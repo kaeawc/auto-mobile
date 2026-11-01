@@ -171,6 +171,13 @@ const hostConfig = z
     androidResetTimeoutMs: z.number().int().positive().max(MAX_SETTIMEOUT_DELAY_MS).optional(),
     androidKeepBootedMaxUses: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
     androidKeepBootedFallback: z.enum(["snapshot", "destroy"]).optional(),
+    /** An idle pooled Android device is destroyed after this long unused (#14364); omitted keeps it. */
+    androidIdleTtlMs: z
+      .number()
+      .int("androidIdleTtlMs must be a whole number of milliseconds")
+      .positive("androidIdleTtlMs must be a positive number of milliseconds")
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
     reuse: z.object({ ios: iosReuse }).strict().optional(),
     capabilities: capabilities.default({}),
   })
@@ -192,6 +199,14 @@ const hostConfig = z
         config.androidKeepBootedFallback === undefined) ||
       config.androidResetMode === "keep-booted",
     { message: "Android keep-booted keys require keep-booted mode" },
+  )
+  .refine(
+    (config) => config.androidIdleTtlMs === undefined || config.androidResetMode !== undefined,
+    {
+      path: ["androidIdleTtlMs"],
+      message:
+        "androidIdleTtlMs requires androidResetMode; without a reset mode no Android device is pooled",
+    },
   )
   .refine(
     (config) =>
@@ -250,12 +265,22 @@ export async function readSessionBrokerHostConfig(path: string): Promise<Session
 }
 
 /**
- * Whether a booted Android emulator should skip the quick-boot snapshot save at exit (#15477):
- * only when the host config is read and configures no warm reuse, so released emulators are
- * destroyed. Snapshot and keep-booted resets, and an unread config, keep the default.
+ * Whether a booted Android emulator should skip the quick-boot snapshot save at exit (#15477,
+ * #15793): when the host config is read and no snapshot reset can use the saved state. That is no
+ * reset mode (released emulators are destroyed) or keep-booted without the snapshot fallback
+ * (`destroy` or omitted: a non-clean release deletes the AVD, a clean one keeps it running).
+ * Snapshot resets, keep-booted with the snapshot fallback, and an unread config keep the default.
  */
 export function discardsAndroidSnapshotOnExit(
-  config: SessionBrokerHostConfig | undefined,
+  config:
+    | Pick<SessionBrokerHostConfig, "androidResetMode" | "androidKeepBootedFallback">
+    | undefined,
 ): boolean {
-  return config !== undefined && config.androidResetMode === undefined;
+  if (config === undefined) {
+    return false;
+  }
+  return (
+    config.androidResetMode === undefined ||
+    (config.androidResetMode === "keep-booted" && config.androidKeepBootedFallback !== "snapshot")
+  );
 }

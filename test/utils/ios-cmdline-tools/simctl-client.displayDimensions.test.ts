@@ -23,7 +23,7 @@ describe("SimCtlClient display dimension enrichment", () => {
         return createExecResult(
           JSON.stringify({
             devices: {
-              "iOS-27-1": [
+              "com.apple.CoreSimulator.SimRuntime.iOS-27-1": [
                 {
                   udid: UDID,
                   name: "iPhone Duo",

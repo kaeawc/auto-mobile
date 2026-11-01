@@ -98,8 +98,8 @@ export function runDaemonClientContract(
     test("a tool call reports a distinct request id before it settles", async () => {
       await withHarness({ result: {} }, async ({ client }) => {
         const ids: string[] = [];
-        await client.callTool("observe", {}, undefined, (id) => ids.push(id));
-        await client.callTool("observe", {}, undefined, (id) => ids.push(id));
+        await client.callTool("observe", {}, undefined, { onRequestId: (id) => ids.push(id) });
+        await client.callTool("observe", {}, undefined, { onRequestId: (id) => ids.push(id) });
         expect(ids).toHaveLength(2);
         expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
         expect(ids[0]).not.toBe(ids[1]);
@@ -110,9 +110,7 @@ export function runDaemonClientContract(
       await withHarness({ result: {} }, async ({ client, requestCount }) => {
         const reason = new Error("caller gave up");
         const signal = AbortSignal.abort(reason);
-        expect(await rejection(client.callTool("observe", {}, undefined, undefined, signal))).toBe(
-          reason,
-        );
+        expect(await rejection(client.callTool("observe", {}, undefined, { signal }))).toBe(reason);
         expect(await rejection(client.readResource("automobile:test", {}, { signal }))).toBe(
           reason,
         );
@@ -128,7 +126,7 @@ export function runDaemonClientContract(
         const controller = new AbortController();
         const reason = new Error("caller gave up");
         const call = rejection(
-          client.callTool("observe", {}, undefined, undefined, controller.signal),
+          client.callTool("observe", {}, undefined, { signal: controller.signal }),
         );
         await settle();
         controller.abort(reason);

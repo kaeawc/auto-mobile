@@ -26,6 +26,10 @@ import {
 
 const SCOPE = { managedHostScope: "test", runnerNamespace: "busy", runnerIncarnation: "one" };
 
+// Real SQLite on a loaded Windows runner took 1839 ms for a 1000 ms bound. These
+// bounds catch an unbounded wait, not a slow host.
+const WALL_CLOCK_SLACK_MS = process.platform === "win32" ? 5_000 : 500;
+
 describe("registry busy bound (real SQLite)", () => {
   const scratch = useScratchRoot("binding-busy-bound-");
 
@@ -58,7 +62,9 @@ describe("registry busy bound (real SQLite)", () => {
         code: "discovery_incomplete",
         retryable: true,
       });
-      expect(performance.now() - started).toBeLessThan(2 * BINDING_REGISTRY_BUSY_TIMEOUT_MS + 500);
+      expect(performance.now() - started).toBeLessThan(
+        2 * BINDING_REGISTRY_BUSY_TIMEOUT_MS + WALL_CLOCK_SLACK_MS,
+      );
       expect(statements.filter((sql) => sql === BEGIN_TRANSACTION_SQL)).toHaveLength(1);
       expect(exec.mock.calls.map(([sql]) => sql)).not.toContain("PRAGMA optimize;");
       expect(exec.mock.calls.map(([sql]) => sql)).not.toContain("PRAGMA wal_checkpoint(TRUNCATE);");
@@ -90,6 +96,8 @@ describe("registry busy bound (real SQLite)", () => {
         BROKER_TIMING_MIGRATION,
         "2026_10_26_014_device_claims",
         "2026_10_27_015_device_claims_metadata",
+        "2026_10_30_016_watchos_binding_platform",
+        "2026_10_31_017_binding_registry_writers",
       ]);
       peer.exec("COMMIT");
       locked = false;
@@ -187,7 +195,7 @@ describe("registry busy bound (real SQLite)", () => {
       expect(attempts).toBe(1);
       expect(sleep).not.toHaveBeenCalled();
       expect(warn.mock.calls.length).toBeLessThanOrEqual(1);
-      expect(elapsedMs).toBeLessThan(2 * BINDING_REGISTRY_BUSY_TIMEOUT_MS + 500);
+      expect(elapsedMs).toBeLessThan(2 * BINDING_REGISTRY_BUSY_TIMEOUT_MS + WALL_CLOCK_SLACK_MS);
       peer.exec("COMMIT");
       locked = false;
       expect((await registry.ensureScope(SCOPE)).kind).toBe("ready");
@@ -196,7 +204,7 @@ describe("registry busy bound (real SQLite)", () => {
       locked = true;
       const closeStarted = performance.now();
       await registry.close();
-      expect(performance.now() - closeStarted).toBeLessThan(500);
+      expect(performance.now() - closeStarted).toBeLessThan(WALL_CLOCK_SLACK_MS);
     } finally {
       query.mockRestore();
       for (const run of runs) {

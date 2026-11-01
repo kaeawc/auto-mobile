@@ -77,8 +77,7 @@ export class SystemUiAnrRecovery {
     context: ReadinessAttemptContext,
     client: SystemUiAnrReadinessClient,
     recoveryDeadlineMs: number,
-    minTimestamp = 0,
-    required = false,
+    { minTimestamp = 0, required = false }: { minTimestamp?: number; required?: boolean } = {},
   ): Promise<ViewHierarchyResult | null> {
     const timeoutMs = Math.min(
       this.phases.probeTimeout(context),
@@ -95,11 +94,8 @@ export class SystemUiAnrRecovery {
       );
     }
     try {
-      const hierarchy = await this.phases.runPhase(
-        context,
-        "runner-health",
-        1,
-        async (signal) =>
+      const hierarchy = await this.phases.runPhase(context, "runner-health", 1, {
+        operation: async (signal) =>
           await client.getAccessibilityHierarchy(undefined, {
             skipWaitForFresh: true,
             minTimestamp,
@@ -107,7 +103,7 @@ export class SystemUiAnrRecovery {
             signal,
             timeoutMs,
           }),
-      );
+      });
       // The production client can fall back to a cached tree when both its
       // fresh-data wait and synchronous request fail. A required read must not
       // treat that stale tree as confirmation that the dialog cleared.
@@ -155,11 +151,8 @@ export class SystemUiAnrRecovery {
   ): Promise<void> {
     const { x, y } = centerOfBounds(bounds);
     try {
-      const tap = await this.phases.runPhase(
-        context,
-        "runner-health",
-        1,
-        async () =>
+      const tap = await this.phases.runPhase(context, "runner-health", 1, {
+        operation: async () =>
           await client.requestTapCoordinates({
             x,
             y,
@@ -169,7 +162,7 @@ export class SystemUiAnrRecovery {
               this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
             ),
           }),
-      );
+      });
       if (!tap.success) {
         throw new Error(tap.error ?? "unknown tap failure");
       }
@@ -197,13 +190,10 @@ export class SystemUiAnrRecovery {
           this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
         ),
       );
-      const hierarchy = await this.readSystemUiAnrHierarchy(
-        context,
-        client,
-        recoveryDeadlineMs,
-        freshAfter,
-        true,
-      );
+      const hierarchy = await this.readSystemUiAnrHierarchy(context, client, recoveryDeadlineMs, {
+        minTimestamp: freshAfter,
+        required: true,
+      });
       freshAfter = Math.max(freshAfter, (hierarchy?.updatedAt ?? 0) + 1);
       if (findSystemUiAnrDialog(hierarchy ?? { hierarchy: {} })) {
         healthyPolls = 0;

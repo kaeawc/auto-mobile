@@ -1,3 +1,4 @@
+import { resolveBootedAppleTvForCall } from "./appleTvReadiness";
 import { iosReadNotBootedMessage } from "./readinessLifecycleStart";
 import {
   type AppearanceMode,
@@ -47,6 +48,7 @@ import {
   isScanAuthoritativeFor,
   lifecycleIdentityForDevice,
 } from "./readinessLifecycleIdentity";
+import { resolveBootedWatchForCall } from "./watchReadiness";
 import {
   explicitReadTargetPlatform,
   matchRunningReadTarget,
@@ -56,6 +58,12 @@ import {
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleIdentity,
 } from "../../devices/virtualDeviceLifecycleCoordinator";
+
+const BOOTED_SIMULATOR_READINESS: Partial<Record<SomePlatform, typeof resolveBootedWatchForCall>> =
+  {
+    watchos: resolveBootedWatchForCall,
+    tvos: resolveBootedAppleTvForCall,
+  };
 
 interface ReadinessSelectionDependencies {
   applyAppearanceOnConnect(
@@ -126,6 +134,9 @@ export class ReadinessSelection {
       android: false,
       "ios-simulator": false,
       "ios-physical": false,
+      // Readiness scans never list watches; a watch is resolved only on request (#14908).
+      "watchos-simulator": false,
+      "tvos-simulator": false,
     };
     const perf = createGlobalPerformanceTracker();
 
@@ -174,6 +185,7 @@ export class ReadinessSelection {
         android: scannedSources.android,
         ios: scannedSources["ios-simulator"] || scannedSources["ios-physical"],
         watchos: false,
+        tvos: false,
       },
       scannedSources,
     };
@@ -241,6 +253,11 @@ export class ReadinessSelection {
     logger.info(
       `[DeviceReadiness] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
+    const resolveBootedSimulator = BOOTED_SIMULATOR_READINESS[platform];
+    if (resolveBootedSimulator) {
+      const pin = this.dependencies.selection.getPin(options?.connectionId);
+      return resolveBootedSimulator(this.dependencies.deviceUtils, providedDeviceId, pin, options);
+    }
     providedDeviceId = await this.resolveProvidedReadinessId(providedDeviceId);
 
     // Detect all connected devices
@@ -265,8 +282,7 @@ export class ReadinessSelection {
         readTarget.bootedDevice,
         readTarget.bootedDevice.platform,
         "provided",
-        scan,
-        options,
+        { scan, ...options },
       );
     }
 
@@ -276,8 +292,7 @@ export class ReadinessSelection {
       platform,
       androidDevices,
       iosDevices,
-      providedDeviceId,
-      options,
+      { providedDeviceId, ...options },
     );
 
     let selectedDevice: BootedDevice | undefined;
@@ -328,21 +343,17 @@ export class ReadinessSelection {
       );
     }
 
-    return await this.finishReadinessSelection(
-      selectedDevice,
-      resolvedPlatform,
-      deviceSource,
+    return await this.finishReadinessSelection(selectedDevice, resolvedPlatform, deviceSource, {
       scan,
-      options,
-    );
+      ...options,
+    });
   }
 
   private async finishReadinessSelection(
     selectedDevice: BootedDevice,
     resolvedPlatform: Platform,
     deviceSource: "provided" | "auto",
-    scan: ConnectedPlatformScan,
-    options?: DeviceReadyOptions,
+    { scan, ...options }: DeviceReadyOptions & { scan: ConnectedPlatformScan },
   ): Promise<BootedDevice> {
     // Safety check: ensure the selected device's platform matches the resolved platform.
     // This guards against cross-platform contamination where an iOS device could be
@@ -751,8 +762,7 @@ export class ReadinessSelection {
     platform: SomePlatform,
     androidDevices: BootedDevice[],
     iosDevices: BootedDevice[],
-    providedDeviceId?: string,
-    options?: DeviceReadyOptions,
+    { providedDeviceId, ...options }: DeviceReadyOptions & { providedDeviceId?: string } = {},
   ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
     // Get devices for the requested platform
     let platformDevices: BootedDevice[] = [];
@@ -812,9 +822,11 @@ export class ReadinessSelection {
         };
       }
     }
-    // With no matching deviceId, fall back to the platform setActiveDevice selected.
+    // With no matching deviceId, fall back to the platform setActiveDevice selected. A watch pin
+    // never decides a call that did not name its platform (#14908).
     const pin = this.dependencies.selection.getPin(options?.connectionId);
-    const selectedPlatform = pin?.platform;
+    const selectedPlatform =
+      pin?.platform === "watchos" || pin?.platform === "tvos" ? undefined : pin?.platform;
     if (selectedPlatform) {
       return {
         platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,
@@ -912,7 +924,7 @@ export class ReadinessSelection {
     result: BootedDevice[] | ConnectedPlatformScan,
   ): ConnectedPlatformScan {
     return Array.isArray(result)
-      ? { devices: result, scanned: { android: true, ios: true, watchos: false } }
+      ? { devices: result, scanned: { android: true, ios: true, watchos: false, tvos: false } }
       : result;
   }
 }

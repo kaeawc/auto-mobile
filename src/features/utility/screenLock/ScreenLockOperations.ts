@@ -132,8 +132,7 @@ export class ScreenLockOperations {
             client,
             before,
             { type: input.type, credential: input.credential },
-            owner,
-            ownLock,
+            { owner, ownLock },
           );
     });
   }
@@ -142,8 +141,7 @@ export class ScreenLockOperations {
     client: LockSettingsClient,
     before: LockSettingsReading,
     requested: { type: ScreenLockCredentialType; credential: string },
-    owner: string | undefined,
-    ownLock: SessionScreenLock | undefined,
+    { owner, ownLock }: { owner?: string; ownLock?: SessionScreenLock } = {},
   ): Promise<ScreenLockState> {
     const deviceId = this.dependencies.device().deviceId;
     const unlocked = isUnlocked(before);

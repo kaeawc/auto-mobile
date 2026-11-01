@@ -41,7 +41,7 @@ describe("SessionManager", () => {
     await sessionManager.createSession("lost-session", "emulator-5554", "android");
     const released = Promise.withResolvers<void>();
     let releaseSnapshot: unknown;
-    sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+    sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, { snapshot }) => {
       releaseSnapshot = snapshot;
       released.resolve();
     });
@@ -108,7 +108,7 @@ describe("SessionManager", () => {
 
     await manager.createSession("killed-session", "emulator-5554", "android");
     let callbackSnapshot: unknown;
-    manager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+    manager.onSessionRelease((_sessionId, _deviceId, _reason, { snapshot }) => {
       callbackSnapshot = snapshot;
     });
     const ordinaryRelease = manager.releaseSession("killed-session", "explicit-release");
@@ -162,7 +162,7 @@ describe("SessionManager", () => {
   test("device-killed supersedes a finalized terminal release", async () => {
     const reasons: string[] = [];
     const persistence = new FakeDeviceSessionPersistence();
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
     };
     const manager = makeSessionManager({ timer: fakeTimer, persistence });
@@ -188,7 +188,7 @@ describe("SessionManager", () => {
     const reasons: string[] = [];
     let failRelease = true;
     const persistence = new FakeDeviceSessionPersistence();
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
       if (failRelease) {
         failRelease = false;
@@ -225,8 +225,8 @@ describe("SessionManager", () => {
     const persistence = new DeferredReleaseDeviceSessionPersistence();
     let failTerminalRelease = true;
     const markReleased = persistence.markReleased.bind(persistence);
-    persistence.markReleased = async (sessionUuid, status, releasedAtMs, reason) => {
-      await markReleased(sessionUuid, status, releasedAtMs, reason);
+    persistence.markReleased = async (sessionUuid, status, releasedAtMs, { reason }) => {
+      await markReleased(sessionUuid, status, releasedAtMs, { reason });
       if (reason === "device-killed" && failTerminalRelease) {
         failTerminalRelease = false;
         throw new Error("terminal write failed");
@@ -276,7 +276,7 @@ describe("SessionManager", () => {
     const terminalPersistenceStarted = Promise.withResolvers<void>();
     const finishTerminalPersistence = Promise.withResolvers<void>();
     const persistence = new FakeDeviceSessionPersistence();
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
       if (reason === "device-killed") {
         terminalPersistenceStarted.resolve();
@@ -368,7 +368,7 @@ describe("SessionManager", () => {
     const persistence = new FakeDeviceSessionPersistence();
     const reasons: string[] = [];
     let failTerminalRelease = true;
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
       if (reason === "device-killed" && failTerminalRelease) {
         failTerminalRelease = false;
@@ -401,7 +401,7 @@ describe("SessionManager", () => {
   test("stale owned retry cannot replace a newer incarnation terminal release", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const reasons: string[] = [];
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
     };
     const manager = makeSessionManager({ timer: fakeTimer, persistence });
@@ -714,7 +714,9 @@ describe("explicit-release regression", () => {
       "Acquire a new device with getAndroid or getApple.";
     await expect(manager.admitIssuedSessionForAutomation("released-uuid")).rejects.toThrow(message);
     await expect(
-      manager.getOrCreateSession("released-uuid", assigner, "android", undefined, true),
+      manager.getOrCreateSession("released-uuid", assigner, "android", {
+        requireIssuedSession: true,
+      }),
     ).rejects.toThrow(TerminalSessionError);
     await expect(manager.createSession("released-uuid", "handset", "android")).rejects.toThrow(
       message,
@@ -772,7 +774,9 @@ describe("explicit-release regression", () => {
         TerminalSessionError,
       );
       await expect(
-        restarted.getOrCreateSession("released-uuid", assigner, "android", undefined, true),
+        restarted.getOrCreateSession("released-uuid", assigner, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow("was released");
       expect(assignments).toBe(0);
     } finally {
@@ -801,7 +805,9 @@ describe("explicit-release regression", () => {
       };
       await restarted.admitIssuedSessionForAutomation("plan-uuid");
       await expect(
-        restarted.getOrCreateSession("plan-uuid", assigner, "android", undefined, true),
+        restarted.getOrCreateSession("plan-uuid", assigner, "android", {
+          requireIssuedSession: true,
+        }),
       ).resolves.toMatchObject({ assignedDevice: "handset" });
       await expect(manager.createSession("plan-uuid", "handset", "android")).resolves.toMatchObject(
         { assignedDevice: "handset" },
@@ -898,7 +904,9 @@ describe("terminal release of persisted restart recovery", () => {
         TerminalSessionError,
       );
       await expect(
-        owner.getOrCreateSession("persisted-session", undefined, undefined, undefined, true),
+        owner.getOrCreateSession("persisted-session", undefined, undefined, {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(TerminalSessionError);
     }
   });
@@ -919,7 +927,9 @@ describe("terminal release of persisted restart recovery", () => {
       release_reason: "explicit-release",
     });
     await expect(
-      manager.getOrCreateSession("persisted-session", undefined, undefined, undefined, true),
+      manager.getOrCreateSession("persisted-session", undefined, undefined, {
+        requireIssuedSession: true,
+      }),
     ).rejects.toThrow(TerminalSessionError);
   });
 

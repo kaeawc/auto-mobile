@@ -3,6 +3,7 @@ import { ActionableError, BootedDevice, LaunchAppResult, ObserveResult } from ".
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { resolveSetupUser } from "../../ctrlProxy/setupUser";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
@@ -103,18 +104,23 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Create an LaunchApp instance
    * @param device - Optional device
-   * @param adb - Optional ADB executor for testing
-   * @param simctl - Optional SimCtlClient instance for testing
-   * @param timer - Optional Timer instance for testing
+   * @param options - Optional ADB executor, SimCtlClient, Timer and collaborators for testing
    */
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    simctl: LaunchAppSimctl | null = null,
-    timer: Timer = defaultTimer,
-    dependencies: LaunchAppDependencies = {},
+    {
+      adb = null,
+      simctl,
+      timer = defaultTimer,
+      dependencies = {},
+    }: {
+      adb?: AdbExecutor | null;
+      simctl?: LaunchAppSimctl | null;
+      timer?: Timer;
+      dependencies?: LaunchAppDependencies;
+    } = {},
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.device = device;
     this.simctl = simctl || new SimCtlClient(this.device);
     this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppManager();
@@ -241,9 +247,12 @@ export class LaunchApp extends BaseVisualChange {
         ) {
           throw new ActionableError("A launch environment is supported on iOS simulators only.");
         }
-        return this.executeiOS(packageName, clearAppData, coldBoot, signal, {
-          launchArguments,
-          launchEnvironment,
+        return this.executeiOS(packageName, clearAppData, coldBoot, {
+          signal,
+          processOptions: {
+            launchArguments,
+            launchEnvironment,
+          },
         });
       case "android":
         if (launchArguments?.length) {
@@ -289,8 +298,10 @@ export class LaunchApp extends BaseVisualChange {
     bundleId: string,
     clearAppData: boolean,
     coldBoot: boolean,
-    signal?: AbortSignal,
-    processOptions: IosLaunchProcessOptions = {},
+    {
+      signal,
+      processOptions = {},
+    }: { signal?: AbortSignal; processOptions?: IosLaunchProcessOptions } = {},
   ): Promise<LaunchAppResult> {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
@@ -323,14 +334,10 @@ export class LaunchApp extends BaseVisualChange {
       );
 
       signal?.throwIfAborted();
-      const settledResult = await this.ensureLaunchObservationMatchesPackage(
-        result,
-        bundleId,
-        undefined,
-        undefined,
+      const settledResult = await this.ensureLaunchObservationMatchesPackage(result, bundleId, {
         signal,
-        { coldBoot },
-      );
+        coldBoot,
+      });
       await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
       return settledResult;
     });
@@ -340,8 +347,7 @@ export class LaunchApp extends BaseVisualChange {
     installedApps: string[],
     packageName: string,
     userId: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<boolean> {
     if (installedApps.includes(packageName)) {
       return true;
@@ -413,6 +419,11 @@ export class LaunchApp extends BaseVisualChange {
     userId?: number,
     signal?: AbortSignal,
   ): Promise<number> {
+    const foregroundUser =
+      userId === undefined ? await resolveSetupUser(this.adb, this.device) : undefined;
+    if (foregroundUser !== undefined) {
+      return foregroundUser;
+    }
     const target = await new AndroidUserTargetResolver(this.adb).resolve({
       packageName,
       explicitUserId: userId,
@@ -543,13 +554,10 @@ export class LaunchApp extends BaseVisualChange {
     logger.info(`[LaunchApp] Looking for package: ${packageName}`);
     logger.info(`[LaunchApp] Installed apps: ${installedApps.join(", ")}`);
     if (
-      !(await this.isInstalledOrLiveConfirmed(
-        installedApps,
-        packageName,
-        targetUserId,
+      !(await this.isInstalledOrLiveConfirmed(installedApps, packageName, targetUserId, {
         perf,
         signal,
-      ))
+      }))
     ) {
       logger.error(`[LaunchApp] App ${packageName} is not installed`);
       logger.error(`[LaunchApp] DEBUG: installedApps.length = ${installedApps.length}`);
@@ -726,14 +734,12 @@ export class LaunchApp extends BaseVisualChange {
     // `alreadyForeground: true` over a capture of a different app, which
     // `buildLaunchAppResponse` would surface as a clean success with a
     // mismatched `observedAppId` and no error (issue #6868 review).
-    const settledResult = await this.ensureLaunchObservationMatchesPackage(
-      result,
-      packageName,
-      ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
-      undefined,
+    const settledResult = await this.ensureLaunchObservationMatchesPackage(result, packageName, {
+      timeoutMs: ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
       signal,
-      { coldBoot, expectedUserId: targetUserId },
-    );
+      coldBoot,
+      expectedUserId: targetUserId,
+    });
     await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
     return settledResult;
   }
@@ -768,23 +774,17 @@ export class LaunchApp extends BaseVisualChange {
             this.adb.getDeviceTimestampMs(),
           );
         }
-        const launchOutcome = await this.performLaunch(
-          packageName,
-          activityName,
-          targetUserId,
+        const launchOutcome = await this.performLaunch(packageName, activityName, targetUserId, {
           perf,
-          signal,
-          intent,
-        );
+          options: { signal, intent },
+        });
         signal?.throwIfAborted();
-        const foregroundReady = await this.waitForAppForeground(
-          packageName,
-          targetUserId,
-          foregroundWaitTimeoutMs,
-          foregroundPollIntervalMs,
+        const foregroundReady = await this.waitForAppForeground(packageName, targetUserId, {
+          timeoutMs: foregroundWaitTimeoutMs,
+          pollIntervalMs: foregroundPollIntervalMs,
           perf,
           signal,
-        );
+        });
         if (!foregroundReady) {
           logger.warn(
             `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
@@ -817,10 +817,12 @@ export class LaunchApp extends BaseVisualChange {
     const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
       launchResult,
       packageName,
-      ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
-      undefined,
-      signal,
-      { coldBoot, expectedUserId: targetUserId },
+      {
+        timeoutMs: ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
+        signal,
+        coldBoot,
+        expectedUserId: targetUserId,
+      },
     );
     if (clearAppData && settledLaunchResult.success && settledLaunchResult.observation) {
       await this.waitForAndroidColdStableFrame(settledLaunchResult, packageName, signal);

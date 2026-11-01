@@ -123,6 +123,11 @@ Separate opt-in, default off. `androidResetMode` requires
 fallback. `androidKeepBootedMaxUses` and `androidKeepBootedFallback` are rejected
 outside `keep-booted`.
 
+`androidIdleTtlMs` (optional, positive integer milliseconds; requires an
+`androidResetMode`) destroys an Android device that has sat idle in the pool for that
+long. Both modes keep the emulator booted while idle (several GB of RSS each), so it
+applies to either. Omitted, an idle device stays booted until it is evicted or drained.
+
 ```json
 {
   "reuseAndroidCleanDevices": true,
@@ -137,7 +142,8 @@ outside `keep-booted`.
   "reuseAndroidCleanDevices": true,
   "androidResetMode": "keep-booted",
   "androidKeepBootedMaxUses": 20,
-  "androidKeepBootedFallback": "snapshot"
+  "androidKeepBootedFallback": "snapshot",
+  "androidIdleTtlMs": 900000
 }
 ```
 
@@ -239,14 +245,23 @@ to the snapshot fallback if configured, else destroys).
 - `sessionCap`: active or acquiring sessions; size from peak simultaneous workload.
 - `totalDeviceCap`: all broker-owned native devices (active, creating, idle,
   resetting, uncertain, still-destroying). Leave recovery headroom; pending
-  destruction stays charged until absence is confirmed.
+  destruction stays charged until absence is confirmed. One limit covers every
+  kind: Android emulators of any form factor (phone, Wear OS, TV, Automotive),
+  iPhone/iPad simulators (a CarPlay screen is a display of its iPhone, not a
+  device) and Apple Watch simulators (`watchos` bindings and running
+  `ambroker-` watches are charged). A watch binding is created, reused and
+  deleted like an iOS simulator binding and is ready once booted. A released
+  watch follows `reuse.ios.mode`: erase is `simctl erase` plus a gated reboot,
+  keep-booted runs its fallback, minimal destroys; see
+  `docs/decisions/watchos-platform.md`.
 - `idlePoolCap`: devices retained between sessions; more warm devices cost disk,
   memory and simulator/emulator capacity. Start small, from concurrent bursts and
   measured reuse demand.
 - Platform boot-gate limit: concurrent boots (including creation/replacement under
-  that gate); distinct from device-count caps.
+  that gate); distinct from device-count caps. A watch boot takes a slot in the
+  simulator (iOS) gate, which already counts every booted simulator.
 - `limits.maxConcurrentResetBoots`: queues iOS erase resets and keep-booted's erase
-  fallback; does not limit Android keep-booted cleanup; unlimited when omitted. Keep
+  fallback, Apple Watch erases included; does not limit Android keep-booted cleanup; unlimited when omitted. Keep
   it at or below safe iOS boot concurrency.
 
 Starting relationship: `totalDeviceCap >= sessionCap + idlePoolCap` plus allowance
@@ -258,6 +273,16 @@ never evicted for an idle target. The `daemon/drainBrokerPool` operator method
 destroys every idle pooled device through the same durable destroy journal, without
 an acquisition; each device reports `destroyed` or `cleanup_pending`, and a replay
 drains only what is still idle.
+
+Idle expiry runs on the broker's recovery pass (every 5 s), so a device is destroyed
+between the TTL and the TTL plus one pass after it went idle. The idle clock is held in
+daemon memory per resource revision: reuse (which changes the revision) restarts it,
+and a daemon restart restarts every clock from the first pass, so an idle device can
+outlive one restart by up to one TTL. Expiry claims a device only while it is still idle
+at the revision the pass observed, in a write transaction serialized with admission; a device
+an acquisition reserved first, or one that is held, resetting or already destroying, is
+never expired. Claimed devices are destroyed through the drain's destroy journal and
+are joined on shutdown; iOS has no idle TTL.
 
 ### Worked sizing example
 

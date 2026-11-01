@@ -123,7 +123,7 @@ SCRIPT
     bash "${fixture_repo}/${SCRIPT}"
 
   [ "$status" -eq 0 ]
-  [ "$(cat "${invocations_file}")" = ':auto-mobile-sdk:apiCheck' ]
+  [ "$(cat "${invocations_file}")" = $'--no-daemon\n:auto-mobile-sdk:apiCheck' ]
   [ ! -s "${ktfmt_marker_file}" ]
 }
 
@@ -628,6 +628,14 @@ SCRIPT
   base_sha="$(git rev-parse HEAD)"
 }
 
+@test "runs Gradle with --no-daemon so a stale shared daemon cannot poison lint" {
+  lint_fixture
+  printf '<manifest package="test"/>\n' > android/bar/src/main/AndroidManifest.xml
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx -- '--no-daemon :bar:lintDebug --continue' "$invocations_file"
+}
+
 @test "lint selects and deduplicates owners of unstaged resources and manifests" {
   lint_fixture
   printf '<resources><string name="x">x</string></resources>\n' > android/foo/src/main/res/values/strings.xml
@@ -635,7 +643,7 @@ SCRIPT
   printf '<manifest package="test"/>\n' > android/bar/src/main/AndroidManifest.xml
   run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$(cat "$invocations_file")" = ':bar:lintDebug :foo:lintDebug --continue' ]
+  [ "$(cat "$invocations_file")" = '--no-daemon :bar:lintDebug :foo:lintDebug --continue' ]
   [[ "$output" == *'shrink-only'* ]]
 }
 
@@ -644,7 +652,7 @@ SCRIPT
   rm android/foo/src/main/res/values/strings.xml
   run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$(cat "$invocations_file")" = ':foo:lintDebug --continue' ]
+  [ "$(cat "$invocations_file")" = '--no-daemon :foo:lintDebug --continue' ]
 }
 
 @test "new local baseline cannot bypass the pre-push shrink guard" {
@@ -653,7 +661,7 @@ SCRIPT
   run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *'new baseline'* ]]
-  [ "$(cat "$invocations_file")" = ':foo:lintDebug --continue' ]
+  [ "$(cat "$invocations_file")" = '--no-daemon :foo:lintDebug --continue' ]
 }
 
 @test "lint failure propagates from pre-push" {
@@ -669,8 +677,8 @@ SCRIPT
   printf 'android.useAndroidX=true\n' > android/gradle.properties
   run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  grep -qx 'lintDebug --continue' "$invocations_file"
-  grep -qx help "$invocations_file"
+  grep -qx -- '--no-daemon lintDebug --continue' "$invocations_file"
+  grep -qx -- '--no-daemon help' "$invocations_file"
 }
 
 @test "the shrink guard rejects a baseline outside an Android plugin module" {
@@ -688,7 +696,7 @@ SCRIPT
   git mv android/foo/src/main/res/values/strings.xml android/bar/src/main/res/values/strings.xml
   run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$(cat "$invocations_file")" = ':bar:lintDebug :foo:lintDebug --continue' ]
+  [ "$(cat "$invocations_file")" = '--no-daemon :bar:lintDebug :foo:lintDebug --continue' ]
 }
 
 @test "ProtoViewer selection verifies dependencies and runs unit tests" {

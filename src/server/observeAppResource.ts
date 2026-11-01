@@ -348,11 +348,10 @@ export function registerObserveAppResource(
   } = {},
 ): void {
   const dataSource = options.dataSource ?? createObserveAppDataSource();
-  ResourceRegistry.register(
-    OBSERVE_APP_RESOURCE_URI,
-    "Observe App UI",
-    "MCP App view of the observe result for the reading session with view-hierarchy bounding boxes; includes the screenshot of that exact capture when it is still retained.",
-    MCP_APP_MIME_TYPE,
-    (context = {}) => buildAppContent({ dataSource, context }),
-  );
+  ResourceRegistry.register(OBSERVE_APP_RESOURCE_URI, "Observe App UI", {
+    description:
+      "MCP App view of the observe result for the reading session with view-hierarchy bounding boxes; includes the screenshot of that exact capture when it is still retained.",
+    mimeType: MCP_APP_MIME_TYPE,
+    handler: (context = {}) => buildAppContent({ dataSource, context }),
+  });
 }

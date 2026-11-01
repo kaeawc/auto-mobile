@@ -87,9 +87,13 @@ export interface StatusOperations {
   isDrivenByForeignDaemon(device: PooledDevice): boolean;
   /**
    * Whether generic allocation may lend `deviceId`, from the last broker binding snapshot and the
-   * live foreign-ownership probe: the same facts allocation filters on. Unknown devices are free.
+   * live foreign-ownership probe: the same facts allocation filters on. Unknown devices are free
+   * unless a broker binding holds `deviceId` or one of `unpooledStableIds`.
    */
-  genericAvailability(deviceId: string): GenericAvailability;
+  genericAvailability(
+    deviceId: string,
+    unpooledStableIds?: ReadonlyArray<string | undefined>,
+  ): GenericAvailability;
   isHeldOutsideGenericAllocation(device: PooledDevice): boolean;
   getGenericallyAllocatableDevices(platform?: Platform): PooledDevice[];
   managedRefFor(
@@ -397,25 +401,34 @@ export class DevicePoolStatus {
    * Whether generic allocation may lend `deviceId`, from the last broker binding snapshot and the
    * live foreign-ownership probe: the same facts allocation filters on. A device outside the pool is
    * free unless a broker binding holds it: an iOS simulator an erase reset shut down leaves the pool
-   * until the next refresh, yet its binding is still published (#15233).
+   * until the next refresh, yet its binding is still published (#15233). An Android emulator an
+   * ADB server reset detached is likewise unpooled until the next refresh re-pools it, and its
+   * binding names its AVD, which only the caller's observation (`unpooledStableIds`) knows (#15794).
    */
-  genericAvailability(deviceId: string): GenericAvailability {
+  genericAvailability(
+    deviceId: string,
+    unpooledStableIds: ReadonlyArray<string | undefined> = [],
+  ): GenericAvailability {
     const device = this.state.devices.get(deviceId);
     if (device) {
       return genericAvailabilityOf(
         deviceHold(this.callbacks.holdFactsFor(device, undefined, "generic")),
       );
     }
-    return this.isBoundWhileUnpooled(deviceId) ? "session_broker" : "free";
+    return this.isBoundWhileUnpooled(deviceId, unpooledStableIds) ? "session_broker" : "free";
   }
 
   /** The id is a broker binding's device on either platform, though the pool does not list it. */
-  private isBoundWhileUnpooled(deviceId: string): boolean {
+  private isBoundWhileUnpooled(
+    deviceId: string,
+    stableIds: ReadonlyArray<string | undefined>,
+  ): boolean {
     const exclusion = this.state.bindingExclusion;
     return (
       exclusion !== undefined &&
       (["ios", "android"] as const).some(
-        (platform) => exclusion.holderOf(this.managedRefFor(deviceId, platform)) !== undefined,
+        (platform) =>
+          exclusion.holderOf(this.managedRefFor(deviceId, platform, stableIds)) !== undefined,
       )
     );
   }

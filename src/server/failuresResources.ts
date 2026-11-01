@@ -186,22 +186,19 @@ export function registerFailuresResources(
   timer: Timer = defaultTimer,
 ): void {
   // Register base failures resource
-  ResourceRegistry.register(
-    FAILURES_RESOURCE_URIS.BASE,
-    "Failures",
-    "List all failure groups (crashes, ANRs, tool failures) with aggregated data.",
-    "application/json",
-    () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE, repository),
-  );
+  ResourceRegistry.register(FAILURES_RESOURCE_URIS.BASE, "Failures", {
+    description: "List all failure groups (crashes, ANRs, tool failures) with aggregated data.",
+    mimeType: "application/json",
+    handler: () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE, repository),
+  });
 
   // Register timeline resource template
-  ResourceRegistry.registerTemplate(
-    TIMELINE_QUERY_TEMPLATE,
-    "Failures Timeline",
-    "Get timeline data for failures. Optional dateRange (1h, 24h, 3d, 7d, 30d; default 24h) and aggregation (minute, hour, day, week; default hour). Buckets and labels are UTC; weeks start Monday 00:00 UTC.",
-    "application/json",
-    (params) => getTimelineResource(params, repository, timer),
-  );
+  ResourceRegistry.registerTemplate(TIMELINE_QUERY_TEMPLATE, "Failures Timeline", {
+    description:
+      "Get timeline data for failures. Optional dateRange (1h, 24h, 3d, 7d, 30d; default 24h) and aggregation (minute, hour, day, week; default hour). Buckets and labels are UTC; weeks start Monday 00:00 UTC.",
+    mimeType: "application/json",
+    handler: (params) => getTimelineResource(params, repository, timer),
+  });
 
   logger.info("[FailuresResources] Registered failures resources");
 }

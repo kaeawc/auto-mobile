@@ -44,6 +44,11 @@ final class PrototypeCarouselTests: XCTestCase {
         ))
     }
 
+    func testPagerIndicatorSitsBelowAHorizontalPagerAndBesideAVerticalOne() {
+        XCTAssertEqual(PrototypeCarousel.indicatorSide(vertical: false), .below)
+        XCTAssertEqual(PrototypeCarousel.indicatorSide(vertical: true), .beside)
+    }
+
     func testSharedFixturesDecode() throws {
         for name in ["carousel-multi-browse", "carousel-hero-repeat", "pager-indicator-dots"] {
             let spec = try JSONDecoder().decode(

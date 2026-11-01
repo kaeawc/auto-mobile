@@ -43,7 +43,7 @@ runObserveScreenContract("RealObserveScreen (fake hierarchy, cache store, timer)
       accessibilityAuditor: { run: async () => undefined } as never,
       accessibilityStateDetector: { run: async () => undefined } as never,
     },
-    timer,
+    { timer },
   );
   return {
     screen,

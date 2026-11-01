@@ -146,6 +146,8 @@ const CONTENT_FIELDS: readonly string[] = ["resource-id", "content-desc", "text"
  */
 const STRUCTURAL_FIELDS: readonly string[] = ["resource-id", "content-desc", "test-tag"];
 const DIGIT_RUN_PATTERN = /\p{Nd}+/gu;
+/** `hashCanonical` options for the digit-normalized descendant-text hash. */
+const NORMALIZE_DIGITS = { normalizeDescendantDigits: true } as const;
 
 /** Normalize the `node` child slot (absent / single object / array) to an array. */
 function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] {
@@ -327,8 +329,7 @@ export function assignStableViewIds(
     fields: readonly string[],
     node: Record<string, unknown>,
     kids: string[],
-    normalizeDescendantDigits = false,
-    sdkIdentity = false,
+    { normalizeDescendantDigits = false, sdkIdentity = false } = {},
   ): string => {
     const attributes = attributesOf(node);
     return (
@@ -399,7 +400,9 @@ export function assignStableViewIds(
     const childTextHashes = children.map(([, subtreeText]) => subtreeText);
     contentHash.set(
       node,
-      hashCanonical(CONTENT_FIELDS, node, childStructuralHashes, false, nodeIsSdkInjected),
+      hashCanonical(CONTENT_FIELDS, node, childStructuralHashes, {
+        sdkIdentity: nodeIsSdkInjected,
+      }),
     );
     // The base identity above remains structural. Tree/class framing is the
     // same for peers of that base, so this hash distinguishes only descendant
@@ -410,7 +413,7 @@ export function assignStableViewIds(
     );
     return [
       hashCanonical(STRUCTURAL_FIELDS, node, childStructuralHashes),
-      hashCanonical(["content-desc", "text"], node, childTextHashes, true),
+      hashCanonical(["content-desc", "text"], node, childTextHashes, NORMALIZE_DIGITS),
     ];
   };
   compute(rootNode);

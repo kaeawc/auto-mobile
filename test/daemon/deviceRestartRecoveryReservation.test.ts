@@ -233,7 +233,7 @@ describe("device restart reserves the entire recovery window", () => {
     expect(pool.genericAvailability(SIM.deviceId)).toBe("session_broker");
     managed = false;
     expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
-    await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    await sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true });
     await handoff();
     managed = true;
     await expect(
@@ -255,7 +255,7 @@ describe("device restart reserves the entire recovery window", () => {
   arranged("resuming ends the hold once and cancels expiry", async () => {
     await setup();
     await handoff();
-    await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    await sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true });
     expect(pool.getDevice(SIM.deviceId)?.sessionId).toBe(HOLDER);
     expect(notifications).toBe(1);
     pool.releaseRehydrationReservation(HOLDER);
@@ -319,7 +319,7 @@ describe("device restart reserves the entire recovery window", () => {
       expect(expiryNotices).toBe(1);
       for (let attempt = 0; attempt < 2; attempt++) {
         await expect(
-          sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true),
+          sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true }),
         ).rejects.toMatchObject({
           release: { releaseReason: "expired" },
         });
@@ -400,7 +400,7 @@ describe("device restart reserves the entire recovery window", () => {
       expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
       for (const admission of [
         () => sessions.admitIssuedSessionForAutomation(HOLDER),
-        () => sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true),
+        () => sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true }),
       ]) {
         const error = await admission().then(
           () => undefined,
@@ -444,7 +444,9 @@ describe("device restart reserves the entire recovery window", () => {
     await useLongIdleWindow();
     await handoff();
     await advance(179_000);
-    expect(await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true)).toMatchObject({
+    expect(
+      await sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true }),
+    ).toMatchObject({
       assignedDevice: SIM.deviceId,
     });
     await advance(1_001);
@@ -483,7 +485,8 @@ describe("device restart reserves the entire recovery window", () => {
     await handoff();
     await absent();
     const waiting = sessions
-      .getOrCreateSession(HOLDER, pool, "ios", undefined, true, {
+      .getOrCreateSession(HOLDER, pool, "ios", {
+        requireIssuedSession: true,
         requestDeadlineMs: timer.now() + 30_000,
       })
       .then(
@@ -525,9 +528,9 @@ describe("device restart reserves the entire recovery window", () => {
       });
       const original = persistence.markReleased.bind(persistence);
       persistence.markReleased = async (...args) => {
-        if (args[3] === "restart-recovery-timeout") {
+        if (args[3].reason === "restart-recovery-timeout") {
           events.push("write");
-          expect(args[4]).toMatchObject({
+          expect(args[3]).toMatchObject({
             expectedRowGeneration: 0,
             onlyIfOwnedByDaemon: DAEMON_A,
             onlyIfRecoverable: true,
@@ -554,13 +557,13 @@ describe("device restart reserves the entire recovery window", () => {
       await handoff();
       const original = persistence.markReleased.bind(persistence);
       persistence.markReleased = async (...args) => {
-        if (args[3] === "restart-recovery-timeout") {
-          await original(HOLDER, "released", timer.now(), "daemon-shutdown");
+        if (args[3].reason === "restart-recovery-timeout") {
+          await original(HOLDER, "released", timer.now(), { reason: "daemon-shutdown" });
         }
         await original(...args);
       };
       let notices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           notices++;
         }
@@ -589,7 +592,7 @@ describe("device restart reserves the entire recovery window", () => {
         );
       };
       let notices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           notices++;
         }
@@ -597,7 +600,7 @@ describe("device restart reserves the entire recovery window", () => {
       if (race) {
         const original = persistence.markReleased.bind(persistence);
         persistence.markReleased = async (...args) => {
-          if (args[3] === "restart-recovery-timeout") {
+          if (args[3].reason === "restart-recovery-timeout") {
             await claim();
           }
           await original(...args);
@@ -633,7 +636,7 @@ describe("device restart reserves the entire recovery window", () => {
       );
       expect(claimedGeneration).toBe(previousGeneration + 1);
       let terminalNotices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           terminalNotices++;
         }
@@ -688,17 +691,17 @@ describe("device restart reserves the entire recovery window", () => {
       sessions.attachLiveDaemonSessionIds(() => new Set([DAEMON_A, DAEMON_B]));
       await handoff();
       let terminalNotices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           terminalNotices++;
         }
       });
       const markReleased = persistence.markReleased.bind(persistence);
-      let expiryOptions: Parameters<typeof markReleased>[4];
+      let expiryOptions: Parameters<typeof markReleased>[3] | undefined;
       let claimedGeneration: number | undefined;
       persistence.markReleased = async (...args) => {
-        if (args[3] === "expired") {
-          expiryOptions = args[4];
+        if (args[3].reason === "expired") {
+          expiryOptions = args[3];
           const row = (await persistence.getSession(HOLDER))!;
           claimedGeneration = await persistence.claimRecoverableSession(
             HOLDER,
@@ -737,7 +740,7 @@ describe("device restart reserves the entire recovery window", () => {
       sessions.setKeepScreenAwake(HOLDER, { applied: true, method: "settings" });
       let releasePersisted: Promise<void> | undefined;
       let persisted = false;
-      sessions.onSessionRelease((_id, _device, reason, _snapshot, options) => {
+      sessions.onSessionRelease((_id, _device, reason, options) => {
         if (reason.startsWith("device-restart:")) {
           releasePersisted = options.releasePersisted;
           void releasePersisted?.then(() => {
@@ -785,7 +788,7 @@ describe("device restart reserves the entire recovery window", () => {
       const idleDeadline = sessions.getSession(HOLDER)!.expiresAt;
       let releasePersisted: Promise<void> | undefined;
       let persisted = false;
-      sessions.onSessionRelease((_id, _device, reason, _snapshot, options) => {
+      sessions.onSessionRelease((_id, _device, reason, options) => {
         if (reason.startsWith("device-restart:")) {
           releasePersisted = options.releasePersisted;
           void releasePersisted?.then(() => {
@@ -842,7 +845,8 @@ describe("device restart reserves the entire recovery window", () => {
     await handoff();
     // An already admitted call ends after loss; the existing recovery-activity seam credits it.
     await absent();
-    const waiting = sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true, {
+    const waiting = sessions.getOrCreateSession(HOLDER, pool, "ios", {
+      requireIssuedSession: true,
       requestDeadlineMs: timer.now() + 30_000,
     });
     const outcome = waiting.catch((error: unknown) => error);
@@ -917,7 +921,7 @@ describe("device restart reserves the entire recovery window", () => {
         target: { platform: "ios", stableDeviceId: SIM.deviceId, deviceId: SIM.deviceId },
       },
     ]);
-    await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    await sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true });
     expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
     expect(notifications).toBe(0);
     pool.releaseRehydrationReservation(HOLDER);
@@ -955,7 +959,8 @@ describe("device restart reserves the entire recovery window", () => {
     // Register activity through the real recovery call, then keep an admitted call in flight.
     await absent();
     const waiting = sessions
-      .getOrCreateSession(HOLDER, pool, "ios", undefined, true, {
+      .getOrCreateSession(HOLDER, pool, "ios", {
+        requireIssuedSession: true,
         requestDeadlineMs: timer.now() + 2_000,
       })
       .catch((error: unknown) => error);
@@ -1140,7 +1145,9 @@ describe("device restart reserves the entire recovery window", () => {
     row.session_timeout_ms = 600_000;
     row.expires_at_ms = 601_000;
     timer.advanceTime(179_000);
-    const waiting = sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    const waiting = sessions.getOrCreateSession(HOLDER, pool, "ios", {
+      requireIssuedSession: true,
+    });
     const outcome = waiting.then(
       (session) => session,
       (error: unknown) => error,
@@ -1194,7 +1201,7 @@ describe("device restart reserves the entire recovery window", () => {
     await keepIdlePastRecovery();
     await handoff();
     timer.advanceTime(1_000);
-    await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+    await sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true });
     await keepIdlePastRecovery();
     await handoff();
     await advance(179_000);
@@ -1231,7 +1238,7 @@ describe("device restart reserves the entire recovery window", () => {
       ]);
       expect(await newcomer()).toMatchObject({ assignedDevice: SPARE.deviceId });
       expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
-      await sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true);
+      await sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true });
       expect(pool.getDevice(SIM.deviceId)?.sessionId).toBe(HOLDER);
       expect(internals.rehydrationReservations.has(HOLDER)).toBe(true);
       // The rehydration batch, rather than creation, still owns this hold's end (#11294).
@@ -1278,7 +1285,7 @@ describe("device restart reserves the entire recovery window", () => {
       });
       const markReleased = persistence.markReleased.bind(persistence);
       persistence.markReleased = async (...args) => {
-        if (args[3].startsWith("device-restart:")) {
+        if (args[3].reason.startsWith("device-restart:")) {
           releaseAttempts++;
           if (releaseAttempts === 1) {
             throw new Error("transient restart release failure");

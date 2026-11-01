@@ -28,7 +28,9 @@ function createConnectedClient(
   idGenerator: CountingIdGenerator,
   writes: string[],
 ): DaemonClient {
-  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, ISOLATED_DAEMON_RECOVERY, null, {
+  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+    clientIdentity: null,
     idGenerator,
   });
   client.testHooks.attachSocket(createCapturingSocket(writes));

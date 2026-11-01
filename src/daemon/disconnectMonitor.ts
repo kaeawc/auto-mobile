@@ -6,7 +6,7 @@ import {
 } from "../utils/discoverySource";
 import { isPhysicalAndroidUsbSerial } from "../utils/androidSerial";
 import type { AdbTransportRestartLookup } from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
-import { MISSING_DEVICE_MISS_THRESHOLD, observeMissingDevice } from "./missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD, type DeviceLossMisses } from "./deviceLossMisses";
 
 export type DisconnectCandidateIncarnation = number | string;
 
@@ -95,7 +95,7 @@ export interface DisconnectMonitorEvaluation {
 }
 
 export interface DisconnectMonitorEvaluationInput {
-  deviceDisconnectMisses: Map<string, number>;
+  deviceDisconnectMisses: DeviceLossMisses;
   confirmedDisconnectedDeviceIds: Set<string>;
   bootedDeviceIds: Set<string>;
   candidateDeviceIds: Set<string>;
@@ -146,13 +146,24 @@ export interface DisconnectMonitorEvaluationInput {
  * unknown listing (probe failed or skipped) selects nothing, and the evaluator
  * still requires the Android source to have succeeded, so a failed or partial
  * listing never fast-paths a release.
+ *
+ * @param candidateDeviceIds - Devices that sessions hold
+ * @param candidatePlatforms - Each candidate's platform
+ * @param bootedDeviceIds - Devices listed in the `device` state
+ * @param listing.listedNonDeviceIds - Serials listed in any other state; undefined when unknown
+ * @param listing.transportRestarts - Serials whose adbd AutoMobile is restarting
  */
 export function selectImmediateDisconnectCandidates(
   candidateDeviceIds: ReadonlySet<string>,
   candidatePlatforms: ReadonlyMap<string, Platform>,
   bootedDeviceIds: ReadonlySet<string>,
-  listedNonDeviceIds: ReadonlySet<string> | undefined,
-  transportRestarts?: AdbTransportRestartLookup,
+  {
+    listedNonDeviceIds,
+    transportRestarts,
+  }: {
+    listedNonDeviceIds: ReadonlySet<string> | undefined;
+    transportRestarts?: AdbTransportRestartLookup;
+  },
 ): Set<string> {
   if (listedNonDeviceIds === undefined) {
     return new Set();
@@ -179,13 +190,24 @@ export function selectImmediateDisconnectCandidates(
  *
  * An undefined offline result means the probe failed: retain episode state
  * unless the candidate disappeared or its incarnation changed.
+ *
+ * @param attempted - Devices whose recovery was already attempted
+ * @param candidateDeviceIds - Devices that sessions hold
+ * @param offlineDeviceIds - Devices observed offline; undefined when the probe failed
+ * @param incarnations.attemptedIncarnations - Incarnation each attempt was made for
+ * @param incarnations.candidateIncarnations - Each candidate's current incarnation
  */
 export function pruneStaleOfflineRecoveryAttempts(
   attempted: ReadonlySet<string>,
   candidateDeviceIds: ReadonlySet<string>,
   offlineDeviceIds: ReadonlySet<string> | undefined,
-  attemptedIncarnations: ReadonlyMap<string, DisconnectCandidateIncarnation> = new Map(),
-  candidateIncarnations: ReadonlyMap<string, DisconnectCandidateIncarnation> = new Map(),
+  {
+    attemptedIncarnations = new Map(),
+    candidateIncarnations = new Map(),
+  }: {
+    attemptedIncarnations?: ReadonlyMap<string, DisconnectCandidateIncarnation>;
+    candidateIncarnations?: ReadonlyMap<string, DisconnectCandidateIncarnation>;
+  } = {},
 ): Set<string> {
   return new Set(
     [...attempted].filter(
@@ -300,7 +322,7 @@ export function evaluateDeviceDisconnects(
   const deviceDisconnectMissIncarnations =
     input.deviceDisconnectMissIncarnations ?? new Map<string, number>();
   const clearMiss = (deviceId: string): void => {
-    observeMissingDevice(input.deviceDisconnectMisses, deviceId, "present");
+    input.deviceDisconnectMisses.observe(deviceId, "present");
     deviceDisconnectMissIncarnations.delete(deviceId);
   };
 
@@ -311,7 +333,7 @@ export function evaluateDeviceDisconnects(
       }
     }
 
-    for (const deviceId of input.deviceDisconnectMisses.keys()) {
+    for (const deviceId of input.deviceDisconnectMisses.deviceIds()) {
       if (!input.candidateDeviceIds.has(deviceId)) {
         clearMiss(deviceId);
         input.confirmedDisconnectedDeviceIds.delete(deviceId);
@@ -343,7 +365,7 @@ export function evaluateDeviceDisconnects(
 
   const recordMiss = (deviceId: string): void => {
     const candidateIncarnation = candidateIncarnations.get(deviceId);
-    const observed = observeMissingDevice(input.deviceDisconnectMisses, deviceId, "missing");
+    const observed = input.deviceDisconnectMisses.observe(deviceId, "missing");
     const immediate = input.immediateDisconnectDeviceIds?.has(deviceId) === true;
     if (immediate) {
       input.deviceDisconnectMisses.set(deviceId, MISSING_DEVICE_MISS_THRESHOLD);
@@ -408,7 +430,7 @@ export function evaluateDeviceDisconnects(
     // a failed devicectl sweep must not age out a booted simulator (#5683).
     const sourceSucceeded = candidateSourceSucceeded(input, deviceId);
     if (!sourceSucceeded) {
-      observeMissingDevice(input.deviceDisconnectMisses, deviceId, "source-unavailable");
+      input.deviceDisconnectMisses.observe(deviceId, "source-unavailable");
       if (simulatorAbsenceBudgetExhausted(input, deviceId, false)) {
         confirmBudgetExhausted(deviceId);
       }

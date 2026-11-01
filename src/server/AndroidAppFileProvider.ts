@@ -57,6 +57,12 @@ interface AndroidAppFileUser {
   pinInResourceUri: boolean;
 }
 
+/** The caller's requested user (if any) and cancellation for one user resolution. */
+interface AndroidAppFileUserRequest {
+  userId?: number;
+  signal?: AbortSignal;
+}
+
 // Explicit IDs (including 0) always round-trip. Auto-resolved 0 is pinned only
 // when several users have the app installed; a sole user-0 installation keeps
 // its existing query-free URI. Nonzero resolved users are always pinned.
@@ -64,9 +70,7 @@ async function resolveAndroidAppFileUser(
   adb: AdbExecutor,
   foregroundAppLookup: ForegroundAppLookup,
   device: BootedDevice,
-  appId: string,
-  userId?: number,
-  signal?: AbortSignal,
+  { appId, userId, signal }: AndroidAppFileUserRequest & { appId: string },
 ): Promise<AndroidAppFileUser> {
   const resolver = new AndroidUserTargetResolver(adb);
   if (userId !== undefined) {
@@ -90,7 +94,7 @@ async function resolveAndroidAppFileUser(
     }
     let candidates: number[] = [];
     for (const user of users) {
-      if (await isPackageInstalledForUser(adb, appId, user.userId, undefined, signal)) {
+      if (await isPackageInstalledForUser(adb, appId, user.userId, { signal })) {
         candidates.push(user.userId);
       }
     }
@@ -110,14 +114,11 @@ async function resolveAndroidAppFileUser(
         `Android app ${appId} is not installed for any user on ${device.deviceId}. Install the app for the intended user.`,
       );
     }
-    return await resolveAmbiguousAndroidAppFileUser(
-      adb,
-      foregroundAppLookup,
-      device,
+    return await resolveAmbiguousAndroidAppFileUser(adb, foregroundAppLookup, device, {
       appId,
       candidates,
       signal,
-    );
+    });
   } catch (error) {
     signal?.throwIfAborted();
     throw toActionableError(
@@ -131,9 +132,7 @@ async function resolveAmbiguousAndroidAppFileUser(
   adb: AdbExecutor,
   foregroundAppLookup: ForegroundAppLookup,
   device: BootedDevice,
-  appId: string,
-  candidates: number[],
-  signal?: AbortSignal,
+  { appId, candidates, signal }: { appId: string; candidates: number[]; signal?: AbortSignal },
 ): Promise<AndroidAppFileUser> {
   try {
     const foreground = await foregroundAppLookup.getForegroundApp(signal);
@@ -152,6 +151,13 @@ async function resolveAmbiguousAndroidAppFileUser(
   throw new ActionableError(
     `Android app ${appId} on ${device.deviceId} is installed for candidate users ${candidates.join(", ")}, but no installed foreground user could be selected. Pass userId explicitly (resource query ?userId=N).`,
   );
+}
+
+/** How one file write of a batch reports back to the batch's rollback bookkeeping. */
+interface AndroidAppFileWriteTracking {
+  onWritten: (backup: string | undefined) => void;
+  cleanupFailures: string[];
+  keepPrevious: boolean;
 }
 
 function androidRunAsPrefix(appId: string, userId: number): string {
@@ -199,22 +205,17 @@ export class AndroidAppFileProvider
       request.destinationPath,
     );
     if (target.kind === "unsupported") {
-      throw unsupportedAppFileOperation(
-        "putFile",
-        request.device.platform,
-        appTarget.appId,
-        appTarget.container,
-        target.message,
-      );
+      throw unsupportedAppFileOperation("putFile", request.device.platform, appTarget.appId, {
+        container: appTarget.container,
+        reason: target.message,
+      });
     }
     const adb = this.adbFactory.create(request.device);
     const { userId, pinInResourceUri } = await resolveAndroidAppFileUser(
       adb,
       this.foregroundAppLookup ?? adb,
       request.device,
-      appTarget.appId,
-      request.userId,
-      request.signal,
+      { appId: appTarget.appId, userId: request.userId, signal: request.signal },
     );
     const results: AppFileProviderWriteResult[] = [];
     const writtenPaths: string[] = [];
@@ -225,11 +226,8 @@ export class AndroidAppFileProvider
     try {
       for (const file of requests) {
         failedPath = file.destinationPath;
-        await this.writeFile(
-          file,
-          adb,
-          userId,
-          (backup) => {
+        await this.writeFile(file, adb, userId, {
+          onWritten: (backup) => {
             writtenPaths.push(file.destinationPath);
             if (backup !== undefined) {
               backups.set(file.destinationPath, backup);
@@ -237,15 +235,15 @@ export class AndroidAppFileProvider
           },
           cleanupFailures,
           // A single-file write has no earlier file to roll back, so it needs no backup.
-          requests.length > 1,
-        );
+          keepPrevious: requests.length > 1,
+        });
         if (cleanupFailures.length > 0) {
           throw new ActionableError("Android app-file staging cleanup failed.");
         }
         results.push({ resourceUserId: pinInResourceUri ? userId : undefined });
       }
     } catch (error) {
-      const rollback = await this.rollbackFiles(adb, appTarget, userId, writtenPaths, backups);
+      const rollback = await this.rollbackFiles(adb, appTarget, userId, { writtenPaths, backups });
       throw new ActionableError(
         `Android app-container batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
           `Rolled back: ${rollback.rolledBack.length > 0 ? rollback.rolledBack.join(", ") : "none"}. ` +
@@ -254,7 +252,7 @@ export class AndroidAppFileProvider
       );
     }
     const leftover = await this.discardBackups(adb, appTarget, userId, [...backups.values()]);
-    await this.confirmRunningState(adb, request, appTarget, userId, results);
+    await this.confirmRunningState(adb, request, appTarget, { userId, results });
     if (leftover.length > 0) {
       results[0] = { ...results[0], warning: leftoverBackupsWarning(leftover) };
     }
@@ -294,8 +292,7 @@ export class AndroidAppFileProvider
     adb: AdbExecutor,
     request: PutAppFileProviderRequest,
     appTarget: AppContainersTarget,
-    userId: number,
-    results: AppFileProviderWriteResult[],
+    { userId, results }: { userId: number; results: AppFileProviderWriteResult[] },
   ): Promise<void> {
     try {
       const state = await readAndroidPackageProcesses(adb, appTarget.appId, {
@@ -328,8 +325,7 @@ export class AndroidAppFileProvider
     adb: AdbExecutor,
     appTarget: AppContainersTarget,
     userId: number,
-    writtenPaths: string[],
-    backups: ReadonlyMap<string, string>,
+    { writtenPaths, backups }: { writtenPaths: string[]; backups: ReadonlyMap<string, string> },
   ) {
     return rollbackWrittenFiles(writtenPaths, this.timer, (paths, signal, timeoutMs) => {
       const created: string[] = [];
@@ -368,9 +364,7 @@ export class AndroidAppFileProvider
     request: PutAppFileProviderRequest,
     adb: AdbExecutor,
     userId: number,
-    onWritten: (backup: string | undefined) => void,
-    cleanupFailures: string[],
-    keepPrevious: boolean,
+    { onWritten, cleanupFailures, keepPrevious }: AndroidAppFileWriteTracking,
   ): Promise<void> {
     const appTarget = requireAppContainersTarget(request.target);
     const target = resolveAndroidTarget(
@@ -380,13 +374,10 @@ export class AndroidAppFileProvider
       userId,
     );
     if (target.kind === "unsupported") {
-      throw unsupportedAppFileOperation(
-        "putFile",
-        request.device.platform,
-        appTarget.appId,
-        appTarget.container,
-        target.message,
-      );
+      throw unsupportedAppFileOperation("putFile", request.device.platform, appTarget.appId, {
+        container: appTarget.container,
+        reason: target.message,
+      });
     }
     const prefix =
       target.kind === "external" ? "shell" : androidRunAsPrefix(appTarget.appId, userId);
@@ -507,21 +498,17 @@ export class AndroidAppFileProvider
     const adb = this.adbFactory.create(request.device);
     let base = resolveAndroidTarget(request.appId, request.container, "placeholder");
     if (base.kind === "unsupported") {
-      throw unsupportedAppFileOperation(
-        "listFiles",
-        request.device.platform,
-        request.appId,
-        request.container,
-        base.message,
-      );
+      throw unsupportedAppFileOperation("listFiles", request.device.platform, request.appId, {
+        container: request.container,
+        reason: base.message,
+      });
     }
 
     const { userId, pinInResourceUri } = await resolveAndroidAppFileUser(
       adb,
       this.foregroundAppLookup ?? adb,
       request.device,
-      request.appId,
-      request.userId,
+      { appId: request.appId, userId: request.userId },
     );
     if (base.kind === "external" && userId !== 0) {
       const resolved = resolveAndroidTarget(
@@ -582,13 +569,10 @@ export class AndroidAppFileProvider
             )
           ).stdout;
 
-    const files = parseAndroidStatListing(
-      stdout,
-      root,
-      request.device,
-      request.appId,
-      request.container,
-    );
+    const files = parseAndroidStatListing(stdout, root, request.device, {
+      appId: request.appId,
+      container: request.container,
+    });
 
     return {
       deviceId: request.device.deviceId,
@@ -612,21 +596,17 @@ export class AndroidAppFileProvider
     const adb = this.adbFactory.create(request.device);
     let target = resolveAndroidTarget(request.appId, request.container, request.path);
     if (target.kind === "unsupported") {
-      throw unsupportedAppFileOperation(
-        "readFile",
-        request.device.platform,
-        request.appId,
-        request.container,
-        target.message,
-      );
+      throw unsupportedAppFileOperation("readFile", request.device.platform, request.appId, {
+        container: request.container,
+        reason: target.message,
+      });
     }
 
     const { userId } = await resolveAndroidAppFileUser(
       adb,
       this.foregroundAppLookup ?? adb,
       request.device,
-      request.appId,
-      request.userId,
+      { appId: request.appId, userId: request.userId },
     );
     if (target.kind === "external" && userId !== 0) {
       const resolved = resolveAndroidTarget(request.appId, request.container, request.path, userId);

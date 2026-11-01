@@ -12,6 +12,7 @@ import type {
   BrokerResourceSample,
 } from "../../scripts/manual-test/brokerDeviceScenarios";
 import { runBrokerScenarioCli } from "../../scripts/manual-test/broker-scenario";
+import { batchClientDevice } from "../../scripts/manual-test/brokerBatch";
 import { BrokerDeviceLedger } from "../../scripts/manual-test/brokerDeviceLedger";
 import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
@@ -129,10 +130,8 @@ function fixture(clientCount = 2, timeoutCode = "timeout") {
         };
       }
       let result: SessionBrokerResult;
-      if (
-        c.config.device.hardware.kind === "archetype" &&
-        c.config.device.hardware.archetype === "duo"
-      ) {
+      const hardware = batchClientDevice(c.config).hardware;
+      if (hardware.kind === "archetype" && hardware.archetype === "duo") {
         result = fail(c, "capability_disabled");
       } else if (c.config.preparationTimeoutMs === 1) {
         result = fail(c, timeoutCode, true);

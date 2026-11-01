@@ -222,7 +222,7 @@
                 "/db/capabilities",
                 body: "{}",
                 status: "200 OK",
-                expected: #"{"readOnly":true,"mutationAuthorized":false,"registeredAppGroupSuites":[],"coreDataStores":[],"unavailableStores":["keychain","file_caches"]}"#,
+                expected: #"{"readOnly":true,"mutationAuthorized":false,"registeredAppGroupSuites":[],"coreDataStores":[],"unavailableStores":["keychain","file_caches"],"stores":[],"keychain":{"schemaVersion":1,"capability":"storage.keychain","inspection":"unavailable","deletion":"disabled","reason":"DISABLED","deletionScopes":[]}}"#,
                 unorderedObjectKeys: true
             )
         }
@@ -433,6 +433,7 @@
                 "observationBridge": [
                     "schemaVersion": 1, "available": false, "reason": "NOT_REGISTERED", "supportedActions": [],
                 ],
+                "webViewBridge": ["schemaVersion": 1, "webViews": []],
             ])
             try assertHttpContract(
                 response,

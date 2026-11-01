@@ -37,6 +37,12 @@ export interface StartDeviceArgs {
   matchExactName?: boolean;
 }
 
+/**
+ * What binding a booted device's session reads from a start request. The bound device carries
+ * the platform, so the request's own may be any platform, an Apple Watch's included (#14908).
+ */
+export type StartDeviceSessionArgs = Omit<StartDeviceArgs, "platform"> & { platform?: Platform };
+
 export interface GetAndroidArgs {
   avdName?: string;
   deviceId?: string;

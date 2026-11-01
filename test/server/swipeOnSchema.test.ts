@@ -101,9 +101,7 @@ test("handler forwards complete selectors and reports a structured resolution fa
     const response = await swipeOnHandler(
       { name: "fake", deviceId: "swipe-schema-fake", platform: "android" },
       swipeOnSchema.parse(scoped),
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject(scoped);

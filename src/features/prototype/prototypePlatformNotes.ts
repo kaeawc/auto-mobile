@@ -316,36 +316,35 @@ function occurrences(
   value: unknown,
   rule: Rule,
   path: string,
-  found: Occurrence[],
-  nodeType?: string,
+  { found, nodeType }: { found: Occurrence[]; nodeType?: string },
 ): void {
   if (skipsOccurrences(value, rule)) {
     return;
   }
   switch (rule.kind) {
     case "ref":
-      referenceOccurrences(value, rule.name!, path, found, nodeType);
+      referenceOccurrences(value, rule.name!, path, { found, nodeType });
       break;
     case "strings":
       break;
     case "screenMap":
       Object.entries(value as Record<string, unknown>).forEach(([name, child]) =>
-        occurrences(child, rule.item!, `${path}[${JSON.stringify(name)}]`, found),
+        occurrences(child, rule.item!, `${path}[${JSON.stringify(name)}]`, { found }),
       );
       break;
     case "array":
       (value as unknown[]).forEach((entry, index) =>
-        occurrences(entry, rule.item!, `${path}[${index}]`, found, nodeType),
+        occurrences(entry, rule.item!, `${path}[${index}]`, { found, nodeType }),
       );
       break;
     case "object":
-      objectOccurrences(value as Record<string, unknown>, rule, path, found, nodeType);
+      objectOccurrences(value as Record<string, unknown>, rule, path, { found, nodeType });
       break;
     case "tagged": {
       const data = value as Record<string, unknown>;
       const variant = rule.variants?.[String(data.type)];
       if (variant) {
-        occurrences(value, variant, path, found, nodeType);
+        occurrences(value, variant, path, { found, nodeType });
       }
       break;
     }
@@ -356,12 +355,11 @@ function objectOccurrences(
   data: Record<string, unknown>,
   rule: Rule,
   path: string,
-  found: Occurrence[],
-  nodeType?: string,
+  { found, nodeType }: { found: Occurrence[]; nodeType?: string },
 ): void {
   for (const [key, field] of Object.entries(rule.fields ?? {})) {
     // Imported JSON has no undefined entries; only union inference makes fields optional.
-    occurrences(data[key], field!.rule, path ? `${path}.${key}` : key, found, nodeType);
+    occurrences(data[key], field!.rule, path ? `${path}.${key}` : key, { found, nodeType });
   }
 }
 
@@ -369,8 +367,7 @@ function referenceOccurrences(
   value: unknown,
   name: string,
   path: string,
-  found: Occurrence[],
-  nodeType?: string,
+  { found, nodeType }: { found: Occurrence[]; nodeType?: string },
 ): void {
   if (name === "iconName" && typeof value === "string") {
     found.push({ path, icon: value, nodeType });
@@ -383,8 +380,7 @@ function referenceOccurrences(
     value,
     name === "menuItem" ? definitions.menuItem!.options![0]! : definitions[name]!,
     path,
-    found,
-    nodeType,
+    { found, nodeType },
   );
 }
 
@@ -424,7 +420,7 @@ export function prototypePlatformNotes(
     ];
   }
   const found: Occurrence[] = [];
-  occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
+  occurrences(spec.root, { kind: "ref", name: "node" }, "root", { found });
   const sfSymbols = supports(PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY);
   const differences = [
     ...PROTOTYPE_PLATFORM_DIFFERENCES,

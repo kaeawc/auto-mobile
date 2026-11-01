@@ -73,7 +73,7 @@ export function eventHost() {
       const combined = [...warnings, result.warning].filter(Boolean);
       return { ...result, ...(combined.length ? { warning: combined.join(" ") } : {}) };
     },
-    verifyKeyEventLetterCase: async (text, result, mode, signal, display, before) => {
+    verifyKeyEventLetterCase: async (text, result, { mode, signal, display, before }) => {
       calls.push({ verify: text, mode, signal, display, before });
       return result;
     },

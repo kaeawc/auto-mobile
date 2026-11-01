@@ -10,6 +10,7 @@ import { up as baseUp } from "../../src/db/migrations/2026_01_09_000_video_recor
 import { up as highlightsUp } from "../../src/db/migrations/2026_01_11_000_video_recording_highlights";
 import { up as ownerUp } from "../../src/db/migrations/2026_07_31_000_video_recordings_owner_session";
 import { up as displayUp } from "../../src/db/migrations/2026_09_30_000_video_recording_display";
+import { up as audioStateUp } from "../../src/db/migrations/2026_10_29_000_video_recording_audio_state";
 
 let sqlite: BunDatabase;
 let db: Kysely<Database>;
@@ -23,6 +24,7 @@ beforeEach(async () => {
   await (
     await import("../../src/db/migrations/2026_10_13_000_video_recording_recorder_daemon")
   ).up(db);
+  await audioStateUp(db);
 });
 afterEach(async () => {
   await db.destroy();
@@ -72,7 +74,7 @@ test("capture teardown migration adds a nullable column idempotently and down re
 
 test("repository inserts refreshes explicitly clears and filters capture descriptors", async () => {
   await (await migration()).up(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording(record);
   expect((await repo.getRecording("rec"))?.captureTeardown).toEqual(descriptor);
   await repo.updateRecording("rec", { captureTeardown: { ...descriptor, devicePid: 43 } });
@@ -98,7 +100,7 @@ test.each([
   '{"kind":"android-screenrecord","deviceTempPath":"/file","devicePid":-1}',
 ])("malformed capture descriptor %s warns and reads as absent", async (value: string) => {
   await (await migration()).up(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording(record);
   await sql`UPDATE video_recordings SET capture_teardown_json=${value}`.execute(db);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -116,7 +118,7 @@ test("capture descriptor query excludes rows belonging to live peer daemons", as
     db,
   );
   await sql`INSERT INTO device_sessions VALUES ('peer-owner','active','peer-daemon')`.execute(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording({
     ...record,
     ownerSessionUuid: "peer-owner",
@@ -138,7 +140,7 @@ test("capture descriptor query excludes rows belonging to live peer daemons", as
 
 test("repository round-trips iOS host identity and preserves the Android descriptor", async () => {
   await (await migration()).up(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording(record);
   expect((await repo.getRecording("rec"))?.captureTeardown).toEqual(descriptor);
   const host = {
@@ -157,7 +159,7 @@ test.each([
   '{"kind":"ios-host-recorder","hostPid":42,"udid":"sim-id"}',
 ])("incomplete iOS host descriptor %s warns and reads as absent", async (value) => {
   await (await migration()).up(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording(record);
   await sql`UPDATE video_recordings SET capture_teardown_json=${value}`.execute(db);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});

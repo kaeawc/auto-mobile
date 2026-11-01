@@ -9,7 +9,7 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
   test("event snapshots are copied on ingestion and status reads and survive mutation results", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     const scope = { deviceId: "device", sessionUuid: "one" };
-    store.record(scope, "show", { id: "panel" }, ok);
+    store.record(scope, "show", { id: "panel" }, { result: ok });
     const pushed = {
       ...event(1),
       pages: { pager: 2 },
@@ -36,7 +36,7 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
       snapshot.pages.pager = 7;
       snapshot.state.title = "caller mutation";
     }
-    store.record(scope, "show", { id: "panel" }, { success: false });
+    store.record(scope, "show", { id: "panel" }, { result: { success: false } });
     expect(store.status(scope).prototypes[0]).toMatchObject({
       pages: { pager: 2 },
       context: { nested: { id: 3 } },
@@ -47,7 +47,7 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
     expect(store.status({ ...scope, sessionUuid: "two" })).toEqual({ prototypes: [] });
     store.dismissed(scope, "panel");
     expect(store.status(scope).prototypes).toEqual([]);
-    store.record(scope, "show", { id: "panel" }, ok);
+    store.record(scope, "show", { id: "panel" }, { result: ok });
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("lastKnown");
   });
 
@@ -57,7 +57,7 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
     store.recordEvent(scope, event(1));
     expect(store.status(scope)).toEqual({ prototypes: [] });
     store.recordEvent({ deviceId: "other" }, event(2));
-    store.record(scope, "show", { id: "panel" }, ok);
+    store.record(scope, "show", { id: "panel" }, { result: ok });
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("lastKnown");
   });
 
@@ -68,7 +68,7 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
         { sessionUuid: session, deviceId: `dev-${session}` },
         "show",
         { id: session },
-        ok,
+        { result: ok },
       );
     }
     expect(store.status({ sessionUuid: "a", deviceId: "dev-a" }).prototypes).toEqual([]);
@@ -78,18 +78,18 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
 
   test("recording refreshes recency so an active scope survives eviction", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer(), 2);
-    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, ok);
-    store.record({ sessionUuid: "b", deviceId: "dev-b" }, "show", { id: "b" }, ok);
-    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, ok);
-    store.record({ sessionUuid: "c", deviceId: "dev-c" }, "show", { id: "c" }, ok);
+    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, { result: ok });
+    store.record({ sessionUuid: "b", deviceId: "dev-b" }, "show", { id: "b" }, { result: ok });
+    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, { result: ok });
+    store.record({ sessionUuid: "c", deviceId: "dev-c" }, "show", { id: "c" }, { result: ok });
     expect(store.status({ sessionUuid: "a", deviceId: "dev-a" }).prototypes).toHaveLength(1);
     expect(store.status({ sessionUuid: "b", deviceId: "dev-b" }).prototypes).toEqual([]);
   });
 
   test("below the cap nothing is evicted and release still clears the device", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
-    store.record({ sessionUuid: "a", deviceId: "dev" }, "show", { id: "a" }, ok);
-    store.record({ sessionUuid: "b", deviceId: "dev" }, "dismiss", { id: "x" }, ok);
+    store.record({ sessionUuid: "a", deviceId: "dev" }, "show", { id: "a" }, { result: ok });
+    store.record({ sessionUuid: "b", deviceId: "dev" }, "dismiss", { id: "x" }, { result: ok });
     expect(store.status({ sessionUuid: "b", deviceId: "dev" }).lastResult?.lastAction).toBe(
       "dismiss",
     );
@@ -136,8 +136,8 @@ describe("InMemoryPrototypeStatusStore failed mutations", () => {
       state: { title: "typed" },
     });
     const failed = { success: false, error: "boom" };
-    const shown = store.record(scope, "show", { id: "panel" }, failed);
-    store.record(scope, "dismiss", { id: "panel" }, failed);
+    const shown = store.record(scope, "show", { id: "panel" }, { result: failed });
+    store.record(scope, "dismiss", { id: "panel" }, { result: failed });
     expect(shown).toMatchObject({ success: false, error: "boom" });
     expect(store.status(scope).prototypes).toMatchObject([
       {
@@ -164,7 +164,7 @@ describe("InMemoryPrototypeStatusStore suspended", () => {
     store.adopt(scope, { id: "panel", suspended: false, pages: {}, state: {} });
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("suspended");
     store.adopt(scope, { id: "panel", suspended: true, pages: {}, state: {} });
-    store.record(scope, "show", { id: "panel" }, ok);
+    store.record(scope, "show", { id: "panel" }, { result: ok });
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("suspended");
   });
 });
@@ -182,20 +182,30 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     store.beginShowDispatch(scope.deviceId, "panel");
     store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
-    const result = store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    const result = store.record(
+      scope,
+      "show",
+      { id: "panel" },
+      { result: { ...ok, appearance: light } },
+    );
     expect(result.appearance).toEqual(light);
     expect(store.status(scope).lastResult?.appearance).toEqual(light);
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("appearance");
-    store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    store.record(scope, "show", { id: "panel" }, { result: { ...ok, appearance: light } });
     expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
   });
 
   test("a host-refused sibling leaves the in-flight show's crossing marker intact", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     store.beginShowDispatch(scope.deviceId, "panel");
-    store.record(scope, "show", { id: "panel" }, { success: false, error: "refused" });
+    store.record(scope, "show", { id: "panel" }, { result: { success: false, error: "refused" } });
     store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
-    const result = store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    const result = store.record(
+      scope,
+      "show",
+      { id: "panel" },
+      { result: { ...ok, appearance: light } },
+    );
     expect(result.appearance).toEqual(light);
     expect(store.status(scope).lastResult?.appearance).toEqual(light);
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("appearance");
@@ -215,7 +225,7 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
         },
       );
       store.startShow(showing);
-      store.record(showing, "show", { id: "panel" }, { ...ok, appearance: light });
+      store.record(showing, "show", { id: "panel" }, { result: { ...ok, appearance: light } });
       if (crossing === "same") {
         expect(store.status(showing).prototypes[0]).not.toHaveProperty("appearance");
       } else {
@@ -227,7 +237,7 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
   test.each(["device", "session"])("clear %s drops an armed crossed marker", (clear) => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     const owned = { ...scope, sessionUuid: "a" };
-    store.record(owned, "show", { id: "panel" }, ok);
+    store.record(owned, "show", { id: "panel" }, { result: ok });
     store.beginShowDispatch(scope.deviceId, "panel");
     store.recordEvent(owned, change(1, { mode: "dark", source: "system" }));
     if (clear === "device") {
@@ -235,14 +245,21 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
     } else {
       store.clearSession("a");
     }
-    store.record(owned, "show", { id: "panel" }, { ...ok, appearance: light });
+    store.record(owned, "show", { id: "panel" }, { result: { ...ok, appearance: light } });
     expect(store.status(owned).prototypes[0]?.appearance).toEqual(light);
   });
 
   test("a successful show and an adopt cache the reported appearance; absence stays absent", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
-    expect(store.record(scope, "show", { id: "panel" }, ok)).not.toHaveProperty("appearance");
-    const shown = store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    expect(store.record(scope, "show", { id: "panel" }, { result: ok })).not.toHaveProperty(
+      "appearance",
+    );
+    const shown = store.record(
+      scope,
+      "show",
+      { id: "panel" },
+      { result: { ...ok, appearance: light } },
+    );
     expect(shown.appearance).toEqual(light);
     expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
     store.adopt(scope, { id: "panel", pages: {}, state: {} });
@@ -253,20 +270,27 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
 
   test("a failed show or dismiss never reports one and keeps the shown prototype's", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
-    store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    store.record(scope, "show", { id: "panel" }, { result: { ...ok, appearance: light } });
     const failed = { success: false, appearance: { ...light, mode: "dark" as const } };
-    expect(store.record(scope, "show", { id: "panel" }, failed)).not.toHaveProperty("appearance");
-    expect(store.record(scope, "dismiss", { id: "panel" }, failed)).not.toHaveProperty(
+    expect(store.record(scope, "show", { id: "panel" }, { result: failed })).not.toHaveProperty(
+      "appearance",
+    );
+    expect(store.record(scope, "dismiss", { id: "panel" }, { result: failed })).not.toHaveProperty(
       "appearance",
     );
     expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
-    const dismissed = store.record(scope, "dismiss", { id: "panel" }, { ...ok, appearance: light });
+    const dismissed = store.record(
+      scope,
+      "dismiss",
+      { id: "panel" },
+      { result: { ...ok, appearance: light } },
+    );
     expect(dismissed).not.toHaveProperty("appearance");
   });
 
   test("appearance_changed updates mode and source and drops deviceDark until a device result", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
-    store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    store.record(scope, "show", { id: "panel" }, { result: { ...ok, appearance: light } });
     store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
     expect(store.status(scope).prototypes[0]?.appearance).toEqual({
       mode: "dark",
@@ -288,7 +312,7 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
     expect(store.status(scope).prototypes).toEqual([]);
-    store.record(scope, "show", { id: "panel" }, ok);
+    store.record(scope, "show", { id: "panel" }, { result: ok });
     store.recordEvent(scope, change(2, { mode: "dark", source: "override" }));
     expect(store.status(scope).prototypes[0]?.appearance).toEqual({
       mode: "dark",
@@ -308,7 +332,17 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
 describe("InMemoryPrototypeStatusStore.shownOnDevice", () => {
   test("finds a shown prototype from any session on that device only, as a copy", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
-    store.record({ sessionUuid: "a", deviceId: "dev" }, "show", { id: "panel" }, ok, 2);
+    store.record(
+      { sessionUuid: "a", deviceId: "dev" },
+      "show",
+      { id: "panel" },
+      {
+        result: ok,
+        details: {
+          displayId: 2,
+        },
+      },
+    );
     expect(store.shownOnDevice("dev", "panel")?.displayId).toBe(2);
     expect(store.shownOnDevice("other", "panel")).toBeUndefined();
     expect(store.shownOnDevice("dev", "missing")).toBeUndefined();
@@ -321,7 +355,7 @@ test("data is copied on show, adoption and every read, preserved on failure, and
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const scope = { deviceId: "data-device" };
   const data = { orders: [{ title: "Latte" }] };
-  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
+  store.record(scope, "show", { id: "orders" }, { result: ok, details: { data } });
   data.orders[0].title = "external";
   const status = store.status(scope);
   expect(status.prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
@@ -333,20 +367,28 @@ test("data is copied on show, adoption and every read, preserved on failure, and
     shown.data.orders = [];
   }
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
-  store.record(scope, "show", { id: "orders" }, { success: false }, undefined, {
-    data: { orders: [] },
-  });
+  store.record(
+    scope,
+    "show",
+    { id: "orders" },
+    {
+      result: { success: false },
+      details: {
+        data: { orders: [] },
+      },
+    },
+  );
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
   store.adopt(scope, { id: "orders", data, pages: {}, state: {} });
   data.orders[0].title = "changed again";
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "external" }] });
   store.adopt(scope, { id: "orders", pages: {}, state: {} });
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
-  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
-  store.record(scope, "show", { id: "orders" }, ok);
+  store.record(scope, "show", { id: "orders" }, { result: ok, details: { data } });
+  store.record(scope, "show", { id: "orders" }, { result: ok });
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
-  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
-  store.record(scope, "dismiss", { id: "orders" }, ok);
+  store.record(scope, "show", { id: "orders" }, { result: ok, details: { data } });
+  store.record(scope, "dismiss", { id: "orders" }, { result: ok });
   expect(store.status(scope).prototypes).toEqual([]);
 });
 
@@ -367,7 +409,7 @@ describe("patch spec and data hooks", () => {
   function track(store: InMemoryPrototypeStatusStore) {
     const ticket = store.shownSpecs.beginShow(scope.deviceId);
     store.shownSpecs.endShow(scope.deviceId, ticket, { id: "panel", spec: { data: { count: 1 } } });
-    store.record(scope, "show", { id: "panel" }, ok, undefined, { data: { count: 1 } });
+    store.record(scope, "show", { id: "panel" }, { result: ok, details: { data: { count: 1 } } });
   }
   test("patched data refreshes every session without touching results or snapshots", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
@@ -387,7 +429,7 @@ describe("patch spec and data hooks", () => {
     store.recordPatchedData("device", "panel", undefined);
     expect(store.status(other)).toEqual(before);
     // Insert another session presence through the public show path, then prove device/id filtering.
-    store.record(scope, "show", { id: "panel" }, ok, undefined, { data: { count: 1 } });
+    store.record(scope, "show", { id: "panel" }, { result: ok, details: { data: { count: 1 } } });
     store.recordPatchedData("device", "other", { count: 3 });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
   });
@@ -417,10 +459,10 @@ describe("patch spec and data hooks", () => {
         store.dismissed(scope, "panel");
       }
       if (hook === "dismiss") {
-        store.record(scope, "dismiss", { id: "panel" }, ok);
+        store.record(scope, "dismiss", { id: "panel" }, { result: ok });
       }
       if (hook === "all") {
-        store.record(scope, "dismiss", { all: true }, ok);
+        store.record(scope, "dismiss", { all: true }, { result: ok });
       }
       if (hook === "clearDevice") {
         store.clearDevice("device");
@@ -435,7 +477,7 @@ describe("patch spec and data hooks", () => {
   test("failed dismiss, wrong-id dismissal and sibling/same-id adoption retain the spec", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     track(store);
-    store.record(scope, "dismiss", { id: "panel" }, { success: false });
+    store.record(scope, "dismiss", { id: "panel" }, { result: { success: false } });
     store.dismissed(scope, "other");
     store.adopt(scope, { id: "other", pages: {}, state: {} });
     store.adopt(scope, { id: "panel", pages: {}, state: {} });
@@ -448,7 +490,7 @@ test("stack snapshots are copied through events, pending shows and inspect adopt
   const scope = { deviceId: "stacks" };
   const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
   store.recordEvent(scope, { ...event(1), stacks });
-  store.record(scope, "show", { id: "panel" }, ok);
+  store.record(scope, "show", { id: "panel" }, { result: ok });
   stacks.nav.path[0] = "mutated";
   expect(store.status(scope).prototypes[0].stacks).toEqual({
     nav: { path: ["home", "detail"], depth: 2 },
@@ -470,7 +512,7 @@ test("show snapshots expose initial stacks until a device snapshot supersedes th
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const scope = { deviceId: "initial-stacks" };
   const stacks = { nav: { path: ["home"], depth: 1 } };
-  store.record(scope, "show", { id: "panel" }, { success: true, stacks });
+  store.record(scope, "show", { id: "panel" }, { result: { success: true, stacks } });
   stacks.nav.path[0] = "caller";
   expect(store.status(scope).prototypes[0].stacks).toEqual({ nav: { path: ["home"], depth: 1 } });
   store.recordEvent(scope, event(1));

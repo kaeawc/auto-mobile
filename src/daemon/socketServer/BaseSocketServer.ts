@@ -44,6 +44,12 @@ export function getAcceptedAuxSocketConnectionCount(): number {
 
 export const AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
 
+/** How a socket server probes a socket left at its path, and records the socket it binds. */
+export interface SocketBindOwnership {
+  socketReachability?: DaemonSocketReachabilityLike;
+  socketOwner?: AuxiliarySocketOwner;
+}
+
 /**
  * Abstract base class for Unix domain socket servers.
  * Handles common functionality: socket lifecycle, line protocol, connection management.
@@ -62,20 +68,24 @@ export abstract class BaseSocketServer {
   /** Largest inbound frame (bytes, newline excluded) a peer may send on this server. */
   protected readonly maxFrameBytes: number = AUX_SOCKET_MAX_FRAME_BYTES;
   private readonly socketReachability: DaemonSocketReachabilityLike;
+  private readonly socketOwner: AuxiliarySocketOwner;
 
   constructor(
     socketPath: string,
     timer: Timer = defaultTimer,
     serverName: string = "Socket",
-    idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
-    socketReachability: DaemonSocketReachabilityLike = new DaemonSocketReachability(),
-    private readonly socketOwner: AuxiliarySocketOwner = new AuxiliarySocketOwner(),
+    {
+      idleTimeoutMs = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
+      socketReachability = new DaemonSocketReachability(),
+      socketOwner = new AuxiliarySocketOwner(),
+    }: SocketBindOwnership & { idleTimeoutMs?: number } = {},
   ) {
     this.socketPath = socketPath;
     this.timer = timer;
     this.serverName = serverName;
     this.idleTimeoutMs = idleTimeoutMs;
     this.socketReachability = socketReachability;
+    this.socketOwner = socketOwner;
   }
 
   /**

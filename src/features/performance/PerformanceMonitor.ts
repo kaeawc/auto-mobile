@@ -539,13 +539,9 @@ export class PerformanceMonitor {
     // for the windowed buffer. The stream uses the cached fps/frameTime to avoid
     // flicker to 0, but the buffer must NOT re-record a stale reading every idle
     // tick — that would keep an old fps dominating the percentiles.
-    this.pushMetrics(
-      device,
-      now,
-      metrics,
-      jankFrames,
+    this.pushMetrics(device, now, metrics, {
       server,
-      createAndroidWindowSample({
+      raw: createAndroidWindowSample({
         recordGfxWindowSample,
         frameMetrics,
         gfx,
@@ -555,7 +551,7 @@ export class PerformanceMonitor {
         memory,
         memoryBreakdown,
       }),
-    );
+    });
   }
 
   /**
@@ -634,15 +630,18 @@ export class PerformanceMonitor {
 
     // iOS has no app touch source here; SDK frame readings are already raw.
     // Host `ps` yields only RSS, not a meminfo-style component breakdown.
-    this.pushMetrics(device, now, metrics, jankFrames, server, {
-      fps,
-      frameTimeMs,
-      jankFrames,
-      touchLatencyMs: null,
-      cpuUsagePercent: shouldCollectCpu ? cpu : null,
-      memoryUsageMb: shouldCollectMemory ? memory : null,
-      frameTimePercentilesMs: null,
-      memoryBreakdownMb: null,
+    this.pushMetrics(device, now, metrics, {
+      server,
+      raw: {
+        fps,
+        frameTimeMs,
+        jankFrames,
+        touchLatencyMs: null,
+        cpuUsagePercent: shouldCollectCpu ? cpu : null,
+        memoryUsageMb: shouldCollectMemory ? memory : null,
+        frameTimePercentilesMs: null,
+        memoryBreakdownMb: null,
+      },
     });
   }
 
@@ -662,21 +661,21 @@ export class PerformanceMonitor {
       cpuUsagePercent: number | null;
       memoryUsageMb: number | null;
     },
-    jankFrames: number | null,
-    server: PerformanceDataPusher,
-    // Raw per-interval readings for the windowed buffer only (null on an idle
-    // no-frame tick), kept separate from the cached/fabricated stream values.
-    // Callers guarantee (via isSampleCurrent) that the sample still belongs to
-    // the currently-monitored app before calling.
-    raw: {
-      fps: number | null;
-      frameTimeMs: number | null;
-      jankFrames: number | null;
-      touchLatencyMs: number | null;
-      cpuUsagePercent: number | null;
-      memoryUsageMb: number | null;
-      frameTimePercentilesMs: FrameTimePercentiles | null;
-      memoryBreakdownMb: MemoryBreakdownMb | null;
+    {
+      server,
+      raw,
+    }: {
+      server: PerformanceDataPusher;
+      raw: {
+        fps: number | null;
+        frameTimeMs: number | null;
+        jankFrames: number | null;
+        touchLatencyMs: number | null;
+        cpuUsagePercent: number | null;
+        memoryUsageMb: number | null;
+        frameTimePercentilesMs: FrameTimePercentiles | null;
+        memoryBreakdownMb: MemoryBreakdownMb | null;
+      };
     },
   ): void {
     const data: LivePerformanceData = {
@@ -728,7 +727,7 @@ export class PerformanceMonitor {
       const streamData: PerformanceStreamData = {
         fps: metrics.fps ?? 0,
         frameTimeMs: metrics.frameTimeMs ?? 0,
-        jankFrames: jankFrames ?? 0,
+        jankFrames: metrics.jankFrames ?? 0,
         droppedFrames: 0, // Not tracked in real-time monitoring
         memoryUsageMb: metrics.memoryUsageMb ?? 0,
         cpuUsagePercent: metrics.cpuUsagePercent ?? 0,

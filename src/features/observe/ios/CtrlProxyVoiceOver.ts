@@ -47,6 +47,7 @@ export interface VoiceOverActivationOptions {
 }
 
 export interface CtrlProxyRequestActionOptions {
+  perf?: PerformanceTracker;
   abortSignal?: AbortSignal;
   duration?: number;
   /** Fires once the request frame was written; after it the action may have run. */
@@ -142,17 +143,14 @@ export class CtrlProxyVoiceOver {
    * @param resourceId - The resource-id / accessibility identifier of the target element
    * @param label - The accessibility label (content-desc) as fallback when no resourceId
    * @param timeoutMs - Request timeout in milliseconds (default: 5000)
-   * @param perf - Optional performance tracker
-   * @param options - Optional caller cancellation signal and action duration
+   * @param options - Optional performance tracker, caller cancellation signal and action duration
    * @returns Action result
    */
   async requestAction(
     action: string,
     resourceId?: string,
     label?: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    options?: CtrlProxyRequestActionOptions,
+    { timeoutMs = 5000, ...options }: CtrlProxyRequestActionOptions & { timeoutMs?: number } = {},
   ): Promise<CtrlProxyActionResult> {
     let dispatched = false;
     const result = await sendCommand<CtrlProxyActionResult>(this.context, {
@@ -166,7 +164,7 @@ export class CtrlProxyVoiceOver {
         duration: options?.duration,
       },
       timeoutMs,
-      perf,
+      perf: options?.perf,
       cancelScreenshotBackoff: false,
       abortSignal: options?.abortSignal,
       onDispatch: () => {
@@ -317,8 +315,7 @@ export class CtrlProxyVoiceOver {
     label: string,
     action: "activate" | "long_press",
     timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-    perf?: PerformanceTracker,
-    options?: VoiceOverActivationOptions,
+    { perf, ...options }: VoiceOverActivationOptions & { perf?: PerformanceTracker } = {},
   ): Promise<CtrlProxyActionResult> {
     const signal = getAbortSignal();
     let dispatched = false;
@@ -334,7 +331,7 @@ export class CtrlProxyVoiceOver {
         idPrefix: "voiceover_action",
         responseType: "action",
         messageType: "request_action",
-        params: { label, action, bounds: options?.bounds, duration: options?.duration },
+        params: { label, action, bounds: options.bounds, duration: options.duration },
         timeoutMs,
         perf,
         cancelScreenshotBackoff: false,

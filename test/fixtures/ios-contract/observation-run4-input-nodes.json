@@ -1,0 +1,4 @@
+[
+{"bounds":[24,280,366,324],"affordances":["tap"],"elementId":"contract-email","label":"Contract email","testTag":"contract-email"},
+{"bounds":[16,169,386,213],"affordances":["tap","input"],"elementId":"s2-03144510d78b1e13","label":"Search videos"}
+]

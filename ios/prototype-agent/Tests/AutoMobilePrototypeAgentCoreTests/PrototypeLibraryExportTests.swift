@@ -52,13 +52,16 @@ final class PrototypeLibraryExportTests: XCTestCase {
         let manifestData = try XCTUnwrap(entries.first { $0.0 == "bundle.json" }?.1)
         let manifest = try JSONDecoder().decode([String: JSONValue].self, from: manifestData)
         XCTAssertEqual(Set(manifest.keys), ["bundleFormatVersion", "specSha256", "assets", "fonts", "requires"])
+        // A recipient library has no matching digest; reimporting into the sender would dedupe.
+        let recipientFiles = PrototypeLibraryFakeFileSystem()
+        let recipient = try store(recipientFiles, id: second)
         let imported = try PrototypeLibraryImporter(
-            store: store(files, id: second), imageProbe: PrototypeLibraryFakeImageProbe()
+            store: recipient, imageProbe: PrototypeLibraryFakeImageProbe()
         ).importData(bytes, source: .file)
         XCTAssertEqual(imported.libraryId, second)
         XCTAssertEqual(imported.source, .file)
-        XCTAssertEqual(try library.load(first).assets, try library.load(second).assets)
-        XCTAssertEqual(try files.children(library.storageURL(second)), [])
+        XCTAssertEqual(try library.load(first).assets, try recipient.load(second).assets)
+        XCTAssertEqual(try recipientFiles.children(recipient.storageURL(second)), [])
     }
 
     func testExportUsesFreshDirectorySanitizesFilenameAndCleansAfterCompletionOrCancellation() throws {

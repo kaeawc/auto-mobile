@@ -65,7 +65,11 @@ class HierarchySuspendWiringTest {
     assertTrue(refresh.contains("serviceScope.launch"))
     assertTrue(refresh.contains("host.publishSettledHierarchy()"))
     val publish = functionBody("override suspend fun publishSettledHierarchy()")
-    assertTrue(publish.contains("hierarchyController.debouncer.extractAfterQuiescenceSuspending("))
+    assertTrue(publish.contains("hierarchyController.publishSettledHierarchy()"))
+    val settledPublish =
+      functionBody("fun HierarchyController.publishSettledHierarchy()", "HierarchyController.kt")
+    assertTrue(settledPublish.contains("settledHierarchy()"))
+    assertFalse(settledPublish.contains("runBlocking"))
   }
 
   private fun functionBody(signature: String, fileName: String = "CtrlProxy.kt"): String {

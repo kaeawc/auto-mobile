@@ -110,7 +110,7 @@ function* acquireLockSteps(lockFilePath: string, options: LockAttemptOptions): S
     if (!isReclaimable(initial, options)) {
       return false;
     }
-    return yield* reclaimExclusiveLock(lockFilePath, options, initial, generation);
+    return yield* reclaimExclusiveLock(lockFilePath, options, initial, { generation });
   }
   const first = yield* writeExclusiveLockFile(lockFilePath, pid, options);
   if (first.blocked) {
@@ -124,26 +124,23 @@ function* acquireLockSteps(lockFilePath: string, options: LockAttemptOptions): S
     return false;
   }
   // Reuse the free path's sweep unless mkdir failed before it could run.
-  return yield* reclaimExclusiveLock(
-    lockFilePath,
-    options,
-    observed,
-    first.generation,
-    !first.swept,
-  );
+  return yield* reclaimExclusiveLock(lockFilePath, options, observed, {
+    generation: first.generation,
+    sweep: !first.swept,
+  });
 }
 
 function* reclaimExclusiveLock(
   lockFilePath: string,
   options: LockAttemptOptions,
   observed: LockSample,
-  generation: string | undefined,
-  sweep = true,
+  { generation, sweep }: { generation?: string; sweep?: boolean } = {},
 ): Steps<boolean> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const pid = options.pid ?? process.pid;
   const prefix = guardPrefix(lockFilePath, observed);
-  if (sweep) {
+  // Sweeps unless the caller already swept on this path.
+  if (sweep !== false) {
     yield* sweepOwnPublicationTmps(lockFilePath, options);
   }
   const guard = yield* claimReclaimGuard(prefix, options, generation);
@@ -170,7 +167,10 @@ function* reclaimExclusiveLock(
       // Once removed, this fingerprint cannot pass the path check again.
       yield* cleanupFile(`${prefix}.${lower}`, fileSystem);
     }
-    return (yield* writeExclusiveLockFile(lockFilePath, pid, options, false, observed)).acquired;
+    return (yield* writeExclusiveLockFile(lockFilePath, pid, options, {
+      sweep: false,
+      reclaimed: observed,
+    })).acquired;
   } finally {
     yield* releaseGuard(`${prefix}.${guard.k}`, guard.content, fileSystem);
     if (guard.compacted) {
@@ -295,7 +295,7 @@ function* takeOverAttemptSteps(
     options.ownerGeneration,
     options.pid ?? process.pid,
   );
-  return yield* reclaimExclusiveLock(path, options, sample, generation);
+  return yield* reclaimExclusiveLock(path, options, sample, { generation });
 }
 
 /**
@@ -447,8 +447,7 @@ function* writeExclusiveLockFile(
   path: string,
   pid: number,
   options: LockAttemptOptions,
-  sweep = true,
-  reclaimed?: LockSample,
+  { sweep = true, reclaimed }: { sweep?: boolean; reclaimed?: LockSample } = {},
 ): Steps<{ acquired: boolean; generation: string | undefined; swept: boolean; blocked?: boolean }> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   try {
@@ -474,19 +473,20 @@ function* writeExclusiveLockFile(
     yield* drainRetainedBeforePublication(path, pid, fileSystem);
     rememberInFlightPublication(path, content, fileSystem, options.publications);
     let acquired = false;
-    const publication = yield* publishFile(
-      path,
-      content,
-      pid,
+    const publication = yield* publishFile(path, content, pid, {
       fileSystem,
-      options.idGenerator,
-      function* (tmp): Steps<void> {
-        acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content, tmp);
+      idGenerator: options.idGenerator,
+      postPublish: function* (tmp): Steps<void> {
+        acquired = yield* checkRetainedLock(path, options, generation, {
+          reclaimed,
+          publishedContent: content,
+          tmp,
+        });
         if (acquired) {
           yield* settleAcquiredBackOuts(path, content, fileSystem, tmp);
         }
       },
-    );
+    });
     const published =
       typeof publication === "string"
         ? publication === "created"
@@ -495,7 +495,10 @@ function* writeExclusiveLockFile(
       return { acquired: false, generation, swept: sweep };
     }
     if (typeof publication !== "string") {
-      acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content);
+      acquired = yield* checkRetainedLock(path, options, generation, {
+        reclaimed,
+        publishedContent: content,
+      });
       if (acquired) {
         yield* settleAcquiredBackOuts(path, content, fileSystem, path);
       }

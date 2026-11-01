@@ -1,3 +1,6 @@
+import { join, resolve } from "node:path";
+import type { AvdSnapshotCleanupReport } from "../../../src/daemon/sessionBroker/AvdSnapshotCleanup";
+import { SessionBrokerMaintenanceError } from "../../../src/daemon/sessionBroker/SessionBrokerMaintenanceError";
 import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
@@ -99,6 +102,21 @@ function request(params: unknown): DaemonRequest {
 }
 
 class HandlerBroker extends SessionBroker {
+  runSnapshotCleanup = false;
+  snapshotCleanupCalls = 0;
+  snapshotCleanupReports = [
+    { avdName: "ambroker-stale", deletedSnapshotNames: ["capture"], keptSnapshots: [] },
+  ];
+  override async cleanupAvdSnapshots(operation: () => Promise<AvdSnapshotCleanupReport[]>) {
+    this.snapshotCleanupCalls++;
+    if (this.mutationError) {
+      throw this.mutationError;
+    }
+    return this.runSnapshotCleanup
+      ? super.cleanupAvdSnapshots(operation)
+      : this.snapshotCleanupReports;
+  }
+
   prepareError: Error | undefined;
   mutationError: Error | undefined;
   prepareResult = result("request-1", "failed");
@@ -222,8 +240,7 @@ describe("session broker daemon handlers", () => {
       broker,
       SCOPE,
       { acquire: () => {}, release: () => {} },
-      new FakeTimer(),
-      new InMemoryMutationRecordingGaps(),
+      { timer: new FakeTimer(), mutations: { recordingGaps: new InMemoryMutationRecordingGaps() } },
     );
     state = {
       isInitialized: () => true,
@@ -257,13 +274,15 @@ describe("session broker daemon handlers", () => {
     )![1];
     const stats = { sinceMs: 1, untilMs: 2, limit: 10, truncated: false, groups: [] };
     const statsSpy = spyOn(broker, "stats").mockResolvedValue(stats);
-    expect(
-      await handler(request({ windowMs: 100, limit: 10 }), state, undefined, undefined, {}),
-    ).toEqual({ success: true, result: stats });
+    expect(await handler(request({ windowMs: 100, limit: 10 }), state, { context: {} })).toEqual({
+      success: true,
+      result: stats,
+    });
     expect(statsSpy).toHaveBeenCalledWith(100, 10);
-    expect(await handler(request({ limit: 10001 }), state, undefined, undefined, {})).toMatchObject(
-      { success: false, code: "session_config_invalid" },
-    );
+    expect(await handler(request({ limit: 10001 }), state, { context: {} })).toMatchObject({
+      success: false,
+      code: "session_config_invalid",
+    });
     statsSpy.mockRestore();
     expect(broker.prepareCalls).toEqual([]);
   });
@@ -278,14 +297,15 @@ describe("session broker daemon handlers", () => {
     const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({
       resources: [...drained.resources],
     });
-    expect(await handler(request({}), state, undefined, undefined, {})).toEqual({
+    expect(await handler(request({}), state, { context: {} })).toEqual({
       success: true,
       result: drained,
     });
     expect(drainSpy).toHaveBeenCalledTimes(1);
-    expect(
-      await handler(request({ resourceId: "x" }), state, undefined, undefined, {}),
-    ).toMatchObject({ success: false, code: "session_config_invalid" });
+    expect(await handler(request({ resourceId: "x" }), state, { context: {} })).toMatchObject({
+      success: false,
+      code: "session_config_invalid",
+    });
     expect(drainSpy).toHaveBeenCalledTimes(1);
     drainSpy.mockRestore();
   });
@@ -301,7 +321,7 @@ describe("session broker daemon handlers", () => {
     const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({ resources: [] });
 
     expect(
-      await handler(request({}), state, undefined, undefined, { socketSessionId: "bound-drain" }),
+      await handler(request({}), state, { context: { socketSessionId: "bound-drain" } }),
     ).toMatchObject({ success: false, code: DEVICE_OUTSIDE_BROKER_GRANT_CODE });
     expect(drainSpy).not.toHaveBeenCalled();
   });
@@ -315,8 +335,8 @@ describe("session broker daemon handlers", () => {
     const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({ resources: [] });
 
     expect(
-      await handler(request({ resourceId: "x" }), state, undefined, undefined, {
-        socketSessionId: "bound-drain",
+      await handler(request({ resourceId: "x" }), state, {
+        context: { socketSessionId: "bound-drain" },
       }),
     ).toMatchObject({ success: false, code: DEVICE_OUTSIDE_BROKER_GRANT_CODE });
     expect(serviceSpy).not.toHaveBeenCalled();
@@ -329,12 +349,150 @@ describe("session broker daemon handlers", () => {
     )![1];
     const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({ resources: [] });
 
-    expect(
-      await handler(request({}), state, undefined, undefined, { socketSessionId: "operator" }),
-    ).toEqual({ success: true, result: { resources: [] } });
+    expect(await handler(request({}), state, { context: { socketSessionId: "operator" } })).toEqual(
+      { success: true, result: { resources: [] } },
+    );
     expect(drainSpy).toHaveBeenCalledTimes(1);
     expect(scopes.get("operator")).toBeUndefined();
   });
+  test("snapshot cleanup returns reports, refuses parameters and binds no connection", async () => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/cleanupBrokerAvdSnapshots",
+    )![1];
+    expect(await handler(request({}), state, { context: { socketSessionId: "operator" } })).toEqual(
+      { success: true, result: { reports: broker.snapshotCleanupReports } },
+    );
+    expect(
+      await handler(request({ avdName: "ambroker-stale" }), state, { context: {} }),
+    ).toMatchObject({ success: false, code: "session_config_invalid" });
+    expect(broker.snapshotCleanupCalls).toBe(1);
+    expect(scopes.get("operator")).toBeUndefined();
+  });
+
+  test.each([{ sessionUuids: [SESSION] }, { sessionUuids: [] }])(
+    "snapshot cleanup refuses a bound socket before lookup or validation: %p",
+    async ({ sessionUuids }) => {
+      const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+        ([method]) => method === "daemon/cleanupBrokerAvdSnapshots",
+      )![1];
+      scopes.bind("bound-cleanup", { scopeKey: SCOPE, sessionUuids });
+      const unavailableState: DaemonStateAccess = {
+        ...state,
+        getSessionBrokerService: () => {
+          throw new Error("must refuse before lookup");
+        },
+      };
+      expect(
+        await handler(request({ extra: true }), unavailableState, {
+          context: { socketSessionId: "bound-cleanup" },
+        }),
+      ).toMatchObject({ success: false, code: DEVICE_OUTSIDE_BROKER_GRANT_CODE });
+      expect(broker.snapshotCleanupCalls).toBe(0);
+    },
+  );
+
+  test.each([true, false])(
+    "snapshot cleanup discovers AVD directories through injected ports (registry=%s)",
+    async (withRegistry) => {
+      const home = resolve("scratch", "fake-handler-avds");
+      const names = ["ambroker-stale", "user-avd"];
+      const snapshots = ["capture", "default_boot", "automobile-broker-baseline-v1"];
+      const tree = new Map<string, string[]>([
+        [home, [...names.map((name) => `${name}.avd`), "README", "ambroker-stale.ini"]],
+      ]);
+      for (const name of names) {
+        const avd = join(home, `${name}.avd`);
+        tree.set(avd, ["snapshots"]);
+        tree.set(join(avd, "snapshots"), snapshots);
+        for (const snapshot of snapshots) {
+          tree.set(join(avd, "snapshots", snapshot), []);
+        }
+      }
+      const removed: string[] = [];
+      broker.runSnapshotCleanup = true;
+      const service = new SessionBrokerService(
+        broker,
+        SCOPE,
+        { acquire: () => {}, release: () => {} },
+        {
+          timer: new FakeTimer(),
+          mutations: { recordingGaps: new InMemoryMutationRecordingGaps() },
+          avdSnapshotCleanup: {
+            resolver: {
+              getAvdHome: () => home,
+              resolveAvdDirectory: async (name) => join(home, `${name}.avd`),
+            },
+            registry: withRegistry ? registry.avdSnapshotCleanupRegistry() : undefined,
+            liveness: {
+              hasLiveProcess: async () => false,
+              findLiveEmulatorSerial: async () => null,
+            },
+            filesystem: {
+              listNames: async (path) => {
+                const entries = tree.get(path);
+                if (!entries) {
+                  throw new Error(`Unexpected path: ${path}`);
+                }
+                return entries;
+              },
+              realpath: async (path) => path,
+              lstat: async () => ({ isDirectory: () => true, isSymbolicLink: () => false }),
+              removeDirectory: async (path) => {
+                removed.push(path);
+              },
+            },
+            log: { warn: () => {} },
+          },
+        },
+      );
+      const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+        ([method]) => method === "daemon/cleanupBrokerAvdSnapshots",
+      )![1];
+      const response = await handler(
+        request({}),
+        { ...state, getSessionBrokerService: () => service },
+        { context: {} },
+      );
+      expect(response).toMatchObject({
+        success: true,
+        result: { reports: names.map((avdName) => ({ avdName })) },
+      });
+      expect(removed).toEqual(
+        withRegistry ? [join(home, "ambroker-stale.avd", "snapshots", "capture")] : [],
+      );
+    },
+  );
+
+  test("snapshot maintenance refusal remains retryable at the daemon boundary", async () => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/cleanupBrokerAvdSnapshots",
+    )![1];
+    broker.mutationError = new SessionBrokerMaintenanceError();
+    expect(await handler(request({}), state, { context: {} })).toMatchObject({
+      success: false,
+      code: "session_broker_maintenance",
+      retryable: true,
+      retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS,
+    });
+    broker.prepareError = new SessionBrokerMaintenanceError();
+    expect(
+      await handlePrepareBrokerSession(
+        request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).toMatchObject({ success: false, code: "session_broker_maintenance", retryable: true });
+  });
+
+  test("snapshot cleanup wraps unexpected discovery failures in an actionable error", async () => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/cleanupBrokerAvdSnapshots",
+    )![1];
+    broker.mutationError = new Error("AVD home unreadable");
+    const response = handler(request({}), state, { context: {} });
+    await expect(response).rejects.toBeInstanceOf(ActionableError);
+    await expect(response).rejects.toThrow("verify AVD home access and retry: AVD home unreadable");
+  });
+
   const exportParams = { ...exportIdentity, livenessOwnerToken: TOKEN };
 
   async function seedExport() {
@@ -404,13 +562,9 @@ describe("session broker daemon handlers", () => {
     await seedExport();
     for (const method of ["daemon/getSessionExport", "daemon/acknowledgeSessionExport"]) {
       scopes.bind("export-socket", { scopeKey: SCOPE, sessionUuids: [SESSION] });
-      const response = await handleDaemonRequest(
-        { ...request(exportParams), method },
-        state,
-        undefined,
-        undefined,
-        { socketSessionId: "export-socket" },
-      );
+      const response = await handleDaemonRequest({ ...request(exportParams), method }, state, {
+        context: { socketSessionId: "export-socket" },
+      });
       expect(response).toMatchObject({
         success: true,
         result:
@@ -800,9 +954,7 @@ describe("session broker daemon handlers", () => {
         ...(configured ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
       };
       for (const [, handler] of BROKER_DAEMON_METHOD_HANDLERS) {
-        expect(await handler(request({}), unavailableState, undefined, undefined, {})).toEqual(
-          expected,
-        );
+        expect(await handler(request({}), unavailableState, { context: {} })).toEqual(expected);
       }
       expect(
         await bindBrokerRegistration(unavailableState, SESSION, {

@@ -2579,16 +2579,16 @@ describe("startDevice handler", () => {
       const failure =
         kind === "bind-offline"
           ? new DeviceTransportOfflineError(androidDevice.deviceId, "offline")
-          : new RunnerReadinessError(
-              "runner failure",
-              false,
-              kind !== "terminal-runner",
-              "runner-connect",
-              42,
-              kind === "device-lost"
-                ? new DeviceLostError(androidDevice.deviceId, "device lost", "incident")
-                : undefined,
-            );
+          : new RunnerReadinessError("runner failure", {
+              retryableAndroidFrameworkFailure: false,
+              deadlineExhausted: kind !== "terminal-runner",
+              phase: "runner-connect",
+              attempts: 42,
+              diagnosticCause:
+                kind === "device-lost"
+                  ? new DeviceLostError(androidDevice.deviceId, "device lost", "incident")
+                  : undefined,
+            });
       let readyDevice: BootedDevice | undefined;
       let bindFailure = kind === "bind-offline";
       const bind = pool.bindOrReuseDeviceSession.bind(pool);
@@ -2722,12 +2722,11 @@ describe("startDevice handler", () => {
         }
         const settlement = cancelUnownedColdBootUnlessRetryable(
           { device: iosDevice, source: "cold-boot", processHandle: child, provisioned: false },
-          new RunnerReadinessError(
-            "readiness timeout",
-            false,
-            kind !== "non-retryable",
-            "runner-connect",
-          ),
+          new RunnerReadinessError("readiness timeout", {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: kind !== "non-retryable",
+            phase: "runner-connect",
+          }),
           controller.signal,
         );
         expect(settlement).toBeInstanceOf(Promise);
@@ -2754,7 +2753,11 @@ describe("startDevice handler", () => {
           provisioned: true,
           processHandle: child,
         },
-        new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
+        new RunnerReadinessError("readiness timeout", {
+          retryableAndroidFrameworkFailure: false,
+          deadlineExhausted: true,
+          phase: "runner-connect",
+        }),
         undefined,
       );
       expect(settlement).toBeInstanceOf(Promise);
@@ -3049,6 +3052,77 @@ describe("startDevice handler", () => {
 
     expect(second.runtime.session.sessionUuid).toBe(first.runtime.session.sessionUuid);
     expect(pool.getDevice(pooledDevice.deviceId)?.autolockSessionId).toBeUndefined();
+  });
+
+  // #15671: the autolock bind gets its cancel signal from the startDevice call, not from the
+  // ambient request context.
+  async function autolockStartDevicePool(): Promise<DevicePool> {
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    const pooledDevice = { ...androidDevice };
+    fakeDeviceUtils.setBootedDevices("android", [pooledDevice]);
+    await pool.initializeWithDevices([pooledDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(pooledDevice);
+    fakeMatcher.setImageResult(androidImage);
+    return pool;
+  }
+
+  it("hands autolock the startDevice signal, so a cancel mid-bind stops it (#15671)", async () => {
+    const pool = await autolockStartDevicePool();
+    const entered = Promise.withResolvers<void>();
+    let policySignal: AbortSignal | undefined;
+    let stoppedWith: unknown;
+    pool.autolockDevice = async (...args: Parameters<DevicePool["autolockDevice"]>) => {
+      policySignal = args[10]?.signal;
+      entered.resolve();
+      return await new Promise<never>((_resolve, reject) => {
+        policySignal?.addEventListener("abort", () => {
+          stoppedWith = policySignal?.reason;
+          reject(policySignal?.reason);
+        });
+      });
+    };
+    const controller = new AbortController();
+
+    const start = callStartDevice(
+      { platform: "android", __mcpSessionId: "mcp-client" },
+      controller.signal,
+    ).catch((error: unknown) => error);
+    await entered.promise;
+    expect(policySignal?.aborted).toBe(false);
+    const reason = new Error("startDevice cancelled");
+    controller.abort(reason);
+    await start;
+
+    expect(stoppedWith).toBe(reason);
+  });
+
+  it("autolocks a startDevice call without a signal under the bind's own live signal (#15671)", async () => {
+    const pool = await autolockStartDevicePool();
+    const autolock = pool.autolockDevice.bind(pool);
+    let policySignal: AbortSignal | undefined;
+    pool.autolockDevice = async (...args: Parameters<DevicePool["autolockDevice"]>) => {
+      policySignal = args[10]?.signal;
+      return await autolock(...args);
+    };
+
+    const result = await callStartDevice({ platform: "android", __mcpSessionId: "mcp-client" });
+
+    expect(pool.captureAutolockSessionForMcpSession("mcp-client")).toBe(
+      result.runtime.session.sessionUuid,
+    );
+    expect(policySignal).toBeInstanceOf(AbortSignal);
+    expect(policySignal?.aborted).toBe(false);
   });
 
   it("does not kill a shared cold boot when autolock rejects the later caller", async () => {

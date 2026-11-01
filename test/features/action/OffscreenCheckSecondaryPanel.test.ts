@@ -174,7 +174,7 @@ async function runTapOn(bounds: Element["bounds"]) {
     observation,
   });
   tapOn.refreshViewHierarchy = async () => capture;
-  tapOn.executeAndroidTap = async (_action, x, y) => {
+  tapOn.executeAndroidTap = async (_action, { x, y }) => {
     points.push({ x, y });
   };
   tapOn.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({

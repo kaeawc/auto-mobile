@@ -11,6 +11,40 @@
 SCRIPT="scripts/live-idle-release-check.sh"
 SESSION_UUID="00000000-0000-4000-8000-000000010671"
 
+# Keep the clock and daemon CLI in the caller's Bash instead of exec'ing a
+# fresh interpreter on every poll. The stdio proxy remains a real child process:
+# STOP/CONT, owner death, anonymous-pipe EOF and JSON-RPC still cross processes.
+idle_check_now() { printf '%s\n' "$(< "${FAKE}/clock")"; }
+idle_check_sleep() {
+  local now
+  now="$(< "${FAKE}/clock")"
+  printf '%s\n' "$((now + $1 * 1000))" > "${FAKE}/clock"
+  # Yield without a fixed wall-time delay; RPC replies already synchronize tool calls.
+  command sleep 0
+}
+idle_check_bun() {
+  if [[ "$2" == --daemon ]]; then
+    (
+      set +e +u
+      set +o pipefail
+      # shellcheck source=/dev/null
+      source "${FAKE}/bun" "$@"
+    )
+  else
+    exec "${FAKE}/bun" "$@"
+  fi
+}
+
+# Observe only successful real signals to our fake proxy. This avoids polling
+# the host's process table (which is unavailable in restricted sandboxes).
+kill() {
+  builtin kill "$@" || return $?
+  case "$1" in
+    -STOP) printf '%s\n' "$2" > "${FAKE}/stopped-proxy" ;;
+    -CONT) : > "${FAKE}/stopped-proxy" ;;
+  esac
+}
+
 setup() {
   FAKE="$(mktemp -d /tmp/am-idle-bats.XXXXXX)"
   WORK="${FAKE}/w"
@@ -19,19 +53,6 @@ setup() {
   printf '%s\n' 1000000 > "${FAKE}/clock"
   : > "${FAKE}/index.js"
   export FAKE
-
-  cat > "${FAKE}/now" <<'EOF'
-#!/usr/bin/env bash
-cat "${FAKE}/clock"
-EOF
-
-  cat > "${FAKE}/sleep" <<'EOF'
-#!/usr/bin/env bash
-# Advance the virtual clock; yield briefly so the fake proxy can react.
-now="$(cat "${FAKE}/clock")"
-printf '%s\n' "$((now + $1 * 1000))" > "${FAKE}/clock"
-command sleep 0.01
-EOF
 
   cat > "${FAKE}/adb" <<'EOF'
 #!/usr/bin/env bash
@@ -69,7 +90,7 @@ EOF
 # Fake AutoMobile entry point: `--daemon <command>` or the stdio MCP proxy. Each held emulator
 # has a directory of facts under state/<serial>/.
 state="${FAKE}/state"
-now() { cat "${FAKE}/clock"; }
+now() { printf '%s\n' "$(< "${FAKE}/clock")"; }
 idle_ms="${AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS:-120000}"
 
 release() {
@@ -88,8 +109,8 @@ session_for() {
 device_for_session() {
   local dir
   for dir in "${state}"/emulator-*; do
-    if [[ -f "${dir}/session" && "$(cat "${dir}/session")" == "$1" ]]; then
-      basename "${dir}"
+    if [[ -f "${dir}/session" && "$(< "${dir}/session")" == "$1" ]]; then
+      printf '%s\n' "${dir##*/}"
       return 0
     fi
   done
@@ -99,13 +120,13 @@ device_for_session() {
 scan_device() {
   local dev="$1" t pid dir="${state}/$1"
   t="$(now)"
-  pid="$(cat "${dir}/proxy_pid")"
+  pid="$(< "${dir}/proxy_pid")"
   if ! kill -0 "${pid}" 2> /dev/null; then
     release "${dev}" owner-disconnected
     return
-  elif [[ "$(ps -o stat= -p "${pid}" 2> /dev/null)" == *T* ]]; then
+  elif [[ -f "${FAKE}/stopped-proxy" && "$(< "${FAKE}/stopped-proxy")" == "${pid}" ]]; then
     [[ -f "${dir}/stopped_since" ]] || printf '%s\n' "${t}" > "${dir}/stopped_since"
-    if ((t - $(cat "${dir}/stopped_since") >= ${FAKE_NO_HB_RELEASE_MS:-8000})); then
+    if ((t - $(< "${dir}/stopped_since") >= ${FAKE_NO_HB_RELEASE_MS:-8000})); then
       release "${dev}" "${FAKE_HEARTBEAT_RELEASE_REASON:-heartbeat-timeout}"
       return
     fi
@@ -116,29 +137,29 @@ scan_device() {
       printf '%s\n' "${t}" > "${dir}/last_tool"
     fi
   fi
-  if [[ "${FAKE_NEVER_IDLE_RELEASE:-0}" != 1 ]] && ((t > $(cat "${dir}/last_tool") + idle_ms + ${FAKE_IDLE_RELEASE_LAG_MS:-2000})); then
+  if [[ "${FAKE_NEVER_IDLE_RELEASE:-0}" != 1 ]] && ((t > $(< "${dir}/last_tool") + idle_ms + ${FAKE_IDLE_RELEASE_LAG_MS:-2000})); then
     release "${dev}" "${FAKE_IDLE_RELEASE_REASON:-cleanup-expired}"
-  elif [[ -n "${FAKE_RELEASE_AFTER_MS:-}" ]] && ((t - $(cat "${dir}/acquired") >= FAKE_RELEASE_AFTER_MS)); then
+  elif [[ -n "${FAKE_RELEASE_AFTER_MS:-}" ]] && ((t - $(< "${dir}/acquired") >= FAKE_RELEASE_AFTER_MS)); then
     release "${dev}" bug
   fi
 }
 
 active_sessions() {
-  local dir dev entries=() jitter query_count=0 local_id
+  local dir dev entries=() jitter query_count=0 local_id tool
   if [[ -n "${FAKE_SWAP_SESSION_AFTER_QUERIES:-}" ]]; then
-    [[ ! -f "${FAKE}/active-sessions.queries" ]] || query_count="$(cat "${FAKE}/active-sessions.queries")"
+    [[ ! -f "${FAKE}/active-sessions.queries" ]] || query_count="$(< "${FAKE}/active-sessions.queries")"
     query_count=$((query_count + 1))
     printf '%s\n' "${query_count}" > "${FAKE}/active-sessions.queries"
   fi
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
-    scan_device "$(basename "${dir}")"
+    scan_device "${dir##*/}"
   done
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
-    dev="$(basename "${dir}")"
+    dev="${dir##*/}"
     # FAKE_SWAP_SESSION_AFTER_QUERIES: swap the holder session after N active-sessions queries.
-    local_id="$(cat "${dir}/session")"
+    local_id="$(< "${dir}/session")"
     if [[ -n "${FAKE_SWAP_SESSION_AFTER_QUERIES:-}" ]] &&
       ((query_count > FAKE_SWAP_SESSION_AFTER_QUERIES)) && [[ "${dev}" == emulator-5560 ]]; then
       local_id="${FAKE_SESSION_UUID}-swapped"
@@ -146,21 +167,19 @@ active_sessions() {
     # FAKE_ACTIVITY_JITTER_MS: once the session has idled 8 s, the unmoved lastToolActivityAt reads
     # back that many ms earlier, as the daemon's wall/monotonic conversion does (#11368).
     jitter=0
-    if (($(cat "${dir}/last_beat") - $(cat "${dir}/last_tool") >= 8000)); then
+    if (($(< "${dir}/last_beat") - $(< "${dir}/last_tool") >= 8000)); then
       jitter=$((-${FAKE_ACTIVITY_JITTER_MS:-0}))
     fi
-    entries+=("$(jq -cn --arg id "${local_id}" --arg dev "${dev}" \
-      --argjson tool "$(($(cat "${dir}/last_tool") + jitter))" --argjson beat "$(cat "${dir}/last_beat")" \
-      --argjson idle "${idle_ms}" --arg kind "${FAKE_HOLDER_KIND:-stdio-proxy}" \
-      '{sessionId: $id, assignedDevice: $dev, platform: "android", lastToolActivityAt: $tool,
-        lastOwnerHeartbeatAt: $beat, idleReleaseAt: ($tool + $idle + 4000),
-        holderKind: $kind, activeExecutions: 0}')")
+    # Every field is a plain id, device, tool kind or integer, so printf builds the JSON without
+    # forking jq on every poll (#16140).
+    tool=$(($(< "${dir}/last_tool") + jitter))
+    entries+=("$(printf '{"sessionId":"%s","assignedDevice":"%s","platform":"android","lastToolActivityAt":%d,"lastOwnerHeartbeatAt":%d,"idleReleaseAt":%d,"holderKind":"%s","activeExecutions":0}' \
+      "${local_id}" "${dev}" "${tool}" "$(< "${dir}/last_beat")" "$((tool + idle_ms + 4000))" \
+      "${FAKE_HOLDER_KIND:-stdio-proxy}")")
   done
-  if ((${#entries[@]} == 0)); then
-    printf '%s\n' '{"activeSessions":0,"activeExecutions":0,"sessions":[]}'
-  else
-    printf '%s\n' "${entries[@]}" | jq -cs '{activeSessions: length, activeExecutions: 0, sessions: .}'
-  fi
+  local joined
+  joined="$(IFS=,; printf '%s' "${entries[*]-}")"
+  printf '{"activeSessions":%d,"activeExecutions":0,"sessions":[%s]}\n' "${#entries[@]}" "${joined}"
 }
 
 if [[ "$2" == "--daemon" ]]; then
@@ -177,7 +196,7 @@ if [[ "$2" == "--daemon" ]]; then
       done
       session="$4"
       calls=0
-      [[ ! -f "${FAKE}/session-info.calls" ]] || calls="$(cat "${FAKE}/session-info.calls")"
+      [[ ! -f "${FAKE}/session-info.calls" ]] || calls="$(< "${FAKE}/session-info.calls")"
       calls=$((calls + 1))
       printf '%s\n' "${calls}" > "${FAKE}/session-info.calls"
       device="$(device_for_session "${session}")"
@@ -237,6 +256,12 @@ fi
 printf '%s\n' "${*:2}" >> "${FAKE}/proxy.calls"
 printf '%s\n' "$$" > "${state}/proxy_pid"
 reply() {
+  # FAKE_NOTIFY_BEFORE_REPLY: a server notification and a reply to another id come first, as a
+  # real proxy may interleave them; the check must skip both and keep waiting for its own id.
+  if [[ "${FAKE_NOTIFY_BEFORE_REPLY:-0}" == 1 ]]; then
+    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info"}}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":-1,"result":{"isError":true,"content":[]}}'
+  fi
   jq -cn --argjson id "$1" --argjson result "$2" '{jsonrpc: "2.0", id: $id, result: $result}'
 }
 # Bun on macOS never delivers stdin EOF for a named FIFO (#11073): model it by detecting one.
@@ -247,27 +272,36 @@ fi
 printf '%s\n' "${stdin_is_fifo}" > "${FAKE}/stdin_is_fifo"
 trap 'exit 0' TERM
 while IFS= read -r line; do
-  id="$(jq -r '.id // empty' <<< "${line}")"
+  # Parse the request once, retaining empty fields without whitespace splitting.
+  fields=()
+  while IFS= read -r field; do fields+=("${field}"); done < <(
+    jq -r '.id // "", .method, (.params.name // ""),
+      (.params.arguments.deviceId // ""), (.params.arguments.sessionUuid // ""),
+      (.params.arguments | tojson)' <<< "${line}"
+  )
+  id="${fields[0]}"
   [[ -n "${id}" ]] || continue
-  method="$(jq -r '.method' <<< "${line}")"
+  method="${fields[1]}"
+  tool="${fields[2]}"
+  device_arg="${fields[3]}"
+  session_arg="${fields[4]}"
   if [[ "${method}" == initialize ]]; then
     reply "${id}" '{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fake","version":"0"}}'
     continue
   fi
-  tool="$(jq -r '.params.name' <<< "${line}")"
   # The owner of a lazily expired session is refused on its next call (#10964/#10979).
   if [[ "${tool}" == observe ]]; then
-    observed="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
+    observed="${device_arg}"
     if [[ "${FAKE_REFUSE_WHILE_HELD:-0}" == 1 ||
       (-n "${observed}" && ! -d "${state}/${observed}" && -f "${FAKE}/releases") ]]; then
       jq -cn --argjson id "${id}" '{jsonrpc: "2.0", id: $id, result: {isError: true, content: [{type: "text", text: "{\"error\":{\"code\":\"no_active_device_session\",\"reason\":\"cleanup-expired\",\"idle\":true}}"}]}}'
       continue
     fi
   fi
-  printf '%s %s\n' "${tool}" "$(jq -c '.params.arguments' <<< "${line}")" >> "${FAKE}/tool.calls"
+  printf '%s %s\n' "${tool}" "${fields[5]}" >> "${FAKE}/tool.calls"
   if [[ "${tool}" == homeScreen && -n "${FAKE_CONTROL_ERROR:-}" ]]; then
     calls=0
-    [[ ! -f "${FAKE}/control.calls" ]] || calls="$(cat "${FAKE}/control.calls")"
+    [[ ! -f "${FAKE}/control.calls" ]] || calls="$(< "${FAKE}/control.calls")"
     calls=$((calls + 1))
     printf '%s\n' "${calls}" > "${FAKE}/control.calls"
     if ((calls <= ${FAKE_CONTROL_ERROR_CALLS:-1})); then
@@ -285,9 +319,7 @@ while IFS= read -r line; do
     fi
   fi
   target=""
-  session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
   # A released owner cannot re-use its connection binding or its old UUID.
-  device_arg="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
   released_device="${device_arg}"
   if [[ -n "${session_arg}" && "${session_arg}" == "${FAKE_SESSION_UUID}" ]]; then
     released_device=emulator-5560
@@ -330,7 +362,7 @@ while IFS= read -r line; do
   elif [[ -n "${session_arg}" ]]; then
     target="$(device_for_session "${session_arg}")"
   elif [[ "${FAKE_SELECTOR_NOT_CREDITED:-0}" != 1 ]]; then
-    target="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
+    target="${device_arg}"
   fi
   # No read counts as activity (#10964); FAKE_READS_COUNT_AS_USE models the old daemon.
   if [[ "${tool}" == observe && "${FAKE_READS_COUNT_AS_USE:-0}" != 1 ]]; then
@@ -368,13 +400,14 @@ if [[ "${FAKE_STREAM_NO_SESSION_ENDED:-0}" != 1 ]]; then
 fi
 cat > /dev/null
 EOF
-  chmod +x "${FAKE}/now" "${FAKE}/sleep" "${FAKE}/adb" "${FAKE}/bun" "${FAKE}/nc"
+  chmod +x "${FAKE}/adb" "${FAKE}/bun" "${FAKE}/nc"
 
   export FAKE_SESSION_UUID="${SESSION_UUID}"
-  export AUTOMOBILE_IDLE_CHECK_BUN="${FAKE}/bun"
+  export -f idle_check_now idle_check_sleep idle_check_bun kill
+  export AUTOMOBILE_IDLE_CHECK_BUN=idle_check_bun
   export AUTOMOBILE_IDLE_CHECK_ADB="${FAKE}/adb"
-  export AUTOMOBILE_IDLE_CHECK_SLEEP="${FAKE}/sleep"
-  export AUTOMOBILE_IDLE_CHECK_NOW="${FAKE}/now"
+  export AUTOMOBILE_IDLE_CHECK_SLEEP=idle_check_sleep
+  export AUTOMOBILE_IDLE_CHECK_NOW=idle_check_now
   export AUTOMOBILE_IDLE_CHECK_NC="${FAKE}/nc"
 }
 
@@ -435,6 +468,12 @@ run_check() {
   [[ "${output}" == *"not an online adb device"* ]]
   [ ! -e "${EVIDENCE}/failed-scenarios.txt" ]
   [ ! -e "${FAKE}/daemon.calls" ]
+}
+
+@test "skips notifications and other ids while waiting for each reply (#16140)" {
+  FAKE_NOTIFY_BEFORE_REPLY=1 run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS idle"* ]]
 }
 
 @test "passes all scenarios against a daemon that keeps the release windows" {

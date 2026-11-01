@@ -2,6 +2,8 @@ import { z } from "zod/v4";
 import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 
 const appPlatformOutputSchema = z.enum(["android", "ios"]);
+/** listApps also answers for an Apple Watch simulator (#14908). */
+const listAppsPlatformOutputSchema = z.enum(["android", "ios", "watchos", "tvos"]);
 
 const listAppsAppOutputSchema = z
   .object({
@@ -24,7 +26,7 @@ export const listAppsResultSchema = z
     message: z.string(),
     query: z
       .object({
-        platform: appPlatformOutputSchema.optional(),
+        platform: listAppsPlatformOutputSchema.optional(),
         search: z.string().optional(),
         type: z.enum(["user", "system", "all", "launchable"]).optional(),
         profile: z.number().optional(),
@@ -40,7 +42,7 @@ export const listAppsResultSchema = z
       z
         .object({
           deviceId: z.string(),
-          platform: appPlatformOutputSchema,
+          platform: listAppsPlatformOutputSchema,
           totalCount: z.number(),
           lastUpdated: z.string(),
           apps: z.array(listAppsAppOutputSchema),

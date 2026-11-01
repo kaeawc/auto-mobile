@@ -1,0 +1,72 @@
+{
+  "spec": {
+    "id": "sensors-block-steps-without-motion",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "shakes": 0
+    },
+    "requires": {
+      "platform": ["sensors"]
+    },
+    "sensors": {
+      "shake": {},
+      "orientation": {
+        "rateHz": 10
+      },
+      "steps": {},
+      "proximity": {},
+      "light": {
+        "rateHz": 2
+      }
+    },
+    "platform": {
+      "on": {
+        "sensors.shake": [
+          {
+            "type": "increment",
+            "key": "shakes"
+          },
+          {
+            "type": "emit",
+            "name": "shake"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Shakes {shakes}, heading {platform:/sensors/headingDeg}"
+        },
+        {
+          "type": "text",
+          "text": "Steps {platform:/sensors/steps}"
+        },
+        {
+          "type": "text",
+          "text": "Too close",
+          "visibleWhen": {
+            "platform": "/sensors/proximityNear",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Dark here",
+          "visibleWhen": {
+            "platform": "/sensors/lightLux",
+            "equals": 0
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "sensors.steps",
+  "expectedMessage": "steps requires permission motion in requires.permissions"
+}

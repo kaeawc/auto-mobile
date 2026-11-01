@@ -1697,7 +1697,12 @@ describe("DeviceReadiness dual-platform resolution", () => {
       { name: "Pixel_9_Pro", platform: "android", isRunning: false },
     ]);
     fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
-    fakeDeviceUtils.waitForDeviceReady = async (_device, _timeoutMs, _childProcess, signal) => {
+    fakeDeviceUtils.waitForDeviceReady = async (
+      _device,
+      _timeoutMs,
+      _childProcess,
+      { signal } = {},
+    ) => {
       readinessStarted();
       return await new Promise<BootedDevice>((_resolve, reject) => {
         const abort = () => reject(signal?.reason ?? new Error("readiness cancelled"));

@@ -83,7 +83,7 @@ function createHarness(handler: Handler = () => undefined, device: BootedDevice 
     retryExecutor: new DefaultRetryExecutor(timer),
     timer,
   });
-  const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, timer);
+  const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, { timer });
   return { manager, executed, timer };
 }
 

@@ -31,6 +31,14 @@ const mediaPickCall = {
   ...label,
   onTap: [{ type: "platform", call: "mediaLibrary.pick", args: { media: { value: "images" } } }],
 };
+const libraryQueryCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.query", args: { media: { value: "images" } } }],
+};
+const librarySaveCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.save", args: { media: { data: "/data/code" } } }],
+};
 const cameraCaptureCall = {
   ...label,
   onTap: [{ type: "platform", call: "camera.capture", args: { media: { value: "image" } } }],
@@ -43,6 +51,21 @@ const notificationsCall = {
   ...label,
   onTap: [{ type: "platform", call: "notifications.cancel", args: { all: { value: true } } }],
 };
+const scheduleCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "notifications.schedule",
+      args: {
+        id: { value: "eta" },
+        channel: { value: "reminders" },
+        title: { value: "Soon" },
+        delaySeconds: { value: 60 },
+      },
+    },
+  ],
+};
 const mediaCall = {
   ...label,
   onTap: [{ type: "platform", call: "media.play", args: { player: { value: "main" } } }],
@@ -50,6 +73,10 @@ const mediaCall = {
 const recordCall = {
   ...label,
   onTap: [{ type: "platform", call: "camera.startRecording", args: { preview: { value: "vf" } } }],
+};
+const queueCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "media.next", args: { player: { value: "main" } } }],
 };
 const castCall = {
   ...label,
@@ -295,6 +322,7 @@ const fixtures: Record<string, Node> = {
     onTap: [{ type: "upsertData", path: "/data/rows", key: "/id", value: { value: { id: 1 } } }],
   },
   prototype_platform_sensors_v1: statusRead("sensors", "proximityNear", true),
+  prototype_platform_map_v1: { type: "map" },
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
@@ -312,10 +340,14 @@ const fixtures: Record<string, Node> = {
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_audioRecorder_v1: recorderCall,
   prototype_platform_notifications_v1: notificationsCall,
+  prototype_platform_notifications_scheduled_v1: scheduleCall,
   prototype_platform_media_v1: mediaCall,
   prototype_platform_camera_capture_v1: cameraCaptureCall,
   prototype_platform_camera_video_v1: recordCall,
   prototype_platform_cast_v1: castCall,
+  prototype_platform_media_queue_v1: queueCall,
+  prototype_platform_mediaLibrary_query_v1: libraryQueryCall,
+  prototype_platform_mediaLibrary_save_v1: librarySaveCall,
   prototype_platform_calendar_v1: calendarCall,
   prototype_platform_commerce_v1: commerceCall,
   prototype_platform_auth_v1: authCall,

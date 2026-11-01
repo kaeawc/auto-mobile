@@ -123,13 +123,11 @@ describe("session log contract (#7006)", () => {
 
   test("builds a URI the registry template matches and round-trips", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const request = parseSessionLogQuery("com.example.app", {
       pathsJson: JSON.stringify(["logs/app.log", "logs/net.log"]),
       groupId: "group.com.example.shared",
@@ -152,13 +150,11 @@ describe("session log contract (#7006)", () => {
 
   test("round-trips a files path containing a comma", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const request = {
       appId: "com.example.app",
       maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
@@ -175,13 +171,11 @@ describe("session log contract (#7006)", () => {
 
   test("round-trips an app group path containing a comma", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const request = {
       appId: "com.example.app",
       maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
@@ -198,13 +192,11 @@ describe("session log contract (#7006)", () => {
 
   test("round-trips multiple files paths", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const request = {
       appId: "com.example.app",
       maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
@@ -221,13 +213,11 @@ describe("session log contract (#7006)", () => {
 
   test("round-trips files paths with spaces and percent characters", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const request = {
       appId: "com.example.app",
       maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
@@ -284,13 +274,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses independently single-encoded canonical bracket filenames", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     for (const path of ["[report]", '["report"]']) {
       const query = new URLSearchParams({
         container: "documents",
@@ -313,13 +301,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses an independently single-encoded files path containing a comma", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["a,b.log"];
     const query = new URLSearchParams({
       container: "documents",
@@ -338,13 +324,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses independently single-encoded multiple files paths containing a comma and space", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["a,b.log", "plain.log", "log file.log"];
     const query = new URLSearchParams({
       container: "documents",
@@ -363,13 +347,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses an independently single-encoded files path with a literal percent", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["100%.log"];
     const query = new URLSearchParams({
       container: "documents",
@@ -388,13 +370,11 @@ describe("session log contract (#7006)", () => {
 
   test("preserves a percent-escape-looking sequence in independently single-encoded files paths", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["weird%41file.log"];
     const query = new URLSearchParams({
       container: "documents",
@@ -413,13 +393,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses an independently single-encoded legacy comma-separated files path list", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["a.log", "b.log"];
     const query = new URLSearchParams({
       container: "documents",
@@ -438,13 +416,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses an independently single-encoded legacy bare files path", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["app.log"];
     const query = new URLSearchParams({
       container: "documents",
@@ -463,13 +439,11 @@ describe("session log contract (#7006)", () => {
 
   test("rejects an independently single-encoded malformed canonical files path list", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const query = new URLSearchParams({
       container: "documents",
       pathsJson: "[a.log,b.log]",
@@ -489,13 +463,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses independently single-encoded legacy bracket filenames literally", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     for (const path of ["[report]", '["report"]']) {
       const query = new URLSearchParams({
         container: "documents",
@@ -518,13 +490,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses independently single-encoded group path lists containing commas", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["a,b.log"];
     const query = new URLSearchParams({
       groupId: "group.com.example.shared",
@@ -546,13 +516,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses canonical bracket group paths and rejects malformed group paths", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const canonicalQuery = new URLSearchParams({
       groupId: "group.com.example.shared",
       groupPathsJson: JSON.stringify(["[report]"]),
@@ -592,13 +560,11 @@ describe("session log contract (#7006)", () => {
 
   test("parses an independently single-encoded legacy comma-separated group path list", () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      SESSION_LOG_RESOURCE_TEMPLATE,
-      "x",
-      "x",
-      "application/json",
-      async () => ({ uri: "x" }),
-    );
+    ResourceRegistry.registerTemplate(SESSION_LOG_RESOURCE_TEMPLATE, "x", {
+      description: "x",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "x" }),
+    });
     const paths = ["a.log", "b.log"];
     const query = new URLSearchParams({
       groupId: "group.com.example.shared",

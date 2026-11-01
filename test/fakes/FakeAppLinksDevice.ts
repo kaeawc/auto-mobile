@@ -130,8 +130,7 @@ export class FakeAppLinksDevice implements AppLinksDevice {
     packageName: string,
     userId: number,
     enabled: boolean,
-    domains: AppLinkDomainSelector,
-    _options?: AppLinksCommandOptions,
+    { domains }: AppLinksCommandOptions & { domains: AppLinkDomainSelector },
   ): Promise<void> {
     this.calls.push(
       `select ${packageName} ${userId} ${enabled} ${domains === "all" ? "all" : domains.join(",")}`,

@@ -5,6 +5,10 @@ and a backup screen. `today.json` is the slice that runs on today's vocabulary, 
 standing in for the device media library and the mock backend. Tiles are drawn as icon placeholders,
 since the slice ships no image assets.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Backup uses `file_upload` (`arrow.up.to.line` on iOS); the denied-photo state uses
+`block` (`nosign`) to indicate no access.
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home and viewer screens.

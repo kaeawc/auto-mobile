@@ -45,13 +45,10 @@ function coveredSources(
       if (
         node &&
         bounds &&
-        isFullyCoveredByApplicationWindow(
-          source.viewHierarchy!,
-          element,
-          bounds,
-          "touch",
-          coverIndex,
-        )
+        isFullyCoveredByApplicationWindow(source.viewHierarchy!, element, bounds, {
+          ownWindows: "touch",
+          index: coverIndex,
+        })
       ) {
         covered.add(node);
         hits.add(index);

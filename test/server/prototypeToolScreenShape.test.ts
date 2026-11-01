@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readToolResponse } from "../helpers/toolResponse";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
-import { prototypeScreenShapeOutput } from "../../src/server/prototypeTools/screenShape";
+import {
+  prototypeFormFactorOutput,
+  prototypeScreenShapeOutput,
+} from "../../src/server/prototypeTools/screenShape";
 import type { ScreenRoundReader } from "../../src/features/wear/screenRound";
 import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -21,6 +24,12 @@ const watch: BootedDevice = {
   formFactor: "watch",
 };
 const phone: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
+const car: BootedDevice = {
+  deviceId: "emulator-5570",
+  platform: "android",
+  name: "AAOS",
+  formFactor: "automotive",
+};
 const ios: BootedDevice = {
   deviceId: "sim-1",
   platform: "ios",
@@ -140,6 +149,28 @@ describe("prototypeScreenShapeOutput", () => {
   });
 });
 
+describe("prototypeFormFactorOutput (#14922)", () => {
+  test("a successful show on a car reports the automotive form factor", () => {
+    expect(prototypeFormFactorOutput({ action: "show", success: true, device: car })).toEqual({
+      formFactor: "automotive",
+    });
+  });
+
+  test("phones, watches, iOS, failed shows and other actions report nothing", () => {
+    const cases = [
+      { action: "show", success: true, device: phone },
+      { action: "show", success: true, device: watch },
+      { action: "show", success: true, device: { ...ios, formFactor: "automotive" as const } },
+      { action: "show", success: false, device: car },
+      { action: "dismiss", success: true, device: car },
+      { action: "save", success: true, device: car },
+    ];
+    for (const input of cases) {
+      expect(prototypeFormFactorOutput(input)).toStrictEqual({});
+    }
+  });
+});
+
 describe("prototype tool screenRound", () => {
   let restore: () => void;
   let unsubscribe: () => void;
@@ -193,11 +224,28 @@ describe("prototype tool screenRound", () => {
     },
   );
 
+  test("a car show carries formFactor, no screenRound read, and matches the schema (#14922)", async () => {
+    const output = await show(car);
+    expect(output.success).toBe(true);
+    expect(output.formFactor).toBe("automotive");
+    expect(output).not.toHaveProperty("screenRound");
+    expect(prototypeOutputSchema.safeParse(output).success).toBe(true);
+    expect(asked).toEqual([]);
+  });
+
+  test("a failed car show reports no formFactor", async () => {
+    client.setPrototypeResult({ success: false, error: "overlay refused" });
+    const output = await show(car);
+    expect(output.success).toBe(false);
+    expect(output).not.toHaveProperty("formFactor");
+  });
+
   test("a phone show has no screenRound", async () => {
     client.setPrototypeResult({ success: true, screenRound: true });
     const output = await show(phone);
     expect(output.success).toBe(true);
     expect(output).not.toHaveProperty("screenRound");
+    expect(output).not.toHaveProperty("formFactor");
     expect(asked).toEqual([]);
   });
 });

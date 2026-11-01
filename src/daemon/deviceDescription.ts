@@ -280,16 +280,24 @@ function poolStatus(
   return pooled ? classifyPoolStatus(statusOf(pooled), unlendable) : null;
 }
 
+interface DevicePoolHoldReads {
+  genericAvailability(
+    deviceId: string,
+    unpooledStableIds?: ReadonlyArray<string | undefined>,
+  ): GenericAvailability;
+}
+
 /**
  * The one projection of the pool's {@link GenericAvailability} into description inputs, shared by
  * `listDevices` and the booted-device resources. A broker binding or other-daemon hold publishes
  * `heldBy`; a reservation reports `assigned` without it. Both read `assigned`, as `getStats()` does.
  */
 export function poolHoldFor(
-  devicePool: { genericAvailability(deviceId: string): GenericAvailability } | null | undefined,
+  devicePool: DevicePoolHoldReads | null | undefined,
   deviceId: string,
+  unpooledStableIds?: ReadonlyArray<string | undefined>,
 ): { heldBy?: DeviceHeldBy; reserved?: boolean } {
-  const availability = devicePool?.genericAvailability(deviceId);
+  const availability = devicePool?.genericAvailability(deviceId, unpooledStableIds);
   if (availability === "session_broker") {
     return { heldBy: "session_broker" };
   }
@@ -437,6 +445,10 @@ export const deviceDescriptionSchema = z
     architecture: nullableString,
     osVersion: nullableString,
     apiLevel: nullableNumber,
+    configuredRamMb: z.number().positive().nullable().optional(),
+    effectiveRamMb: z.number().positive().nullable().optional(),
+    configuredCpuCores: z.number().int().positive().nullable().optional(),
+    effectiveCpuCores: z.number().int().positive().nullable().optional(),
     runtimeId: nullableString,
     runtime: z
       .object({

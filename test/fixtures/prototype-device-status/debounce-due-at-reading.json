@@ -1,0 +1,43 @@
+{
+  "description": "A timer due at a reading's timestamp fires before that reading applies, so the reading starts a new burst.",
+  "module": "battery",
+  "updates": [
+    {
+      "timestampMs": 0,
+      "values": {
+        "level": 50,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 100,
+      "values": {
+        "level": 49,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 600,
+      "values": {
+        "level": 48,
+        "state": "unplugged"
+      }
+    }
+  ],
+  "expectedEvents": [
+    {
+      "timestampMs": 600,
+      "values": {
+        "level": 49,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 1100,
+      "values": {
+        "level": 48,
+        "state": "unplugged"
+      }
+    }
+  ]
+}

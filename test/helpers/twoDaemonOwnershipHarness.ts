@@ -553,8 +553,7 @@ export class TwoDaemonWorld {
       pid,
       this.claims.forProcess(current),
       this.probe,
-      () => socketPath,
-      timer,
+      { ownerSocketPath: () => socketPath, timer },
     );
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, daemonSessionId, {
@@ -572,9 +571,11 @@ export class TwoDaemonWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, reason);
+        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
+          reason,
+        });
       },
-      timer,
+      { timer },
     );
     registerDerivedLabelSessionReleaseCascade(manager, pool);
     const registry = new DeviceSessionRegistry();
@@ -632,7 +633,7 @@ export class TwoDaemonWorld {
       }
       this.log(`  ${self.name} session ${session.sessionId} live on ${session.assignedDevice}`);
     });
-    manager.onSessionRelease((sessionId, deviceId, reason, _snapshot, options) => {
+    manager.onSessionRelease((sessionId, deviceId, reason, options) => {
       if (self.dead || options?.upgradeOnly) {
         return;
       }
@@ -1139,8 +1140,7 @@ export class TwoDaemonWorld {
           device.deviceId,
           undefined,
           undefined,
-          undefined,
-          { toolName: "killDevice", force: false },
+          { foreignClaim: { toolName: "killDevice", force: false } },
         );
         if (!reservation || process.dead) {
           return;
@@ -1198,11 +1198,12 @@ export class TwoDaemonWorld {
         const sessionId = pooled?.sessionId ?? null;
         if (sessionId && process.manager.getSession(sessionId)) {
           await releaseSessionAndDevice(
-            process.manager,
-            process.pool,
+            { manager: process.manager, pool: process.pool },
             device.deviceId,
             sessionId,
-            deviceLossCancellationReason(device.deviceId),
+            {
+              reason: deviceLossCancellationReason(device.deviceId),
+            },
           );
         }
         await process.pool.removeDisconnectedDevice(
@@ -1335,11 +1336,12 @@ export class TwoDaemonWorld {
               process.pool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
               null;
             await releaseSessionAndDevice(
-              process.manager,
-              process.pool,
+              { manager: process.manager, pool: process.pool },
               deviceId,
               sessionId,
-              "daemon-shutdown",
+              {
+                reason: "daemon-shutdown",
+              },
             );
           }),
         );
@@ -1498,7 +1500,7 @@ export async function runTwoDaemonSteps(
   const db = await createTestDatabase();
   const timer = new FakeTimer();
   const world = new TwoDaemonWorld(
-    new DeviceSessionRepository(db, timer),
+    new DeviceSessionRepository({ db, timer }),
     () =>
       db
         .selectFrom("device_sessions")

@@ -83,18 +83,14 @@ class FakeDataReaders implements MutationDataReaders {
 function harness() {
   const readers = new FakeDataReaders();
   const reader = new DataMutationPriorReader(readers);
-  const defaultReader = new DefaultMutationPriorReader(
-    { read: async () => ({}) },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { dataReader: reader },
-  );
+  const defaultReader = new DefaultMutationPriorReader({
+    settingsAccess: { read: async () => ({}) },
+    observationReaders: { dataReader: reader },
+  });
   const journal = new FakeDeviceMutationJournal(new FakeTimer());
   const recording = new SessionDeviceMutationRecording(
     () => new SessionMutationRecorder(journal, SCOPE),
-    defaultReader,
+    { reader: defaultReader },
   );
   return { readers, reader, defaultReader, journal, recording };
 }
@@ -514,14 +510,16 @@ describe("data mutation prior recording", () => {
     const pending = Promise.withResolvers<KeyValueEntry[]>();
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, SCOPE),
-      new DataMutationPriorReader({
-        keyValuesFor: () => ({
-          getPreferenceEntries: () => {
-            controller.abort(new Error("cancelled"));
-            return pending.promise;
-          },
+      {
+        reader: new DataMutationPriorReader({
+          keyValuesFor: () => ({
+            getPreferenceEntries: () => {
+              controller.abort(new Error("cancelled"));
+              return pending.promise;
+            },
+          }),
         }),
-      }),
+      },
     );
     let acted = false;
     await expect(

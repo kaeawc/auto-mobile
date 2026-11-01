@@ -195,7 +195,11 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
         sent();
       });
       try {
-        const pending = client.requestNodeAction("click", { uniqueId: "button" }, 5000);
+        const pending = client.requestNodeAction(
+          "click",
+          { uniqueId: "button" },
+          { timeoutMs: 5000 },
+        );
         await dispatched;
         if (mode === "timeout") {
           fakeTimer.advanceTime(5000);
@@ -353,7 +357,11 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const controller = new AbortController();
     let settled = false;
     const result = client
-      .requestNodeAction("click", { uniqueId: "row" }, 5000, undefined, controller.signal)
+      .requestNodeAction(
+        "click",
+        { uniqueId: "row" },
+        { timeoutMs: 5000, signal: controller.signal },
+      )
       .then((value) => {
         settled = true;
         return value;
@@ -393,9 +401,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
       const result = client.requestNodeAction(
         "click",
         { uniqueId: "row" },
-        5000,
-        undefined,
-        controller.signal,
+        { timeoutMs: 5000, signal: controller.signal },
       );
       for (let i = 0; i < 20; i++) {
         await Promise.resolve();
@@ -440,9 +446,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
         await client.requestNodeAction(
           "click",
           { uniqueId: "row" },
-          5000,
-          undefined,
-          controller.signal,
+          { timeoutMs: 5000, signal: controller.signal },
         )
       ).success,
     ).toBe(false);
@@ -481,9 +485,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const result = await client.requestNodeAction(
       "click",
       { uniqueId: "row" },
-      5000,
-      undefined,
-      controller.signal,
+      { timeoutMs: 5000, signal: controller.signal },
     );
     expect(result.success).toBe(false);
     expect(result.action).toBe("click");

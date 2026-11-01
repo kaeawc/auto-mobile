@@ -263,17 +263,21 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "postNotification",
     "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     postNotificationSchema,
-    createPostNotificationHandler(deps),
-    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: postNotificationResultSchema },
+    {
+      handler: createPostNotificationHandler(deps),
+      ...PLAN_RELEVANT,
+      defaultEnabled: false,
+      outputSchema: postNotificationResultSchema,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "getNotificationPolicy",
     "Read app notification/DND policy state",
     getNotificationPolicySchema,
-    getNotificationPolicyHandler,
-    // Reads only; read-only access never requires a session (#10965).
     {
+      handler: getNotificationPolicyHandler,
+      // Reads only; read-only access never requires a session (#10965).
       defaultEnabled: false,
       deviceReadOnly: true,
       outputSchema: getNotificationPolicyResultSchema,
@@ -284,7 +288,11 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "setNotificationPolicy",
     "Set app notification/DND policy state",
     setNotificationPolicySchema,
-    setNotificationPolicyHandler,
-    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setNotificationPolicyResultSchema },
+    {
+      handler: setNotificationPolicyHandler,
+      ...PLAN_RELEVANT,
+      defaultEnabled: false,
+      outputSchema: setNotificationPolicyResultSchema,
+    },
   );
 }

@@ -63,11 +63,13 @@ describe("ToolRegistry display inventory resolution", () => {
       "displayInventoryProbe",
       "Inspect resolved inventory",
       z.object({ sessionUuid: z.string().optional(), deviceId: z.string().optional() }),
-      async (device) => ({
-        displays: device.displays,
-        hasDisplays: Object.hasOwn(device, "displays"),
-      }),
-      { deviceReadiness: "booted" },
+      {
+        handler: async (device) => ({
+          displays: device.displays,
+          hasDisplays: Object.hasOwn(device, "displays"),
+        }),
+        deviceReadiness: "booted",
+      },
     );
   }
 
@@ -92,7 +94,9 @@ describe("ToolRegistry display inventory resolution", () => {
       },
     };
     restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
-      displayInventory: new CachingDisplayInventoryProvider(source, source, new FakeTimer()),
+      displayInventory: new CachingDisplayInventoryProvider(source, source, {
+        timer: new FakeTimer(),
+      }),
     });
     fakeManager.setConnectedDevices([android]);
     registerProbe();
@@ -123,7 +127,9 @@ describe("ToolRegistry display inventory resolution", () => {
   test("rediscovery of the same serial hits the hydrated cache", async () => {
     const source = new FakeDisplayInventorySource({ displays, degraded: false });
     restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
-      displayInventory: new CachingDisplayInventoryProvider(source, source, new FakeTimer()),
+      displayInventory: new CachingDisplayInventoryProvider(source, source, {
+        timer: new FakeTimer(),
+      }),
     });
     fakeManager.setConnectedDevices([{ ...android, observedAt: 1 }]);
     registerProbe();
@@ -142,7 +148,9 @@ describe("ToolRegistry display inventory resolution", () => {
 
   test("invalidation makes the same serial a cache miss", async () => {
     const source = new FakeDisplayInventorySource({ displays, degraded: false });
-    const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+    const provider = new CachingDisplayInventoryProvider(source, source, {
+      timer: new FakeTimer(),
+    });
     restoreInventory = ToolRegistry.setPipelineOverridesForTesting({ displayInventory: provider });
     fakeManager.setConnectedDevices([android]);
     registerProbe();

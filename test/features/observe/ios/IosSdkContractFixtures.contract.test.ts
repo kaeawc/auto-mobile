@@ -38,8 +38,7 @@ function decodeFixture(name: string): DecodedEvent {
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "fixture-device", platform: "ios", name: "Fixture iPhone" },
     8765,
-    createSuccessWebSocketFactory(timer),
-    timer,
+    { wsFactory: createSuccessWebSocketFactory(timer), timer },
   );
   const decoder = client.getSdkEventPollingTestHooks().polling;
   const events = decoder.decodeSdkEventBatches([batch], 0);

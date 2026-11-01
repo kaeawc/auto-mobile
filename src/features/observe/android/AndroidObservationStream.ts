@@ -4,7 +4,7 @@ import type { BootedDevice, ScreenScaleMetadata, ViewHierarchyResult } from "../
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { logger } from "../../../utils/logger";
 import type {
-  DefaultScreenshotBackoffScheduler,
+  ScreenshotBackoffConfigInput,
   ScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
 } from "../ScreenshotBackoffScheduler";
@@ -34,15 +34,17 @@ export interface AndroidObservationStreamContext {
   startScreenshotBackoff(): void;
   pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata?: ScreenshotMetadata,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
+    options?: {
+      metadata?: ScreenshotMetadata;
+      binding?: ScreenGeometryBinding;
+      frameContext?: string;
+      rotation?: number;
+    },
   ): void;
   createScreenshotBackoffScheduler(
     capture: () => Promise<ScreenshotCaptureResult>,
     emit: (result: ScreenshotCaptureResult) => void,
-    options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
+    options: ScreenshotBackoffConfigInput,
   ): ScreenshotBackoffScheduler;
   forwardHierarchyToObservationStream(
     hierarchy: ViewHierarchyResult,
@@ -137,10 +139,17 @@ export class AndroidObservationStream {
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
+    {
+      metadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
+      binding,
+      frameContext,
+      rotation,
+    }: {
+      metadata?: ScreenshotMetadata;
+      binding?: ScreenGeometryBinding;
+      frameContext?: string;
+      rotation?: number;
+    } = {},
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -159,18 +168,16 @@ export class AndroidObservationStream {
       // client's LATEST metadata at delivery. Android bounds are already physical pixels
       // (nativeScale === 1), so a post-#4548 runner's frame is canonical pixels as-is; the binding
       // carries that declaration so a mid-flight metadata flip cannot relabel the frame.
-      server.pushScreenshotUpdate(
-        this.context.device.deviceId,
-        screenshotBase64,
+      server.pushScreenshotUpdate(this.context.device.deviceId, screenshotBase64, {
         screenWidth,
         screenHeight,
         metadata,
-        {
+        options: {
           ...screenshotBindingPushOptions(binding),
           rotation,
           ...(frameContext === undefined ? {} : { frameContext }),
         },
-      );
+      });
     } catch (error) {
       // Stream delivery is best effort; a disconnected subscriber must not fail observation.
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
@@ -250,13 +257,12 @@ export class AndroidObservationStream {
 
   private emitBackoffScreenshot(result: ScreenshotCaptureResult): void {
     if (result.data) {
-      this.context.pushScreenshotToObservationStream(
-        result.data,
-        result,
-        result.captureBinding,
-        result.frameContext,
-        result.rotation,
-      );
+      this.context.pushScreenshotToObservationStream(result.data, {
+        metadata: result,
+        binding: result.captureBinding,
+        frameContext: result.frameContext,
+        rotation: result.rotation,
+      });
     }
   }
 

@@ -120,7 +120,10 @@ test.each([
     const result = await handler({ method: "tools/call", params: { name: "observe" } }, extra);
     expect(readToolResponse(result).isError).toBe(true);
     expect(JSON.stringify(readToolResponse(result).content)).toContain(expected);
-    expect(call).toHaveBeenCalledWith("observe", {}, undefined, undefined, extra.mcpReq.signal);
+    expect(call).toHaveBeenCalledWith("observe", {}, undefined, {
+      onProgress: undefined,
+      signal: extra.mcpReq.signal,
+    });
   } finally {
     call.mockRestore();
     await server.close();

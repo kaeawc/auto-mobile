@@ -226,8 +226,7 @@ function staleTapTargetError(
   deps: StableTapTargetDeps,
   context: StableTapContext,
   freshHierarchy: ViewHierarchyResult,
-  selection: ElementSelectionResult,
-  element: Element,
+  { selection, element }: { selection: ElementSelectionResult; element: Element },
 ): string | undefined {
   const { original, options, observeResult } = context;
   if (
@@ -309,13 +308,10 @@ function refindStableTapTarget(
     return undefined;
   }
 
-  const staleError = staleTapTargetError(
-    deps,
-    context,
-    freshHierarchy,
-    refind.selection,
-    refind.selection.element,
-  );
+  const staleError = staleTapTargetError(deps, context, freshHierarchy, {
+    selection: refind.selection,
+    element: refind.selection.element,
+  });
   if (staleError) {
     return { ok: false, error: staleError };
   }

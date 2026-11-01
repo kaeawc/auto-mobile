@@ -17,7 +17,7 @@ import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
 import { ToolDefinitionListing } from "./ToolDefinitionListing";
 import { TOOL_ANNOTATIONS } from "./toolAnnotations";
 import { toolExecutionError } from "./toolExecutionError";
-import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
+import { erased, eraseDeviceAware, erasePlain, splitRegistration } from "./toolRegistryErasure";
 
 import { logger, type Logger } from "../utils/logger";
 import "./featureWiring";
@@ -108,7 +108,9 @@ export { toolHasOutputSchema } from "./toolRegistryTypes";
 export type {
   DeviceAwareToolHandler,
   DeviceAwareToolOptions,
+  DeviceAwareToolRegistration,
   PlainToolOptions,
+  PlainToolRegistration,
   ProgressCallback,
   RegisteredTool,
   SessionlessDeviceRead,
@@ -122,11 +124,13 @@ import { installDaemonToolRegistryPort } from "../daemon/toolRegistryPort";
 import {
   DeviceAwareToolHandler,
   DeviceAwareToolOptions,
+  DeviceAwareToolRegistration,
   deviceReadOnlyMetadata,
   InternalToolCallOptions,
+  InternalToolCallRequest,
   InternalToolInvocationContext,
   pickToolTraits,
-  PlainToolOptions,
+  PlainToolRegistration,
   PLAN_ONLY_GATE_REASON,
   ProgressCallback,
   RegisteredTool,
@@ -275,14 +279,14 @@ export class ToolRegistryClass {
     }
   }
 
-  // Register a new tool
+  /** Register a new tool. @param registration - The handler, or `{ handler, ...options }`. */
   register<S extends ZodType>(
     name: string,
     description: string,
     inSchema: S,
-    inHandler: ToolHandler<z.output<S>>,
-    inOptions: PlainToolOptions<z.output<S>> = {},
+    registration: ToolHandler<z.output<S>> | PlainToolRegistration<z.output<S>>,
   ): void {
+    const { handler: inHandler, options: inOptions } = splitRegistration(registration);
     const { schema, handler, options } = erasePlain(inSchema, inHandler, inOptions);
     this.invalidateToolListing();
     if (this === ToolRegistry) {
@@ -363,14 +367,14 @@ export class ToolRegistryClass {
     });
   }
 
-  // Register a device-aware tool
+  /** Register a device-aware tool. @param registration - The handler, or `{ handler, ...options }`. */
   registerDeviceAware<S extends ZodType>(
     name: string,
     description: string,
     inSchema: S,
-    inHandler: DeviceAwareToolHandler<z.output<S>>,
-    inOptions: DeviceAwareToolOptions<z.output<S>> = {},
+    registration: DeviceAwareToolHandler<z.output<S>> | DeviceAwareToolRegistration<z.output<S>>,
   ): void {
+    const { handler: inHandler, options: inOptions } = splitRegistration(registration);
     // A UI interaction answers the device's system-alert policy first (#14106).
     const erased = eraseDeviceAware(inSchema, inHandler, inOptions);
     const { schema, handler, options } = gateUiInteraction(erased);
@@ -386,12 +390,10 @@ export class ToolRegistryClass {
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
       const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext, name);
-      return runRecordedToolCall(
-        this.toolCallRepository,
-        this.timer,
-        name,
-        typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
-        async (recording, toolStartMs) => {
+      return runRecordedToolCall(this.toolCallRepository, this.timer, name, {
+        sessionUuid:
+          typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
+        handler: async (recording, toolStartMs) => {
           await assertSessionBrokerToolCall(name, true, handlerArgs);
           const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
             name,
@@ -505,7 +507,7 @@ export class ToolRegistryClass {
             }),
           );
         },
-      );
+      });
     };
 
     this.tools.set(name, {
@@ -619,13 +621,13 @@ export class ToolRegistryClass {
     });
   }
 
+  /** @param request - Handler progress and abort signal, plus internal routing options. */
   async callInternal(
     tool: string | RegisteredTool,
     args: Record<string, unknown>,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    options: InternalToolCallOptions = {},
+    request: InternalToolCallRequest = {},
   ): Promise<unknown> {
+    const { progress, signal, ...options } = request;
     const resolved =
       typeof tool === "string"
         ? options.forPlan
@@ -669,9 +671,11 @@ export class ToolRegistryClass {
             resolved,
             invocation.args,
             progress ?? getToolSelectionContext()?.planRequest?.progress,
-            signal,
-            options.targetDevice,
-            this.mutationRecording,
+            {
+              signal,
+              targetDevice: options.targetDevice,
+              mutationRecording: this.mutationRecording,
+            },
           ),
         false,
       ),
@@ -720,11 +724,17 @@ export class ToolRegistryClass {
   async callInternalTyped<K extends InternalToolName>(
     name: K,
     args: Record<string, unknown>,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    options: InternalToolCallOptions = {},
+    {
+      progress,
+      signal,
+      options = {},
+    }: {
+      progress?: ProgressCallback;
+      signal?: AbortSignal;
+      options?: InternalToolCallOptions;
+    } = {},
   ): Promise<StructuredToolResponse<InternalToolPayloads[K]> | undefined> {
-    const response = await this.callInternal(name, args, progress, signal, options);
+    const response = await this.callInternal(name, args, { progress, signal, ...options });
     return narrowInternalToolEnvelope(name, response);
   }
 

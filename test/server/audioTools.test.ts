@@ -25,10 +25,16 @@ import { CountingIdGenerator } from "../../src/utils/CountingIdGenerator";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeEmulatorAudioSession } from "../fakes/FakeEmulatorAudioSession";
+import { FakeGuestAudioCapture } from "../fakes/FakeGuestAudioCapture";
+import { EmulatorAudioError } from "../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const emulator: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
-const simulator: BootedDevice = { name: "sim", platform: "ios", deviceId: "UDID-1" };
+const physicalIos: BootedDevice = {
+  name: "iPhone",
+  platform: "ios",
+  deviceId: "00008110-001A2B3C4D5E801E",
+};
 
 function structured(response: unknown): unknown {
   return (response as { structuredContent?: unknown }).structuredContent;
@@ -39,6 +45,8 @@ describe("audio tools (#13628, #13629)", () => {
   let manager: SessionManager;
   let sessions: FakeEmulatorAudioSession[];
   let service: EmulatorAudioService;
+  let guestCapture: FakeGuestAudioCapture;
+  let emulatorAlive: boolean;
   let saved: Array<{ deviceId: string; bytes: Uint8Array }>;
   let readPaths: string[];
   let onCreateSession: () => void;
@@ -53,15 +61,21 @@ describe("audio tools (#13628, #13629)", () => {
     saved = [];
     readPaths = [];
     onCreateSession = () => {};
+    guestCapture = new FakeGuestAudioCapture();
+    emulatorAlive = true;
     service = new EmulatorAudioService({
+      guestCapture,
       discovery: {
-        findByConsolePort: async (port) => ({
-          pid: 1,
-          consolePort: port,
-          address: `localhost:${port + 3000}`,
-          auth: { kind: "none" },
-          descriptionFile: "pid_1.ini",
-        }),
+        findByConsolePort: async (port) =>
+          emulatorAlive
+            ? {
+                pid: 1,
+                consolePort: port,
+                address: `localhost:${port + 3000}`,
+                auth: { kind: "none" },
+                descriptionFile: "pid_1.ini",
+              }
+            : undefined,
       },
       createSession: (endpoint) => {
         onCreateSession();
@@ -91,6 +105,37 @@ describe("audio tools (#13628, #13629)", () => {
     manager.stopCleanupTimer();
   });
 
+  test("the tool refuses unverified capture without injecting", async () => {
+    guestCapture.failure = new EmulatorAudioError(
+      "audio_guest_capture_unavailable",
+      "Cannot verify capture",
+    );
+    await expect(createInjectAudioInputHandler(deps)(emulator, { tone: {} })).rejects.toThrow(
+      "[audio_guest_capture_unavailable]",
+    );
+    expect(sessions).toHaveLength(0);
+  });
+
+  for (const alive of [true, false]) {
+    test(`stopAudioInput reports the correct failure with emulator alive=${alive}`, async () => {
+      const started = injectAudioInputResultSchema.parse(
+        structured(await createInjectAudioInputHandler(deps)(emulator, { tone: {} })),
+      );
+      emulatorAlive = alive;
+      sessions[0].failInjection?.(
+        new EmulatorAudioError("audio_injection_unsupported", "read ECONNRESET"),
+      );
+      await expect(
+        createStopAudioInputHandler(deps)(emulator, { injectionId: started.injectionId }),
+      ).rejects.toThrow(
+        alive
+          ? "[audio_injection_unsupported]"
+          : "[audio_emulator_exited] Emulator emulator-5554 exited during audio injection",
+      );
+      expect(guestCapture.closed).toEqual([emulator.deviceId]);
+    });
+  }
+
   test("schemas are strict and bound capture length", () => {
     expect(injectAudioInputSchema.safeParse({ tone: {} }).success).toBe(true);
     expect(injectAudioInputSchema.safeParse({ tone: { volume: 3 } }).success).toBe(false);
@@ -110,7 +155,12 @@ describe("audio tools (#13628, #13629)", () => {
     const stopped = stopAudioInputResultSchema.parse(
       structured(await stop(emulator, { injectionId: started.injectionId })),
     );
-    expect(stopped).toMatchObject({ injectionId: "inj-1", reason: "stopped", framesSent: 7 });
+    expect(stopped).toMatchObject({
+      injectionId: "inj-1",
+      reason: "stopped",
+      framesQueued: 7,
+      framesPlayed: 0,
+    });
   });
 
   test("stopAudioInput refuses an injection running on another emulator", async () => {
@@ -138,13 +188,13 @@ describe("audio tools (#13628, #13629)", () => {
     expect(sessions).toHaveLength(0);
   });
 
-  test("iOS is refused for injection and capture", async () => {
-    await expect(createInjectAudioInputHandler(deps)(simulator, { tone: {} })).rejects.toThrow(
-      "Android emulators only",
-    );
-    await expect(createCaptureAudioHandler(deps)(simulator, { seconds: 1 })).rejects.toThrow(
-      "Android emulators only",
-    );
+  test("a physical iOS device has no route for injection or capture", async () => {
+    await expect(
+      createInjectAudioInputHandler(deps)(physicalIos, { tone: {} }),
+    ).rejects.toMatchObject({ code: "audio_injection_unsupported" });
+    await expect(
+      createCaptureAudioHandler(deps)(physicalIos, { seconds: 1 }),
+    ).rejects.toMatchObject({ code: "audio_capture_unsupported" });
   });
 
   test("a session's injection stops when the session is released", async () => {
@@ -163,6 +213,7 @@ describe("audio tools (#13628, #13629)", () => {
     await manager.releaseSession("session-1", "explicit-release");
     await manager.getPendingDeviceCleanup(emulator.deviceId);
     expect(service.activeInjectionIds(emulator.deviceId)).toEqual([]);
+    expect(guestCapture.closed).toEqual([emulator.deviceId]);
   });
 
   test("an injection whose session is released while it starts is stopped", async () => {
@@ -177,6 +228,7 @@ describe("audio tools (#13628, #13629)", () => {
       }),
     ).rejects.toThrow("released while the audio injection was starting");
     expect(service.activeInjectionIds(emulator.deviceId)).toEqual([]);
+    expect(guestCapture.closed).toEqual([emulator.deviceId]);
   });
 
   test("a sessionless start cancelled while connecting is stopped, not left playing", async () => {
@@ -187,6 +239,7 @@ describe("audio tools (#13628, #13629)", () => {
       createInjectAudioInputHandler(deps)(emulator, { tone: {} }, undefined, controller.signal),
     ).rejects.toThrow("cancelled while the audio injection was starting");
     expect(service.activeInjectionIds(emulator.deviceId)).toEqual([]);
+    expect(guestCapture.closed).toEqual([emulator.deviceId]);
   });
 
   test("a released session cannot start an injection", async () => {
@@ -194,7 +247,7 @@ describe("audio tools (#13628, #13629)", () => {
     await manager.releaseSession("session-1", "explicit-release");
     await expect(
       createInjectAudioInputHandler(deps)(emulator, { tone: {}, sessionUuid: "session-1" }),
-    ).rejects.toThrow("Cannot inject emulator audio");
+    ).rejects.toThrow("Cannot inject audio");
     expect(sessions).toHaveLength(0);
   });
 

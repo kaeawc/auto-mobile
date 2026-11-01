@@ -48,7 +48,7 @@ describe("registerSession after a daemon restart (#11367)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
     registries = [];
   });
 

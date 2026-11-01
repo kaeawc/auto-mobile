@@ -82,8 +82,10 @@ export class FakeDaemonManager implements DaemonManagerLike {
 
   async waitForReady(
     timeout: number,
-    signal?: AbortSignal,
-    _shouldContinueWaiting?: () => boolean,
+    {
+      signal,
+      shouldContinueWaiting: _shouldContinueWaiting,
+    }: { signal?: AbortSignal; shouldContinueWaiting?: () => boolean } = {},
   ): Promise<boolean> {
     this.waitForReadyCallCount++;
     // The real wait checks its loop bound and the caller's signal before it ever
@@ -105,6 +107,8 @@ export class FakeDaemonManager implements DaemonManagerLike {
    * Override for tests that need to model replacement re-arbitration directly.
    */
   async waitForLockHolderReadiness(timeoutMs: number): Promise<boolean> {
-    return this.waitForReady(timeoutMs, undefined, () => this.isStartupLockHeldByLiveProcess());
+    return this.waitForReady(timeoutMs, {
+      shouldContinueWaiting: () => this.isStartupLockHeldByLiveProcess(),
+    });
   }
 }

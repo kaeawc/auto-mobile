@@ -273,8 +273,7 @@ async function statusUntilSettled(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   deadlineMs: number,
-  signal: AbortSignal | undefined,
-  initial: SessionBrokerResult | undefined,
+  { signal, initial }: { signal?: AbortSignal; initial?: SessionBrokerResult } = {},
 ): Promise<SessionBrokerResult> {
   const state: StatusRecoveryState = { last: initial, unreachableSinceMs: undefined };
   while (!signal?.aborted && ports.timer.now() < deadlineMs) {
@@ -379,8 +378,7 @@ async function abandonHeldReadyResult(
   result: SessionBrokerResult,
   late: Promise<void> | undefined,
   ports: SessionBrokerProxyAcquisitionPorts,
-  end: AcquisitionEnd,
-  deadlineMs: number,
+  { end, deadlineMs }: { end: AcquisitionEnd; deadlineMs: number },
 ): Promise<SessionBrokerResult> {
   const sessionUuid = result.sessionUuid!;
   if (late) {
@@ -443,7 +441,7 @@ async function holdReadyResult(
   const endedBeforeHold = acquisitionEnded(ports, deadlineMs, signal);
   if (endedBeforeHold) {
     // Never start ownership for a grant whose acquisition already ended; release it instead.
-    return abandonHeldReadyResult(result, undefined, ports, endedBeforeHold, deadlineMs);
+    return abandonHeldReadyResult(result, undefined, ports, { end: endedBeforeHold, deadlineMs });
   }
   const holdTimeoutMs = deadlineMs - ports.timer.now();
   const hold = ports.holdSession(result.requestId, sessionUuid);
@@ -468,12 +466,12 @@ async function holdReadyResult(
       `[SessionBroker] Holding session ${sessionUuid} did not finish before acquisition ended: ${errorMessage(error)}`,
       error,
     );
-    return abandonHeldReadyResult(result, hold, ports, ended, deadlineMs);
+    return abandonHeldReadyResult(result, hold, ports, { end: ended, deadlineMs });
   }
   // Fence publication after the awaited hold: cancellation may land in the same turn it resolves.
   const endedDuringHold = acquisitionEnded(ports, deadlineMs, signal);
   return endedDuringHold
-    ? abandonHeldReadyResult(result, undefined, ports, endedDuringHold, deadlineMs)
+    ? abandonHeldReadyResult(result, undefined, ports, { end: endedDuringHold, deadlineMs })
     : result;
 }
 
@@ -493,13 +491,13 @@ async function daemonSupportsRequestedContract(
   return daemonSupportsSessionBroker(advertised);
 }
 
-/** Only a typed stopping refusal proves that prepare admitted nothing and is safe to resend. */
+/** Typed session_broker_stopping and session_broker_maintenance refusals admit nothing and are safe to resend. */
 function stoppingRetryDelay(error: unknown): number | undefined {
   if (
     typeof error !== "object" ||
     error === null ||
     !("code" in error) ||
-    error.code !== "session_broker_stopping"
+    (error.code !== "session_broker_stopping" && error.code !== "session_broker_maintenance")
   ) {
     return undefined;
   }
@@ -537,9 +535,11 @@ async function prepareBudgetAfterRetry(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   statusReserveMs: number,
-  deadlineMs: number,
-  signal: AbortSignal | undefined,
-  retryAfterMs: number | undefined,
+  {
+    deadlineMs,
+    signal,
+    retryAfterMs,
+  }: { deadlineMs: number; signal: AbortSignal | undefined; retryAfterMs: number | undefined },
 ): Promise<number | SessionBrokerResult> {
   let prepareCallBudgetMs = Math.floor(deadlineMs - ports.timer.now() - statusReserveMs);
   if (retryAfterMs !== undefined && prepareCallBudgetMs > 0) {
@@ -597,8 +597,7 @@ async function prepareThenRecover(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   statusReserveMs: number,
-  deadlineMs: number,
-  signal: AbortSignal | undefined,
+  { deadlineMs, signal }: { deadlineMs: number; signal?: AbortSignal },
 ): Promise<SessionBrokerResult> {
   // The runner's start identity is proxy-only; older daemons reject unknown config keys.
   const { executionOwnerStartIdentity: _executionOwnerStartIdentity, ...daemonConfig } = config;
@@ -608,14 +607,11 @@ async function prepareThenRecover(
   while (true) {
     let reply: unknown;
     try {
-      const prepareCallBudgetMs = await prepareBudgetAfterRetry(
-        config,
-        ports,
-        statusReserveMs,
+      const prepareCallBudgetMs = await prepareBudgetAfterRetry(config, ports, statusReserveMs, {
         deadlineMs,
         signal,
         retryAfterMs,
-      );
+      });
       if (typeof prepareCallBudgetMs !== "number") {
         return prepareCallBudgetMs;
       }
@@ -641,9 +637,9 @@ async function prepareThenRecover(
       }
       retryAfterMs = stoppingRetryDelay(error);
       if (retryAfterMs !== undefined) {
-        // Expected shutdown refusal admitted nothing; the successor can accept the same request.
+        // Stopping or maintenance admitted nothing; the same request can be accepted on retry.
         logger.debug(
-          `[SessionBroker] Prepare refused while stopping; retrying in ${retryAfterMs}ms.`,
+          `[SessionBroker] Prepare refused while stopping or maintaining snapshots; retrying in ${retryAfterMs}ms.`,
           error,
         );
         continue;
@@ -652,12 +648,12 @@ async function prepareThenRecover(
         `[SessionBroker] Prepare reply was not received; checking request ${config.requestId}: ${errorMessage(error)}`,
         error,
       );
-      return statusUntilSettled(config, ports, deadlineMs, signal, undefined);
+      return statusUntilSettled(config, ports, deadlineMs, { signal });
     }
     const initial = isSessionBrokerResult(reply, config.requestId) ? reply : undefined;
     return initial !== undefined && initial.outcome !== "pending"
       ? initial
-      : await statusUntilSettled(config, ports, deadlineMs, signal, initial);
+      : await statusUntilSettled(config, ports, deadlineMs, { signal, initial });
   }
 }
 
@@ -684,8 +680,8 @@ function acquisitionFailure(
 
 /**
  * Prepares exactly one durable request. Recovery reads status for the same request ID and owner
- * token, except a typed session_broker_stopping refusal admitted nothing: after its retry delay,
- * prepare is resent with identical params within the acquisition deadline.
+ * token, except typed session_broker_stopping and session_broker_maintenance refusals admitted
+ * nothing: after the retry delay, prepare is resent with identical params within the acquisition deadline.
  * A retryable session_broker_stopping receipt with retryRequires: "new_request_id" is returned
  * to the caller without resending: the request ID belongs to the caller.
  */
@@ -720,7 +716,7 @@ export async function acquireSessionThroughDaemon(
       STATUS_RECOVERY_RESERVE_MS,
       Math.max(1, Math.floor(budgetMs / 4)),
     );
-    const result = await prepareThenRecover(config, ports, statusReserveMs, deadlineMs, signal);
+    const result = await prepareThenRecover(config, ports, statusReserveMs, { deadlineMs, signal });
     return await holdReadyResult(result, ports, deadlineMs, signal);
   } catch (error) {
     const result = acquisitionFailure(config, error, signal);

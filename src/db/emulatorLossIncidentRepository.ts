@@ -15,6 +15,7 @@ import { defaultIdGenerator } from "../utils/IdGenerator";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 const MAX_UPDATE_ATTEMPTS = 3;
 
@@ -58,12 +59,22 @@ function decodeIncident(value: string): EmulatorLossIncident | undefined {
  * user's default file-backed store.
  */
 export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore {
-  constructor(
-    private readonly database?: Kysely<Database>,
-    private readonly timer: Timer = defaultTimer,
-    private readonly idGenerator: IdGenerator = defaultIdGenerator,
-    private readonly maxRetained: number = DEFAULT_MAX_RETAINED_EMULATOR_LOSS_INCIDENTS,
-  ) {}
+  private readonly database?: Kysely<Database>;
+  private readonly timer: Timer;
+  private readonly idGenerator: IdGenerator;
+  private readonly maxRetained: number;
+
+  constructor({
+    db,
+    timer = defaultTimer,
+    idGenerator = defaultIdGenerator,
+    maxRetained = DEFAULT_MAX_RETAINED_EMULATOR_LOSS_INCIDENTS,
+  }: Pick<RepositoryDeps, "db" | "timer" | "idGenerator"> & { maxRetained?: number } = {}) {
+    this.database = db;
+    this.timer = timer;
+    this.idGenerator = idGenerator;
+    this.maxRetained = maxRetained;
+  }
 
   async open(input: OpenEmulatorLossIncidentInput): Promise<EmulatorLossIncident> {
     const now = this.timer.now();

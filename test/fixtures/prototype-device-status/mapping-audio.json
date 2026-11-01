@@ -1,0 +1,22 @@
+{
+  "description": "Audio readings to /platform/audio/{volume, ringer}. Volume is the media stream as a whole percent; the ringer is Android only.",
+  "androidVolume": [
+    [0, 15, 0],
+    [7, 15, 47],
+    [15, 15, 100],
+    [3, 0, null]
+  ],
+  "iosVolume": [
+    [0, 0],
+    [0.5, 50],
+    [0.625, 63],
+    [1, 100],
+    [-0.1, null]
+  ],
+  "androidRinger": [
+    [0, "silent"],
+    [1, "vibrate"],
+    [2, "normal"],
+    [3, null]
+  ]
+}

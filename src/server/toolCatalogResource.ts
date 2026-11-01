@@ -83,11 +83,10 @@ export function createToolCatalogResourceHandler(
 }
 
 export function registerToolCatalogResources(): void {
-  ResourceRegistry.register(
-    TOOL_CATALOG_RESOURCE_URI,
-    "Tool Catalog",
-    "Every registered AutoMobile tool with its default enabled/gated state, discoverable without acquiring a device.",
-    "application/json",
-    createToolCatalogResourceHandler(),
-  );
+  ResourceRegistry.register(TOOL_CATALOG_RESOURCE_URI, "Tool Catalog", {
+    description:
+      "Every registered AutoMobile tool with its default enabled/gated state, discoverable without acquiring a device.",
+    mimeType: "application/json",
+    handler: createToolCatalogResourceHandler(),
+  });
 }

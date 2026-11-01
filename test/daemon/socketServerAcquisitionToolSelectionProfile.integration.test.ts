@@ -66,7 +66,10 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
         params: { name, arguments: { sessionUuid: "expired-session" } },
       };
       const forwardRoute = await server.forwardRouteFor(request, socketSessionId);
-      server.recordForwardResult(request, socketSessionId, forwardRoute, false, { content: [] });
+      server.recordForwardResult(request, socketSessionId, forwardRoute, {
+        sessionWasActiveBeforeForward: false,
+        response: { content: [] },
+      });
       expect(server.boundClientSocketSessionIds).not.toContain(socketSessionId);
     }
   });
@@ -82,8 +85,9 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
       params: { name: "setToolEnabled", arguments: { toolName: "provisionDevice", enabled: true } },
     };
     const enableRoute = await server.forwardRouteFor(enableRequest, socketSessionId);
-    server.recordForwardResult(enableRequest, socketSessionId, enableRoute, false, {
-      content: [{ type: "text", text: JSON.stringify({ sessionUuid: profileUuid }) }],
+    server.recordForwardResult(enableRequest, socketSessionId, enableRoute, {
+      sessionWasActiveBeforeForward: false,
+      response: { content: [{ type: "text", text: JSON.stringify({ sessionUuid: profileUuid }) }] },
     });
 
     // DaemonMcpProxy remembers this profile from the preceding setToolEnabled

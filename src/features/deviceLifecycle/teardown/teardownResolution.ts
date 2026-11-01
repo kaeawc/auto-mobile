@@ -72,7 +72,10 @@ export async function resolveAbsentTeardownTarget(
         context.args,
         "precondition",
         "inventory_incomplete",
-        "Cannot prove the target is absent because one or more platform inventories did not complete.",
+        {
+          message:
+            "Cannot prove the target is absent because one or more platform inventories did not complete.",
+        },
       ),
     };
   }
@@ -111,7 +114,7 @@ export async function resolveAbsentTeardownTarget(
       context.args,
       "already_absent",
       { stop: "not_required", destroy: "not_required" },
-      { notRunning: "confirmed", inventory: "complete_absence_confirmed" },
+      { verification: { notRunning: "confirmed", inventory: "complete_absence_confirmed" } },
     ),
   };
 }
@@ -154,7 +157,7 @@ export async function resolveInventoryTeardownTarget(
         context.args,
         "precondition",
         "target_identity_conflict",
-        resolution.conflict,
+        { message: resolution.conflict },
       ),
     };
   }
@@ -168,8 +171,10 @@ export async function resolveInventoryTeardownTarget(
         context.args,
         "precondition",
         "booted_inventory_incomplete",
-        `Cannot confirm ${target.device.platform} target '${target.device.name}' is not running.`,
-        target.device,
+        {
+          message: `Cannot confirm ${target.device.platform} target '${target.device.name}' is not running.`,
+          resolved: target.device,
+        },
       ),
     };
   }
@@ -205,8 +210,11 @@ export async function finalizeIosNameResolvedTeardownTarget(
         context.args,
         "precondition",
         "inventory_incomplete",
-        "Cannot resolve the requested iOS device name against the complete inventory because platform discovery did not complete.",
-        target.device,
+        {
+          message:
+            "Cannot resolve the requested iOS device name against the complete inventory because platform discovery did not complete.",
+          resolved: target.device,
+        },
       ),
     };
   }
@@ -220,8 +228,11 @@ export async function finalizeIosNameResolvedTeardownTarget(
         context.args,
         "precondition",
         "target_identity_conflict",
-        "Multiple iOS devices matched the requested stable name; refusing to guess which one to delete.",
-        target.device,
+        {
+          message:
+            "Multiple iOS devices matched the requested stable name; refusing to guess which one to delete.",
+          resolved: target.device,
+        },
       ),
     };
   }
@@ -274,12 +285,9 @@ async function refuseUnresolvedAndroidRuntime(
       isUnknownAndroidRuntimeName(device),
   );
   const unresolvedRefusal = (runtime: BootedDevice) =>
-    createTeardownFailureResponse(
-      context.args,
-      "precondition",
-      "target_identity_unresolved",
-      `Android emulator runtime '${runtime.deviceId}' has no resolvable AVD name; refusing deletion.`,
-    );
+    createTeardownFailureResponse(context.args, "precondition", "target_identity_unresolved", {
+      message: `Android emulator runtime '${runtime.deviceId}' has no resolvable AVD name; refusing deletion.`,
+    });
   if (skipLocalSiblings && unresolvedRuntimes.some((runtime) => !runtime.foreignOwned)) {
     context.localSiblingVetoSkipped = true;
     logger.info(
@@ -302,13 +310,11 @@ async function refuseUnresolvedAndroidRuntime(
     return unresolvedRefusal(probe.runtime);
   }
   if (probe.kind === "runs-target") {
-    return createTeardownFailureResponse(
-      context.args,
-      "precondition",
-      "target_identity_conflict",
-      `Android AVD '${probe.avdName}' is running on emulator '${probe.runtime.deviceId}', which ` +
+    return createTeardownFailureResponse(context.args, "precondition", "target_identity_conflict", {
+      message:
+        `Android AVD '${probe.avdName}' is running on emulator '${probe.runtime.deviceId}', which ` +
         "another AutoMobile daemon owns; refusing deletion.",
-    );
+    });
   }
   context.clearedForeignSerials = new Set(runtimesToResolve.map((runtime) => runtime.deviceId));
   return undefined;
@@ -341,7 +347,7 @@ export async function resolveTeardownTarget(context: TeardownContext): Promise<T
         context.args,
         "precondition",
         "target_identity_unresolved",
-        pooledAvdNameRefusalMessage(matchedBootedCandidate, pooledAvdCapture.refusal),
+        { message: pooledAvdNameRefusalMessage(matchedBootedCandidate, pooledAvdCapture.refusal) },
       ),
     };
   }
@@ -352,7 +358,7 @@ export async function resolveTeardownTarget(context: TeardownContext): Promise<T
         context.args,
         "precondition",
         "target_identity_conflict",
-        bootedTarget.conflict,
+        { message: bootedTarget.conflict },
       ),
     };
   }
@@ -362,7 +368,7 @@ export async function resolveTeardownTarget(context: TeardownContext): Promise<T
         context.args,
         "precondition",
         "target_not_destroyable",
-        bootedTarget.unsupported,
+        { message: bootedTarget.unsupported },
       ),
     };
   }
@@ -436,8 +442,8 @@ export async function refuseLiveStoppedAndroidTarget(
     context.deadlineDevice,
     context.dependencies.timer,
     context.deadlineMs,
-    "Android stopped-image runtime check did not complete",
     {
+      detail: "Android stopped-image runtime check did not complete",
       requestAbortSignal: context.requestAbortSignal,
       timeoutMs: context.timeoutMs,
       operation: async (signal, timeoutMs) => {
@@ -462,18 +468,16 @@ export async function refuseLiveStoppedAndroidTarget(
             break;
         }
         if ((states?.size ?? 0) > 0 || processesUnproven) {
-          return createTeardownFailureResponse(
-            context.args,
-            "stop",
-            "runtime_stop_unproven",
-            `Cannot prove Android AVD '${target.device.name}' has stopped; retaining its image and pool ownership. ` +
+          return createTeardownFailureResponse(context.args, "stop", "runtime_stop_unproven", {
+            message:
+              `Cannot prove Android AVD '${target.device.name}' has stopped; retaining its image and pool ownership. ` +
               emulatorProcessEscapeHint(
                 serials[0] ?? target.device.name,
                 processes.kind === "read" ? processes.candidates : [],
                 processes.kind === "unreadable" ? "unreadable" : undefined,
               ),
-            target.device,
-          );
+            resolved: target.device,
+          });
         }
         return undefined;
       },

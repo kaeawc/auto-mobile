@@ -48,6 +48,9 @@ export interface RunMigrationsOptions {
   lock?: MigrationLock;
 }
 
+/** {@link RunMigrationsOptions} with `env` resolved (defaulted to `process.env`). */
+type ResolvedRunMigrationsOptions = RunMigrationsOptions & { env: NodeJS.ProcessEnv };
+
 export function resolveMigrationFolder(env: NodeJS.ProcessEnv = process.env): string {
   // @deprecated AUTO_MOBILE_MIGRATIONS_DIR - use AUTOMOBILE_MIGRATIONS_DIR instead
   const envPath = readEnvRaw(ENV.MIGRATIONS_DIR, env);
@@ -412,9 +415,9 @@ async function handleMigrationFailure(
   db: Kysely<MigratorSchema>,
   migrator: Migrator,
   error: unknown,
-  options: RunMigrationsOptions,
-  env: NodeJS.ProcessEnv,
+  options: ResolvedRunMigrationsOptions,
 ): Promise<void> {
+  const { env } = options;
   if (isCorruptedMigrationError(error) && isMigrationRecoveryEnabled(env)) {
     // A newer build migrated this shared DB ahead of us; every migration we ship
     // is already applied. Leave the ledger untouched instead of pruning the newer
@@ -429,7 +432,7 @@ async function handleMigrationFailure(
       return;
     }
 
-    const recoveryResult = await recoverCorruptedMigrations(db, migrator, error, options, env);
+    const recoveryResult = await recoverCorruptedMigrations(db, migrator, error, options);
     if (recoveryResult.error) {
       logger.error("Failed to run migrations after recovery:", recoveryResult.error);
       throw recoveryResult.error;
@@ -453,9 +456,9 @@ async function recoverCorruptedMigrations(
   db: Kysely<MigratorSchema>,
   migrator: Migrator,
   error: Error,
-  options: RunMigrationsOptions,
-  env: NodeJS.ProcessEnv,
+  options: ResolvedRunMigrationsOptions,
 ) {
+  const { env } = options;
   logger.warn(`Corrupted migrations detected: ${error.message}`);
   logger.warn(
     "Attempting automatic recovery by rebuilding migration history (destructive). " +
@@ -523,7 +526,7 @@ export async function runMigrations(
     const { error } = await runMigrationsOnce(migrator);
 
     if (error) {
-      await handleMigrationFailure(asMigratorDb(db), migrator, error, options, env);
+      await handleMigrationFailure(asMigratorDb(db), migrator, error, { ...options, env });
       return;
     }
 

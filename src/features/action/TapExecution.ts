@@ -1,4 +1,9 @@
 import { deadlineRequest, type TapOnCall } from "./ActionCall";
+import {
+  deviceIosSdkBridgeTapper,
+  type IosSdkBridgeTapper,
+  type IosSdkTapOutcome,
+} from "./IosSdkBridgeTapRouter";
 import type { AndroidOrIosPlatform, ElementSelectionResult } from "../../models";
 import { requireAndroidOrIosPlatform } from "../../models";
 import type { DisplayFence, ObservedActionResult } from "./BaseVisualChange";
@@ -118,6 +123,8 @@ export interface TapExecutionHost {
   resolveTapTargetElement: TapTargetResolver["resolveTapTargetElement"];
   rethrowKeyboardOcclusion: TapDisplayRouter["rethrowKeyboardOcclusion"];
   retryTapIfNoChange: TapGestureDispatcher["retryTapIfNoChange"];
+  /** Routes a tap on an SDK observation-bridge node (#5159); defaults to the device's runner. */
+  readonly iosSdkBridgeTapper?: () => IosSdkBridgeTapper;
   searchForElement: TapTargetResolver["searchForElement"];
   readonly selectionStateTracker: () => Pick<SelectionStateTracker, "prepare" | "finalize">;
   readonly strategy: () => TapStrategy;
@@ -167,6 +174,8 @@ interface TapTargetState extends TapHierarchyState {
   tapElement: Element;
   usedParent: boolean;
   screenReaderNavigation?: ScreenReaderNavigationResult;
+  /** Which backend tapped an iOS SDK bridge node, and why XCTest stood in (#5159). */
+  iosBackend?: IosSdkTapOutcome;
 }
 
 /** Executes one selector action while keeping its observation and verification state local. */
@@ -345,13 +354,10 @@ export class TapExecution {
       : undefined;
 
     // Return error result with debug info instead of throwing
-    return this.host.readScopeFailureResult(
-      requestedAction,
-      state.effectiveAction,
-      error,
-      state.searchUntilStats,
+    return this.host.readScopeFailureResult(requestedAction, state.effectiveAction, error, {
+      searchUntilStats: state.searchUntilStats,
       debugContext,
-    );
+    });
   }
 
   private async executeObservedTap(
@@ -375,14 +381,12 @@ export class TapExecution {
     };
     await this.prepareHierarchy(state, hierarchy);
     if (options.accessibilityLink) {
-      return this.host.activateAccessibilityLinkPhase(
-        options,
-        options.accessibilityLink,
+      return this.host.activateAccessibilityLinkPhase(options, options.accessibilityLink, {
         observeResult,
-        hierarchy.viewHierarchy,
-        hierarchy.activationWarnings,
+        viewHierarchy: hierarchy.viewHierarchy,
+        activationWarnings: hierarchy.activationWarnings,
         signal,
-      );
+      });
     }
     const searchOutcome = await this.searchCurrentTarget(state, hierarchy);
     const prepared = await this.prepareSelection(state, hierarchy, searchOutcome);
@@ -497,13 +501,12 @@ export class TapExecution {
       if (searchOutcome.visibilityError) {
         throw searchOutcome.visibilityError;
       }
-      await this.host.handleElementNotFound(
-        options,
+      await this.host.handleElementNotFound(options, {
         observeResult,
-        searchOutcome.containerFound,
+        containerFound: searchOutcome.containerFound,
         signal,
-        searchOutcome.selection,
-      );
+        selection: searchOutcome.selection,
+      });
     }
 
     return searchOutcome;
@@ -663,8 +666,7 @@ export class TapExecution {
         options,
         observeResult,
         target.action,
-        requireResourceId,
-        signal,
+        { requireResourceId, signal },
       );
       if (!stable.ok) {
         perf.end();
@@ -734,11 +736,14 @@ export class TapExecution {
       target.activationWarnings,
     );
     this.host.logClickableParentSelection(target.usedParent);
+    const planningHierarchy = await this.host
+      .tapPoints()
+      .prototypeTapHierarchy(target.viewHierarchy, target.tapElement, requestedAction);
     const { tapPoint, warning: tapPointWarning } = this.host.tapPoints().planVisibleTapPoint({
       options: target.tapOptions,
       requestedAction,
       observeResult,
-      viewHierarchy: target.viewHierarchy,
+      viewHierarchy: planningHierarchy,
       finalSelection: target.finalSelection,
       tapElement: target.tapElement,
     });
@@ -771,24 +776,24 @@ export class TapExecution {
       state.ensureCheckedTapTimestamp = this.host.timer().now();
     }
 
-    if (preTapHash && this.host.strategy().retryTapIfNoChange) {
-      await this.host.retryTapIfNoChange(
-        preTapHash,
-        tapPoint,
-        target.action,
-        target.longPressDuration,
-        target.tapElement,
-        {
-          options: {
-            ...this.host.withObservationScreenSize(target.tapOptions, observeResult),
-            displayFence: fence,
-          },
-          isTalkBackEnabled: target.isAccessibilityServiceEnabled!,
-          screenSize: observeResult.screenSize,
-          signal,
-          selection: target.finalSelection,
+    // A tap the SDK bridge accepted is never repeated through XCTest.
+    if (
+      preTapHash &&
+      this.host.strategy().retryTapIfNoChange &&
+      target.iosBackend?.backend !== "sdk"
+    ) {
+      await this.host.retryTapIfNoChange(preTapHash, tapPoint, target.action, {
+        longPressDuration: target.longPressDuration,
+        tapElement: target.tapElement,
+        options: {
+          ...this.host.withObservationScreenSize(target.tapOptions, observeResult),
+          displayFence: fence,
         },
-      );
+        isTalkBackEnabled: target.isAccessibilityServiceEnabled!,
+        screenSize: observeResult.screenSize,
+        signal,
+        selection: target.finalSelection,
+      });
     }
 
     perf.end();
@@ -798,6 +803,7 @@ export class TapExecution {
         action: target.action,
         element: target.tapElement,
         selectedElement: target.selectedElementMetadata,
+        ...iosBackendFields(target.iosBackend),
         searchUntil: target.searchOutcome.stats,
         ...(target.screenReaderNavigation
           ? { screenReaderNavigation: target.screenReaderNavigation }
@@ -826,11 +832,10 @@ export class TapExecution {
       android: async () => {
         target.screenReaderNavigation = await this.host.executeAndroidTap(
           target.action,
-          tapPoint.x,
-          tapPoint.y,
+          tapPoint,
           target.longPressDuration,
-          target.tapElement,
           {
+            element: target.tapElement,
             signal,
             options: {
               ...target.tapOptions,
@@ -860,18 +865,25 @@ export class TapExecution {
         );
       },
       ios: async () => {
-        await this.host.executeiOSTap(
-          target.action,
-          tapPoint.x,
-          tapPoint.y,
-          target.longPressDuration,
-          target.tapElement,
-          {
-            isVoiceOverEnabled: target.isAccessibilityServiceEnabled,
-            displayFence: fence,
+        const tapper =
+          this.host.iosSdkBridgeTapper?.() ?? deviceIosSdkBridgeTapper(this.host.device());
+        target.iosBackend =
+          (await tapper.tap({
+            // A focus rewritten to a tap still belongs to sendKeys, which stays on XCTest.
+            action: state.requestedAction === "focus" ? "focus" : target.action,
+            element: target.tapElement,
+            longPressDurationMs: target.longPressDuration,
             signal,
-          },
-        );
+          })) ?? undefined;
+        if (target.iosBackend?.backend === "sdk") {
+          return;
+        }
+        await this.host.executeiOSTap(target.action, tapPoint, target.longPressDuration, {
+          element: target.tapElement,
+          isVoiceOverEnabled: target.isAccessibilityServiceEnabled,
+          displayFence: fence,
+          signal,
+        });
       },
     });
   }
@@ -900,14 +912,11 @@ export class TapExecution {
     result.focusVerified = await this.host.verifyFocusAfterTap(
       result,
       (observation) =>
-        this.host.verifyFocusedInputTarget(
-          options,
-          target,
-          observation,
-          focusLabelText,
-          result.selectedElement?.indexInMatches,
+        this.host.verifyFocusedInputTarget(options, target, observation, {
+          labelText: focusLabelText,
+          selectedIndex: result.selectedElement?.indexInMatches,
           preTapHierarchy,
-        ),
+        }),
       signal,
     );
     if (!result.focusVerified) {
@@ -963,8 +972,13 @@ export class TapExecution {
     requestedAction: NonNullable<TapOnElementOptions["action"]>,
     action: TapOnElementOptions["action"],
     error: unknown,
-    searchUntilStats: SearchUntilStats | undefined,
-    debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>,
+    {
+      searchUntilStats,
+      debugContext,
+    }: {
+      searchUntilStats?: SearchUntilStats;
+      debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>;
+    },
   ): TapOnFocusResult {
     const errorMsg = errorMessage(error);
     return markFocusFailure(
@@ -1004,4 +1018,16 @@ export class TapExecution {
   ): LongPressMetadata {
     return this.host.longPressMetadataDetector().detect(previousObservation, currentObservation);
   }
+}
+
+/** `backend` and `fallbackReason` for a tap on an iOS SDK bridge node; nothing otherwise. */
+function iosBackendFields(
+  outcome: IosSdkTapOutcome | undefined,
+): Pick<TapOnElementResult, "backend" | "fallbackReason"> {
+  if (!outcome) {
+    return {};
+  }
+  return outcome.backend === "sdk"
+    ? { backend: "sdk" }
+    : { backend: "xctest", fallbackReason: outcome.fallbackReason };
 }

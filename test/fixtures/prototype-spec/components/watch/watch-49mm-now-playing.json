@@ -1,0 +1,173 @@
+{
+  "id": "watch-49mm-now-playing",
+  "window": {
+    "placement": {
+      "type": "floating",
+      "gravity": "center",
+      "offset": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  "state": {
+    "playing": true,
+    "trackProgress": 0.4
+  },
+  "components": {
+    "watchNowPlaying": {
+      "root": {
+        "type": "column",
+        "style": {
+          "width": "fill",
+          "height": "fill",
+          "padding": {
+            "start": 12,
+            "end": 12,
+            "top": 18,
+            "bottom": 14
+          },
+          "alignment": "center",
+          "arrangement": "spaceBetween"
+        },
+        "children": [
+          {
+            "type": "column",
+            "style": {
+              "alignment": "center",
+              "spacing": 2
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{props.source}",
+                "style": {
+                  "textSize": 13,
+                  "color": "#FA2D48"
+                }
+              },
+              {
+                "type": "text",
+                "text": "{props.title}",
+                "style": {
+                  "textSize": 17,
+                  "fontWeight": 600,
+                  "color": "#FFFFFF",
+                  "maxLines": 1,
+                  "overflow": "ellipsis"
+                }
+              },
+              {
+                "type": "text",
+                "text": "{props.artist}",
+                "style": {
+                  "textSize": 15,
+                  "color": "#AEAEB2",
+                  "maxLines": 1,
+                  "overflow": "ellipsis"
+                }
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "style": {
+              "width": "fill",
+              "arrangement": "spaceEvenly",
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "iconButton",
+                "icon": "skip_previous",
+                "contentDescription": "Previous track",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "previous"
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "icon": "pause",
+                "variant": "filled",
+                "contentDescription": "Pause",
+                "visibleWhen": {
+                  "key": "playing",
+                  "equals": true
+                },
+                "onTap": [
+                  {
+                    "type": "toggle",
+                    "key": "playing"
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "icon": "play_arrow",
+                "variant": "filled",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "key": "playing",
+                  "equals": false
+                },
+                "onTap": [
+                  {
+                    "type": "toggle",
+                    "key": "playing"
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "icon": "skip_next",
+                "contentDescription": "Next track",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "next"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "progress",
+            "variant": "linear",
+            "contentDescription": "Track progress",
+            "stateKey": "{props.progressKey}",
+            "max": 1
+          }
+        ]
+      }
+    }
+  },
+  "root": {
+    "type": "box",
+    "contentDescription": "49 mm watch screen",
+    "style": {
+      "width": {
+        "dp": 205
+      },
+      "height": {
+        "dp": 251
+      },
+      "cornerRadius": 44,
+      "background": "#000000"
+    },
+    "children": [
+      {
+        "type": "use",
+        "component": "watchNowPlaying",
+        "props": {
+          "source": "Music",
+          "title": "Night Drive",
+          "artist": "The Midnight Hours",
+          "progressKey": "trackProgress"
+        }
+      }
+    ]
+  }
+}

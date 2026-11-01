@@ -127,7 +127,9 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
         heartbeatTimeoutSource: "default",
         hasReceivedHeartbeat: true,
       });
-      await persistence.markReleased(sessionUuid, "released", timer.now(), "daemon-restart");
+      await persistence.markReleased(sessionUuid, "released", timer.now(), {
+        reason: "daemon-restart",
+      });
     }
     restarted = new SessionManager(timer, persistence);
     restarted.stopCleanupTimer();
@@ -167,7 +169,7 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason, { allowExpired: true });
       },
-      timer,
+      { timer },
     );
     manager.startRehydratedOwnerWindows();
     monitor.start();

@@ -612,7 +612,9 @@ describe("device binding writers current behavior (#11802)", () => {
         rebootOverride = detached;
         const disconnect = spyOn(pool, "removeDisconnectedDevice").mockResolvedValue();
         utils.setBootedDevices("android", [bystander]);
-        const checking = liveness.ensurePooledDevicePresent(captured, detached, false, !detached);
+        const checking = liveness.ensurePooledDevicePresent(captured, detached, false, {
+          idleEviction: !detached,
+        });
         try {
           await incidentStarted.promise;
           expect(binding(captured)).toEqual({

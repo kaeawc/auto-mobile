@@ -95,14 +95,19 @@ function describeStatusBarOnlyCapture(
   };
 }
 
+/** The post-capture evidence and request floor a window-identity mismatch is confirmed against. */
+export interface WindowIdentityMismatchCheck {
+  postCaptureForeground: PostCaptureForegroundIdentity;
+  getConfirmedFrameworkErrorDialog: () => Promise<boolean>;
+  minTimestamp: number;
+  signal?: AbortSignal;
+}
+
 export interface WindowIdentityFreshnessResolver {
   resolveWindowIdentityMismatch(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
-    postCaptureForeground: PostCaptureForegroundIdentity,
-    getConfirmedFrameworkErrorDialog: () => Promise<boolean>,
-    minTimestamp: number,
-    signal?: AbortSignal,
+    check: WindowIdentityMismatchCheck,
   ): Promise<{ observed: string; foreground: string } | undefined>;
   attributeFocusedOwnWindowToForeground(
     result: ObserveResult,
@@ -177,10 +182,12 @@ export class DefaultWindowIdentityFreshnessResolver implements WindowIdentityFre
   async resolveWindowIdentityMismatch(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
-    postCaptureForeground: PostCaptureForegroundIdentity,
-    getConfirmedFrameworkErrorDialog: () => Promise<boolean>,
-    minTimestamp: number,
-    signal?: AbortSignal,
+    {
+      postCaptureForeground,
+      getConfirmedFrameworkErrorDialog,
+      minTimestamp,
+      signal,
+    }: WindowIdentityMismatchCheck,
   ): Promise<{ observed: string; foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
     const observed = result.viewHierarchy?.packageName ?? result.activeWindow?.appId;

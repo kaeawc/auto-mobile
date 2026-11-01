@@ -495,7 +495,9 @@ describe("systemTray find", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const resultPromise = waitForNotificationMatch(device, { title: "Test Notification" }, [], 500);
+    const resultPromise = waitForNotificationMatch(device, { title: "Test Notification" }, [], {
+      awaitTimeoutMs: 500,
+    });
 
     await waitForPendingSleep(fakeTimer);
     fakeTimer.advanceTime(POLL_INTERVAL_MS);
@@ -534,7 +536,9 @@ describe("systemTray find", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const resultPromise = waitForNotificationMatch(device, { title: "Test Notification" }, [], 500);
+    const resultPromise = waitForNotificationMatch(device, { title: "Test Notification" }, [], {
+      awaitTimeoutMs: 500,
+    });
 
     await advancePendingSleeps(fakeTimer, 3);
 
@@ -564,7 +568,9 @@ describe("systemTray find", () => {
 
     // With awaitTimeoutMs=0, the function should enforce a minimum timeout
     // and still find the notification after the tray opens
-    const result = await waitForNotificationMatch(device, { title: "Test Notification" }, [], 0);
+    const result = await waitForNotificationMatch(device, { title: "Test Notification" }, [], {
+      awaitTimeoutMs: 0,
+    });
 
     expect(result.match).not.toBeNull();
     expect(result.observation.viewHierarchy?.packageName).toBe(SYSTEM_TRAY_PACKAGE);
@@ -587,7 +593,9 @@ describe("systemTray find", () => {
 
     // With negative awaitTimeoutMs, the function should enforce a minimum timeout
     // and still find the notification after the tray opens
-    const result = await waitForNotificationMatch(device, { title: "Test Notification" }, [], -100);
+    const result = await waitForNotificationMatch(device, { title: "Test Notification" }, [], {
+      awaitTimeoutMs: -100,
+    });
 
     expect(result.match).not.toBeNull();
     expect(result.observation.viewHierarchy?.packageName).toBe(SYSTEM_TRAY_PACKAGE);
@@ -613,7 +621,9 @@ describe("systemTray find", () => {
 
     // Without the fix, awaitTimeoutMs=0 would return null immediately after
     // the first observation check. With the fix, it uses minimum timeout and polls.
-    const resultPromise = waitForNotificationMatch(device, { title: "Target Notification" }, [], 0);
+    const resultPromise = waitForNotificationMatch(device, { title: "Target Notification" }, [], {
+      awaitTimeoutMs: 0,
+    });
 
     await waitForPendingSleep(fakeTimer);
     fakeTimer.advanceTime(POLL_INTERVAL_MS);
@@ -655,12 +665,9 @@ describe("systemTray re-expand on closed shade during wait", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const resultPromise = waitForNotificationMatch(
-      device,
-      { title: "Target Notification" },
-      [],
-      REEXPAND_INTERVAL_MS * 5,
-    );
+    const resultPromise = waitForNotificationMatch(device, { title: "Target Notification" }, [], {
+      awaitTimeoutMs: REEXPAND_INTERVAL_MS * 5,
+    });
 
     // 5 poll ticks: shade stays closed through t=250..1000, crossing the
     // throttle interval on the 4th closed observation (t=1000), then reopens.
@@ -697,12 +704,9 @@ describe("systemTray re-expand on closed shade during wait", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const resultPromise = waitForNotificationMatch(
-      device,
-      { title: "Target Notification" },
-      [],
-      REEXPAND_INTERVAL_MS * 5,
-    );
+    const resultPromise = waitForNotificationMatch(device, { title: "Target Notification" }, [], {
+      awaitTimeoutMs: REEXPAND_INTERVAL_MS * 5,
+    });
 
     // At t=1000 and t=2000, the closed shade crosses the re-expand throttle
     // interval. The target appears after the second best-effort retry.
@@ -736,12 +740,9 @@ describe("systemTray re-expand on closed shade during wait", () => {
     // Deadline elapses strictly before the shade has been closed for a full
     // REEXPAND_INTERVAL_MS, so the loop should time out without ever
     // re-issuing the expand.
-    const resultPromise = waitForNotificationMatch(
-      device,
-      { title: "Target Notification" },
-      [],
-      REEXPAND_INTERVAL_MS - 300,
-    );
+    const resultPromise = waitForNotificationMatch(device, { title: "Target Notification" }, [], {
+      awaitTimeoutMs: REEXPAND_INTERVAL_MS - 300,
+    });
 
     await advancePendingSleeps(fakeTimer, 3);
 
@@ -774,12 +775,9 @@ describe("systemTray re-expand on closed shade during wait", () => {
 
     const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
     try {
-      const resultPromise = waitForNotificationMatch(
-        device,
-        { title: "Target Notification" },
-        [],
-        5000,
-      );
+      const resultPromise = waitForNotificationMatch(device, { title: "Target Notification" }, [], {
+        awaitTimeoutMs: 5000,
+      });
 
       await advancePendingSleeps(fakeTimer, 5);
 
@@ -845,7 +843,9 @@ describe("systemTray unmatched-notification diagnostics", () => {
     const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
     const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
     try {
-      const resultPromise = waitForNotificationMatch(device, criteria, appMatchTexts, 5000);
+      const resultPromise = waitForNotificationMatch(device, criteria, appMatchTexts, {
+        awaitTimeoutMs: 5000,
+      });
       await advancePendingSleeps(fakeTimer, 3);
       const result = await resultPromise;
 
@@ -893,12 +893,9 @@ describe("systemTray unmatched-notification diagnostics", () => {
 
     const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
     try {
-      const resultPromise = waitForNotificationMatch(
-        device,
-        { title: "Target Notification" },
-        [],
-        5000,
-      );
+      const resultPromise = waitForNotificationMatch(device, { title: "Target Notification" }, [], {
+        awaitTimeoutMs: 5000,
+      });
 
       await advancePendingSleeps(fakeTimer, 3);
 
@@ -1920,7 +1917,7 @@ describe("systemTray headerless two-notification group", () => {
         device,
         { title, body, appId: "com.android.shell" },
         ["Shell", "com.android.shell"],
-        500,
+        { awaitTimeoutMs: 500 },
       );
       expect(result.match?.match.matches.title?.text).toBe(title);
       expect(result.match?.match.matches.body?.text).toBe(body);
@@ -1962,7 +1959,7 @@ describe("systemTray headerless two-notification group", () => {
           device,
           { title, appId: "com.android.shell" },
           ["Shell", "com.android.shell"],
-          5000,
+          { awaitTimeoutMs: 5000 },
         );
         expect(found.match?.candidate.node["resource-id"]).toBe(
           "com.android.systemui:id/expandableNotificationRow",
@@ -2052,7 +2049,7 @@ describe("systemTray headerless two-notification group", () => {
       device,
       { title: "Gamma", appId: "com.android.shell" },
       ["Shell", "com.android.shell"],
-      500,
+      { awaitTimeoutMs: 500 },
     );
     const title = { left: 179, top: 997, right: 308, bottom: 1048 };
     const body = { left: 179, top: 1053, right: 891, bottom: 1106 };
@@ -2104,7 +2101,7 @@ describe("systemTray grouped notifications", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match).not.toBeNull();
@@ -2133,7 +2130,7 @@ describe("systemTray grouped notifications", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match).not.toBeNull();
@@ -2203,7 +2200,7 @@ describe("systemTray grouped notifications", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match).not.toBeNull();
@@ -2242,7 +2239,7 @@ describe("systemTray grouped notifications", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     await advancePendingSleeps(fakeTimer, 3);
@@ -2278,7 +2275,7 @@ describe("systemTray group expansion", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match).not.toBeNull();
@@ -2310,9 +2307,15 @@ describe("systemTray group expansion", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const collapsed = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
-    const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
-    const legacy = await waitForNotificationMatch(device, { title: "Legacy title" }, [], 500);
+    const collapsed = await waitForNotificationMatch(device, { title: "Rev3" }, [], {
+      awaitTimeoutMs: 500,
+    });
+    const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], {
+      awaitTimeoutMs: 500,
+    });
+    const legacy = await waitForNotificationMatch(device, { title: "Legacy title" }, [], {
+      awaitTimeoutMs: 500,
+    });
 
     expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode!)).toBe(
       "collapsed",
@@ -2327,7 +2330,7 @@ describe("systemTray group expansion", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
     expect(
       getNotificationGroupChildRows(realisticExpanded.match!.candidate.groupNode!),
@@ -2351,8 +2354,12 @@ describe("systemTray group expansion", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const collapsed = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
-    const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
+    const collapsed = await waitForNotificationMatch(device, { title: "Rev3" }, [], {
+      awaitTimeoutMs: 500,
+    });
+    const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], {
+      awaitTimeoutMs: 500,
+    });
 
     expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode!)).toBe(
       "collapsed",
@@ -2626,7 +2633,7 @@ describe("systemTray group expansion", () => {
       device,
       { appId: "com.example.fub", title: "Zillow Real-Time Tour request" },
       ["FUBStaging", "com.example.fub"],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match?.candidate.groupNode?.$?.["resource-id"]).toBe(
@@ -2772,7 +2779,7 @@ describe("systemTray group expansion", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match).not.toBeNull();
@@ -2798,7 +2805,7 @@ describe("systemTray group expansion", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match).not.toBeNull();
@@ -2838,7 +2845,7 @@ describe("systemTray group expansion", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     expect(result.match).not.toBeNull();
@@ -3686,7 +3693,7 @@ describe("systemTray group expansion", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      5000,
+      { awaitTimeoutMs: 5000 },
     );
 
     expect(match).not.toBeNull();
@@ -3699,7 +3706,7 @@ describe("systemTray group expansion", () => {
       device,
       { title: "Zillow Real-Time Tour request" },
       [],
-      500,
+      { awaitTimeoutMs: 500 },
     );
 
     await advancePendingSleeps(fakeTimer, 5);
@@ -4523,12 +4530,9 @@ describe("iOS systemTray find", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const resultPromise = waitForNotificationMatch(
-      iosDevice,
-      { title: "Test Notification" },
-      [],
-      2000,
-    );
+    const resultPromise = waitForNotificationMatch(iosDevice, { title: "Test Notification" }, [], {
+      awaitTimeoutMs: 2000,
+    });
 
     // First sleep: waitForSystemTrayOpen polling (NC not yet open after swipe)
     await waitForPendingSleep(fakeTimer);
@@ -4556,12 +4560,9 @@ describe("iOS systemTray find", () => {
       observeScreenFactory: () => fakeObserveScreen,
     });
 
-    const resultPromise = waitForNotificationMatch(
-      iosDevice,
-      { title: "Test Notification" },
-      [],
-      500,
-    );
+    const resultPromise = waitForNotificationMatch(iosDevice, { title: "Test Notification" }, [], {
+      awaitTimeoutMs: 500,
+    });
 
     await advancePendingSleeps(fakeTimer, 3);
 
@@ -4731,8 +4732,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
         device,
         { appId: "com.android.shell" },
         ["Delta", "Gamma"],
-        3125,
-        { maxSwipes: 1, signal },
+        { awaitTimeoutMs: 3125, maxSwipes: 1, signal },
       );
     return { timer, adb, observer, swipes, reopenTimes, drain };
   };
@@ -4976,15 +4976,10 @@ describe("Android systemTray clearAll progress budget", () => {
       observeScreenFactory: () => observer,
     });
     const drain = (maxSwipes?: number) =>
-      clearMatchingSystemTrayNotifications(
-        device,
-        { appId: "com.android.shell" },
-        ["Delta"],
-        5000,
-        {
-          maxSwipes,
-        },
-      );
+      clearMatchingSystemTrayNotifications(device, { appId: "com.android.shell" }, ["Delta"], {
+        awaitTimeoutMs: 5000,
+        maxSwipes,
+      });
     return { timer, swipes, drain };
   };
 
@@ -5031,7 +5026,7 @@ describe("Android systemTray clearAll progress budget", () => {
         device,
         { appId: "com.android.shell" },
         ["Delta"],
-        5000,
+        { awaitTimeoutMs: 5000 },
       );
       expect({ swipeCount: actualSwipes, dismissedCount, stalled }).toEqual({
         swipeCount: rows,

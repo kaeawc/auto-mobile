@@ -80,7 +80,7 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
     // looks them up; only the setup/connect work that would touch a device is stubbed.
     for (const device of devices) {
       AndroidCtrlProxyManager.registry.get(device.deviceId, () =>
-        AndroidCtrlProxyManager.createForTestingWithDeps(device, new FakeAdbExecutor(), timer),
+        AndroidCtrlProxyManager.createForTestingWithDeps(device, new FakeAdbExecutor(), { timer }),
       );
       AndroidCtrlProxyClient.registerForTesting(
         AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), { timer }),

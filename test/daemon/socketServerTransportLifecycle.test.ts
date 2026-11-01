@@ -310,13 +310,11 @@ describe("daemon socket resource subscription routing", () => {
     const stop = ResourceUpdatedBroadcaster.subscribe((resolve) =>
       internals.broadcastResourceUpdated(resolve),
     );
-    ResourceRegistry.registerTemplate(
-      "automobile:known-resource",
-      "Known",
-      "Known",
-      "text/plain",
-      async () => ({ uri: "automobile:known-resource", text: "value" }),
-    );
+    ResourceRegistry.registerTemplate("automobile:known-resource", "Known", {
+      description: "Known",
+      mimeType: "text/plain",
+      handler: async () => ({ uri: "automobile:known-resource", text: "value" }),
+    });
     try {
       expect(
         await internals.dispatchRequest(
@@ -364,14 +362,12 @@ describe("daemon socket resource subscription routing", () => {
     internals.connect(third);
     const canonical = "automobile:socket/one?appId=x";
     const page = `${canonical}&limit=10&offset=0`;
-    ResourceRegistry.registerTemplate(
-      "automobile:socket/{id}{?appId,limit,offset}",
-      "Socket",
-      "Socket",
-      "text/plain",
-      async () => ({ uri: canonical, text: "value" }),
-      ["limit", "offset"],
-    );
+    ResourceRegistry.registerTemplate("automobile:socket/{id}{?appId,limit,offset}", "Socket", {
+      description: "Socket",
+      mimeType: "text/plain",
+      handler: async () => ({ uri: canonical, text: "value" }),
+      paginationParams: ["limit", "offset"],
+    });
     const stop = ResourceUpdatedBroadcaster.subscribe((resolve) =>
       internals.broadcastResourceUpdated(resolve),
     );

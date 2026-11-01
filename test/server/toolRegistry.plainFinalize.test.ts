@@ -55,8 +55,10 @@ describe("plain-registered tools are finalized (#13942)", () => {
       TOOL,
       "plain finalize probe",
       z.object({ resourceLink: resourceLinkField() }).passthrough(),
-      async () => envelope(payload),
-      { outputSchema },
+      {
+        handler: async () => envelope(payload),
+        outputSchema,
+      },
     );
   });
 

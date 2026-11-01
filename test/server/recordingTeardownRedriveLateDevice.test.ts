@@ -202,7 +202,7 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
 
   test("R6b real startup filter never exposes live peer or later rows", async () => {
     const db = await createTestDatabase();
-    const repository = new VideoRecordingRepository(db);
+    const repository = new VideoRecordingRepository({ db });
     deps.recordingRepository = repository;
     incarnation = 1;
     try {

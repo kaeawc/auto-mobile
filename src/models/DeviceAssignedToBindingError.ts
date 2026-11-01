@@ -1,8 +1,9 @@
 import { ActionableError } from "./ActionableError";
+import type { Platform } from "./Platform";
 
 /** The slice of a managed-device registry entry the refusal reports. */
 export interface DeviceAssignedToBindingEntry {
-  platform: "android" | "ios";
+  platform: Platform;
   stableDeviceId: string;
   holder: "session_broker";
   scopeKey: string;
@@ -19,7 +20,7 @@ export const DEVICE_ASSIGNED_TO_BINDING_CODE = "device_assigned_to_binding";
 export class DeviceAssignedToBindingError extends ActionableError {
   readonly code = DEVICE_ASSIGNED_TO_BINDING_CODE;
   readonly retryable = false;
-  readonly platform: "android" | "ios";
+  readonly platform: Platform;
   readonly stableId: string;
   readonly scopeKey: string;
   /** The binding index holding the device, or null when it sits in the managed free pool. */

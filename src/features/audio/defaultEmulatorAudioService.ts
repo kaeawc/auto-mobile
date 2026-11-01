@@ -1,6 +1,11 @@
 import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
+import { ENV } from "../../config/env";
 import { ActionableError } from "../../models/ActionableError";
+import { resolveSetupUser } from "../../ctrlProxy/setupUser";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultEmulatorOutputTail } from "../../utils/android-cmdline-tools/EmulatorOutputTail";
+import { defaultDeviceTraits, isAutomotive } from "../../utils/android-cmdline-tools/deviceTraits";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
 import { FileEmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
@@ -8,6 +13,9 @@ import { Http2GrpcTransport } from "../../utils/android-cmdline-tools/emulatorGr
 import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { audioSourceTooLarge, EmulatorAudioService } from "./EmulatorAudioService";
+import { AdbGuestAudioCapture } from "./GuestAudioCapture";
+import { HostLoopbackAudioSession } from "./HostLoopbackAudioSession";
+import { audioLoopbackHelperPath, spawnLoopbackHelper } from "./audioLoopbackHelper";
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -50,15 +58,48 @@ export async function readRegularFileCapped(path: string, maxBytes: number): Pro
   }
 }
 
-/** The service over each emulator's real gRPC endpoint, as discovered on this host. */
+/**
+ * The service over each emulator's real gRPC endpoint, as discovered on this host, and over the host
+ * loopback devices for iOS Simulators.
+ */
 export function createEmulatorAudioService(): EmulatorAudioService {
   const fs = new DefaultFileSystem();
+  const discovery = new FileEmulatorGrpcDiscovery(fs);
   return new EmulatorAudioService({
-    discovery: new FileEmulatorGrpcDiscovery(fs),
+    discovery,
+    outputTail: defaultEmulatorOutputTail,
+    guestCapture: new AdbGuestAudioCapture(
+      (deviceId) =>
+        defaultAdbClientFactory.create({
+          deviceId,
+          platform: "android",
+          name: deviceId,
+        }),
+      discovery,
+      defaultIdGenerator,
+      {
+        resolveSetupUser: async (deviceId) => {
+          const adb = defaultAdbClientFactory.create({
+            deviceId,
+            name: deviceId,
+            platform: "android",
+          });
+          const traits = await defaultDeviceTraits.read(adb, deviceId);
+          return resolveSetupUser(adb, {
+            formFactor: isAutomotive(traits) ? "automotive" : undefined,
+          });
+        },
+      },
+    ),
     createSession: (endpoint) =>
       new EmulatorAudioClient(
         new Http2GrpcTransport(endpoint.address),
         createGrpcAuthorizer(endpoint.auth, fs),
+      ),
+    createHostLoopbackSession: () =>
+      new HostLoopbackAudioSession(
+        { helperPath: () => audioLoopbackHelperPath(), launchHelper: spawnLoopbackHelper },
+        ENV.IOS_AUDIO_LOOPBACK_HELPER.name,
       ),
     readFile: readRegularFileCapped,
     ids: defaultIdGenerator,

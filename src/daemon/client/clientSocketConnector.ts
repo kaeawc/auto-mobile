@@ -31,7 +31,9 @@ export function openDaemonSocket(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let socket: Socket | undefined = undefined;
     let removeAbortListener = () => {};
+    const isStaleSocket = () => host.getSocket() !== null && host.getSocket() !== socket;
 
     const fail = (error: Error) => {
       if (isStaleSocket()) {
@@ -41,7 +43,7 @@ export function openDaemonSocket(
       removeAbortListener();
       host.setConnected(false);
       host.setSocket(null);
-      socket.destroy();
+      socket?.destroy();
       // Type the transport failure so the proxy can recover sibling sessions
       // wedged by a daemon restart (#2599/#2737) instead of surfacing a raw
       // ECONNRESET/EPIPE/"socket hang up" that its recovery does not match.
@@ -68,9 +70,8 @@ export function openDaemonSocket(
       removeAbortListener = () => signal.removeEventListener("abort", onAbort);
     }
 
-    const isStaleSocket = () => host.getSocket() !== null && host.getSocket() !== socket;
-    const socket = createConnection(host.socketPath, () => {
-      if (settled || socket.destroyed || isStaleSocket()) {
+    const returnedSocket = createConnection(host.socketPath, () => {
+      if (settled || !socket || socket.destroyed || isStaleSocket()) {
         return;
       }
       host.timer.clearTimeout(timeout);
@@ -83,6 +84,13 @@ export function openDaemonSocket(
         resolve();
       }
     });
+    socket = returnedSocket;
+    if (settled) {
+      // An error after destroy is expected; the caller already received the timeout rejection.
+      socket.on("error", () => {});
+      socket.destroy();
+      return;
+    }
     host.setSocket(socket);
 
     socket.on("data", (data) => {
@@ -100,7 +108,7 @@ export function openDaemonSocket(
       fail(error);
     });
 
-    socket.once("close", () => onDaemonSocketClosed(host, socket));
+    socket.once("close", () => onDaemonSocketClosed(host, returnedSocket));
   });
 }
 

@@ -98,13 +98,18 @@ export function guardNamespaceNodes(
     : searchedNodes;
 }
 
+/** How an element-id query compares, and which captured nodes guard bare synthetic ids. */
+interface IdMatchOptions {
+  caseSensitive?: boolean;
+  /** Defaults to the searched nodes. */
+  captureNodes?: readonly SearchableEntry[];
+}
+
 export function matchId(
   nodes: SearchableEntry[],
   query: string,
   matchMode: MatchMode,
-  intent: ResolutionIntent,
-  caseSensitive?: boolean,
-  captureNodes: readonly SearchableEntry[] = nodes,
+  { intent, caseSensitive, captureNodes = nodes }: IdMatchOptions & { intent: ResolutionIntent },
 ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
   if (matchMode === "regex") {
     return {
@@ -136,15 +141,14 @@ export function matchId(
   if (guard) {
     return { matches: [], matchMode, failureReason: "ambiguous", error: guard };
   }
-  return matchNodeKeyOrNamespace(nodes, query, matchMode, intent, native);
+  return matchNodeKeyOrNamespace(nodes, query, matchMode, { intent, native });
 }
 
 function matchNodeKeyOrNamespace(
   nodes: SearchableEntry[],
   query: string,
   matchMode: MatchMode,
-  intent: ResolutionIntent,
-  native: SearchableEntry[],
+  { intent, native }: { intent: ResolutionIntent; native: SearchableEntry[] },
 ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
   const qualified = qualifiedId(query);
   const direct = nodes.filter(

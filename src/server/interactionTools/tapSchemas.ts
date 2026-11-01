@@ -15,6 +15,7 @@ import {
   addDeviceTargetingToSchema,
   compactExclusiveSelectorProperties,
   platformSchema,
+  watchAwarePlatformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
 } from "../../utils/schemaHelpers";
@@ -23,11 +24,25 @@ import { imageRelativePointSchema } from "../imageRelativePointSchema";
 import type { TapOnArgs } from "../interactionToolTypes";
 import { pointerSchema } from "../pointerSchema";
 
-function validateEnsureCheckedSchema(
-  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy">,
+function validateLongPressDuration(
+  action: string | undefined,
+  duration: number,
   ctx: z.RefinementCtx,
 ): void {
-  if (value.ensureChecked !== undefined && value.action !== "tap") {
+  if (action === undefined && duration > 0 && duration < LONG_PRESS_MIN_MS) {
+    ctx.addIssue({
+      code: "custom",
+      message: `longPress duration must be 0 (platform default) or at least ${LONG_PRESS_MIN_MS} ms`,
+      path: ["duration"],
+    });
+  }
+}
+
+function validateTapOnSelectionSchema(
+  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy" | "sibling" | "selector">,
+  ctx: z.RefinementCtx,
+): void {
+  if (value.ensureChecked !== undefined && (value.action ?? "tap") !== "tap") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'ensureChecked requires action "tap"',
@@ -39,6 +54,17 @@ function validateEnsureCheckedSchema(
       code: z.ZodIssueCode.custom,
       message: "ensureChecked cannot use random selection; use a unique selector or index",
       path: ["ensureChecked"],
+    });
+  }
+  if (
+    value.selectionStrategy === "unique" &&
+    (value.sibling || "accessibilityLink" in value.selector)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead",
+      path: ["selectionStrategy"],
     });
   }
 }
@@ -61,8 +87,8 @@ export const tapOnSchema = withJsonSchemaOverride(
           ),
         action: z
           .enum(["tap", "doubleTap", "longPress", "focus"])
-          .default("tap")
-          .describe("Action type (default: tap)"),
+          .optional()
+          .describe("Action type (default: longPress with positive duration, otherwise tap)"),
         selectionStrategy: resolverSelectionStrategySchema
           .optional()
           .describe(
@@ -86,7 +112,7 @@ export const tapOnSchema = withJsonSchemaOverride(
           .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
           .optional()
           .describe(
-            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom). Positive duration without action means longPress; positive duration with action tap is refused. For longPress, 0 or omitted uses the platform default.`,
           ),
         subtext: z
           .object({
@@ -135,12 +161,15 @@ export const tapOnSchema = withJsonSchemaOverride(
           ),
         // #5870: a `sessionUuid` resolves the platform, so `platform` is not
         // required — a device handle from getAndroid is sufficient on its own.
-        platform: platformSchema.optional(),
+        platform: watchAwarePlatformSchema(),
         ...responseShapeControlFields,
       })
       .strict(),
   ).superRefine((value, ctx) => {
-    validateEnsureCheckedSchema(value, ctx);
+    const { duration = 0 } = value;
+    const action = value.action ?? (duration > 0 ? "longPress" : "tap");
+    validateLongPressDuration(value.action, duration, ctx);
+    validateTapOnSelectionSchema({ ...value, action }, ctx);
     const isDirectLink = "accessibilityLink" in value.selector;
     const addIssue = (invalid: unknown, message: string, path: (string | number)[]) => {
       if (!invalid) {
@@ -152,11 +181,6 @@ export const tapOnSchema = withJsonSchemaOverride(
         path,
       });
     };
-    addIssue(
-      value.selectionStrategy === "unique" && (value.sibling || isDirectLink),
-      "unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead",
-      ["selectionStrategy"],
-    );
     if (!isDirectLink && !value.subtext) {
       return;
     }
@@ -165,9 +189,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       "accessibilityLink and subtext cannot be used together",
       ["subtext"],
     );
-    addIssue(value.action !== "tap", "semantic link activation supports only the tap action", [
-      "action",
-    ]);
+    addIssue(action !== "tap", "semantic link activation supports only the tap action", ["action"]);
     addIssue(value.sibling, "semantic link activation cannot use sibling", ["sibling"]);
     addIssue(
       value.retryIfNoChange || value.ensureTap,
@@ -204,6 +226,7 @@ export const tapOnSchema = withJsonSchemaOverride(
 export const tapAtSchema = withJsonSchemaOverride(
   coordinatePointInputSchema()
     .extend({
+      platform: watchAwarePlatformSchema(),
       includeExtras: responseShapeControlFields.includeExtras,
       x: coordinatePointInputSchema().shape.x.optional(),
       y: coordinatePointInputSchema().shape.y.optional(),
@@ -296,8 +319,8 @@ export const tapAnySchema = withJsonSchemaOverride(
         layer: hierarchyLayerSchema.optional(),
         action: z
           .enum(["tap", "doubleTap", "longPress"])
-          .default("tap")
-          .describe("Action type (default: tap)"),
+          .optional()
+          .describe("Action type (default: longPress when duration is given, otherwise tap)"),
         // Bounded like tapOn.duration so a negative longPress cannot silently
         // become a plain tap (#5769).
         duration: z
@@ -326,6 +349,24 @@ export const tapAnySchema = withJsonSchemaOverride(
         ...responseShapeControlFields,
       })
       .strict(),
-  ),
+  )
+    .superRefine((value, context) => {
+      validateLongPressDuration(value.action, value.duration ?? 0, context);
+      if (
+        value.duration !== undefined &&
+        value.action !== undefined &&
+        value.action !== "longPress"
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "duration is only valid with action longPress",
+          path: ["duration"],
+        });
+      }
+    })
+    .overwrite((value) => ({
+      ...value,
+      action: value.action ?? (value.duration !== undefined ? "longPress" : "tap"),
+    })),
   (js) => compactExclusiveSelectorProperties(js, ["container"]),
 );

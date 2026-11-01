@@ -63,7 +63,7 @@ describe("AndroidCtrlProxyClient network state sync is scoped to its device", ()
   test("device B receives no rules and no simulation that were set for device A", () => {
     const state = NetworkState.getInstance();
     state.addMock(DEVICE_A.deviceId, mockRule);
-    state.startSimulation(DEVICE_A.deviceId, "timeout", 30, null);
+    state.startSimulation(DEVICE_A.deviceId, "timeout", 30, { limit: null });
 
     const forB = syncedMessages(DEVICE_B);
 
@@ -74,7 +74,7 @@ describe("AndroidCtrlProxyClient network state sync is scoped to its device", ()
   test("device A still receives its own rules and simulation on reconnect", () => {
     const state = NetworkState.getInstance();
     const mock = state.addMock(DEVICE_A.deviceId, mockRule);
-    state.startSimulation(DEVICE_A.deviceId, "timeout", 30, null);
+    state.startSimulation(DEVICE_A.deviceId, "timeout", 30, { limit: null });
 
     const forA = syncedMessages(DEVICE_A);
 
@@ -132,7 +132,7 @@ describe("AndroidCtrlProxyClient reconnect sends the remaining error simulation 
   }
 
   test("reconnect right after start sends the full duration and keeps the legacy epoch", () => {
-    NetworkState.getInstance().startSimulation(DEVICE_A.deviceId, "http500", 30, null);
+    NetworkState.getInstance().startSimulation(DEVICE_A.deviceId, "http500", 30, { limit: null });
 
     expect(reconnectSimulationMessage()).toMatchObject({
       enabled: true,
@@ -142,7 +142,7 @@ describe("AndroidCtrlProxyClient reconnect sends the remaining error simulation 
   });
 
   test("reconnect ten seconds in sends what is left, not the original duration", () => {
-    NetworkState.getInstance().startSimulation(DEVICE_A.deviceId, "http500", 30, null);
+    NetworkState.getInstance().startSimulation(DEVICE_A.deviceId, "http500", 30, { limit: null });
     timer.advanceTime(10_000);
 
     expect(reconnectSimulationMessage()).toMatchObject({ enabled: true, remainingMs: 20_000 });

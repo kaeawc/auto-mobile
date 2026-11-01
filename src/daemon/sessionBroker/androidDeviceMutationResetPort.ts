@@ -36,6 +36,10 @@ import {
   SCREEN_STATE_MUTATION_KEY,
   isRestorableScreenState,
 } from "./mutations/screenStateMutation";
+import {
+  systemPropertyJournalName,
+  systemPropertyRevertValue,
+} from "./mutations/systemPropertyMutation";
 import { VOLUME_RESTORED_MARKER, volumeRevertScript } from "./mutations/volumeMutation";
 
 interface AndroidRevertCommand {
@@ -46,7 +50,7 @@ interface AndroidRevertCommand {
   wakeSleptScreen?: boolean;
 }
 
-/** A key-press volume revert runs one `cmd media_session` per stream set and per read-back. */
+/** A key-press volume revert sets and reads every stream, with a legacy setter fallback. */
 const VOLUME_REVERT_TIMEOUT_MS = 10_000;
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
 type AndroidRevertAdapter = (mutation: DeviceMutationInput) => AndroidRevertCommand[] | null;
@@ -77,7 +81,8 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     keyboard: (mutation) => this.settingCommands(mutation),
     clipboard: (mutation) => this.clipboardCommands(mutation),
     location: (mutation) => this.locationCommands(mutation),
-    preference: (mutation) => this.appDataCommands(mutation),
+    preference: (mutation) =>
+      this.appDataCommands(mutation) ?? this.systemPropertyCommands(mutation),
     "shared-file": (mutation) => this.fileCommands(mutation),
     "status-bar": (mutation) => this.statusBarCommands(mutation),
   };
@@ -138,7 +143,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
 
   capture(context: DeviceMutationResetContext): Promise<DeviceBaseline> {
     return captureAndroidMutationBaseline((command, timeoutMs) =>
-      this.execute(command, context, timeoutMs),
+      this.execute(command, context, { timeoutMs }),
     );
   }
 
@@ -150,11 +155,12 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     await cleanAndroidBaseline(
       baseline,
       context,
-      (command, timeoutMs) => this.execute(command, context, timeoutMs),
-      (mutation) => this.revert(mutation, context),
-      journalEntries,
+      (command, timeoutMs) => this.execute(command, context, { timeoutMs }),
+      { revert: (mutation) => this.revert(mutation, context), journalEntries },
     );
-    const output = await this.execute("shell cmd clipboard clear", context, undefined, true);
+    const output = await this.execute("shell cmd clipboard clear", context, {
+      optionalClipboard: true,
+    });
     if (this.unsupportedClipboard(output)) {
       logger.warn("Android cleaning skipped unsupported clipboard clear");
     } else if (this.failedOutput(output)) {
@@ -190,13 +196,11 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       return;
     }
     for (const { command, success, timeoutMs, retryable, wakeSleptScreen } of commands) {
-      const output = await this.execute(
-        command,
-        context,
+      const output = await this.execute(command, context, {
         timeoutMs,
-        mutation.kind === "clipboard",
+        optionalClipboard: mutation.kind === "clipboard",
         retryable,
-      );
+      });
       if (mutation.kind === "clipboard" && this.unsupportedClipboard(output)) {
         logger.warn("Android cleaning skipped unsupported journal clipboard clear");
         continue;
@@ -294,9 +298,11 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     command: string,
     context: DeviceMutationResetContext,
     // Legacy callers without a deadline retain one attempt; reset deadlines turn this into a floor.
-    timeoutMs = 2000,
-    optionalClipboard = false,
-    retryable = true,
+    {
+      timeoutMs = 2000,
+      optionalClipboard = false,
+      retryable = true,
+    }: { timeoutMs?: number; optionalClipboard?: boolean; retryable?: boolean } = {},
   ): Promise<string> {
     try {
       const dispatch = async (attemptTimeoutMs: number) => {
@@ -569,7 +575,11 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   }: DeviceMutationInput): AndroidRevertCommand[] | null {
     const prior = priorValue.state === "present" ? priorValue.value : undefined;
     return key === "timezone" && typeof prior === "string" && prior.length > 0
-      ? [{ command: `shell cmd alarm set-timezone ${shellQuote(prior)}` }]
+      ? [
+          { command: `shell cmd alarm set-timezone ${shellQuote(prior)}` },
+          // The prior was read from this property, so only an identical read-back proves restore.
+          { command: "shell getprop persist.sys.timezone", success: prior },
+        ]
       : null;
   }
 
@@ -605,6 +615,26 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           },
         ]
       : null;
+  }
+
+  /**
+   * Puts back a property `setPreference` wrote: `setprop` prints nothing on success, and only a
+   * read-back equal to the prior proves the restore. An absent prior is restored as `""`, which
+   * `getprop` reads the same as absent (`setprop` cannot delete a property); a `persist.*` name
+   * also writes that empty value to disk. Read-only and control properties have no revert.
+   */
+  private systemPropertyCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const name = systemPropertyJournalName(key);
+    const prior = systemPropertyRevertValue(priorValue);
+    return name === null || prior === null
+      ? null
+      : [
+          { command: `shell setprop ${name} ${shellQuote(prior)}`, success: "" },
+          { command: `shell getprop ${name}`, success: prior },
+        ];
   }
 
   /** Leaves SystemUI demo mode, then puts `sysui_demo_allowed` back to its journaled value. */

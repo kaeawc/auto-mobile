@@ -17,7 +17,7 @@ describe("NavigationRepository clock (#11862)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_700_000_000_000);
-    repo = new NavigationRepository(db, timer);
+    repo = new NavigationRepository({ db, timer });
   });
 
   afterEach(async () => {

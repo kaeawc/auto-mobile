@@ -115,6 +115,19 @@ EOF
   [[ "$status" -eq 124 ]]
 }
 
+@test "a test deadline override fires the portable watchdog early but still reports the budget (#16140)" {
+  start=$SECONDS
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0.1 \
+    AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS=0.1 \
+    AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$BATS_TEST_TMPDIR/snapshot" \
+    bash -c 'source scripts/ios/run_with_timeout.sh; run_with_timeout 30 sleep 20'
+  [[ "$status" -eq 124 ]]
+  # Far below the 30 s budget: the override, not the budget, decided when it fired.
+  ((SECONDS - start < 10))
+  [ -s "$BATS_TEST_TMPDIR/snapshot" ]
+}
+
 @test "fractional portable deadline preserves an early command exit status" {
   run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
     bash -c 'source scripts/ios/run_with_timeout.sh; run_with_timeout 1.5 bash -c "exit 7"'

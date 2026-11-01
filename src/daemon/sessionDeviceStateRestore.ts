@@ -17,7 +17,7 @@ import {
 } from "./deviceStateRestoreQueue";
 import type { IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
 import { KeepAwakeRestoreError } from "./KeepAwakeRestoreError";
-import { QueuedDeviceStateRestore } from "./queuedDeviceStateRestore";
+import { type PendingRestorationSteps, QueuedDeviceStateRestore } from "./queuedDeviceStateRestore";
 import {
   type BiometricRestoreTarget,
   type KeepScreenAwakeRestoreTarget,
@@ -158,17 +158,12 @@ export class SessionDeviceStateRestore {
     queue: DeviceStateRestoreQueue<NonNullable<Session["cacheData"][K]> & object>,
     slot: K,
     session: Session,
-    pendingSetups: Promise<void> | null,
-    start: (
-      deviceId: string,
-      target: PendingRestore<NonNullable<Session["cacheData"][K]> & object>,
-    ) => Promise<{ pending: Promise<void> | null }>,
-    again: (
-      session: Session,
-      pendingSetups: Promise<void> | null,
-    ) => Promise<{ pending: Promise<void> | null }>,
+    {
+      pendingSetups,
+      steps,
+    }: { pendingSetups: Promise<void> | null; steps: PendingRestorationSteps<K> },
   ): { pending: Promise<void> | null } | Promise<{ pending: Promise<void> | null }> {
-    return this.queued.getPendingRestoration(queue, slot, session, pendingSetups, start, again);
+    return this.queued.getPendingRestoration(queue, slot, session, { pendingSetups, ...steps });
   }
 
   startRestoration<S extends object>(
@@ -183,10 +178,12 @@ export class SessionDeviceStateRestore {
     spec: BoundedRetrySpec<S>,
     deviceId: string,
     target: PendingRestore<S>,
-    restoration: Promise<RestoreAttemptOutcome>,
-    restore: () => Promise<void>,
+    {
+      restoration,
+      restore,
+    }: { restoration: Promise<RestoreAttemptOutcome>; restore: () => Promise<void> },
   ): Promise<void> {
-    return this.queued.retryRestoreBounded(spec, deviceId, target, restoration, restore);
+    return this.queued.retryRestoreBounded(spec, deviceId, target, { restoration, restore });
   }
 
   forgetAbandonedRestore<S>(memory: Map<string, S>, deviceId: string, state: S): void {
@@ -208,10 +205,15 @@ export class SessionDeviceStateRestore {
     queue: DeviceStateRestoreQueue<NonNullable<Session["cacheData"][K]> & object>,
     slot: K,
     session: Session,
-    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
-    startRestore: () => Promise<{ pending: Promise<void> | null }>,
+    {
+      createSetup,
+      startRestore,
+    }: {
+      createSetup: (assertCurrentDevice: () => void) => Promise<void>;
+      startRestore: () => Promise<{ pending: Promise<void> | null }>;
+    },
   ): Promise<void> {
-    return this.queued.trackRestoreSetup(queue, slot, session, createSetup, startRestore);
+    return this.queued.trackRestoreSetup(queue, slot, session, { createSetup, startRestore });
   }
 
   getPendingScreenReaderRestoration(

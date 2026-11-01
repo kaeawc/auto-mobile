@@ -72,6 +72,12 @@ export const DEFAULT_MAX_INTERACTIONS = 200;
  * automatically discovering navigation paths, prioritizing likely navigation elements,
  * avoiding redundant interactions, and efficiently covering unexplored screens.
  */
+/** The session an exploration records under and the dialog-tap seam its blocker handlers use. */
+export interface ExploreSessionOptions {
+  sessionUuid?: string;
+  tapActionFactory?: DialogTapActionFactory;
+}
+
 export class Explore extends BaseVisualChange {
   private navigationManager: NavigationGraphService;
   private exploredElements: Map<string, TrackedElement>;
@@ -116,11 +122,13 @@ export class Explore extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
-    navigationManager?: NavigationGraphService,
-    sessionUuid?: string,
-    tapActionFactory?: DialogTapActionFactory,
+    {
+      navigationManager,
+      sessionUuid,
+      tapActionFactory,
+    }: ExploreSessionOptions & { navigationManager?: NavigationGraphService } = {},
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.exploredElements = new Map();
     this.elementParser = new DefaultElementParser();
@@ -199,7 +207,7 @@ export class Explore extends BaseVisualChange {
 
     try {
       if (options.dryRun) {
-        return await this.executeDryRun(options, progress, signal, perf, startTime);
+        return await this.executeDryRun(options, progress, signal, { perf, startTime });
       }
 
       // Set defaults
@@ -330,13 +338,11 @@ export class Explore extends BaseVisualChange {
         tracked.lastInteractionScreen !== (this.navigationManager.getCurrentScreen() ?? "unknown");
       // Perform interaction
       throwIfAborted(signal);
-      const interactionSuccess = await this.performInteraction(
-        nextElement,
-        observation,
+      const interactionSuccess = await this.performInteraction(nextElement, observation, {
         progress,
         perf,
         signal,
-      );
+      });
 
       if (!(await this.recordInteractionResult(interactionSuccess, mode, isNewInteraction))) {
         break;
@@ -451,14 +457,10 @@ export class Explore extends BaseVisualChange {
     }
 
     // Check for blocker screens (auth, permissions, etc.) and handle them
-    const blockerHandled = await detectAndHandleBlockers(
-      observation,
-      this.device,
-      this.adb,
-      this.elementParser,
-      progress,
-      this.blockerHandlerDeps(),
-    );
+    const blockerHandled = await detectAndHandleBlockers(observation, this.device, this.adb, {
+      elementParser: this.elementParser,
+      options: { ...this.blockerHandlerDeps(), progress },
+    });
     if (blockerHandled) {
       // Re-observe after handling blocker
       return "continue";
@@ -497,10 +499,12 @@ export class Explore extends BaseVisualChange {
         this.currentTargetEdge,
         this.graphTraversalState,
         this.navigationManager,
-        this.timer,
-        this.currentElementConfidence,
-        (reason) => {
-          this.stopReason = reason;
+        {
+          timer: this.timer,
+          elementConfidence: this.currentElementConfidence,
+          setStopReason: (reason) => {
+            this.stopReason = reason;
+          },
         },
       );
 
@@ -582,8 +586,7 @@ export class Explore extends BaseVisualChange {
     options: ExploreOptions,
     progress: ProgressCallback | undefined,
     signal: AbortSignal | undefined,
-    perf: PerformanceTracker,
-    startTime: number,
+    { perf, startTime }: { perf: PerformanceTracker; startTime: number },
   ): Promise<ExploreDryRunResult> {
     const maxInteractions = options.maxInteractions ?? DEFAULT_MAX_INTERACTIONS;
 
@@ -612,8 +615,7 @@ export class Explore extends BaseVisualChange {
         targetPackageName: this.targetPackageName,
         exploredElements: this.exploredElements,
       },
-      perf,
-      startTime,
+      { perf, startTime },
     );
   }
 
@@ -828,9 +830,11 @@ export class Explore extends BaseVisualChange {
   async performInteraction(
     element: Element,
     observation: ObserveResult,
-    progress?: ProgressCallback,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    {
+      progress,
+      perf,
+      signal,
+    }: { progress?: ProgressCallback; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<boolean> {
     const elementKey = getElementKey(element, observation.viewHierarchy);
     const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
@@ -1047,16 +1051,13 @@ export class Explore extends BaseVisualChange {
     });
   }
   private platformRecovery(): ExplorePlatformRecovery {
-    return new ExplorePlatformRecovery(
-      this.device,
-      this.adb,
-      this.timer,
-      async (toolName, args, signal) => {
+    return new ExplorePlatformRecovery(this.device, this.adb, this.timer, {
+      callInternalTool: async (toolName, args, signal) => {
         const response = await toolCaller.callInternal(toolName, args, undefined, signal);
         throwIfInternalToolFailed(response, toolName, this.device.platform);
       },
-      this.sessionUuid,
-    );
+      sessionUuid: this.sessionUuid,
+    });
   }
   async generateReport(
     initialGraph: ExportedGraph,

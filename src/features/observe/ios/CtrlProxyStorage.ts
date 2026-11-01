@@ -18,7 +18,7 @@ import type {
   PreferenceStoreResolution,
   PreferenceFile,
   KeyValueEntry,
-  KeyValueType,
+  KeyValueWrite,
   ListPreferenceFilesResult,
   GetPreferencesResult,
   GetPreferenceResult,
@@ -292,19 +292,16 @@ export class CtrlProxyStorage {
    *
    * @param packageName - Target app bundle identifier
    * @param fileName - Suite name
-   * @param key - The key to set
-   * @param value - The value to set (serialized as string, or null)
-   * @param type - The type of the value
+   * @param entry - The key to set, its value (serialized as string, or null) and its type
    * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async setPreference(
     packageName: string,
     fileName: string,
-    key: string,
-    value: string | null,
-    type: KeyValueType,
+    entry: KeyValueWrite,
     timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | undefined> {
+    const { key, value, type } = entry;
     const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 

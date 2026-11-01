@@ -24,18 +24,6 @@ describe("resolveViewHierarchyReadArgs", () => {
     });
   });
 
-  test("maps the deprecated positional form unchanged", () => {
-    const perf = new NoOpPerformanceTracker();
-    const signal = new AbortController().signal;
-    expect(resolveViewHierarchyReadArgs(perf, true, 5, signal, 100)).toEqual({
-      perf,
-      skipWaitForFresh: true,
-      minTimestamp: 5,
-      signal,
-      readOptions: 100,
-    });
-  });
-
   test("an options object without a read policy resolves no read options", () => {
     expect(resolveViewHierarchyReadArgs({ minTimestamp: 1 }).readOptions).toBeUndefined();
   });

@@ -115,14 +115,16 @@ export class SingleDisplayReconcileStage {
     // their own extraction policy.
     const initialMismatch = await this.d
       .windowIdentity()
-      .resolveWindowIdentityMismatch(
-        result,
-        captured.foregroundIdentity,
-        { sampled: false, identity: undefined, activityAttributionMismatch: false },
+      .resolveWindowIdentityMismatch(result, captured.foregroundIdentity, {
+        postCaptureForeground: {
+          sampled: false,
+          identity: undefined,
+          activityAttributionMismatch: false,
+        },
         getConfirmedFrameworkErrorDialog,
         minTimestamp,
         signal,
-      );
+      });
     const remainingMs = Math.min(
       500,
       (options?.timeoutMs ?? DEFAULT_HIERARCHY_READ_TIMEOUT_MS) -
@@ -133,9 +135,12 @@ export class SingleDisplayReconcileStage {
     }
     await this.d
       .staleRecovery()
-      .refreshKnownStaleHierarchy(result, initialMismatch.foreground, options, remainingMs, {
-        skipBackStack,
-        displayId: run.requestedDisplayId ?? run.observedAndroid?.logicalId ?? 0,
+      .refreshKnownStaleHierarchy(result, initialMismatch.foreground, options, {
+        remainingMs,
+        sideSamples: {
+          skipBackStack,
+          displayId: run.requestedDisplayId ?? run.observedAndroid?.logicalId ?? 0,
+        },
       });
     return true;
   }

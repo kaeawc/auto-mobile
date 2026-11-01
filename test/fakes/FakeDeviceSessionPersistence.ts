@@ -181,7 +181,8 @@ export class FakeDeviceSessionPersistence implements DaemonDeviceSessionStore {
             ? livePeerDaemonSessionIds()
             : [];
         if (reason && !peers.includes(row.daemon_session_id ?? "")) {
-          await this.markReleased(row.session_uuid, "expired", nowMs, reason, {
+          await this.markReleased(row.session_uuid, "expired", nowMs, {
+            reason,
             expectedRowGeneration: row.stable_identity_generation ?? 0,
             onlyIfRecoverable: true,
             ...(reason === "restart-recovery-timeout"
@@ -270,8 +271,7 @@ export class FakeDeviceSessionPersistence implements DaemonDeviceSessionStore {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options: MarkReleasedOptions = {},
+    { reason, ...options }: MarkReleasedOptions & { reason: string },
   ): Promise<void> {
     const fault = this.faultPlan?.enter("markReleased");
     if (fault?.pause) {

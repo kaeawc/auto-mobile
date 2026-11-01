@@ -10,6 +10,16 @@ final class PrototypeNamespaceTests: XCTestCase {
         XCTAssertNil(PrototypeNamespacePolicy.buttonStyle(nil, osMajor: 26))
     }
 
+    func testOutlinedButtonIsNotDrawnAsTonal() {
+        XCTAssertEqual(PrototypeNamespacePolicy.buttonChrome("outlined"), .outlined)
+        XCTAssertEqual(PrototypeNamespacePolicy.buttonChrome("tonal"), .tonal)
+        XCTAssertNotEqual(PrototypeNamespacePolicy.buttonChrome("outlined"), .tonal)
+        XCTAssertEqual(PrototypeNamespacePolicy.buttonChrome("elevated"), .elevated)
+        XCTAssertEqual(PrototypeNamespacePolicy.buttonChrome("text"), .text)
+        XCTAssertEqual(PrototypeNamespacePolicy.buttonChrome(nil), .filled)
+        XCTAssertEqual(PrototypeNamespacePolicy.buttonChrome("filled"), .filled)
+    }
+
     func testHoverIsRenderOnlyFrom17() {
         XCTAssertNil(PrototypeNamespacePolicy.hover("lift", osMajor: 16))
         XCTAssertEqual(PrototypeNamespacePolicy.hover("highlight", osMajor: 17), "highlight")

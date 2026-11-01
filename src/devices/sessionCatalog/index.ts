@@ -5,3 +5,8 @@ export {
 export type { AndroidCatalogPolicy, AndroidNativeCatalogReader } from "./androidCatalogAdapter";
 export { adaptIosSessionDeviceCatalog, readIosSessionDeviceCatalog } from "./iosCatalogAdapter";
 export type { IosNativeCatalogReader, IosNativeRuntime } from "./iosCatalogAdapter";
+export {
+  adaptWatchSessionDeviceCatalog,
+  readWatchSessionDeviceCatalog,
+} from "./watchCatalogAdapter";
+export type { WatchNativeCatalogReader } from "./watchCatalogAdapter";

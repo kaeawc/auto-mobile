@@ -1,3 +1,4 @@
+import { watchPress, unsupportedWatchAction } from "../watch/WatchActions";
 import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
 import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
@@ -170,12 +171,40 @@ export function acceptAndroidHomeAlreadyOnLauncher(
   }
 }
 
+/** The runner verified the App Switcher is already open, so the press is a no-op success. */
+export function isVerifiedAlreadyOpenSwitcher(reply: {
+  success: boolean;
+  recentAppsRoute?: string;
+}): boolean {
+  return reply.success && reply.recentAppsRoute === "already-open";
+}
+
+/** A verified already-open switcher needs no visual change: turn "No visual change" into success. */
+export function acceptVerifiedAlreadyOpenSwitcher(
+  result: { success: boolean; error?: string },
+  verifiedAlreadyOpen: boolean,
+): void {
+  if (verifiedAlreadyOpen && result.error === "No visual change observed") {
+    result.success = true;
+    delete result.error;
+  }
+}
+
+/** Display-fence collaborators, CtrlProxy overrides and the iOS/dispatch seams; all optional. */
+export type PressButtonCollaborators = DisplayFenceDependencies &
+  PressButtonCtrlProxyOverrides & {
+    simctl?: Pick<SimCtl, "executeCommandArgs">;
+    holdRequest?: DispatchedRequestHold;
+  };
+
 /** Per-press dispatch inputs threaded through the platform helpers (#11835). */
 interface PressDispatchOptions {
   timeoutMs?: number;
   frameContext?: string;
   signal?: AbortSignal;
   onDispatch?: () => void;
+  /** Receives the runner's iOS recent-apps route so callers can accept a verified no-op. */
+  onRecentAppsRoute?: (route: string | undefined) => void;
 }
 
 export class PressButton extends BaseVisualChange {
@@ -183,17 +212,19 @@ export class PressButton extends BaseVisualChange {
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
   private readonly systemActionClient?: PressButtonCtrlProxyOverrides["systemActionClient"];
   private readonly deviceTraits?: DeviceTraits;
+  private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
+  private readonly holdRequest?: DispatchedRequestHold;
 
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
-    private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
-    private readonly holdRequest?: DispatchedRequestHold,
-    collaborators: DisplayFenceDependencies & PressButtonCtrlProxyOverrides = {},
+    collaborators: PressButtonCollaborators = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.device = device;
+    this.simctl = collaborators.simctl ?? new SimCtlClient(device);
+    this.holdRequest = collaborators.holdRequest;
     this.iosLockStateInvalidator = collaborators.iosLockStateInvalidator;
     this.globalActionClient = collaborators.globalActionClient;
     this.frameContextClient = collaborators.frameContextClient;
@@ -231,10 +262,9 @@ export class PressButton extends BaseVisualChange {
   } {
     return {
       verifyAndroidHomeForeground: (options = {}) => this.verifyAndroidHomeForeground(options),
-      executeAndroidButtonPress: (button, timeoutMs, frameContext, signal, onDispatch) =>
-        this.executeAndroidButtonPress(button, { timeoutMs, frameContext, signal, onDispatch }),
-      executeiOSButtonPress: (button, timeoutMs, frameContext, signal, onDispatch) =>
-        this.executeiOSButtonPress(button, { timeoutMs, frameContext, signal, onDispatch }),
+      executeAndroidButtonPress: (button, options = {}) =>
+        this.executeAndroidButtonPress(button, options),
+      executeiOSButtonPress: (button, options = {}) => this.executeiOSButtonPress(button, options),
     };
   }
 
@@ -248,8 +278,7 @@ export class PressButton extends BaseVisualChange {
     signal: AbortSignal | undefined,
     timeoutMs: number | undefined,
     send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
-    liveWait = false,
+    { onDispatch, liveWait = false }: { onDispatch?: () => void; liveWait?: boolean } = {},
   ): Promise<T> {
     if (this.holdRequest) {
       return this.holdRequest(signal, timeoutMs, send, onDispatch);
@@ -271,6 +300,12 @@ export class PressButton extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    if (this.device.platform === "watchos") {
+      if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
+        unsupportedWatchAction("home with steps");
+      }
+      return watchPress(this.device.deviceId, button, signal);
+    }
     const rotary = isRotaryButton(button) ? this.rotaryInput() : undefined;
     // Refuse a bad rotary call before observing; `steps` means nothing on any other button.
     const rotarySteps = isRotaryButton(button)
@@ -299,6 +334,7 @@ export class PressButton extends BaseVisualChange {
     };
     let startedOnFallbackSpringboard = false;
     let pressSucceeded = false;
+    let verifiedAlreadyOpen = false;
     const result = await this.observedInteraction(async (previousObservation) => {
       // A Home press on SpringBoard may change nothing (#14954); that is a no-op success.
       if (isIosHomePressOnSpringboard(this.device.platform, button, previousObservation)) {
@@ -312,12 +348,22 @@ export class PressButton extends BaseVisualChange {
       const pressed = await perf.track("buttonPress", () =>
         rotary && isRotaryButton(button)
           ? this.pressRotary(rotary, button, rotarySteps ?? 1, signal)
-          : this.press(button, undefined, undefined, signal),
+          : this.press(button, {
+              signal,
+              onRecentAppsRoute: (recentAppsRoute) => {
+                verifiedAlreadyOpen = isVerifiedAlreadyOpenSwitcher({
+                  success: true,
+                  recentAppsRoute,
+                });
+              },
+            }),
       );
       pressSucceeded = pressed.success;
+      verifiedAlreadyOpen &&= pressed.success;
       return pressed;
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
+    acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
     acceptAndroidHomeAlreadyOnLauncher(result, {
       platform: this.device.platform,
       button,
@@ -364,10 +410,19 @@ export class PressButton extends BaseVisualChange {
    */
   async press(
     button: string,
-    timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    {
+      timeoutMs,
+      frameContext,
+      signal,
+      onDispatch,
+      onRecentAppsRoute,
+    }: {
+      timeoutMs?: number;
+      frameContext?: string;
+      signal?: AbortSignal;
+      onDispatch?: () => void;
+      onRecentAppsRoute?: (route: string | undefined) => void;
+    } = {},
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
     let dispatched = false;
@@ -392,6 +447,7 @@ export class PressButton extends BaseVisualChange {
             frameContext,
             signal,
             onDispatch: markDispatch,
+            onRecentAppsRoute,
           });
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
@@ -535,8 +591,7 @@ export class PressButton extends BaseVisualChange {
               },
             }),
           ),
-        onDispatch,
-        true,
+        { onDispatch, liveWait: true },
       );
       this.assertHeldRequestLive(signal);
     } catch (error) {
@@ -604,19 +659,18 @@ export class PressButton extends BaseVisualChange {
         signal,
         budget,
         (fenced, markDispatch) =>
-          client.requestGlobalAction(
-            action.wireAction,
-            budget,
-            undefined,
+          client.requestGlobalAction(action.wireAction, budget, undefined, {
             frameContext,
-            fenced,
-            markDispatch,
-          ),
-        () => {
-          dispatched = true;
-          onDispatch?.();
+            signal: fenced,
+            onDispatch: markDispatch,
+          }),
+        {
+          onDispatch: () => {
+            dispatched = true;
+            onDispatch?.();
+          },
+          liveWait: true,
         },
-        true,
       );
       throwIfAborted(signal);
       if (result.success) {
@@ -677,20 +731,19 @@ export class PressButton extends BaseVisualChange {
         signal,
         globalActionTimeout,
         (fenced, markDispatch) =>
-          client.requestGlobalAction(
-            normalized,
-            globalActionTimeout,
-            undefined,
+          client.requestGlobalAction(normalized, globalActionTimeout, undefined, {
             frameContext,
-            fenced,
-            markDispatch,
-          ),
-        () => {
-          // HOME is idempotent; only latch presses that must not be replayed.
-          dispatched = normalized !== "home";
-          onDispatch?.();
+            signal: fenced,
+            onDispatch: markDispatch,
+          }),
+        {
+          onDispatch: () => {
+            // HOME is idempotent; only latch presses that must not be replayed.
+            dispatched = normalized !== "home";
+            onDispatch?.();
+          },
+          liveWait: true,
         },
-        true,
       );
       throwIfAborted(signal);
       if (result.success) {
@@ -775,7 +828,7 @@ export class PressButton extends BaseVisualChange {
     button: string,
     dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
-    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
+    const { timeoutMs, frameContext, signal, onDispatch, onRecentAppsRoute } = dispatch;
     throwIfAborted(signal);
     const normalizedButton = button.toLowerCase();
     if (
@@ -789,17 +842,15 @@ export class PressButton extends BaseVisualChange {
             signal,
             timeoutMs,
             (fenced, dispatch) =>
-              client.requestPressButton(
-                normalizedButton,
-                timeoutMs,
-                undefined,
+              client.requestPressButton(normalizedButton, timeoutMs, undefined, {
                 frameContext,
-                fenced,
-                dispatch,
-              ),
-            onDispatch,
+                signal: fenced,
+                onDispatch: dispatch,
+              }),
+            { onDispatch },
           );
       this.assertHeldRequestLive(signal);
+      onRecentAppsRoute?.((result as { recentAppsRoute?: string }).recentAppsRoute);
       return result.success
         ? { success: true, button, keyCode: -1 }
         : iosPressFailureResult(button, normalizedButton, result);
@@ -832,7 +883,11 @@ export class PressButton extends BaseVisualChange {
         ) {
           if (!this.holdRequest) {
             await awaitWhileRequestIsLive(
-              new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation({
+              new HomeScreen(this.device, {
+                adb: null,
+                timer: this.timer,
+                simctl: this.simctl,
+              }).executeIosHomeNavigation({
                 frameContext,
                 timeoutMs,
                 signal,
@@ -853,14 +908,18 @@ export class PressButton extends BaseVisualChange {
                   dispatch();
                   return this.simctl.executeCommandArgs(args, options);
                 },
-                onDispatch,
+                { onDispatch },
               );
               return launch;
             },
           };
           try {
             // Verification uses the caller signal; only the launch wait is fenced.
-            await new HomeScreen(this.device, null, this.timer, simctl).executeIosHomeNavigation({
+            await new HomeScreen(this.device, {
+              adb: null,
+              timer: this.timer,
+              simctl,
+            }).executeIosHomeNavigation({
               frameContext,
               timeoutMs,
               signal,
@@ -875,8 +934,12 @@ export class PressButton extends BaseVisualChange {
           signal,
           timeoutMs,
           (fenced, dispatch) =>
-            client.requestPressHome(timeoutMs, undefined, frameContext, fenced, dispatch),
-          onDispatch,
+            client.requestPressHome(timeoutMs, undefined, {
+              frameContext,
+              signal: fenced,
+              onDispatch: dispatch,
+            }),
+          { onDispatch },
         );
         throwIfAborted(signal);
         return result;
@@ -885,16 +948,24 @@ export class PressButton extends BaseVisualChange {
           signal,
           timeoutMs,
           (fenced, dispatch) =>
-            client.requestPressBack(timeoutMs, undefined, frameContext, fenced, dispatch),
-          onDispatch,
+            client.requestPressBack(timeoutMs, undefined, {
+              frameContext,
+              signal: fenced,
+              onDispatch: dispatch,
+            }),
+          { onDispatch },
         );
       case "recent":
         return await this.awaitDispatchedRequest(
           signal,
           timeoutMs,
           (fenced, dispatch) =>
-            client.requestRecentApps(timeoutMs, undefined, frameContext, fenced, dispatch),
-          onDispatch,
+            client.requestRecentApps(timeoutMs, undefined, {
+              frameContext,
+              signal: fenced,
+              onDispatch: dispatch,
+            }),
+          { onDispatch },
         );
       default:
         return { success: false, error: `Unsupported iOS button: ${button}` };

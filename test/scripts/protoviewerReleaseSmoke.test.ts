@@ -1,3 +1,12 @@
+import {
+  runDuoSmoke,
+  validateDuoOptions,
+  type DuoScreens,
+  type PostureSetter,
+  type DuoArtifacts,
+} from "../../scripts/release/lib/protoviewer-smoke/duoFlow";
+import { parseSimulatorDisplays } from "../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+import { loadDuoEnumerate } from "../fixtures/loadDuoEnumerate";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readPrototypeBundle } from "../../src/features/prototype/prototypeBundle";
 import type { ProtoViewerDevice } from "../../src/features/prototype/protoViewer/protoViewerDevice";
@@ -298,5 +307,106 @@ describe("smoke bundles", () => {
     for (const entry of [built.bundled, built.imported]) {
       expect(readPrototypeBundle(entry.bytes).ok).toBe(true);
     }
+  });
+});
+
+const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+class FakeDuo implements PostureSetter, DuoScreens, DuoArtifacts {
+  readonly postures: string[] = [];
+  readonly captures: string[] = [];
+  readonly saved: string[] = [];
+  displays = parseSimulatorDisplays(loadDuoEnumerate());
+  failPosture?: "closed" | "opened";
+  image = PNG;
+  written = PNG;
+  async set(posture: "closed" | "opened"): Promise<void> {
+    this.postures.push(posture);
+    if (this.failPosture === posture) {
+      throw new Error("posture unavailable");
+    }
+  }
+  async enumerate() {
+    return this.displays;
+  }
+  async screenshot(display: string) {
+    this.captures.push(display);
+    return this.image;
+  }
+  async save(name: string, _bytes: Uint8Array) {
+    this.saved.push(name);
+    return this.written;
+  }
+}
+const duoRun = (fake: FakeDuo) =>
+  runDuoSmoke(new FakeDriver({}), bundle, {
+    posture: fake,
+    screens: fake,
+    artifacts: fake,
+  });
+describe("Duo release smoke", () => {
+  test("screenshots explicitly select the cover then inner display and fold back", async () => {
+    const fake = new FakeDuo();
+    expect(summarize(await duoRun(fake)).failed).toBe(false);
+    expect(fake.captures).toEqual(["primary", "primary-1"]);
+    expect(fake.postures).toEqual(["closed", "opened", "closed"]);
+    expect(fake.saved).toEqual(["closed.png", "opened.png"]);
+  });
+  test("a missing display fails with the available names", async () => {
+    const fake = new FakeDuo();
+    fake.displays = fake.displays.filter((display) => display.name !== "primary-1");
+    const result = summarize(await duoRun(fake));
+    expect(result.failed).toBe(true);
+    expect(result.text).toContain("missing display primary-1; available displays: primary");
+    expect(fake.captures).toEqual(["primary"]);
+    expect(fake.postures.at(-1)).toBe("closed");
+  });
+  for (const posture of ["closed", "opened"] as const) {
+    test(`a failing ${posture} command fails the check and still folds back`, async () => {
+      const fake = new FakeDuo();
+      fake.failPosture = posture;
+      const result = summarize(await duoRun(fake));
+      expect(result.failed).toBe(true);
+      expect(result.text).toContain("posture unavailable");
+      expect(fake.postures.at(-1)).toBe("closed");
+      expect(fake.postures.filter((value) => value === "closed")).toHaveLength(2);
+    });
+  }
+  test("validates the written PNG, including an empty or corrupt file", async () => {
+    for (const written of [new Uint8Array(), new Uint8Array([1, 2, 3])]) {
+      const fake = new FakeDuo();
+      fake.written = written;
+      expect(summarize(await duoRun(fake)).failed).toBe(true);
+      expect(fake.postures.at(-1)).toBe("closed");
+    }
+  });
+  test("Duo usage errors are pure and mapped to exit 2 by the CLI", () => {
+    expect(validateDuoOptions({ duo: true, platform: "ios" })).toBe(
+      "--duo requires --posture-command",
+    );
+    expect(validateDuoOptions({ duo: true, platform: "android", postureCommand: "posture" })).toBe(
+      "--duo requires platform ios",
+    );
+    expect(
+      validateDuoOptions({ duo: true, platform: "ios", postureCommand: "posture" }),
+    ).toBeUndefined();
+    expect(validateDuoOptions({ platform: "android" })).toBeUndefined();
+  });
+  test("non-Duo minified smoke summary remains unchanged", async () => {
+    const checks = await runMinifiedSmoke(new FakeDriver({}), "min.apk", {
+      bundled: bundle,
+      imported: bundle,
+    });
+    expect(summarize(checks)).toEqual({
+      failed: false,
+      text: [
+        "PASS    install release artifact: min.apk",
+        "PASS    import kept: libraryId 11111111-1111-4111-8111-111111111100",
+        "PASS    open kept: opened 11111111-1111-4111-8111-111111111100",
+        "PASS    import kept: libraryId 11111111-1111-4111-8111-111111111101",
+        "PASS    open kept: opened 11111111-1111-4111-8111-111111111101",
+        "SKIPPED settings screen: no android UI driver in this script; check Settings and Open-source licenses by hand",
+        "SKIPPED licenses screen: same",
+      ].join("\n"),
+    });
   });
 });

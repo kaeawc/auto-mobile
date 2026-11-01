@@ -71,47 +71,50 @@ function serializeDirectMutationPerFile<T>(
   deviceId: string,
   appId: string,
   safeFileName: string,
-  userId: number,
-  task: () => Promise<T>,
+  { userId, task }: { userId: number; task: () => Promise<T> },
 ): Promise<T> {
-  return getAndroidSharedPreferencesMutationCoordinator().run(
-    deviceId,
-    appId,
-    safeFileName,
-    task,
+  return getAndroidSharedPreferencesMutationCoordinator().run(deviceId, appId, safeFileName, {
+    mutation: task,
     userId,
-  );
+  });
+}
+
+/** The app, SharedPreferences file and Android user a direct-file key-value mutation targets. */
+export interface AndroidKeyValueFileTarget {
+  appId: string;
+  fileName: string;
+  userId?: number;
 }
 
 /** Writes `key` = `value` (of `type`) into the on-device SharedPreferences XML file. */
 export async function setAndroidKeyValueDirect(
   adb: AdbExecutor,
   deviceId: string,
-  target: { appId: string; fileName: string; userId?: number },
+  target: AndroidKeyValueFileTarget,
   entry: { key: string; value: string; type: KeyValueType },
 ): Promise<void> {
   const { appId, fileName, userId } = target;
   const { key, value, type } = entry;
   const safeFileName = androidKeyValueFileName(fileName);
   const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
-  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
-    const existingXml = await readAndroidPreferencesXml(adb, appId, safeFileName, targetUser);
-    const document = await parseAndroidPreferencesXml(existingXml);
-    document.map ??= {};
-    removeNamedNodes(document, key);
+  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, {
+    userId: targetUser,
+    task: async () => {
+      const existingXml = await readAndroidPreferencesXml(adb, appId, safeFileName, targetUser);
+      const document = await parseAndroidPreferencesXml(existingXml);
+      document.map ??= {};
+      removeNamedNodes(document, key);
 
-    const tag = tagForType(type);
-    const nodes = arrayOfNodes(document.map[tag]);
-    nodes.push(androidKeyValueNode(key, value, type));
-    document.map[tag] = nodes;
+      const tag = tagForType(type);
+      const nodes = arrayOfNodes(document.map[tag]);
+      nodes.push(androidKeyValueNode(key, value, type));
+      document.map[tag] = nodes;
 
-    await writeAndroidPreferencesXml(
-      adb,
-      appId,
-      safeFileName,
-      serializeAndroidPreferencesXml(document),
-      targetUser,
-    );
+      await writeAndroidPreferencesXml(adb, appId, safeFileName, {
+        xml: serializeAndroidPreferencesXml(document),
+        userId: targetUser,
+      });
+    },
   });
 }
 
@@ -119,33 +122,32 @@ export async function setAndroidKeyValueDirect(
 export async function removeAndroidKeyValueDirect(
   adb: AdbExecutor,
   deviceId: string,
-  appId: string,
-  fileName: string,
+  target: AndroidKeyValueFileTarget,
   key: string,
-  userId?: number,
 ): Promise<void> {
+  const { appId, fileName, userId } = target;
   const safeFileName = androidKeyValueFileName(fileName);
   const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
-  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
-    const { xml: existingXml, exists } = await readAndroidPreferencesXmlIfExists(
-      adb,
-      appId,
-      safeFileName,
-      targetUser,
-    );
-    if (!exists) {
-      return;
-    }
-    const document = await parseAndroidPreferencesXml(existingXml);
-    document.map ??= {};
-    removeNamedNodes(document, key);
-    await writeAndroidPreferencesXml(
-      adb,
-      appId,
-      safeFileName,
-      serializeAndroidPreferencesXml(document),
-      targetUser,
-    );
+  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, {
+    userId: targetUser,
+    task: async () => {
+      const { xml: existingXml, exists } = await readAndroidPreferencesXmlIfExists(
+        adb,
+        appId,
+        safeFileName,
+        targetUser,
+      );
+      if (!exists) {
+        return;
+      }
+      const document = await parseAndroidPreferencesXml(existingXml);
+      document.map ??= {};
+      removeNamedNodes(document, key);
+      await writeAndroidPreferencesXml(adb, appId, safeFileName, {
+        xml: serializeAndroidPreferencesXml(document),
+        userId: targetUser,
+      });
+    },
   });
 }
 
@@ -154,29 +156,28 @@ export async function clearAndroidKeyValueFileDirect(
   adb: AdbExecutor,
   deviceId: string,
   appId: string,
-  fileName: string,
-  userId?: number,
+  { fileName, userId }: { fileName: string; userId?: number },
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
   const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
-  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
-    const { exists } = await readAndroidPreferencesXmlIfExists(
-      adb,
-      appId,
-      safeFileName,
-      targetUser,
-    );
-    if (!exists) {
-      return;
-    }
-    const emptyDocument: AndroidPreferencesXmlDocument = { map: {} };
-    await writeAndroidPreferencesXml(
-      adb,
-      appId,
-      safeFileName,
-      serializeAndroidPreferencesXml(emptyDocument),
-      targetUser,
-    );
+  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, {
+    userId: targetUser,
+    task: async () => {
+      const { exists } = await readAndroidPreferencesXmlIfExists(
+        adb,
+        appId,
+        safeFileName,
+        targetUser,
+      );
+      if (!exists) {
+        return;
+      }
+      const emptyDocument: AndroidPreferencesXmlDocument = { map: {} };
+      await writeAndroidPreferencesXml(adb, appId, safeFileName, {
+        xml: serializeAndroidPreferencesXml(emptyDocument),
+        userId: targetUser,
+      });
+    },
   });
 }
 
@@ -251,8 +252,10 @@ export async function withAndroidSharedPreferencesInspectionFallback(
   appId: string,
   fileName: string,
   createAdb: () => AdbExecutor,
-  viaSdk: () => Promise<void>,
-  viaDirectFile: (adb: AdbExecutor) => Promise<void>,
+  {
+    viaSdk,
+    viaDirectFile,
+  }: { viaSdk: () => Promise<void>; viaDirectFile: (adb: AdbExecutor) => Promise<void> },
 ): Promise<SharedPreferencesInspectionFallbackResult> {
   try {
     await viaSdk();

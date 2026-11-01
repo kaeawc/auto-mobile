@@ -8,7 +8,10 @@ for (const [name, value] of unionFixtures) {
   test(`migrated ${name} satisfies the existing contract interpreter`, () => {
     const spec = {
       id: "models",
-      requires: { platform: ["test", "clipboard", "media"] },
+      requires: {
+        platform: ["test", "clipboard", "media", "map", "cast", "camera"],
+        permissions: [{ name: "camera", purpose: "Preview" }],
+      },
       state: {
         enabled: true,
         text: "Text",
@@ -20,6 +23,7 @@ for (const [name, value] of unionFixtures) {
         status: "idle",
       },
       data: { points: [{ value: 1 }], items: [], value: 1 },
+      media: { players: { main: { kind: "video", source: { sample: "countdown" } } } },
       window: { placement: { type: "fullscreen" }, opacity: 100 },
       root: {
         type: "column",

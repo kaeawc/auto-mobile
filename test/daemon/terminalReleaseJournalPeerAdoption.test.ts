@@ -83,7 +83,7 @@ async function world() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_700_000_000_000);
   db = await createTestDatabase();
-  const repository = new DeviceSessionRepository(db, timer);
+  const repository = new DeviceSessionRepository({ db, timer });
   const files = new FakeTerminalReleaseJournalFileSystem();
   const live = new Set<string>();
   /** Start a daemon as daemon.ts does: listed live, then its journal adopts dead daemons' files. */
@@ -112,12 +112,9 @@ async function world() {
       timeoutMs: IDLE_MS,
       stableDeviceId: STABLE_ID,
     });
-    await repository.markReleased(
-      "s",
-      "expired",
-      timer.now(),
-      deviceRestartReleaseReason(STABLE_ID),
-    );
+    await repository.markReleased("s", "expired", timer.now(), {
+      reason: deviceRestartReleaseReason(STABLE_ID),
+    });
     // B starts while A is live: startup adoption leaves A's journal alone.
     return { a, b: start("daemon-b") };
   };

@@ -203,13 +203,10 @@ export class ObservedAndroidDisplayCache {
       });
       const hasPostures = (device.displays?.postures.length ?? 0) > 0;
       throw new DisplaySelectionError(
-        buildDisconnectedPanelMessage(
-          panel.key,
-          panel.role,
-          connectedPanels,
+        buildDisconnectedPanelMessage(panel.key, panel.role, connectedPanels, {
           hasPostures,
-          selectedDisplayPin() !== undefined,
-        ),
+          pinned: selectedDisplayPin() !== undefined,
+        }),
         { disconnectedPanel: { panel, connectedPanels, hasPostures } },
       );
     }
@@ -221,10 +218,9 @@ export class ObservedAndroidDisplayCache {
     device: BootedDevice,
     adb: AdbCommandRunner,
     displayId: number | null | undefined,
-    signal?: AbortSignal,
-    identity?: AndroidPanelIdentity,
-    allowProbe = true,
+    options?: { signal?: AbortSignal; identity?: AndroidPanelIdentity; allowProbe?: boolean },
   ): Promise<DisplayPanel | undefined> {
+    const { signal, identity, allowProbe = true } = { ...options };
     const panels = device.displays?.panels ?? [];
     const direct = panelForAndroidIdentity(panels, identity);
     if (direct) {

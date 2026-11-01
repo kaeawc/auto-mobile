@@ -29,20 +29,16 @@ test("a retained base does not keep a finished label's restart handoff recoverab
     const deviceId = await hunt.acquire();
     const { sessionManager, pool } = hunt.daemon();
     hunt.setProbeStep(async (device) => {
-      await releaseSessionAndDevice(
-        sessionManager,
-        pool,
-        device.deviceId,
-        LABEL_B,
-        deviceRestartReleaseReason(device.deviceId),
-      );
+      await releaseSessionAndDevice({ manager: sessionManager, pool }, device.deviceId, LABEL_B, {
+        reason: deviceRestartReleaseReason(device.deviceId),
+      });
     });
 
     await hunt.runPlan(twoDevicePlan(["B"]));
 
     expect(sessionManager.getSession(BASE)?.assignedDevice).toBe(deviceId);
     await expect(
-      sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+      sessionManager.getOrCreateSession(LABEL_B, pool, "ios", { requireIssuedSession: true }),
     ).rejects.toBeInstanceOf(TerminalSessionError);
     expect(hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
   } finally {
@@ -88,7 +84,9 @@ test("a plan releases a base session it acquired itself", async () => {
     // Automation refuses never-issued UUIDs. A released base can be re-issued by the plan.
     const deviceId = await hunt.acquire();
     const { sessionManager, pool } = hunt.daemon();
-    await releaseSessionAndDevice(sessionManager, pool, deviceId, BASE, "plan-auto-release");
+    await releaseSessionAndDevice({ manager: sessionManager, pool }, deviceId, BASE, {
+      reason: "plan-auto-release",
+    });
     expect(hunt.daemon().sessionManager.getSession(BASE)).toBeNull();
     hunt.setProbeStep(async (device) => {
       expect(hunt.poolHolder(device.deviceId)).toBe(BASE);
@@ -159,12 +157,9 @@ test.each(["plan", "caller", "released-and-reacquired"] as const)(
           heartbeatTimeoutMs: 60_000,
           hasReceivedHeartbeat: false,
         });
-        await hunt.persistence.markReleased(
-          BASE,
-          "released",
-          hunt.timer.now(),
-          "plan-auto-release",
-        );
+        await hunt.persistence.markReleased(BASE, "released", hunt.timer.now(), {
+          reason: "plan-auto-release",
+        });
       }
       hunt.setProbeStep(async () => {
         throw new Error("recoverable probe failure");
@@ -180,11 +175,12 @@ test.each(["plan", "caller", "released-and-reacquired"] as const)(
       if (owner === "released-and-reacquired") {
         // Any release must forget the plan hold before a caller re-acquires this UUID.
         await releaseSessionAndDevice(
-          sessionManager,
-          hunt.daemon().pool,
+          { manager: sessionManager, pool: hunt.daemon().pool },
           deviceA.deviceId,
           uuid!,
-          "plan-auto-release",
+          {
+            reason: "plan-auto-release",
+          },
         );
         await hunt.acquire(uuid);
       }
@@ -206,13 +202,9 @@ test("a plan preserves a caller's session resumed within its device-restart wind
   try {
     const deviceId = await hunt.acquire();
     const { sessionManager, pool } = hunt.daemon();
-    await releaseSessionAndDevice(
-      sessionManager,
-      pool,
-      deviceId,
-      BASE,
-      deviceRestartReleaseReason(deviceId),
-    );
+    await releaseSessionAndDevice({ manager: sessionManager, pool }, deviceId, BASE, {
+      reason: deviceRestartReleaseReason(deviceId),
+    });
     expect(sessionManager.peekSession(BASE)).toBeNull();
     expect(await sessionManager.isReleasedSessionInRestartRecoveryWindow(BASE)).toBe(true);
     expect((await hunt.runPlan(singleDevicePlan)).success).toBe(true);

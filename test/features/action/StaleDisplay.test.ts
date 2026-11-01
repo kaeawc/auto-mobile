@@ -121,13 +121,11 @@ describe("typed BaseVisualChange fences A/B/C", () => {
   for (const site of ["A", "B", "C"] as const) {
     test.each(cases)(`${site}: $label`, async (scenario) => {
       const h = harness(scenario);
-      const action = new BaseVisualChange(
-        h.targetDevice,
-        h.adb,
-        h.timer,
-        h.deps.renderedDisplayRevision,
-        h.deps,
-      );
+      const action = new BaseVisualChange(h.targetDevice, {
+        adb: h.adb,
+        timer: h.timer,
+        displayFence: h.deps,
+      });
       action.observeScreen = h.observe;
       let calls = 0;
       const transition = () => h.transitions.transition(scenario.count);
@@ -314,7 +312,8 @@ describe("typed explicit-display fences G", () => {
         });
       }
       const run = async () => {
-        const target = await prepareTargetDisplayAction(h.targetDevice, "inner", h.observe, h.adb, {
+        const target = await prepareTargetDisplayAction(h.targetDevice, "inner", h.observe, {
+          adb: h.adb,
           lastRenderedObservation: previous,
           transitions: h.transitions,
         });
@@ -359,7 +358,8 @@ describe("typed explicit-display fences G", () => {
         display: { key: "inner", generation: h.screen.display.generation },
         displayRevision: reads++ === 0 ? 41 : later,
       });
-      const prepare = prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+      const prepare = prepareTargetDisplayAction(device, "inner", h.observe, {
+        adb: h.adb,
         lastRenderedObservation: reader,
         transitions: h.transitions,
       });
@@ -374,7 +374,8 @@ describe("typed explicit-display fences G", () => {
   test("G still requires observation of the requested panel", async () => {
     const h = harness(cases[4]);
     await expect(
-      prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+      prepareTargetDisplayAction(device, "inner", h.observe, {
+        adb: h.adb,
         lastRenderedObservation: () => undefined,
         transitions: h.transitions,
       }),
@@ -385,13 +386,11 @@ describe("typed explicit-display fences G", () => {
   test("a push without a newly observed panel omits currentDisplayKey", async () => {
     const h = harness(cases[0]);
     h.transitions.transition(1, false);
-    const action = new BaseVisualChange(
-      device,
-      h.adb,
-      h.timer,
-      h.deps.renderedDisplayRevision,
-      h.deps,
-    );
+    const action = new BaseVisualChange(device, {
+      adb: h.adb,
+      timer: h.timer,
+      displayFence: h.deps,
+    });
     assertStale(
       await rejection(() =>
         action.observedInteraction(async () => ({ success: true }), {
@@ -477,13 +476,9 @@ describe("explicit-display action catches", () => {
         },
       },
     });
-    const result = await action.execute(
-      [{ action: "key", key: "enter" }],
-      undefined,
-      undefined,
-      undefined,
-      "inner",
-    );
+    const result = await action.execute([{ action: "key", key: "enter" }], undefined, {
+      display: "inner",
+    });
     assertResult(result, 7, 9);
     expect(result.commands[0]?.staleDisplay).toEqual(result.staleDisplay);
     expect(h.adb.getExecutedCommands().some((cmd) => cmd.includes("keyevent"))).toBe(false);
@@ -535,13 +530,7 @@ async function caughtExplicitAction(
         ...deps,
         observer: h.observe,
       });
-      return action.execute(
-        [{ action: "key", key: "enter" }],
-        undefined,
-        undefined,
-        undefined,
-        "inner",
-      );
+      return action.execute([{ action: "key", key: "enter" }], undefined, { display: "inner" });
     }
   }
 }
@@ -589,13 +578,11 @@ function staleCallerHarness(platform: "android" | "ios") {
 describe("unscoped selector actions re-resolve against a new display generation", () => {
   function baseHarness(platform: "android" | "ios") {
     const { h, fresh } = staleCallerHarness(platform);
-    const action = new BaseVisualChange(
-      h.targetDevice,
-      h.adb,
-      h.timer,
-      h.deps.renderedDisplayRevision,
-      h.deps,
-    );
+    const action = new BaseVisualChange(h.targetDevice, {
+      adb: h.adb,
+      timer: h.timer,
+      displayFence: h.deps,
+    });
     action.observeScreen = h.observe;
     return { h, fresh, action };
   }

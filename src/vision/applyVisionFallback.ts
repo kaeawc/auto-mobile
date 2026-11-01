@@ -7,19 +7,29 @@ import type { VisionFallbackConfig, ElementSearchCriteria, VisionAnalyzer } from
 import type { ScreenshotCapturer } from "../features/navigation/SelectionStateTracker";
 import { logger } from "../utils/logger";
 
+export interface VisionEnrichedErrorOptions {
+  /** Vision fallback configuration; a disabled config returns `baseError` unchanged. */
+  visionConfig: VisionFallbackConfig;
+  /** The message returned unchanged when vision is disabled, unavailable, or fails. */
+  baseError: string;
+  signal?: AbortSignal;
+  visionAnalyzer?: VisionAnalyzer;
+}
+
 /**
  * Attempts to enrich an error message using vision fallback (AI-based element search).
  * If vision is disabled, screenshot unavailable, or vision fails, returns baseError unchanged.
+ *
+ * @param options.visionConfig - Vision fallback configuration.
+ * @param options.baseError - Message returned unchanged when vision cannot help.
  */
 export async function getVisionEnrichedError(
   screenshotCapturer: ScreenshotCapturer,
   viewHierarchy: unknown,
   searchCriteria: ElementSearchCriteria,
-  visionConfig: VisionFallbackConfig,
-  baseError: string,
-  options: { signal?: AbortSignal; visionAnalyzer?: VisionAnalyzer } = {},
+  options: VisionEnrichedErrorOptions,
 ): Promise<string> {
-  const { signal, visionAnalyzer } = options;
+  const { visionConfig, baseError, signal, visionAnalyzer } = options;
   if (!visionConfig.enabled) {
     return baseError;
   }

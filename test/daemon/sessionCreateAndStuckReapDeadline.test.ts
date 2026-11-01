@@ -54,10 +54,10 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
+    { reason }: { reason: string },
   ): Promise<void> {
     await this.parkRelease;
-    await super.markReleased(sessionUuid, status, releasedAtMs, reason);
+    await super.markReleased(sessionUuid, status, releasedAtMs, { reason });
   }
 }
 
@@ -175,8 +175,8 @@ describe("a reap stuck past its deadline frees the device (#10963)", () => {
         () => false,
         // A reap whose release never settles.
         () => new Promise<void>(() => {}),
-        h.timer,
         {
+          timer: h.timer,
           heartbeatTimeoutMs: 1_000,
           graceMs: 0,
           preFirstHeartbeatGraceMs: 1_000,

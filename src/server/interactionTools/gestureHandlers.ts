@@ -11,8 +11,7 @@ import {
 } from "../../models";
 import { StructuredToolResponse, createStructuredToolResponse } from "../../utils/toolUtils";
 import type { DragAndDropArgs, PinchOnArgs, SwipeOnArgs } from "../interactionToolTypes";
-import { ProgressCallback } from "../toolRegistry";
-import type { InteractionToolDependencies } from "./dependencies";
+import type { InteractionHandlerOptions, InteractionToolDependencies } from "./dependencies";
 
 export function formatSwipeOnMessage(
   result: Pick<
@@ -42,9 +41,7 @@ const defaultSwipeOnFactory: NonNullable<InteractionToolDependencies["swipeOnFac
 export async function swipeOnHandler(
   device: BootedDevice,
   args: SwipeOnArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ): Promise<StructuredToolResponse<SwipeOnToolPayload> & { isError?: true }> {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const swipeOn = (deps.swipeOnFactory ?? defaultSwipeOnFactory)(device);
@@ -110,9 +107,7 @@ const defaultPinchOnFactory: NonNullable<InteractionToolDependencies["pinchOnFac
 export async function pinchOnHandler(
   device: BootedDevice,
   args: PinchOnArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const pinchOn = (deps.pinchOnFactory ?? defaultPinchOnFactory)(device);
@@ -151,9 +146,7 @@ const defaultDragAndDropFactory: NonNullable<InteractionToolDependencies["dragAn
 export async function dragAndDropHandler(
   device: BootedDevice,
   args: DragAndDropArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const dragAndDrop = (deps.dragAndDropFactory ?? defaultDragAndDropFactory)(device);

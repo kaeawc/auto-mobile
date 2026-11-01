@@ -32,9 +32,11 @@ describe("NavigationGraphManager tool call attribution", () => {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     manager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(harness.db),
-      new TestCoverageRepository(harness.db),
-      timer,
+      new NavigationRepository({ db: harness.db }),
+      {
+        testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
+        timer,
+      },
     );
     await manager.setCurrentApp("com.x");
     harness.manager = manager;

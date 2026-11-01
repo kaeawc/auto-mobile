@@ -106,7 +106,9 @@ describe("SessionManager", () => {
     };
 
     await expect(
-      restarted.getOrCreateSession("restarted-ios-session", devicePool, "ios", undefined, true),
+      restarted.getOrCreateSession("restarted-ios-session", devicePool, "ios", {
+        requireIssuedSession: true,
+      }),
     ).resolves.toMatchObject({
       assignedDevice: "simulator-uuid",
       stableDeviceId: "simulator-uuid",
@@ -169,13 +171,9 @@ describe("SessionManager", () => {
     };
 
     await expect(
-      restarted.getOrCreateSession(
-        "restarted-android-session",
-        devicePool,
-        "android",
-        undefined,
-        true,
-      ),
+      restarted.getOrCreateSession("restarted-android-session", devicePool, "android", {
+        requireIssuedSession: true,
+      }),
     ).resolves.toMatchObject({
       assignedDevice: "emulator-5560",
       stableDeviceId: "Pixel_8_API_35",
@@ -249,7 +247,7 @@ describe("SessionManager", () => {
       restartRow("rehydrate-me", { heartbeatTimeoutSource: "custom" }),
     );
     await persistence.recordLivenessOwnership("rehydrate-me", "owner-token");
-    await persistence.markReleased("rehydrate-me", "expired", 30, "daemon-restart");
+    await persistence.markReleased("rehydrate-me", "expired", 30, { reason: "daemon-restart" });
     const restarted = makeSessionManager({ timer: fakeTimer, persistence });
     const devicePool = recoveringAssigner(restarted);
 
@@ -277,7 +275,9 @@ describe("SessionManager", () => {
   test("terminalizes missing rehydration targets without aborting the sweep", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     await persistence.upsertActiveSession(restartRow("gone-after-restart"));
-    await persistence.markReleased("gone-after-restart", "expired", 30, "daemon-restart");
+    await persistence.markReleased("gone-after-restart", "expired", 30, {
+      reason: "daemon-restart",
+    });
     const restarted = makeSessionManager({ timer: fakeTimer, persistence });
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
@@ -471,13 +471,9 @@ describe("SessionManager", () => {
       },
     };
     try {
-      const recovery = restarted.getOrCreateSession(
-        "slow-owner-recovery",
-        devicePool,
-        "android",
-        undefined,
-        true,
-      );
+      const recovery = restarted.getOrCreateSession("slow-owner-recovery", devicePool, "android", {
+        requireIssuedSession: true,
+      });
       await sessionCreated.promise;
       // The persisted owner's lease must lapse or the reconnect claim is rejected (#10050).
       fakeTimer.advanceTime(persisted.heartbeat_timeout_ms + SUSPECT_GRACE_MS + 1);
@@ -549,7 +545,7 @@ describe("SessionManager", () => {
       heartbeatTimeoutMs: 15_000,
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased("terminal-row", "released", 30, "device-killed");
+    await persistence.markReleased("terminal-row", "released", 30, { reason: "device-killed" });
     const restarted = makeSessionManager({ timer: fakeTimer, persistence });
     let assignments = 0;
 
@@ -814,7 +810,10 @@ describe("restart recovery idle window counts control calls only (#11281)", () =
         }),
     };
     void manager
-      .getOrCreateSession(SESSION, pool, "android", undefined, true, "read-only")
+      .getOrCreateSession(SESSION, pool, "android", {
+        requireIssuedSession: true,
+        access: "read-only",
+      })
       .catch(() => {});
     await settle();
     return { timer, persistence, manager, tracker, failRecovery };

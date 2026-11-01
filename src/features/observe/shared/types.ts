@@ -53,6 +53,12 @@ export interface PerfTiming {
 // Shared Result Types
 // =============================================================================
 
+/** Caller cancellation and the hook fired once the request frame was written (both platforms). */
+export interface DispatchOptions {
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 /**
  * Base result for operations that return success/failure with timing.
  */

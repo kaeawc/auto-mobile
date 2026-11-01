@@ -15,7 +15,7 @@ describe("DeviceLockRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new DeviceLockRepository(db);
+    repo = new DeviceLockRepository({ db });
   });
 
   afterEach(async () => {

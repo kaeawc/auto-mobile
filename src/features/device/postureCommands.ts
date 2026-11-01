@@ -165,8 +165,7 @@ export async function observeIosPosture(
   observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
   panels: DisplayPanel[] | undefined,
   expectedRole: "cover" | "inner",
-  timer: Timer,
-  operation: PostureOperation,
+  { timer, operation }: { timer: Timer; operation: PostureOperation },
 ): Promise<Awaited<ReturnType<ObserveScreen["execute"]>>> {
   const { signal, assertCurrent } = operation;
   assertCurrent();
@@ -362,8 +361,7 @@ export async function setEmulatorPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   displayPreset: DisplayPreset | undefined,
-  supportsRearDisplay: boolean,
-  operation: PostureOperation,
+  { supportsRearDisplay, operation }: { supportsRearDisplay: boolean; operation: PostureOperation },
 ): Promise<NotFoldableRefusal | undefined> {
   const { signal, assertCurrent } = operation;
   assertCurrent();
@@ -412,8 +410,7 @@ export async function setPhysicalPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   states: AndroidDeviceState[],
-  supportsOpenedReset: boolean,
-  operation: PostureOperation,
+  { supportsOpenedReset, operation }: { supportsOpenedReset: boolean; operation: PostureOperation },
 ): Promise<void> {
   const { signal, assertCurrent } = operation;
   assertCurrent();
@@ -444,9 +441,15 @@ export async function observeAndroidPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   { states, notFoldable }: { states: AndroidDeviceState[]; notFoldable?: NotFoldableRefusal },
-  timer: Timer,
-  observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
-  operation: PostureOperation,
+  {
+    timer,
+    observe,
+    operation,
+  }: {
+    timer: Timer;
+    observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>;
+    operation: PostureOperation;
+  },
 ): Promise<void> {
   const { signal, assertCurrent } = operation;
   assertCurrent();

@@ -1,3 +1,4 @@
+import type { IosSdkWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { ScrollSearchSession } from "./ScrollSearchSession";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { withSwipeObservationReadScope } from "./freshSwipeHierarchy";
@@ -108,6 +109,8 @@ export interface ScrollUntilVisibleDependencies {
   overlayDetector: OverlayAnalyzer;
   talkBackExecutor: TalkBackSwipeRunner;
   voiceOverExecutor?: VoiceOverSwipeRunner;
+  /** Scrolls a WKWebView DOM element into view before any swipe (#5162); iOS only. */
+  webScrollIntoView?: IosSdkWebScrollIntoView;
   timer: Timer;
   getDuration: (options: SwipeOnResolvedOptions) => number;
   resolveBoomerangConfig: (options: SwipeOnResolvedOptions) => BoomerangConfig | undefined;
@@ -397,9 +400,7 @@ export class ScrollUntilVisible {
     const element = await this.findElementInHierarchy(
       options.lookFor!,
       observation.viewHierarchy!,
-      options.container,
-      container,
-      options.layer,
+      { container: options.container, containerElement: container, layer: options.layer },
     );
     return element && this.isElementWithinContainer(element, container.bounds, observation)
       ? element
@@ -639,9 +640,7 @@ export class ScrollUntilVisible {
     const element = await this.findElementInHierarchy(
       options.lookFor!,
       observation.viewHierarchy!,
-      options.container,
-      container,
-      options.layer,
+      { container: options.container, containerElement: container, layer: options.layer },
     );
     if (element && this.isElementWithinContainer(element, container.bounds, observation)) {
       return element;
@@ -803,9 +802,15 @@ export class ScrollUntilVisible {
   async findElementInHierarchy(
     lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
     viewHierarchy: ViewHierarchyResult,
-    container?: SwipeOnOptions["container"],
-    containerElement?: Element,
-    layer?: SwipeOnOptions["layer"],
+    {
+      container,
+      containerElement,
+      layer,
+    }: {
+      container?: SwipeOnOptions["container"];
+      containerElement?: Element;
+      layer?: SwipeOnOptions["layer"];
+    } = {},
   ): Promise<Element | null> {
     if (!lookFor.text && !lookFor.elementId) {
       return null;
@@ -847,7 +852,7 @@ export class ScrollUntilVisible {
           return;
         }
 
-        await this.deps.accessibilityService.requestAction("focus", resourceId, 5000, perf);
+        await this.deps.accessibilityService.requestAction("focus", resourceId, 5000, { perf });
         logger.info(`[SwipeOn] Set accessibility focus on element: ${resourceId}`);
       });
     } catch (error) {

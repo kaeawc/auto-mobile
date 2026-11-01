@@ -15,7 +15,8 @@ import { ToolRegistry, ToolRegistryClass } from "../../src/server/toolRegistry";
 describe("device-control transport failure wire type", () => {
   test("replay safety comes from the registered recovery capability and clears with the registry", () => {
     const handler = async () => ({ content: [] });
-    ToolRegistry.register("safeProbe", "read-only probe", z.object({}), handler, {
+    ToolRegistry.register("safeProbe", "read-only probe", z.object({}), {
+      handler,
       transportRecovery: "replay",
     });
     ToolRegistry.register("unsafeProbe", "changes state", z.object({}), handler);
@@ -32,7 +33,8 @@ describe("device-control transport failure wire type", () => {
   test("clearing another registry preserves the singleton's observe replay permission", () => {
     const handler = async () => ({ content: [] });
     const otherRegistry = new ToolRegistryClass();
-    ToolRegistry.registerDeviceAware("observe", "Read device state", z.object({}), handler, {
+    ToolRegistry.registerDeviceAware("observe", "Read device state", z.object({}), {
+      handler,
       transportRecovery: "replay",
     });
     try {

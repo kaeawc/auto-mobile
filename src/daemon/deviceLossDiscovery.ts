@@ -26,7 +26,7 @@ import {
   selectTransitionalDeviceIds,
 } from "./disconnectMonitor";
 import type { DevicePool, PooledDevice } from "./devicePool";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD, type DeviceLossMisses } from "./deviceLossMisses";
 
 /**
  * The stateless half of the device-disconnect monitor, split out of daemon.ts (#11808): discovery
@@ -72,6 +72,16 @@ function needsFreshTransitionalSimulatorRead(
   return iosDeviceListMaxAgeMs !== undefined && (discovery.transitionalSimulators?.length ?? 0) > 0;
 }
 
+/**
+ * Pooled watches need their own sweep on an "either" loss read, first read and confirmation re-read
+ * alike (#14908). Other reads carry no watch option, so their options are unchanged.
+ */
+function watchSweepOption(
+  platform: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0],
+): { includeWatchOs?: true } {
+  return platform === "either" ? { includeWatchOs: true } : {};
+}
+
 export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
@@ -96,6 +106,7 @@ export async function discoverAndReconcile(
   const options = {
     bypassAndroidDeviceListCache,
     skipAndroidProfileEnrichment: true,
+    ...watchSweepOption(platform),
     // An unpooled held device still needs liveness evidence from its own source.
     skipPhysicalIosDiscovery: !trackedDevices.some(
       (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
@@ -245,6 +256,13 @@ export interface ListedAndroidStates {
   listedNonDeviceIds?: Set<string>;
 }
 
+/** The disconnect candidates a listed-state probe asks about, and what discovery already booted. */
+export interface ListedAndroidCandidates {
+  candidateDeviceIds: Set<string>;
+  bootedDeviceIds: Set<string>;
+  candidatePlatforms: Map<string, Platform>;
+}
+
 /**
  * Online-ness is otherwise binary: an in-session Android emulator that
  * dropped to ADB `offline` looks identical to one that is fully gone, since
@@ -260,9 +278,7 @@ export async function probeListedAndroidStates(
   devicePool: Pick<DevicePool, "getAndroidTransportAliases">,
   deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
   planActive: boolean,
-  candidateDeviceIds: Set<string>,
-  bootedDeviceIds: Set<string>,
-  candidatePlatforms: Map<string, Platform>,
+  { candidateDeviceIds, bootedDeviceIds, candidatePlatforms }: ListedAndroidCandidates,
 ): Promise<ListedAndroidStates> {
   if (planActive) {
     return {};
@@ -394,7 +410,7 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 }
 
 export function logDisconnectMisses(
-  deviceDisconnectMisses: Map<string, number>,
+  deviceDisconnectMisses: DeviceLossMisses,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
   planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,

@@ -9,6 +9,7 @@ import {
   type DeviceSettingDefaultsPersistence,
   type DeviceSettingDefaultsRecord,
 } from "../models/DeviceSettingDefaults";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 const settingValueSchema = z.union([z.string(), z.number(), z.null()]);
 const recordSchema = z.object({
@@ -24,7 +25,11 @@ const recordSchema = z.object({
  * `config_json` under `settingDefaults`, so they survive a daemon restart.
  */
 export class DeviceSettingDefaultsRepository implements DeviceSettingDefaultsPersistence {
-  constructor(private readonly db?: Kysely<Database>) {}
+  private readonly db?: Kysely<Database>;
+
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
+    this.db = db;
+  }
 
   // Resolve lazily so construction never opens the default database.
   private getDb(): Kysely<Database> {

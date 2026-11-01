@@ -9,6 +9,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { StylusOutcomeIndeterminateError } from "../stylusPointer";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { PointerNotSentError, createInstrumentationDispatch } from "./instrumentationDispatch";
+import { createUinputDispatch } from "./uinputDispatch";
 import type {
   PointerEnvironment,
   PointerInjector,
@@ -66,7 +67,7 @@ export function strokeRequest(
   // What the request actually needs, so a refusal names the real reason.
   return {
     features: {
-      toolType: "stylus",
+      toolType: pointer.toolType,
       ...(filled.some((point) => point.pressure !== undefined && point.pressure !== 1)
         ? { variablePressure: true }
         : {}),
@@ -90,7 +91,8 @@ export function tapStrokePoints(
 }
 
 /**
- * Sends a stylus stroke that `adb input stylus` cannot express through the instrumentation route.
+ * Sends a stylus stroke that `adb input stylus` cannot express through the instrumentation route,
+ * or the root-only uinput route where the runner cannot.
  * The route is chosen from the device first: a device or runner that cannot honour it is refused
  * before anything is sent, and the stroke is never turned into a finger touch.
  */
@@ -101,14 +103,16 @@ export async function dispatchRichStylus(
   options: RichStylusOptions = {},
 ): Promise<void> {
   const environment = await (
-    options.readEnvironment ?? ((signal) => readPointerEnvironment(device, adb, signal))
+    options.readEnvironment ??
+    ((signal) => readPointerEnvironment(device, adb, signal, request.features.toolType))
   )(options.signal);
   const injectors =
     options.injectors ??
     defaultPointerRoutes({
       a11y: refuseNonStylus,
       adbInputSource: refuseNonStylus,
-      instrumentation: createInstrumentationDispatch(adb),
+      instrumentation: createInstrumentationDispatch(adb, device.deviceId),
+      uinput: createUinputDispatch(adb, device.deviceId),
     });
   const route = requirePointerRoute(request.features, environment, injectors);
   options.assertCurrent?.();

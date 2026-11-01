@@ -379,8 +379,8 @@ describe("TapAtCoordinate", () => {
     };
     // The iOS client takes its abort signal before the dispatch marker.
     const iosClient: IosCoordinateTapClient = {
-      requestDoubleTapCoordinates: (_x, _y, _timeout, frame, _signal, onDispatch) =>
-        request(frame, onDispatch),
+      requestDoubleTapCoordinates: (_x, _y, _timeout, { frameContext, onDispatch } = {}) =>
+        request(frameContext, onDispatch),
       requestTapCoordinates: (tap: TapCoordinatesRequest) =>
         request(tap.frameContext, tap.onDispatch),
     };
@@ -511,7 +511,11 @@ describe("TapAtCoordinate", () => {
         androidClient: unused,
         iosClient: { ...unused, requestDoubleTapCoordinates: async () => ({ success: true }) },
         invalidateIosCache: () => {},
-        dispatchIosCoordinateTap: async (_client, _x, _y, _duration, frameContext) => {
+        dispatchIosCoordinateTap: async (
+          _client,
+          _point,
+          { durationMs: _duration, frameContext },
+        ) => {
           sent.push(frameContext);
           if (frameContext === undefined || !runnerFrames.includes(frameContext)) {
             throw staleError();
@@ -2194,7 +2198,17 @@ describe("TapAtCoordinate", () => {
     };
 
     await expect(
-      dispatchAndroidCoordinateTap(staleClient, adb, 1, 2, 10, { frameContext: "frame-123" }),
+      dispatchAndroidCoordinateTap(
+        staleClient,
+        adb,
+        { x: 1, y: 2 },
+        {
+          durationMs: 10,
+          options: {
+            frameContext: "frame-123",
+          },
+        },
+      ),
     ).rejects.toThrow("Stale frame context");
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });
@@ -2204,9 +2218,17 @@ describe("TapAtCoordinate", () => {
     const rejectedClient: CoordinateTapClient = {
       requestTapCoordinates: async () => ({ success: false, error: "gesture unavailable" }),
     };
-    await dispatchAndroidCoordinateTap(rejectedClient, adb, 1, 2, 750, {
-      frameContext: "frame-123",
-    });
+    await dispatchAndroidCoordinateTap(
+      rejectedClient,
+      adb,
+      { x: 1, y: 2 },
+      {
+        durationMs: 750,
+        options: {
+          frameContext: "frame-123",
+        },
+      },
+    );
     expect(adb.wasCommandExecuted("shell input touchscreen swipe 1 2 1 2 750")).toBe(true);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });

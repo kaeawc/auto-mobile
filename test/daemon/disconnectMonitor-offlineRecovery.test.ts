@@ -153,23 +153,26 @@ describe("pruneStaleOfflineRecoveryAttempts", () => {
 
 test("a new incarnation at an offline serial receives its own reconnect attempt", () => {
   const ids = new Set(["emulator-5554"]);
-  const pruned = pruneStaleOfflineRecoveryAttempts(
-    ids,
-    ids,
-    ids,
-    new Map([["emulator-5554", 1]]),
-    new Map([["emulator-5554", 2]]),
-  );
+  const pruned = pruneStaleOfflineRecoveryAttempts(ids, ids, ids, {
+    attemptedIncarnations: new Map([["emulator-5554", 1]]),
+    candidateIncarnations: new Map([["emulator-5554", 2]]),
+  });
   expect(selectOfflineRecoveryCandidates(ids, ids, pruned)).toEqual(["emulator-5554"]);
 });
 
 test("failed offline probes preserve attempts for the same incarnation", () => {
   const ids = new Set(["emulator-5554"]);
   const incarnations = new Map([["emulator-5554", 1]]);
-  const pruned = pruneStaleOfflineRecoveryAttempts(ids, ids, undefined, incarnations, incarnations);
+  const pruned = pruneStaleOfflineRecoveryAttempts(ids, ids, undefined, {
+    attemptedIncarnations: incarnations,
+    candidateIncarnations: incarnations,
+  });
   expect(selectOfflineRecoveryCandidates(ids, ids, pruned)).toEqual([]);
   expect(
-    pruneStaleOfflineRecoveryAttempts(pruned, ids, new Set(), incarnations, incarnations).size,
+    pruneStaleOfflineRecoveryAttempts(pruned, ids, new Set(), {
+      attemptedIncarnations: incarnations,
+      candidateIncarnations: incarnations,
+    }).size,
   ).toBe(0);
 });
 
@@ -325,7 +328,7 @@ test("alternating successful and failed offline probes do not repeat global reco
   await failedSweep;
   expect(daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
   fail = false;
-  daemon.testHooks.deviceLoss.misses.clear();
+  daemon.testHooks.deviceLoss.misses.reset(device.id);
   await monitor.run();
   expect(reconnects).toBe(1);
   device.incarnation++;

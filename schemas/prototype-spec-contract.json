@@ -16,7 +16,9 @@
     "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])",
     "openUrl": "^(?:https?|mailto|tel|sms|geo|maps):[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
     "reservedEmail": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])",
-    "mediaUrl": "^https?://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
+    "mediaUrl": "^https?://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
+    "decimalAmount": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,2})?$(?![\\s\\S])",
+    "isoPeriod": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -86,7 +88,8 @@
     "MAX_PROTOTYPE_UPLOAD_BYTES": 10485760,
     "MAX_PROTOTYPE_UPLOAD_PARTS": 16,
     "MAX_PROTOTYPE_KEYFRAME_NODES": 16,
-    "MAX_PROTOTYPE_MEDIA_PLAYERS": 4
+    "MAX_PROTOTYPE_MEDIA_PLAYERS": 4,
+    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3
   },
   "definitions": {
     "authAccount": {
@@ -2634,6 +2637,12 @@
               "rule": {
                 "kind": "enum",
                 "values": ["host", "device"]
+              },
+              "optional": true
+            },
+            "allowSecureInRequest": {
+              "rule": {
+                "kind": "boolean"
               },
               "optional": true
             },
@@ -15518,6 +15527,849 @@
                 "kind": "key"
               },
               "optional": true
+            },
+            "visibleThreshold": {
+              "rule": {
+                "kind": "number",
+                "min": 0.1,
+                "max": 1
+              },
+              "optional": true
+            },
+            "resumePosition": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "captions": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "mediaCaption"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            }
+          }
+        },
+        "map": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["map"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
+            },
+            "mapStyle": {
+              "rule": {
+                "kind": "enum",
+                "values": ["plain", "streets"]
+              },
+              "optional": true
+            },
+            "camera": {
+              "rule": {
+                "kind": "ref",
+                "name": "mapCamera"
+              },
+              "optional": true
+            },
+            "fit": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "markers", "route"]
+              },
+              "optional": true
+            },
+            "markers": {
+              "rule": {
+                "kind": "ref",
+                "name": "mapMarkers"
+              },
+              "optional": true
+            },
+            "polylines": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "mapPolyline"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "showUserLocation": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "onMarkerTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onCameraIdle": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "into": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              "optional": true
+            }
+          }
+        },
+        "castButton": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["castButton"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
+            },
+            "player": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "protocols": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "enum",
+                  "values": ["googleCast", "airplay"]
+                },
+                "min": 1,
+                "max": 2,
+                "unique": true
+              },
+              "optional": true
+            }
+          }
+        },
+        "cameraPreview": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["cameraPreview"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
+            },
+            "lensKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "flashKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "zoomKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "aspectRatio": {
+              "rule": {
+                "kind": "enum",
+                "values": ["4:3", "16:9", "1:1"]
+              },
+              "optional": true
+            },
+            "contentScale": {
+              "rule": {
+                "kind": "enum",
+                "values": ["fit", "crop", "fill"]
+              },
+              "optional": true
+            },
+            "tapToFocus": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "pinchToZoom": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "mode": {
+              "rule": {
+                "kind": "enum",
+                "values": ["photo", "video"]
+              },
+              "optional": true
             }
           }
         }
@@ -15734,10 +16586,31 @@
           },
           "optional": true
         },
+        "commerce": {
+          "rule": {
+            "kind": "ref",
+            "name": "commerceBlock"
+          },
+          "optional": true
+        },
         "location": {
           "rule": {
             "kind": "ref",
             "name": "locationBlock"
+          },
+          "optional": true
+        },
+        "sensors": {
+          "rule": {
+            "kind": "ref",
+            "name": "sensorsBlock"
+          },
+          "optional": true
+        },
+        "notifications": {
+          "rule": {
+            "kind": "ref",
+            "name": "notificationsBlock"
           },
           "optional": true
         },
@@ -21702,6 +22575,97 @@
         }
       ]
     },
+    "mediaCaptionCue": {
+      "kind": "object",
+      "fields": {
+        "startMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "endMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "text": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 512
+          },
+          "optional": false
+        }
+      }
+    },
+    "mediaCaption": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "language": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 35
+          },
+          "optional": false
+        },
+        "label": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "source": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string",
+                      "max": 128
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "data": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": false
+        }
+      }
+    },
     "mediaPlayer": {
       "kind": "object",
       "fields": {
@@ -21717,11 +22681,17 @@
             "kind": "ref",
             "name": "mediaSource"
           },
-          "optional": false
+          "optional": true
         },
         "loop": {
           "rule": {
             "kind": "boolean"
+          },
+          "optional": true
+        },
+        "queue": {
+          "rule": {
+            "kind": "pointer"
           },
           "optional": true
         }
@@ -21738,6 +22708,444 @@
               "kind": "ref",
               "name": "mediaPlayer"
             }
+          },
+          "optional": false
+        }
+      }
+    },
+    "notificationChannel": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": false
+        },
+        "name": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "importance": {
+          "rule": {
+            "kind": "enum",
+            "values": ["min", "low", "default", "high"]
+          },
+          "optional": false
+        },
+        "description": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "showBadge": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "notificationsBlock": {
+      "kind": "object",
+      "fields": {
+        "channels": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 8,
+            "item": {
+              "kind": "ref",
+              "name": "notificationChannel"
+            }
+          },
+          "optional": false
+        }
+      }
+    },
+    "mediaQueueItem": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 128
+          },
+          "optional": false
+        },
+        "title": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "artist": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "album": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "artwork": {
+          "rule": {
+            "kind": "string",
+            "max": 128
+          },
+          "optional": true
+        },
+        "source": {
+          "rule": {
+            "kind": "ref",
+            "name": "mediaSource"
+          },
+          "optional": false
+        },
+        "durationMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": true
+        }
+      }
+    },
+    "mapCamera": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "object",
+          "fields": {
+            "lat": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -90,
+                "max": 90
+              },
+              "optional": false
+            },
+            "lng": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -180,
+                "max": 180
+              },
+              "optional": false
+            },
+            "zoom": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 22
+              },
+              "optional": false
+            },
+            "bearing": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 360
+              },
+              "optional": true
+            },
+            "tilt": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 60
+              },
+              "optional": true
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
+    "mapMarkers": {
+      "kind": "object",
+      "fields": {
+        "path": {
+          "rule": {
+            "kind": "pointer"
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        },
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "lat": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "lng": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "title": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "icon": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconName"
+          },
+          "optional": true
+        },
+        "heading": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": true
+        },
+        "animateMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 2000
+          },
+          "optional": true
+        }
+      }
+    },
+    "mapPolyline": {
+      "kind": "object",
+      "fields": {
+        "path": {
+          "rule": {
+            "kind": "pointer"
+          },
+          "optional": false
+        },
+        "width": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1,
+            "max": 16
+          },
+          "optional": true
+        },
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "sensorsBlock": {
+      "kind": "object",
+      "fields": {
+        "shake": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "orientation": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "rateHz": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 1,
+                  "max": 30
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "steps": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "proximity": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "light": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "rateHz": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 1,
+                  "max": 30
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        }
+      }
+    },
+    "commerceBlock": {
+      "kind": "object",
+      "fields": {
+        "backend": {
+          "rule": {
+            "kind": "enum",
+            "values": ["fake"]
+          },
+          "optional": false
+        },
+        "products": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "commerceProduct"
+            }
+          },
+          "optional": false
+        }
+      }
+    },
+    "commerceProduct": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": false
+        },
+        "title": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "kind": {
+          "rule": {
+            "kind": "enum",
+            "values": ["consumable", "nonConsumable", "subscription"]
+          },
+          "optional": false
+        },
+        "price": {
+          "rule": {
+            "kind": "ref",
+            "name": "commercePrice"
+          },
+          "optional": false
+        },
+        "period": {
+          "rule": {
+            "kind": "string",
+            "pattern": "isoPeriod",
+            "max": 8
+          },
+          "optional": true
+        },
+        "trialPeriod": {
+          "rule": {
+            "kind": "string",
+            "pattern": "isoPeriod",
+            "max": 8
+          },
+          "optional": true
+        }
+      }
+    },
+    "commercePrice": {
+      "kind": "object",
+      "fields": {
+        "amount": {
+          "rule": {
+            "kind": "string",
+            "pattern": "decimalAmount",
+            "max": 12
+          },
+          "optional": false
+        },
+        "currency": {
+          "rule": {
+            "kind": "string",
+            "pattern": "currencyCode",
+            "max": 3
           },
           "optional": false
         }
@@ -22171,11 +23579,16 @@
           },
           "permissions": [],
           "background": [],
-          "sensitive": true
+          "sensitive": true,
+          "userGesture": true
         }
       },
       "events": {},
-      "state": {}
+      "state": {},
+      "rateLimit": {
+        "calls": 5,
+        "windowMs": 10000
+      }
     },
     "battery": {
       "capability": "prototype_platform_battery_v1",
@@ -22378,7 +23791,10 @@
               "optional": true,
               "value": {
                 "kind": "array",
-                "item": { "kind": "enum", "values": ["name", "phone", "email"] },
+                "item": {
+                  "kind": "enum",
+                  "values": ["name", "phone", "email"]
+                },
                 "min": 1,
                 "max": 3,
                 "unique": true
@@ -22515,6 +23931,60 @@
           "permissions": [],
           "background": [],
           "sensitive": true
+        },
+        "query": {
+          "args": {
+            "media": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["images", "videos", "imagesAndVideos"]
+              }
+            },
+            "limit": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 64
+              }
+            }
+          },
+          "permissions": ["photos"],
+          "background": [],
+          "sensitive": true,
+          "capability": "prototype_platform_mediaLibrary_query_v1"
+        },
+        "manageLimitedSelection": {
+          "args": {},
+          "permissions": ["photos"],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_mediaLibrary_query_v1"
+        },
+        "save": {
+          "args": {
+            "media": {
+              "optional": false,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "album": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "empty": false,
+                "maxBytes": 256
+              }
+            }
+          },
+          "permissions": ["photosAdd"],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_mediaLibrary_save_v1"
         }
       },
       "events": {},
@@ -22863,6 +24333,20 @@
           }
         }
       }
+    },
+    "map": {
+      "capability": "prototype_platform_map_v1",
+      "calls": {},
+      "events": {
+        "markerTap": {
+          "sensitive": false,
+          "userInitiated": true
+        },
+        "cameraIdle": {
+          "sensitive": false
+        }
+      },
+      "state": {}
     },
     "audioRecorder": {
       "capability": "prototype_platform_audioRecorder_v1",
@@ -23221,7 +24705,8 @@
           },
           "permissions": ["notifications"],
           "background": [],
-          "sensitive": false
+          "sensitive": false,
+          "userGesture": true
         },
         "cancel": {
           "args": {
@@ -23264,22 +24749,199 @@
           },
           "permissions": ["notifications"],
           "background": [],
-          "sensitive": false
+          "sensitive": false,
+          "userGesture": true
+        },
+        "schedule": {
+          "args": {
+            "id": { "optional": false, "value": { "kind": "string", "max": 128 } },
+            "channel": { "optional": false, "value": { "kind": "string", "pattern": "stateKey" } },
+            "title": {
+              "optional": false,
+              "value": { "kind": "string", "nonblank": true, "max": 128 }
+            },
+            "body": { "optional": true, "value": { "kind": "string", "max": 1024 } },
+            "largeImage": { "optional": true, "value": { "kind": "string", "max": 128 } },
+            "style": {
+              "optional": true,
+              "value": {
+                "kind": "tagged",
+                "variants": {
+                  "bigText": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["bigText"] },
+                        "optional": false
+                      }
+                    }
+                  },
+                  "bigPicture": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["bigPicture"] },
+                        "optional": false
+                      },
+                      "image": { "rule": { "kind": "string", "max": 128 }, "optional": false }
+                    }
+                  },
+                  "inbox": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["inbox"] },
+                        "optional": false
+                      },
+                      "lines": {
+                        "rule": {
+                          "kind": "array",
+                          "min": 1,
+                          "max": 6,
+                          "item": { "kind": "string", "max": 256 }
+                        },
+                        "optional": false
+                      },
+                      "summary": { "rule": { "kind": "string", "max": 128 }, "optional": true }
+                    }
+                  },
+                  "messaging": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["messaging"] },
+                        "optional": false
+                      },
+                      "self": {
+                        "rule": { "kind": "string", "nonblank": true, "max": 64 },
+                        "optional": false
+                      },
+                      "conversationTitle": {
+                        "rule": { "kind": "string", "max": 128 },
+                        "optional": true
+                      },
+                      "messages": {
+                        "rule": {
+                          "kind": "array",
+                          "min": 1,
+                          "max": 7,
+                          "item": {
+                            "kind": "object",
+                            "fields": {
+                              "from": {
+                                "rule": { "kind": "string", "nonblank": true, "max": 64 },
+                                "optional": true
+                              },
+                              "text": {
+                                "rule": { "kind": "string", "max": 1024 },
+                                "optional": false
+                              },
+                              "image": {
+                                "rule": { "kind": "string", "max": 128 },
+                                "optional": true
+                              }
+                            }
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "group": { "optional": true, "value": { "kind": "string", "max": 128 } },
+            "badge": {
+              "optional": true,
+              "value": { "kind": "number", "integer": true, "min": 0, "max": 9999 }
+            },
+            "data": { "optional": true, "value": { "kind": "json", "maxBytes": 1024 } },
+            "actions": {
+              "optional": true,
+              "value": {
+                "kind": "array",
+                "min": 1,
+                "max": 3,
+                "item": {
+                  "kind": "object",
+                  "fields": {
+                    "id": {
+                      "rule": { "kind": "string", "pattern": "stateKey" },
+                      "optional": false
+                    },
+                    "label": {
+                      "rule": { "kind": "string", "nonblank": true, "max": 64 },
+                      "optional": false
+                    },
+                    "opensApp": { "rule": { "kind": "boolean" }, "optional": true },
+                    "reply": {
+                      "rule": {
+                        "kind": "object",
+                        "fields": {
+                          "placeholder": {
+                            "rule": { "kind": "string", "max": 64 },
+                            "optional": true
+                          }
+                        }
+                      },
+                      "optional": true
+                    }
+                  }
+                }
+              }
+            },
+            "progress": {
+              "optional": true,
+              "value": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": { "kind": "number", "integer": false, "min": 0, "max": 1 },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": { "indeterminate": { "rule": { "kind": "true" }, "optional": false } }
+                  }
+                ]
+              }
+            },
+            "silent": { "optional": true, "value": { "kind": "boolean" } },
+            "ongoing": { "optional": true, "value": { "kind": "boolean" } },
+            "delaySeconds": {
+              "optional": false,
+              "value": { "kind": "number", "integer": true, "min": 1, "max": 604800 }
+            }
+          },
+          "permissions": ["notifications"],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_notifications_scheduled_v1",
+          "userGesture": true
         }
       },
       "events": {
         "opened": {
-          "sensitive": false
+          "sensitive": false,
+          "userInitiated": true
         },
         "action": {
-          "sensitive": false
+          "sensitive": false,
+          "userInitiated": true
         },
         "reply": {
-          "sensitive": true
+          "sensitive": true,
+          "userInitiated": true
         },
         "dismissed": {
           "sensitive": false
-        }
+        },
+        "scheduledFired": { "sensitive": false }
       },
       "state": {
         "badge": {
@@ -23323,7 +24985,17 @@
               "unavailable"
             ]
           }
+        },
+        "blocked": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
         }
+      },
+      "rateLimit": {
+        "calls": 10,
+        "windowMs": 60000
       }
     },
     "media": {
@@ -23504,6 +25176,165 @@
           "permissions": [],
           "background": [],
           "sensitive": false
+        },
+        "setCaptions": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "track": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 192
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "next": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "previous": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "skipTo": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "itemId": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": false,
+                "maxBytes": 384
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setShuffle": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "shuffle": {
+              "optional": false,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setRepeat": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "repeat": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["off", "one", "all"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setSleepTimer": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "timer": {
+              "optional": false,
+              "value": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "ms": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 86400000
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "endOfItem": {
+                        "rule": {
+                          "kind": "true"
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
         }
       },
       "events": {
@@ -23514,6 +25345,9 @@
           "sensitive": false
         },
         "error": {
+          "sensitive": false
+        },
+        "itemChanged": {
           "sensitive": false
         }
       },
@@ -23566,6 +25400,61 @@
               "unsupported_format",
               "blocked_egress"
             ]
+          }
+        },
+        "captionTrack": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 64
+          }
+        },
+        "currentItemId": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 128
+          }
+        },
+        "currentIndex": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": -1,
+            "max": 4096
+          }
+        },
+        "rate": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "min": 0.25,
+            "max": 4
+          }
+        },
+        "sleepRemainingMs": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          }
+        },
+        "shuffle": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "repeat": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["off", "one", "all"]
           }
         }
       }
@@ -23907,6 +25796,18 @@
       "android": "material"
     },
     "videoPlayer": {
+      "ios": "material",
+      "android": "material"
+    },
+    "castButton": {
+      "ios": "material",
+      "android": "material"
+    },
+    "map": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "cameraPreview": {
       "ios": "material",
       "android": "material"
     }

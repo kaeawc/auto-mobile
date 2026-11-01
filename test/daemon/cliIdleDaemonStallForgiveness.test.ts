@@ -42,7 +42,7 @@ describe("cli-idle session across a daemon stall (#10835)", () => {
         reaped.push(reason);
         await sessionManager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     expect(sessionManager.adoptCliLivenessPolicy(SESSION, CLI_IDLE_MS)).toBe(true);

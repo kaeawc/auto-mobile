@@ -134,14 +134,17 @@ nav:
       - "SDK capabilities": using/sdk-capabilities.md
       - "Hackathon demo kit": using/hackathon.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
+      - "Installing ProtoViewer (Android)": using/protoviewer-install.md
       - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Android Automotive OS": using/android-automotive.md
+      - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
-      - "Emulator audio": using/emulator-audio.md
+      - "Emulator and simulator audio": using/emulator-audio.md
+      - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md
       - "Usage skill": using/usage-skill.md
       - "Managed Macs and CI runners": using/managed-macs.md
@@ -158,13 +161,19 @@ nav:
       - "Session broker device reuse": design-docs/session-broker-device-reuse.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
+      - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
+      - "tvOS XCUITest spike": design-docs/plat/tvos/xcuitest-spike.md
+      - "watchOS XCUITest spike": design-docs/plat/watchos/xcuitest-spike.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS WKWebView bridge actions": design-docs/plat/ios/webview-bridge-actions.md
       - "iOS SDK observation bridge": design-docs/plat/ios/observation-bridge.md
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
+      - "iOS Keychain and shared-store capabilities": design-docs/plat/ios/keychain-and-shared-store-capabilities.md
       - "iOS Photos full access": design-docs/plat/ios/photos-full-access.md
       - "iOS simulator load reduction": design-docs/plat/ios/simulator-load-reduction.md
+      - "iOS Simulator audio loopback": design-docs/plat/ios/simulator-audio-loopback.md
+      - "iOS SDK host-integration profile": design-docs/plat/ios/host-integration-profile.md
       - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android emulator host cost": design-docs/android-emulator-host-cost.md
@@ -180,6 +189,8 @@ nav:
       - "Native prototype embedding": design-docs/prototype-embedding.md
       - "Prototype platform security": design-docs/prototype-platform-security.md
       - "Prototype user-test sessions": design-docs/prototype-user-test-sessions.md
+      - "Prototype SDK support matrix": design-docs/prototype-sdk-matrix.md
+      - "Prototype camera and media guide": design-docs/prototype-camera-media.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md
@@ -202,6 +213,7 @@ nav:
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
       - "Persona robustness harness": design-docs/plat/android/persona-robustness-harness.md
+      - "OEM identity lane": design-docs/plat/android/oem-identity-lane.md
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
       - "Android windowing": design-docs/plat/android/windowing.md
       - "Android form factors": design-docs/plat/android/form-factors.md

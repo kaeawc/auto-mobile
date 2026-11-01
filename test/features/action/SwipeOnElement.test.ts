@@ -57,8 +57,11 @@ describe("SwipeOnElement", () => {
     const result = await swipe.execute(element, "up", options, { signal: controller.signal });
 
     expect(gesture.calls).toHaveLength(1);
-    expect(gesture.calls[0]?.slice(0, 5)).toEqual([200, 700, 200, 200, options]);
-    expect(gesture.calls[0]?.[5]).toMatchObject({ signal: controller.signal });
+    expect(gesture.calls[0]?.slice(0, 2)).toEqual([
+      { x1: 200, y1: 700, x2: 200, y2: 200 },
+      options,
+    ]);
+    expect(gesture.calls[0]?.[2]).toMatchObject({ signal: controller.signal });
     expect(result).toBe(gesture.result);
   });
 
@@ -86,7 +89,7 @@ describe("SwipeOnElement", () => {
 
     expect(await swipe.execute(element, "up")).toBe(gesture.result);
     expect(gesture.calls).toHaveLength(1);
-    expect(gesture.calls[0]?.slice(0, 5)).toEqual([200, 700, 200, 200, {}]);
-    expect(gesture.calls[0]?.slice(6)).toEqual([]);
+    expect(gesture.calls[0]?.slice(0, 2)).toEqual([{ x1: 200, y1: 700, x2: 200, y2: 200 }, {}]);
+    expect(gesture.calls[0]?.slice(3)).toEqual([]);
   });
 });

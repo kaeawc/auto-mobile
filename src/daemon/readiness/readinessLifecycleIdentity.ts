@@ -11,8 +11,8 @@ import {
 export function lifecycleIdentityForDevice(
   device: BootedDevice,
 ): StableVirtualDeviceIdentity | VirtualDeviceLifecycleIdentity {
-  if (device.platform === "ios") {
-    return { platform: "ios", stableId: device.deviceId };
+  if (device.platform === "ios" || device.platform === "watchos") {
+    return { platform: device.platform, stableId: device.deviceId };
   }
 
   return isAndroidEmulatorSerial(device.deviceId) && !isUnresolvedAndroidEmulatorName(device)

@@ -553,58 +553,62 @@ async function getNavigationNodeScreenshotResource(
 }
 
 function registerNavigationGraphResources(): void {
-  ResourceRegistry.register(
-    NAVIGATION_RESOURCE_URIS.APPS,
-    "Navigation Apps",
-    "Apps that have a persisted navigation graph (appId, displayName, lastUpdated). No connected device required.",
-    "application/json",
-    () => getNavigationAppsResource(),
-  );
+  ResourceRegistry.register(NAVIGATION_RESOURCE_URIS.APPS, "Navigation Apps", {
+    description:
+      "Apps that have a persisted navigation graph (appId, displayName, lastUpdated). No connected device required.",
+    mimeType: "application/json",
+    handler: () => getNavigationAppsResource(),
+  });
 
-  ResourceRegistry.register(
-    NAVIGATION_RESOURCE_URIS.GRAPH,
-    "Navigation Graph",
-    "High-level navigation graph for the current app (nodes and edges). Use ?appId= to filter by specific app.",
-    "application/json",
-    (context) => getNavigationGraphResource(undefined, context),
-  );
+  ResourceRegistry.register(NAVIGATION_RESOURCE_URIS.GRAPH, "Navigation Graph", {
+    description:
+      "High-level navigation graph for the current app (nodes and edges). Use ?appId= to filter by specific app.",
+    mimeType: "application/json",
+    handler: (context) => getNavigationGraphResource(undefined, context),
+  });
 
   ResourceRegistry.registerTemplate(
     NAVIGATION_RESOURCE_URIS.GRAPH_WITH_APP_ID,
     "Navigation Graph (App-Specific)",
-    "High-level navigation graph filtered by app ID.",
-    "application/json",
-    async (params) => {
-      const appId = decodeUriParam(params.appId);
-      return getNavigationGraphResource(appId);
+    {
+      description: "High-level navigation graph filtered by app ID.",
+      mimeType: "application/json",
+      handler: async (params) => {
+        const appId = decodeUriParam(params.appId);
+        return getNavigationGraphResource(appId);
+      },
     },
   );
 
   ResourceRegistry.registerTemplate(
     NAVIGATION_RESOURCE_URIS.GRAPH_BUILD_FILTER,
     "Navigation Graph (Build Filter)",
-    "App-union navigation graph annotated for one app build.",
-    "application/json",
-    getNavigationBuildFilterResource,
+    {
+      description: "App-union navigation graph annotated for one app build.",
+      mimeType: "application/json",
+      handler: getNavigationBuildFilterResource,
+    },
   );
 
   ResourceRegistry.registerTemplate(
     NAVIGATION_RESOURCE_URIS.GRAPH_BUILD_DIFF,
     "Navigation Graph (Build Diff)",
-    "Navigation nodes and edges reached by either of two app builds, with presence labels.",
-    "application/json",
-    getNavigationBuildDiffResource,
+    {
+      description:
+        "Navigation nodes and edges reached by either of two app builds, with presence labels.",
+      mimeType: "application/json",
+      handler: getNavigationBuildDiffResource,
+    },
   );
 }
 
 function registerNavigationHistoryResources(): void {
-  ResourceRegistry.register(
-    NAVIGATION_RESOURCE_URIS.HISTORY,
-    "Navigation History",
-    "Ordered navigation history for the current app (nodes and edges).",
-    "application/json",
-    (context) => getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY, {}, context),
-  );
+  ResourceRegistry.register(NAVIGATION_RESOURCE_URIS.HISTORY, "Navigation History", {
+    description: "Ordered navigation history for the current app (nodes and edges).",
+    mimeType: "application/json",
+    handler: (context) =>
+      getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY, {}, context),
+  });
 
   const historyHandler = async (params: Record<string, string>, context: ResourceReadContext) => {
     try {
@@ -644,25 +648,138 @@ function registerNavigationHistoryResources(): void {
   ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.HISTORY_WITH_CURSOR_AND_LIMIT,
     "Navigation History",
-    "Ordered navigation history with pagination support.",
-    "application/json",
-    historyHandler,
+    {
+      description: "Ordered navigation history with pagination support.",
+      mimeType: "application/json",
+      handler: historyHandler,
+    },
   );
 
   ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.HISTORY_WITH_CURSOR,
     "Navigation History",
-    "Ordered navigation history with pagination support.",
-    "application/json",
-    historyHandler,
+    {
+      description: "Ordered navigation history with pagination support.",
+      mimeType: "application/json",
+      handler: historyHandler,
+    },
   );
 
   ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.HISTORY_WITH_LIMIT,
     "Navigation History",
-    "Ordered navigation history with pagination support.",
-    "application/json",
-    historyHandler,
+    {
+      description: "Ordered navigation history with pagination support.",
+      mimeType: "application/json",
+      handler: historyHandler,
+    },
+  );
+}
+
+function registerNavigationNodeResources(): void {
+  // Registered before NODE_BY_ID: the base template's `([^/&]+)` node-id capture
+  // would otherwise greedily swallow a `?appId=` suffix and win the match (#4933).
+  ResourceRegistry.registerTemplate(
+    NAVIGATION_RESOURCE_URIS.NODE_BY_ID_WITH_APP_ID,
+    "Navigation Graph Node (App-Specific)",
+    {
+      description: "Detailed navigation graph node by node ID, resolved under a specific app ID.",
+      mimeType: "application/json",
+      handler: async (params) => {
+        const nodeId = Number(params.nodeId);
+        const appId = decodeUriParam(params.appId);
+        if (!Number.isFinite(nodeId)) {
+          return buildNavigationNodeError(
+            `automobile:navigation/nodes/${params.nodeId}`,
+            `Invalid navigation node id: ${params.nodeId}`,
+          );
+        }
+        return getNavigationNodeByIdResource(nodeId, appId);
+      },
+    },
+  );
+
+  ResourceRegistry.registerTemplateWithReadContext(
+    NAVIGATION_RESOURCE_URIS.NODE_BY_ID,
+    "Navigation Graph Node",
+    {
+      description: "Detailed navigation graph node by node ID, including relationships.",
+      mimeType: "application/json",
+      handler: async (params, context) => {
+        const nodeId = Number(params.nodeId);
+        if (!Number.isFinite(nodeId)) {
+          return buildNavigationNodeError(
+            `automobile:navigation/nodes/${params.nodeId}`,
+            `Invalid navigation node id: ${params.nodeId}`,
+          );
+        }
+        return getNavigationNodeByIdResource(nodeId, undefined, context);
+      },
+    },
+  );
+
+  ResourceRegistry.registerTemplateWithReadContext(
+    NAVIGATION_RESOURCE_URIS.NODE_BY_SCREEN,
+    "Navigation Graph Node (Screen)",
+    {
+      description: "Detailed navigation graph node by screen name, including relationships.",
+      mimeType: "application/json",
+      handler: async (params, context) => {
+        const screenName = decodeUriParam(params.screenName) ?? "";
+        if (!screenName) {
+          return buildNavigationNodeError(
+            "automobile:navigation/nodes?screen=",
+            "Screen name is required.",
+          );
+        }
+        return getNavigationNodeByScreenResource(screenName, context);
+      },
+    },
+  );
+
+  // Registered before NODE_SCREENSHOT so the app-scoped variant is matched for
+  // `.../screenshot?appId=...` URIs; resolves the screenshot under the named app
+  // instead of the daemon's current foreground app (#4933).
+  ResourceRegistry.registerTemplate(
+    NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT_WITH_APP_ID,
+    "Navigation Node Screenshot (App-Specific)",
+    {
+      description:
+        "Screenshot thumbnail for a navigation graph node, resolved under a specific app ID (WebP image).",
+      mimeType: "image/webp",
+      handler: async (params) => {
+        const nodeId = Number(params.nodeId);
+        const appId = decodeUriParam(params.appId);
+        if (!Number.isFinite(nodeId)) {
+          return {
+            uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2),
+          };
+        }
+        return getNavigationNodeScreenshotResource(nodeId, appId);
+      },
+    },
+  );
+
+  ResourceRegistry.registerTemplateWithReadContext(
+    NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT,
+    "Navigation Node Screenshot",
+    {
+      description: "Screenshot thumbnail for a navigation graph node (WebP image).",
+      mimeType: "image/webp",
+      handler: async (params, context) => {
+        const nodeId = Number(params.nodeId);
+        if (!Number.isFinite(nodeId)) {
+          return {
+            uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2),
+          };
+        }
+        return getNavigationNodeScreenshotResource(nodeId, undefined, context);
+      },
+    },
   );
 }
 
@@ -684,144 +801,55 @@ export function registerNavigationResources(
   registerNavigationGraphResources();
   registerNavigationHistoryResources();
 
-  // Registered before NODE_BY_ID: the base template's `([^/&]+)` node-id capture
-  // would otherwise greedily swallow a `?appId=` suffix and win the match (#4933).
-  ResourceRegistry.registerTemplate(
-    NAVIGATION_RESOURCE_URIS.NODE_BY_ID_WITH_APP_ID,
-    "Navigation Graph Node (App-Specific)",
-    "Detailed navigation graph node by node ID, resolved under a specific app ID.",
-    "application/json",
-    async (params) => {
-      const nodeId = Number(params.nodeId);
-      const appId = decodeUriParam(params.appId);
-      if (!Number.isFinite(nodeId)) {
-        return buildNavigationNodeError(
-          `automobile:navigation/nodes/${params.nodeId}`,
-          `Invalid navigation node id: ${params.nodeId}`,
-        );
-      }
-      return getNavigationNodeByIdResource(nodeId, appId);
-    },
-  );
-
-  ResourceRegistry.registerTemplateWithReadContext(
-    NAVIGATION_RESOURCE_URIS.NODE_BY_ID,
-    "Navigation Graph Node",
-    "Detailed navigation graph node by node ID, including relationships.",
-    "application/json",
-    async (params, context) => {
-      const nodeId = Number(params.nodeId);
-      if (!Number.isFinite(nodeId)) {
-        return buildNavigationNodeError(
-          `automobile:navigation/nodes/${params.nodeId}`,
-          `Invalid navigation node id: ${params.nodeId}`,
-        );
-      }
-      return getNavigationNodeByIdResource(nodeId, undefined, context);
-    },
-  );
-
-  ResourceRegistry.registerTemplateWithReadContext(
-    NAVIGATION_RESOURCE_URIS.NODE_BY_SCREEN,
-    "Navigation Graph Node (Screen)",
-    "Detailed navigation graph node by screen name, including relationships.",
-    "application/json",
-    async (params, context) => {
-      const screenName = decodeUriParam(params.screenName) ?? "";
-      if (!screenName) {
-        return buildNavigationNodeError(
-          "automobile:navigation/nodes?screen=",
-          "Screen name is required.",
-        );
-      }
-      return getNavigationNodeByScreenResource(screenName, context);
-    },
-  );
-
-  // Registered before NODE_SCREENSHOT so the app-scoped variant is matched for
-  // `.../screenshot?appId=...` URIs; resolves the screenshot under the named app
-  // instead of the daemon's current foreground app (#4933).
-  ResourceRegistry.registerTemplate(
-    NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT_WITH_APP_ID,
-    "Navigation Node Screenshot (App-Specific)",
-    "Screenshot thumbnail for a navigation graph node, resolved under a specific app ID (WebP image).",
-    "image/webp",
-    async (params) => {
-      const nodeId = Number(params.nodeId);
-      const appId = decodeUriParam(params.appId);
-      if (!Number.isFinite(nodeId)) {
-        return {
-          uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,
-          mimeType: "application/json",
-          text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2),
-        };
-      }
-      return getNavigationNodeScreenshotResource(nodeId, appId);
-    },
-  );
-
-  ResourceRegistry.registerTemplateWithReadContext(
-    NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT,
-    "Navigation Node Screenshot",
-    "Screenshot thumbnail for a navigation graph node (WebP image).",
-    "image/webp",
-    async (params, context) => {
-      const nodeId = Number(params.nodeId);
-      if (!Number.isFinite(nodeId)) {
-        return {
-          uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,
-          mimeType: "application/json",
-          text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2),
-        };
-      }
-      return getNavigationNodeScreenshotResource(nodeId, undefined, context);
-    },
-  );
+  registerNavigationNodeResources();
 
   ResourceRegistry.register(
     NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
     "Navigation Test Coverage Report",
-    "Comprehensive test coverage analysis for the navigation graph, including coverage metrics, critical gaps, and recommendations.",
-    "application/json",
-    async (context) => {
-      try {
-        const appId = (await getNavigationGraphProvider(context).exportGraphSummary()).appId;
+    {
+      description:
+        "Comprehensive test coverage analysis for the navigation graph, including coverage metrics, critical gaps, and recommendations.",
+      mimeType: "application/json",
+      handler: async (context) => {
+        try {
+          const appId = (await getNavigationGraphProvider(context).exportGraphSummary()).appId;
 
-        if (!appId) {
+          if (!appId) {
+            return {
+              uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
+              mimeType: "application/json",
+              text: JSON.stringify(
+                {
+                  error:
+                    "No current app set. Launch or observe an app first to enable test coverage tracking.",
+                },
+                null,
+                2,
+              ),
+            };
+          }
+
+          const report = await testCoverageAnalyzer.generateReport(appId);
+          return {
+            uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
+            mimeType: "application/json",
+            text: JSON.stringify(report, null, 2),
+          };
+        } catch (error) {
+          logger.error(`[NavigationResources] Failed to generate test coverage report: ${error}`);
           return {
             uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
             mimeType: "application/json",
             text: JSON.stringify(
               {
-                error:
-                  "No current app set. Launch or observe an app first to enable test coverage tracking.",
+                error: `Failed to generate test coverage report: ${error}`,
               },
               null,
               2,
             ),
           };
         }
-
-        const report = await testCoverageAnalyzer.generateReport(appId);
-        return {
-          uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
-          mimeType: "application/json",
-          text: JSON.stringify(report, null, 2),
-        };
-      } catch (error) {
-        logger.error(`[NavigationResources] Failed to generate test coverage report: ${error}`);
-        return {
-          uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
-          mimeType: "application/json",
-          text: JSON.stringify(
-            {
-              error: `Failed to generate test coverage report: ${error}`,
-            },
-            null,
-            2,
-          ),
-        };
-      }
+      },
     },
   );
 

@@ -10,10 +10,7 @@ describe("sendKeys layer (#9305)", () => {
     const result = await h.action.execute(
       commands,
       { elementId: "field" },
-      undefined,
-      undefined,
-      undefined,
-      { layer: "app" },
+      { focus: { layer: "app" } },
     );
 
     expect(result.success).toBe(true);
@@ -24,8 +21,10 @@ describe("sendKeys layer (#9305)", () => {
 
   test("layer without a selector is rejected before anything is sent", async () => {
     const h = createSendKeysFocusHarness();
-    const result = await h.action.execute(commands, undefined, undefined, undefined, undefined, {
-      layer: "prototype",
+    const result = await h.action.execute(commands, undefined, {
+      focus: {
+        layer: "prototype",
+      },
     });
 
     expect(result).toMatchObject({

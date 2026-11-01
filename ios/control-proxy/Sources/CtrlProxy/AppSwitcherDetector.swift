@@ -5,27 +5,18 @@ import Foundation
     @MainActor
     enum AppSwitcherDetector {
         static func isVisible(in springboard: XCUIApplication) -> Bool {
-            let candidates = [
-                springboard.otherElements["AppSwitcher"],
-                springboard.otherElements["App Switcher"],
-                springboard.otherElements["AppSwitcherContentView"],
-                springboard.collectionViews["AppSwitcher"],
-                springboard.scrollViews["AppSwitcher"],
-            ]
-
-            for candidate in candidates where candidate.waitForExistence(timeout: 0.2) {
-                return true
-            }
-
-            let appSwitcherPredicate = NSPredicate(
-                format: "identifier CONTAINS[c] %@ OR label CONTAINS[c] %@",
-                "AppSwitcher",
-                "App Switcher"
+            let predicate = NSPredicate(
+                format: "identifier == %@ OR identifier BEGINSWITH %@",
+                "AppSwitcherContentView",
+                "card:"
             )
-            return springboard.descendants(matching: .any)
-                .matching(appSwitcherPredicate)
-                .firstMatch
-                .waitForExistence(timeout: 0.5)
+            let snapshots = springboard.descendants(matching: .any).matching(predicate)
+                .allElementsBoundByIndex.filter { $0.exists }.map {
+                    AppSwitcherSnapshotClassifier.ElementSnapshot(
+                        identifier: $0.identifier, frame: $0.frame, value: $0.value as? String
+                    )
+                }
+            return AppSwitcherSnapshotClassifier.isVisible(snapshots)
         }
     }
 #endif

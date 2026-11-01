@@ -111,7 +111,7 @@ const viewCleaner = new ViewHierarchy(
   { deviceId: "node-cleaners", name: "Node cleaners", platform: "android" },
   new FakeAdbClientFactory(),
   makeViewHierarchyCtrlProxy(),
-  new FakeTimer(),
+  { timer: new FakeTimer() },
 );
 
 function cleanAndroidNode(attrs: Record<string, unknown>): Record<string, unknown> {

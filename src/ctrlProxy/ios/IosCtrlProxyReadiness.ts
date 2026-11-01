@@ -122,8 +122,7 @@ export class IosCtrlProxyReadiness {
     sharedStart: SharedCtrlProxyStart,
     perf: PerformanceTracker,
     delayMs: number,
-    windowMs: number,
-    firstLaunchOwned: boolean,
+    { windowMs, firstLaunchOwned }: { windowMs: number; firstLaunchOwned: boolean },
   ): Promise<boolean> {
     const launchWindowsMs: number[] = [];
     let lastFailure: RunnerLaunchFailure | undefined;
@@ -133,7 +132,8 @@ export class IosCtrlProxyReadiness {
           ? windowMs * IOS_CTRL_PROXY_FIRST_LAUNCH_HEALTH_WINDOW_MULTIPLIER
           : windowMs;
 
-      const result = await this.pollRunnerLaunch(sharedStart, perf, delayMs, launchWindowMs, {
+      const result = await this.pollRunnerLaunch(sharedStart, perf, delayMs, {
+        launchWindowMs,
         firstLaunch: firstLaunchOwned && launchWindowsMs.length === 0,
         windowMs,
       });
@@ -192,8 +192,10 @@ export class IosCtrlProxyReadiness {
     sharedStart: SharedCtrlProxyStart,
     perf: PerformanceTracker,
     delayMs: number,
-    launchWindowMs: number,
-    options: { firstLaunch: boolean; windowMs: number },
+    {
+      launchWindowMs,
+      ...options
+    }: { launchWindowMs: number; firstLaunch: boolean; windowMs: number },
   ): Promise<{
     ready: boolean;
     canRetire: boolean;
@@ -207,7 +209,10 @@ export class IosCtrlProxyReadiness {
     if (launch) {
       await launch.initialize();
     }
-    const ready = await this.waitForLaunchHealth(sharedStart, perf, delayMs, deadlineMs, launch);
+    const ready = await this.waitForLaunchHealth(sharedStart, perf, delayMs, {
+      initialDeadlineMs: deadlineMs,
+      launch,
+    });
     const now = this.state.timer.now();
     const failure = this.trackedLaunchFailure();
     const canRetire =
@@ -229,8 +234,10 @@ export class IosCtrlProxyReadiness {
       this.policies.progressProbe ?? this.state.runnerLaunchProgressProbe,
       this.policies.extensionBackoff ??
         exponentialBackoff({ initialDelayMs: windowMs, maxDelayMs: 60_000 }),
-      { pid: this.state.xcTestProcessId, deviceId: this.state.device.deviceId },
-      launchWindowMs,
+      {
+        identity: { pid: this.state.xcTestProcessId, deviceId: this.state.device.deviceId },
+        windowMs: launchWindowMs,
+      },
     );
   }
 
@@ -238,8 +245,7 @@ export class IosCtrlProxyReadiness {
     sharedStart: SharedCtrlProxyStart,
     perf: PerformanceTracker,
     delayMs: number,
-    initialDeadlineMs: number,
-    launch: IosRunnerLaunchWindow | undefined,
+    { initialDeadlineMs, launch }: { initialDeadlineMs: number; launch?: IosRunnerLaunchWindow },
   ): Promise<boolean> {
     for (;;) {
       const deadlineMs = launch?.deadlineMs ?? initialDeadlineMs;

@@ -112,7 +112,8 @@ describe("UnixSocketServer input/key", () => {
       success: true,
       key: "enter",
     });
-    expect(press).toHaveBeenCalledWith("enter", 1234, undefined, [], {
+    expect(press).toHaveBeenCalledWith("enter", 1234, undefined, {
+      modifiers: [],
       signal: expect.any(AbortSignal),
       onDispatch: expect.any(Function),
     });
@@ -139,7 +140,8 @@ describe("UnixSocketServer input/key", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("enter", 30_000, "frame-1", [], {
+    expect(press).toHaveBeenCalledWith("enter", 30_000, "frame-1", {
+      modifiers: [],
       signal: expect.any(AbortSignal),
       onDispatch: expect.any(Function),
     });

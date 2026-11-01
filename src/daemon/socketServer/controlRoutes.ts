@@ -51,8 +51,7 @@ export async function dispatchInputRoute<Ctx>(
   handlers: InputRouteHandlers<Ctx>,
   route: InputRouteEntry,
   request: DaemonRequest,
-  socketSessionId: string | undefined,
-  input: Ctx,
+  { socketSessionId, input }: { socketSessionId?: string; input: Ctx },
 ): Promise<unknown> {
   return route.handler === "gesture"
     ? await handlers.gesture(request, route.gestureKind, socketSessionId, input)
@@ -254,7 +253,7 @@ export class ControlDiscoveryCache {
     this.entries.delete(key);
     const result = await load();
     context.signal?.throwIfAborted();
-    this.retain(kind, key, generation, result, context.socketSessionId);
+    this.retain(kind, key, generation, { result, socketSessionId: context.socketSessionId });
     return result;
   }
 
@@ -291,8 +290,7 @@ export class ControlDiscoveryCache {
     kind: ListChangedKind,
     key: string,
     generation: number,
-    result: unknown,
-    socketSessionId: string,
+    { result, socketSessionId }: { result: unknown; socketSessionId: string },
   ): void {
     // A notification during the await fences out this fill. Never retain errors or old epochs.
     if (

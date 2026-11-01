@@ -41,23 +41,23 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    *
    * @param deviceId - The device identifier (for caching)
    * @param client - CtrlProxy service for executing the detection command
-   * @param featureFlags - Feature flag service for override support
+   * @param options.featureFlags - Feature flag service for override support
    * @returns Promise resolving to true only when VoiceOver is confirmed enabled
    */
   async isVoiceOverEnabled(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const state = await this.resolveVoiceOverState(
-      deviceId,
-      client,
+    {
       featureFlags,
       timeoutMs,
       signal,
-    );
+    }: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<boolean> {
+    const state = await this.resolveVoiceOverState(deviceId, client, {
+      featureFlags,
+      timeoutMs,
+      signal,
+    });
     return state === true;
   }
 
@@ -79,17 +79,17 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
   async isVoiceOverActiveOrUnknown(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const state = await this.resolveVoiceOverState(
-      deviceId,
-      client,
+    {
       featureFlags,
       timeoutMs,
       signal,
-    );
+    }: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<boolean> {
+    const state = await this.resolveVoiceOverState(deviceId, client, {
+      featureFlags,
+      timeoutMs,
+      signal,
+    });
     if (state === null) {
       logger.warn(
         `[IosVoiceOverDetector] VoiceOver state for device ${deviceId} could not be determined; ` +
@@ -112,11 +112,13 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
   async resolveState(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    {
+      featureFlags,
+      timeoutMs,
+      signal,
+    }: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<boolean | null> {
-    return this.resolveVoiceOverState(deviceId, client, featureFlags, timeoutMs, signal);
+    return this.resolveVoiceOverState(deviceId, client, { featureFlags, timeoutMs, signal });
   }
 
   /**
@@ -128,9 +130,11 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
   private async resolveVoiceOverState(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    {
+      featureFlags,
+      timeoutMs,
+      signal,
+    }: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<boolean | null> {
     // Check feature flag override first
     if (featureFlags?.isEnabled("force-accessibility-mode")) {

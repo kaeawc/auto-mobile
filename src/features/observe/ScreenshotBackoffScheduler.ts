@@ -132,7 +132,7 @@ interface ScreenshotBackoffConfig {
   minCaptureIntervalMs?: number | null;
 }
 
-type ScreenshotBackoffConfigInput = Partial<ScreenshotBackoffConfig>;
+export type ScreenshotBackoffConfigInput = Partial<ScreenshotBackoffConfig>;
 
 const DEFAULT_CONFIG: ScreenshotBackoffConfig = {
   intervals: [0, 100, 300, 500, 800, 1300],
@@ -172,9 +172,15 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
   constructor(
     captureCallback: ScreenshotCaptureCallback,
     emitCallback: ScreenshotEmitCallback,
-    config: ScreenshotBackoffConfigInput = DEFAULT_CONFIG,
-    timer: Timer = defaultTimer,
-    shouldKeepAlive: ScreenshotKeepAlivePredicate = () => true,
+    {
+      config = DEFAULT_CONFIG,
+      timer = defaultTimer,
+      shouldKeepAlive = () => true,
+    }: {
+      config?: ScreenshotBackoffConfigInput;
+      timer?: Timer;
+      shouldKeepAlive?: ScreenshotKeepAlivePredicate;
+    } = {},
   ) {
     this.captureCallback = captureCallback;
     this.emitCallback = emitCallback;

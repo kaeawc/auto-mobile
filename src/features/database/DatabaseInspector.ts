@@ -144,8 +144,7 @@ export class DatabaseInspector {
     appId: string,
     databasePath: string,
     table: string,
-    limit: number = 50,
-    offset: number = 0,
+    { limit = 50, offset = 0 }: { limit?: number; offset?: number } = {},
   ): Promise<TableDataResult> {
     return this.contentCall<TableDataResult>(appId, "getTableData", {
       databasePath,

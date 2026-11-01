@@ -77,7 +77,7 @@ describe("rows released before their latest incarnation was handed out", () => {
       heartbeatTimeoutMs: 4_000,
       hasReceivedHeartbeat: false,
     });
-    await repo.markReleased(SESSION, "released", CREATED_AT + 500, reason);
+    await repo.markReleased(SESSION, "released", CREATED_AT + 500, { reason });
   }
 
   const wire = (method: string) =>
@@ -175,7 +175,7 @@ describe("rows released before their latest incarnation was handed out", () => {
       await seedRow(reason);
       timer.setCurrentTime(DEADLINE + 1);
       await expect(
-        manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+        manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(UnissuedSessionError);
       expect(await repo.getSession!(SESSION)).toMatchObject({
         status: "released",
@@ -186,7 +186,9 @@ describe("rows released before their latest incarnation was handed out", () => {
 
   test("a recovered handoff rolled back before handout keeps allocation-rollback", async () => {
     await seedRow("daemon-shutdown");
-    await repo.markReleased(SESSION, "released", CREATED_AT + 750, "allocation-rollback");
+    await repo.markReleased(SESSION, "released", CREATED_AT + 750, {
+      reason: "allocation-rollback",
+    });
     timer.setCurrentTime(DEADLINE + 1);
     await expectNamedNotFound("allocation-rollback");
     expect(await wire(DAEMON_REGISTER_SESSION_METHOD)).toMatchObject({
@@ -222,7 +224,7 @@ describe("rows released before their latest incarnation was handed out", () => {
         release_reason: reason,
       });
       await expect(
-        manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+        manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(TerminalSessionError);
       expect(await repo.getSession!(SESSION)).toMatchObject({
         status: "expired",

@@ -6,6 +6,16 @@ import type { ViewHierarchy } from "../observe/ViewHierarchy";
 import type { AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
+import {
+  deviceIosSdkBridgeReader,
+  mergeIosSdkBridgeInto,
+  type IosSdkBridgeReader,
+} from "../observe/ios/IosSdkBridgeReader";
+import {
+  deviceIosSdkWebReader,
+  mergeIosSdkWebInto,
+  type IosSdkWebReader,
+} from "../observe/ios/IosSdkWebReader";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 
 /** Hierarchy-read helpers shared by TapOnElement and TapAnyElement (#11832). */
@@ -43,6 +53,10 @@ export interface FreshHierarchyReadDeps {
   ) => ViewHierarchyResult;
   /** Names the action in the unsupported-platform error. */
   actionLabel: string;
+  /** The app's SDK observation bridge (#5159); defaults to the device's runner client. */
+  sdkBridge?: IosSdkBridgeReader;
+  /** The app's opted-in WKWebView bridges (#5162); defaults to the device's runner client. */
+  sdkWeb?: IosSdkWebReader;
 }
 
 /** Read one fresh hierarchy for the device platform within `timeoutMs`; null when none arrived. */
@@ -58,6 +72,7 @@ export async function readFreshPlatformHierarchy(
   const { device } = deps;
   const { signal, screenSize } = request;
   const effectiveTimeoutMs = Math.max(0, request.timeoutMs);
+  const deadline = deps.timer.now() + effectiveTimeoutMs;
   switch (device.platform) {
     case "android": {
       const rawHierarchy = await refreshAndroidViewHierarchy(
@@ -80,7 +95,9 @@ export async function readFreshPlatformHierarchy(
             signal,
             effectiveTimeoutMs,
           )
-        : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
+        : await client.requestHierarchySync(undefined, false, signal, {
+            timeoutMs: effectiveTimeoutMs,
+          });
       if (!synced?.hierarchy) {
         return null;
       }
@@ -91,7 +108,17 @@ export async function readFreshPlatformHierarchy(
       if (acquisition === "device" || acquisition === "client-cache") {
         Object.assign(rawHierarchy, { [iosHierarchyAcquisition]: acquisition });
       }
-      return deps.prepareForResponse(rawHierarchy, screenSize);
+      const prepared = deps.prepareForResponse(rawHierarchy, screenSize);
+      // Merge the bridges exactly as observe does, so a revalidated target keeps its bridge or
+      // web identity.
+      await mergeIosSdkBridgeInto(
+        prepared,
+        deps.sdkBridge ?? deviceIosSdkBridgeReader(device, deps.timer),
+        signal,
+        Math.max(0, deadline - deps.timer.now()),
+      );
+      await mergeIosSdkWebInto(prepared, deps.sdkWeb ?? deviceIosSdkWebReader(device), signal);
+      return prepared;
     }
     default:
       throw unsupportedPlatformError(device.platform, deps.actionLabel);

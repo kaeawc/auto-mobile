@@ -37,6 +37,7 @@ class ServerConfig {
   private _accessibilityAuditConfig: AccessibilityAuditConfig | null = null;
   private _memPerfAuditEnabled: boolean = false;
   private _predictiveUiEnabled: boolean = false;
+  private _iosSdkObservationBridgeEnabled: boolean = true;
   private _rawElementSearchEnabled: boolean = false;
   private _planExecutionLockScope: PlanExecutionLockScope = "session";
   private _videoRecordingDefaults: VideoRecordingConfigInput = {};
@@ -107,6 +108,15 @@ class ServerConfig {
 
   isPredictiveUiEnabled(): boolean {
     return this._predictiveUiEnabled;
+  }
+
+  setIosSdkObservationBridgeEnabled(enabled: boolean): void {
+    this._iosSdkObservationBridgeEnabled = enabled;
+  }
+
+  /** Whether iOS observe and tapOn use a registered SDK observation bridge (#5159). */
+  isIosSdkObservationBridgeEnabled(): boolean {
+    return this._iosSdkObservationBridgeEnabled;
   }
 
   setRawElementSearchEnabled(enabled: boolean): void {

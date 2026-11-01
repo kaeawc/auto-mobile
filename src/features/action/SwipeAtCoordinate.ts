@@ -1,3 +1,4 @@
+import { unsupportedWatchAction } from "../watch/WatchActions";
 import {
   dispatchRichStylus,
   pointerNeedsInstrumentation,
@@ -148,7 +149,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SwipeAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
@@ -211,17 +216,12 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     }
     let target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     try {
-      target = await prepareTargetDisplayAction(
-        this.device,
-        display,
-        this.observeScreen,
-        this.adb,
-        {
-          lastRenderedObservation: this.lastRenderedObservation,
-          signal,
-          transitions: this.displayTransitionReader,
-        },
-      );
+      target = await prepareTargetDisplayAction(this.device, display, this.observeScreen, {
+        adb: this.adb,
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      });
     } catch (error) {
       if (
         error instanceof StaleDisplayError ||
@@ -321,10 +321,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     if (displayId === undefined || displayId === 0) {
       // The gesture reports its own outcomeIndeterminate; a throw before sending is a plain failure.
       return this.executeGesture.swipe(
-        from.x,
-        from.y,
-        to.x,
-        to.y,
+        { x1: from.x, y1: from.y, x2: to.x, y2: to.y },
         { duration, displayFence: { assertCurrent: target.assertCurrent } },
         { perf, signal },
       );
@@ -380,9 +377,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       this.adb,
       `swipe ${from.x} ${from.y} ${to.x} ${to.y} ${inputDurationArgument(duration)}`,
       displayId,
-      signal,
-      target.assertCurrent,
-      { onDispatch },
+      { signal, assertCurrent: target.assertCurrent, onDispatch },
     );
     return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
   }
@@ -395,8 +390,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     resolved: { from: NativePoint; to: NativePoint },
     duration: number,
     fence: { assertCurrent: () => void } | undefined,
-    pointer: PointerOption | undefined,
-    signal?: AbortSignal,
+    { pointer, signal }: { pointer?: PointerOption; signal?: AbortSignal } = {},
   ): Promise<SwipeResult> {
     const { from, to } = resolved;
     const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
@@ -444,6 +438,9 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     options: SwipeAtOptions,
     call: ActionCall & { recordingContext?: SwipeAtRecordingContext } = {},
   ): Promise<SwipeResult> {
+    if (this.device.platform === "watchos") {
+      unsupportedWatchAction("coordinate swipe; use swipeOn with a direction");
+    }
     const { progress, signal } = resolveActionCall(call);
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);
@@ -503,12 +500,14 @@ export class SwipeAtCoordinate extends BaseVisualChange {
             options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
           const result = await perf.track("executeSwipe", () =>
             options.pointer
-              ? this.dispatchStylus(resolved, duration, fence, options.pointer, signal)
+              ? this.dispatchStylus(resolved, duration, fence, { pointer: options.pointer, signal })
               : this.executeGesture.swipe(
-                  resolved.from.x,
-                  resolved.from.y,
-                  resolved.to.x,
-                  resolved.to.y,
+                  {
+                    x1: resolved.from.x,
+                    y1: resolved.from.y,
+                    x2: resolved.to.x,
+                    y2: resolved.to.y,
+                  },
                   {
                     duration,
                     // A display change since the pre-dispatch read refuses just before the finger goes down.

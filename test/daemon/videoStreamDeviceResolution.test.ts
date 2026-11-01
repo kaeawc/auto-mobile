@@ -49,7 +49,7 @@ test("video iOS discovery uses the injected retry timer", async () => {
     },
     undefined,
     "ios",
-    timer,
+    { timer },
   );
   expect(device).toBe(ios);
   expect(calls).toBe(2);
@@ -58,13 +58,10 @@ test("video iOS discovery uses the injected retry timer", async () => {
 test("video iOS discovery aborts its retry", async () => {
   const timer = new FakeTimer();
   const controller = new AbortController();
-  const pending = resolveVideoStreamDevice(
-    { getBootedDevices: async () => [] },
-    undefined,
-    "ios",
+  const pending = resolveVideoStreamDevice({ getBootedDevices: async () => [] }, undefined, "ios", {
     timer,
-    controller.signal,
-  );
+    signal: controller.signal,
+  });
   // Allow the resolver to enter its fake-timer retry without wall-clock sleeps.
   for (let i = 0; i < 10; i++) {
     await Promise.resolve();

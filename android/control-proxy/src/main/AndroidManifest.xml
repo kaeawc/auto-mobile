@@ -27,6 +27,9 @@
       android:protectionLevel="signature" />
   <uses-permission android:name="dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2" />
 
+  <!-- Guest microphone capture for emulator audio injection. -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
   <!-- Prototype request actions with via "device" make their own HTTP calls (#12528). -->
   <uses-permission android:name="android.permission.INTERNET" />
 
@@ -111,6 +114,16 @@
           android:name="android.view.im"
           android:resource="@xml/method" />
       </service>
+
+      <!-- DUMP permits the adb shell to control guest capture; third-party apps do not hold it. -->
+      <receiver
+        android:name=".GuestAudioCaptureReceiver"
+        android:exported="true"
+        android:permission="android.permission.DUMP">
+        <intent-filter>
+          <action android:name="dev.jasonpearson.automobile.GUEST_AUDIO_CAPTURE" />
+        </intent-filter>
+      </receiver>
 
       <receiver
         android:name=".AutoMobileDeviceAdminReceiver"

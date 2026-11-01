@@ -26,6 +26,15 @@ import {
   isPrintableAscii,
 } from "./AndroidTypingConstants";
 
+/** How a key-event letter-case read-back runs: the typing mode it reports and where it reads. */
+export interface KeyEventLetterCaseCheck {
+  mode: "eventAll" | "eventOnly" | "eventLast";
+  signal?: AbortSignal;
+  display?: string;
+  /** Field text before typing, so only the typed suffix is compared. */
+  before?: string;
+}
+
 export interface KeyEventSupportHost {
   adb: AdbExecutor;
   timer: Timer;
@@ -55,11 +64,9 @@ export class KeyEventSupport {
   async verifyKeyEventLetterCase(
     text: string,
     typed: TextActionResult,
-    mode: "eventAll" | "eventOnly" | "eventLast",
-    signal?: AbortSignal,
-    display?: string,
-    before = "",
+    check: KeyEventLetterCaseCheck,
   ): Promise<TextActionResult> {
+    const { mode, signal, display, before = "" } = check;
     // A password's text and read-back must never reach a warning or log.
     if (
       !typed.success ||

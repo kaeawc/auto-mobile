@@ -1,0 +1,263 @@
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { describe, expect, test } from "bun:test";
+import { ActionableError } from "../../src/models";
+import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
+import type { IosBootRequest } from "../../src/models/IosBootInstrumentation";
+import { WatchSimulatorInventory } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
+import { WatchSimulatorLifecycle } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
+import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import { installBootAdmissionServices } from "../../src/devices/bootAdmissionServices";
+import { watchLifecycleOver } from "../../src/server/deviceToolsWatchOs";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
+import { FakeWatchLifecycleSimctl, IPHONE_UDID, watchDevice } from "../fakes/FakeWatchSimctl";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
+
+// Apple Watch simulators boot and shut down through their own lifecycle; targets resolve only from
+// the watch listing, so nothing else is ever booted or stopped as a watch (#14908).
+
+const WATCH_UDID = watchDevice().udid;
+
+function lifecycleOver(simctl: FakeWatchLifecycleSimctl): WatchSimulatorLifecycle {
+  return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl, "arm64"));
+}
+
+async function refusal(operation: Promise<unknown>): Promise<string> {
+  const error = await operation.then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+  expect(error).toBeInstanceOf(ActionableError);
+  return error instanceof Error ? error.message : "";
+}
+
+describe("Apple Watch simulator lifecycle", () => {
+  test("boots a shutdown watch and labels the result watchos", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const lifecycle = lifecycleOver(simctl);
+
+    const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+    const result = await lifecycle.boot(watch, { timeoutMs: 30_000 });
+
+    expect(result).toEqual({
+      device: {
+        name: "Apple Watch Series 10 (46mm)",
+        platform: "watchos",
+        deviceId: WATCH_UDID,
+        observedAt: 7,
+      },
+      acquisition: "cold-boot",
+    });
+    expect(simctl.commands).toEqual([`boot ${WATCH_UDID} 30000`]);
+    expect(simctl.stateOf(WATCH_UDID)).toBe("Booted");
+  });
+
+  test("a cold watch boot is admitted through the shared simulator gate first (#15882)", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const requests: IosBootRequest[] = [];
+    const lifecycle = new WatchSimulatorLifecycle(
+      simctl,
+      new WatchSimulatorInventory(simctl, "arm64"),
+      {
+        run: async (request, boot) => {
+          requests.push(request);
+          expect(simctl.commands).toEqual([]);
+          return await boot(request.timeoutMs);
+        },
+      },
+    );
+
+    await lifecycle.boot(await lifecycle.findWatch({ deviceId: WATCH_UDID }), {
+      timeoutMs: 30_000,
+    });
+
+    expect(requests).toEqual([
+      expect.objectContaining({ udid: WATCH_UDID, reason: "restart", timeoutMs: 30_000 }),
+    ]);
+    expect(simctl.commands).toEqual([`boot ${WATCH_UDID} 30000`]);
+  });
+
+  test("a watch boot's admission follows the caller's signal, else the ambient request signal", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const signals: Array<AbortSignal | undefined> = [];
+    const lifecycle = new WatchSimulatorLifecycle(
+      simctl,
+      new WatchSimulatorInventory(simctl, "arm64"),
+      {
+        run: async (request, boot) => {
+          signals.push(request.signal);
+          return await boot(request.timeoutMs);
+        },
+      },
+    );
+    const explicit = new AbortController().signal;
+    const ambient = new AbortController().signal;
+    const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+
+    await lifecycle.boot(watch, { timeoutMs: 30_000, signal: explicit });
+    await runWithAbortSignal(ambient, () => lifecycle.boot(watch, { timeoutMs: 30_000 }));
+
+    expect(signals).toEqual([explicit, ambient]);
+  });
+
+  test("a watch boot refused at the simulator limit never runs simctl boot", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const full = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 2, booted: 2, retryAfterMs: 1_000 },
+      "iOS simulator capacity reached",
+    );
+    const lifecycle = new WatchSimulatorLifecycle(
+      simctl,
+      new WatchSimulatorInventory(simctl, "arm64"),
+      {
+        run: async () => {
+          throw full;
+        },
+      },
+    );
+    const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+    await expect(lifecycle.boot(watch, { timeoutMs: 30_000 })).rejects.toBe(full);
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("the tool lifecycle admits watch boots through the installed simulator gate", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const full = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1_000 },
+      "iOS simulator capacity reached",
+    );
+    const previous = installBootAdmissionServices({
+      androidColdBootAdmitter: () => undefined,
+      assertBootCapacityAvailable: async () => {},
+      iosBootInstrumentation: () => ({
+        run: async () => {
+          throw full;
+        },
+      }),
+    });
+    try {
+      const lifecycle = watchLifecycleOver(simctl);
+      const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+      await expect(lifecycle.boot(watch, { timeoutMs: 30_000 })).rejects.toBe(full);
+      expect(simctl.commands).toEqual([]);
+    } finally {
+      installBootAdmissionServices(previous);
+    }
+  });
+
+  test("adopts an already-booted watch without a boot command", async () => {
+    const simctl = new FakeWatchLifecycleSimctl([watchDevice({ state: "Booted" })]);
+    const lifecycle = lifecycleOver(simctl);
+
+    const result = await lifecycle.boot(await lifecycle.findWatch({ name: watchDevice().name }));
+
+    expect(result).toEqual({
+      device: { name: "Apple Watch Series 10 (46mm)", platform: "watchos", deviceId: WATCH_UDID },
+      acquisition: "already-booted",
+    });
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("refuses an iPhone UDID and names the available watches, before any command", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+
+    const message = await refusal(lifecycleOver(simctl).findWatch({ deviceId: IPHONE_UDID }));
+
+    expect(message).toContain(`No Apple Watch simulator matches UDID ${IPHONE_UDID}`);
+    expect(message).toContain(`Apple Watch Series 10 (46mm) (${WATCH_UDID}, Shutdown)`);
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("refuses an ambiguous name and a selector with neither id nor name", async () => {
+    const simctl = new FakeWatchLifecycleSimctl([
+      watchDevice(),
+      watchDevice({ udid: "SECOND-WATCH" }),
+    ]);
+    const lifecycle = lifecycleOver(simctl);
+
+    expect(await refusal(lifecycle.findWatch({ name: watchDevice().name }))).toContain(
+      "is ambiguous; pass deviceId",
+    );
+    expect(await refusal(lifecycle.findWatch({}))).toContain("needs deviceId");
+  });
+
+  test("refuses an unavailable watch with its availability error", async () => {
+    const simctl = new FakeWatchLifecycleSimctl([
+      watchDevice({ isAvailable: false, availabilityError: "runtime profile not found" }),
+    ]);
+
+    expect(await refusal(lifecycleOver(simctl).findWatch({ deviceId: WATCH_UDID }))).toContain(
+      "unavailable: runtime profile not found",
+    );
+  });
+
+  test("shuts down a booted watch and skips one already shut down", async () => {
+    const simctl = new FakeWatchLifecycleSimctl([watchDevice({ state: "Booted" })]);
+    const lifecycle = lifecycleOver(simctl);
+    const device = { name: watchDevice().name, platform: "watchos" as const, deviceId: WATCH_UDID };
+
+    await lifecycle.shutdown(device);
+    await lifecycle.shutdown(device);
+
+    expect(simctl.commands).toEqual([`shutdown ${WATCH_UDID}`]);
+    expect(simctl.stateOf(WATCH_UDID)).toBe("Shutdown");
+  });
+
+  test("never shuts down an iPhone through the watch path", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const lifecycle = lifecycleOver(simctl);
+
+    expect(
+      await refusal(
+        lifecycle.shutdown({ name: "iPhone 16", platform: "watchos", deviceId: IPHONE_UDID }),
+      ),
+    ).toContain("No Apple Watch simulator matches");
+    expect(
+      await refusal(
+        lifecycle.shutdown({ name: "iPhone 16", platform: "ios", deviceId: IPHONE_UDID }),
+      ),
+    ).toContain("as an Apple Watch simulator");
+    expect(simctl.commands).toEqual([]);
+    expect(simctl.stateOf(IPHONE_UDID)).toBe("Booted");
+  });
+});
+
+describe("MultiPlatformDeviceManager.killDevice for a watch", () => {
+  function managerOver(simctl: FakeWatchLifecycleSimctl, withInventory = true) {
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient(),
+      fakeDeviceManagerSimctl({ killSimulator: (device) => simctl.killSimulator(device) }),
+      createFakeAndroidEmulator(),
+    );
+    return withInventory
+      ? manager.withWatchSimulators(new WatchSimulatorInventory(simctl, "arm64"))
+      : manager;
+  }
+
+  test("shuts the watch down through the watch lifecycle", async () => {
+    const simctl = new FakeWatchLifecycleSimctl([watchDevice({ state: "Booted" })]);
+
+    await managerOver(simctl).killDevice({
+      name: watchDevice().name,
+      platform: "watchos",
+      deviceId: WATCH_UDID,
+    });
+
+    expect(simctl.commands).toEqual([`shutdown ${WATCH_UDID}`]);
+  });
+
+  test("refuses when no watch listing is wired, before any command", async () => {
+    const simctl = new FakeWatchLifecycleSimctl([watchDevice({ state: "Booted" })]);
+
+    const message = await refusal(
+      managerOver(simctl, false).killDevice({
+        name: watchDevice().name,
+        platform: "watchos",
+        deviceId: WATCH_UDID,
+      }),
+    );
+
+    expect(message).toContain("inventory is not available");
+    expect(simctl.commands).toEqual([]);
+  });
+});

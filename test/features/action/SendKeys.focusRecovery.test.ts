@@ -118,9 +118,7 @@ describe("sendKeys selector focus recovery", () => {
     const h = createSendKeysFocusHarness();
     const scope = { container: { elementId: "form" }, selectionStrategy: "unique" as const };
     h.replies.push(occlusion, { success: true, focusVerified: true });
-    expect(
-      (await h.action.execute(commands, selector, undefined, undefined, undefined, scope)).success,
-    ).toBe(true);
+    expect((await h.action.execute(commands, selector, { focus: scope })).success).toBe(true);
     expect(h.calls).toEqual(["focus", "close", "refresh", "focus", "type"]);
     expect(h.focusCalls).toHaveLength(2);
     expect(h.focusCalls[1]).toEqual(h.focusCalls[0]);
@@ -196,7 +194,7 @@ describe("sendKeys selector focus recovery", () => {
   test("display-routed occlusion skips the unrouteable keyboard close", async () => {
     const h = createSendKeysFocusHarness();
     h.replies.push(occlusion);
-    expect((await h.action.execute(commands, selector, undefined, undefined, "0")).error).toBe(
+    expect((await h.action.execute(commands, selector, { display: "0" })).error).toBe(
       occlusion.message,
     );
     expect(h.calls).toEqual(["focus"]);
@@ -205,7 +203,7 @@ describe("sendKeys selector focus recovery", () => {
   test("display-routed not-found retains the original error plus hint without recovery", async () => {
     const h = createSendKeysFocusHarness();
     h.replies.push(missing);
-    expect((await h.action.execute(commands, selector, undefined, undefined, "0")).error).toBe(
+    expect((await h.action.execute(commands, selector, { display: "0" })).error).toBe(
       `${missing.error} ${hint}`,
     );
     expect(h.calls).toEqual(["focus"]);
@@ -220,7 +218,7 @@ describe("sendKeys selector focus recovery", () => {
       controller.abort(reason);
       return { success: true };
     };
-    await expect(h.action.execute(commands, selector, undefined, controller.signal)).rejects.toBe(
+    await expect(h.action.execute(commands, selector, { signal: controller.signal })).rejects.toBe(
       reason,
     );
     expect(h.calls).toEqual(["focus", "close"]);
@@ -245,7 +243,7 @@ describe("sendKeys selector focus recovery", () => {
       },
     });
     await expect(
-      action.execute(commands, selector, undefined, controller.signal, "0"),
+      action.execute(commands, selector, { signal: controller.signal, display: "0" }),
     ).rejects.toBe(reason);
     expect(h.adb.getExecutedCommands()).toEqual([]);
   });
@@ -285,10 +283,10 @@ describe("sendKeys selector focus recovery", () => {
           displayTransitions: h.transitions,
           lastRenderedObservation: () => h.observation,
         });
-        expect(
-          (await action.execute(commands, selector, undefined, undefined, display)).error,
-        ).toBe(`${missing.error} ${hint}`);
-        expect(tap.mock.calls[0][3]).toEqual({ throwOnKeyboardOcclusion: true });
+        expect((await action.execute(commands, selector, { display })).error).toBe(
+          `${missing.error} ${hint}`,
+        );
+        expect(tap.mock.calls[0][1]?.recovery).toEqual({ throwOnKeyboardOcclusion: true });
         expect(tap).toHaveBeenCalledTimes(1);
       } finally {
         tap.mockRestore();

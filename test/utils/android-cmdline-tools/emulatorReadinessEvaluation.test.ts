@@ -27,8 +27,7 @@ const ready = (): Parameters<typeof unmetReadinessPredicate> => [
   "emulator-5554",
   "device",
   exec("package:com.android.settings\n"),
-  "1",
-  "stopped",
+  { sysBootCompleted: "1", bootAnimationState: "stopped" },
 ];
 
 describe("unmetReadinessPredicate", () => {
@@ -38,28 +37,44 @@ describe("unmetReadinessPredicate", () => {
 
   test("reports each failing signal in order", () => {
     const [id, , pm] = ready();
-    expect(unmetReadinessPredicate(id, "offline", pm, "1", "stopped")?.phase).toBe("device-state");
     expect(
-      unmetReadinessPredicate(id, "device", exec("", "Failure [x]"), "1", "stopped")?.phase,
+      unmetReadinessPredicate(id, "offline", pm, {
+        sysBootCompleted: "1",
+        bootAnimationState: "stopped",
+      })?.phase,
+    ).toBe("device-state");
+    expect(
+      unmetReadinessPredicate(id, "device", exec("", "Failure [x]"), {
+        sysBootCompleted: "1",
+        bootAnimationState: "stopped",
+      })?.phase,
     ).toBe("package-manager");
-    expect(unmetReadinessPredicate(id, "device", pm, "0", "stopped")?.phase).toBe(
-      "system-boot-complete",
-    );
-    expect(unmetReadinessPredicate(id, "device", pm, "1", "running")?.phase).toBe("boot-animation");
+    expect(
+      unmetReadinessPredicate(id, "device", pm, {
+        sysBootCompleted: "0",
+        bootAnimationState: "stopped",
+      })?.phase,
+    ).toBe("system-boot-complete");
+    expect(
+      unmetReadinessPredicate(id, "device", pm, {
+        sysBootCompleted: "1",
+        bootAnimationState: "running",
+      })?.phase,
+    ).toBe("boot-animation");
   });
 
   test("benign stderr with a listing does not block; empty listing prefers stderr detail", () => {
     const [id] = ready();
     expect(
-      unmetReadinessPredicate(id, "device", exec("package:a\n", "linker warning"), "1", ""),
+      unmetReadinessPredicate(id, "device", exec("package:a\n", "linker warning"), {
+        sysBootCompleted: "1",
+        bootAnimationState: "",
+      }),
     ).toBeUndefined();
-    const d = unmetReadinessPredicate(
-      id,
-      "device",
-      exec("", "cmd: Can't find service: package"),
-      "1",
-      "",
-    );
+    const d = unmetReadinessPredicate(id, "device", exec("", "cmd: Can't find service: package"), {
+      sysBootCompleted: "1",
+      bootAnimationState: "",
+    });
     expect(d?.summary).toContain(`observed="cmd: Can't find service: package"`);
   });
 });
@@ -97,14 +112,10 @@ describe("diagnostics", () => {
   test("readinessTimeoutError prefers the process exit error, else lists details", () => {
     const exit = new Error("exited") as never;
     expect(readinessTimeoutError("Pixel", 10, exit)).toBe(exit);
-    const error = readinessTimeoutError(
-      "Pixel",
-      10,
-      null,
-      undefined,
-      { phase: "boot-animation", summary: "s" },
-      { deviceId: "emulator-5554", state: "offline" },
-    );
+    const error = readinessTimeoutError("Pixel", 10, null, {
+      diagnostic: { phase: "boot-animation", summary: "s" },
+      target: { deviceId: "emulator-5554", state: "offline" },
+    });
     expect(error.message).toBe(
       [
         "Emulator 'Pixel' failed to become ready within 10ms",

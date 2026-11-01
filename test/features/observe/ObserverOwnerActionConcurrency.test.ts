@@ -162,25 +162,21 @@ test.each(ownerCommands)(
       const owner = new AbortController();
       const ownerAction =
         command === ownerCommands[0]
-          ? executeTouchscreenInput(adb, "tap 10 20", undefined, owner.signal)
+          ? executeTouchscreenInput(adb, "tap 10 20", undefined, { signal: owner.signal })
           : command === ownerCommands[1]
-            ? executeTouchscreenInput(adb, "swipe 10 20 30 40 100", 2, owner.signal)
+            ? executeTouchscreenInput(adb, "swipe 10 20 30 40 100", 2, { signal: owner.signal })
             : command === ownerCommands[2]
               ? new ExecuteGesture(device, adb, timer).swipe(
-                  10,
-                  20,
-                  30,
-                  40,
+                  { x1: 10, y1: 20, x2: 30, y2: 40 },
                   { duration: 100 },
                   { signal: owner.signal },
                 )
               : command === ownerCommands[4]
-                ? new InputKey(device, factory, undefined, timer).press(
+                ? new InputKey(device, { adbFactory: factory, timer }).press(
                     "enter",
                     undefined,
                     undefined,
-                    [],
-                    { signal: owner.signal },
+                    { modifiers: [], signal: owner.signal },
                   )
                 : adb.executeCommand(command, { signal: owner.signal });
       await adb.started;
@@ -196,7 +192,7 @@ test.each(ownerCommands)(
           screenshotStateStore: new FakeScreenshotStateStore(timer),
           hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
         },
-        timer,
+        { timer },
       );
       const observation = screen.execute({
         observerMode: true,
@@ -294,7 +290,9 @@ test("observer display-discovery deadline aborts only its probes and fences late
   const ownerAdb = new HoldingAdb("shell input touchscreen tap 10 20");
   const observerAdb = new HoldingAdb("shell dumpsys SurfaceFlinger --display-id");
   const ownerController = new AbortController();
-  const owner = executeTouchscreenInput(ownerAdb, "tap 10 20", undefined, ownerController.signal);
+  const owner = executeTouchscreenInput(ownerAdb, "tap 10 20", undefined, {
+    signal: ownerController.signal,
+  });
   await ownerAdb.started;
   const shot = screenshot(observerAdb, timer, new CountingIdGenerator("observer"));
   const observer = shot.capture.executeObservationRead({ format: "png" });

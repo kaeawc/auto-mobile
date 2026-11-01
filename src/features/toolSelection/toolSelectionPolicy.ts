@@ -151,8 +151,10 @@ export async function isToolEnabledForAnySession(
   toolName: string,
   declaredDefault: boolean,
   sessionUuids: ReadonlyArray<string | undefined>,
-  sessionToolSelectionService?: ToolSelectionReader,
-  connectionProfileUuid?: string,
+  {
+    sessionToolSelectionService,
+    connectionProfileUuid,
+  }: { sessionToolSelectionService?: ToolSelectionReader; connectionProfileUuid?: string } = {},
 ): Promise<boolean> {
   const candidates = Array.from(
     new Set(sessionUuids.filter((uuid): uuid is string => Boolean(uuid))),
@@ -196,8 +198,10 @@ export async function isToolEnabledForAnyRoute(
   toolName: string,
   declaredDefault: boolean,
   routingSessionRoutes: ReadonlyArray<ReadonlyArray<string | undefined>>,
-  sessionToolSelectionService?: ToolSelectionReader,
-  connectionProfileUuid?: string,
+  {
+    sessionToolSelectionService,
+    connectionProfileUuid,
+  }: { sessionToolSelectionService?: ToolSelectionReader; connectionProfileUuid?: string } = {},
 ): Promise<boolean> {
   const routes = routingSessionRoutes.length > 0 ? routingSessionRoutes : [[]];
   for (const routingSessions of routes) {
@@ -206,8 +210,7 @@ export async function isToolEnabledForAnyRoute(
         toolName,
         declaredDefault,
         [connectionProfileUuid, ...routingSessions],
-        sessionToolSelectionService,
-        connectionProfileUuid,
+        { sessionToolSelectionService, connectionProfileUuid },
       )
     ) {
       return true;
@@ -216,8 +219,20 @@ export async function isToolEnabledForAnyRoute(
   return false;
 }
 
+export interface AssertToolEnabledOptions {
+  /** Reads per-session tool overrides; defaults to the shared session tool selection service. */
+  sessionToolSelectionService?: ToolSelectionReader;
+  /** The MCP connection profile whose own override is rechecked, when the caller has one. */
+  connectionProfileUuid?: string;
+  /**
+   * The callable the remediation sentence names — the MCP `setToolEnabled` tool by default.
+   * See `assertToolEnabledForAnySession`.
+   */
+  remediationMethodName?: string;
+}
+
 /**
- * @param remediationMethodName The callable the remediation sentence names — the MCP
+ * @param options.remediationMethodName The callable the remediation sentence names — the MCP
  * `setToolEnabled` tool by default. Pass `IDE_SET_SESSION_TOOL_ENABLED_METHOD` from a rejection
  * raised on the direct IDE socket channel (see `assertSocketToolEnabled` in
  * src/daemon/socketServer.ts): that caller cannot invoke an MCP tool, only the socket's own
@@ -227,18 +242,17 @@ export async function assertToolEnabledForAnySession(
   toolName: string,
   declaredDefault: boolean,
   sessionUuids: ReadonlyArray<string | undefined>,
-  sessionToolSelectionService?: ToolSelectionReader,
-  connectionProfileUuid?: string,
-  remediationMethodName: string = SET_TOOL_ENABLED_TOOL_NAME,
+  {
+    sessionToolSelectionService,
+    connectionProfileUuid,
+    remediationMethodName = SET_TOOL_ENABLED_TOOL_NAME,
+  }: AssertToolEnabledOptions = {},
 ): Promise<void> {
   if (
-    await isToolEnabledForAnySession(
-      toolName,
-      declaredDefault,
-      sessionUuids,
+    await isToolEnabledForAnySession(toolName, declaredDefault, sessionUuids, {
       sessionToolSelectionService,
       connectionProfileUuid,
-    )
+    })
   ) {
     return;
   }

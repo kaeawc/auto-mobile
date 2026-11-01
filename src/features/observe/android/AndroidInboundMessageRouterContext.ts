@@ -70,10 +70,12 @@ interface InboundScreenshotContext {
   readonly screenshotCaptureBindings: Map<string, ScreenGeometryBinding>;
   pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata?: ScreenshotMetadata,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
+    options?: {
+      metadata?: ScreenshotMetadata;
+      binding?: ScreenGeometryBinding;
+      frameContext?: string;
+      rotation?: number;
+    },
   ): void;
 }
 

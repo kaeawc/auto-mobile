@@ -306,12 +306,9 @@ describe("Perfetto trace processor summaries (#14102)", () => {
       },
     };
 
-    const result = await summarizePerfettoTrace(
-      processor,
-      "/t.pftrace",
-      "hitches",
-      "com.example.app",
-    );
+    const result = await summarizePerfettoTrace(processor, "/t.pftrace", "hitches", {
+      appId: "com.example.app",
+    });
 
     expect(result).toEqual({
       summary: { durationMs: 5_250, hitches: { count: 2, totalDurationMs: 60, maxDurationMs: 40 } },
@@ -327,7 +324,9 @@ describe("Perfetto trace processor summaries (#14102)", () => {
         return [{ dur: "1000000000" }];
       },
     };
-    expect(await summarizePerfettoTrace(failing, "/t", "appLaunch", "com.example.app")).toEqual({
+    expect(
+      await summarizePerfettoTrace(failing, "/t", "appLaunch", { appId: "com.example.app" }),
+    ).toEqual({
       summary: { durationMs: 1_000 },
       warnings: [expect.stringContaining("no such table: android_startups")],
     });
@@ -338,10 +337,10 @@ describe("Perfetto trace processor summaries (#14102)", () => {
     const processor: PerfettoTraceProcessor = {
       query: async (_path, query) => (sql.push(query), []),
     };
-    await summarizePerfettoTrace(processor, "/t", "hangs", "com.o'brien");
+    await summarizePerfettoTrace(processor, "/t", "hangs", { appId: "com.o'brien" });
     expect(sql[1]).toContain("'com.o''brien'");
 
-    const result = await summarizePerfettoTrace(processor, "/t", "hangs", undefined);
+    const result = await summarizePerfettoTrace(processor, "/t", "hangs");
     expect(result.warnings).toEqual([expect.stringContaining("limited to duration")]);
   });
 });

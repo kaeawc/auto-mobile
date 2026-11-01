@@ -52,11 +52,11 @@ export function stylusRefusal(request: StylusRequest): string | undefined {
   if (pointer === undefined) {
     return undefined;
   }
-  if (pointer.toolType !== "stylus") {
-    return `pointer.toolType "${pointer.toolType}" is not supported; only "stylus" can be injected`;
+  if (pointer.toolType !== "stylus" && pointer.toolType !== "eraser") {
+    return `pointer.toolType "${String(pointer.toolType)}" is not supported; only "stylus" or "eraser" can be injected`;
   }
   if (platform !== "android") {
-    return 'pointer.toolType "stylus" is Android-only; omit pointer on iOS';
+    return `pointer.toolType "${pointer.toolType}" is Android-only; omit pointer on iOS`;
   }
   if (gesture === "doubleTap") {
     return "stylus pointer does not support doubleTap yet; use tap or longPress";

@@ -68,8 +68,10 @@ export class StaleHierarchyRecovery {
     result: ObserveResult,
     foreground: string,
     options: ObserveScreenExecuteOptions | undefined,
-    remainingMs: number,
-    sideSamples: { skipBackStack: boolean; displayId: number },
+    {
+      remainingMs,
+      sideSamples,
+    }: { remainingMs: number; sideSamples: { skipBackStack: boolean; displayId: number } },
   ): Promise<void> {
     const startedAt = this.timer.now();
     const hierarchy = await this.readIndependentHierarchy(
@@ -272,11 +274,14 @@ export class StaleHierarchyRecovery {
         () =>
           this.viewHierarchy.getViewHierarchy(
             {},
-            new NoOpPerformanceTracker(),
-            true,
-            Math.max(1, updatedAt ?? 1),
-            retrySignal,
-            { timeoutMs: remainingMs, requireFreshExtraction: true },
+            {
+              perf: new NoOpPerformanceTracker(),
+              skipWaitForFresh: true,
+              minTimestamp: Math.max(1, updatedAt ?? 1),
+              signal: retrySignal,
+              timeoutMs: remainingMs,
+              requireFreshExtraction: true,
+            },
           ),
         {
           timer: this.timer,

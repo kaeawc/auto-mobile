@@ -7,7 +7,11 @@ import {
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { ActionableError, BootedDevice, RecentAppsResult, ObserveResult } from "../../models";
-import { PressButton } from "./PressButton";
+import {
+  PressButton,
+  acceptVerifiedAlreadyOpenSwitcher,
+  isVerifiedAlreadyOpenSwitcher,
+} from "./PressButton";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -17,6 +21,7 @@ import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { IOS_RECENT_APPS_TIMEOUT_MS } from "./gestureTransportTimeout";
 import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // Two reads preserve the existing recent-app verification bound.
@@ -42,7 +47,7 @@ export class RecentApps extends BaseVisualChange {
     timer: Timer = defaultTimer,
     collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.pressButton = new PressButton(device, adb);
   }
 
@@ -64,9 +69,17 @@ export class RecentApps extends BaseVisualChange {
     perf.serial("recentApps");
 
     if (this.device.platform === "ios") {
-      return this.observedInteraction(
+      let verifiedAlreadyOpen = false;
+      const result = await this.observedInteraction(
         async () => {
-          return perf.track("iOSRecentApps", () => this.executeIosRecentApps(signal));
+          const { recentAppsRoute, ...reply } = await perf.track("iOSRecentApps", () =>
+            this.executeIosRecentApps(signal),
+          );
+          verifiedAlreadyOpen = isVerifiedAlreadyOpenSwitcher({
+            success: reply.success,
+            recentAppsRoute,
+          });
+          return reply;
         },
         {
           usesObservationForResolution: false,
@@ -78,6 +91,9 @@ export class RecentApps extends BaseVisualChange {
           perf,
         },
       );
+      // The runner verified the switcher is already open; this no-op needs no visual change.
+      acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
+      return result;
     }
 
     const options = {
@@ -186,7 +202,8 @@ export class RecentApps extends BaseVisualChange {
     if (overview?.visibleToUser !== true) {
       return false;
     }
-    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, this.timer, {
+    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, {
+      timer: this.timer,
       incarnationToken: deviceIncarnationToken(this.device.deviceId),
       signal,
       timeoutMs: 3000,
@@ -210,8 +227,11 @@ export class RecentApps extends BaseVisualChange {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
       throwIfAborted(signal);
       const result = await awaitWhileRequestIsLive(
-        client.requestGlobalAction("recent", 3000, undefined, undefined, signal, () => {
-          dispatched = true;
+        client.requestGlobalAction("recent", 3000, undefined, {
+          signal,
+          onDispatch: () => {
+            dispatched = true;
+          },
         }),
         signal,
       );
@@ -236,10 +256,17 @@ export class RecentApps extends BaseVisualChange {
     return { success: true, method: "hardware" };
   }
 
-  private async executeIosRecentApps(signal?: AbortSignal): Promise<RecentAppsResult> {
+  private async executeIosRecentApps(
+    signal?: AbortSignal,
+  ): Promise<RecentAppsResult & { recentAppsRoute?: string }> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     throwIfAborted(signal);
-    const result = await client.requestRecentApps(undefined, undefined, undefined, signal);
+    const result = await client.requestRecentApps(IOS_RECENT_APPS_TIMEOUT_MS, undefined, {
+      signal,
+    });
+    if (result.recentAppsRoute !== undefined) {
+      logger.info(`iOS recentApps route: ${result.recentAppsRoute}`);
+    }
     if (!result.success && result.dispatched && result.acknowledged === false) {
       // Preserve the uncertain dispatch before post-action reads can replace it with cancellation.
       throw new ActionableError(
@@ -250,6 +277,7 @@ export class RecentApps extends BaseVisualChange {
       success: result.success,
       method: "ios_swipe",
       error: result.success ? undefined : (result.error ?? "Failed to open iOS recent apps"),
+      recentAppsRoute: result.recentAppsRoute,
     };
   }
 }

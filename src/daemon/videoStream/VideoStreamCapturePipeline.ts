@@ -62,13 +62,31 @@ function defaultCaptureFps(device: BootedDevice): number {
 
 /** H.264 delivery, replay, backpressure recovery and capture liveness for the socket relay. */
 export class VideoStreamCapturePipeline {
+  private readonly timer: Timer;
+  private readonly outboundStalls: Map<Socket, { timeout: NodeJS.Timeout; onDrain: () => void }>;
+
+  /**
+   * @param host - Relay callbacks for capture lookup, detach and stop
+   * @param deps - Capture-source collaborators
+   * @param captureRegistry - Shared device capture registry
+   * @param options.timer - Clock for heartbeats and liveness probes
+   * @param options.outboundStalls - The relay's per-socket backpressure stall table
+   */
   constructor(
     private readonly host: VideoStreamCapturePipelineHost,
     private readonly deps: VideoStreamCapturePipelineDependencies,
     private readonly captureRegistry: DeviceCaptureRegistry,
-    private readonly timer: Timer,
-    private readonly outboundStalls: Map<Socket, { timeout: NodeJS.Timeout; onDrain: () => void }>,
-  ) {}
+    {
+      timer,
+      outboundStalls,
+    }: {
+      timer: Timer;
+      outboundStalls: Map<Socket, { timeout: NodeJS.Timeout; onDrain: () => void }>;
+    },
+  ) {
+    this.timer = timer;
+    this.outboundStalls = outboundStalls;
+  }
 
   async createSource(
     capture: DeviceCapture,
@@ -166,7 +184,11 @@ export class VideoStreamCapturePipeline {
           }
           const packet = encodeDroppedFrames(droppedFrames);
           for (const subscriber of capture.subscribers) {
-            this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
+            this.writePacketToSubscriber(deviceId, capture, subscriber, {
+              packet,
+              isConfig: false,
+              isKeyFrame: false,
+            });
           }
         },
         onError: (error) => {
@@ -249,7 +271,7 @@ export class VideoStreamCapturePipeline {
     );
 
     for (const subscriber of capture.subscribers) {
-      this.writePacketToSubscriber(deviceId, capture, subscriber, packet, isConfig, isKeyFrame);
+      this.writePacketToSubscriber(deviceId, capture, subscriber, { packet, isConfig, isKeyFrame });
     }
   }
 
@@ -307,26 +329,20 @@ export class VideoStreamCapturePipeline {
     if (!capture.sps || !capture.pps || !capture.latestKeyFrameAu) {
       return;
     }
-    this.writePacketToSubscriber(
-      deviceId,
-      capture,
-      socket,
-      encodePacket(
+    this.writePacketToSubscriber(deviceId, capture, socket, {
+      packet: encodePacket(
         encodePtsAndFlags(this.deps.nowUs(), { isKeyFrame: true }),
         capture.latestKeyFrameAu,
       ),
-      false,
-      true,
-    );
+      isConfig: false,
+      isKeyFrame: true,
+    });
     for (const au of capture.latestInterFrameAus) {
-      this.writePacketToSubscriber(
-        deviceId,
-        capture,
-        socket,
-        encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
-        false,
-        false,
-      );
+      this.writePacketToSubscriber(deviceId, capture, socket, {
+        packet: encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
+        isConfig: false,
+        isKeyFrame: false,
+      });
     }
   }
 
@@ -355,9 +371,7 @@ export class VideoStreamCapturePipeline {
     deviceId: string,
     capture: DeviceCapture,
     subscriber: Socket,
-    packet: Buffer,
-    isConfig: boolean,
-    isKeyFrame: boolean,
+    { packet, isConfig, isKeyFrame }: { packet: Buffer; isConfig: boolean; isKeyFrame: boolean },
   ): void {
     if (subscriber.destroyed) {
       this.host.detach(subscriber);

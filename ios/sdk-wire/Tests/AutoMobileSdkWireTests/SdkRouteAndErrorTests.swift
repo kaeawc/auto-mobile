@@ -4,7 +4,7 @@ import XCTest
 
 final class SdkRouteAndErrorTests: XCTestCase {
     func testRoutesAreUniqueAbsolutePathsWithAMethodEach() {
-        XCTAssertEqual(SdkRoute.allCases.count, 17)
+        XCTAssertEqual(SdkRoute.allCases.count, 21)
         XCTAssertEqual(Set(SdkRoute.allCases.map(\.path)).count, SdkRoute.allCases.count)
         for route in SdkRoute.allCases {
             XCTAssertTrue(route.path.hasPrefix("/"), route.path)
@@ -25,6 +25,10 @@ final class SdkRouteAndErrorTests: XCTestCase {
         XCTAssertEqual(SdkRoute.networkFaultRules.path, "/network/fault-rules")
         XCTAssertEqual(SdkRoute.magicTap.path, "/accessibility/magic-tap")
         XCTAssertEqual(SdkRoute.dbTableStructure.path, "/db/table-structure")
+        XCTAssertEqual(SdkRoute.observationSnapshot.path, "/observation/snapshot")
+        XCTAssertEqual(SdkRoute.observationAction.path, "/observation/action")
+        XCTAssertEqual(SdkRoute.webViewSnapshot.path, "/webview/snapshot")
+        XCTAssertEqual(SdkRoute.webViewAction.path, "/webview/action")
         XCTAssertEqual(SdkRoute(rawValue: "/preferences"), .preferences)
         XCTAssertNil(SdkRoute(rawValue: "/nope"))
     }

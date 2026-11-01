@@ -16,6 +16,10 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { PortAvailabilityChecker } from "../../../src/utils/PortManager";
+import { DefaultEmulatorPortReservations } from "../../../src/utils/android-cmdline-tools/EmulatorPortReservations";
+import { FakeEmulatorGrpcPortRegistry } from "../../fakes/FakeEmulatorGrpcPortRegistry";
+
+const grpcPortRegistry = new FakeEmulatorGrpcPortRegistry();
 
 const execResult = (stdout = ""): ExecResult => ({
   stdout,
@@ -53,6 +57,12 @@ function createClient(
     adbFactory,
     avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
     hostPortAvailabilityChecker,
+    reservations: new DefaultEmulatorPortReservations({
+      timer: () => timer,
+      adbFactory: () => adbFactory,
+      hostPortAvailabilityChecker: () => hostPortAvailabilityChecker,
+      grpcPortRegistry,
+    }),
     posterFileSystem,
   });
   client.listAvds = async () => [{ name: avdName, platform: "android", isRunning: false }];
@@ -83,13 +93,14 @@ describe("AndroidEmulatorClient launch contract", () => {
     };
     const baseline = await launch();
     const poster = await launch("poster image.PNG");
+    // The launch ends `-grpc <port> -port <console>`; the poster arguments sit just before `-grpc`.
     expect(poster).toEqual([
-      ...baseline.slice(0, -2),
+      ...baseline.slice(0, -4),
       "-camera-back",
       "virtualscene",
       "-virtualscene-poster",
       `wall=${resolve("poster image.PNG")}`,
-      ...baseline.slice(-2),
+      ...baseline.slice(-4),
     ]);
     for (const path of ["poster.jpg", "poster.jpeg"]) {
       expect(await launch(path)).toContain(`wall=${resolve(path)}`);

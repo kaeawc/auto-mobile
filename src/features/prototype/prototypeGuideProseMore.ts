@@ -314,3 +314,25 @@ export const GUIDE_PLATFORM_EXAMPLE = `Example: copy a link on tap and re-show a
   }
 }
 \`\`\``;
+
+export const GUIDE_NOTIFICATIONS = `### Notifications
+
+\`notifications.post|cancel|setBadge|schedule\` need \`requires.platform:["notifications"]\` and
+\`prototype_platform_notifications_v1\`; all but \`cancel\` also need the \`notifications\` permission. Declare channels in a root block:
+\`"notifications": {"channels": [{"id": "messages", "name": "Messages", "importance": "high"}]}\`
+(1 to 8 channels, unique ids; \`importance\` is min, low, default or high, and iOS maps min and low to
+passive, default and high to active; optional \`description\` and \`showBadge\`). The block needs
+\`notifications\` in \`requires.platform\`.
+
+- \`post\` takes \`id\`, \`channel\`, \`title\` and optional \`body\`, \`largeImage\`, \`style\`, \`group\`,
+  \`badge\`, \`data\` and up to 3 \`actions\`. A literal \`channel\` must name a declared channel, and
+  action ids are unique. Posting an \`id\` that is already shown updates it in place.
+- \`schedule\` takes the \`post\` arguments plus \`delaySeconds\` (1 to 604800) and also needs
+  \`prototype_platform_notifications_scheduled_v1\`; its firing is the \`notifications.scheduledFired\`
+  event. Delivery is inexact.
+- \`cancel\` takes exactly one of \`id\`, \`group\` or \`all: true\`.
+- Taps, action buttons and inline replies arrive at \`platform.on\` handlers
+  (\`notifications.opened|action|reply|dismissed\`); read \`{event: "/notificationId"}\`,
+  \`"/actionId"\`, \`"/reply"\` and \`"/data"\` there.
+- \`/platform/notifications/channels/<id>/blocked\` is true when the user turned a declared channel
+  off; a post to it fails with \`unavailable\`. A read of an undeclared channel fails validation.`;

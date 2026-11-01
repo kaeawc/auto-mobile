@@ -81,12 +81,18 @@ export function artifactRenderedPayload(
   return sanitizedPayload;
 }
 
+/**
+ * @param rendering.hasStructured - Whether the response carries structuredContent.
+ * @param rendering.serialization - How the inline payload is serialized for the size check.
+ */
 export function boundRenderedPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
   sanitizedPayload: Record<string, unknown> | undefined,
-  hasStructured: boolean,
-  serialization: ToolResponseSerialization,
+  {
+    hasStructured,
+    serialization,
+  }: { hasStructured: boolean; serialization: ToolResponseSerialization },
 ) {
   // Hard ceiling (issue #6870). Spilling `observation` bounds only the
   // observation: `observationDiff` rides at the TOP level beside it, and so does

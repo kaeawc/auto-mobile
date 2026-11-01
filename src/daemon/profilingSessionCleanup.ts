@@ -53,7 +53,9 @@ export function registerProfilingSessionCleanup(
     const device: BootedDevice = { name: deviceId, platform: "android", deviceId };
     // Not part of whichever request triggered the release: its abort must not cut the cleanup short.
     const done = runOutsideRequestContext(async () =>
-      cleanupSessionProfiling(deviceId, state, adbFor(device), options.timer ?? defaultTimer),
+      cleanupSessionProfiling(deviceId, state, adbFor(device), {
+        timer: options.timer ?? defaultTimer,
+      }),
     ).catch((error: unknown): ProfilingCleanupReport => {
       logger.warn(
         `[profiling] Cleaning up session ${sessionId}'s profiling state threw: ${errorMessage(error)}`,
@@ -67,7 +69,7 @@ export function registerProfilingSessionCleanup(
     });
   };
   // A terminal upgrade of a finished release must not touch the device's next owner (#10825).
-  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     if (!releaseOptions?.upgradeOnly) {
       cleanup(sessionId, deviceId, releaseOptions);
     }

@@ -58,9 +58,7 @@ test("handler forwards the new options and turns autoTarget off for an edge swip
       edgeInset: 6,
       durationMs: 120,
     },
-    undefined,
-    undefined,
-    interactionDeps,
+    { deps: interactionDeps },
   );
   expect(seen).toMatchObject({
     fromEdge: "left",
@@ -69,7 +67,7 @@ test("handler forwards the new options and turns autoTarget off for an edge swip
     durationMs: 120,
     autoTarget: false,
   });
-  await swipeOnHandler(device, { direction: "up" }, undefined, undefined, interactionDeps);
+  await swipeOnHandler(device, { direction: "up" }, { deps: interactionDeps });
   expect(seen?.autoTarget).toBe(true);
   expect(seen?.durationMs).toBeUndefined();
 });

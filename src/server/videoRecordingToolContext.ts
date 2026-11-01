@@ -86,6 +86,12 @@ export const videoRecordingSchema = addDeviceTargetingToSchema(
         .optional()
         .describe("Max duration seconds"),
       outputName: z.string().optional().describe("Recording label"),
+      audio: z
+        .boolean()
+        .optional()
+        .describe(
+          "Also record the device's audio into the file (start only; local emulators and iOS Simulators; needs FFmpeg)",
+        ),
       display: z.string().optional().describe('Android panel key, role, or "active" (start only)'),
       highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
       resourceLink: resourceLinkField(),
@@ -232,12 +238,9 @@ export function assertActiveRecordingOwner(
   if (requesterSessionUuid === undefined && !ctx.requesterResolver.isDeviceHeld(deviceId)) {
     return;
   }
-  throw new InputDeviceOwnedError(
-    "videoRecording stop",
-    deviceId,
-    requesterSessionUuid,
-    undefined,
-    `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
+  throw new InputDeviceOwnedError("videoRecording stop", deviceId, requesterSessionUuid, {
+    message:
+      `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
       "another session. Only the session that started an active recording can stop it.",
-  );
+  });
 }

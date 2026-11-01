@@ -119,7 +119,7 @@ describe("an idle release is terminal (#11258)", () => {
         await manager.adoptManagedExecutionLivenessPolicy(SESSION);
       }
       const origins: unknown[] = [];
-      manager.onSessionRelease((_id, _device, _reason, _snapshot, options) => {
+      manager.onSessionRelease((_id, _device, _reason, options) => {
         origins.push(options.expiryOrigin);
       });
       timer.setCurrentTime(manager.getAllSessions()[0]!.expiresAt + 1);

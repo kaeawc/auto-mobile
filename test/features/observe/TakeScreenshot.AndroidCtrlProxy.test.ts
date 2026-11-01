@@ -171,7 +171,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
         adbFactory: new FakeAdbClientFactory(fakeAdb),
         cacheDirResolver: () => cacheDir,
       });
-      const calls: unknown[][] = [];
+      const calls: Parameters<FakeCtrlProxy["requestScreenshot"]>[] = [];
       const ctrlProxy = new FakeCtrlProxy();
       spyOn(ctrlProxy, "requestScreenshot").mockImplementation(
         async (...args: Parameters<FakeCtrlProxy["requestScreenshot"]>) => {
@@ -202,8 +202,8 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       expect(result.path).toMatch(/\.png$/);
       expect(readFileSync(result.path!)).toEqual(pngFixture());
       // displayId and hidePrototypes reach the client; nothing goes through ADB screencap.
-      expect(calls[0]?.[4]).toBe(1);
-      expect(calls[0]?.[5]).toBe(true);
+      expect(calls[0]?.[2]?.displayId).toBe(1);
+      expect(calls[0]?.[2]?.hidePrototypes).toBe(true);
       expect(adbCommands).toHaveLength(0);
     });
 

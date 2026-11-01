@@ -150,9 +150,15 @@ export async function enrichProvisionDeviceResult<
   toolName: string,
   result: T,
   sessionUuid: string | undefined,
-  service: McpServerOptions["sessionToolSelectionService"],
-  enableTools: readonly string[],
-  connectionProfileUuid: string | undefined,
+  {
+    service,
+    enableTools,
+    connectionProfileUuid,
+  }: {
+    service: McpServerOptions["sessionToolSelectionService"];
+    enableTools: readonly string[];
+    connectionProfileUuid: string | undefined;
+  },
 ): Promise<T> {
   if (toolName !== "provisionDevice" || !sessionUuid) {
     return result;
@@ -164,13 +170,10 @@ export async function enrichProvisionDeviceResult<
       // the call gate apply, and the session this call just minted carries no
       // override of its own — so a capability enabled on the profile is
       // callable and belongs in this report (#6886 review).
-      enabledTools: await listEnabledToolNames(
-        service,
-        [sessionUuid],
+      enabledTools: await listEnabledToolNames(service, [sessionUuid], {
         connectionProfileUuid,
-        [],
-        undefined,
-      ),
+        labelSessionUuids: [],
+      }),
       ...failure,
     });
   } catch (error) {

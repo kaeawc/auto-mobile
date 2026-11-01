@@ -53,7 +53,7 @@ export interface DeviceClientFake {
   requestGestureStart?: (
     request: GestureStartRequest,
   ) => Promise<{ success: boolean; error?: string }>;
-  setPreference?: (...args: unknown[]) => Promise<void>;
+  setPreference?: (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => Promise<void>;
   clearPreferenceStore?: (...args: unknown[]) => Promise<void>;
   /** Awaited by every device discovery before it answers. */
   discovery?: () => Promise<void>;
@@ -84,7 +84,11 @@ export function createDirectFrameRig(
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
   const sessionManager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
   sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-    hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+    hasActiveSessionExecution(
+      { tracker: executionTracker, sessionManager, devicePool: pool },
+      sessionId,
+      query,
+    ),
   );
   const unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 
@@ -113,13 +117,18 @@ export function createDirectFrameRig(
         called("move");
         return { success: true, totalTimeMs: 0 };
       },
-      requestGestureEnd: async (_id: string, _x: number, _y: number, cancel?: boolean) => {
+      requestGestureEnd: async (
+        _id: string,
+        _x: number,
+        _y: number,
+        { cancel }: { cancel?: boolean } = {},
+      ) => {
         called(cancel === true ? "cancel" : "end");
         return { totalTimeMs: 0, ...((await client.requestGestureEnd?.()) ?? { success: true }) };
       },
       setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
         }
         called("setPreference");
         await client.setPreference?.(...args);

@@ -71,7 +71,7 @@ async function makeDaemon(
     httpTokenStore: tokenStore,
     httpServerFactory: httpServer ? () => httpServer : undefined,
     timer,
-    deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+    deviceSessionRepository: new DeviceSessionRepository({ db: await createTestDatabase(), timer }),
     idGenerator: new FakeIdGenerator(),
     processBirthTime: () => 0,
     processGenerationToken: () => "memory-generation",
@@ -84,6 +84,7 @@ async function registryMaintenanceHarness() {
   const { daemon, timer } = await makeDaemon({ port: 3161 });
   const registry = await bindingRegistryModule.openSqliteBindingRegistry({
     dbPath: ":memory:",
+    writerVersion: "test-writer",
     timer,
   });
   const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry").mockResolvedValue(
@@ -159,8 +160,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
   test("redrive wiring includes this daemon's rehydrated owner and excludes live peer owners", async () => {
     const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
     const db = await createTestDatabase();
-    const repository = new VideoRecordingRepository(db);
-    const sessions = new DeviceSessionRepository(db, timer);
+    const repository = new VideoRecordingRepository({ db });
+    const sessions = new DeviceSessionRepository({ db, timer });
     const actualOwnId = internals.testHooks.daemonSessionId();
     const host = internals.testHooks.processStartHost();
     const live = new Set([actualOwnId, "peer-daemon"]);
@@ -561,6 +562,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       expect(await h.daemon.testHooks.openBindingRegistry(undefined, { quiet: true })).toBe(
         h.registry,
       );
+      expect(DaemonState.getInstance().getBindingRegistrySchemaProbe()).toBe(h.registry);
       expect(h.reconcile).toHaveBeenCalledTimes(1);
       expect(h.reconcile).toHaveBeenCalledWith(h.registry.deviceClaims());
       expect(h.recover).not.toHaveBeenCalled();
@@ -579,6 +581,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       expect(h.redrive).toHaveBeenCalledWith(h.registry);
     } finally {
       await h.close();
+      expect(DaemonState.getInstance().getBindingRegistrySchemaProbe()).toBeUndefined();
     }
   });
 

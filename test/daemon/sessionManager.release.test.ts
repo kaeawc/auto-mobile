@@ -283,7 +283,7 @@ describe("SessionManager", () => {
           _sessionId: string,
           _status: string,
           _releasedAt: number,
-          reason: string,
+          { reason }: { reason: string },
         ): Promise<void> {
           releases.push(reason);
           if (reason === "superseded") {
@@ -520,7 +520,7 @@ describe("SessionManager", () => {
       const releases: Array<{ sessionId: string; status: DeviceSessionStatus; reason: string }> =
         [];
       const repository: DeviceSessionPersistence = quietPersistence({
-        async markReleased(sessionId, status, _releasedAtMs, reason): Promise<void> {
+        async markReleased(sessionId, status, _releasedAtMs, { reason }): Promise<void> {
           releases.push({ sessionId, status, reason });
         },
       });

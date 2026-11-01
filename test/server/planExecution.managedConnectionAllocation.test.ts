@@ -517,11 +517,12 @@ describe("managed connection executePlan device labels (#11397)", () => {
         sessionManager.setDeviceReadiness(genericSession, "automationReady");
         await probe(genericSession);
         await releaseSessionAndDevice(
-          sessionManager,
-          pool,
+          { manager: sessionManager, pool },
           free.deviceId,
           genericSession,
-          "plan-auto-release",
+          {
+            reason: "plan-auto-release",
+          },
         );
 
         const result = await runPlan(PROBE_PLAN, {

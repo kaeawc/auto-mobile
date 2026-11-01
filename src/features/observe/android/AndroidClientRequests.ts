@@ -23,7 +23,7 @@ import type {
 import type { Logger } from "../../../utils/logger";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
-import type { DelegateContext } from "../shared/types";
+import type { DelegateContext, DispatchOptions } from "../shared/types";
 import type { AndroidActionDispatcher } from "./AndroidActionDispatcher";
 
 /** Client-backed accessors resolve live state on every use, including after awaits. */
@@ -38,6 +38,20 @@ export interface AndroidClientRequestsContext {
   awaitActionWork<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T>;
 }
 
+/** Transport controls for {@link AndroidClientRequests.requestSettingsPut}. */
+export interface AndroidSettingsPutOptions {
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+}
+
+/** Frame validation, cancellation and dispatch hook for a global action. */
+export interface AndroidGlobalActionOptions {
+  frameContext?: string;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export class AndroidClientRequests {
   constructor(private readonly context: AndroidClientRequestsContext) {}
 
@@ -45,9 +59,11 @@ export class AndroidClientRequests {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      onDispatch,
+    }: DispatchOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yClipboardResult & { acknowledged?: boolean }> {
     const startTime = this.context.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
@@ -112,8 +128,7 @@ export class AndroidClientRequests {
             error: `Clipboard ${action} timeout after ${timeout}ms`,
           }),
         },
-        { signal: combinedSignal, startTime },
-        perf,
+        { cancellation: { signal: combinedSignal, startTime }, perf },
       );
       const result = await perf.track("waitForClipboard", () =>
         clipboardPromise.then((result) => ({
@@ -160,9 +175,11 @@ export class AndroidClientRequests {
   requestSettingsGet(
     namespace: SettingsNamespace,
     key: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    {
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      signal,
+    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<A11ySettingsGetResult> {
     return this.sendSettingsCommand(
       "get",
@@ -180,13 +197,12 @@ export class AndroidClientRequests {
     namespace: SettingsNamespace,
     key: string,
     value: string | null,
-    valueType: SettingsValueType = "string",
-    timeoutMs: number = 5000,
-    ...[perf = new NoOpPerformanceTracker(), signal]: [
-      perf?: PerformanceTracker,
-      signal?: AbortSignal,
-    ]
+    {
+      valueType = "string",
+      ...options
+    }: AndroidSettingsPutOptions & { valueType?: SettingsValueType } = {},
   ): Promise<A11ySettingsPutResult> {
+    const { timeoutMs = 5000, perf = new NoOpPerformanceTracker(), signal } = options;
     return this.sendSettingsCommand(
       "put",
       { namespace, key, value, valueType },
@@ -271,9 +287,7 @@ export class AndroidClientRequests {
     action: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options: AndroidGlobalActionOptions = {},
   ): Promise<{
     success: boolean;
     action: string;
@@ -281,6 +295,7 @@ export class AndroidClientRequests {
     error?: string;
     acknowledged?: boolean;
   }> {
+    const { frameContext, signal, onDispatch } = options;
     const startTime = this.context.timer.now();
     // Combine with the ambient request signal so a cancelled request (e.g.
     // session teardown mid-home-press) can free this keyed device operation
@@ -343,7 +358,7 @@ export class AndroidClientRequests {
               acknowledged: false,
             }),
           },
-          { signal: combinedSignal, startTime },
+          { cancellation: { signal: combinedSignal, startTime } },
         )
         .then((result) => ({
           ...result,
@@ -420,7 +435,7 @@ export class AndroidClientRequests {
             error: `Frame context validation timeout after ${timeout}ms`,
           }),
         },
-        { signal: combinedSignal, startTime },
+        { cancellation: { signal: combinedSignal, startTime } },
       );
     } catch (error) {
       const logger = this.context.logger;

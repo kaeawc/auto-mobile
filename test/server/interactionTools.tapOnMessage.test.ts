@@ -69,40 +69,28 @@ const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElemen
 
 describe("buildTapOnResultMessage", () => {
   test("names a long press as a long press, not a tap", () => {
-    const message = buildTapOnResultMessage(
-      selected({ text: "Photo" }),
-      undefined,
-      undefined,
-      undefined,
-      { action: "longPress" },
-    );
+    const message = buildTapOnResultMessage(selected({ text: "Photo" }), undefined, {
+      longPress: { action: "longPress" },
+    });
     expect(message).toBe('Long-pressed element (matched text="Photo"; 1 match)');
   });
 
   test("says when a long-pressed target advertises no long-click action", () => {
-    const message = buildTapOnResultMessage(
-      selected({ text: "Photo" }),
-      undefined,
-      undefined,
-      undefined,
-      { action: "longPress", longClickAdvertised: false },
-    );
+    const message = buildTapOnResultMessage(selected({ text: "Photo" }), undefined, {
+      longPress: { action: "longPress", longClickAdvertised: false },
+    });
     expect(message).toBe(
       'Long-pressed element (matched text="Photo"; 1 match; target advertises no long-click action)',
     );
   });
 
   test("keeps the tap wording for a tap", () => {
-    const message = buildTapOnResultMessage(
-      selected({ text: "Photo" }),
-      undefined,
-      undefined,
-      undefined,
-      {
+    const message = buildTapOnResultMessage(selected({ text: "Photo" }), undefined, {
+      longPress: {
         action: "tap",
         longClickAdvertised: false,
       },
-    );
+    });
     expect(message).toBe('Tapped on element (matched text="Photo"; 1 match)');
   });
 
@@ -201,25 +189,33 @@ describe("buildTapOnResultMessage", () => {
   // byte-identical.
   test("names the activated semantic link when there is no selected element", () => {
     const message = buildTapOnResultMessage(undefined, undefined, {
-      text: "Terms and privacy",
-      occurrence: 0,
+      activatedSubtext: {
+        text: "Terms and privacy",
+        occurrence: 0,
+      },
     });
     expect(message).toBe('Tapped on element (activated link "Terms and privacy")');
   });
 
   test("includes the occurrence when it disambiguates repeated link text", () => {
     const message = buildTapOnResultMessage(undefined, undefined, {
-      text: "Learn more",
-      occurrence: 2,
+      activatedSubtext: {
+        text: "Learn more",
+        occurrence: 2,
+      },
     });
     expect(message).toContain('activated link "Learn more" [occurrence 2]');
   });
 
   test("different activated links yield different messages", () => {
-    const terms = buildTapOnResultMessage(undefined, undefined, { text: "Terms", occurrence: 0 });
+    const terms = buildTapOnResultMessage(undefined, undefined, {
+      activatedSubtext: { text: "Terms", occurrence: 0 },
+    });
     const privacy = buildTapOnResultMessage(undefined, undefined, {
-      text: "Privacy",
-      occurrence: 0,
+      activatedSubtext: {
+        text: "Privacy",
+        occurrence: 0,
+      },
     });
     expect(terms).not.toBe(privacy);
   });
@@ -229,12 +225,16 @@ describe("buildTapOnResultMessage", () => {
   // otherwise activating "Terms" vs "Privacy" on the same owner is byte-identical.
   test("includes both the owner identity and the activated link when both are present", () => {
     const terms = buildTapOnResultMessage(selected({ text: "Legal" }), undefined, {
-      text: "Terms",
-      occurrence: 0,
+      activatedSubtext: {
+        text: "Terms",
+        occurrence: 0,
+      },
     });
     const privacy = buildTapOnResultMessage(selected({ text: "Legal" }), undefined, {
-      text: "Privacy",
-      occurrence: 0,
+      activatedSubtext: {
+        text: "Privacy",
+        occurrence: 0,
+      },
     });
     expect(terms).toContain('matched text="Legal"');
     expect(terms).toContain('activated link "Terms"');
@@ -281,7 +281,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
     const registered = ToolRegistry.getTool("tapOn")?.deviceAwareHandler;
     expect(registered).toBeDefined();
     expect(await registered!(fakeDevice, { ...args })).toEqual(
-      await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps),
+      await tapOnHandler(fakeDevice, args, { deps: interactionDeps }),
     );
   });
 
@@ -326,9 +326,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
         action: "focus",
         platform: "android",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     expect(response.isError).toBe(true);
     const payload = {
@@ -356,7 +354,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
   test("tapOn result with internal layer metadata passes the MCP SDK schema", async () => {
     const result = { ...fakeResult({ success: true }), [tapResolvedLayer]: "prototype" as const };
     interactionDeps.tapOnElementFactory = () => ({ execute: async () => result });
-    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapOnHandler(fakeDevice, args, { deps: interactionDeps });
 
     expect(parseCallToolResult(response).structuredContent).toEqual(response.structuredContent);
     expect(
@@ -378,7 +376,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
         }),
     });
 
-    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(response.isError).toBe(true);
     const message = parseMessage(response);
     // The failure keeps the search summary: the user sees both that nothing
@@ -397,7 +395,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
     interactionDeps.tapOnElementFactory = () => ({
       execute: async () => fakeResult({ success: true, warnings: [warning] }),
     });
-    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(parseMessage(response)).toContain(`Warning: ${warning}`);
     expect(getStructuredField(response, "warnings")).toEqual([warning]);
   });
@@ -407,7 +405,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ error: "Element not found with provided text 'Missing'" }),
     });
 
-    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(response.isError).toBe(true);
     expect(parseMessage(response)).toBe(
       "Failed to tap: Element not found with provided text 'Missing'",
@@ -423,7 +421,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
   test.each(emptyErrorCases)("a failure with error %p yields %p", async (error, expected) => {
     interactionDeps.tapOnElementFactory = () => ({ execute: async () => fakeResult({ error }) });
 
-    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(response.isError).toBe(true);
     expect(parseMessage(response)).toBe(expected);
   });
@@ -438,7 +436,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
         }),
     });
 
-    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(response.isError).toBeUndefined();
     expect(parseMessage(response)).toBe(
       'Tapped on element (matched text="Internet"; 1 match; 2 view hierarchy changes over 5 requests within 300ms)',
@@ -459,9 +457,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
     const response = await tapOnHandler(
       fakeDevice,
       { ...args, ensureChecked: true },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     const message = parseMessage(response);
     expect(message).toContain("already");
@@ -486,9 +482,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
     const response = await tapOnHandler(
       fakeDevice,
       { ...args, ensureChecked: true },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     const message = parseMessage(response);
     expect(message).toContain("was unchecked");
@@ -510,9 +504,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
         action: "tap",
         platform: "android",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
 
     expect(parseMessage(response)).toBe(
@@ -541,9 +533,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
         ensureChecked: false,
         platform: "android",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
 
     expect(parseMessage(response)).toStartWith(
@@ -569,7 +559,7 @@ describe("tapAtHandler (registered handler wiring)", () => {
     const registered = ToolRegistry.getTool("tapAt")?.deviceAwareHandler;
     expect(registered).toBeDefined();
     expect(await registered!(fakeDevice, args)).toEqual(
-      await tapAtHandler(fakeDevice, args, undefined, undefined, interactionDeps),
+      await tapAtHandler(fakeDevice, args, { deps: interactionDeps }),
     );
   });
 
@@ -618,7 +608,7 @@ describe("tapAtHandler (registered handler wiring)", () => {
       execute: async () => ({ success: true, x: 12, y: 34 }) as TapAtResult,
     });
 
-    const response = await tapAtHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapAtHandler(fakeDevice, args, { deps: interactionDeps });
 
     expect(response.isError).toBeUndefined();
     expect(getStructuredField(response, "message")).toBe("Tapped at (12, 34)");
@@ -647,9 +637,7 @@ describe("tapAtHandler (registered handler wiring)", () => {
         coordinateSpace: "normalized",
         action: "doubleTap",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
 
     expect(received).toMatchObject({
@@ -668,7 +656,7 @@ describe("tapAtHandler (registered handler wiring)", () => {
         ({ success: false, x: 10, y: 34, error: "outside screen bounds" }) as TapAtResult,
     });
 
-    const response = await tapAtHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await tapAtHandler(fakeDevice, args, { deps: interactionDeps });
 
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "message")).toBe(
@@ -756,9 +744,7 @@ describe("hitTestHandler", () => {
     const response = await hitTestHandler(
       device,
       { x: 1, y: 2, display: "active" },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ display: "active", skipScreenshot: true });
@@ -779,9 +765,7 @@ describe("hitTestHandler", () => {
         y: 0.5,
         coordinateSpace: "normalized",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
 
     expect(getStructuredField(response, "point")).toEqual({
@@ -802,9 +786,7 @@ describe("hitTestHandler", () => {
         y: 2,
         snapshotId: "ref-unknown",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     ).then(
       (response) => response,
       (error: unknown) => error,
@@ -834,7 +816,7 @@ describe("tapOn handler transport deadline", () => {
       duration: 20000,
       __mcpRequestDeadlineMs: timer.now() + 5000,
     };
-    const call = tapOnHandler(device, internalArgs, undefined, undefined, interactionDeps);
+    const call = tapOnHandler(device, internalArgs, { deps: interactionDeps });
     await expect(call).rejects.toBeInstanceOf(ActionableError);
     await expect(call).rejects.toThrow(
       "longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started.",
@@ -866,9 +848,7 @@ describe("tapOn handler transport deadline", () => {
       await tapOnHandler(
         { deviceId: "handler-deadline", name: "Test", platform: "android" },
         args,
-        undefined,
-        undefined,
-        interactionDeps,
+        { deps: interactionDeps },
       );
       expect(received).toBe(deadline);
       expect(recoveryPolicy).toBeUndefined();

@@ -924,7 +924,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       const value = putMatch[3].trim();
       try {
         const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-        const a11yResult = await a11y.requestSettingsPut(namespace, key, value, "string");
+        const a11yResult = await a11y.requestSettingsPut(namespace, key, value, {
+          valueType: "string",
+        });
         if (a11yResult.success) {
           return;
         }

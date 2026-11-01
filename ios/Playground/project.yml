@@ -34,6 +34,7 @@ targets:
         type: folder
     dependencies:
       - package: AutoMobileSDK
+      - package: AutoMobileSdkWire
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

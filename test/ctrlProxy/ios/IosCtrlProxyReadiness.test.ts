@@ -133,7 +133,10 @@ describe("IosCtrlProxyReadiness health startup", () => {
     expect(
       await settleByFakeEvents(
         timer,
-        readiness.waitForHealthRestartingUnresponsiveRunner(start, perf, 500, 100, false),
+        readiness.waitForHealthRestartingUnresponsiveRunner(start, perf, 500, {
+          windowMs: 100,
+          firstLaunchOwned: false,
+        }),
         { description: "default-port runner adoption" },
       ),
     ).toBe(true);
@@ -182,7 +185,10 @@ describe("progress-aware runner windows", () => {
     expect(
       await settleByFakeEvents(
         h.timer,
-        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, 100, true),
+        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, {
+          windowMs: 100,
+          firstLaunchOwned: true,
+        }),
         { description: "progress extension" },
       ),
     ).toBe(true);
@@ -201,7 +207,10 @@ describe("progress-aware runner windows", () => {
         expect(
           await settleByFakeEvents(
             h.timer,
-            h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, 100, true),
+            h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, {
+              windowMs: 100,
+              firstLaunchOwned: true,
+            }),
             { description: "no progress relaunch" },
           ),
         ).toBe(true);
@@ -225,7 +234,10 @@ describe("progress-aware runner windows", () => {
     expect(
       await settleByFakeEvents(
         h.timer,
-        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 10000, 30000, true),
+        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 10000, {
+          windowMs: 30000,
+          firstLaunchOwned: true,
+        }),
         { description: "progress ceiling", maxEvents: 2000 },
       ),
     ).toBe(true);
@@ -245,7 +257,10 @@ describe("progress-aware runner windows", () => {
     try {
       await settleByFakeEvents(
         h.timer,
-        readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 500, 30000, true),
+        readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 500, {
+          windowMs: 30000,
+          firstLaunchOwned: true,
+        }),
         { description: "extended retirement" },
       );
       expect(
@@ -264,7 +279,10 @@ describe("progress-aware runner windows", () => {
     expect(
       await settleByFakeEvents(
         h.timer,
-        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, 100, true),
+        h.readiness.waitForHealthRestartingUnresponsiveRunner(h.start, h.perf, 100, {
+          windowMs: 100,
+          firstLaunchOwned: true,
+        }),
         { description: "caller budget" },
       ),
     ).toBe(false);

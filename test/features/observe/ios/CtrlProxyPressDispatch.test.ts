@@ -41,28 +41,43 @@ const cases: PressCase[] = [
     name: "home",
     home: true,
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestPressHome(50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestPressHome(50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "back",
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestPressBack(50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestPressBack(50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "recent",
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestRecentApps(50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestRecentApps(50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   ...["volume_up", "volume_down", "power", "home"].map((button): PressCase => ({
     name: `button ${button}`,
     home: button === "home",
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestPressButton(button, 50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestPressButton(button, 50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   })),
   {
     name: "input/key",
     request: (h, s, d) =>
-      new CtrlProxyKeyboard(h.context).requestPressKey("enter", [], 50, undefined, s, d),
+      new CtrlProxyKeyboard(h.context).requestPressKey("enter", [], 50, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "multi-finger swipe",
@@ -289,30 +304,51 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "physical-iphone", platform: "ios", name: "iPhone" },
       8765,
-      (url) => new FakeWebSocket(url, "none", 0, h.timer),
-      h.timer,
+      { wsFactory: (url) => new FakeWebSocket(url, "none", 0, h.timer), timer: h.timer },
     );
     try {
-      expect(await client.requestPressHome(50, undefined, "frame", signal, onDispatch)).toBe(
-        result,
-      );
-      expect(home).toHaveBeenCalledWith(50, undefined, "frame", signal, onDispatch);
-      expect(await client.requestPressBack(50, undefined, "frame", signal, onDispatch)).toBe(
-        result,
-      );
-      expect(back).toHaveBeenCalledWith(50, undefined, "frame", signal, onDispatch);
-      expect(await client.requestRecentApps(50, undefined, "frame", signal, onDispatch)).toBe(
-        result,
-      );
-      expect(recent).toHaveBeenCalledWith(50, undefined, "frame", signal, onDispatch);
       expect(
-        await client.requestPressButton("power", 50, undefined, "frame", signal, onDispatch),
+        await client.requestPressHome(50, undefined, { frameContext: "frame", signal, onDispatch }),
       ).toBe(result);
-      expect(button).toHaveBeenCalledWith("power", 50, undefined, "frame", signal, onDispatch);
-      expect(await client.requestPressKey("enter", [], 50, undefined, signal, onDispatch)).toBe(
-        result,
-      );
-      expect(key).toHaveBeenCalledWith("enter", [], 50, undefined, signal, onDispatch);
+      expect(home).toHaveBeenCalledWith(50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(
+        await client.requestPressBack(50, undefined, { frameContext: "frame", signal, onDispatch }),
+      ).toBe(result);
+      expect(back).toHaveBeenCalledWith(50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(
+        await client.requestRecentApps(50, undefined, {
+          frameContext: "frame",
+          signal,
+          onDispatch,
+        }),
+      ).toBe(result);
+      expect(recent).toHaveBeenCalledWith(50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(
+        await client.requestPressButton("power", 50, undefined, {
+          frameContext: "frame",
+          signal,
+          onDispatch,
+        }),
+      ).toBe(result);
+      expect(button).toHaveBeenCalledWith("power", 50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(await client.requestPressKey("enter", [], 50, { signal, onDispatch })).toBe(result);
+      expect(key).toHaveBeenCalledWith("enter", [], 50, { signal, onDispatch });
       expect(
         await client.requestMultiFingerSwipe({
           x1: 1,
@@ -405,5 +441,42 @@ describe("iOS press beforeSend display fence", () => {
     });
     await expect(pending).rejects.toBe(stale);
     expect(h.sentMessages).toHaveLength(0);
+  });
+});
+
+describe("iOS recentApps transport budget", () => {
+  test.each([true, false])("accepts a runner reply at 8400ms with success=%s", async (success) => {
+    const h = createIosDelegateHarness();
+    const pending = new CtrlProxyNavigation(h.context).requestRecentApps();
+    await Promise.resolve();
+    expect(h.sentMessages).toHaveLength(1);
+    h.advanceTime(8400);
+    expect(h.requestManager.getPendingIds()).toHaveLength(1);
+    h.resolveLast({ success, totalTimeMs: 8400, recentAppsRoute: "sim-hid-home-double" });
+    expect(await pending).toMatchObject({
+      success,
+      acknowledged: true,
+      dispatched: true,
+      recentAppsRoute: "sim-hid-home-double",
+    });
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("an unanswered request times out at 10000ms with uncertain dispatch", async () => {
+    const h = createIosDelegateHarness();
+    const pending = new CtrlProxyNavigation(h.context).requestRecentApps();
+    await Promise.resolve();
+    h.advanceTime(9999);
+    expect(h.requestManager.getPendingIds()).toHaveLength(1);
+    h.advanceTime(1);
+    expect(await pending).toMatchObject({
+      success: false,
+      dispatched: true,
+      acknowledged: false,
+      retryable: false,
+      error: "Recent apps timed out after 10000ms",
+    });
+    expect(h.sentMessages).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
   });
 });

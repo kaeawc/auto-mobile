@@ -147,3 +147,40 @@ describe("videoPlayer nodes", () => {
     expect(validatePrototypeSpec(spec({}, node)).success).toBe(false);
   });
 });
+
+describe("castButton nodes", () => {
+  const castSpec = (root: Record<string, unknown>) =>
+    spec({ requires: { platform: ["media", "cast"] } }, root);
+
+  test("a castButton names a declared or an inline player", () => {
+    const root = {
+      type: "column",
+      children: [
+        { type: "videoPlayer", id: "clip", source: { sample: "countdown" } },
+        { type: "castButton", player: "main" },
+        { type: "castButton", player: "clip", protocols: ["airplay"] },
+      ],
+    };
+    expect(validatePrototypeSpec(castSpec(root)).success).toBe(true);
+  });
+
+  test("a castButton player must be a known media player", () => {
+    expect(validatePrototypeSpec(castSpec({ type: "castButton", player: "other" }))).toEqual({
+      success: false,
+      error: { path: "root.player", message: "Unknown media player" },
+    });
+  });
+
+  test("a castButton needs cast in requires.platform", () => {
+    expect(validatePrototypeSpec(spec({}, { type: "castButton", player: "main" }))).toEqual({
+      success: false,
+      error: { path: "root", message: "castButton requires cast in requires.platform" },
+    });
+  });
+
+  test("a castButton requires the cast module capability", () => {
+    expect(
+      requiredPrototypeCapabilities(castSpec({ type: "castButton", player: "main" })),
+    ).toContain("prototype_platform_cast_v1");
+  });
+});

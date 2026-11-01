@@ -47,7 +47,7 @@ async function harness(deviceUtils?: FakeDeviceUtils) {
   await addLivenessContract(db as Kysely<unknown>);
   await addLivenessWriterFence(db as Kysely<unknown>);
   await addActivitySequence(db as Kysely<unknown>);
-  const repository = new DeviceSessionRepository(db);
+  const repository = new DeviceSessionRepository({ db });
   const timer = new FakeTimer();
   const barrier = new FakeDbWriteBarrier();
   const manager = new SessionManager(timer, repository, { barrier: () => barrier });

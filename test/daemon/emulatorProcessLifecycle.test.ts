@@ -100,7 +100,7 @@ function harness() {
       calls.push("settle");
       settlements.push([incidentId, outcome]);
     },
-    evictMissingPooledDevice: async (device, reason, _recover, incidentId) => {
+    evictMissingPooledDevice: async (device, reason, { incidentId }) => {
       expect(reason).toBe("emulator process exited after startup (code=1, signal=null)");
       calls.push("evict");
       evictionIncidents.push(incidentId);

@@ -522,6 +522,133 @@ describe("ListInstalledApps", function () {
       expect(probes).toHaveLength(1);
     });
 
+    describe("LEANBACK_LAUNCHER-only apps (#15957)", function () {
+      const LAUNCHER_PROBE =
+        "shell cmd package query-activities --brief --user 0 " +
+        "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER";
+      const LEANBACK_PROBE =
+        "shell cmd package query-activities --brief --user 0 " +
+        "-a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER";
+
+      beforeEach(function () {
+        fakeAdb.setCommandResponse(
+          "shell pm list packages -s --user 0",
+          createExecResult("package:com.android.tv.settings\npackage:com.android.contacts\n", ""),
+        );
+        fakeAdb.setCommandResponse(
+          LAUNCHER_PROBE,
+          createExecResult("com.example.myapp/.Main\n", ""),
+        );
+        fakeAdb.setCommandResponse(
+          LEANBACK_PROBE,
+          createExecResult("1 activities found:\ncom.android.tv.settings/.MainSettings\n", ""),
+        );
+      });
+
+      const listFor = (device: BootedDevice) =>
+        new ListInstalledApps(device, new FakeAdbClientFactory(fakeAdb));
+
+      test("a TV lists a LEANBACK-only package as launchable and leaves LAUNCHER apps alone", async function () {
+        const tv = { ...mockDevice, formFactor: "tv" } as BootedDevice;
+
+        const result = await listFor(tv).executeDetailed();
+
+        const byName = (name: string) =>
+          [...result.system, ...result.profiles[0]].find((app) => app.packageName === name);
+        expect(byName("com.android.tv.settings")?.launchable).toBe(true);
+        expect(byName("com.example.myapp")?.launchable).toBe(true);
+        expect(byName("com.android.contacts")?.launchable).toBe(false);
+      });
+
+      test("a TV tops up cached rows: a LEANBACK-only package is launchable on a cache hit", async function () {
+        const tv = { ...mockDevice, formFactor: "tv" } as BootedDevice;
+        const repo = new FakeInstalledAppsRepository();
+        const timer = new FakeTimer();
+        timer.advanceTime(1000);
+        const now = timer.now();
+        await repo.replaceInstalledApps(tv.deviceId, [
+          {
+            device_id: tv.deviceId,
+            user_id: 0,
+            package_name: "com.android.tv.settings",
+            is_system: 1,
+            installed_at: now,
+            last_verified_at: now,
+            profile_type: "primary",
+          },
+          {
+            device_id: tv.deviceId,
+            user_id: 0,
+            package_name: "com.android.contacts",
+            is_system: 1,
+            installed_at: now,
+            last_verified_at: now,
+            profile_type: "primary",
+          },
+        ]);
+
+        const cached = new ListInstalledApps(tv, new FakeAdbClientFactory(fakeAdb), null, {
+          cacheEnabled: true,
+          installedAppsRepository: repo,
+          timer,
+        });
+        const result = await cached.executeDetailed();
+
+        const byName = (name: string) => result.system.find((app) => app.packageName === name);
+        expect(byName("com.android.tv.settings")?.launchable).toBe(true);
+        expect(byName("com.android.contacts")?.launchable).toBe(false);
+      });
+
+      test("a phone never queries LEANBACK_LAUNCHER", async function () {
+        const phone = { ...mockDevice, formFactor: "phone" } as BootedDevice;
+
+        const result = await listFor(phone).executeDetailed();
+
+        expect(
+          result.system.find((app) => app.packageName === "com.android.tv.settings")?.launchable,
+        ).toBe(false);
+        expect(fakeAdb.getExecutedCommands().filter((c) => c.includes("query-activities"))).toEqual(
+          [LAUNCHER_PROBE],
+        );
+      });
+
+      test("a TV tops up a CtrlProxy catalog that reported the LEANBACK-only package unlaunchable", async function () {
+        const tv = { ...mockDevice, formFactor: "tv" } as BootedDevice;
+        const list = new ListInstalledApps(tv, new FakeAdbClientFactory(fakeAdb), null, {
+          installedPackageSource: new FakeInstalledPackageSource({
+            available: true,
+            result: {
+              userId: 0,
+              packages: [
+                {
+                  packageName: "com.android.tv.settings",
+                  isSystem: true,
+                  label: "Settings",
+                  launchable: false,
+                },
+                {
+                  packageName: "com.android.contacts",
+                  isSystem: true,
+                  label: "Contacts",
+                  launchable: false,
+                },
+              ],
+            },
+          }),
+        });
+
+        const result = await list.executeDetailed();
+
+        const launchable = Object.fromEntries(
+          result.system.map((app) => [app.packageName, app.launchable]),
+        );
+        expect(launchable).toEqual({
+          "com.android.tv.settings": true,
+          "com.android.contacts": false,
+        });
+      });
+    });
+
     test("cached rows are still enriched: the DB cache stores no label or launchability", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
@@ -1405,13 +1532,10 @@ describe("ListInstalledApps", function () {
       // A zero timestamp is read as "never verified", which would rebuild
       // regardless; use a real-looking one so only the fix can force the rebuild.
       timer.advanceTime(1_000);
-      await repo.upsertInstalledApp(
-        mockDevice.deviceId,
-        0,
-        "com.broadcast.app",
-        false,
-        timer.now(),
-      );
+      await repo.upsertInstalledApp(mockDevice.deviceId, 0, "com.broadcast.app", {
+        isSystem: false,
+        timestampMs: timer.now(),
+      });
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse(
@@ -1459,13 +1583,10 @@ describe("ListInstalledApps", function () {
       timer.advanceTime(5 * 60 * 1000 + 1);
 
       // The broadcast writer patches exactly one row, bypassing the coordinator.
-      await repo.upsertInstalledApp(
-        mockDevice.deviceId,
-        0,
-        "com.broadcast.app",
-        false,
-        timer.now(),
-      );
+      await repo.upsertInstalledApp(mockDevice.deviceId, 0, "com.broadcast.app", {
+        isSystem: false,
+        timestampMs: timer.now(),
+      });
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse(

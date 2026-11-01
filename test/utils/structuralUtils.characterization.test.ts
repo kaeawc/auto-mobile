@@ -366,14 +366,11 @@ describe("Screenshot comparison characterization", () => {
     async ({ fast, threshold, value, difference }) => {
       const backend = new FakeImageBackend();
       expect(
-        await ScreenshotComparator.compareImages(
-          solidPng(2, 2, 0),
-          solidPng(2, 2, value),
+        await ScreenshotComparator.compareImages(solidPng(2, 2, 0), solidPng(2, 2, value), {
           threshold,
-          fast,
-          new FakeTimer(),
-          backend,
-        ),
+          fastMode: fast,
+          deps: { timer: new FakeTimer(), backend },
+        }),
       ).toEqual({
         compared: true,
         similarity: difference === 0 ? 100 : 0,
@@ -399,14 +396,14 @@ describe("Screenshot comparison characterization", () => {
     try {
       const input = Buffer.from("not-png");
       expect(
-        await ScreenshotComparator.compareImages(
-          input,
-          resized,
-          0.1,
-          fast,
-          new FakeTimer(),
-          backend,
-        ),
+        await ScreenshotComparator.compareImages(input, resized, {
+          threshold: 0.1,
+          fastMode: fast,
+          deps: {
+            timer: new FakeTimer(),
+            backend,
+          },
+        }),
       ).toEqual({ compared: true, similarity: 100, pixelDifference: 0, totalPixels: 2 });
       expect(backend.executeCalls).toEqual([
         { source: input, pipeline: { operations: [], encoding: { mime: "image/png" } } },
@@ -438,14 +435,14 @@ describe("Screenshot comparison characterization", () => {
       second.writeUInt32BE(900, 16);
       second.writeUInt32BE(650, 20);
       expect(
-        await ScreenshotComparator.compareImages(
-          first,
-          second,
-          0.1,
-          fast,
-          new FakeTimer(),
-          backend,
-        ),
+        await ScreenshotComparator.compareImages(first, second, {
+          threshold: 0.1,
+          fastMode: fast,
+          deps: {
+            timer: new FakeTimer(),
+            backend,
+          },
+        }),
       ).toEqual({ compared: true, similarity: 100, pixelDifference: 0, totalPixels: 1 });
       expect(backend.executeCalls.map(({ pipeline }) => pipeline)).toEqual(
         [0, 1].map(() => ({
@@ -471,10 +468,7 @@ describe("Screenshot comparison characterization", () => {
     const result = await ScreenshotComparator.compareImages(
       Buffer.from("bad"),
       Buffer.from("other"),
-      0.1,
-      false,
-      new FakeTimer(),
-      backend,
+      { threshold: 0.1, fastMode: false, deps: { timer: new FakeTimer(), backend } },
     );
     expect(result.compared).toBe(false);
     expect(result).toEqual({ compared: false, error: expect.any(String) });

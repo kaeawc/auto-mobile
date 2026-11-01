@@ -19,6 +19,13 @@ interface BarrierWaiter {
  * Ensures that devices wait at critical section boundaries and execute
  * their steps serially within the critical section.
  */
+/** How long, in which plan namespace, and under which cancellation one device waits at a barrier. */
+export interface BarrierWaitOptions {
+  timeout?: number;
+  namespace?: string;
+  signal?: AbortSignal;
+}
+
 export class CriticalSectionCoordinator {
   private static instance: CriticalSectionCoordinator;
   private locks: Map<string, Mutex>;
@@ -141,9 +148,11 @@ export class CriticalSectionCoordinator {
   public async enterCriticalSection(
     lock: string,
     deviceId: string,
-    timeout: number = BARRIER_TIMEOUT_MS,
-    namespace?: string,
-    signal?: AbortSignal,
+    {
+      timeout = BARRIER_TIMEOUT_MS,
+      namespace,
+      signal,
+    }: { timeout?: number; namespace?: string; signal?: AbortSignal } = {},
   ): Promise<() => void> {
     throwIfAborted(signal, true);
     const key = this.scopedKey(lock, namespace);
@@ -155,7 +164,7 @@ export class CriticalSectionCoordinator {
     }
 
     // Wait at barrier
-    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock, signal);
+    const generation = await this.waitAtBarrier(key, deviceId, timeout, { label: lock, signal });
 
     // Acquire the mutex for serial execution
     logger.debug(`Device ${deviceId} acquiring lock "${lock}"`);
@@ -218,14 +227,12 @@ export class CriticalSectionCoordinator {
     lock: string,
     deviceId: string,
     deviceCount: number,
-    timeout: number = BARRIER_TIMEOUT_MS,
-    namespace?: string,
-    signal?: AbortSignal,
+    { timeout = BARRIER_TIMEOUT_MS, namespace, signal }: BarrierWaitOptions = {},
   ): Promise<void> {
     throwIfAborted(signal, true);
     this.registerExpectedDevices(lock, deviceCount, namespace);
     const key = this.scopedKey(lock, namespace);
-    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock, signal);
+    const generation = await this.waitAtBarrier(key, deviceId, timeout, { label: lock, signal });
     throwIfAborted(signal, true);
     this.scheduleCleanup(key, generation);
   }
@@ -241,8 +248,7 @@ export class CriticalSectionCoordinator {
     key: string,
     deviceId: string,
     timeout: number,
-    label: string,
-    signal?: AbortSignal,
+    { label, signal }: { label: string; signal?: AbortSignal },
   ): Promise<number> {
     throwIfAborted(signal, true);
     const expectedCount = this.expectedDeviceCounts.get(key);

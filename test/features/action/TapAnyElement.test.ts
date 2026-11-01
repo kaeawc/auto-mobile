@@ -546,9 +546,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
         "android",
         { hierarchy: { node: createFlatNodeForTest({ text: "replacement" }) } },
         "fresh",
-        timer,
-        undefined,
-        "replacement-capture",
+        { timer, captureId: "replacement-capture" },
       );
       inheritHierarchySnapshot(replacement.hierarchy, selected?.hierarchy);
     });

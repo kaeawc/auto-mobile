@@ -1,3 +1,4 @@
+import { DAEMON_VERSION } from "../wire/constants";
 import { BindingRegistrySchemaUnsupportedError } from "../sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
@@ -177,7 +178,7 @@ export class DaemonBroker {
     this.brokerExecutionRelease = release;
     this.host.services
       .sessionManager()
-      .onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
+      .onSessionRelease((_sessionId, _deviceId, _reason, { snapshot, ...options }) =>
         release.onSessionReleased(snapshot, options),
       );
   }
@@ -347,6 +348,7 @@ export class DaemonBroker {
           });
     }
     const opening = openSqliteBindingRegistry({
+      writerVersion: DAEMON_VERSION,
       // Rehydration may open here before startup reaches the socket: only brokers may upgrade
       // in that window. Local daemons retry from the post-bind background upgrade instead.
       migrate:
@@ -384,6 +386,9 @@ export class DaemonBroker {
     this.host.setBindingRegistry(opening);
     opening.then(
       (registry) => {
+        if (!this.registryClosing) {
+          this.host.services.daemonState().setBindingRegistrySchemaProbe(registry);
+        }
         // Claims taken before the registry opened, and releases still owed, reach the table now.
         this.host.deviceClaimMirrors().registryOpened(registry.deviceClaims());
         if (!options?.quiet) {
@@ -431,6 +436,7 @@ export class DaemonBroker {
   async closeManagedExecutionRelease(): Promise<void> {
     // Mirrors are disposed later: fence late probes before the first shutdown await.
     this.registryClosing = true;
+    this.host.services.daemonState().setBindingRegistrySchemaProbe(undefined);
     await this.host.lifecycle.backgroundRegistryUpgrade()?.close();
     this.host.lifecycle.setBackgroundRegistryUpgrade(undefined);
     await this.sessionBrokerService?.close();

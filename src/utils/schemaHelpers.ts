@@ -1,7 +1,26 @@
 import { z } from "zod/v4";
 
-/** Shared platform schema — single source of truth for all tool schemas. */
-export const platformSchema = z.enum(["android", "ios"]);
+/**
+ * Shared platform schema — single source of truth for all tool schemas. `tvos` (an Apple TV
+ * simulator) is offered so clients can name it; every tool refuses it until the tool supports it.
+ */
+export const platformSchema = z.enum(["android", "ios", "tvos"]);
+
+/** A `platform` argument as the shared schema accepts it. */
+export type PlatformArg = z.infer<typeof platformSchema>;
+
+/**
+ * `platform` for a tool that accepts an Apple Watch simulator (installApp, uninstallApp, listApps,
+ * launchApp, terminateApp, observe; #14908, #14910). Every other tool keeps the shared Android/iOS {@link platformSchema}.
+ * A fresh instance per field, so the tool schema never emits a dangling `$ref`.
+ */
+export const watchAwarePlatformSchema = () =>
+  z
+    .enum(["android", "ios", "watchos", "tvos"])
+    .optional()
+    .describe(
+      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session. "tvos" (Apple TV) is not supported by any tool yet',
+    );
 
 export const DEVICE_LABEL_DESCRIPTION = "Device label";
 

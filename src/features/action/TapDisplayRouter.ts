@@ -143,8 +143,7 @@ export class TapDisplayRouter {
         options,
         target.observation,
         options.action,
-        false,
-        signal,
+        { requireResourceId: false, signal },
       );
       if (!stable.ok) {
         return { result: { success: false, error: stable.error } as TapOnElementResult };
@@ -217,12 +216,10 @@ export class TapDisplayRouter {
         );
       }
     }
-    const visibleBounds = this.host.visibleTapBounds(
-      selection,
-      hierarchy,
-      target.observation.screenSize,
+    const visibleBounds = this.host.visibleTapBounds(selection, hierarchy, {
+      screenSize: target.observation.screenSize,
       options,
-    );
+    });
     const point =
       visibleBounds &&
       this.host.resolveVisibleTapPoint(element, hierarchy, visibleBounds, {
@@ -249,23 +246,18 @@ export class TapDisplayRouter {
     reportToolDispatched();
     await dispatchAction(point);
     if (preTapHash && this.host.strategy().retryTapIfNoChange) {
-      await this.host.retryTapIfNoChange(
-        preTapHash,
-        point,
-        options.action,
-        this.host.strategy().longPressDurationMs,
-        element,
-        {
-          options: {
-            ...this.host.withObservationScreenSize(options, target.observation),
-            verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
-          },
-          isTalkBackEnabled: false,
-          screenSize: target.observation.screenSize,
-          signal,
-          selection,
+      await this.host.retryTapIfNoChange(preTapHash, point, options.action, {
+        longPressDuration: this.host.strategy().longPressDurationMs,
+        tapElement: element,
+        options: {
+          ...this.host.withObservationScreenSize(options, target.observation),
+          verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
         },
-      );
+        isTalkBackEnabled: false,
+        screenSize: target.observation.screenSize,
+        signal,
+        selection,
+      });
     }
     return withResolvedLayer(
       {
@@ -381,13 +373,11 @@ export class TapDisplayRouter {
         }
         // Vision screenshots are not display-aware. Omit the observation to keep
         // the shared base error without invoking default-display vision fallback.
-        await this.host.handleElementNotFound(
-          options,
-          undefined,
-          outcome.containerFound,
+        await this.host.handleElementNotFound(options, {
+          containerFound: outcome.containerFound,
           signal,
-          outcome.selection,
-        );
+          selection: outcome.selection,
+        });
       } catch (error) {
         logger.warn(`tapOn display resolution failed: ${errorMessage(error)}`, error);
         return {
@@ -416,17 +406,14 @@ export class TapDisplayRouter {
     const { target, signal } = context;
     const talkBack = await this.resolveAndroidDisplayTalkBack(target);
     const refresh: AndroidTapVerification["refresh"] = (timeoutMs) =>
-      refreshTargetDisplayHierarchy(
-        target,
-        this.host.hierarchyCapture(),
-        timeoutMs,
-        () =>
+      refreshTargetDisplayHierarchy(target, this.host.hierarchyCapture(), timeoutMs, {
+        stale: () =>
           this.host.staleDisplay(
             target.observation.display.generation ??
               this.host.displayTransitionReader().identityRevision(this.host.device().deviceId),
           ),
         signal,
-      );
+      });
     const verificationOptions = { ...options, verification: { refresh } };
     const resolved = await this.resolveAndroidDisplaySelection(
       verificationOptions,
@@ -511,9 +498,11 @@ export class TapDisplayRouter {
       options,
       result.element,
       result.observation,
-      labelText,
-      result.selectedElement?.indexInMatches,
-      previousObservation.viewHierarchy,
+      {
+        labelText,
+        selectedIndex: result.selectedElement?.indexInMatches,
+        preTapHierarchy: previousObservation.viewHierarchy,
+      },
     );
     if (!result.focusVerified) {
       result.success = false;
@@ -557,8 +546,8 @@ export class TapDisplayRouter {
           this.host.device(),
           display,
           this.host.observeScreen(),
-          this.host.adb(),
           {
+            adb: this.host.adb(),
             lastRenderedObservation: this.host.lastRenderedObservation(),
             signal,
             transitions: this.host.displayTransitionReader(),

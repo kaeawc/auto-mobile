@@ -1,7 +1,11 @@
 import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import type { BootedDevice, Platform } from "../models";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+  PlatformDeviceManager,
+} from "../devices/deviceUtils";
 import {
   resetBootedDevicesResourceCache,
   resetAndroidDeviceImageResourceCache,
@@ -10,34 +14,19 @@ import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorCo
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";
 import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
-
-/** Missing observations required to confirm absence without intervening presence. */
-export const MISSING_DEVICE_MISS_THRESHOLD = 3;
+import {
+  MISSING_DEVICE_MISS_THRESHOLD,
+  type DeviceLossMissPort,
+  type MissingDeviceObservation,
+} from "./deviceLossMisses";
 
 export function classifyMissingDeviceObservation(
   sourceSucceeded: boolean,
   devicePresent: boolean,
-): "present" | "missing" | "source-unavailable" {
+): MissingDeviceObservation {
   return !sourceSucceeded ? "source-unavailable" : devicePresent ? "present" : "missing";
 }
 
-/** A failed source supplies no evidence either way: hold until presence or another miss. */
-export function observeMissingDevice(
-  missesByDevice: Map<string, number>,
-  deviceId: string,
-  observation: "present" | "missing" | "source-unavailable",
-): { misses: number; confirmedGone: boolean } {
-  if (observation === "source-unavailable") {
-    return { misses: missesByDevice.get(deviceId) ?? 0, confirmedGone: false };
-  }
-  if (observation === "present") {
-    missesByDevice.delete(deviceId);
-    return { misses: 0, confirmedGone: false };
-  }
-  const misses = Math.min((missesByDevice.get(deviceId) ?? 0) + 1, MISSING_DEVICE_MISS_THRESHOLD);
-  missesByDevice.set(deviceId, misses);
-  return { misses, confirmedGone: misses >= MISSING_DEVICE_MISS_THRESHOLD };
-}
 /** adb lost the serial but the emulator child may be alive: keep watching it (#11123). */
 const LIVENESS_MISS_REMOVAL: RemoveDeviceOptions = { keepTrackedProcess: true };
 
@@ -60,7 +49,7 @@ export interface MissingDeviceLivenessPoolPort {
   mapAndroidDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
   isTransportEmulator?(deviceId: string): boolean;
   getDevices(): ReadonlyMap<string, PooledDevice>;
-  getRefreshMissingDeviceMisses(): Map<string, number>;
+  getRefreshMissingDeviceMisses(): DeviceLossMissPort;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getDeviceManager(): PlatformDeviceManager;
   getRefreshGeneration(): number;
@@ -135,7 +124,7 @@ export class MissingDeviceLiveness {
 
     for (const device of Array.from(this.pool.getDevices().values())) {
       if (bootedDeviceIds.has(device.id)) {
-        observeMissingDevice(this.pool.getRefreshMissingDeviceMisses(), device.id, "present");
+        this.pool.getRefreshMissingDeviceMisses().observe(device.id, "present");
         continue;
       }
       if (holderOf(device)) {
@@ -157,21 +146,15 @@ export class MissingDeviceLiveness {
           device.id,
         )
       ) {
-        observeMissingDevice(
-          this.pool.getRefreshMissingDeviceMisses(),
-          device.id,
-          "source-unavailable",
-        );
+        this.pool.getRefreshMissingDeviceMisses().observe(device.id, "source-unavailable");
         logger.warn(
           `Device ${device.id} retained: ${device.platform} discovery did not succeed this refresh`,
         );
         continue;
       }
-      const { misses, confirmedGone } = observeMissingDevice(
-        this.pool.getRefreshMissingDeviceMisses(),
-        device.id,
-        "missing",
-      );
+      const { misses, confirmedGone } = this.pool
+        .getRefreshMissingDeviceMisses()
+        .observe(device.id, "missing");
       logger.warn(
         `Device ${device.id} missing from ${device.platform} refresh discovery ` +
           `(miss ${misses}/${MISSING_DEVICE_MISS_THRESHOLD}, platform empty=${!bootedPlatforms.has(device.platform)})`,
@@ -198,9 +181,13 @@ export class MissingDeviceLiveness {
     assignmentLockHeld: boolean,
     refreshGeneration: number,
     bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
+    {
+      bootedPlatforms,
+      succeededPlatforms,
+      succeededSources,
+    }: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources"> & {
+      bootedPlatforms: Set<Platform>;
+    },
   ): Promise<number | undefined> {
     const removeMissingDevices = async () => {
       if (refreshGeneration !== this.pool.getRefreshGeneration()) {
@@ -252,8 +239,7 @@ export class MissingDeviceLiveness {
     device: PooledDevice,
     deferRecovery: boolean,
     assignmentLockHeld: boolean,
-    idleEviction: boolean,
-    snapshot?: BootedDeviceDiscovery,
+    { idleEviction, snapshot }: { idleEviction: boolean; snapshot?: BootedDeviceDiscovery },
   ): Promise<boolean> {
     if (!this.shouldValidatePooledDevicePresence(device)) {
       return true;
@@ -266,11 +252,7 @@ export class MissingDeviceLiveness {
       bootedDevice !== undefined,
     );
     if (observation === "source-unavailable") {
-      observeMissingDevice(
-        this.pool.getRefreshMissingDeviceMisses(),
-        device.id,
-        "source-unavailable",
-      );
+      this.pool.getRefreshMissingDeviceMisses().observe(device.id, "source-unavailable");
       logger.warn(
         `Retaining ${device.id}: ${device.platform} discovery did not succeed during assignment liveness check`,
       );
@@ -341,12 +323,7 @@ export class MissingDeviceLiveness {
     resetAndroidDeviceImageResourceCache();
     const discovery = await this.pool
       .getDeviceManager()
-      .getBootedDevicesDetailed(
-        platform,
-        platform === "ios"
-          ? { bypassIosDeviceListCache: true }
-          : { bypassAndroidDeviceListCache: true },
-      );
+      .getBootedDevicesDetailed(platform, freshPresenceOptions(platform));
     return this.pool.mapAndroidDiscovery &&
       this.pool.needsAndroidTransportNormalization?.(discovery.devices)
       ? { ...discovery, devices: this.pool.mapAndroidDiscovery(discovery.devices) }
@@ -391,7 +368,7 @@ export class MissingDeviceLiveness {
       logger.debug(`Rejecting superseded pooled incarnation of ${device.id} after liveness check`);
       return false;
     }
-    this.pool.getRefreshMissingDeviceMisses().delete(device.id);
+    this.pool.getRefreshMissingDeviceMisses().reset(device.id);
     return true;
   }
 
@@ -490,8 +467,7 @@ export class MissingDeviceLiveness {
       device,
       attemptDeviceLossRecovery,
       correlatedIncidentId,
-      identityObservation,
-      lockPoolRemoval,
+      { identityObservation, lockPoolRemoval },
     );
   }
 
@@ -499,8 +475,10 @@ export class MissingDeviceLiveness {
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
     correlatedIncidentId: string | undefined,
-    identityObservation: IdentityObservation | undefined,
-    lockPoolRemoval: boolean | undefined,
+    {
+      identityObservation,
+      lockPoolRemoval,
+    }: { identityObservation?: IdentityObservation; lockPoolRemoval?: boolean } = {},
   ): Promise<void> {
     this.prepareEvictedDeviceForRemoval(device, lockPoolRemoval);
     if (attemptDeviceLossRecovery && this.pool.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -638,5 +616,21 @@ export class MissingDeviceLiveness {
       undefined,
       "absent",
     );
+  }
+}
+
+/**
+ * Each platform's cache bypass. The watch listing has no cache, so it reads fresh as is (#14908);
+ * Apple TV simulators are not discovered yet, so there is no listing to bypass.
+ */
+function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions {
+  switch (platform) {
+    case "android":
+      return { bypassAndroidDeviceListCache: true };
+    case "ios":
+      return { bypassIosDeviceListCache: true };
+    case "watchos":
+    case "tvos":
+      return {};
   }
 }

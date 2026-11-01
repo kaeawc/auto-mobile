@@ -157,7 +157,7 @@ describe("display-scoped resumed activity", () => {
         backStack: new GetBackStack(device, factory, timer),
         cacheStore: new FakeObserveCacheStore(timer),
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({
@@ -210,7 +210,7 @@ describe("display-scoped resumed activity", () => {
       device,
       new FakeAdbClientFactory(adb),
       { viewHierarchy: hierarchy, cacheStore: new FakeObserveCacheStore(timer) },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({

@@ -58,11 +58,13 @@ describe("exportPlan resourceLink opt-in (#13942)", () => {
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       plainToolFinalizer: new DefaultAfterToolCallHandler(() => writer),
     });
-    await startDeviceGestureRecording(device, timer, new CountingIdGenerator("rl"), () => ({
-      stepCount: 1,
-      start: async () => undefined,
-      stop: async () => ({ steps: [step], stepCount: 1 }),
-    }));
+    await startDeviceGestureRecording(device, timer, new CountingIdGenerator("rl"), {
+      recorderFactory: () => ({
+        stepCount: 1,
+        start: async () => undefined,
+        stop: async () => ({ steps: [step], stepCount: 1 }),
+      }),
+    });
   });
 
   afterEach(async () => {

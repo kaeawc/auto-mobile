@@ -6,6 +6,15 @@ import {
 } from "../../../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
+import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
+import { FakeDeviceExecutionBinding } from "../../../fakes/FakeDeviceExecutionBinding";
+import { ExecutionTracker } from "../../../../src/daemon/executionTracker";
+import { AdmittingAdbClientFactory } from "../../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import {
+  ambientDeviceExecutionBinding,
+  runWithDeviceExecutionBinding,
+} from "../../../../src/utils/deviceExecutionBinding";
 
 // The source filters process.pid from foreign clients.
 const FOREIGN_PID = process.pid + 1;
@@ -67,6 +76,64 @@ function harness() {
 }
 
 describe("foreign CtrlProxy forward evidence", () => {
+  test.each([false, true])(
+    "provisionDevice probes retain admission without binding an unrelated emulator (signal=%s)",
+    async (withSignal) => {
+      const targetId = "emulator-5554";
+      const unrelatedId = "emulator-5558";
+      const timer = new FakeTimer();
+      const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["provision"]));
+      const execution = tracker.startExecution("provisionDevice");
+      const binding = new FakeDeviceExecutionBinding();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "forward --list",
+        createExecResult(`${unrelatedId} tcp:52001 tcp:8765`, ""),
+      );
+      const admitted: string[] = [];
+      const evidence = new DefaultForeignCtrlProxyForwardEvidence({
+        adbFactory: new AdmittingAdbClientFactory(new FakeAdbClientFactory(adb), {
+          admissionGate: { assertDeviceActionable: (id) => void admitted.push(id) },
+          executionBinding: ambientDeviceExecutionBinding,
+        }),
+        clientProbe: { findClientPids: async () => [FOREIGN_PID] },
+        ownership: () => ({ ownsForward: () => false }),
+        isProcessRunning: () => true,
+        timer,
+      });
+      try {
+        await runWithDeviceExecutionBinding(
+          {
+            bindDeviceExecution: (id) => {
+              binding.bindDeviceExecution(id);
+              tracker.bindDeviceExecution(execution.id, id);
+            },
+          },
+          async () => {
+            ambientDeviceExecutionBinding.bindDeviceExecution(targetId);
+            const signal = withSignal ? execution.abortController.signal : undefined;
+            expect(await evidence.read(unrelatedId, signal)).toMatchObject({
+              kind: "foreign",
+              ports: [52001],
+              clientPids: [FOREIGN_PID],
+            });
+            expect(admitted).toEqual([unrelatedId]);
+            expect(adb.getExecutedCommands()).toEqual(["forward --list"]);
+            expect(tracker.getActiveDeviceExecutionCount(unrelatedId)).toBe(0);
+            expect(binding.deviceIds).toEqual([targetId]);
+            // The caller's binding is restored after the unrelated inventory read.
+            ambientDeviceExecutionBinding.bindDeviceExecution(targetId);
+            expect(tracker.getActiveDeviceExecutionCount(targetId)).toBe(1);
+            expect(binding.deviceIds).toEqual([targetId, targetId]);
+          },
+        );
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        tracker.endExecution(execution.id);
+      }
+    },
+  );
+
   // A real PID of 4241 would make FOREIGN_PID equal the simulated self PID.
   test.skipIf(FOREIGN_PID === 4242)(
     "foreign evidence survives the old fixture PID becoming self",

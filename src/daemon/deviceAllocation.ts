@@ -142,6 +142,13 @@ export interface DeviceAllocationPort extends Pick<
   isPotentialAllocationSupply(device: PooledDevice): boolean;
 }
 
+/** The recovery a single-attempt assignment serves, and the caller's cancellation. */
+export interface AssignFromOptions {
+  recoveryTarget?: SessionRecoveryTarget;
+  settledRecoveryLoss?: boolean;
+  signal?: AbortSignal;
+}
+
 export class DeviceAllocation {
   constructor(private readonly port: DeviceAllocationPort) {}
 
@@ -195,13 +202,12 @@ export class DeviceAllocation {
           lossIncident = await this.settledRecoveryLossIncident(sessionId, recoveryTarget);
         }
         // Try to assign device (mutex ensures atomic assignment)
-        const assignResult = await this.tryAssignDevice(
-          sessionId,
+        const assignResult = await this.tryAssignDevice(sessionId, {
           platform,
           recoveryTarget,
-          lossIncident !== undefined,
+          settledRecoveryLoss: lossIncident !== undefined,
           signal,
-        );
+        });
         if (assignResult.refreshCompleted) {
           refreshFailure = assignResult.refreshFailure;
         }
@@ -423,10 +429,17 @@ export class DeviceAllocation {
    */
   async tryAssignDevice(
     sessionId: string,
-    platform?: Platform,
-    recoveryTarget?: SessionRecoveryTarget,
-    settledRecoveryLoss = false,
-    signal?: AbortSignal,
+    {
+      platform,
+      recoveryTarget,
+      settledRecoveryLoss,
+      signal,
+    }: {
+      platform?: Platform;
+      recoveryTarget?: SessionRecoveryTarget;
+      settledRecoveryLoss?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -451,9 +464,7 @@ export class DeviceAllocation {
         sessionId,
         () => this.port.getGenericallyAllocatableDevices(platform),
         "platform pool empty",
-        () => this.port.hasPendingAndroidRecovery(platform),
-        undefined,
-        { signal },
+        { hasPendingRecovery: () => this.port.hasPendingAndroidRecovery(platform), signal },
       );
     }
     const ownership = this.port.foreignOwnershipFor(recoveryTarget.platform);
@@ -464,18 +475,18 @@ export class DeviceAllocation {
       sessionId,
       () => this.port.getDevicesMatchingRecoveryTarget(recoveryTarget),
       "recovery target pool empty",
-      () => this.port.hasPendingAndroidRecovery(platform),
-      recoveryTarget,
-      { settledRecoveryLoss, signal },
+      {
+        hasPendingRecovery: () => this.port.hasPendingAndroidRecovery(platform),
+        recoveryTarget,
+        settledRecoveryLoss,
+        signal,
+      },
     );
     if (ownership && result.success && result.deviceId !== undefined && result.session) {
-      await this.claimRecoveredDevice(
-        sessionId,
-        recoveryTarget,
-        ownership,
-        result.deviceId,
-        result.session,
-      );
+      await this.claimRecoveredDevice(sessionId, recoveryTarget, ownership, {
+        deviceId: result.deviceId,
+        session: result.session,
+      });
     }
     return result;
   }
@@ -504,8 +515,7 @@ export class DeviceAllocation {
     sessionId: string,
     target: SessionRecoveryTarget,
     ownership: ForeignDeviceOwnership,
-    deviceId: string,
-    session: Session,
+    { deviceId, session }: { deviceId: string; session: Session },
   ): Promise<void> {
     if (await this.port.publishDeviceClaim(deviceId)) {
       return;
@@ -560,9 +570,7 @@ export class DeviceAllocation {
             .getGenericallyAllocatableDevices(platform)
             .filter((device) => !this.port.isDrivenByForeignDaemon(device)),
         "platform pool empty",
-        () => this.port.hasPendingAndroidRecovery(platform),
-        undefined,
-        { signal },
+        { hasPendingRecovery: () => this.port.hasPendingAndroidRecovery(platform), signal },
       ),
     );
   }
@@ -633,11 +641,47 @@ export class DeviceAllocation {
         sessionId,
         () => this.port.getUnownedDevicesMatchingCriteria(criteria),
         "criteria pool empty",
-        () => this.port.hasPendingAndroidRecoveryMatching(criteria),
-        undefined,
-        { signal },
+        { hasPendingRecovery: () => this.port.hasPendingAndroidRecoveryMatching(criteria), signal },
       ),
     );
+  }
+
+  /** Capture idle entries before taking one fresh sweep per platform outside the assignment lock. */
+  private async takeAllocationSnapshots(
+    candidates: PooledDevice[],
+    signal?: AbortSignal,
+  ): Promise<AllocationDiscoverySnapshots> {
+    // Only entries idle before discovery may be judged by this pass. A newly
+    // released, added or replaced entry needs its own fresh snapshot.
+    const capturedEntries = new Set(candidates.filter((device) => isIdle(device)));
+    const [iosLiveness, androidPresence, tvosLiveness] = await raceWithDeadline(
+      () =>
+        Promise.all([
+          candidates.some((device) => isIdle(device) && device.platform === "ios")
+            ? this.port.idleDeviceReaper.getIosLivenessSnapshot()
+            : undefined,
+          candidates.some(
+            (device) => isIdle(device) && this.port.shouldValidatePooledDevicePresence(device),
+          )
+            ? this.port.takeFreshPresenceDiscovery("android")
+            : undefined,
+          candidates.some((device) => isIdle(device) && device.platform === "tvos")
+            ? this.port.idleDeviceReaper.getIosLivenessSnapshot({ platform: "tvos" })
+            : undefined,
+        ]),
+      { timer: this.port.timer, signal, label: "Device allocation discovery" },
+    );
+    if (iosLiveness && tvosLiveness) {
+      iosLiveness.tvosDiscoverySucceeded = tvosLiveness.tvosDiscoverySucceeded;
+      for (const id of tvosLiveness.bootedDeviceIds) {
+        iosLiveness.bootedDeviceIds.add(id);
+      }
+    }
+    return {
+      capturedEntries,
+      iosLiveness: iosLiveness ?? tvosLiveness,
+      androidPresence,
+    };
   }
 
   /**
@@ -655,12 +699,7 @@ export class DeviceAllocation {
     sessionId: string,
     selectCandidates: () => PooledDevice[],
     emptyCandidatePoolReason: string,
-    hasPendingRecovery: () => boolean,
-    recoveryTarget?: SessionRecoveryTarget,
-    {
-      settledRecoveryLoss = false,
-      signal,
-    }: { settledRecoveryLoss?: boolean; signal?: AbortSignal } = {},
+    { hasPendingRecovery, ...options }: AssignFromOptions & { hasPendingRecovery: () => boolean },
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -672,6 +711,7 @@ export class DeviceAllocation {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
+    const { recoveryTarget, settledRecoveryLoss = false, signal } = options;
     let livenessUnknown = false;
     let refreshCompleteness: DiscoveryCompleteness | undefined;
     let refreshFailure: string | undefined;
@@ -683,24 +723,7 @@ export class DeviceAllocation {
     while (true) {
       throwIfRequestAborted();
       const candidatesBeforeDiscovery = selectCandidates();
-      // Only entries idle before discovery may be judged by this pass. A newly
-      // released, added or replaced entry needs its own fresh snapshot.
-      const capturedEntries = new Set(candidatesBeforeDiscovery.filter((device) => isIdle(device)));
-      const [iosLiveness, androidPresence] = await raceWithDeadline(
-        () =>
-          Promise.all([
-            candidatesBeforeDiscovery.some((device) => isIdle(device) && device.platform === "ios")
-              ? this.port.idleDeviceReaper.getIosLivenessSnapshot()
-              : undefined,
-            candidatesBeforeDiscovery.some(
-              (device) => isIdle(device) && this.port.shouldValidatePooledDevicePresence(device),
-            )
-              ? this.port.takeFreshPresenceDiscovery("android")
-              : undefined,
-          ]),
-        { timer: this.port.timer, signal, label: "Device allocation discovery" },
-      );
-      const snapshots = { capturedEntries, iosLiveness, androidPresence };
+      const snapshots = await this.takeAllocationSnapshots(candidatesBeforeDiscovery, signal);
 
       if (recoveryTarget && this.port.foreignOwnershipFor(recoveryTarget.platform)) {
         // Discovery may have added the target or its owner may have changed since preflight.

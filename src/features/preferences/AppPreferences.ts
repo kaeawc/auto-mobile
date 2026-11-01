@@ -290,28 +290,27 @@ export class AppPreferences {
       this.device.deviceId,
       input.appId!,
       fileName,
-      async () => {
-        const existingXml = await readAndroidPreferencesXml(
-          this.adb(),
-          input.appId!,
-          fileName,
-          input.userId,
-        );
-        const updatedXml = await writeAndroidPreferenceEntry(
-          existingXml,
-          input.key,
-          input.value,
-          input.type,
-        );
-        await writeAndroidPreferencesXml(
-          this.adb(),
-          input.appId!,
-          fileName,
-          updatedXml,
-          input.userId,
-        );
+      {
+        mutation: async () => {
+          const existingXml = await readAndroidPreferencesXml(
+            this.adb(),
+            input.appId!,
+            fileName,
+            input.userId,
+          );
+          const updatedXml = await writeAndroidPreferenceEntry(
+            existingXml,
+            input.key,
+            input.value,
+            input.type,
+          );
+          await writeAndroidPreferencesXml(this.adb(), input.appId!, fileName, {
+            xml: updatedXml,
+            userId: input.userId,
+          });
+        },
+        userId: input.userId,
       },
-      input.userId,
     );
   }
 
@@ -359,7 +358,7 @@ export class AppPreferences {
       }
     }
     return operation(
-      await this.resolveIosContainerPreferenceStore(input, store, domain, deadlineMs, write),
+      await this.resolveIosContainerPreferenceStore(input, store, domain, { deadlineMs, write }),
     );
   }
 
@@ -455,8 +454,7 @@ export class AppPreferences {
     input: GetPreferenceInput,
     store: string,
     domain: string,
-    deadlineMs: number | undefined,
-    write: boolean,
+    { deadlineMs, write }: { deadlineMs?: number; write: boolean },
   ): Promise<IosPreferenceStore> {
     if (store !== "standard" && domain.startsWith("group.")) {
       if (write) {
@@ -642,9 +640,11 @@ export class AppPreferences {
               store.client.setPreference(
                 input.appId!,
                 iosSdkStoreName(store.store),
-                input.key,
-                stringValue(input.value),
-                IOS_PREFERENCE_WRITE_TYPES[input.type],
+                {
+                  key: input.key,
+                  value: stringValue(input.value),
+                  type: IOS_PREFERENCE_WRITE_TYPES[input.type],
+                },
                 timeoutMs,
               ),
             deadlineMs,

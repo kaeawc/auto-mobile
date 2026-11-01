@@ -126,9 +126,11 @@ describe("MultiPlatformDeviceManager", () => {
           getBootedSimulatorsChecked: async () => [iosDevice],
         }),
         createFakeAndroidEmulator({ getBootedDevicesChecked: androidDiscovery }),
-        undefined,
-        undefined,
-        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+        {
+          physicalIosDevices: {
+            listConnectedDevices: async () => ({ devices: [], complete: true }),
+          },
+        },
       );
     }
 
@@ -236,9 +238,7 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
-        undefined,
-        undefined,
-        fakeLister,
+        { physicalIosDevices: fakeLister },
       );
     }
 
@@ -264,9 +264,7 @@ describe("MultiPlatformDeviceManager", () => {
           new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
-          undefined,
-          undefined,
-          hangingLister,
+          { physicalIosDevices: hangingLister },
         ).withPhysicalIosScanBudget(3_000, timer);
 
         const pending = manager.getBootedDevicesDetailed("ios").finally(() => {
@@ -517,6 +515,23 @@ describe("MultiPlatformDeviceManager", () => {
       });
     });
 
+    test("killDevice never shuts a watch down through the iOS backend (#14908)", async () => {
+      const fakeSimctl = fakeDeviceManagerSimctl({
+        killSimulator: async () => {
+          throw new Error("simctl shutdown must not run through the iOS backend for a watch");
+        },
+      });
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient(),
+        fakeSimctl,
+        createFakeAndroidEmulator({}),
+      );
+
+      await expect(
+        manager.killDevice({ name: "Watch", deviceId: "WATCH-UDID", platform: "watchos" }),
+      ).rejects.toThrow("Apple Watch simulator inventory is not available");
+    });
+
     test("physical discovery is not attempted when iOS tooling is unavailable", async () => {
       await withProcessPlatform("linux", async () => {
         let listerCalls = 0;
@@ -529,12 +544,12 @@ describe("MultiPlatformDeviceManager", () => {
           new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
-          undefined,
-          undefined,
           {
-            listConnectedDevices: async () => {
-              listerCalls++;
-              return { devices: [physicalDevice], complete: true };
+            physicalIosDevices: {
+              listConnectedDevices: async () => {
+                listerCalls++;
+                return { devices: [physicalDevice], complete: true };
+              },
             },
           },
         );
@@ -605,9 +620,11 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
-        undefined,
-        undefined,
-        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+        {
+          physicalIosDevices: {
+            listConnectedDevices: async () => ({ devices: [], complete: true }),
+          },
+        },
       );
 
       await expect(
@@ -663,9 +680,7 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
-        undefined,
-        undefined,
-        { listConnectedDevices: () => physicalDiscovery },
+        { physicalIosDevices: { listConnectedDevices: () => physicalDiscovery } },
       );
 
       const discoveryPromise = manager.getBootedDevicesDetailed("ios", {
@@ -700,12 +715,12 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
-        undefined,
-        undefined,
         {
-          listConnectedDevices: async (options) => {
-            physicalOptions = options;
-            return { devices: [], complete: true };
+          physicalIosDevices: {
+            listConnectedDevices: async (options) => {
+              physicalOptions = options;
+              return { devices: [], complete: true };
+            },
           },
         },
       );
@@ -1806,8 +1821,7 @@ describe("MultiPlatformDeviceManager", () => {
       new FakeAdbClient(),
       fakeSimctl,
       createFakeAndroidEmulator({}),
-      lifecycleCoordinator,
-      timer,
+      { lifecycleCoordinator, timer },
     );
 
     await manager.destroyDevice(
@@ -1883,9 +1897,11 @@ describe("discovery classifies tooling that is not installed apart from a failed
           getBootedSimulatorsChecked: async () => [sim],
         }),
       createFakeAndroidEmulator({ getBootedDevicesChecked: seams.adb ?? (async () => []) }),
-      undefined,
-      undefined,
-      seams.devicectl ?? { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+      {
+        physicalIosDevices: seams.devicectl ?? {
+          listConnectedDevices: async () => ({ devices: [], complete: true }),
+        },
+      },
     );
   }
 

@@ -1,3 +1,5 @@
+import { watchSwipeOn } from "../../watch/WatchActions";
+import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
 import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
 import { SwipeOnAndroidDisplay, containerFailureOf } from "./SwipeOnAndroidDisplay";
@@ -31,7 +33,6 @@ import {
   SwipeOnOptions,
   SwipeOnResult,
   ScrollableCandidate,
-  SwipeResult,
   ViewHierarchyResult,
   requireAndroidOrIosPlatform,
 } from "../../../models";
@@ -66,6 +67,7 @@ import {
   GestureExecutor,
   SwipeOnDependencies,
   SwipeOnResolvedOptions,
+  type ElementSwipeCall,
   BoomerangConfig,
   VoiceOverSwipeRunner,
   AutoTargetSelectorService,
@@ -79,7 +81,8 @@ import { OverlayDetector } from "./OverlayDetector";
 import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
 import { SwipeOutcomeIndeterminateError } from "./SwipeOutcomeIndeterminateError";
-import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
+import { createDefaultVoiceOverSwipeRunner } from "./VoiceOverSwipeExecutor";
+import { iosGestureFailureError, swipeMayHaveMoved } from "./iosSwipeOutcome";
 import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
@@ -102,22 +105,6 @@ import { settleSdkRouteAssessment, type SdkRouteSource } from "./sdkRouteSettle"
 import { resolveActionCall, type ActionCall } from "../ActionCall";
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
-/**
- * The error that stops a lock-screen swipe after a failed iOS gesture. It keeps the unconfirmed-
- * outcome marker as a type: the legacy catch rebuilds a plain failure result from the message.
- */
-function iosGestureFailureError(result: Pick<SwipeResult, "error" | "outcomeIndeterminate">) {
-  const message = result.error ?? "iOS lock-screen swipe failed";
-  return result.outcomeIndeterminate === true
-    ? new SwipeOutcomeIndeterminateError(message)
-    : new ActionableError(message);
-}
-
-/** A confirmed swipe, or one dispatched without a reply (#9972), may have moved the screen. */
-function swipeMayHaveMoved(result: Pick<SwipeResult, "success" | "outcomeIndeterminate">): boolean {
-  return result.success || result.outcomeIndeterminate === true;
-}
-
 /**
  * Refuse a swipe whose start point lies on the other `layer`: the window under the down event
  * receives the whole gesture (issue #9305). Resolution itself is scoped where the target is found.
@@ -179,7 +166,11 @@ export class SwipeOn extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SwipeOnDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.skipCallerDisplayFence = dependencies.skipCallerDisplayFence ?? false;
     this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
     this.iosLockScreenSwipe = dependencies.iosLockScreenSwipe;
@@ -242,17 +233,15 @@ export class SwipeOn extends BaseVisualChange {
       timer: this.timer,
       featureFlags,
     });
-    const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.voiceOverExecutor =
       dependencies.voiceOverExecutor ??
-      new VoiceOverSwipeExecutor(
+      createDefaultVoiceOverSwipeRunner({
         device,
-        this.executeGesture,
-        IOSCtrlProxyClient.getInstance(device),
-        iosVoiceOverDetector,
-        this.timer,
+        executeGesture: this.executeGesture,
+        iosVoiceOverDetector: dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector,
+        timer: this.timer,
         featureFlags,
-      );
+      });
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,
       resolver: dependencies.resolver,
@@ -265,6 +254,7 @@ export class SwipeOn extends BaseVisualChange {
       overlayDetector: this.overlayDetector,
       talkBackExecutor: this.talkBackExecutor,
       voiceOverExecutor: this.voiceOverExecutor,
+      webScrollIntoView: iosWebScrollIntoView(device, dependencies.webScrollIntoView),
       timer: this.timer,
       getDuration: this.getDuration.bind(this),
       resolveBoomerangConfig: this.resolveBoomerangConfig.bind(this),
@@ -383,6 +373,9 @@ export class SwipeOn extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    if (this.device.platform === "watchos") {
+      return watchSwipeOn(this.device.deviceId, options, signal);
+    }
     const result = await withSwipeObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal),
     );
@@ -432,19 +425,29 @@ export class SwipeOn extends BaseVisualChange {
     });
     const result =
       decision.element && context.observeResult
-        ? await this.executeElementSwipe(options, progress, perf, signal, {
-            element: decision.element,
-            observation: context.observeResult,
+        ? await this.executeElementSwipe(options, {
+            progress,
+            perf,
+            signal,
+            selected: {
+              element: decision.element,
+              observation: context.observeResult,
+            },
           })
         : decision.container
           ? await this.executeElementSwipe(
               { ...options, container: decision.container },
-              progress,
-              perf,
-              signal,
-              context.observeResult ? { observation: context.observeResult } : undefined,
+              {
+                progress,
+                perf,
+                signal,
+                selected: context.observeResult
+                  ? { observation: context.observeResult }
+                  : undefined,
+              },
             )
-          : await this.executeScreenSwipe(options, progress, perf, signal, {
+          : await this.executeScreenSwipe(options, progress, perf, {
+              signal,
               within: decision.scrollFrame,
             });
     return this.autoTargeting.withAutoTargetDecision({ result, decision });
@@ -475,7 +478,7 @@ export class SwipeOn extends BaseVisualChange {
       `[SwipeOn] execute: direction=${normalizedOptions.direction}, lookFor=${JSON.stringify(normalizedOptions.lookFor)}, container=${JSON.stringify(normalizedOptions.container)}, speed=${normalizedOptions.speed}, autoTarget=${normalizedOptions.autoTarget}`,
     );
     try {
-      return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
+      return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, { perf, signal });
     } catch (error) {
       perf.end();
       if (error instanceof SwipeSearchCancelledError) {
@@ -506,14 +509,12 @@ export class SwipeOn extends BaseVisualChange {
       if (searchCriteria) {
         throwIfAborted(signal);
         const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
-        const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
+        const vision = { visionConfig: this.visionConfig, visionAnalyzer: this.visionAnalyzer };
         errorMsg = await getVisionEnrichedError(
           this.screenshotCapturer,
-          viewHierarchy,
+          cachedObserve?.viewHierarchy ?? null,
           searchCriteria,
-          this.visionConfig,
-          errorMsg,
-          { visionAnalyzer: this.visionAnalyzer },
+          { ...vision, baseError: errorMsg },
         );
       }
 
@@ -598,8 +599,7 @@ export class SwipeOn extends BaseVisualChange {
     action: SwipeOn,
     normalizedOptions: SwipeOnResolvedOptions,
     progress: ProgressCallback | undefined,
-    perf: PerformanceTracker,
-    signal: AbortSignal | undefined,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<SwipeOnResult> {
     // Determine which mode to use
     if (normalizedOptions.lookFor) {
@@ -610,7 +610,7 @@ export class SwipeOn extends BaseVisualChange {
       const autoTargetEnabled = normalizedOptions.autoTarget !== false;
       if (!autoTargetEnabled) {
         logger.info(`[SwipeOn] Mode: screen swipe (autoTarget disabled)`);
-        return action.executeScreenSwipe(normalizedOptions, progress, perf, signal);
+        return action.executeScreenSwipe(normalizedOptions, progress, perf, { signal });
       }
 
       return action.executeAutoTargetSwipe({
@@ -624,7 +624,7 @@ export class SwipeOn extends BaseVisualChange {
       logger.info(
         `[SwipeOn] Mode: element swipe (explicit container=${JSON.stringify(normalizedOptions.container)})`,
       );
-      return action.executeElementSwipe(normalizedOptions, progress, perf, signal);
+      return action.executeElementSwipe(normalizedOptions, { progress, perf, signal });
     }
   }
 
@@ -745,14 +745,11 @@ export class SwipeOn extends BaseVisualChange {
         { x: result.x1, y: result.y1 },
         requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
       );
-    const assessment = await settleSdkRouteAssessment(
-      assess(),
-      previous,
-      result.observation,
+    const assessment = await settleSdkRouteAssessment(assess(), previous, result.observation, {
       swipeEndedAtMs,
-      sdkRoutes,
-      assess,
-    );
+      source: sdkRoutes,
+      reassess: assess,
+    });
     if (!assessment) {
       return;
     }
@@ -783,8 +780,7 @@ export class SwipeOn extends BaseVisualChange {
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    { within }: { within?: Element["bounds"] } = {},
+    { signal, within }: { signal?: AbortSignal; within?: Element["bounds"] } = {},
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
     let iosDispatchTimestamp: number | undefined;
@@ -838,6 +834,7 @@ export class SwipeOn extends BaseVisualChange {
                 perf,
                 boomerang,
                 signal,
+                sdkObservation: options.fromEdge ? undefined : observeResult,
               })
             : this.talkBackExecutor.executeSwipeGesture({
                 x1: Math.floor(startX),
@@ -900,10 +897,7 @@ export class SwipeOn extends BaseVisualChange {
 
   private async executeElementSwipe(
     options: SwipeOnResolvedOptions,
-    progress?: ProgressCallback,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    selected?: { element?: Element; observation: ObserveResult },
+    { progress, perf = new NoOpPerformanceTracker(), signal, selected }: ElementSwipeCall = {},
   ): Promise<SwipeOnResult> {
     logger.info(
       `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,
@@ -971,6 +965,7 @@ export class SwipeOn extends BaseVisualChange {
                 perf,
                 boomerang,
                 signal,
+                sdkObservation: observeResult,
               })
             : this.talkBackExecutor.executeSwipeGesture({
                 x1: Math.floor(startX),

@@ -74,8 +74,8 @@ function fakeAndroidPlatform(manager: FakeDeviceUtils): void {
   };
   manager.setMockChildProcess(AVD, processHandle);
   const waitForDeviceReady = manager.waitForDeviceReady.bind(manager);
-  manager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
-    const booted = await waitForDeviceReady(device, timeoutMs, childProcess, signal);
+  manager.waitForDeviceReady = async (device, timeoutMs, childProcess, { signal } = {}) => {
+    const booted = await waitForDeviceReady(device, timeoutMs, childProcess, { signal });
     const resolved = { ...booted, deviceId: "emulator-5554" };
     manager.setBootedDevices("android", [resolved]);
     return resolved;

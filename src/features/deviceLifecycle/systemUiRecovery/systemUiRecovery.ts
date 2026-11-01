@@ -75,18 +75,13 @@ export async function resolveSystemUiRecoveryImage({
       `Cannot restart Android device '${boot.device.deviceId}' after a System UI ANR because its AVD name is unknown.`,
     );
   }
-  const images = await operations.runWithinShutdownDeadline(
-    boot.device,
-    timer,
-    totalDeadlineMs,
-    "System UI recovery image lookup did not complete",
-    {
-      requestAbortSignal: signal,
-      operation: async () => await deviceManager.listDeviceImages("android"),
-      timeoutMs: undefined,
-      phase: "to resolve its AVD image for System UI ANR recovery",
-    },
-  );
+  const images = await operations.runWithinShutdownDeadline(boot.device, timer, totalDeadlineMs, {
+    detail: "System UI recovery image lookup did not complete",
+    requestAbortSignal: signal,
+    operation: async () => await deviceManager.listDeviceImages("android"),
+    timeoutMs: undefined,
+    phase: "to resolve its AVD image for System UI ANR recovery",
+  });
   const image = images.find(
     (candidate) => candidate.platform === "android" && candidate.name === avdName,
   );
@@ -143,8 +138,8 @@ export async function shutdownAndroidForSystemUiAnr(
     device,
     timer,
     totalDeadlineMs,
-    "System UI recovery shutdown command did not complete",
     {
+      detail: "System UI recovery shutdown command did not complete",
       requestAbortSignal: signal,
       operation: async (shutdownSignal, timeoutMs) => {
         shutdownSignal.throwIfAborted();
@@ -181,9 +176,15 @@ export async function bootSystemUiAnrReplacement(
   bootService: DeviceBootService,
   args: StartDeviceArgs,
   sourceImage: DeviceInfo,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
-  progress: { report: ProgressCallback } | undefined,
+  {
+    totalDeadlineMs,
+    signal,
+    progress,
+  }: {
+    totalDeadlineMs: number;
+    signal: AbortSignal | undefined;
+    progress: { report: ProgressCallback } | undefined;
+  },
 ): Promise<DeviceBootResult> {
   const replacement = await bootService.boot(
     {
@@ -238,8 +239,13 @@ export async function handoffSystemUiAnrReplacement(
   devicePool: ReadinessDevicePool | undefined,
   shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
   replacementBoot: DeviceBootResult,
-  sourceImage: DeviceInfo,
-  publishReplacementReadinessMarker?: (replacement: BootedDevice) => void,
+  {
+    sourceImage,
+    publishReplacementReadinessMarker,
+  }: {
+    sourceImage: DeviceInfo;
+    publishReplacementReadinessMarker?: (replacement: BootedDevice) => void;
+  },
 ): Promise<Awaited<ReturnType<DevicePool["replaceDeviceForSystemUiAnrRecovery"]>> | undefined> {
   if (!devicePool || !shutdownReservation) {
     return undefined;
@@ -248,9 +254,11 @@ export async function handoffSystemUiAnrReplacement(
     shutdownReservation.device,
     replacementBoot.device,
     sourceImage,
-    replacementBoot.processHandle,
-    () => publishReplacementReadinessMarker?.(replacementBoot.device),
-    getShutdownInitiatingExecutionId(),
+    {
+      childProcess: replacementBoot.processHandle,
+      beforeReplacementPublishes: () => publishReplacementReadinessMarker?.(replacementBoot.device),
+      excludeExecutionId: getShutdownInitiatingExecutionId(),
+    },
   );
 }
 
@@ -258,11 +266,17 @@ export async function retireSystemUiAnrReplacement(
   devicePool: ReadinessDevicePool | undefined,
   expectedReplacement: PooledDevice | undefined,
   replacementBoot: DeviceBootResult,
-  collectColdBootSettlement: ColdBootSettlementCollector,
-  operations: SystemUiAnrRecoveryOperations,
-  preservedSession: {
-    sessionId: string | undefined;
-    release: (replacement: PooledDevice) => Promise<void>;
+  {
+    collectColdBootSettlement,
+    operations,
+    preservedSession,
+  }: {
+    operations: SystemUiAnrRecoveryOperations;
+    preservedSession: {
+      sessionId: string | undefined;
+      release: (replacement: PooledDevice) => Promise<void>;
+    };
+    collectColdBootSettlement: ColdBootSettlementCollector;
   },
 ): Promise<void> {
   const currentReplacement = devicePool?.getDevice(replacementBoot.device.deviceId);
@@ -307,14 +321,11 @@ export async function restartAndroidForSystemUiAnr(
   );
   state.shutdownWasConfirmed = true;
   state.replacementBoot = carryCreatedByCall(
-    await bootSystemUiAnrReplacement(
-      bootService,
-      args,
-      state.sourceImage,
+    await bootSystemUiAnrReplacement(bootService, args, state.sourceImage, {
       totalDeadlineMs,
       signal,
       progress,
-    ),
+    }),
     boot,
   );
   assertSystemUiAnrReplacementIdentity(state.replacementBoot, state.sourceImage);
@@ -327,8 +338,10 @@ export async function restartAndroidForSystemUiAnr(
     devicePool,
     state.shutdownReservation,
     adoptedReplacementBoot,
-    state.sourceImage,
-    context.publishReplacementReadinessMarker,
+    {
+      sourceImage: state.sourceImage,
+      publishReplacementReadinessMarker: context.publishReplacementReadinessMarker,
+    },
   );
   return {
     boot: adoptedReplacementBoot,
@@ -339,12 +352,14 @@ export async function restartAndroidForSystemUiAnr(
         devicePool,
         handoff?.replacementDevice,
         adoptedReplacementBoot,
-        context.collectColdBootSettlement,
-        context.operations,
         {
-          sessionId: handoff?.preservedSessionId,
-          release: async (replacement) =>
-            await context.releasePreservedSession(replacement, handoff?.preservedSessionId),
+          collectColdBootSettlement: context.collectColdBootSettlement,
+          operations: context.operations,
+          preservedSession: {
+            sessionId: handoff?.preservedSessionId,
+            release: async (replacement) =>
+              await context.releasePreservedSession(replacement, handoff?.preservedSessionId),
+          },
         },
       ),
     validatePreservedSession: handoff?.validatePreservedSession,
@@ -481,18 +496,20 @@ export async function reserveSystemUiAnrShutdown(
   devicePool: ReadinessDevicePool | undefined,
   deviceId: string,
   signal: AbortSignal | undefined,
-  autolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
-  assertHolder: () => void,
+  {
+    autolockClient,
+    assertHolder,
+  }: {
+    autolockClient?: { mcpSessionId?: string; expectedSessionId?: string };
+    assertHolder: () => void;
+  },
 ): Promise<Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>> {
   if (!devicePool) {
     return undefined;
   }
-  const reservation = await devicePool.reserveDeviceForShutdown(
-    deviceId,
-    signal,
-    autolockClient,
+  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal, autolockClient, {
     assertHolder,
-  );
+  });
   if (reservation) {
     // Unnamed: rebooting on the session's behalf is not the session giving the device up.
     devicePool.markIntentionalShutdown(deviceId);
@@ -512,13 +529,11 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
   context.assertHolder();
   const sourceImage = await resolveSystemUiRecoveryImage(context);
   const releaseReadinessReservation = devicePool
-    ? await devicePool.reserveDeviceForReadiness(
-        boot.device.deviceId,
-        boot.device,
-        sourceImage.name,
-        sourceImage.name,
-        recoveryAutolockClient,
-      )
+    ? await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+        stableRuntimeName: sourceImage.name,
+        verifiedAndroidAvdName: sourceImage.name,
+        autolockClient: recoveryAutolockClient,
+      })
     : undefined;
   const state: SystemUiAnrRestartState = {
     sourceImage,
@@ -538,8 +553,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
       devicePool,
       boot.device.deviceId,
       signal,
-      recoveryAutolockClient,
-      context.assertHolder,
+      { autolockClient: recoveryAutolockClient, assertHolder: context.assertHolder },
     );
     // Before dispatch the request still owns cancellation: nothing has been touched yet.
     signal?.throwIfAborted();

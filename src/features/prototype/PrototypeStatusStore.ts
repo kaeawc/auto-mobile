@@ -138,17 +138,19 @@ export interface PrototypeStatusStore {
     scope: PrototypeScope,
     action: PrototypeMutation,
     target: { id?: string; all?: true },
-    result: PrototypeResult,
-    displayId?: number,
-    details?: PrototypeRecordDetails,
+    options: { result: PrototypeResult; details?: PrototypeRecordDetails },
   ): PrototypeLastResult;
   readonly shownSpecs: PrototypeShownSpecs;
   recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
   /** The device wiped this prototype's stored values (#12522): drop the reported `storage`. */
   forgetStorage(deviceId: string, id: string): void;
 }
-/** What a show placed besides its display: the spec's data (#11673) and the chrome drawn (#12064). */
+/**
+ * Where a mutation landed and what a show placed: its display, the spec's data (#11673) and the
+ * chrome drawn (#12064). An absent display falls back to the one the prototype is already shown on.
+ */
 export interface PrototypeRecordDetails {
+  displayId?: number;
   data?: PrototypeData;
   chrome?: PrototypeWindowChrome;
   replaceOthers?: boolean;
@@ -357,10 +359,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     scope: PrototypeScope,
     action: PrototypeMutation,
     target: { id?: string; all?: true },
-    result: PrototypeResult,
-    displayId?: number,
-    details: PrototypeRecordDetails = {},
+    { result, details = {} }: { result: PrototypeResult; details?: PrototypeRecordDetails },
   ): PrototypeLastResult {
+    const { displayId } = details;
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
     // A dismiss acts on the prototype already shown, wherever it was shown.
@@ -368,13 +369,10 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId
         : undefined;
-    const entry = this.createResult(
-      action,
-      target,
-      result,
-      displayId ?? shownDisplay,
-      details.chrome,
-    );
+    const entry = this.createResult(action, target, result, {
+      displayId: displayId ?? shownDisplay,
+      chrome: details.chrome,
+    });
     const presence = this.consumeShowDispatch(scope.deviceId, entry);
     if (!existing && !result.success) {
       return structuredClone(entry);
@@ -577,8 +575,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     action: PrototypeMutation,
     target: { id?: string; all?: true },
     result: PrototypeResult,
-    displayId?: number,
-    chrome?: PrototypeWindowChrome,
+    { displayId, chrome }: { displayId?: number; chrome?: PrototypeWindowChrome } = {},
   ): PrototypeLastResult {
     return {
       ...target,

@@ -67,6 +67,8 @@ export interface VideoCaptureConfig extends VideoRecordingConfig {
   display?: string;
   recordingPanel?: VideoRecordingPanel;
   physicalDisplayId?: string;
+  /** Record the device's audio beside the video and mux it in (#13629). */
+  audio?: boolean;
 }
 
 // Config parsing and the teardown descriptor live in src/models so src/db can use them without
@@ -90,6 +92,11 @@ export interface RecordingHandle {
    * capture writes `outputPath` directly (or its host file only appears at stop).
    */
   liveCapturePath?: string;
+  /**
+   * Other files the capture grows while it runs (an audio track's PCM), which the in-progress
+   * size cap counts too.
+   */
+  inProgressSidecarPaths?: string[];
   backendHandle?: unknown;
 }
 
@@ -106,6 +113,8 @@ export interface RecordingResult {
   recordedPanel?: VideoRecordingPanel;
   warnings?: string[];
   transitions?: VideoRecordingDisplayTransition[];
+  /** Set for a recording that asked for audio: whether the file got an audio track. */
+  hasAudioTrack?: boolean;
 }
 
 function recordingTransitions(
@@ -172,6 +181,7 @@ export interface StartVideoRecordingOptions {
   display?: string;
   recordingPanel?: VideoRecordingPanel;
   physicalDisplayId?: string;
+  audio?: boolean;
 }
 
 export interface ActiveVideoRecording {
@@ -200,6 +210,7 @@ export interface VideoRecorderServiceDependencies {
 
 interface ActiveRecordingState extends ActiveVideoRecording {
   deviceId?: string;
+  inProgressSidecarPaths?: string[];
   handle?: RecordingHandle;
   startPromise: Promise<RecordingHandle>;
   startAbortController: AbortController;
@@ -259,6 +270,7 @@ export class VideoRecorderService {
       display: options.display,
       recordingPanel: options.recordingPanel,
       physicalDisplayId: options.physicalDisplayId,
+      audio: options.audio,
       ...config,
     };
     // Defer backend invocation by one microtask so provisional ownership is
@@ -290,6 +302,7 @@ export class VideoRecorderService {
       active.outputPath = handle.outputPath || outputPath;
       active.fileName = path.basename(active.outputPath);
       active.liveCapturePath = handle.liveCapturePath;
+      active.inProgressSidecarPaths = handle.inProgressSidecarPaths;
       active.startedAt = handle.startedAt || startedAt;
       active.config = toPublicRecordingConfig(handle.effectiveConfig ?? config);
       applyBackendDisplayOutcome(active, handle);
@@ -328,9 +341,15 @@ export class VideoRecorderService {
     return handle ? this.backend.describeCaptureTeardown?.(handle) : undefined;
   }
 
-  /** The file an active capture is writing, when it differs from its output path. */
-  getLiveCapturePath(recordingId: string): string | undefined {
-    return this.activeRecordings.get(recordingId)?.liveCapturePath;
+  /**
+   * The files an active capture grows while it runs: its live capture file (its output path when
+   * it writes that directly) and any sidecar, such as an audio track's PCM. Empty when not active.
+   */
+  getInProgressFiles(recordingId: string): string[] {
+    const active = this.activeRecordings.get(recordingId);
+    return active
+      ? [active.liveCapturePath ?? active.outputPath, ...(active.inProgressSidecarPaths ?? [])]
+      : [];
   }
 
   hasActiveRecordingForDevice(deviceId: string): boolean {
@@ -401,6 +420,9 @@ export class VideoRecorderService {
       recordedPanel: stopResult.recordedPanel ?? active.recordedPanel,
       transitions: recordingTransitions(stopResult, active.recordedPanel),
       warnings: recordingWarnings(active, stopResult),
+      ...(stopResult.hasAudioTrack === undefined
+        ? {}
+        : { hasAudioTrack: stopResult.hasAudioTrack }),
     };
 
     this.activeRecordings.delete(recordingId);

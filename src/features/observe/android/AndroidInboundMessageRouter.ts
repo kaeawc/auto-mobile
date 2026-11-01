@@ -141,13 +141,12 @@ export class AndroidInboundMessageRouter {
             `[CTRL_PROXY] Discarded screenshot response for cancelled request (requestId: ${message.requestId})`,
           );
         } else if (!suppressObservationStreamPush) {
-          this.ctx.pushScreenshotToObservationStream(
-            message.data,
+          this.ctx.pushScreenshotToObservationStream(message.data, {
             metadata,
             binding,
-            message.frameContext,
-            message.rotation,
-          );
+            frameContext: message.frameContext,
+            rotation: message.rotation,
+          });
         } else {
           logger.debug(
             "[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request",
@@ -241,7 +240,9 @@ export class AndroidInboundMessageRouter {
           serverConfig.isNavigationScreenshotsEnabled()
         ) {
           await NavigationScreenshotManager.getInstance()
-            .captureAndStore(this.ctx.device, this.ctx.adb, event.applicationId, event.destination)
+            .captureAndStore(this.ctx.device, this.ctx.adb, event.applicationId, {
+              screenName: event.destination,
+            })
             .then((screenshotPath) => {
               if (this.ctx.closed) {
                 // The screenshot is optional; do not attach it to a session that has ended.

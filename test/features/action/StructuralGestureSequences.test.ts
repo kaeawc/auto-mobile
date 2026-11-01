@@ -220,7 +220,12 @@ describe("gesture request sequences", () => {
         elementSelector: selector,
         accessibilityDetector: new FakeAccessibilityDetector(),
         androidTapper: {
-          executeAndroidTap: async (_action, x, y, duration, _target, context) => {
+          executeAndroidTap: async (
+            _action,
+            { x, y },
+            duration,
+            { target: _target, fenceOptions: context },
+          ) => {
             calls.push(`tap:${x}:${y}:${duration}`);
             throwIfAborted(context?.signal);
             context?.onActivationWarnings?.(["activation warning"]);

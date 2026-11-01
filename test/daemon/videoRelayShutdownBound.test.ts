@@ -68,8 +68,7 @@ async function closeWithStreamingViewer(wedged: boolean): Promise<CloseOutcome> 
       },
       "/unused/video-relay-shutdown.sock",
       timer,
-      allowAll,
-      { assertDeviceActionable: () => {} },
+      { authenticator: allowAll, admissionGate: { assertDeviceActionable: () => {} } },
     );
     servers.push(server);
     const bind = spyOn(BaseSocketServer.prototype, "start").mockResolvedValue(undefined);

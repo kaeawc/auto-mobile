@@ -101,13 +101,18 @@ function arraysEqual(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+/** How one family of startup options is read from each side and compared. */
+interface OptionComparison<T> {
+  readRequested: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T | undefined;
+  readRunning: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T;
+  equals?: (requestedValue: T, runningValue: T) => boolean;
+}
+
 function requestedOptionDeficits<T>(
   keys: readonly (keyof DaemonOptions)[],
   requested: DaemonOptions | undefined,
   running: DaemonOptions | undefined,
-  readRequested: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T | undefined,
-  readRunning: (options: DaemonOptions | undefined, key: keyof DaemonOptions) => T,
-  equals: (requestedValue: T, runningValue: T) => boolean = (left, right) => left === right,
+  { readRequested, readRunning, equals = (left, right) => left === right }: OptionComparison<T>,
 ): string[] {
   return keys.flatMap((key) => {
     const requestedValue = readRequested(requested, key);
@@ -143,45 +148,30 @@ export function startupOptionDeficits(
   running: DaemonOptions | undefined,
 ): string[] {
   return [
-    ...requestedOptionDeficits(
-      REUSE_CRITICAL_OPTION_KEYS,
-      requested,
-      running,
-      (options, key) => (options?.[key] === true ? true : undefined),
-      (options, key) => options?.[key] === true,
-    ),
-    ...requestedOptionDeficits(
-      REUSE_CRITICAL_STRING_OPTION_KEYS,
-      requested,
-      running,
-      stringOption,
-      (options, key) => stringOption(options, key) ?? "unset",
-    ),
-    ...requestedOptionDeficits(
-      REUSE_CRITICAL_NUMBER_OPTION_KEYS,
-      requested,
-      running,
-      numberOption,
-      (options, key) => numberOption(options, key) ?? Number.NaN,
-    ),
-    ...requestedOptionDeficits(
-      ["accessibilityUseBaseline"],
-      requested,
-      running,
-      (options) =>
+    ...requestedOptionDeficits(REUSE_CRITICAL_OPTION_KEYS, requested, running, {
+      readRequested: (options, key) => (options?.[key] === true ? true : undefined),
+      readRunning: (options, key) => options?.[key] === true,
+    }),
+    ...requestedOptionDeficits(REUSE_CRITICAL_STRING_OPTION_KEYS, requested, running, {
+      readRequested: stringOption,
+      readRunning: (options, key) => stringOption(options, key) ?? "unset",
+    }),
+    ...requestedOptionDeficits(REUSE_CRITICAL_NUMBER_OPTION_KEYS, requested, running, {
+      readRequested: numberOption,
+      readRunning: (options, key) => numberOption(options, key) ?? Number.NaN,
+    }),
+    ...requestedOptionDeficits(["accessibilityUseBaseline"], requested, running, {
+      readRequested: (options) =>
         options?.accessibilityAudit === true
           ? options.accessibilityUseBaseline === true
           : undefined,
-      (options) => options?.accessibilityUseBaseline === true,
-    ),
-    ...requestedOptionDeficits(
-      ["eventAllMarkers"],
-      requested,
-      running,
-      (options, key) => stringArrayOption(options, key),
-      (options, key) => stringArrayOption(options, key) ?? [],
-      arraysEqual,
-    ),
+      readRunning: (options) => options?.accessibilityUseBaseline === true,
+    }),
+    ...requestedOptionDeficits(["eventAllMarkers"], requested, running, {
+      readRequested: (options, key) => stringArrayOption(options, key),
+      readRunning: (options, key) => stringArrayOption(options, key) ?? [],
+      equals: arraysEqual,
+    }),
   ];
 }
 

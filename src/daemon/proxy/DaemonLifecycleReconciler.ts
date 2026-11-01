@@ -96,16 +96,14 @@ export interface DaemonLifecycleReconcilerDeps {
     status: DaemonStatus,
     runningVersion: string,
     runningBase: string,
-    clientBase: string,
-    sameRelease: boolean,
+    options: { clientBase: string; sameRelease: boolean },
   ): void;
   assertVersionRestartCooldownExpired(status: DaemonStatus, runningVersion: string): void;
   versionMismatchError(
     runningVersion: string,
     reason: VersionMismatchReason,
     detail: string,
-    retryAfterMs?: number,
-    daemonBuild?: BuildIdentity,
+    options?: { retryAfterMs?: number; daemonBuild?: BuildIdentity },
   ): DaemonVersionMismatchError;
 
   ensureBuildMatches(reconciliationDeadline?: number, observedStatus?: DaemonStatus): Promise<void>;
@@ -389,8 +387,7 @@ export class DaemonLifecycleReconciler {
         restartedVersion,
         "restartMismatch",
         "daemon restart completed but version still differs",
-        undefined,
-        buildIdentityFromStatus(restartedStatus),
+        { daemonBuild: buildIdentityFromStatus(restartedStatus) },
       );
     }
   }
@@ -440,8 +437,7 @@ export class DaemonLifecycleReconciler {
         runningVersion,
         "staleClient",
         "the daemon already runs this checkout's current version; restarting cannot reconcile",
-        undefined,
-        buildIdentityFromStatus(status),
+        { daemonBuild: buildIdentityFromStatus(status) },
       );
     }
     if (!this.acceptedCheckoutVersions.has(runningVersion)) {
@@ -471,18 +467,14 @@ export class DaemonLifecycleReconciler {
         runningVersion,
         "autoStartDisabled",
         "auto-start is disabled",
-        undefined,
-        buildIdentityFromStatus(status),
+        { daemonBuild: buildIdentityFromStatus(status) },
       );
     }
 
-    this.deps.assertNewerClientVersion(
-      status,
-      runningVersion,
-      runningBase,
+    this.deps.assertNewerClientVersion(status, runningVersion, runningBase, {
       clientBase,
       sameRelease,
-    );
+    });
     return true;
   }
 
@@ -490,8 +482,7 @@ export class DaemonLifecycleReconciler {
     status: DaemonStatus,
     runningVersion: string,
     runningBase: string,
-    clientBase: string,
-    sameRelease: boolean,
+    { clientBase, sameRelease }: { clientBase: string; sameRelease: boolean },
   ): void {
     if (!sameRelease) {
       const cmp =
@@ -504,8 +495,7 @@ export class DaemonLifecycleReconciler {
           runningVersion,
           "nonNumeric",
           "version comparison is not numeric",
-          undefined,
-          buildIdentityFromStatus(status),
+          { daemonBuild: buildIdentityFromStatus(status) },
         );
       }
 
@@ -514,8 +504,7 @@ export class DaemonLifecycleReconciler {
           runningVersion,
           "daemonNewer",
           "the running daemon is newer than this client",
-          undefined,
-          buildIdentityFromStatus(status),
+          { daemonBuild: buildIdentityFromStatus(status) },
         );
       }
     }
@@ -528,13 +517,10 @@ export class DaemonLifecycleReconciler {
         logger.warn(
           `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${this.deps.clientVersion}`,
         );
-        throw this.deps.versionMismatchError(
-          runningVersion,
-          "cooldown",
-          "restart is in cooldown",
-          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
-          buildIdentityFromStatus(status),
-        );
+        throw this.deps.versionMismatchError(runningVersion, "cooldown", "restart is in cooldown", {
+          retryAfterMs: DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
+          daemonBuild: buildIdentityFromStatus(status),
+        });
       }
     }
   }
@@ -543,8 +529,7 @@ export class DaemonLifecycleReconciler {
     runningVersion: string,
     reason: VersionMismatchReason,
     detail: string,
-    retryAfterMs?: number,
-    daemonBuild?: BuildIdentity,
+    { retryAfterMs, daemonBuild }: { retryAfterMs?: number; daemonBuild?: BuildIdentity } = {},
   ): DaemonVersionMismatchError {
     const daemonVersion = runningVersion.length > 0 ? runningVersion : "unknown";
     const clientVersion = this.deps.clientVersion.trim();

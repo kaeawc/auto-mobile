@@ -27,9 +27,10 @@ import {
   responseShapeControlFields,
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
+import type { PlatformArg } from "../utils/schemaHelpers";
 
 export type MultiTouchArgs = MultiTouchOptions & {
-  platform?: "android" | "ios";
+  platform?: PlatformArg;
   raw?: boolean;
   project?: "full" | "skeleton";
 };
@@ -178,8 +179,8 @@ export function registerMultiTouchTools() {
     "multiTouch",
     "Simultaneous 2-5 finger tap, long press, or swipe at a screen point.",
     multiTouchSchema,
-    multiTouchHandler,
     {
+      handler: multiTouchHandler,
       defaultEnabled: false,
       supportsProgress: true,
       ...ANSWERS_SYSTEM_ALERTS,

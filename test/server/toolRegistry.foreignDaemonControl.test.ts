@@ -124,9 +124,11 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
       100,
       files,
       { query: async () => ({ kind: "unreachable", detail: "unused" }) },
-      () => undefined,
-      timer,
-      { read: async () => forwardVerdict },
+      {
+        ownerSocketPath: () => undefined,
+        timer,
+        forwardEvidence: { read: async () => forwardVerdict },
+      },
     );
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "foreign-daemon-control", {

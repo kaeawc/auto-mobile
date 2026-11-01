@@ -5,7 +5,7 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { afterAll, beforeEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
-import { DaemonClient } from "../../src/daemon/client/client";
+import { DaemonClient, type DaemonToolCallOptions } from "../../src/daemon/client/client";
 import { DAEMON_VERSION, INTERNAL_EXECUTION_ID_PARAM } from "../../src/daemon/wire/constants";
 import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { ActionableError } from "../../src/models";
@@ -106,9 +106,9 @@ class ForwardingDaemonClient extends FakeDaemonClient {
     toolName: string,
     params: Record<string, unknown>,
     progressToken?: string | number,
-    onRequestId?: (requestId: string) => void,
+    options?: DaemonToolCallOptions,
   ): Promise<unknown> {
-    await super.callTool(toolName, params, progressToken, onRequestId);
+    await super.callTool(toolName, params, progressToken, options);
     return this.daemonServerClient().callTool({
       name: toolName,
       arguments: daemonLoopbackToolArgs(params),

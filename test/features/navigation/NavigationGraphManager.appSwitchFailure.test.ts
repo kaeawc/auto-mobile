@@ -19,7 +19,7 @@ class FlakyAppInsertRepository extends NavigationRepository {
   private failNext = false;
 
   constructor(db: Kysely<Database>) {
-    super(db);
+    super({ db });
   }
 
   rejectNextAppInsert(): void {
@@ -44,11 +44,10 @@ describe("NavigationGraphManager app switch when the app-row insert rejects (#99
   beforeEach(async () => {
     harness = await installInMemoryNavManager();
     repository = new FlakyAppInsertRepository(harness.db);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
-      new FakeTimer(),
-    );
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
+      timer: new FakeTimer(),
+    });
   });
 
   afterEach(async () => {

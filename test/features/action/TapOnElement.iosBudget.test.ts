@@ -52,7 +52,7 @@ test("iOS hierarchy refresh forwards the caller's remaining budget and signal", 
   client.setHierarchyData({ updatedAt: 0, packageName: "com.test", hierarchy: {} });
   const sync = spyOn(client, "requestHierarchySync");
   await tap.refreshViewHierarchy(37, undefined, signal);
-  expect(sync).toHaveBeenCalledWith(undefined, false, signal, 37);
+  expect(sync).toHaveBeenCalledWith(undefined, false, signal, { timeoutMs: 37 });
   expect(read).not.toHaveBeenCalled();
   sync.mockRestore();
 });

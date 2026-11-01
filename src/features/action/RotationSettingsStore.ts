@@ -412,7 +412,7 @@ export class RotationSettingsStore {
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.ctx().device);
       cleanup?.assertCurrentDevice?.();
-      const write = a11y.requestSettingsPut(namespace, key, value, valueType);
+      const write = a11y.requestSettingsPut(namespace, key, value, { valueType });
       if (cleanup) {
         cleanup.pendingWrite = write;
       }

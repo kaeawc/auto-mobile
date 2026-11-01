@@ -457,8 +457,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     return readEnvPositiveInteger(
       ENV.IPROXY_START_TIMEOUT_MS.name,
       ENV.IPROXY_START_TIMEOUT_MS.legacyName,
-      { fallback: DEFAULT_IPROXY_START_TIMEOUT_MS },
-      this.options.env,
+      { fallback: DEFAULT_IPROXY_START_TIMEOUT_MS, env: this.options.env },
     );
   }
 

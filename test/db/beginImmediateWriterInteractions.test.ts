@@ -88,8 +88,8 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
   });
 
   test("storage insert, device-lock forget, installed-apps patch and replace all complete together", async () => {
-    const apps = new InstalledAppsRepository(db);
-    const locks = new DeviceLockRepository(db);
+    const apps = new InstalledAppsRepository({ db });
+    const locks = new DeviceLockRepository({ db });
     const listener = createDeviceLockIdentityListener(locks);
     await locks.rememberLock("emulator-5554", "pin", "1234", "avd-a");
     await apps.replaceInstalledApps("dev-1", []);
@@ -108,7 +108,7 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
           last_verified_at: nowMs,
         },
       ]),
-      apps.upsertInstalledApp("dev-1", 0, "com.b", false, nowMs + 1),
+      apps.upsertInstalledApp("dev-1", 0, "com.b", { isSystem: false, timestampMs: nowMs + 1 }),
       Promise.resolve(listener.onDeviceIdentityReplaced?.("emulator-5554")),
     ]);
     // The listener forgets with a detached promise; a following serialized write
@@ -125,9 +125,9 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
   });
 
   test("a patch against a device with no snapshot writes nothing, even beside a transaction", async () => {
-    const apps = new InstalledAppsRepository(db);
+    const apps = new InstalledAppsRepository({ db });
     await Promise.all([
-      apps.upsertInstalledApp("dev-2", 0, "com.x", false, 1),
+      apps.upsertInstalledApp("dev-2", 0, "com.x", { isSystem: false, timestampMs: 1 }),
       recordStorageEvent(storageEvent("a", 1), db),
     ]);
     expect(await apps.listInstalledApps("dev-2")).toEqual([]);
@@ -140,7 +140,7 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
     for (let i = 0; i < 8; i++) {
       await recordStorageEvent(storageEvent(`v${i}`, 9_000 - i), db);
     }
-    await pruneEventTableByCount(db, "storage_events", state, 3, 1);
+    await pruneEventTableByCount(db, "storage_events", state, { maxRows: 3, checkInterval: 1 });
 
     const kept = await db
       .selectFrom("storage_events")

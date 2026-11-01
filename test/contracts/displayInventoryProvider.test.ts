@@ -44,7 +44,7 @@ runDisplayInventoryProviderContract("CachingDisplayInventoryProvider", () => {
     read: () => readAndroidDeviceDisplaysChecked(scriptedAdb(scenario)),
   };
   return {
-    provider: new CachingDisplayInventoryProvider(source, source, new FakeTimer()),
+    provider: new CachingDisplayInventoryProvider(source, source, { timer: new FakeTimer() }),
     script: (next) => {
       scenario = next;
     },

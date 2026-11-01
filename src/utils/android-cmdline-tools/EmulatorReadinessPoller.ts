@@ -33,12 +33,18 @@ import type {
   EmulatorReadinessHost,
   EmulatorReadinessPoller,
   EmulatorReadinessState,
+  EmulatorReadyWait,
   OfflineTracker,
   ReadinessPollCycle,
   ReadinessPollOutcome,
   ReadinessPollingState,
 } from "./EmulatorReadinessTypes";
 import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
+import {
+  ambientDeviceExecutionBinding,
+  type DeviceExecutionBinding,
+} from "../deviceExecutionBinding";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../deviceAdmissionGate";
 
 const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
 export const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
@@ -49,6 +55,7 @@ const READINESS_PROBE_TIMEOUT_MS = 10_000;
 export type {
   EmulatorReadinessHost,
   EmulatorReadinessPoller,
+  EmulatorReadyWait,
   OfflineTracker,
 } from "./EmulatorReadinessTypes";
 
@@ -66,11 +73,19 @@ export function resolveEmulatorPollingInterval(value: string | undefined): numbe
 
 export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
   private readonly bootUnlock: EmulatorBootUnlock;
+  private readonly executionBinding: DeviceExecutionBinding;
+  private readonly admissionGate: DeviceAdmissionGate;
 
   constructor(
     private readonly host: EmulatorReadinessHost,
     bootUnlock?: EmulatorBootUnlock,
+    options: {
+      executionBinding?: DeviceExecutionBinding;
+      admissionGate?: DeviceAdmissionGate;
+    } = {},
   ) {
+    this.executionBinding = options.executionBinding ?? ambientDeviceExecutionBinding;
+    this.admissionGate = options.admissionGate ?? daemonDeviceAdmissionGate;
     this.bootUnlock =
       bootUnlock ??
       new DefaultEmulatorBootUnlock({
@@ -107,9 +122,11 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
   async detectOfflineFailure(
     deviceId: string | undefined,
     tracker: OfflineTracker,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    observedStates?: AdbDeviceState[],
+    {
+      timeoutMs,
+      signal,
+      observedStates,
+    }: { timeoutMs?: number; signal?: AbortSignal; observedStates?: AdbDeviceState[] } = {},
   ): Promise<ActionableError | null> {
     let states: AdbDeviceState[];
     try {
@@ -230,8 +247,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     delayMs: number,
     signal: AbortSignal | undefined,
     polling: ReadinessPollingState,
-    startTime: number,
-    timeoutMs: number,
+    { startTime, timeoutMs }: { startTime: number; timeoutMs: number },
   ): Promise<void> {
     return new Promise<void>((resolve) => {
       let settled = false;
@@ -281,6 +297,20 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     );
   }
 
+  private bindCorrelatedTarget(deviceId: string | undefined): void {
+    if (!deviceId) {
+      return;
+    }
+    try {
+      this.admissionGate.assertDeviceActionable(deviceId, "to verify Android device readiness");
+    } catch (error) {
+      // Correlation may identify a quarantined serial; leave its existing readiness path intact.
+      logger.debug(`Not binding readiness target ${deviceId}: ${errorMessage(error)}`);
+      return;
+    }
+    this.executionBinding.bindDeviceExecution(deviceId);
+  }
+
   /**
    * Wait for the emulator to be ready for use
    * @param avdName - The AVD name to wait for
@@ -291,9 +321,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     avdName: string,
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
-    targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    { targetDeviceId, signal, options }: EmulatorReadyWait = {},
   ): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
@@ -377,22 +405,26 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
           avdName,
           state.foundDeviceId,
           state.foundEmulatorName,
-          Math.max(
-            0,
-            Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
-          ),
-          signal,
+          {
+            timeoutMs: Math.max(
+              0,
+              Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
+            ),
+            signal,
+          },
         );
         logger.info(`Emulator '${resolvedName}' is ready! Device ID: ${state.foundDeviceId}`);
         const model = await this.host.resolveFoundDeviceModel(
           state.foundDeviceModel,
           state.foundDeviceId,
           resolvedName,
-          Math.max(
-            0,
-            Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
-          ),
-          signal,
+          {
+            timeoutMs: Math.max(
+              0,
+              Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
+            ),
+            signal,
+          },
         );
         const bootedDevice = this.host.foundBootedDevice(resolvedName, state.foundDeviceId, model);
         await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
@@ -401,7 +433,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
 
       // Poller completion and process exits wake this bounded fallback delay immediately.
       const delayMs = Math.min(500, timeoutMs - (this.timer.now() - startTime));
-      await this.waitForReadinessDelay(delayMs, signal, polling, startTime, timeoutMs);
+      await this.waitForReadinessDelay(delayMs, signal, polling, { startTime, timeoutMs });
     }
 
     // Stop background polling
@@ -417,22 +449,26 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         avdName,
         state.foundDeviceId,
         state.foundEmulatorName,
-        Math.max(
-          0,
-          Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
-        ),
-        signal,
+        {
+          timeoutMs: Math.max(
+            0,
+            Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
+          ),
+          signal,
+        },
       );
       logger.info(`Emulator '${resolvedName}' is ready! Device ID: ${state.foundDeviceId}`);
       const model = await this.host.resolveFoundDeviceModel(
         state.foundDeviceModel,
         state.foundDeviceId,
         resolvedName,
-        Math.max(
-          0,
-          Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
-        ),
-        signal,
+        {
+          timeoutMs: Math.max(
+            0,
+            Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
+          ),
+          signal,
+        },
       );
       const bootedDevice = this.host.foundBootedDevice(resolvedName, state.foundDeviceId, model);
       await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
@@ -445,14 +481,11 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       state.resolvedTargetDeviceId,
     );
     const target = readinessTarget(correlatedTargetDeviceId, offlineTracker);
-    throw readinessTimeoutError(
-      avdName,
-      timeoutMs,
-      state.processExitError,
-      state.correlationFailure,
-      state.lastDiagnostic,
+    throw readinessTimeoutError(avdName, timeoutMs, state.processExitError, {
+      correlationFailure: state.correlationFailure,
+      diagnostic: state.lastDiagnostic,
       target,
-    );
+    });
   }
 
   private validateReadinessCandidate(
@@ -502,6 +535,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         emulator = correlation.emulator;
         state.correlationFailure = correlation.failure;
         state.resolvedTargetDeviceId = emulator?.deviceId;
+        this.bindCorrelatedTarget(state.resolvedTargetDeviceId);
       }
 
       return emulator;
@@ -556,8 +590,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         emulator.deviceId,
         stateOutput,
         packageManagerResult.value,
-        sysBootCompleted,
-        bootAnimationState,
+        { sysBootCompleted, bootAnimationState },
       );
       if (unmetPredicate) {
         // An upstream scan failure (discovery, AVD-name resolution) is the
@@ -705,7 +738,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         return;
       }
       const delayMs = Math.min(remainingMs, MAX_POLLING_SLEEP_CHUNK_MS);
-      await this.waitForReadinessDelay(delayMs, signal, polling, startTime, timeoutMs);
+      await this.waitForReadinessDelay(delayMs, signal, polling, { startTime, timeoutMs });
     }
   }
 
@@ -738,6 +771,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       childProcess,
       state.resolvedTargetDeviceId,
     );
+    this.bindCorrelatedTarget(correlatedTargetDeviceId);
     cycle.correlatedTargetDeviceId = correlatedTargetDeviceId;
     const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
     if (remainingTimeoutMs <= 0) {
@@ -746,21 +780,17 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     }
     const snapshotTimeoutMs = Math.min(AdbClient.DEVICE_LIST_TIMEOUT_MS, remainingTimeoutMs);
     const snapshot = await this.readReadinessSnapshot(snapshotTimeoutMs, signal, offlineTracker);
-    await this.detectOfflineFailure(
-      correlatedTargetDeviceId,
-      offlineTracker,
-      snapshotTimeoutMs,
+    await this.detectOfflineFailure(correlatedTargetDeviceId, offlineTracker, {
+      timeoutMs: snapshotTimeoutMs,
       signal,
-      snapshot?.states,
-    );
-    await this.host.maybeRecoverFreshOffline(
-      offlineTracker,
-      options,
-      correlatedTargetDeviceId,
+      observedStates: snapshot?.states,
+    });
+    await this.host.maybeRecoverFreshOffline(offlineTracker, options, correlatedTargetDeviceId, {
+      avdName,
+      signal,
       startTime,
       timeoutMs,
-      { avdName, signal },
-    );
+    });
     if (!polling.active || this.timer.now() - startTime >= timeoutMs) {
       return "stop";
     }
@@ -787,13 +817,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       correlatedTargetDeviceId,
     );
     if (emulator && emulator.deviceId) {
-      const ready = await this.probeSelectedEmulator(
-        context,
-        emulator,
-        scanDiagnostic,
+      const ready = await this.probeSelectedEmulator(context, emulator, scanDiagnostic, {
         readinessTimeoutMs,
         correlatedTargetDeviceId,
-      );
+      });
       return ready ? "ready" : "continue";
     }
     if (runningEmulators.length > 0) {
@@ -824,8 +851,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     context: EmulatorReadinessContext,
     emulator: BootedDevice,
     scanDiagnostic: ReturnType<typeof relevantScanDiagnostic>,
-    readinessTimeoutMs: number,
-    correlatedTargetDeviceId: string | undefined,
+    {
+      readinessTimeoutMs,
+      correlatedTargetDeviceId,
+    }: { readinessTimeoutMs: number; correlatedTargetDeviceId?: string },
   ): Promise<boolean> {
     const { signal, state, perf, offlineTracker } = context;
     this.markTargetNotReady(offlineTracker, correlatedTargetDeviceId);
@@ -872,9 +901,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       offlineTracker,
       options,
       cycle.correlatedTargetDeviceId,
-      now,
-      pollingIntervalMs,
-      remainingPollingTimeMs,
+      { now, pollingIntervalMs, remainingPollingTimeMs },
     );
 
     // Never let the background poller sleep past the readiness deadline.
@@ -883,7 +910,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     );
     while (polling.active && !state.foundDeviceId && remainingPollingDelayMs > 0) {
       const sleepChunkMs = Math.min(remainingPollingDelayMs, MAX_POLLING_SLEEP_CHUNK_MS);
-      await this.waitForReadinessDelay(sleepChunkMs, signal, polling, startTime, timeoutMs);
+      await this.waitForReadinessDelay(sleepChunkMs, signal, polling, { startTime, timeoutMs });
       remainingPollingDelayMs -= sleepChunkMs;
     }
     return true;

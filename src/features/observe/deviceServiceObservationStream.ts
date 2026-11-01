@@ -5,6 +5,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
   DefaultScreenshotBackoffScheduler,
+  type ScreenshotBackoffConfigInput,
   type ScreenshotBackoffScheduler,
   type ScreenshotCaptureResult,
 } from "./ScreenshotBackoffScheduler";
@@ -43,13 +44,16 @@ export function buildScreenshotBackoffScheduler(
   deviceId: string,
   timer: Timer,
   capture: () => Promise<ScreenshotCaptureResult>,
-  emit: (result: ScreenshotCaptureResult) => void,
-  options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
-): ScreenshotBackoffScheduler {
-  return new DefaultScreenshotBackoffScheduler(
-    capture,
+  {
     emit,
-    {
+    options,
+  }: {
+    emit: (result: ScreenshotCaptureResult) => void;
+    options: ScreenshotBackoffConfigInput;
+  },
+): ScreenshotBackoffScheduler {
+  return new DefaultScreenshotBackoffScheduler(capture, emit, {
+    config: {
       ...options,
       getKeepAliveIntervalMs: () => {
         const server = getDeviceDataStreamServer();
@@ -57,9 +61,9 @@ export function buildScreenshotBackoffScheduler(
       },
     },
     timer,
-    () => {
+    shouldKeepAlive: () => {
       const server = getDeviceDataStreamServer();
       return !!server && server.hasSubscriberForDevice(deviceId);
     },
-  );
+  });
 }

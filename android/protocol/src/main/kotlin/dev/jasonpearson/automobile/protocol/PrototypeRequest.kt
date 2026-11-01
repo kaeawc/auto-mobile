@@ -125,8 +125,13 @@ object PrototypeRequests {
           element.content == "false"
     }
 
-  /** `{data:/pointer}` placeholders in [text] read from [data], as in any text field. */
-  fun bindDataText(text: String, data: JsonObject?): String = PrototypeDataText.bind(text, data)
+  /**
+   * Request text in one pass: `{data:/pointer}` placeholders in [text] read from [data], and only
+   * the authored text between them goes through [state] interpolation, so a data value that holds
+   * `{key}` is sent as written instead of reading that state key.
+   */
+  fun bindText(text: String, data: JsonObject?, state: (String) -> String): String =
+    PrototypeDataText.bindAround(text, data, state)
 }
 
 /** The transport codes of the host executor (`prototypeRequestProtocol.ts`) plus two of ours. */

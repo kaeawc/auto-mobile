@@ -1,25 +1,25 @@
 # Android form factors: TV, Wear OS and Android Auto
 
-Spike notes for #14118, part of #14072.
+Form-factor support, navigation contracts and remaining verification gaps.
 
 > [!WARNING]
-> **Not yet verified on an emulator** (no KVM or Android SDK was available when written). "Verified in the repo" means read from this checkout; "Hypothesis" means from AOSP and Android documentation. Verdicts are provisional until the verification checklist is run.
+> **Wear OS and Automotive OS remain unverified on emulators.** The TV section is verified on the Android 36 `android-tv` `arm64-v8a` user image described below. "Verified in the repo" means read from this checkout; "Hypothesis" means from AOSP and Android documentation.
 
 ## Verdicts
 
-| Form factor                                  | Verdict            | Smallest useful tool surface                                                                       | Main risk                                                       |
-| -------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Android TV / Google TV                       | **Go**             | `focusNavigate`, a `select` key on `sendKeys` only if `enter` falls short, TV form-factor matching | The CtrlProxy has never been run on a TV image                  |
-| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle                                        | Every rotary and ambient command is unconfirmed                 |
-| Android Auto (projection to a DHU)           | **No-go**          | none                                                                                               | The car UI is not in any accessibility tree AutoMobile can read |
-| Android Automotive OS (an AAOS system image) | **Investigate**    | none yet                                                                                           | It is a normal Android image and may just work                  |
+| Form factor                                  | Verdict            | Smallest useful tool surface                                                                       | Main risk                                                                        |
+| -------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Android TV / Google TV                       | **Go**             | `focusNavigate`, a `select` key on `sendKeys` only if `enter` falls short, TV form-factor matching | Google TV and no-touchscreen devices unverified; child-label `focusNavigate` gap |
+| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle                                        | Every rotary and ambient command is unconfirmed                                  |
+| Android Auto (projection to a DHU)           | **No-go**          | none                                                                                               | The car UI is not in any accessibility tree AutoMobile can read                  |
+| Android Automotive OS (an AAOS system image) | **Investigate**    | none yet                                                                                           | It is a normal Android image and may just work                                   |
 
 Android Auto projects a phone's UI to a head unit; Automotive OS is a full Android build on the car. Only the latter is feasible.
 
 ## What the repo does today (verified)
 
-- **Matching.** The vocabulary is `phone | tablet | foldable | tv | watch | automotive | unknown` (`src/models/DeviceMatchCriteria.ts`); binding `family` takes the same values except `unknown` (`BINDING_DEVICE_FAMILIES`, `src/utils/provisionDeviceSpecSchemas.ts`). `formFactorFrom` (`src/models/formFactor.ts`) classifies `tv`, `watch` and `automotive` from the system-image tag first (`android-tv`, `android-wear`, `android-automotive`), then the avdmanager profile id, then geometry (fold/flip by profile name; diagonal >= 7in is a tablet, else phone), so a TV is never matched as a tablet. iOS accepts only `phone` and `tablet`. `startDevice` `formFactor`, the broker binding `deviceFamily` and the device description accept the new values; `getAndroid` has no `formFactor` input, and `startDevice` with `createIfMissing` does not create `tv`, `watch` or `automotive` AVDs (it fails with an actionable error). The tag and profile names are still unconfirmed on real images.
-- **Provisioning.** `provisionDevice` takes `runtime` as a system-image package id; `parseAndroidSystemImageRuntime` accepts any tag between API level and ABI (only `google_apis_playstore` is special-cased). TV/Wear/Automotive ids already parse; no code names those tags.
+- **Matching.** The vocabulary is `phone | tablet | foldable | tv | watch | automotive | unknown` (`src/models/DeviceMatchCriteria.ts`); binding `family` takes the same values except `unknown` (`BINDING_DEVICE_FAMILIES`, `src/utils/provisionDeviceSpecSchemas.ts`). `formFactorFrom` (`src/models/formFactor.ts`) classifies `tv`, `watch` and `automotive` from the system-image tag first (`android-tv`, `android-wear`, `android-automotive`), then the avdmanager profile id, then geometry (fold/flip by profile name; diagonal >= 7in is a tablet, else phone), so a TV is never matched as a tablet. iOS accepts only `phone` and `tablet`. `startDevice` `formFactor`, the broker binding `deviceFamily` and the device description accept the new values; `getAndroid` has no `formFactor` input. `startDevice` with `createIfMissing` creates `tv` and `automotive` AVDs but not `watch` ones (those fail with an actionable error). An `automotive` request picks only installed `android-automotive-playstore` / `android-automotive` images (Play first, behind API level and host ABI, with the CtrlProxy minSdk floor), creates the AVD with `automotive_1024p_landscape`, and with no car image installed fails with the exact `sdkmanager` command; a repeated request reuses the AVD because those tags classify it as `automotive`. The tag and profile names are still unconfirmed on real images.
+- **Provisioning.** `provisionDevice` takes `runtime` as a system-image package id; `parseAndroidSystemImageRuntime` accepts any tag between API level and ABI (only `google_apis_playstore` is special-cased). Default creation (`pickAndroidSystemImage`, `src/devices/deviceProvisioning.ts`) picks an image family from the requested form factor (`androidImageFamilyFor`): handheld tags for phone, tablet, foldable or none (#14900), and only the TV tags for `tv`, ranked `android-tv`, `google-tv`, `google-tv-ps16k` behind API level and host ABI. `android-tv` leads because Play Store builds usually refuse `adb root`; this ordering rationale concerns Play Store images only and does not guarantee root on `android-tv`. The verified `android-tv` user build also refuses `adb root`. A TV AVD gets the `tv_1080p` profile. The tag lists and default profiles live once in `src/models/formFactor.ts` and the broker's family defaults read them. With no TV image in range the error names the `sdkmanager` command; nothing is downloaded.
 - **CtrlProxy.** `minSdk` 24 (`android/gradle/libs.versions.toml`) is not a blocker. The manifest declares no `<uses-feature>` and only a `LAUNCHER` category (no `LEANBACK_LAUNCHER`). The accessibility config requests window content, interactive windows and gesture dispatch.
 - **Input.** `sendKeys` supports arrows (`KEYCODE_DPAD_*`), enter, tab, escape, backspace, delete (`INPUT_KEY_CODE_MAP`, `src/features/action/InputKey.ts`); there is no D-pad centre, menu or media key. `pressButton` sends back/home/recent as global actions with ADB fallback, plus volume/power via ADB.
 - **Focus.** `observe` returns `focusedElement` (`ActiveWindowAttribution.ts`, `HierarchyFocus.ts`) from the `focused` property; TalkBack focus is separate (`accessibility-focused`).
@@ -27,21 +27,35 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 
 ## Hypotheses to confirm
 
-- sdkmanager tags: `android-tv`, `google-tv`, `android-wear`, `android-wear-cn`, `android-automotive`, `android-automotive-playstore` (`sdkmanager --list`). avdmanager profiles: `tv_1080p`, `tv_4k`, `wearos_small_round`, `wearos_large_round`, `wearos_rect`, `wearos_square`, `automotive_1024p_landscape` (`avdmanager list device`).
-- `adb install` does not filter on `<uses-feature>`, so the APK installs everywhere. Enabling the accessibility service from the host should work, but TV and Wear ship a different Settings app and the enable path has never run there; service connect plus hierarchy is the first check per image.
+- Unconfirmed sdkmanager tags: `android-wear`, `android-wear-cn`, `android-automotive`, `android-automotive-playstore` (`sdkmanager --list`). Unconfirmed avdmanager profiles: `wearos_small_round`, `wearos_large_round`, `wearos_rect`, `wearos_square`, `automotive_1024p_landscape` (`avdmanager list device`). TV tags and profiles are confirmed below.
+- CtrlProxy installation, host-side accessibility enable and hierarchy observation work unchanged on the verified TV image. Wear has a different Settings app and its enable path remains unverified; service connect plus hierarchy is the first check per Wear image.
 
 ## Android TV: go
 
-TV navigation is a focus problem: D-pad keys can be sent and the focused element comes back in every observation. `focusNavigate` is the loop that connects them.
+TV navigation is a focus problem: D-pad keys can be sent and the focused element comes back in every observation. `focusNavigate` is the loop that connects them. `launchApp` tries `MAIN/LEANBACK_LAUNCHER` when `LAUNCHER` resolution finds no activity, including activity-query and package-dump fallbacks. `listApps` includes Leanback entry points in launchability on devices with `formFactor: "tv"`.
 
-1. **Activate focused item.** Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so `enter` is the activation key and no `select` key exists. If checklist row 3 shows `enter` does not activate on a TV image, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
+1. **Activate focused item.** `enter` activates the focused item on the verified image; `KEYCODE_DPAD_CENTER` is not needed and no `select` key exists. If a future TV image shows that `enter` does not activate, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
 2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`** (`src/features/action/FocusNavigate.ts`, Android only). Observe; stop if the focused element matches `until`; else press one D-pad key and repeat. `until` matches on `text`, `contentDesc` and `resourceId`. Returns the path of focused elements.
    - Direction: given `direction`, else the arrow from the focused element's bounds centre toward the nearest `until` match; with no match on screen, `arrow_down`.
-   - Stops on match, `maxSteps` (default 30), or two consecutive presses leaving focus unchanged. Statuses: `focused`, `max_steps`, `stuck`.
+   - Stops on match, `maxSteps` (default 30), or when every direction toward the target has left focus unchanged on the current element (ranked dominant axis first; a direction that did not move focus is blocked for that element for the rest of the call; an explicit `direction` stops after two unchanged presses). Statuses: `focused`, `max_steps`, `stuck`.
    - Why a tool, not an agent loop: one call replaces up to 30 round-trips, and stuck detection needs the previous observation.
 3. **TV matching.** Extend `FormFactor` with `tv`, classified from system-image tag first, geometry second.
 
-Open on-device: does `tapOn`/`swipeOn` work with no touchscreen (gesture dispatch needs a display, not a digitizer)? Does `focused` appear for Leanback's focus ring, or only input-focused views (if so `focusNavigate` needs accessibility focus too)?
+`focusedElement` follows Leanback's focus ring (`focused: true`). `tapOn` and `swipeOn` work on the verified image, which reports a touchscreen; no-touchscreen behaviour remains unverified. Google TV is unverified. `focusNavigate` can reach a row but return `max_steps` or `stuck` when the target text belongs only to a child view (#16029); match the focused element's own `contentDesc` or `resourceId` instead. Prototype overlay buttons are not reachable with D-pad focus.
+
+### Android TV: behaviour and limits
+
+The TV image is `system-images;android-36;android-tv;arm64-v8a` with profile `tv_1080p` (1920×1080 at 320 dpi), a user build that refuses `adb root`. The SDK tags `android-tv`, `google-tv`, `google-tv-ps16k` and the profiles `tv_1080p`, `tv_4k`, `tv_720p` match `src/models/formFactor.ts`. CtrlProxy installs and its accessibility service enables from the host with no TV-specific setup, and `observe` returns the hierarchy for the launcher and Settings.
+
+`focusedElement` follows the Leanback focus ring. `sendKeys` arrows move focus and `enter` activates. `focusNavigate` matches the target's own `contentDesc` or `resourceId`, and a target inside the focused node's bounds counts as focused, so child-view label text matches too. `pressButton` back and home, screenshots and video recording work. `launchApp` and `terminateApp` work for apps that only have a `LEANBACK_LAUNCHER` entry, and `listApps` includes them. The prototype overlay renders and dismisses, but its button is not reachable with D-pad focus. `observe.accessibilityState` reports the service as disabled and unknown while it is bound, which is an unexplained oddity.
+
+**Signals and classification.** `ro.build.characteristics` is `emulator`, with no `tv`. Booted-device traits (`src/utils/android-cmdline-tools/deviceTraits.ts`) derive `formFactor` from this property, and on an emulator with no form factor there they fall back to `pm has-feature android.software.leanback`. AVD classification comes from the config's system-image tag or `tv_*` profile. The image reports `android.software.leanback`, `android.hardware.type.television`, `android.software.leanback_only` and `android.hardware.touchscreen` as present.
+
+**Not covered:**
+
+- The Google TV image; only `android-tv` was booted.
+- Real no-touchscreen behaviour.
+- D-pad reach of prototype overlays (known gap).
 
 ## Wear OS: conditional go
 
@@ -68,7 +82,14 @@ follows the current user on Android 10+. When the booted device's `formFactor` i
 check, enabled-services read, enable, disable, rebind writes and the local-network grant target that user,
 and the rebind health check reads that user's `User state[` block. A device that is not automotive issues
 no extra command and the exact commands it always did. An unreadable user is an `ActionableError` naming
-the user problem. Unverified on an AAOS emulator (#14916); the gate relies on the AVD's form factor, so a
+the user problem. User 0 is the driver only on a build without a headless system user: when an automotive
+device reports user 0, `ro.fw.mu.headless_system_user` (what `UserManager.isHeadlessSystemUserMode()`
+reads) is checked, and on a headless build the read throws `ForegroundUserPendingError`. Runner readiness
+treats that like a missing framework service and retries setup within its budget, so `sys.boot_completed`
+alone never lets CtrlProxy be set up for user 0 before the switch to the driver user. A freshly
+created AVD can also answer the first setup command with `adb: device still authorizing` before it
+finishes the adb key handshake; readiness retries that within the same budget too, so the
+create-and-boot path does not roll back the new AVD for it. Unverified on an AAOS emulator (#14916); the gate relies on the AVD's form factor, so a
 physical head unit is not covered.
 
 An AAOS image is a normal Android build with a car SystemUI; app windows are in the accessibility tree. Same three questions as TV (service enables, `observe` returns a hierarchy, multi-display behaviour for cluster/passenger screens; see `docs/design-docs/plat/android/windowing.md`).

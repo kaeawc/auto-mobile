@@ -83,8 +83,7 @@ function nativeRig() {
           { consoleBusyRegistry: console, adbFactory: identityFactory, timer },
           { ...ANDROID_RESET_DEVICE, deviceId: serial },
           options.timeoutMs,
-          options.signal,
-          options.consoleExclusiveOwner,
+          { signal: options.signal, consoleExclusiveOwner: options.consoleExclusiveOwner },
         );
         if (options.throwOnTimeout && result.nameProbeTimedOut) {
           throw new AdbCommandTimeoutError(`AVD name timed out after ${options.timeoutMs}ms`);
@@ -395,9 +394,11 @@ describe("NativeAndroidSnapshotResetPort", () => {
         ANDROID_RESET_DEVICE.name,
         step.timeoutMs,
         null,
-        ANDROID_RESET_DEVICE.deviceId,
-        expect.any(AbortSignal),
-        { skipWakeAndUnlock: true },
+        {
+          targetDeviceId: ANDROID_RESET_DEVICE.deviceId,
+          signal: expect.any(AbortSignal),
+          options: { skipWakeAndUnlock: true },
+        },
       ],
     ]);
   });
@@ -408,7 +409,7 @@ describe("NativeAndroidSnapshotResetPort", () => {
       rig.step.timeoutMs = 600_000;
       const readinessSignals: AbortSignal[] = [];
       rig.dependencies.emulator.waitForEmulatorReady = (...args) => {
-        const signal = args[4];
+        const signal = args[3]?.signal;
         if (signal) {
           readinessSignals.push(signal);
         }

@@ -112,7 +112,7 @@ function harness(
   );
   const instance = spyOnIosClientInstance(client);
   const adb = new FakeAdbClientFactory(new FakeAdbExecutor());
-  const hierarchy = new ViewHierarchy(device, adb, undefined, timer);
+  const hierarchy = new ViewHierarchy(device, adb, undefined, { timer });
   const screen = createObserveScreenForTest(
     device,
     adb,
@@ -183,7 +183,9 @@ describe("iOS acquisition through real delegate, normalization and observe proje
     async (mode) => {
       const h = harness({ ...cached(), fresh: false }, mode);
       try {
-        const result = await h.delegate.getLatestHierarchy(false, 100, undefined, true);
+        const result = await h.delegate.getLatestHierarchy(false, 100, undefined, {
+          skipWaitForFresh: true,
+        });
         expect(result.hierarchy).not.toBeNull();
         expect(result.fresh).toBe(mode === "push");
         expect(acquisition(result)).toEqual(["client-cache"]);
@@ -217,17 +219,12 @@ describe("iOS acquisition through real delegate, normalization and observe proje
   test("observer sync response carries device acquisition", async () => {
     const h = harness(null);
     try {
-      const response = await h.delegate.requestHierarchySync(
-        undefined,
-        false,
-        undefined,
-        100,
-        true,
-        {
-          forceCapture: true,
-          observerMode: true,
-        },
-      );
+      const response = await h.delegate.requestHierarchySync(undefined, false, undefined, {
+        timeoutMs: 100,
+        suppressObservationStreamPush: true,
+        forceCapture: true,
+        observerMode: true,
+      });
       expect(acquisition(response!)).toEqual(["device"]);
       expect(h.commands.map((command) => command.type)).toEqual(["request_hierarchy"]);
       expect(h.context.getCachedHierarchy()).toBeNull();
@@ -242,11 +239,23 @@ describe("iOS acquisition through real delegate, normalization and observe proje
       try {
         // Exercise the production public-client forwarding boundary without its transport constructor.
         const client = { hierarchy: h.delegate };
-        const response = await (
-          forceCapture
-            ? IOSCtrlProxyClient.prototype.requestHierarchySyncForTapRevalidation
-            : IOSCtrlProxyClient.prototype.requestHierarchySync
-        ).call(client, undefined, false, undefined, 100);
+        const response = await (forceCapture
+          ? IOSCtrlProxyClient.prototype.requestHierarchySyncForTapRevalidation.call(
+              client,
+              undefined,
+              false,
+              undefined,
+              100,
+            )
+          : IOSCtrlProxyClient.prototype.requestHierarchySync.call(
+              client,
+              undefined,
+              false,
+              undefined,
+              {
+                timeoutMs: 100,
+              },
+            ));
         expect(response?.hierarchy).toBe(raw);
         expect(acquisition(response!)).toEqual(["device"]);
         expect(h.commands.map((command) => command.type)).toEqual([
@@ -266,8 +275,8 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       const h = harness(null);
       h.timer.enableAutoAdvance();
       const sync = spyOn(h.client, "requestHierarchySync").mockImplementation(
-        (perf, filtering, signal, timeout, options) =>
-          h.delegate.requestHierarchySync(perf, filtering, signal, timeout, false, options),
+        (perf, filtering, signal, options) =>
+          h.delegate.requestHierarchySync(perf, filtering, signal, options),
       );
       const convert = spyOn(h.client, "convertToViewHierarchyResult").mockImplementation((value) =>
         h.delegate.convertToViewHierarchyResult(value),

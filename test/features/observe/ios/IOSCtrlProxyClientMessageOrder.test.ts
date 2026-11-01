@@ -71,9 +71,7 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
       const client = IOSCtrlProxyClient.createForTesting(
         { deviceId: "captured-order", platform: "ios", name: "Fake iPhone" },
         8765,
-        createSuccessWebSocketFactory(timer),
-        timer,
-        { options },
+        { wsFactory: createSuccessWebSocketFactory(timer), timer, options },
       );
       void client.connectionTestHooks.deliverMessage(
         JSON.stringify({

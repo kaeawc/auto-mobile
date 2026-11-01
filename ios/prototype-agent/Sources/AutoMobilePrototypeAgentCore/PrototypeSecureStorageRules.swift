@@ -3,7 +3,8 @@ import Foundation
 /// Secure storage rules (#14321) the contract cannot express, the twin of TypeScript's
 /// `prototypeSecureStorage.ts`: `storage.secure` needs the `secureStorage` module, each key is a declared
 /// string state key not also in `storage.keys`, a `secureAuth` entry names a secure key and needs the
-/// `biometric` module, and no secure key may leave the device through an emit context.
+/// `biometric` module, and no secure key may leave the device through an emit context or through a
+/// `request` that does not opt in with `allowSecureInRequest: true`.
 enum PrototypeSecureStorageRules {
     static func validateBlock(_ storage: JSONValue?, requires: JSONValue?, state: [String: JSONValue]) throws {
         guard let block = storage?.objectFields else { return }
@@ -60,6 +61,57 @@ enum PrototypeSecureStorageRules {
                 "Secure storage key \(leaked) cannot be sent in an emit context"
             )
         }
+    }
+
+    /// A `request` that sends a secure key without `allowSecureInRequest: true`: a `{state}` binding in a
+    /// header, query value or body (a whole body, a form entry or a multipart value), or a `{key}` placeholder
+    /// in the URL, a header or a query value. Members are checked in sorted order.
+    static func validateRequest(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
+        guard fields["type"] == .string("request"), !secure.isEmpty,
+              fields["allowSecureInRequest"] != .bool(true) else { return }
+        let body = fields["body"]?.objectFields
+        func members(_ value: JSONValue?, _ at: String) -> [(JSONValue?, String)] {
+            let entries = value?.objectFields ?? [:]
+            return entries.keys.sorted().map { (entries[$0], PrototypeLimits.dataMemberPath(at, key: $0)) }
+        }
+        let parts: [JSONValue] = if case let .array(items)? = body?["multipart"] { items } else { [] }
+        let candidates: [(JSONValue?, String)] = [(fields["url"], "\(path).url")]
+            + members(fields["headers"], "\(path).headers")
+            + members(fields["query"], "\(path).query")
+            + [(fields["body"], "\(path).body")]
+            + members(body?["form"], "\(path).body.form")
+            + parts.enumerated().map { ($1.objectFields?["value"], "\(path).body.multipart[\($0)].value") }
+        for (value, at) in candidates {
+            let leaked: String? = switch value {
+            case let .string(text)?: placeholderKey(text, secure: secure)
+            case let .object(binding)?: binding["state"]?.stringValue.flatMap { secureKey(for: $0, secure: secure) }
+            default: nil
+            }
+            if let leaked {
+                throw PrototypeContractValidator.invalid(
+                    at, "Secure storage key \(leaked) cannot be sent in a request without allowSecureInRequest"
+                )
+            }
+        }
+    }
+
+    /// The secure key a `{key}` text placeholder names. Every `{...}` group that closes is checked, at every
+    /// depth: request text resolves an inner `{token}` even when an outer brace never closes (`{{token}`), and
+    /// a group may hold repeat placeholders, as in `{tok{row.id}}`, which repeat binding turns into `{token}`,
+    /// so a group is matched as a template whose inner groups may stand for any text.
+    private static func placeholderKey(_ text: String, secure: [String]) -> String? {
+        let scalars = Array(text.unicodeScalars)
+        var open: [Int] = []
+        for (index, scalar) in scalars.enumerated() {
+            if scalar == "{" {
+                open.append(index + 1)
+            } else if scalar == "}", let start = open.popLast() {
+                var group = String.UnicodeScalarView()
+                group.append(contentsOf: scalars[start ..< index])
+                if let key = secureKey(for: String(group), secure: secure) { return key }
+            }
+        }
+        return nil
     }
 
     /// The first secure `state:` key a context state reference can read. A repeat template such as

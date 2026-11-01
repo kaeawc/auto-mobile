@@ -18,7 +18,7 @@ export class IosLaunchHierarchy {
     timeoutMs: number,
   ): Promise<string> {
     return xcTestClient
-      .requestHierarchySync(undefined, true, undefined, timeoutMs)
+      .requestHierarchySync(undefined, true, undefined, { timeoutMs })
       .then((result) => {
         const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
         if (pkg === expectedPackageName) {
@@ -63,7 +63,10 @@ export class IosLaunchHierarchy {
 
     // Fast path: if cache already has the correct app's hierarchy, skip the round-trip.
     // This makes warm launches (app already foreground) ~0ms instead of ~133ms.
-    const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, true, 0);
+    const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
     const cachedPkg = (cached?.hierarchy as { packageName?: string } | null)?.packageName;
     if (this.isCachedIosHierarchyReady(cachedPkg, expectedPackageName)) {
       logger.info(
@@ -119,7 +122,7 @@ export class IosLaunchHierarchy {
     } else {
       // No expected packageName — just do one forced sync to get any hierarchy
       try {
-        await xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs);
+        await xcTestClient.requestHierarchySync(undefined, true, undefined, { timeoutMs });
         logger.info(`[LaunchApp] iOS hierarchy ready after ${this.deps.timer.now() - startTime}ms`);
         return;
       } catch (error) {

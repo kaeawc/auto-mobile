@@ -6,6 +6,11 @@ import {
   resolvePrototypeTapUnderSystemBar,
 } from "../../../src/features/action/prototypeTapUnderSystemBars";
 import type { ObservationInsets } from "../../../src/models/ObservationInsets";
+import { TapPointPlanner } from "../../../src/features/action/tapPointPlanner";
+import { PROTOTYPE_WINDOW_MARKER_ID } from "../../../src/features/prototype/prototypeHostControls";
+import { FakeElementGeometry } from "../../fakes/FakeElementGeometry";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
+import { FakePrototypeAgentClient } from "../../fakes/FakePrototypeAgentClient";
 import type {
   ViewHierarchyNode,
   ViewHierarchyResult,
@@ -36,6 +41,51 @@ const typedInsets = (
 const threeButton = () => capture({ insets: typedInsets({ top: 136, bottom: 63 }, 63) });
 /** A capture on gesture navigation: the 63 px bottom bar is not tappable. */
 const gesture = () => capture({ insets: typedInsets({ top: 136, bottom: 63 }, 0) });
+
+function iosCapture(top = 0, bottom = 40) {
+  const control = {
+    class: "UIButton",
+    "resource-id": "top-control",
+    bounds: { left: 100, top, right: 200, bottom },
+    clickable: true,
+  };
+  const appControl = { ...control, "resource-id": "app-control" };
+  const hierarchy: ViewHierarchyResult = {
+    packageName: "dev.jasonpearson.ProtoViewer",
+    screenWidth: 402,
+    screenHeight: 874,
+    systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
+    insets: {
+      available: true,
+      source: "ios-sdk-safe-area",
+      units: "points",
+      safeArea: { top: 59, bottom: 34, left: 0, right: 0 },
+      systemChrome: {
+        visibility: "visible",
+        statusBar: "visible",
+        source: "ios-status-bar-manager",
+      },
+    },
+    hierarchy: {
+      node: createFlatNodeForTest({
+        class: "XCUIApplication",
+        node: [
+          createFlatNodeForTest({ class: "UIWindow", node: [appControl] }),
+          createFlatNodeForTest({
+            class: "UIWindow",
+            node: [createFlatNodeForTest({ "resource-id": PROTOTYPE_WINDOW_MARKER_ID }), control],
+          }),
+        ],
+      }),
+    },
+  };
+  const planner = new TapPointPlanner({
+    device: { name: "fake iPhone", deviceId: "fake-ios", platform: "ios" },
+    geometry: () => new FakeElementGeometry(),
+    strategy: () => FakeTapStrategy.ios(),
+  });
+  return { hierarchy, control, appControl, planner };
+}
 
 function capture(overrides: Partial<ViewHierarchyResult> = {}): ViewHierarchyResult {
   return {
@@ -250,5 +300,156 @@ describe("isOwnPrototypeNode (#10086)", () => {
     expect(
       isOwnPrototypeNode(capture({ windows: windows(CTRL_PROXY_PACKAGE, 1) }), prototypeControl),
     ).toBe(false);
+  });
+});
+
+describe("iOS prototype status-bar taps (#16175)", () => {
+  test("agent status is never read for app controls or non-tap actions", async () => {
+    const { hierarchy, control, appControl } = iosCapture();
+    const agent = new FakePrototypeAgentClient();
+    const planner = new TapPointPlanner({
+      device: { name: "fake iPhone", deviceId: "fake-ios", platform: "ios" },
+      geometry: () => new FakeElementGeometry(),
+      strategy: () => FakeTapStrategy.ios(),
+      prototypeAgents: { get: () => agent },
+    });
+    expect(await planner.prototypeTapHierarchy(hierarchy, appControl, "tap")).toBe(hierarchy);
+    for (const action of ["longPress", "doubleTap", "focus"] as const) {
+      expect(await planner.prototypeTapHierarchy(hierarchy, control, action)).toBe(hierarchy);
+    }
+    expect(agent.requests).toEqual([]);
+  });
+
+  test("ownership uses the agent's window marker, preserving node identity", () => {
+    const { hierarchy, control, appControl } = iosCapture();
+    expect(isOwnPrototypeNode(hierarchy, control)).toBe(true);
+    expect(isOwnPrototypeNode(hierarchy, appControl)).toBe(false);
+    expect(isOwnPrototypeNode(hierarchy, { ...control })).toBe(false);
+  });
+
+  test("the planner refuses a prototype control wholly above the captured status-bar edge", () => {
+    const { hierarchy, control, planner } = iosCapture();
+    expect(planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 20 })).toEqual({
+      kind: "refuse",
+      bar: "status bar",
+    });
+  });
+
+  test("the planner refuses a control whose clipped viewport is wholly under the status bar", () => {
+    const { hierarchy, control, planner } = iosCapture(0, 200);
+    const clippedBounds = { left: 100, top: 0, right: 200, bottom: 50 };
+    expect(
+      planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 20 }, clippedBounds),
+    ).toEqual({ kind: "refuse", bar: "status bar" });
+  });
+
+  test("the planner moves a partially covered control into its reachable part", () => {
+    const { hierarchy, control, planner } = iosCapture(40, 70);
+    expect(planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 55 })).toEqual({
+      kind: "proceed",
+      point: { x: 150, y: 64 },
+    });
+  });
+
+  test("a below-bar prototype control proceeds unchanged, including the exact bar edge", () => {
+    for (const top of [59, 160]) {
+      const { hierarchy, control, planner } = iosCapture(top, top + 40);
+      const point = { x: 150, y: top };
+      expect(planner.prototypeBarTapDecision(hierarchy, control, point)).toEqual({
+        kind: "proceed",
+        point,
+      });
+    }
+  });
+
+  test("an app control at the same position is never judged as prototype-owned", () => {
+    const { hierarchy, appControl, planner } = iosCapture();
+    const point = { x: 150, y: 20 };
+    expect(planner.prototypeBarTapDecision(hierarchy, appControl, point)).toEqual({
+      kind: "proceed",
+      point,
+    });
+  });
+
+  test("unknown visibility keeps the unverified warning with no guessed status-bar height", () => {
+    const { hierarchy, control, planner } = iosCapture();
+    delete hierarchy.insets?.systemChrome;
+    const decision = planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 20 });
+    expect(decision).toMatchObject({ kind: "proceed", point: { x: 150, y: 20 } });
+    expect(decision.kind === "proceed" && decision.warning).toContain("does not say whether");
+  });
+
+  test("legacy-only or unavailable iOS captures retain the unverified warning", () => {
+    for (const unavailable of [false, true]) {
+      const { hierarchy, control, planner } = iosCapture();
+      hierarchy.insets = unavailable
+        ? { available: false, source: "unavailable", units: "unknown" }
+        : undefined;
+      const decision = planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 20 });
+      expect(decision).toMatchObject({ kind: "proceed", point: { x: 150, y: 20 } });
+      expect(decision.kind === "proceed" && decision.warning).toContain("does not say whether");
+    }
+  });
+
+  test("without any captured inset no status-bar height is invented", () => {
+    const { hierarchy, control, planner } = iosCapture();
+    delete hierarchy.insets;
+    delete hierarchy.systemInsets;
+    const decision = planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 20 });
+    expect(decision).toMatchObject({
+      kind: "proceed",
+      point: { x: 150, y: 20 },
+    });
+    expect(decision.kind === "proceed" && decision.warning).toContain("does not say whether");
+  });
+
+  test("a captured hidden status bar does not use the safe-area height as a visible bar", () => {
+    const { hierarchy, control, planner } = iosCapture();
+    hierarchy.insets = {
+      ...hierarchy.insets,
+      available: true,
+      source: "ios-sdk-safe-area",
+      units: "points",
+      systemChrome: {
+        visibility: "hidden",
+        statusBar: "hidden",
+        source: "ios-status-bar-manager",
+      },
+    };
+    expect(planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 20 })).toEqual({
+      kind: "proceed",
+      point: { x: 150, y: 20 },
+    });
+  });
+
+  test("the iOS bottom safe area is not treated as a touch-consuming navigation bar", () => {
+    const { hierarchy, control, planner } = iosCapture(850, 874);
+    expect(planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 862 })).toEqual({
+      kind: "proceed",
+      point: { x: 150, y: 862 },
+    });
+  });
+
+  test("the Android planner still refuses a known status-bar tap", async () => {
+    const node = {
+      bounds: { left: 100, top: 0, right: 200, bottom: 40 },
+      "resource-id": "android-control",
+    };
+    const hierarchy = capture({
+      windows: [{ type: 4, packageName: CTRL_PROXY_PACKAGE, hierarchy: { node: [node] } }],
+    });
+    const agent = new FakePrototypeAgentClient();
+    const planner = new TapPointPlanner({
+      device: { name: "fake Android", deviceId: "fake-android", platform: "android" },
+      geometry: () => new FakeElementGeometry(),
+      strategy: () => new FakeTapStrategy(),
+      prototypeAgents: { get: () => agent },
+    });
+    expect(await planner.prototypeTapHierarchy(hierarchy, node, "tap")).toBe(hierarchy);
+    expect(agent.requests).toEqual([]);
+    expect(planner.prototypeBarTapDecision(hierarchy, node, { x: 150, y: 20 })).toEqual({
+      kind: "refuse",
+      bar: "status bar",
+    });
   });
 });

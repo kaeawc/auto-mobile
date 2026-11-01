@@ -194,9 +194,11 @@ export class IosSimCapacityGate
     report: OwnershipFleetReport,
     request: WarmDeviceRequest | undefined,
     warmMatch: "substitute" | "hint",
-    bootUdid?: string,
-    window?: LedgerSampleWindow,
-    carriesOwnSlot = false,
+    {
+      bootUdid,
+      window,
+      carriesOwnSlot,
+    }: { bootUdid?: string; window?: LedgerSampleWindow; carriesOwnSlot?: boolean } = {},
   ): CapacityDecision {
     this.assertCountKnown(report);
     const heldUdids = report.simulators
@@ -261,7 +263,8 @@ export class IosSimCapacityGate
         return this.refreshOwnership(await this.refresh({ fresh: true }));
       },
       ledger: this.admittedBoots,
-      decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
+      decide: (report, window) =>
+        this.decide(report, request, "hint", { bootUdid: options.bootUdid, window }),
       admit: () => this.recordAdmission(options.bootUdid, undefined, options.reason),
     });
     return this.withBootPermit(admission, options);
@@ -333,18 +336,16 @@ export class IosSimCapacityGate
       },
       ledger: this.admittedBoots,
       decide: (report, window) =>
-        this.decide(
-          report,
-          undefined,
-          "hint",
-          options.replacingDeviceId,
+        this.decide(report, undefined, "hint", {
+          bootUdid: options.replacingDeviceId,
           window,
           // Only a reset re-boots the same device it stopped. Binding replacement deletes the old
           // device and creates another, so it still needs capacity for the new one.
-          options.reason === "reset" &&
+          carriesOwnSlot:
+            options.reason === "reset" &&
             options.replacingDeviceId !== undefined &&
             occupyingUdids(report).includes(options.replacingDeviceId),
-        ),
+        }),
       admit: () => {
         admission = this.admittedBoots.admit(options.replacingDeviceId, true, options.reason);
         return admission.release;
@@ -409,7 +410,7 @@ export class IosSimCapacityGate
     }
     return this.sampleInWindow({ ...options, ownership: true }, (report, window) => {
       assertCapacityGranted({
-        decision: this.decide(report, undefined, "hint", undefined, window),
+        decision: this.decide(report, undefined, "hint", { window }),
       });
     });
   }

@@ -87,7 +87,7 @@ describe("CriticalSectionCoordinator.awaitBarrier", () => {
 
   test("times out if not all devices arrive", async () => {
     // Only device-1 arrives; device-2 never does.
-    const promise = coordinator.awaitBarrier("missing", "device-1", 2, 100);
+    const promise = coordinator.awaitBarrier("missing", "device-1", 2, { timeout: 100 });
     fakeTimer.advanceTime(100);
     await expect(promise).rejects.toThrow(
       /Timeout waiting for critical section "missing"\. 1\/2 devices arrived after 100ms/,

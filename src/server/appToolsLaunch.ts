@@ -263,8 +263,7 @@ export function executeLaunch(
   launchApp: LaunchAppExecutor,
   args: LaunchAppActionArgs,
   launchArguments: string[] | undefined,
-  prototypeLaunch: PrototypeLaunch | undefined,
-  signal: AbortSignal | undefined,
+  { prototypeLaunch, signal }: { prototypeLaunch?: PrototypeLaunch; signal?: AbortSignal } = {},
 ): Promise<LaunchAppResult> {
   return launchApp.execute(args.appId, {
     clearAppData: args.clearAppData ?? false,

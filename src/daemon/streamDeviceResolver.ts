@@ -4,13 +4,22 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 
+/** How a stream device lookup retries discovery and tags its observations. */
+export interface StreamDeviceResolveOptions {
+  timer?: Timer;
+  signal?: AbortSignal;
+  source?: string;
+}
+
 export async function resolveStreamDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform: "android" | "ios" | "either" = "android",
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal,
-  source = "webrtc-stream-resolve",
+  {
+    timer = defaultTimer,
+    signal,
+    source = "webrtc-stream-resolve",
+  }: StreamDeviceResolveOptions = {},
 ): Promise<BootedDevice> {
   // Explicit platforms avoid waiting on the other platform. Legacy video requests use either.
   let candidates = await deviceManager.getBootedDevices(platform);
@@ -29,7 +38,7 @@ export async function resolveStreamDevice(
     if (platform === "android") {
       throw new ActionableError("No connected android devices found.");
     }
-    candidates = await rediscoverStreamDevices(deviceManager, platform, timer, signal, source);
+    candidates = await rediscoverStreamDevices(deviceManager, platform, timer, { signal, source });
   }
   return selectStreamDevice(candidates, deviceId, platform);
 }
@@ -65,8 +74,7 @@ async function rediscoverStreamDevices(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   platform: "android" | "ios",
   timer: Timer,
-  signal: AbortSignal | undefined,
-  source: string,
+  { signal, source }: { signal?: AbortSignal; source: string },
 ): Promise<BootedDevice[]> {
   try {
     return await new DefaultRetryExecutor(timer).executeOrThrow(

@@ -60,7 +60,7 @@ describe("heartbeat activity writes (#11079)", () => {
         released.push(`${sessionId}:${reason}`);
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     warn = spyOn(logger, "warn").mockImplementation(() => {});
     await manager.createSession(SESSION, "emulator-5554", "android");

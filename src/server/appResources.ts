@@ -1,7 +1,8 @@
 import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
-import type { AppResourceDependencies } from "../features/deviceLifecycle/deviceLifecycleServerHost";
+import * as traitsProbe from "./bootedDeviceTraits";
+import type { AppResourceDependencies as LifecycleAppResourceDependencies } from "../features/deviceLifecycle/deviceLifecycleServerHost";
 import { GetAppMetadata } from "../features/observe/GetAppMetadata";
 import { createIosMetadataSource } from "../utils/iosAppMetadataSource";
 import { BootedDevice, Platform } from "../models";
@@ -30,7 +31,6 @@ import type {
   AppsQueryResourceContent,
   AppsQueryType,
   AppsResourceContent,
-  InstalledAppInfo,
 } from "./appResourcesTypes";
 import {
   buildAppsByPackage,
@@ -143,11 +143,16 @@ function getDeviceAppsUri(deviceId: string): string {
 
 function createAppsResourceContent(
   device: BootedDevice,
-  apps: InstalledAppInfo[],
-  foregroundApp: string | null,
-  lastUpdated: string,
-  observationComplete: boolean,
-  message?: string,
+  {
+    apps,
+    foregroundApp,
+    lastUpdated,
+    observationComplete,
+    message,
+  }: Pick<
+    AppsResourceContent,
+    "apps" | "foregroundApp" | "lastUpdated" | "observationComplete" | "message"
+  >,
 ): AppsResourceContent {
   return {
     deviceId: device.deviceId,
@@ -178,7 +183,8 @@ const defaultListInstalledAppsFactory: NonNullable<
   AppResourceDependencies["listInstalledAppsFactory"]
 > = (device) => new ListInstalledApps(device);
 
-export type { AppResourceDependencies };
+export interface AppResourceDependencies
+  extends LifecycleAppResourceDependencies, traitsProbe.Dependencies {}
 
 async function fetchAppsForDevice(
   device: BootedDevice,
@@ -186,6 +192,8 @@ async function fetchAppsForDevice(
   signal?: AbortSignal,
   deps: AppResourceDependencies = {},
 ): Promise<FetchedAppsCacheEntry> {
+  device = await traitsProbe.resolveFormFactor(device, timer, deps);
+  signal?.throwIfAborted();
   const listInstalledApps = (deps.listInstalledAppsFactory ?? defaultListInstalledAppsFactory)(
     device,
   );
@@ -202,14 +210,13 @@ async function fetchAppsForDevice(
       cacheable: result.successful,
       entry: {
         expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-        content: createAppsResourceContent(
-          device,
-          userApps,
+        content: createAppsResourceContent(device, {
+          apps: userApps,
           foregroundApp,
           lastUpdated,
-          result.successful,
+          observationComplete: result.successful,
           message,
-        ),
+        }),
         appsByPackage: buildAppsByPackage(userApps),
         queryApps,
         launchabilityUnknown,
@@ -228,7 +235,12 @@ async function fetchAppsForDevice(
     cacheable: result.successful,
     entry: {
       expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-      content: createAppsResourceContent(device, apps, null, lastUpdated, result.successful),
+      content: createAppsResourceContent(device, {
+        apps,
+        foregroundApp: null,
+        lastUpdated,
+        observationComplete: result.successful,
+      }),
       appsByPackage: buildAppsByPackage(apps),
       queryApps,
       iosTypeClassificationUnreliable,
@@ -573,14 +585,13 @@ async function getAppResource(
 function registerDeviceAppResource(device: BootedDevice, deps: AppResourceDependencies = {}): void {
   const uri = getDeviceAppsUri(device.deviceId);
 
-  ResourceRegistry.register(
-    uri,
-    `Installed Apps (${device.deviceId})`,
-    `List of installed user apps for device ${device.deviceId} (${device.platform}). ` +
+  ResourceRegistry.register(uri, `Installed Apps (${device.deviceId})`, {
+    description:
+      `List of installed user apps for device ${device.deviceId} (${device.platform}). ` +
       `System apps: use automobile:apps?deviceId=${device.deviceId}&type=system.`,
-    "application/json",
-    () => getAppsResource(device.deviceId, deps),
-  );
+    mimeType: "application/json",
+    handler: () => getAppsResource(device.deviceId, deps),
+  });
 
   registeredDeviceResources.set(device.deviceId, uri);
 }
@@ -731,10 +742,17 @@ export function invalidateInstalledAppsCache(deviceId?: string): void {
 
 export function createInstalledAppsDeviceIncarnationListener(
   repository: InstalledAppsStore = new InstalledAppsRepository(),
-  coordinator: InstalledAppsCacheWriteCoordinator = getInstalledAppsCacheWriteCoordinator(),
-  barrier: DbWriteBarrier = getDbWriteBarrier(),
-  invalidateCache: (deviceId: string) => void = invalidateInstalledAppsCache,
-  notifyResourcesUpdated: (deviceId: string) => Promise<void> = notifyInstalledAppResourceUpdated,
+  {
+    coordinator = getInstalledAppsCacheWriteCoordinator(),
+    barrier = getDbWriteBarrier(),
+    invalidateCache = invalidateInstalledAppsCache,
+    notifyResourcesUpdated = notifyInstalledAppResourceUpdated,
+  }: {
+    coordinator?: InstalledAppsCacheWriteCoordinator;
+    barrier?: DbWriteBarrier;
+    invalidateCache?: (deviceId: string) => void;
+    notifyResourcesUpdated?: (deviceId: string) => Promise<void>;
+  } = {},
 ): DeviceIncarnationListener {
   return {
     name: "installed-apps",
@@ -864,20 +882,18 @@ async function getAppMetadataResource(
 }
 
 export function registerAppResources(deps: AppResourceDependencies = {}): void {
-  ResourceRegistry.register(
-    APPS_RESOURCE_URIS.BASE,
-    "Installed Apps",
-    "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile (deviceId required).",
-    "application/json",
-    () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE, deps),
-  );
+  ResourceRegistry.register(APPS_RESOURCE_URIS.BASE, "Installed Apps", {
+    description:
+      "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile (deviceId required).",
+    mimeType: "application/json",
+    handler: () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE, deps),
+  });
 
-  ResourceRegistry.registerTemplate(
-    APPS_QUERY_TEMPLATE,
-    "Installed Apps",
-    "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile.",
-    "application/json",
-    async (params) => {
+  ResourceRegistry.registerTemplate(APPS_QUERY_TEMPLATE, "Installed Apps", {
+    description:
+      "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile.",
+    mimeType: "application/json",
+    handler: async (params) => {
       try {
         const options = parseAppsQueryParams(params);
         const uri = getRequestedResourceUri(params) || buildAppsUri(options);
@@ -897,34 +913,31 @@ export function registerAppResources(deps: AppResourceDependencies = {}): void {
         };
       }
     },
-  );
+  });
 
-  ResourceRegistry.registerTemplate(
-    APP_RESOURCE_TEMPLATES.DEVICE_APPS,
-    "Installed Apps",
-    "List of installed user apps for a specific device. " +
+  ResourceRegistry.registerTemplate(APP_RESOURCE_TEMPLATES.DEVICE_APPS, "Installed Apps", {
+    description:
+      "List of installed user apps for a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system.",
-    "application/json",
-    async (params) => getAppsResource(params.deviceId, deps),
-  );
+    mimeType: "application/json",
+    handler: async (params) => getAppsResource(params.deviceId, deps),
+  });
 
-  ResourceRegistry.registerTemplate(
-    APP_RESOURCE_TEMPLATES.DEVICE_APP,
-    "Installed App Details",
-    "Details for a specific user app installed on a specific device. " +
+  ResourceRegistry.registerTemplate(APP_RESOURCE_TEMPLATES.DEVICE_APP, "Installed App Details", {
+    description:
+      "Details for a specific user app installed on a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system&search=PACKAGE_NAME.",
-    "application/json",
-    async (params) => getAppResource(params.deviceId, params.packageName, deps),
-  );
+    mimeType: "application/json",
+    handler: async (params) => getAppResource(params.deviceId, params.packageName, deps),
+  });
 
-  ResourceRegistry.registerTemplate(
-    APP_RESOURCE_TEMPLATES.DEVICE_APP_METADATA,
-    "App Metadata",
-    "Version, build number, install path, and timestamps for an installed app. " +
+  ResourceRegistry.registerTemplate(APP_RESOURCE_TEMPLATES.DEVICE_APP_METADATA, "App Metadata", {
+    description:
+      "Version, build number, install path, and timestamps for an installed app. " +
       "Returns normalized metadata for both Android (package name) and iOS (bundle ID).",
-    "application/json",
-    async (params) => getAppMetadataResource(params.deviceId, params.appId),
-  );
+    mimeType: "application/json",
+    handler: async (params) => getAppMetadataResource(params.deviceId, params.appId),
+  });
 
   void syncInstalledAppResources(deps);
 

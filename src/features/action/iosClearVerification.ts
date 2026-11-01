@@ -122,9 +122,10 @@ export async function clearIosFieldWithVerification({
   const requestSignal = combineWithAmbientAbort(signal);
   const read = async (preClear = false) => {
     requestSignal?.throwIfAborted();
-    const field = await readIosTypedTextField(observer, timer, requestSignal, display, {
-      iosPlaceholderAsBlank: true,
-    });
+    const field = await readIosTypedTextField(
+      { observer, timer, signal: requestSignal, display },
+      { iosPlaceholderAsBlank: true },
+    );
     requestSignal?.throwIfAborted();
     if (preClear && !field?.secure && field?.value === undefined) {
       logger.warn(

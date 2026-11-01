@@ -29,17 +29,14 @@ describe("runSessionBiometricMutation", () => {
     const finished = Promise.withResolvers<void>();
     try {
       await manager.createSession("session-1", "sim-1", "ios");
-      const mutation = runSessionBiometricMutation(
-        manager,
-        "session-1",
-        "sim-1",
-        "not_enrolled",
-        async () => {
+      const mutation = runSessionBiometricMutation(manager, "session-1", "sim-1", {
+        initialEnrollment: "not_enrolled",
+        mutation: async () => {
           started.resolve();
           await finished.promise;
           return "changed";
         },
-      );
+      });
       await started.promise;
 
       const release = manager.releaseSession("session-1");
@@ -70,20 +67,19 @@ describe("runSessionBiometricMutation", () => {
     let mutationStarted = false;
     try {
       await manager.createSession("session-1", "sim-1", "ios");
-      const pendingMutation = runSessionBiometricMutation(
-        manager,
-        "session-1",
-        "sim-1",
-        undefined,
-        async () => {
+      const pendingMutation = runSessionBiometricMutation(manager, "session-1", "sim-1", {
+        mutation: async () => {
           await finished.promise;
         },
-      );
+      });
       const release = manager.releaseSession("session-1");
 
       await expect(
-        runSessionBiometricMutation(manager, "session-1", "sim-1", "enrolled", async () => {
-          mutationStarted = true;
+        runSessionBiometricMutation(manager, "session-1", "sim-1", {
+          initialEnrollment: "enrolled",
+          mutation: async () => {
+            mutationStarted = true;
+          },
         }),
       ).rejects.toThrow("began releasing before the mutation started");
 
@@ -116,11 +112,14 @@ describe("runSessionBiometricMutation", () => {
       await manager.createSession("session-1", "sim-1", "ios");
 
       await expect(
-        runSessionBiometricMutation(manager, "session-1", "sim-1", "not_enrolled", async () => {
-          expect(manager.getBiometricEnrollment("session-1")).toEqual({
-            initialEnrollment: "not_enrolled",
-          });
-          throw new Error("mutation failed after modifying enrollment");
+        runSessionBiometricMutation(manager, "session-1", "sim-1", {
+          initialEnrollment: "not_enrolled",
+          mutation: async () => {
+            expect(manager.getBiometricEnrollment("session-1")).toEqual({
+              initialEnrollment: "not_enrolled",
+            });
+            throw new Error("mutation failed after modifying enrollment");
+          },
         }),
       ).rejects.toThrow("mutation failed after modifying enrollment");
 
@@ -147,8 +146,11 @@ describe("runSessionBiometricMutation", () => {
       await manager.rebindSession("session-1", "sim-b", "ios");
 
       await expect(
-        runSessionBiometricMutation(manager, "session-1", "sim-a", "enrolled", async () => {
-          mutationStarted = true;
+        runSessionBiometricMutation(manager, "session-1", "sim-a", {
+          initialEnrollment: "enrolled",
+          mutation: async () => {
+            mutationStarted = true;
+          },
         }),
       ).rejects.toThrow("bound to sim-b, not sim-a");
 

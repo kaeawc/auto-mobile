@@ -24,6 +24,11 @@ type SessionDeviceRequirement =
         manufacturerProfile: ManufacturerProfileId;
         requires?: NonEmulatableCapability[];
       };
+    }
+  | {
+      schemaVersion: 1;
+      platform: "watchos";
+      spec: { runtime: string; deviceType: string };
     };
 ```
 
@@ -67,6 +72,15 @@ capabilities the task needs; one the profile cannot emulate refuses the request
 with non-retryable `requires_real_device` before anything is reserved. Selecting
 a matching hardware profile or emulator skin, and routing to real OEM devices,
 are not part of this boundary yet.
+
+A watchOS request names one exact Apple Watch simulator: `spec` is provisionDevice's
+watch spec (a watchOS CoreSimulator runtime and an Apple Watch device type, nothing
+else). It has no hardware or OS selector and no host defaults, so
+`normalizeSessionDeviceRequirement` refuses it; `normalizeWatchSessionDeviceRequirement`
+validates it against the watch catalog and yields the exact profile
+`{ platform: "watchos", metadataState: "current", runtime, deviceType }`, and
+`matchWatchSessionDevice` accepts only a pooled watch with the same runtime and device
+type. See `docs/decisions/watchos-platform.md` for the broker behaviour.
 
 OS selectors are `exact`, `major`, `minimum`, and `omitted`. Their kind is
 always explicit. Values are positive dotted numeric releases. Android API
@@ -139,6 +153,14 @@ resolved profile.
 Catalog provenance includes source, revision, and availability state. An
 unavailable catalog is a transient `catalog_unavailable` result, never evidence
 that hardware or a runtime is permanently unsupported.
+
+`WatchSessionDeviceCatalog` lists installed watchOS runtimes (identifier, OS
+version, availability) and Apple Watch device types from
+`WatchSimulatorInventory.readCatalog`. A host without simctl has state
+`not-installed`, a permanent `unsupported_hardware` refusal; a failed read is
+`unavailable`. Neither is reported as an empty ready catalog. An unlisted device
+type is `unsupported_hardware`; an unlisted or unavailable runtime is
+`missing_installed_runtime`; both messages name the available identifiers.
 
 ## Defaults and pool-first resolution
 

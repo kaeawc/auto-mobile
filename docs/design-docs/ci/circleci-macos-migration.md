@@ -36,9 +36,10 @@ Measured from 100 PR runs (2026-10-08/09, ~4.4 h) and 15 nightly runs:
 
 - **PR load:** XCTestRunner Simulator Tests (21.6 min/run, 20 of 100 runs) dominated at ≈ 510
   hosted macOS minutes per 100 PR runs (≈ 102,000 credits, 3.4 months of allowance). It now runs
-  nightly and on `run-ios-sim` PRs only (#10895) and is not mirrored on CircleCI. The remaining PR
-  lanes (device capture ~10, Swift Packages ~5, Xcode builds ~3.3, root SPM ~1.3 min/run) are
-  ≈ 78 min per 100 PR runs ≈ 15,600 credits.
+  nightly, on `run-ios-sim` PRs (#10895) and on PRs that touch an iOS SDK contract input, and is
+  not mirrored on CircleCI. The remaining PR lanes (device capture ~10, Swift Packages ~5, Xcode builds ~3.3, root SPM ~1.3 min/run) are
+  ≈ 78 min per 100 PR runs ≈ 15,600 credits; this capacity estimate excludes PR runs triggered
+  by contract-input changes.
 - **Nightly load:** ≈ 34 min/night plus ~1.5 min VM start per job ≈ 49 min ≈ 9,800 credits/night
   ≈ 294,000 credits/month, 10× the allowance (≈ $176/month at overage price).
 - **Concurrency:** with XCTestRunner off the PR path, the mirrored lanes need 1–2 concurrent
@@ -71,7 +72,7 @@ the CircleCI GitHub App (app id **302869**, slug `circleci-app`). The mirrors
 added for #10887 use `name:` values identical to the GitHub jobs, so they report
 as `ci/circleci: Build Root SPM Package` and `ci/circleci: iOS Device Capture to
 WHEP`. XCTestRunner Simulator Tests has no PR mirror: GitHub runs it nightly and
-on PRs only with the `run-ios-sim` label (#10895). The required contexts
+on PRs with the `run-ios-sim` label (#10895) or an iOS SDK contract input change. The required contexts
 in the `green-main` ruleset (id 11406121) are bare names (`SwiftLint`, `Swift
 Code Coverage`, `Build Root SPM Package`, `iOS Build`, `Installer Minimal
 (macos-latest)`, …), all pinned to integration **15368** (GitHub Actions). A

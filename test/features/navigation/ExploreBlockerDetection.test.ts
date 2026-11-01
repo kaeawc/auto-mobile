@@ -456,14 +456,10 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        deps,
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: deps,
+      });
 
       expect(handled).toBe(true);
       expect(calls).toEqual([
@@ -483,14 +479,10 @@ describe("ExploreBlockerDetection", () => {
       timer.enableAutoAdvance();
       const elements = [createMockElement({ text: "Allow" })];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        { tapActionFactory: tap.factory, timer },
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: { tapActionFactory: tap.factory, timer },
+      });
 
       expect(handled).toBe(false);
       expect(tap.calls).toHaveLength(1);
@@ -510,14 +502,10 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "OK", "resource-id": "com.test:id/ok_button" }),
       ];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        deps,
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: deps,
+      });
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
@@ -530,14 +518,10 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Cookies", "resource-id": "com.test:id/cookies" }),
       ];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        deps,
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: deps,
+      });
 
       expect(handled).toBe(false);
       expect(calls).toEqual([]);
@@ -562,9 +546,7 @@ describe("ExploreBlockerDetection", () => {
           elements,
           hierarchyOf(elements),
           androidDevice,
-          null,
-          undefined,
-          deps,
+          { adb: null, options: deps },
         );
 
         expect(handled).toBe(true);
@@ -586,9 +568,7 @@ describe("ExploreBlockerDetection", () => {
           elements,
           hierarchyOf(elements),
           androidDevice,
-          null,
-          undefined,
-          deps,
+          { adb: null, options: deps },
         );
 
         expect(handled).toBe(true);
@@ -607,14 +587,10 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "OKButton", "resource-id": "com.test:id/ok_button" }),
       ];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        deps,
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: deps,
+      });
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/ok_button", action: "tap" }]);
@@ -641,14 +617,10 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        deps,
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: deps,
+      });
 
       expect(handled).toBe(true);
       expect(calls).toEqual([
@@ -681,9 +653,7 @@ describe("ExploreBlockerDetection", () => {
           elements,
           hierarchyOf(elements),
           androidDevice,
-          null,
-          undefined,
-          deps,
+          { adb: null, options: deps },
         );
 
         expect(handled).toBe(true);
@@ -720,9 +690,7 @@ describe("ExploreBlockerDetection", () => {
           elements,
           hierarchyOf(elements),
           androidDevice,
-          null,
-          undefined,
-          deps,
+          { adb: null, options: deps },
         );
 
         expect(handled).toBe(false);
@@ -742,14 +710,10 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        deps,
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: deps,
+      });
 
       expect(handled).toBe(false);
       expect(calls).toEqual([]);
@@ -787,9 +751,7 @@ describe("ExploreBlockerDetection", () => {
           elements,
           hierarchyOf(elements),
           androidDevice,
-          null,
-          undefined,
-          deps,
+          { adb: null, options: deps },
         );
 
         expect(handled).toBe(false);
@@ -856,14 +818,10 @@ describe("ExploreBlockerDetection", () => {
         }),
       ];
 
-      const handled = await handlePermissionDialog(
-        elements,
-        hierarchyOf(elements),
-        androidDevice,
-        null,
-        undefined,
-        deps,
-      );
+      const handled = await handlePermissionDialog(elements, hierarchyOf(elements), androidDevice, {
+        adb: null,
+        options: deps,
+      });
 
       expect(handled).toBe(true);
       expect(calls).toEqual([
@@ -886,9 +844,7 @@ describe("ExploreBlockerDetection", () => {
         createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
-        parser,
-        undefined,
-        deps,
+        { elementParser: parser, options: deps },
       );
 
       expect(handled).toBe(true);
@@ -912,9 +868,7 @@ describe("ExploreBlockerDetection", () => {
         createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
-        parser,
-        undefined,
-        { tapActionFactory: tap.factory, timer },
+        { elementParser: parser, options: { tapActionFactory: tap.factory, timer } },
       );
 
       expect(handled).toBe(false);
@@ -941,9 +895,7 @@ describe("ExploreBlockerDetection", () => {
         createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
-        parser,
-        undefined,
-        deps,
+        { elementParser: parser, options: deps },
       );
 
       expect(handled).toBe(true);
@@ -969,9 +921,7 @@ describe("ExploreBlockerDetection", () => {
           createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
           androidDevice,
           null,
-          parser,
-          undefined,
-          deps,
+          { elementParser: parser, options: deps },
         );
 
         expect(handled).toBe(true);
@@ -992,9 +942,7 @@ describe("ExploreBlockerDetection", () => {
         createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
-        parser,
-        undefined,
-        deps,
+        { elementParser: parser, options: deps },
       );
 
       expect(handled).toBe(false);
@@ -1019,9 +967,7 @@ describe("ExploreBlockerDetection", () => {
         createObserveResultForTest({ viewHierarchy: hierarchyOf(notesElements) }),
         androidDevice,
         null,
-        notesParser,
-        undefined,
-        notesDeps,
+        { elementParser: notesParser, options: notesDeps },
       );
 
       expect(notesHandled).toBe(false);
@@ -1038,9 +984,7 @@ describe("ExploreBlockerDetection", () => {
         createObserveResultForTest({ viewHierarchy: hierarchyOf(genuineElements) }),
         androidDevice,
         null,
-        genuineParser,
-        undefined,
-        genuineDeps,
+        { elementParser: genuineParser, options: genuineDeps },
       );
 
       expect(genuineHandled).toBe(true);
@@ -1098,14 +1042,13 @@ describe("ExploreBlockerDetection", () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
 
-      const result = await detectAndHandleBlockers(
-        observationWith({}),
-        device,
-        null,
-        parser,
-        undefined,
-        { timer, tapActionFactory: tap.factory },
-      );
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, {
+        elementParser: parser,
+        options: {
+          timer,
+          tapActionFactory: tap.factory,
+        },
+      });
 
       expect(tap.calls).toEqual([{ text: "Allow access", action: "tap" }]);
       expect(result).toBe(true);
@@ -1114,7 +1057,9 @@ describe("ExploreBlockerDetection", () => {
     test("leaves login screens to normal selection before dead-end handling", async () => {
       const { parser } = makeParser(loginElements);
 
-      const result = await detectAndHandleBlockers(observationWith({}), device, null, parser);
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, {
+        elementParser: parser,
+      });
 
       expect(result).toBe(false);
     });
@@ -1125,7 +1070,9 @@ describe("ExploreBlockerDetection", () => {
         { text: "Settings", clickable: true } as Element,
       ]);
 
-      const result = await detectAndHandleBlockers(observationWith({}), device, null, parser);
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, {
+        elementParser: parser,
+      });
 
       expect(result).toBe(false);
     });
@@ -1139,7 +1086,7 @@ describe("ExploreBlockerDetection", () => {
         observationWith({ error: "accessibility service unavailable" }),
         device,
         null,
-        parser,
+        { elementParser: parser },
       );
 
       expect(result).toBe(false);
@@ -1153,7 +1100,7 @@ describe("ExploreBlockerDetection", () => {
         createObserveResultForTest({ viewHierarchy: undefined }),
         device,
         null,
-        parser,
+        { elementParser: parser },
       );
 
       expect(result).toBe(false);

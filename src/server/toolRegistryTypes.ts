@@ -66,6 +66,12 @@ export interface InternalToolCallOptions {
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
 }
 
+/** `ToolRegistry.callInternal`'s trailing request: handler progress/abort plus routing options. */
+export interface InternalToolCallRequest extends InternalToolCallOptions {
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+}
+
 export interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   routingSessionUuid?: string;
@@ -128,6 +134,14 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   hostInventory?: boolean;
 }
 
+/**
+ * A plain tool's handler together with its options: `ToolRegistry.register`'s fourth argument
+ * when the tool has options. A tool without options passes the bare handler instead.
+ */
+export interface PlainToolRegistration<T = Record<string, unknown>> extends PlainToolOptions<T> {
+  handler: ToolHandler<T>;
+}
+
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
 export interface SessionlessDeviceRead {
   resolve(deviceId: string, signal?: AbortSignal, platform?: SomePlatform): Promise<BootedDevice>;
@@ -188,6 +202,18 @@ export interface ToolTraits {
    * committed tool definitions.
    */
   hostInventory?: boolean;
+  /**
+   * Changes host-side state (AVD config, mock-network rules) that survives both a snapshot load and
+   * a wipe-data reset, so a broker session that ran it cannot be reset to its full baseline
+   * (#15672). Advertised as `_meta["automobile/hostSideState"]` for the daemon's reset policy.
+   */
+  changesHostSideState?: boolean;
+  /**
+   * Writes state a snapshot load cannot revert (a user snapshot capture writes emulator state outside
+   * the guest), so only a wipe-data reset leaves the device clean (#15672). Advertised as
+   * `_meta["automobile/opaquePersistentState"]` for the daemon's reset policy.
+   */
+  changesOpaquePersistentState?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
@@ -219,6 +245,8 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     selectsActiveDevice,
     deviceResourceBudget,
     hostInventory,
+    changesHostSideState,
+    changesOpaquePersistentState,
   } = options;
   return {
     stopsApp,
@@ -232,7 +260,19 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     selectsActiveDevice,
     deviceResourceBudget,
     hostInventory,
+    changesHostSideState,
+    changesOpaquePersistentState,
   };
+}
+
+/**
+ * A device-aware tool's handler together with its options: `ToolRegistry.registerDeviceAware`'s
+ * fourth argument when the tool has options. A tool without options passes the bare handler.
+ */
+export interface DeviceAwareToolRegistration<
+  T = Record<string, unknown>,
+> extends DeviceAwareToolOptions<T> {
+  handler: DeviceAwareToolHandler<T>;
 }
 
 export interface DeviceAwareToolOptions<T = Record<string, unknown>>

@@ -113,19 +113,25 @@ export function registerSharedStorageResources(service?: SharedStorageReadServic
     ResourceRegistry.registerTemplate(
       templates.NAMESPACE,
       domain === "media_library" ? "Media Library Namespace Files" : "Downloads Namespace Files",
-      "List files staged by putAppFile into one bounded storage-domain namespace, " +
-        "with normalized relative paths, byte counts, MIME types, and SHA-256 verification hashes.",
-      "application/json",
-      createListNamespaceResource(resolver, buildUri, domain),
+      {
+        description:
+          "List files staged by putAppFile into one bounded storage-domain namespace, " +
+          "with normalized relative paths, byte counts, MIME types, and SHA-256 verification hashes.",
+        mimeType: "application/json",
+        handler: createListNamespaceResource(resolver, buildUri, domain),
+      },
     );
 
     ResourceRegistry.registerTemplate(
       templates.FILE,
       domain === "media_library" ? "Media Library Namespace File" : "Downloads Namespace File",
-      "Read one file staged by putAppFile in a bounded storage-domain namespace. UTF-8 content is returned " +
-        "as text; binary content is returned as a base64 MCP blob.",
-      "application/octet-stream",
-      createReadFileResource(resolver, buildUri, domain),
+      {
+        description:
+          "Read one file staged by putAppFile in a bounded storage-domain namespace. UTF-8 content is returned " +
+          "as text; binary content is returned as a base64 MCP blob.",
+        mimeType: "application/octet-stream",
+        handler: createReadFileResource(resolver, buildUri, domain),
+      },
     );
   }
 }

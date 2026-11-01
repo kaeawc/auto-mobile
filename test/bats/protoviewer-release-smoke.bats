@@ -69,3 +69,32 @@ teardown() {
   run bash "$script" android --device x --candidate "$work/new.apk" --mode nightly
   [ "$status" -eq 2 ]
 }
+
+@test "Duo requires iOS and a posture command before bun runs" {
+  run bash "$script" ios --device x --candidate "$work/new.apk" --mode smoke --duo
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--duo requires"* ]]
+  run bash "$script" android --device x --candidate "$work/new.apk" --mode smoke --duo --posture-command posture
+  [ "$status" -eq 2 ]
+  [ ! -e "$BUN_ARGS_FILE" ]
+}
+
+@test "forwards Duo options as separate arguments including paths with spaces" {
+  run bash "$script" ios --device x --candidate "$work/new.apk" --mode smoke --duo --posture-command "$work/set posture" --screenshots-dir "$work/duo images"
+  [ "$status" -eq 0 ]
+  mapfile -t args < "$BUN_ARGS_FILE"
+  [ "${args[8]}" = "--duo" ]
+  [ "${args[9]}" = "--posture-command" ]
+  [ "${args[10]}" = "$work/set posture" ]
+  [ "${args[11]}" = "--screenshots-dir" ]
+  [ "${args[12]}" = "$work/duo images" ]
+}
+
+@test "Duo value options reject missing values" {
+  for option in --posture-command --screenshots-dir; do
+    run bash "$script" ios --device x --candidate "$work/new.apk" --mode smoke "$option"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"requires a value"* ]]
+    [ ! -e "$BUN_ARGS_FILE" ]
+  done
+}

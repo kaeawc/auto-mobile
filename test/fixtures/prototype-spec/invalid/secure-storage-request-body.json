@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "id": "secure-storage-request-body",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "token": "",
+      "remember": false
+    },
+    "requires": {
+      "platform": ["secureStorage", "biometric"]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:remember"],
+      "secure": ["state:token"],
+      "secureAuth": {
+        "state:token": "biometric"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "token"
+        },
+        {
+          "type": "button",
+          "label": "Save",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "save",
+              "context": {
+                "r": {
+                  "state": "remember"
+                }
+              }
+            },
+            {
+              "type": "request",
+              "url": "https://example.com/session",
+              "via": "device",
+              "method": "POST",
+              "body": {
+                "state": "token"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Locked",
+          "visibleWhen": {
+            "platform": "/secureStorage/locked",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[1].body",
+  "expectedMessage": "Secure storage key state:token cannot be sent in a request without allowSecureInRequest"
+}

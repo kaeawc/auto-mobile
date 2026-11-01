@@ -98,7 +98,7 @@ async function setUpRig(ownership?: "awaiting-owner"): Promise<Rig> {
       reaped.push(reason);
       await manager.releaseSession(sessionId, reason);
     },
-    timer,
+    { timer },
   );
   const state: DaemonStateAccess = {
     isInitialized: () => true,

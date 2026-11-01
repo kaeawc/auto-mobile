@@ -176,20 +176,16 @@ async function getTestTimingResource(
 }
 
 export function registerTestTimingResources(): void {
-  ResourceRegistry.register(
-    TEST_TIMING_RESOURCE_URIS.BASE,
-    "Test Timing History",
-    "Historical aggregated test execution timing statistics.",
-    "application/json",
-    () => getTestTimingResource({}, TEST_TIMING_RESOURCE_URIS.BASE),
-  );
+  ResourceRegistry.register(TEST_TIMING_RESOURCE_URIS.BASE, "Test Timing History", {
+    description: "Historical aggregated test execution timing statistics.",
+    mimeType: "application/json",
+    handler: () => getTestTimingResource({}, TEST_TIMING_RESOURCE_URIS.BASE),
+  });
 
-  ResourceRegistry.registerTemplate(
-    TEST_TIMING_QUERY_TEMPLATE,
-    "Test Timing History",
-    "Historical aggregated test execution timing statistics.",
-    "application/json",
-    async (params) => {
+  ResourceRegistry.registerTemplate(TEST_TIMING_QUERY_TEMPLATE, "Test Timing History", {
+    description: "Historical aggregated test execution timing statistics.",
+    mimeType: "application/json",
+    handler: async (params) => {
       try {
         const queryParams = queryParamsToRecord(params.params ?? "");
         const options = parseTestTimingParams(queryParams);
@@ -210,7 +206,7 @@ export function registerTestTimingResources(): void {
         };
       }
     },
-  );
+  });
 
   logger.info("[TestTimingResources] Registered test timing resources");
 }

@@ -85,10 +85,14 @@ export function* checkRetainedLock(
   path: string,
   options: ExclusiveLockOptions,
   generation: string | undefined,
-  reclaimed: LockSample | undefined,
-  publishedContent: string,
-  tmp?: string,
+  publication: {
+    reclaimed: LockSample | undefined;
+    publishedContent: string;
+    /** The private temp name, while it still exists. */
+    tmp?: string;
+  },
 ): Steps<boolean> {
+  const { reclaimed, publishedContent, tmp } = publication;
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
   if (retained === "absent") {
@@ -98,7 +102,10 @@ export function* checkRetainedLock(
   const published: DoomedPublication =
     (tmp ? yield* samplePublication(tmp, publishedContent, fileSystem) : undefined) ??
     ({ raw: publishedContent } satisfies DoomedPublication);
-  const current = yield* removePriorRetainedPublication(path, retained, published, pid, fileSystem);
+  const current = yield* removePriorRetainedPublication(path, retained, published, {
+    pid,
+    fileSystem,
+  });
   if (current === "absent") {
     return true;
   }
@@ -107,11 +114,11 @@ export function* checkRetainedLock(
     if (isOwnBytesLeak(current, reclaimed, publishedContent, options)) {
       return yield* reclaimOwnBytesRetained(path, published, pid, fileSystem);
     }
-    if (yield* reclaimRetainedLock(path, current, options, generation, reclaimed)) {
+    if (yield* reclaimRetainedLock(path, current, options, { generation, reclaimed })) {
       return true;
     }
   }
-  return yield* settleRetainedPublication(path, current, published, pid, fileSystem);
+  return yield* settleRetainedPublication(path, current, published, { pid, fileSystem });
 }
 
 /** F2: distinguish this call's retained publication from remembered earlier doomed instances. */
@@ -119,31 +126,26 @@ function* removePriorRetainedPublication(
   path: string,
   retained: LockSample | "unreadable",
   published: DoomedPublication,
-  pid: number,
-  fileSystem: LockFileSystem,
+  { pid, fileSystem }: { pid: number; fileSystem: LockFileSystem },
 ): Steps<LockSample | "absent" | "unreadable"> {
   if (typeof retained !== "string" && hasIdentity(published) && sameSample(published, retained)) {
     // Inode reuse makes this identity the new publication, never an earlier doomed one.
     forgetBackOuts(path, fileSystem, (known) => isSamePublication(known, published));
     return retained;
   }
-  return yield* removeRememberedRetained(path, retained, pid, fileSystem);
+  return yield* removeRememberedRetained(path, retained, pid, { fileSystem });
 }
 
 function* settleRetainedPublication(
   path: string,
   retained: LockSample | "unreadable",
   published: DoomedPublication,
-  pid: number,
-  fileSystem: LockFileSystem,
+  { pid, fileSystem }: { pid: number; fileSystem: LockFileSystem },
 ): Steps<boolean> {
-  const publication = yield* isRetainedPublication(
-    path,
-    retained,
-    published.raw,
+  const publication = yield* isRetainedPublication(path, retained, published.raw, {
     fileSystem,
-    hasIdentity(published) ? published : undefined,
-  );
+    publication: hasIdentity(published) ? published : undefined,
+  });
   if (publication === "absent") {
     yield* completeRetainedLock(path, fileSystem);
     return true;
@@ -182,8 +184,8 @@ function* removeBlockedPublication(
   pid: number,
   fileSystem: LockFileSystem,
 ): Steps<void> {
-  const retained = yield* removeInstance(path, `${path}.displaced`, published, pid, fileSystem);
-  const linked = yield* removeInstance(path, path, published, pid, fileSystem);
+  const retained = yield* removeInstance(path, `${path}.displaced`, published, { pid, fileSystem });
+  const linked = yield* removeInstance(path, path, published, { pid, fileSystem });
   if (retained !== "removed" || linked !== "removed") {
     rememberBackOut(path, fileSystem, published);
   }
@@ -194,8 +196,7 @@ function* removeRememberedRetained(
   path: string,
   retained: LockSample | "unreadable",
   pid: number,
-  fileSystem: LockFileSystem,
-  keepEntry = false,
+  { fileSystem, keepEntry = false }: { fileSystem: LockFileSystem; keepEntry?: boolean },
 ): Steps<LockSample | "absent" | "unreadable"> {
   if (typeof retained === "string") {
     return retained;
@@ -214,8 +215,12 @@ function* removeRememberedRetained(
   }
   const name = `${path}.displaced`;
   const removed = sameSample(doomed, retained)
-    ? (yield* removeInstance(path, name, doomed, pid, fileSystem)) === "removed"
-    : (yield* backOutBytesAtName(path, name, doomed.raw, pid, fileSystem, true)) === "removed";
+    ? (yield* removeInstance(path, name, doomed, { pid, fileSystem })) === "removed"
+    : (yield* backOutBytesAtName(path, name, doomed.raw, {
+        pid,
+        fileSystem,
+        protectGenuine: true,
+      })) === "removed";
   if (!removed) {
     return retained;
   }
@@ -288,8 +293,7 @@ function* reclaimRetainedLock(
   path: string,
   retained: LockSample | "unreadable",
   options: ExclusiveLockOptions,
-  generation: string | undefined,
-  reclaimed: LockSample | undefined,
+  { generation, reclaimed }: { generation?: string; reclaimed?: LockSample } = {},
 ): Steps<boolean> {
   if (typeof retained !== "string") {
     if (reclaimed !== undefined && sameSample(retained, reclaimed)) {
@@ -312,8 +316,7 @@ function* isRetainedPublication(
   path: string,
   retained: LockSample | "unreadable",
   publishedContent: string,
-  fileSystem: LockFileSystem,
-  publication?: LockSample,
+  { fileSystem, publication }: { fileSystem: LockFileSystem; publication?: LockSample },
 ): Steps<"other" | "older" | "same" | "absent" | "blocked"> {
   if (typeof retained === "string" || retained.raw !== publishedContent) {
     return "other";
@@ -387,18 +390,24 @@ function* drainDoomedPublication(
     if (hasInFlightPublication(path, publication.raw, fileSystem)) {
       return false;
     }
-    return (yield* backOutAttempt(path, publication.raw, pid, fileSystem, true)) === "removed";
+    return (
+      (yield* backOutAttempt(path, publication.raw, pid, { fileSystem, protectGenuine: true })) ===
+      "removed"
+    );
   }
   const current = yield* samplePublication(path, publication.raw, fileSystem);
   if (!sameSample(current, publication)) {
     if (current === undefined) {
       return false;
     }
-    return yield* removeDoomedCopy(path, path, publication.raw, pid, fileSystem);
+    return yield* removeDoomedCopy(path, path, publication.raw, { pid, fileSystem });
   }
   // F first: a retained copy of this instance could otherwise be linked onto P again.
-  const retained = yield* removeInstance(path, `${path}.displaced`, publication, pid, fileSystem);
-  const linked = yield* removeInstance(path, path, publication, pid, fileSystem);
+  const retained = yield* removeInstance(path, `${path}.displaced`, publication, {
+    pid,
+    fileSystem,
+  });
+  const linked = yield* removeInstance(path, path, publication, { pid, fileSystem });
   return linked === "removed" && retained !== "unverified";
 }
 
@@ -408,8 +417,7 @@ function* removeDoomedCopy(
   path: string,
   name: string,
   raw: string,
-  pid: number,
-  fileSystem: LockFileSystem,
+  { pid, fileSystem }: { pid: number; fileSystem: LockFileSystem },
 ): Steps<boolean> {
   if (
     hasProtectedPublication(path, raw, fileSystem) ||
@@ -421,9 +429,11 @@ function* removeDoomedCopy(
   const remaining =
     retained === "absent"
       ? retained
-      : yield* removeRememberedRetained(path, retained, pid, fileSystem, true);
+      : yield* removeRememberedRetained(path, retained, pid, { fileSystem, keepEntry: true });
   // A successful byte removal ends the entry. A later private-marker restore is the R2 residual.
-  const removed = (yield* backOutBytesAtName(path, name, raw, pid, fileSystem, true)) === "removed";
+  const removed =
+    (yield* backOutBytesAtName(path, name, raw, { pid, fileSystem, protectGenuine: true })) ===
+    "removed";
   return removed && remaining !== "unreadable" && (remaining === "absent" || remaining.raw !== raw);
 }
 
@@ -435,8 +445,7 @@ function* removeInstance(
   path: string,
   name: string,
   publication: LockSample,
-  pid: number,
-  fileSystem: LockFileSystem,
+  { pid, fileSystem }: { pid: number; fileSystem: LockFileSystem },
 ): Steps<"removed" | "elsewhere" | "unverified"> {
   if (!sameSample(yield* samplePublication(name, publication.raw, fileSystem), publication)) {
     return "elsewhere";
@@ -510,7 +519,7 @@ function* backOutLockPath(
   pid: number,
   fileSystem: LockFileSystem,
 ): Steps<void> {
-  const outcome = yield* backOutAttempt(path, publication.raw, pid, fileSystem);
+  const outcome = yield* backOutAttempt(path, publication.raw, pid, { fileSystem });
   if (outcome === "removed") {
     return;
   }
@@ -528,8 +537,7 @@ function* backOutAttempt(
   path: string,
   raw: string,
   pid: number,
-  fileSystem: LockFileSystem,
-  protectGenuine = false,
+  { fileSystem, protectGenuine = false }: { fileSystem: LockFileSystem; protectGenuine?: boolean },
 ): Steps<"removed" | "unfound" | "failed"> {
   const read = yield* retryLockStep({ op: "readText", path }, () => fileSystem.readText(path));
   if (typeof read === "string") {
@@ -538,16 +546,18 @@ function* backOutAttempt(
   if (read.value !== raw) {
     return "unfound";
   }
-  return yield* backOutBytesAtName(path, path, raw, pid, fileSystem, protectGenuine);
+  return yield* backOutBytesAtName(path, path, raw, { pid, fileSystem, protectGenuine });
 }
 
 function* backOutBytesAtName(
   path: string,
   name: string,
   raw: string,
-  pid: number,
-  fileSystem: LockFileSystem,
-  protectGenuine = false,
+  {
+    pid,
+    fileSystem,
+    protectGenuine = false,
+  }: { pid: number; fileSystem: LockFileSystem; protectGenuine?: boolean },
 ): Steps<"removed" | "unfound" | "failed"> {
   const marker = `${path}.${pid}.release.${++lockState.releaseMarkerCounter}`;
   const claim = yield* retryLockStep({ op: "rename", path: name }, () => {
@@ -612,6 +622,6 @@ export function* drainRetainedBeforePublication(
   // Drain F before publishing identical bytes; the new in-flight publication must stay protected.
   const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
   if (retained !== "absent") {
-    yield* removeRememberedRetained(path, retained, pid, fileSystem);
+    yield* removeRememberedRetained(path, retained, pid, { fileSystem });
   }
 }

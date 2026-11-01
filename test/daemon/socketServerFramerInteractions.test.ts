@@ -228,7 +228,7 @@ describe("an over-limit input/* frame (#10109 x #10032 admission)", () => {
       error: "Invalid request: frame too large",
     });
     expect(pending("gestureEnd")).toHaveLength(1);
-    expect(pending("gestureEnd")[0].args).toEqual(["g1", 0, 0, true, 5000]);
+    expect(pending("gestureEnd")[0].args).toEqual(["g1", 0, 0, { cancel: true, timeoutMs: 5000 }]);
     pending("gestureEnd")[0].release({ success: true, totalTimeMs: 0 });
     await drain();
     expect(pending("gestureEnd")).toHaveLength(1);
@@ -356,7 +356,9 @@ describe("the real reachability probe against a framer-backed server (#10107 x #
 
   beforeEach(async () => {
     dir = scratch.next();
-    target = new ProbeTarget(join(dir, "p.sock"), new FakeTimer(), "ProbeTarget", 0);
+    target = new ProbeTarget(join(dir, "p.sock"), new FakeTimer(), "ProbeTarget", {
+      idleTimeoutMs: 0,
+    });
     await target.start();
   });
 

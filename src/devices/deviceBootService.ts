@@ -5,6 +5,10 @@ import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { errorMessage } from "../utils/describeUnknownError";
+import {
+  ambientDeviceExecutionBinding,
+  runWithDeviceExecutionBinding,
+} from "../utils/deviceExecutionBinding";
 import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import { DeviceBootExecution } from "./DeviceBootExecution";
@@ -210,21 +214,20 @@ export class DeviceBootService {
       request.platform,
       context,
       "discovering running devices",
-      request.platform === "android",
-      true,
-      request.presentationOrder,
+      {
+        bypassAndroidCache: request.platform === "android",
+        awaitAbortSettlement: true,
+        presentationOrder: request.presentationOrder,
+      },
     );
     const hasExplicitConstraints = hasExplicitSpecConstraints(request);
     const running = booted.find((device) => device.deviceId === request.deviceId);
     if (running) {
-      return await this.waitForKnownRunningDevice(
-        running,
-        request,
-        criteria,
-        hasExplicitConstraints,
+      return await this.waitForKnownRunningDevice(running, request, criteria, {
         context,
+        hasExplicitConstraints,
         progress,
-      );
+      });
     }
     // Discovery filters foreign devices using a potentially stale inventory snapshot.
     // Check the literal ID afresh; an AVD name must not be mapped to a serial claim.
@@ -262,14 +265,11 @@ export class DeviceBootService {
     // Route through the same reuse-before-cold-boot path as the name matcher so
     // both spellings of the same target resolve identically (#3334): booting a
     // live image is rejected by the platform, or spawns a doomed second child.
-    const result = await this.bootMatchedImage(
-      image,
-      context,
-      progress,
-      request.presentationOrder,
-      request.preferRunning,
-      request.platform === "android" && request.deviceId === image.name,
-    );
+    const result = await this.bootMatchedImage(image, context, progress, {
+      presentationOrder: request.presentationOrder,
+      preferRunning: request.preferRunning,
+      exactTarget: request.platform === "android" && request.deviceId === image.name,
+    });
     assertBootedMatchesImage(result.device, image);
     return result;
   }
@@ -278,9 +278,15 @@ export class DeviceBootService {
     running: BootedDevice,
     request: DeviceBootRequest & { deviceId: string },
     criteria: DeviceMatchCriteria,
-    hasExplicitConstraints: boolean,
-    context: BootDeadlineContext,
-    progress: DeviceBootProgress | undefined,
+    {
+      context,
+      hasExplicitConstraints,
+      progress,
+    }: {
+      context: BootDeadlineContext;
+      hasExplicitConstraints: boolean;
+      progress: DeviceBootProgress | undefined;
+    },
   ): Promise<DeviceBootResult> {
     assertRequestedNameVerifiable(request, running);
     const enriched = await this.enrichKnownRunningDevice(
@@ -289,6 +295,8 @@ export class DeviceBootService {
       hasExplicitConstraints,
       context,
     );
+    // Explicit selection owns this target; shared display reads do not bind executions.
+    ambientDeviceExecutionBinding.bindDeviceExecution(enriched.device.deviceId);
     const [resolvedRunning] = await hydrateRequiredDisplayInventories(
       [enriched.device],
       criteria.requires,
@@ -367,14 +375,11 @@ export class DeviceBootService {
       (image) => !isExcludedImage(image, request.excludeDeviceNames, request.excludeDeviceIds),
     );
     const bootedCandidates: BootedDevice[] = [];
-    const running = await this.findRunningMatch(
-      request,
-      criteria,
-      matchingImages,
+    const running = await this.findRunningMatch(request, criteria, matchingImages, {
       context,
       progress,
-      bootedCandidates,
-    );
+      candidates: bootedCandidates,
+    });
     if (running) {
       return running;
     }
@@ -391,14 +396,11 @@ export class DeviceBootService {
           ) ?? null)
         : deviceMatcher.matchDeviceImage(criteria, matchingImages, matchingStrategy);
     if (image) {
-      const result = await this.bootMatchedImage(
-        image,
-        context,
-        progress,
-        request.presentationOrder,
-        request.preferRunning,
-        request.matchExactName === true,
-      );
+      const result = await this.bootMatchedImage(image, context, progress, {
+        presentationOrder: request.presentationOrder,
+        preferRunning: request.preferRunning,
+        exactTarget: request.matchExactName === true,
+      });
       if (request.matchExactName) {
         assertBootedMatchesImage(result.device, image);
       }
@@ -422,23 +424,22 @@ export class DeviceBootService {
         (image) => !bootedCandidates.some((device) => device.name === image.name),
       ),
     ];
-    return this.provisionAndBoot(
-      request,
-      provisionCriteria,
-      matchingImages,
+    return this.provisionAndBoot(request, provisionCriteria, matchingImages, {
       context,
       progress,
       candidates,
-    );
+    });
   }
 
   private async findRunningMatch(
     request: DeviceBootRequest,
     criteria: DeviceMatchCriteria,
     images: DeviceInfo[],
-    context: BootDeadlineContext,
-    progress?: DeviceBootProgress,
-    candidates?: BootedDevice[],
+    {
+      context,
+      progress,
+      candidates,
+    }: { context: BootDeadlineContext; progress?: DeviceBootProgress; candidates?: BootedDevice[] },
   ): Promise<DeviceBootResult | undefined> {
     if (request.preferRunning === false) {
       return undefined;
@@ -447,9 +448,11 @@ export class DeviceBootService {
       request.platform,
       context,
       "discovering running devices",
-      request.matchExactName && request.name !== undefined,
-      false,
-      request.presentationOrder,
+      {
+        bypassAndroidCache: request.matchExactName && request.name !== undefined,
+        awaitAbortSettlement: false,
+        presentationOrder: request.presentationOrder,
+      },
     );
     assertExactRunningDiscovery(request, booted);
     const excludedDeviceNames = request.excludeDeviceNames;
@@ -461,11 +464,13 @@ export class DeviceBootService {
               !excludedDeviceNames?.has(device.name) && !excludedDeviceIds?.has(device.deviceId),
           )
         : booted;
-    const enriched = await hydrateRequiredDisplayInventories(
-      enrichBootedDevicesFromImages(matchingBooted, images),
-      criteria.requires,
-      this.dependencies.displayInventory ?? defaultDisplayInventoryProvider,
-      context.signal,
+    const enriched = await runWithDeviceExecutionBinding(undefined, () =>
+      hydrateRequiredDisplayInventories(
+        enrichBootedDevicesFromImages(matchingBooted, images),
+        criteria.requires,
+        this.dependencies.displayInventory ?? defaultDisplayInventoryProvider,
+        context.signal,
+      ),
     );
     candidates?.push(...enriched);
     const match =
@@ -533,10 +538,16 @@ export class DeviceBootService {
   private async bootMatchedImage(
     image: DeviceInfo,
     context: BootDeadlineContext,
-    progress?: DeviceBootProgress,
-    presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
-    preferRunning?: boolean,
-    exactTarget?: boolean,
+    progress: DeviceBootProgress | undefined,
+    {
+      presentationOrder,
+      preferRunning,
+      exactTarget,
+    }: {
+      presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
+      preferRunning?: boolean;
+      exactTarget?: boolean;
+    },
   ): Promise<DeviceBootResult> {
     // Watch boot is not implemented yet (#14908); refuse before the iOS path can claim it.
     const platform = requireAndroidOrIosPlatform(image.platform, "Starting a device");
@@ -548,21 +559,20 @@ export class DeviceBootService {
     // re-checks the simulator after its UDID lease settles (#9902), so a
     // sibling acquisition that booted it meanwhile is adopted, not re-booted.
     if (!image.isRunning && image.platform !== "android") {
-      return this.bootImage(
-        image,
-        context,
-        progress,
-        false,
-        this.adoptAfterLeasePolicy(context, image, preferRunning, false),
-      );
+      return this.bootImage(image, context, progress, {
+        provisioned: false,
+        adoptAfterLease: this.adoptAfterLeasePolicy(context, image, preferRunning, false),
+      });
     }
     const booted = await this.execution.discoverBootedDevices(
       platform,
       context,
       "resolving the running device image",
-      image.platform === "android",
-      true,
-      presentationOrder,
+      {
+        bypassAndroidCache: image.platform === "android",
+        awaitAbortSettlement: true,
+        presentationOrder,
+      },
     );
     assertExactAndroidImageDiscovery(
       image,
@@ -589,13 +599,13 @@ export class DeviceBootService {
       hasInFlightColdBoot,
     );
     if (!running) {
-      return this.bootImage(image, context, progress, false, adoptAfterLease);
+      return this.bootImage(image, context, progress, { provisioned: false, adoptAfterLease });
     }
     if (hasInFlightColdBoot || explicitlyRequestedColdBoot) {
       // An in-flight owner may finish while this selector reservation waits to
       // bind the AVD's stable identity. Re-check only that case after binding:
       // explicit cold-boot intent must never be turned into adoption (#7197).
-      return this.bootImage(image, context, progress, false, adoptAfterLease);
+      return this.bootImage(image, context, progress, { provisioned: false, adoptAfterLease });
     }
     const result = await this.waitForRunningDevice(
       enrichBootedDevice(running, image),
@@ -609,9 +619,15 @@ export class DeviceBootService {
     request: DeviceBootRequest,
     criteria: DeviceMatchCriteria,
     images: DeviceInfo[],
-    context: BootDeadlineContext,
-    progress?: DeviceBootProgress,
-    candidates: readonly (BootedDevice | DeviceInfo)[] = images,
+    {
+      context,
+      progress,
+      candidates = images,
+    }: {
+      context: BootDeadlineContext;
+      progress?: DeviceBootProgress;
+      candidates?: readonly (BootedDevice | DeviceInfo)[];
+    },
   ): Promise<DeviceBootResult> {
     const describedCandidates = candidates.map((candidate) => ({
       ...candidate,
@@ -660,12 +676,9 @@ export class DeviceBootService {
         },
       );
       created = provisioned;
-      const boot = await this.bootImage(
-        createdImageFor(provisioned, request),
-        context,
-        progress,
-        true,
-      );
+      const boot = await this.bootImage(createdImageFor(provisioned, request), context, progress, {
+        provisioned: true,
+      });
       return {
         ...boot,
         ...(provisioned.prebootDisabledResources
@@ -793,7 +806,7 @@ export class DeviceBootService {
               { ...device, isRunning: true },
               this.execution.remaining(context, "waiting for a running device"),
               undefined,
-              signal,
+              { signal },
             ),
         );
         return { device: { ...device, ...ready }, source: "booted", provisioned: false };
@@ -862,8 +875,10 @@ export class DeviceBootService {
     image: DeviceInfo,
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
-    provisioned: boolean,
-    adoptAfterLease: AdoptAfterLease = "never",
+    {
+      provisioned,
+      adoptAfterLease = "never",
+    }: { provisioned: boolean; adoptAfterLease?: AdoptAfterLease },
   ): Promise<DeviceBootResult> {
     context.deviceLabel = image.deviceId ? `${image.name} (${image.deviceId})` : image.name;
     if (image.isRunningStateKnown === false) {
@@ -907,13 +922,10 @@ export class DeviceBootService {
       return await this.bootRecovery.run(
         image,
         async () =>
-          this.bootImageAdoptingAlreadyRunning(
-            image,
-            context,
-            progress,
+          this.bootImageAdoptingAlreadyRunning(image, context, progress, {
             provisioned,
             adoptRunningAfterLease,
-          ),
+          }),
         context.signal,
       );
     } finally {
@@ -951,8 +963,10 @@ export class DeviceBootService {
     image: DeviceInfo,
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
-    provisioned: boolean,
-    adoptRunningAfterLease: boolean,
+    {
+      provisioned,
+      adoptRunningAfterLease,
+    }: { provisioned: boolean; adoptRunningAfterLease: boolean },
   ): Promise<DeviceBootResult> {
     try {
       return await this.bootImageOnce(image, context, progress, provisioned);

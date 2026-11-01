@@ -56,7 +56,7 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased(ROW, "expired", 0, "daemon-restart");
+    await persistence.markReleased(ROW, "expired", 0, { reason: "daemon-restart" });
     sessions = new SessionManager(timer, persistence);
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager();
@@ -104,10 +104,12 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
     async () => {
       await autolockAsOtherClient().catch(() => undefined);
 
-      const recovery = await sessions.getOrCreateSession(ROW, pool, "ios", undefined, true).then(
-        (session) => `recovered on ${session.assignedDevice}`,
-        () => "lost",
-      );
+      const recovery = await sessions
+        .getOrCreateSession(ROW, pool, "ios", { requireIssuedSession: true })
+        .then(
+          (session) => `recovered on ${session.assignedDevice}`,
+          () => "lost",
+        );
 
       expect({
         recovery,

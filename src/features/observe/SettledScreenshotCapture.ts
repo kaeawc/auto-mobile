@@ -25,6 +25,12 @@ export interface SettledScreenshotCaptureDeps {
   pathProtection: () => ScreenshotPathProtection;
 }
 
+/** Which display a settled screenshot captures, and how it is encoded. */
+export interface SettledScreenshotTarget {
+  displayId?: number;
+  screenshotOptions?: ObserveScreenshotOptions;
+}
+
 /** Settled screenshot capture and the raster evidence attached to its observation. */
 export class SettledScreenshotCapture {
   constructor(private readonly deps: SettledScreenshotCaptureDeps) {}
@@ -49,21 +55,18 @@ export class SettledScreenshotCapture {
     observation: ObserveResult,
     perf: PerformanceTracker,
     signal: AbortSignal | undefined,
-    strict: boolean,
-    displayId?: number,
-    screenshotOptions?: ObserveScreenshotOptions,
+    { strict, displayId, screenshotOptions }: SettledScreenshotTarget & { strict: boolean },
   ): Promise<void> {
     try {
       if (!this.screenshotRecorder.captureSettled) {
         throw new ActionableError("Settled screenshot capture is unavailable");
       }
-      const path = await this.screenshotRecorder.captureSettled(
-        observation.observationId,
+      const path = await this.screenshotRecorder.captureSettled(observation.observationId, {
         perf,
         signal,
         displayId,
-        screenshotOptions,
-      );
+        options: screenshotOptions,
+      });
       const screenshotEvidence = await observationScreenshotEvidence(path, "fresh", undefined, {
         files: this.screenshotEvidenceFiles,
         timer: this.timer,

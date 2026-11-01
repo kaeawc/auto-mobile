@@ -1,3 +1,4 @@
+import { isAndroidOrIosPlatform } from "../../models/Platform";
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
 import { DefaultObservationInitialFrameCoordinator } from "../observationInitialFrameCoordinator";
 import { logger } from "../../utils/logger";
@@ -60,7 +61,8 @@ export class DaemonStreams {
   onDeviceReadyForSessionRegistry(deviceId: string): void {
     this.host.lifecycle.socketServer()?.evictDeviceInputCache(deviceId);
     const pooled = this.host.services.devicePool().getDevice(deviceId);
-    if (!pooled) {
+    // The device-session wire is Android and iOS; watches get no epoch yet (#14908).
+    if (!pooled || !isAndroidOrIosPlatform(pooled.platform)) {
       return;
     }
     if (pooled.platform === "ios") {

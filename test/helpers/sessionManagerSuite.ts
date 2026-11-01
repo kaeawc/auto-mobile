@@ -104,7 +104,7 @@ export class DeferredReleaseDeviceSessionPersistence extends FakeDeviceSessionPe
     _sessionUuid: string,
     _status: DeviceSessionStatus,
     _releasedAtMs: number,
-    reason: string,
+    { reason }: { reason: string },
   ): Promise<void> {
     this.reasons.push(reason);
     if (this.reasons.length === 1) {
@@ -373,7 +373,7 @@ export async function seedRestartReleasedRow(
   overrides: Partial<DeviceSessionRecord> = {},
 ): Promise<void> {
   await persistence.upsertActiveSession(restartRow(sessionUuid, overrides));
-  await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
+  await persistence.markReleased(sessionUuid, "released", 30, { reason: "daemon-restart" });
 }
 
 /** Seeds one restart-released row per `[sessionUuid, lastUsedAtMs]`. */
@@ -422,7 +422,7 @@ export function persistenceMirroringRelease(
   releases?: string[],
 ): DeviceSessionPersistence {
   return persistenceServing(row, {
-    async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+    async markReleased(_sessionUuid, status, releasedAtMs, { reason: releaseReason }) {
       releases?.push(releaseReason);
       row.status = status;
       row.released_at_ms = releasedAtMs;
@@ -437,7 +437,9 @@ export function recoverPersisted(
   row: DeviceSession,
   devicePool: SessionDeviceAssigner,
 ): ReturnType<SessionManager["getOrCreateSession"]> {
-  return manager.getOrCreateSession(row.session_uuid, devicePool, "android", undefined, true);
+  return manager.getOrCreateSession(row.session_uuid, devicePool, "android", {
+    requireIssuedSession: true,
+  });
 }
 
 /** A device pool that hands out `deviceId` and counts its assignments. */
@@ -520,8 +522,7 @@ export function makeReapingMonitor(
     async (_id, reason) => {
       reaped.push(reason);
     },
-    timer,
-    { preFirstHeartbeatGraceMs },
+    { timer, preFirstHeartbeatGraceMs },
   );
   return { monitor, reaped };
 }

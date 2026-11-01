@@ -14,15 +14,13 @@ export interface ChooserAppMetadata {
     device: BootedDevice,
     packageName: string,
     url: string,
-    adb: AdbExecutor,
-    signal?: AbortSignal,
+    options: { adb: AdbExecutor; signal?: AbortSignal },
   ): Promise<ChooserActivityLabelResult>;
   getFreshHierarchy(
     device: BootedDevice,
     adbFactory: AdbClientFactory,
     minTimestamp: number,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
   ): Promise<ViewHierarchyResult>;
 }
 
@@ -87,10 +85,10 @@ export const defaultChooserAppMetadata: ChooserAppMetadata = {
     throwIfAborted(signal);
     return resolveAppLabel(device, packageName, signal);
   },
-  async getActivityLabel(_device, packageName, url, adb, signal) {
+  async getActivityLabel(_device, packageName, url, { adb, signal }) {
     return resolveChooserActivityLabel(adb, packageName, url, signal);
   },
-  async getFreshHierarchy(device, adbFactory, minTimestamp, timeoutMs, signal) {
+  async getFreshHierarchy(device, adbFactory, minTimestamp, { timeoutMs, signal } = {}) {
     return new ViewHierarchy(device, adbFactory).getViewHierarchy(undefined, {
       skipWaitForFresh: true,
       minTimestamp,

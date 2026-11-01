@@ -70,7 +70,7 @@ function setup(hierarchy: ViewHierarchyResult, platform: "ios" | "android" = "io
       cacheStore,
       screenshotStateStore: new FakeScreenshotStateStore(timer),
     },
-    timer,
+    { timer },
   );
   spyOn(screen["performanceAuditor"], "run").mockResolvedValue(undefined);
   spyOn(screen["accessibilityAuditor"], "run").mockResolvedValue(undefined);
@@ -135,7 +135,7 @@ test("recapture uses pixel-settled size and updates only observation rotation", 
 
 test("post-action observation inherits the fallback from real ObserveScreen", async () => {
   const { screen, adb, timer } = setup(issue8379Hierarchy());
-  const action = new BaseVisualChange(device, adb, timer);
+  const action = new BaseVisualChange(device, { adb, timer });
   action.observeScreen = screen;
   const result = await action["takeObservation"]({ success: true }, null, {
     changeExpected: false,
@@ -227,7 +227,7 @@ test("snapshotOf crop input retains absent runner rotation rather than guessing 
         rotation: result.viewHierarchy?.rotation,
         nativeScale: result.viewHierarchy?.nativeScale,
       },
-      image,
+      { backend: image },
     ),
   ).rejects.toThrow("incompatible aspect ratios");
   expect(result.viewHierarchy?.rotation).toBeUndefined();

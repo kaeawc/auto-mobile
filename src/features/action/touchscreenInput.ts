@@ -21,19 +21,26 @@ export function assertTouchscreenInputSucceeded(command: string, result: ExecRes
   }
 }
 
+/** Dispatch context for one `shell input ...` command. */
+export interface ShellInputOptions {
+  signal?: AbortSignal;
+  assertCurrent?: () => void;
+  timeoutMs?: number;
+  onDispatch?: () => void;
+}
+
 export async function executeTouchscreenInput(
   adb: AdbExecutor,
   action: string,
   displayId?: number,
-  signal?: AbortSignal,
-  assertCurrent?: () => void,
-  options?: { timeoutMs?: number; onDispatch?: () => void },
+  options: ShellInputOptions = {},
 ): Promise<void> {
+  const { signal, assertCurrent, timeoutMs, onDispatch } = options;
   await executeShellInput(adb, touchscreenInputCommand(action, displayId), {
     signal,
     assertCurrent,
-    timeoutMs: options?.timeoutMs,
-    onDispatch: options?.onDispatch,
+    timeoutMs,
+    onDispatch,
   });
 }
 
@@ -44,12 +51,7 @@ export async function executeTouchscreenInput(
 export async function executeShellInput(
   adb: AdbExecutor,
   command: string,
-  options: {
-    signal?: AbortSignal;
-    assertCurrent?: () => void;
-    timeoutMs?: number;
-    onDispatch?: () => void;
-  } = {},
+  options: ShellInputOptions = {},
 ): Promise<void> {
   const { signal, assertCurrent, timeoutMs, onDispatch } = options;
   if (!assertCurrent) {

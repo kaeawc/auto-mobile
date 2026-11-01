@@ -99,7 +99,7 @@ final class PrototypeMenusTests: XCTestCase {
         let spec = try fixture("menu-overflow")
         let root = spec.root
         let menu = try XCTUnwrap(root.children?.last)
-        XCTAssertTrue(root.menuParent(of: menu) === root)
+        XCTAssertTrue(root.menuParent(of: menu, data: spec.data) === root)
         XCTAssertFalse(root.blocksPage(state: ["open": .bool(false)], pages: [:]))
         XCTAssertTrue(root.blocksPage(state: ["open": .bool(true)], pages: [:]))
         XCTAssertEqual(root.openModals(state: ["open": .bool(true)], pages: [:]).map(\.type), ["menu"])
@@ -134,7 +134,7 @@ final class PrototypeMenusTests: XCTestCase {
         let target = try XCTUnwrap(spec.root.tapTarget(identifier: "m.0", state: session.state))
         XCTAssertEqual(session.activate(target)?.map(\.name), ["change"])
         XCTAssertEqual(session.state["open"], .bool(true))
-        XCTAssertNil(spec.root.menuParent(of: spec.root))
+        XCTAssertNil(spec.root.menuParent(of: spec.root, data: spec.data))
     }
 
     func testSelectUsesRadioChangePayloadAndTestTagIdentifier() throws {
@@ -316,8 +316,51 @@ final class PrototypeMenusTests: XCTestCase {
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.menusCapability))
         let spec = try fixture("select-dropdown")
         let select = try XCTUnwrap(spec.root.children?.first)
-        XCTAssertTrue(spec.root.visibleSelect(select, state: spec.state ?? [:], pages: [:]))
+        XCTAssertTrue(spec.root.visibleSelect(select, state: spec.state ?? [:], pages: [:], data: spec.data))
         let replacement = try fixture("select-dropdown")
-        XCTAssertFalse(replacement.root.visibleSelect(select, state: replacement.state ?? [:], pages: [:]))
+        XCTAssertFalse(replacement.root.visibleSelect(
+            select,
+            state: replacement.state ?? [:],
+            pages: [:],
+            data: replacement.data
+        ))
+    }
+
+    func testSelectVisibilityInLazyRowModals() throws {
+        for modalType in ["bottomSheet", "dialog"] {
+            let spec = try decode("""
+            {"id":"lazy-select","window":{"placement":{"type":"fullscreen"}},
+             "state":{"open_1":true,"choice":"a"},"data":{"items":[{"id":1}]},
+             "root":{"type":"column","children":[
+              {"type":"list","maxItems":1,"repeat":{"items":{"path":"/items"},"as":"item","key":"id"},
+               "children":[{"type":"\(modalType)","openWhen":{"key":"open_{item.id}","equals":true},
+                "child":{"type":"select","stateKey":"choice",
+                 "options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}}]}]}}
+            """)
+            let state = spec.state ?? [:]
+            let modal = try XCTUnwrap(spec.root.openModals(state: state, pages: [:], data: spec.data).first)
+            let select = try XCTUnwrap(modal.child)
+            XCTAssertEqual(select.type, "select")
+            XCTAssertEqual(select.stateKey, "choice")
+            XCTAssertTrue(spec.root.visibleSelect(select, state: state, pages: [:], data: spec.data), modalType)
+            let closed = state.merging(["open_1": .bool(false)]) { _, value in value }
+            XCTAssertFalse(spec.root.visibleSelect(select, state: closed, pages: [:], data: spec.data), modalType)
+        }
+    }
+
+    func testMenuParentInsideLazyRowModal() throws {
+        let spec = try decode("""
+        {"id":"lazy-menu","window":{"placement":{"type":"fullscreen"}},
+         "state":{"sheet_1":true,"menu_1":true},"data":{"items":[{"id":1}]},
+         "root":{"type":"list","maxItems":1,"repeat":{"items":{"path":"/items"},"as":"item","key":"id"},
+          "children":[{"type":"bottomSheet","openWhen":{"key":"sheet_{item.id}","equals":true},
+           "child":{"type":"column","children":[
+            {"type":"menu","openWhen":{"key":"menu_{item.id}","equals":true},"items":[{"label":"Close"}]}]}}]}}
+        """)
+        let modal = try XCTUnwrap(spec.root.openModals(state: spec.state ?? [:], pages: [:], data: spec.data).first)
+        let parent = try XCTUnwrap(modal.child)
+        let menu = try XCTUnwrap(parent.children?.first)
+        XCTAssertEqual(menu.type, "menu")
+        XCTAssertTrue(spec.root.menuParent(of: menu, data: spec.data) === parent)
     }
 }

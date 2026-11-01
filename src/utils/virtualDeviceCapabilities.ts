@@ -7,6 +7,7 @@ import {
 import {
   androidEmulatorAudioCapabilities,
   iosSimulatorAudioCapabilities,
+  type AndroidAudioInputs,
 } from "./audio/audioCapabilities";
 import type { HostAudioSnapshot } from "./audio/hostAudio";
 
@@ -121,7 +122,11 @@ function avdCapabilityState(
  */
 export function buildAndroidAvdCapabilityInventory(
   config: Readonly<Record<string, string | undefined>>,
-  audio?: { launchWithoutAudio: boolean; hostAudio: HostAudioSnapshot },
+  audio?: {
+    launchWithoutAudio: boolean;
+    hostAudio: HostAudioSnapshot;
+    grpc?: AndroidAudioInputs["grpc"];
+  },
 ): VirtualDeviceCapabilityInventory {
   const capabilities = new Map<string, VirtualDeviceCapability>([
     [
@@ -146,6 +151,7 @@ export function buildAndroidAvdCapabilityInventory(
       config,
       launchWithoutAudio: audio.launchWithoutAudio,
       host: audio.hostAudio,
+      grpc: audio.grpc,
     })) {
       capabilities.set(capability.id, capability);
     }

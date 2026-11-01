@@ -70,9 +70,11 @@ export class IosMinimalReset {
     device: BootedDevice,
     profile: IosResetProfile,
     assertOwned: () => Promise<void>,
-    scope: DeviceMutationScope,
-    reuseCount: number,
-    options: { signal?: AbortSignal } = {},
+    {
+      scope,
+      reuseCount,
+      signal,
+    }: { reuseCount: number; signal?: AbortSignal } & { scope: DeviceMutationScope },
   ): Promise<ResetOutcome> {
     assertIosResetInput(device, profile);
     assertDeviceMutationScope(scope, scope.sessionUuid);
@@ -92,9 +94,9 @@ export class IosMinimalReset {
       return this.pending(phases, "maxUses reached");
     }
     try {
-      await this.clean(scope, assertOwned, phases, options.signal);
+      await this.clean(scope, assertOwned, phases, signal);
     } catch (error) {
-      if (options.signal?.aborted) {
+      if (signal?.aborted) {
         throw error;
       }
       // Lost ownership is not a cleaning failure: surface it instead of destroying a foreign device.
@@ -134,7 +136,7 @@ export class IosMinimalReset {
     const step = (
       phase: string,
       operation: (context: DeviceMutationResetContext) => Promise<void>,
-    ) => this.step(scope, assertOwned, phases, callerSignal, phase, operation);
+    ) => this.step({ scope, assertOwned, phases, callerSignal }, phase, operation);
     for (const entry of entries.filter((candidate) => candidate.kind === "installed-app")) {
       await step(`uninstall:${entry.key}`, (context) =>
         this.dependencies.mutations.revert(entry, context),
@@ -181,10 +183,17 @@ export class IosMinimalReset {
   }
 
   private async step(
-    scope: DeviceMutationScope,
-    assertOwned: () => Promise<void>,
-    phases: Record<string, number>,
-    callerSignal: AbortSignal | undefined,
+    {
+      scope,
+      assertOwned,
+      phases,
+      callerSignal,
+    }: {
+      scope: DeviceMutationScope;
+      assertOwned: () => Promise<void>;
+      phases: Record<string, number>;
+      callerSignal: AbortSignal | undefined;
+    },
     phase: string,
     operation: (context: DeviceMutationResetContext) => Promise<void>,
   ): Promise<void> {

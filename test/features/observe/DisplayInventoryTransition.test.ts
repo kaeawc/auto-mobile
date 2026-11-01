@@ -54,7 +54,7 @@ const otherDevice: BootedDevice = { deviceId: "emulator-5556", name: "Other", pl
 
 function setup() {
   const source = new FixtureAdbSource();
-  const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+  const provider = new CachingDisplayInventoryProvider(source, source, { timer: new FakeTimer() });
   const tracker = new DisplayTransitionTracker(
     () => {},
     (deviceId) => provider.invalidate(deviceId),

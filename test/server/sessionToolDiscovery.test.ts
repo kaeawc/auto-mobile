@@ -73,9 +73,11 @@ describe("session-scoped tool discovery", () => {
 
   test("a seeded connection names a live session of its own plan, and only that (#11602)", () => {
     const asked: Array<[string, string]> = [];
-    const binding = new SessionToolBinding("base", undefined, undefined, undefined, (...pair) => {
-      asked.push(pair);
-      return pair[0] === "base:B";
+    const binding = new SessionToolBinding("base", undefined, undefined, {
+      namesLiveSessionOfBoundPlan: (...pair) => {
+        asked.push(pair);
+        return pair[0] === "base:B";
+      },
     });
 
     expect(binding.effectiveSessionUuid("transport", { sessionUuid: "base:B" })).toBe("base:B");

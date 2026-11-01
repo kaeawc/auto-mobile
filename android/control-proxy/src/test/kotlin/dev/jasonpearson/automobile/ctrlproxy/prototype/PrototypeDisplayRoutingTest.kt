@@ -53,7 +53,7 @@ class PrototypeDisplayRoutingTest {
   }
 
   @Test
-  fun `a display hot-plugged after the service bound is refused below API 34 until it rebinds`() {
+  fun `a display hot-plugged after the service bound is refused below the fixed API until it rebinds`() {
     val provider = displays(32)
     val hotPlugged = ShadowDisplayManager.addDisplay("w800dp-h480dp")
     val reason = provider.unsupportedReason(hotPlugged)
@@ -64,7 +64,15 @@ class PrototypeDisplayRoutingTest {
   }
 
   @Test
-  fun `a display present when the service bound is allowed and API 34 is unchanged`() {
+  fun `a display hot-plugged after bind on API 35 is refused with an actionable message`() {
+    val provider = displays(35)
+    val hotPlugged = ShadowDisplayManager.addDisplay("w800dp-h480dp")
+    val reason = provider.unsupportedReason(hotPlugged)
+    assertTrue(reason.orEmpty().contains("connected after the accessibility service started"))
+  }
+
+  @Test
+  fun `a display present when the service bound is allowed and the fixed API is unchanged`() {
     val present = ShadowDisplayManager.addDisplay("w800dp-h480dp")
     assertNull(displays(32).unsupportedReason(present))
     val later = ShadowDisplayManager.addDisplay("w800dp-h480dp")
@@ -76,6 +84,8 @@ class PrototypeDisplayRoutingTest {
     assertNull(PrototypeDisplayHotPlug.error(0, 32, emptySet()))
     assertNull(PrototypeDisplayHotPlug.error(3, 33, setOf(0, 3)))
     assertNotNull(PrototypeDisplayHotPlug.error(3, 33, setOf(0)))
-    assertNull(PrototypeDisplayHotPlug.error(3, 34, setOf(0)))
+    assertNotNull(PrototypeDisplayHotPlug.error(3, 34, setOf(0)))
+    assertNotNull(PrototypeDisplayHotPlug.error(3, 35, setOf(0)))
+    assertNull(PrototypeDisplayHotPlug.error(3, 36, setOf(0)))
   }
 }

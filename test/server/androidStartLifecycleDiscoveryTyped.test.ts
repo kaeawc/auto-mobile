@@ -56,8 +56,7 @@ async function resolveOutcome(
     "emulator-5554",
     Date.now() + 60_000,
     manager,
-    new FakeTimer(),
-    undefined,
+    { timer: new FakeTimer() },
   ).then(
     (target) => ({ target }),
     (error: unknown) => ({ error }),

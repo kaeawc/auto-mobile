@@ -26,7 +26,7 @@ describe("RestoreSnapshot settings command ordering", () => {
         return executeCommand(command);
       });
       const client: Pick<AndroidCtrlProxyClient, "requestSettingsPut"> = {
-        requestSettingsPut: async (namespace, key, value, valueType) => {
+        requestSettingsPut: async (namespace, key, value, { valueType } = {}) => {
           events.push(`a11y ${namespace}/${key} ${value} ${valueType}`);
           if (mode === "throw") {
             throw new Error("accessibility unavailable");

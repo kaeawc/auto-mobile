@@ -168,7 +168,7 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
       adoptDeviceGestureRecording: () => false,
     })("device", "holder");
     const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
-    state.startSimulation("device", "timeout", 30, null);
+    state.startSimulation("device", "timeout", 30, { limit: null });
     createOwnerlessNetworkStateAcquisitionCleanup(manager, {
       timer,
       state: () => state,

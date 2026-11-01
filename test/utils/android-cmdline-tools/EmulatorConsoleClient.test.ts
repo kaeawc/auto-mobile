@@ -8,6 +8,7 @@ import {
   parseConsoleAcknowledgement,
   RealEmulatorConsoleClient,
   EmulatorConsoleTransport,
+  type EmulatorConsoleExecuteOptions,
   AVD_SNAPSHOT_CONSOLE_TIMEOUT_MS,
 } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 
@@ -27,9 +28,7 @@ class RecordingTransport implements EmulatorConsoleTransport {
     host: string,
     port: number,
     authToken: string | null,
-    commands: string[],
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    { commands, signal, timeoutMs }: EmulatorConsoleExecuteOptions,
   ): Promise<string> {
     this.calls.push({ host, port, authToken, commands, signal, timeoutMs });
     if (this.failWith) {
@@ -392,13 +391,10 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const socket = new FakeSocket();
     const timer = new FakeTimer();
     const controller = new AbortController();
-    const pending = makeTransport(socket, timer).execute(
-      "localhost",
-      5554,
-      null,
-      ["geo fix 1 2"],
-      controller.signal,
-    );
+    const pending = makeTransport(socket, timer).execute("localhost", 5554, null, {
+      commands: ["geo fix 1 2"],
+      signal: controller.signal,
+    });
     controller.abort();
     await expect(pending).rejects.toThrow("cancelled");
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -409,7 +405,9 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const socket = new FakeSocket();
     const transport = makeTransport(socket, new FakeTimer());
 
-    const pending = transport.execute("localhost", 5554, "s3cr3t", ["gsm call 5551234567"]);
+    const pending = transport.execute("localhost", 5554, "s3cr3t", {
+      commands: ["gsm call 5551234567"],
+    });
     socket.emit("connect");
     socket.emit("data", "OK\n");
     socket.emit("close");
@@ -422,7 +420,9 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const socket = new FakeSocket();
     const transport = makeTransport(socket, new FakeTimer());
 
-    const pending = transport.execute("localhost", 5554, null, ["sms send 5551234567 hi"]);
+    const pending = transport.execute("localhost", 5554, null, {
+      commands: ["sms send 5551234567 hi"],
+    });
     socket.emit("connect");
     socket.emit("close");
 
@@ -434,7 +434,7 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const socket = new FakeSocket();
     const transport = makeTransport(socket, new FakeTimer());
 
-    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    const pending = transport.execute("localhost", 5554, null, { commands: ["gsm hold"] });
     socket.emit("connect");
     socket.emit("data", "Android Console\n");
     socket.emit("data", "OK\n");
@@ -448,7 +448,7 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const timer = new FakeTimer();
     const transport = makeTransport(socket, timer);
 
-    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    const pending = transport.execute("localhost", 5554, null, { commands: ["gsm hold"] });
     // No connect/close: only the timer fires.
     timer.advanceTime(5000);
 
@@ -459,14 +459,10 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
   test("a per-call timeout overrides the transport default", async () => {
     const socket = new FakeSocket();
     const timer = new FakeTimer();
-    const pending = makeTransport(socket, timer).execute(
-      "localhost",
-      5554,
-      null,
-      ["avd snapshot save fixture"],
-      undefined,
-      30_000,
-    );
+    const pending = makeTransport(socket, timer).execute("localhost", 5554, null, {
+      commands: ["avd snapshot save fixture"],
+      timeoutMs: 30_000,
+    });
     timer.advanceTime(5000);
     expect(socket.destroyed).toBe(false);
     timer.advanceTime(25_000);
@@ -477,7 +473,7 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const socket = new FakeSocket();
     const transport = makeTransport(socket, new FakeTimer());
 
-    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    const pending = transport.execute("localhost", 5554, null, { commands: ["gsm hold"] });
     socket.emit("error", new Error("ECONNREFUSED"));
 
     await expect(pending).rejects.toThrow(/failed: ECONNREFUSED/);
@@ -487,7 +483,7 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const socket = new FakeSocket();
     const transport = makeTransport(socket, new FakeTimer());
 
-    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    const pending = transport.execute("localhost", 5554, null, { commands: ["gsm hold"] });
     socket.emit("error", new Error("ECONNRESET"));
     // A stray close after the error settle must not flip the rejection into a resolve.
     socket.emit("close");

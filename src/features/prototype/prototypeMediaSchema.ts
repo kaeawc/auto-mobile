@@ -27,7 +27,8 @@ export const prototypeMediaSchema = z
         z
           .object({
             kind: z.enum(["video", "audio"]),
-            source: prototypeMediaSourceSchema,
+            source: prototypeMediaSourceSchema.optional(),
+            queue: pointerSchema.optional(),
             loop: z.boolean().optional(),
           })
           .strict(),
@@ -40,6 +41,26 @@ export const prototypeMediaSchema = z
   })
   .strict();
 export type PrototypeMedia = z.infer<typeof prototypeMediaSchema>;
+
+/** A nonblank string kept as authored: trimming would change ids after their semantic checks. */
+const nonblank = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .refine((value) => !prototypeContractPatterns.blankText.test(value));
+
+/** A `videoPlayer` caption track (#14259): an uploaded WebVTT asset or `/data` cues. */
+const prototypeMediaCaptionSchema = z
+  .object({
+    id: nonblank(64),
+    language: nonblank(35),
+    label: nonblank(64),
+    source: z.union([
+      z.object({ asset: z.string().min(1).max(128) }).strict(),
+      z.object({ data: pointerSchema }).strict(),
+    ]),
+  })
+  .strict();
 
 /**
  * The `videoPlayer` node's own fields (#14253): exactly one of a declared `player` or an inline
@@ -57,9 +78,50 @@ const videoPlayerShape = {
   loop: z.boolean().optional(),
   startMs: z.number().int().min(0).max(86_400_000).optional(),
   positionKey: keySchema.optional(),
+  visibleThreshold: z.number().min(0.1).max(1).optional(),
+  resumePosition: z.boolean().optional(),
+  captions: z.array(prototypeMediaCaptionSchema).min(1).max(8).optional(),
 };
 
-/** The `videoPlayer` node schema: the shared node fields plus its own. */
-export function prototypeVideoPlayerSchema<T extends z.ZodRawShape>(common: T) {
-  return z.object({ ...common, ...videoPlayerShape }).strict();
+/**
+ * The `castButton` node's own fields (#14239): the system route picker for a declared or inline
+ * `player` (checked in `prototypeMedia.ts`), optionally limited to some protocols.
+ */
+const castButtonShape = {
+  type: z.enum(["castButton"]),
+  player: keySchema,
+  protocols: z
+    .array(z.enum(["googleCast", "airplay"]))
+    .min(1)
+    .max(2)
+    .refine((protocols) => new Set(protocols).size === protocols.length)
+    .optional(),
+};
+
+/**
+ * The `cameraPreview` node's own fields (#14202): the in-app viewfinder. Lens, flash and zoom are
+ * state keys (checked in `prototypeCameraPreview.ts`) so ordinary state actions drive them.
+ */
+const cameraPreviewShape = {
+  type: z.enum(["cameraPreview"]),
+  lensKey: keySchema.optional(),
+  flashKey: keySchema.optional(),
+  zoomKey: keySchema.optional(),
+  aspectRatio: z.enum(["4:3", "16:9", "1:1"]).optional(),
+  contentScale: z.enum(["fit", "crop", "fill"]).optional(),
+  tapToFocus: z.boolean().optional(),
+  pinchToZoom: z.boolean().optional(),
+  mode: z.enum(["photo", "video"]).optional(),
+};
+
+/**
+ * The media node schemas (`videoPlayer`, `castButton`, `cameraPreview`): the shared node fields
+ * plus their own.
+ */
+export function prototypeMediaNodeSchemas<T extends z.ZodRawShape>(common: T) {
+  return [
+    z.object({ ...common, ...videoPlayerShape }).strict(),
+    z.object({ ...common, ...castButtonShape }).strict(),
+    z.object({ ...common, ...cameraPreviewShape }).strict(),
+  ] as const;
 }

@@ -1,0 +1,281 @@
+{
+  "id": "watch-41mm-list",
+  "window": {
+    "placement": {
+      "type": "floating",
+      "gravity": "center",
+      "offset": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  "root": {
+    "type": "box",
+    "contentDescription": "41 mm watch screen",
+    "style": {
+      "width": {
+        "dp": 176
+      },
+      "height": {
+        "dp": 215
+      },
+      "cornerRadius": 36,
+      "background": "#000000"
+    },
+    "children": [
+      {
+        "type": "scroll",
+        "axis": "vertical",
+        "style": {
+          "width": "fill",
+          "height": "fill"
+        },
+        "child": {
+          "type": "column",
+          "style": {
+            "width": "fill",
+            "padding": {
+              "start": 8,
+              "end": 8,
+              "top": 12,
+              "bottom": 16
+            },
+            "spacing": 6
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Reminders",
+              "style": {
+                "textSize": 17,
+                "fontWeight": 600,
+                "color": "#FF9F0A"
+              }
+            },
+            {
+              "type": "row",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "open-water"
+                }
+              ],
+              "style": {
+                "width": "fill",
+                "background": "#222222",
+                "cornerRadius": 16,
+                "padding": {
+                  "start": 10,
+                  "end": 10,
+                  "top": 8,
+                  "bottom": 8
+                },
+                "spacing": 8,
+                "alignment": "centerStart"
+              },
+              "children": [
+                {
+                  "type": "icon",
+                  "name": "alarm",
+                  "style": {
+                    "color": "#FF9F0A"
+                  }
+                },
+                {
+                  "type": "column",
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Drink water",
+                      "style": {
+                        "textSize": 15,
+                        "fontWeight": 600,
+                        "color": "#FFFFFF",
+                        "maxLines": 1
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "Every 2 hours",
+                      "style": {
+                        "textSize": 13,
+                        "color": "#AEAEB2",
+                        "maxLines": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "row",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "open-stand"
+                }
+              ],
+              "style": {
+                "width": "fill",
+                "background": "#222222",
+                "cornerRadius": 16,
+                "padding": {
+                  "start": 10,
+                  "end": 10,
+                  "top": 8,
+                  "bottom": 8
+                },
+                "spacing": 8,
+                "alignment": "centerStart"
+              },
+              "children": [
+                {
+                  "type": "icon",
+                  "name": "alarm",
+                  "style": {
+                    "color": "#FF9F0A"
+                  }
+                },
+                {
+                  "type": "column",
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Stand up",
+                      "style": {
+                        "textSize": 15,
+                        "fontWeight": 600,
+                        "color": "#FFFFFF",
+                        "maxLines": 1
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "10:50",
+                      "style": {
+                        "textSize": 13,
+                        "color": "#AEAEB2",
+                        "maxLines": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "row",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "open-call"
+                }
+              ],
+              "style": {
+                "width": "fill",
+                "background": "#222222",
+                "cornerRadius": 16,
+                "padding": {
+                  "start": 10,
+                  "end": 10,
+                  "top": 8,
+                  "bottom": 8
+                },
+                "spacing": 8,
+                "alignment": "centerStart"
+              },
+              "children": [
+                {
+                  "type": "icon",
+                  "name": "alarm",
+                  "style": {
+                    "color": "#FF9F0A"
+                  }
+                },
+                {
+                  "type": "column",
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Call Mom",
+                      "style": {
+                        "textSize": 15,
+                        "fontWeight": 600,
+                        "color": "#FFFFFF",
+                        "maxLines": 1
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "18:00",
+                      "style": {
+                        "textSize": 13,
+                        "color": "#AEAEB2",
+                        "maxLines": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "row",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "open-meds"
+                }
+              ],
+              "style": {
+                "width": "fill",
+                "background": "#222222",
+                "cornerRadius": 16,
+                "padding": {
+                  "start": 10,
+                  "end": 10,
+                  "top": 8,
+                  "bottom": 8
+                },
+                "spacing": 8,
+                "alignment": "centerStart"
+              },
+              "children": [
+                {
+                  "type": "icon",
+                  "name": "alarm",
+                  "style": {
+                    "color": "#FF9F0A"
+                  }
+                },
+                {
+                  "type": "column",
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Vitamins",
+                      "style": {
+                        "textSize": 15,
+                        "fontWeight": 600,
+                        "color": "#FFFFFF",
+                        "maxLines": 1
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "Tomorrow",
+                      "style": {
+                        "textSize": 13,
+                        "color": "#AEAEB2",
+                        "maxLines": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

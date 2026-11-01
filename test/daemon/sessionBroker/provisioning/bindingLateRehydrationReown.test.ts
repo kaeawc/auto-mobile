@@ -141,7 +141,7 @@ describe("managed execution across a daemon restart", () => {
       ).kind,
     ).toBe("claimed");
     before.stopCleanupTimer();
-    await persistence.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+    await persistence.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
     livePids.delete(BEFORE.pid);
     livePids.add(AFTER.pid);
 

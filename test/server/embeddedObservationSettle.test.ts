@@ -221,16 +221,17 @@ class ScreenshotSettleScreen extends FakeObserveScreen {
 
   override async captureScreenshot(
     perf?: Parameters<FakeObserveScreen["captureScreenshot"]>[0],
-    signal?: AbortSignal,
-    observation?: ObserveResult,
+    { signal, observation }: { signal?: AbortSignal; observation?: ObserveResult } = {},
   ): Promise<void> {
-    await super.captureScreenshot(perf, signal, observation);
+    await super.captureScreenshot(perf, { signal, observation });
     if (!observation) {
       throw new Error("Expected the adopted observation");
     }
     observation.screenshotCaptureAttempted = true;
     const path = `/fake/${observation.observationId}.png`;
-    this.screenshots.updateForObservation(observation.deviceId!, observation.observationId, path);
+    this.screenshots.updateForObservation(observation.deviceId!, observation.observationId, {
+      path,
+    });
     if (this.settledScreenshot) {
       observation.screenshotPath = path;
       observation.screenshotSettled = true;
@@ -458,7 +459,11 @@ function deviceLikeObserveScreen(h: Awaited<ReturnType<typeof deviceLikeAndroidH
       hierarchyCapture: createDeviceHierarchyCapture(h.device, {
         timer: h.timer,
         syncClientFactory: () => ({
-          requestHierarchySync: (...args) => h.hierarchy.requestHierarchySync(...args),
+          requestHierarchySync: (perf, disableAllFiltering, signal, { timeoutMs, ...options }) =>
+            h.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, {
+              timeoutMs,
+              ...options,
+            }),
           convertToViewHierarchyResult: (value) =>
             h.hierarchy.convertToViewHierarchyResult(value as AccessibilityHierarchy),
         }),

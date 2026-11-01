@@ -33,6 +33,8 @@ export interface HierarchySnapshot {
   hierarchy: ViewHierarchyResult;
   nodes: readonly SearchableEntry[];
   searchRaw?: boolean;
+  /** The projection option the snapshot was built with, so a refresh projects the same way. */
+  iosMultiPanel?: boolean;
 }
 
 const capturedHierarchies = new WeakMap<ViewHierarchyResult, HierarchySnapshot>();
@@ -56,20 +58,28 @@ export function getHierarchySnapshot(
   return hierarchy ? capturedHierarchies.get(hierarchy) : undefined;
 }
 
+/** How a newly identified capture is named; a fresh id comes from `ids` when `captureId` is unset. */
+export interface ObservedHierarchyIdentity {
+  ids?: IdGenerator;
+  captureId?: string;
+  iosMultiPanel?: boolean;
+}
+
 export function identifyObservedHierarchy(
   platform: "android" | "ios",
   source: ViewHierarchyResult,
   freshness: HierarchyCaptureRequest["freshness"],
-  timer: Timer = defaultTimer,
-  ids: IdGenerator = defaultIdGenerator,
-  captureIdentity?: string | { captureId?: string; iosMultiPanel?: boolean },
+  {
+    timer = defaultTimer,
+    ids = defaultIdGenerator,
+    captureId,
+    iosMultiPanel = false,
+  }: ObservedHierarchyIdentity & { timer?: Timer } = {},
 ): HierarchySnapshot {
   const existing = getHierarchySnapshot(source);
   if (existing) {
     return existing;
   }
-  const { captureId, iosMultiPanel = false } =
-    (typeof captureIdentity === "string" ? { captureId: captureIdentity } : captureIdentity) ?? {};
   const hierarchy = projectActionableHierarchy(platform, source, iosMultiPanel);
   const snapshot: HierarchySnapshot = {
     captureId: captureId ?? ids.next(),
@@ -79,6 +89,7 @@ export function identifyObservedHierarchy(
     receivedAt: source.receivedAt ?? timer.now(),
     hierarchy,
     nodes: observedSearchable.project(hierarchy),
+    ...(iosMultiPanel ? { iosMultiPanel } : {}),
   };
   capturedHierarchies.set(source, snapshot);
   capturedHierarchies.set(hierarchy, snapshot);
@@ -96,9 +107,37 @@ export function inheritHierarchySnapshot(
     return;
   }
   const hierarchy = projectActionableHierarchy(existing.platform, target, iosMultiPanel);
-  const snapshot = { ...existing, hierarchy, nodes: observedSearchable.project(hierarchy) };
+  const snapshot = {
+    ...existing,
+    hierarchy,
+    nodes: observedSearchable.project(hierarchy),
+    ...(iosMultiPanel ? { iosMultiPanel } : {}),
+  };
   capturedHierarchies.set(target, snapshot);
   capturedHierarchies.set(hierarchy, snapshot);
+}
+
+/**
+ * Rebuild the selector index of a hierarchy that was changed in place after its snapshot was
+ * bound (the iOS SDK bridge merge, #5159), keeping its capture identity.
+ */
+export function refreshHierarchySnapshot(hierarchy: ViewHierarchyResult): void {
+  const existing = getHierarchySnapshot(hierarchy);
+  if (!existing) {
+    return;
+  }
+  const projected = projectActionableHierarchy(
+    existing.platform,
+    hierarchy,
+    existing.iosMultiPanel ?? false,
+  );
+  const snapshot = {
+    ...existing,
+    hierarchy: projected,
+    nodes: observedSearchable.project(projected),
+  };
+  capturedHierarchies.set(hierarchy, snapshot);
+  capturedHierarchies.set(projected, snapshot);
 }
 
 export interface HierarchyCapture {

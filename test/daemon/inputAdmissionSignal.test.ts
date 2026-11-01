@@ -197,8 +197,7 @@ describe("InputDeviceGating.runTrackedDeviceInput hands admission the frame's si
       "input/admission-signal-test",
       device,
       async () => "sent",
-      ownerSignal,
-      () => SESSION,
+      { ownerSignal, requester: () => SESSION },
     );
     return { admitted, result };
   }

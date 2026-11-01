@@ -107,11 +107,13 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
       INVENTORY_READ,
       "inventory read probe",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => {
-        entered.resolve();
-        return await outcome.promise;
+      {
+        handler: async () => {
+          entered.resolve();
+          return await outcome.promise;
+        },
+        readOnly: true,
       },
-      { readOnly: true },
     );
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();

@@ -35,7 +35,7 @@ describe("SqliteFeatureFlagRepository config_json validation (#11859)", () => {
   test("reads a stored object config unchanged", async () => {
     await storeRawConfig('{"level":"AAA","ignoreRules":["1.4.3"]}');
     const log = new FakeLogger();
-    const flags = await new SqliteFeatureFlagRepository(db, undefined, log).listFlags();
+    const flags = await new SqliteFeatureFlagRepository({ db, log }).listFlags();
 
     expect(flags[0]?.config).toEqual({ level: "AAA", ignoreRules: ["1.4.3"] });
     expect(log.at("warn")).toHaveLength(0);
@@ -50,7 +50,7 @@ describe("SqliteFeatureFlagRepository config_json validation (#11859)", () => {
   ])("reads %s as null with a warning instead of throwing", async (_name, raw) => {
     await storeRawConfig(raw);
     const log = new FakeLogger();
-    const flags = await new SqliteFeatureFlagRepository(db, undefined, log).listFlags();
+    const flags = await new SqliteFeatureFlagRepository({ db, log }).listFlags();
 
     expect(flags).toHaveLength(1);
     expect(flags[0]?.enabled).toBe(true);
@@ -61,7 +61,7 @@ describe("SqliteFeatureFlagRepository config_json validation (#11859)", () => {
   test("a SQL NULL config is null without a warning", async () => {
     await storeRawConfig(null);
     const log = new FakeLogger();
-    const flags = await new SqliteFeatureFlagRepository(db, undefined, log).listFlags();
+    const flags = await new SqliteFeatureFlagRepository({ db, log }).listFlags();
 
     expect(flags[0]?.config).toBeNull();
     expect(log.at("warn")).toHaveLength(0);
@@ -71,7 +71,7 @@ describe("SqliteFeatureFlagRepository config_json validation (#11859)", () => {
     await storeRawConfig('{"level":');
     const applier = new FakeFeatureFlagApplier();
     const service = new FeatureFlagService(
-      new SqliteFeatureFlagRepository(db, undefined, new FakeLogger()),
+      new SqliteFeatureFlagRepository({ db, log: new FakeLogger() }),
       applier,
       definitions,
     );

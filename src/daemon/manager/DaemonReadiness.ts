@@ -42,10 +42,17 @@ export class DaemonReadiness {
    */
   async waitForReady(
     timeout: number,
-    signal?: AbortSignal,
-    shouldContinueWaiting: () => boolean = () => true,
-    maxProbeDurationMs?: number,
-    launchedProcess?: { pid: number | undefined; launchNonce?: string },
+    {
+      signal,
+      shouldContinueWaiting = () => true,
+      maxProbeDurationMs,
+      launchedProcess,
+    }: {
+      signal?: AbortSignal;
+      shouldContinueWaiting?: () => boolean;
+      maxProbeDurationMs?: number;
+      launchedProcess?: { pid: number | undefined; launchNonce?: string };
+    } = {},
   ): Promise<boolean> {
     return launchedProcess
       ? this.waitForLaunchedProcessReady(
@@ -83,13 +90,10 @@ export class DaemonReadiness {
       const keepWaiting = shouldContinueWaiting();
       if (this.host.socketPathObservable()) {
         socketObserved = true;
-        const outcome = await this.probeObservedSocketWithWatchdog(
-          keepWaiting,
-          deadline,
-          signal,
+        const outcome = await this.probeObservedSocketWithWatchdog(keepWaiting, deadline, signal, {
           shouldContinueWaiting,
           maxProbeDurationMs,
-        );
+        });
         if (outcome === "ready") {
           stderrLog(
             `Daemon readiness probe succeeded after ${this.host.timer.now() - startTime}ms ` +
@@ -152,8 +156,10 @@ export class DaemonReadiness {
     keepWaiting: boolean,
     deadline: number,
     signal: AbortSignal | undefined,
-    shouldContinueWaiting: () => boolean,
-    maxProbeDurationMs: number | undefined,
+    {
+      shouldContinueWaiting,
+      maxProbeDurationMs,
+    }: { shouldContinueWaiting: () => boolean; maxProbeDurationMs?: number },
   ): Promise<"ready" | "aborted" | "unready"> {
     const probeDeadline = keepWaiting
       ? Math.min(

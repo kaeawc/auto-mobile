@@ -50,8 +50,7 @@ function linkedError(
   linked: Raw,
   path: string,
   node: Located,
-  nodes: readonly Located[],
-  scopes: readonly string[],
+  { nodes, scopes }: { nodes: readonly Located[]; scopes: readonly string[] },
 ) {
   const range = linked.range as number[];
   if (range[0] >= range[1]) {
@@ -94,7 +93,7 @@ export function prototypeScrollMotionError(
       return { path: node.path, message: "Scroll binding limit exceeded" };
     }
     if (linked) {
-      const error = linkedError(linked, `${node.path}.scrollLinked`, node, nodes, scopes);
+      const error = linkedError(linked, `${node.path}.scrollLinked`, node, { nodes, scopes });
       if (error) {
         return error;
       }

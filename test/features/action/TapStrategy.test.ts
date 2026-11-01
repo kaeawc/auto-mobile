@@ -269,13 +269,10 @@ describe("TapStrategy", () => {
 
     it("createTapStrategy threads featureFlags into the Android strategy", async () => {
       const detector = new FakeAccessibilityDetector();
-      const strategy = createTapStrategy(
-        androidDevice,
-        new FakeAdbClient(),
-        detector,
-        new FakeIosVoiceOverDetector(),
-        sentinelFlags,
-      );
+      const strategy = createTapStrategy(androidDevice, new FakeAdbClient(), detector, {
+        iosVoiceOverDetector: new FakeIosVoiceOverDetector(),
+        featureFlags: sentinelFlags,
+      });
       await strategy.isAccessibilityServiceEnabled();
       expect(detector.detectMethodFeatureFlagsArgs).toEqual([sentinelFlags]);
     });
@@ -286,8 +283,7 @@ describe("TapStrategy", () => {
         iosDevice,
         new FakeAdbClient(),
         new FakeAccessibilityDetector(),
-        detector,
-        sentinelFlags,
+        { iosVoiceOverDetector: detector, featureFlags: sentinelFlags },
       );
       await strategy.isAccessibilityServiceEnabled();
       expect(detector.isVoiceOverEnabledFeatureFlagsArgs).toEqual([sentinelFlags]);
@@ -300,7 +296,7 @@ describe("TapStrategy", () => {
         androidDevice,
         new FakeAdbClient(),
         new FakeAccessibilityDetector(),
-        new FakeIosVoiceOverDetector(),
+        { iosVoiceOverDetector: new FakeIosVoiceOverDetector() },
       );
       expect(strategy).toBeInstanceOf(AndroidTapStrategy);
       expect(strategy.longPressDurationMs).toBe(500);
@@ -311,7 +307,7 @@ describe("TapStrategy", () => {
         iosDevice,
         new FakeAdbClient(),
         new FakeAccessibilityDetector(),
-        new FakeIosVoiceOverDetector(),
+        { iosVoiceOverDetector: new FakeIosVoiceOverDetector() },
       );
       expect(strategy).toBeInstanceOf(IosTapStrategy);
       expect(strategy.longPressDurationMs).toBe(1000);
@@ -348,13 +344,13 @@ test("platform tap refinements are Android-only capabilities of the strategy", (
     { name: "a", deviceId: "emulator-5554", platform: "android" },
     new FakeAdbClient(),
     new FakeAccessibilityDetector(),
-    new FakeIosVoiceOverDetector(),
+    { iosVoiceOverDetector: new FakeIosVoiceOverDetector() },
   );
   const ios = createTapStrategy(
     { name: "i", deviceId: "sim", platform: "ios" },
     new FakeAdbClient(),
     new FakeAccessibilityDetector(),
-    new FakeIosVoiceOverDetector(),
+    { iosVoiceOverDetector: new FakeIosVoiceOverDetector() },
   );
   const flags = (s: TapStrategy) => [
     s.warnsOnDisabledElement,

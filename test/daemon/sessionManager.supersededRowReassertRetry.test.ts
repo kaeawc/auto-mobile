@@ -123,7 +123,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
         await manager.rebindSession(SESSION, "emulator-5556", "android");
         expect(session.assignedDevice).toBe("emulator-5556");
       } else {
-        await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+        await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
         timer.advanceTime(1);
         expect(await refresh()).toBe("refreshed");
         expect(await store.getSession(SESSION)).toMatchObject({ status: "active" });
@@ -277,7 +277,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
         await manager.rebindSession(SESSION, "emulator-5556", "android");
         expect(await store.getSession(SESSION)).toMatchObject({ device_id: "emulator-5556" });
       } else {
-        await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+        await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
         store.duringActivityUpsert = changeOwner;
         timer.advanceTime(1);
         expect(await refresh()).toBe("refreshed");
@@ -349,7 +349,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
       const session = await manager.createSession(SESSION, DEVICE, "android", {
         timeoutMs: IDLE_WINDOW_MS,
       });
-      await store.markReleased(SESSION, "expired", timer.now(), reason);
+      await store.markReleased(SESSION, "expired", timer.now(), { reason });
       timer.advanceTime(1);
       store.activityUpserts = 0;
       expect(await Promise.all([refresh(), refresh()])).toEqual(["refreshed", "refreshed"]);
@@ -584,9 +584,9 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
       }
       const writes: string[] = [];
       const markReleased = store.markReleased.bind(store);
-      store.markReleased = async (uuid, status, at, reason, options) => {
-        writes.push(reason);
-        await markReleased(uuid, status, at, reason, options);
+      store.markReleased = async (uuid, status, at, options) => {
+        writes.push(options.reason);
+        await markReleased(uuid, status, at, options);
       };
       await manager.testHooks.wiring.supersededRows.restoreReleasedRowAfterReassert(session);
       return writes;
@@ -651,7 +651,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
     const session = await manager.createSession(SESSION, DEVICE, "android", {
       timeoutMs: IDLE_WINDOW_MS,
     });
-    await store.markReleased(SESSION, "released", timer.now(), "daemon-restart");
+    await store.markReleased(SESSION, "released", timer.now(), { reason: "daemon-restart" });
     const before = { ...(await store.getSession(SESSION))!, daemon_session_id: "daemon-peer" };
     store.seed(structuredClone(before));
     timer.advanceTime(1);
@@ -669,7 +669,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
       const old = await manager.createSession(SESSION, DEVICE, "android", {
         timeoutMs: IDLE_WINDOW_MS,
       });
-      await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
       let land!: () => void;
       let parked = false;
       store.duringActivityUpsert = () => {
@@ -721,7 +721,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
     const session = await manager.createSession(SESSION, DEVICE, "android", {
       timeoutMs: IDLE_WINDOW_MS,
     });
-    await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+    await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
     store.failActivityUpserts = 1;
     timer.advanceTime(1);
     expect(await refresh()).toBe("SessionActivityPersistenceError");
@@ -1116,7 +1116,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
     const session = await manager.createSession(SESSION, DEVICE, "android", {
       timeoutMs: IDLE_WINDOW_MS,
     });
-    await store.markReleased(SESSION, "expired", timer.now(), STALE_REASON);
+    await store.markReleased(SESSION, "expired", timer.now(), { reason: STALE_REASON });
     store.plainUpserts = 0;
     const settleExpected = manager.testHooks.wiring.host.superseded.expectReassert(SESSION);
     return () => {
@@ -1219,7 +1219,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
       });
       manager.attachTerminalReleaseJournal(journal);
       // Repair a peer startup sweep's expiry through the real activity persistence path.
-      await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
       const landed = Promise.withResolvers<number>();
       const statement = Promise.withResolvers<number>();
       const upsert = store.upsertActiveSession.bind(store);

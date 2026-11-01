@@ -202,13 +202,25 @@ export class IosSimulatorPermissions {
   private readonly backend: IosPermissionsBackend;
   private tccReader: TccPermissionReader;
 
+  private readonly withPrivacyLock: typeof withDeviceReadinessLock;
+  private readonly photosVerifier: PhotosAuthorizationVerifier;
+
   constructor(
     device: BootedDevice,
-    simctl: IosSimulatorPrivacyClient | null = null,
-    tccReader: TccPermissionReader | null = null,
-    private readonly withPrivacyLock: typeof withDeviceReadinessLock = withDeviceReadinessLock,
-    private readonly photosVerifier: PhotosAuthorizationVerifier = new UnobservablePhotosAuthorizationVerifier(),
+    {
+      simctl = null,
+      tccReader = null,
+      withPrivacyLock = withDeviceReadinessLock,
+      photosVerifier = new UnobservablePhotosAuthorizationVerifier(),
+    }: {
+      simctl?: IosSimulatorPrivacyClient | null;
+      tccReader?: TccPermissionReader | null;
+      withPrivacyLock?: typeof withDeviceReadinessLock;
+      photosVerifier?: PhotosAuthorizationVerifier;
+    } = {},
   ) {
+    this.withPrivacyLock = withPrivacyLock;
+    this.photosVerifier = photosVerifier;
     this.device = device;
     this.iosMajor = parseIosMajorVersion(device.iosVersion ?? device.osVersion);
     this.backend = resolveIosPermissionsBackend({

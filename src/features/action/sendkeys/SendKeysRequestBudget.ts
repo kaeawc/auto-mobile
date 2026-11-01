@@ -21,6 +21,14 @@ export function isSendKeysBudgetExhausted(signal?: AbortSignal): boolean {
   return signal?.aborted === true && signal.reason instanceof SendKeysBudgetError;
 }
 
+/** Context for the bounded iOS IME interaction, after the commands and the semantic key. */
+export interface BoundedIosImeOptions {
+  selector?: SendKeysSelector;
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+  target: Pick<SendKeysRouting, "display" | "assertCurrent" | "container" | "selectionStrategy">;
+}
+
 export interface SendKeysRequestBudgetDeps {
   platform(): string;
   timer: Timer;
@@ -28,8 +36,7 @@ export interface SendKeysRequestBudgetDeps {
     commands: SendKeysCommand[],
     selector?: SendKeysSelector,
     progress?: ProgressCallback,
-    signal?: AbortSignal,
-    routing?: SendKeysRouting,
+    routing?: SendKeysRouting & { signal?: AbortSignal },
   ): Promise<SendKeysResult>;
 }
 
@@ -54,7 +61,7 @@ export class SendKeysRequestBudget {
     const getDeadlineMs = getRequestContext()?.getDeadlineMs;
     const deadlineMs = getTextRequestDeadlineMs(getDeadlineMs);
     if (this.deps.platform() !== "android" || deadlineMs === undefined) {
-      return this.deps.executeUnbounded(commands, selector, progress, signal, routing);
+      return this.deps.executeUnbounded(commands, selector, progress, { signal, ...routing });
     }
     const controller = new AbortController();
     const remainingMs = deadlineMs - this.deps.timer.now() - TEXT_MCP_REQUEST_HEADROOM_MS;
@@ -75,7 +82,8 @@ export class SendKeysRequestBudget {
     const results: SendKeysCommandResult[] = [];
     let pending = false;
     try {
-      return await this.deps.executeUnbounded(commands, selector, progress, combined, {
+      return await this.deps.executeUnbounded(commands, selector, progress, {
+        signal: combined,
         ...routing,
         onCommandStart: () => {
           pending = true;
@@ -152,12 +160,10 @@ export class SendKeysRequestBudget {
 
   async executeBoundedIosIme(
     commands: SendKeysCommand[],
-    selector: SendKeysSelector | undefined,
-    progress: ProgressCallback | undefined,
-    signal: AbortSignal | undefined,
     key: SendKeysSemanticKey,
-    target: Pick<SendKeysRouting, "display" | "assertCurrent" | "container" | "selectionStrategy">,
+    options: BoundedIosImeOptions,
   ): Promise<SendKeysResult> {
+    const { selector, progress, signal, target } = options;
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
@@ -169,7 +175,8 @@ export class SendKeysRequestBudget {
     const deadline = Symbol("IME action deadline");
     let interaction!: Promise<SendKeysResult>;
     const startInteraction = () =>
-      (interaction = this.deps.executeUnbounded(commands, selector, progress, controller.signal, {
+      (interaction = this.deps.executeUnbounded(commands, selector, progress, {
+        signal: controller.signal,
         onDispatch: () => {
           dispatched = true;
         },

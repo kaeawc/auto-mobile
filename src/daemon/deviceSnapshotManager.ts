@@ -558,8 +558,10 @@ async function resolveSnapshotSizeBytes(
   snapshotName: string,
   manifest: DeviceSnapshotManifest,
   snapshotStore: DeviceSnapshotStorePort,
-  avdSnapshots: AvdSnapshotOperations,
-  pathOptions: SnapshotPathOptions | undefined,
+  {
+    avdSnapshots,
+    pathOptions,
+  }: { avdSnapshots: AvdSnapshotOperations; pathOptions?: SnapshotPathOptions },
 ): Promise<number | null> {
   if (!isVmSnapshotRecord(manifest)) {
     return snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
@@ -588,8 +590,7 @@ async function deleteUnrecordedVmSnapshot(
   device: BootedDevice,
   snapshotName: string,
   avdSnapshots: AvdSnapshotOperations,
-  vmSnapshotTimeoutMs: number,
-  context: string,
+  { vmSnapshotTimeoutMs, context }: { vmSnapshotTimeoutMs: number; context: string },
 ): Promise<void> {
   try {
     const liveDeviceId = await avdSnapshots.findLiveEmulatorSerial(device.name);
@@ -666,13 +667,10 @@ async function recordFailedVmSnapshotReclaim({
         `[DeviceSnapshot] Same-named capture '${snapshotName}' failed on AVD '${device.name}' ` +
           `(${device.deviceId}); preserving the existing row because ${preservationReason}: ${reason}`,
       );
-      await deleteUnrecordedVmSnapshot(
-        device,
-        snapshotName,
-        avdSnapshots,
+      await deleteUnrecordedVmSnapshot(device, snapshotName, avdSnapshots, {
         vmSnapshotTimeoutMs,
-        "failed same-named",
-      );
+        context: "failed same-named",
+      });
       return false;
     }
 
@@ -711,13 +709,10 @@ async function recordFailedVmSnapshotReclaim({
         `on AVD '${device.name}': ${errorMessage(recordError)}`,
       recordError,
     );
-    await deleteUnrecordedVmSnapshot(
-      device,
-      snapshotName,
-      avdSnapshots,
+    await deleteUnrecordedVmSnapshot(device, snapshotName, avdSnapshots, {
       vmSnapshotTimeoutMs,
-      "unrecordable",
-    );
+      context: "unrecordable",
+    });
     return false;
   }
 }
@@ -927,18 +922,21 @@ async function importLegacySnapshot(
   snapshotName: string,
   manifest: DeviceSnapshotManifest,
   snapshotStore: DeviceSnapshotStorePort,
-  snapshotRepository: DeviceSnapshotRepositoryPort,
-  now: () => Date,
-  pathOptions?: SnapshotPathOptions,
+  {
+    snapshotRepository,
+    now,
+    pathOptions,
+  }: {
+    snapshotRepository: DeviceSnapshotRepositoryPort;
+    now: () => Date;
+    pathOptions?: SnapshotPathOptions;
+  },
 ): Promise<DeviceSnapshotRecord | null> {
   const { avdSnapshots } = await getDeviceSnapshotDependencies();
-  const sizeBytes = await resolveSnapshotSizeBytes(
-    snapshotName,
-    manifest,
-    snapshotStore,
+  const sizeBytes = await resolveSnapshotSizeBytes(snapshotName, manifest, snapshotStore, {
     avdSnapshots,
     pathOptions,
-  );
+  });
   const fallbackTimestamp = now().toISOString();
   const createdAt = resolveLegacyTimestamp(manifest.timestamp, fallbackTimestamp);
 
@@ -973,7 +971,10 @@ async function hydrateLegacySnapshot(
 ): Promise<DeviceSnapshotRecord | null> {
   const flatManifest = await discoverSnapshotManifest(snapshotName, snapshotStore, undefined, now);
   if (flatManifest) {
-    return importLegacySnapshot(snapshotName, flatManifest, snapshotStore, snapshotRepository, now);
+    return importLegacySnapshot(snapshotName, flatManifest, snapshotStore, {
+      snapshotRepository,
+      now,
+    });
   }
 
   // Not at the flat/unscoped path — a restore-by-name doesn't know which
@@ -984,14 +985,11 @@ async function hydrateLegacySnapshot(
     return null;
   }
 
-  return importLegacySnapshot(
-    snapshotName,
-    scoped.manifest,
-    snapshotStore,
+  return importLegacySnapshot(snapshotName, scoped.manifest, snapshotStore, {
     snapshotRepository,
     now,
-    scoped.pathOptions,
-  );
+    pathOptions: scoped.pathOptions,
+  });
 }
 
 /**
@@ -1105,13 +1103,10 @@ async function importFlatLegacySnapshots(
       continue;
     }
 
-    const record = await importLegacySnapshot(
-      snapshotName,
-      manifest,
-      snapshotStore,
+    const record = await importLegacySnapshot(snapshotName, manifest, snapshotStore, {
       snapshotRepository,
       now,
-    );
+    });
     if (record) {
       existingSnapshots.add(snapshotName);
       imported = true;
@@ -1174,14 +1169,11 @@ async function importScopedLegacySnapshots(
         continue;
       }
 
-      const record = await importLegacySnapshot(
-        snapshotName,
-        manifest,
-        snapshotStore,
+      const record = await importLegacySnapshot(snapshotName, manifest, snapshotStore, {
         snapshotRepository,
         now,
         pathOptions,
-      );
+      });
       if (record) {
         existingSnapshots.add(snapshotName);
         imported = true;
@@ -1803,9 +1795,11 @@ async function scheduleVmRetentionRetry(
   deviceName: string,
   config: DeviceSnapshotConfig,
   state: VmRetentionState,
-  currentSizeBytes: number,
-  maxSizeBytes: number,
-  excludeFromEviction: string | undefined,
+  {
+    currentSizeBytes,
+    maxSizeBytes,
+    excludeFromEviction,
+  }: { currentSizeBytes: number; maxSizeBytes: number; excludeFromEviction: string | undefined },
 ): Promise<void> {
   const remainsOverLimit =
     state.snapshots.length > config.maxVmSnapshotsPerAvd ||
@@ -1887,14 +1881,11 @@ async function enforceVmSnapshotRetentionForDevice(
     if (state.evictedSnapshotNames.length > 0) {
       await notifySnapshotResources();
     }
-    await scheduleVmRetentionRetry(
-      deviceName,
-      config,
-      state,
+    await scheduleVmRetentionRetry(deviceName, config, state, {
       currentSizeBytes,
       maxSizeBytes,
-      options.excludeFromEviction,
-    );
+      excludeFromEviction: options.excludeFromEviction,
+    });
 
     return {
       evictedSnapshotNames: state.evictedSnapshotNames,
@@ -2258,8 +2249,7 @@ export async function captureDeviceSnapshot(
                 snapshotName,
                 captured.manifest,
                 snapshotStore,
-                avdSnapshots,
-                pathOptions,
+                { avdSnapshots, pathOptions },
               );
               const timestamp = captured.manifest.timestamp;
 

@@ -8,6 +8,70 @@ const fixture = (name: string) =>
   );
 const playground = fixture("dumpsys-package-installed");
 const egg = fixture("dumpsys-package-system-installed");
+const maps = fixture("dumpsys-package-shared-uid-maps");
+
+test("captured Maps shared-user runtime permissions are parsed for user 0", () => {
+  const state = parseAndroidRuntimePermissions(maps, "com.google.android.apps.maps", 0)!;
+  expect(state.runtimePermissions.get("android.permission.ACCESS_FINE_LOCATION")).toMatchObject({
+    state: "denied",
+    source: "androidRuntime",
+  });
+  expect(state.runtimePermissions.size).toBe(16);
+});
+
+test("captured Maps shared-user permissions do not fall back to user 0", () => {
+  const state = parseAndroidRuntimePermissions(maps, "com.google.android.apps.maps", 10)!;
+  expect(state.runtimePermissions.size).toBe(0);
+});
+
+test("captured Maps install permissions remain available", () => {
+  const state = parseAndroidRuntimePermissions(maps, "com.google.android.apps.maps")!;
+  expect(state.installPermissions.size).toBeGreaterThan(0);
+  expect(state.installPermissions.has("android.permission.DOWNLOAD_WITHOUT_NOTIFICATION")).toBe(
+    true,
+  );
+});
+
+test("package permission blocks take precedence over shared-user blocks, even when empty", () => {
+  const capture = `Packages:
+  Package [com.example.app] (123):
+    sharedUser=SharedUserSetting{456 com.example.shared/10174}
+    install permissions:
+    User 0:
+      runtime permissions:
+Shared users:
+  SharedUser [com.example.shared] (456):
+    install permissions:
+      android.permission.INTERNET: granted=true
+    User 0:
+      runtime permissions:
+        android.permission.CAMERA: granted=true
+`;
+  const state = parseAndroidRuntimePermissions(capture, "com.example.app")!;
+  expect(state.installPermissions.size).toBe(0);
+  expect(state.runtimePermissions.size).toBe(0);
+});
+
+test("missing package blocks use the declared shared user's install and target-user grants", () => {
+  const capture = `Packages:
+  Package [com.example.app] (123):
+    sharedUser=SharedUserSetting{456 com.example.shared/10174}
+Shared users:
+  SharedUser [com.example.other] (789):
+    User 10:
+      runtime permissions:
+        android.permission.CAMERA: granted=false
+  SharedUser [com.example.shared] (456):
+    install permissions:
+      android.permission.INTERNET: granted=true
+    User 10:
+      runtime permissions:
+        android.permission.CAMERA: granted=true
+`;
+  const state = parseAndroidRuntimePermissions(capture, "com.example.app", 10)!;
+  expect(state.installPermissions.get("android.permission.INTERNET")?.state).toBe("granted");
+  expect(state.runtimePermissions.get("android.permission.CAMERA")?.state).toBe("granted");
+});
 
 test("a permissionless package may omit requested permissions entirely", () => {
   const state = parseAndroidRuntimePermissions(

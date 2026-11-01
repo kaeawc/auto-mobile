@@ -34,7 +34,7 @@ export class SimCtlScreenshot {
   constructor(private readonly context: SimCtlScreenshotContext) {}
 
   /** Capture the selected physical framebuffer as PNG through a private temporary file. */
-  async screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+  async screenshot(deviceId: string, display?: string, signal?: AbortSignal): Promise<Buffer> {
     const startedAt = this.context.timer.now();
     const timeout = new AbortController();
     const handle = this.context.timer.setTimeout(() => timeout.abort(), 10_000);
@@ -150,11 +150,17 @@ export class SimCtlScreenshot {
 
   async captureScreenshotFile(
     deviceId: string,
-    display: string,
+    display: string | undefined,
     path: string,
     context: ScreenshotCaptureContext,
   ): Promise<Buffer> {
-    const args = buildSimctlArgs(["io", deviceId, "screenshot", `--display=${display}`, path]);
+    const args = buildSimctlArgs([
+      "io",
+      deviceId,
+      "screenshot",
+      ...(display === undefined ? [] : [`--display=${display}`]),
+      path,
+    ]);
     const captureSignal = context.signal;
     const errors: Buffer[] = [];
     const stderrText = (): string => Buffer.concat(errors).toString();

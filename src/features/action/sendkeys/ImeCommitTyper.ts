@@ -44,13 +44,16 @@ interface ImeCommitProgress {
   result: TextActionResult;
   safeToRestore: boolean;
 }
-interface ActiveImeCommitOptions {
-  text: string;
-  operation: SendKeysOperation;
-  keyboardProfile: KeyboardProfileId | undefined;
+/** The IME state read before a commit, which the commit must restore afterwards. */
+interface CapturedImeState {
   prior: string | null;
   wasEnabled: boolean;
   priorSubtype: ImeSubtypeSnapshot;
+}
+interface ActiveImeCommitOptions extends CapturedImeState {
+  text: string;
+  operation: SendKeysOperation;
+  keyboardProfile: KeyboardProfileId | undefined;
   routing?: ImeCommitRouting;
   mode?: "ime" | "imeKeyEvents";
 }
@@ -141,34 +144,30 @@ export class ImeCommitTyper implements AndroidModeTyper {
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
     return mode === "imeKeyEvents"
-      ? this.host.executeAndroidImeCommit(text, operation, keyboardProfile, routing, mode)
-      : this.executeAndroidImeOrFallback(
-          text,
-          operation,
-          keyboardProfile,
+      ? this.host.executeAndroidImeCommit(text, operation, keyboardProfile, { routing, mode })
+      : this.executeAndroidImeOrFallback(text, operation, keyboardProfile, {
           autoImeFallback,
-          routing,
-        );
+          ...routing,
+        });
   }
 
   private async executeAndroidImeOrFallback(
     text: string,
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
-    autoImeFallback: AndroidTypeOptions["autoImeFallback"],
-    routing: ImeCommitRouting = {},
+    {
+      autoImeFallback,
+      ...routing
+    }: ImeCommitRouting & { autoImeFallback: AndroidTypeOptions["autoImeFallback"] },
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const { signal } = routing;
     if (!autoImeFallback) {
-      return this.host.executeAndroidImeCommit(text, operation, keyboardProfile, routing);
+      return this.host.executeAndroidImeCommit(text, operation, keyboardProfile, { routing });
     }
     if (await this.host.textClient.supportsImeCommit()) {
-      const result = await this.host.executeAndroidImeCommit(
-        text,
-        operation,
-        keyboardProfile,
+      const result = await this.host.executeAndroidImeCommit(text, operation, keyboardProfile, {
         routing,
-      );
+      });
       if (!result.imeActivationFailed) {
         return result;
       }
@@ -194,8 +193,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
     text: string,
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
-    routing: ImeCommitRouting = {},
-    mode: "ime" | "imeKeyEvents" = "ime",
+    {
+      routing = {},
+      mode = "ime",
+    }: { routing?: ImeCommitRouting; mode?: "ime" | "imeKeyEvents" } = {},
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
@@ -208,7 +209,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
         passwordField: routing.passwordField,
       };
       await this.imeSpanService.acquireImeSpan(this.imeSpanService.imeSpan, signal);
-      return this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode);
+      return this.runAndroidImeCommit(text, operation, keyboardProfile, { routing, mode });
     }
     // Serialize the whole capture→activate→commit→restore section per device so a
     // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
@@ -216,7 +217,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
       this.host.device.deviceId,
       async () => {
         try {
-          return await this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode);
+          return await this.runAndroidImeCommit(text, operation, keyboardProfile, {
+            routing,
+            mode,
+          });
         } finally {
           this.host.session.imeUserId = undefined;
         }
@@ -230,8 +234,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
     text: string,
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
-    routing: ImeCommitRouting = {},
-    mode: "ime" | "imeKeyEvents" = "ime",
+    {
+      routing = {},
+      mode = "ime",
+    }: { routing?: ImeCommitRouting; mode?: "ime" | "imeKeyEvents" } = {},
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
@@ -321,10 +327,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
   /** Pins the foreground user, then reads the IME state that the commit must restore. */
   private async captureImeState(
     signal?: AbortSignal,
-  ): Promise<
-    | { success: true; prior: string | null; wasEnabled: boolean; priorSubtype: ImeSubtypeSnapshot }
-    | { success: false; error: string }
-  > {
+  ): Promise<({ success: true } & CapturedImeState) | { success: false; error: string }> {
     const pinned = await this.restoration.pinImeUser(signal);
     this.host.checkAbort(signal);
     if (!pinned.success) {
@@ -398,17 +401,16 @@ export class ImeCommitTyper implements AndroidModeTyper {
       );
     }
 
+    const captured = { prior, wasEnabled, priorSubtype };
     const { outcome, failure, safeToRestore } = await this.performImeCommit(
       text,
       operation,
-      prior,
       routing,
-      mode,
-      { ...priorSubtype, wasEnabled },
+      { mode, captured },
     );
     if (safeToRestore) {
       await this.restoration.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
-      return this.restoreAfterImeCommit(prior, wasEnabled, priorSubtype, outcome, failure, mode);
+      return this.restoreAfterImeCommit(captured, outcome, failure, mode);
     }
     if (failure !== undefined) {
       throw failure;
@@ -443,13 +445,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
         logger.debug("[SendKeys] IME trace capability unavailable", error);
       }
     }
-    let result = await this.host.textClient.commitViaIme(
-      text,
-      priorImeId,
-      signal,
+    let result = await this.host.textClient.commitViaIme(text, priorImeId, signal, {
       delivery,
-      trace ? true : undefined,
-    );
+      trace: trace ? true : undefined,
+    });
     for (
       let attempt = 1;
       attempt <= IME_RESTART_RETRIES && isRetryableImeRestartWithNothingCommitted(result);
@@ -458,13 +457,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
       logger.warn(`[SendKeys] IME editor restarted before any text landed; retry ${attempt}`);
       await this.host.timer.sleep(IME_RESTART_BACKOFF.delayForAttempt(attempt));
       this.host.checkAbort(signal);
-      result = await this.host.textClient.commitViaIme(
-        text,
-        priorImeId,
-        signal,
+      result = await this.host.textClient.commitViaIme(text, priorImeId, signal, {
         delivery,
-        trace ? true : undefined,
-      );
+        trace: trace ? true : undefined,
+      });
     }
     const traceState = this.host.imeTraceContext.getStore();
     if (trace && traceState && result.imeTrace !== undefined) {
@@ -479,8 +475,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
     operation: SendKeysOperation,
     routing: ImeCommitRouting,
     prior: string | null,
-    priorSubtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
-    progress: ImeCommitProgress,
+    {
+      priorSubtype,
+      progress,
+    }: { priorSubtype: ImeSubtypeSnapshot & { wasEnabled: boolean }; progress: ImeCommitProgress },
   ): Promise<{ outcome?: TextActionResult; warning?: string }> {
     if (operation !== "replace" && routing.delivery !== "clearField") {
       return {};
@@ -574,26 +572,23 @@ export class ImeCommitTyper implements AndroidModeTyper {
   private async performImeCommit(
     text: string,
     operation: SendKeysOperation,
-    prior: string | null,
     routing: ImeCommitRouting,
-    mode: "ime" | "imeKeyEvents",
-    priorSubtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
+    { mode, captured }: { mode: "ime" | "imeKeyEvents"; captured: CapturedImeState },
   ): Promise<{
     outcome?: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode };
     failure?: unknown;
     safeToRestore: boolean;
   }> {
     const { signal } = routing;
+    const { prior } = captured;
+    const priorSubtype = { ...captured.priorSubtype, wasEnabled: captured.wasEnabled };
     const progress: ImeCommitProgress = { result: { success: false }, safeToRestore: true };
     try {
       this.host.checkAbort(signal);
-      const cleared = await this.prepareImeCommitClear(
-        operation,
-        routing,
-        prior,
+      const cleared = await this.prepareImeCommitClear(operation, routing, prior, {
         priorSubtype,
         progress,
-      );
+      });
       this.host.checkAbort(signal);
       if (cleared.outcome) {
         return {
@@ -677,13 +672,10 @@ export class ImeCommitTyper implements AndroidModeTyper {
         };
       }
       return {
-        ...imeCommitExceptionResult(
-          error,
-          signal,
-          progress.result,
+        ...imeCommitExceptionResult(error, signal, progress.result, {
           text,
-          routing.focusedFieldClass,
-        ),
+          focusedFieldClass: routing.focusedFieldClass,
+        }),
         safeToRestore: progress.safeToRestore,
       };
     }
@@ -797,9 +789,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
   }
 
   private async restoreAfterImeCommit(
-    prior: string | null,
-    wasEnabled: boolean,
-    priorSubtype: ImeSubtypeSnapshot,
+    { prior, wasEnabled, priorSubtype }: CapturedImeState,
     outcome: (TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }) | undefined,
     failure: unknown,
     mode: "ime" | "imeKeyEvents",

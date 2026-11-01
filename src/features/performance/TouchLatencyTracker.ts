@@ -276,8 +276,7 @@ export class TouchLatencyTracker {
     packageName: string,
     touchLocation: { x: number; y: number },
     maxWaitMs: number,
-    perf: PerformanceTracker,
-    sampleIndex: number,
+    { perf, sampleIndex }: { perf: PerformanceTracker; sampleIndex: number },
   ): Promise<{
     latencyMs: number | null;
     animating: boolean;
@@ -385,8 +384,7 @@ export class TouchLatencyTracker {
     touchLocation: { x: number; y: number },
     measurements: number[],
     animatingCount: number,
-    otherFailureCount: number,
-    obstructedCount: number,
+    { otherFailureCount, obstructedCount }: { otherFailureCount: number; obstructedCount: number },
   ): TouchLatencyResult {
     const anySampleAnimating = animatingCount > 0;
 
@@ -481,7 +479,10 @@ export class TouchLatencyTracker {
       for (let i = 0; i < sampleCount; i++) {
         logger.debug(`[TouchLatency] Taking sample ${i + 1}/${sampleCount}`);
 
-        const sampleResult = await this.takeSample(packageName, touchLocation, maxWaitMs, perf, i);
+        const sampleResult = await this.takeSample(packageName, touchLocation, maxWaitMs, {
+          perf,
+          sampleIndex: i,
+        });
 
         if (sampleResult.animating) {
           animatingCount++;
@@ -506,13 +507,10 @@ export class TouchLatencyTracker {
         }
       }
 
-      return this.buildResult(
-        reportedLocation,
-        measurements,
-        animatingCount,
+      return this.buildResult(reportedLocation, measurements, animatingCount, {
         otherFailureCount,
         obstructedCount,
-      );
+      });
     } catch (error) {
       logger.warn(`[TouchLatency] Failed to measure touch latency: ${errorMessage(error)}`, error);
       return {

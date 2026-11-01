@@ -22,8 +22,10 @@ test("batch renders product-validated host and Android/iOS request contracts", (
     if (client.hardware !== "phone" && client.hardware !== "tablet" && client.hardware !== "duo") {
       throw new Error("fixture must use a hardware archetype");
     }
-    expect(request.device.hardware).toEqual({ kind: "archetype", archetype: client.hardware });
-    expect(request.device.os).toEqual({ kind: "omitted" });
+    expect(request.device).toMatchObject({
+      hardware: { kind: "archetype", archetype: client.hardware },
+      os: { kind: "omitted" },
+    });
   }
 });
 
@@ -43,8 +45,8 @@ test("explicit hardware and OS selectors and timeouts use product validation", (
     device: { hardware: client.hardware, os: client.os },
   });
   expect(
-    renderClientRequest({ name: "default", platform: "android" }, "request").device.hardware,
-  ).toEqual({ kind: "omitted" });
+    renderClientRequest({ name: "default", platform: "android" }, "request").device,
+  ).toMatchObject({ hardware: { kind: "omitted" } });
   expect(() =>
     renderClientRequest(
       {

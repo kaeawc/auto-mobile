@@ -1,3 +1,8 @@
+import type { AppleTvSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
+import type { AppleTvSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorBoot";
+import type { WatchSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
+import type { WatchSimulatorLifecycle } from "../../../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
+import type { WatchRunnerLifecycle } from "../../watch/WatchRunnerLifecycle";
 import { getDefaultSimulatorCreationService } from "../../iosTemplates/defaultSimulatorCreationService";
 import { type DevicePool } from "../../../daemon/devicePool";
 import { defaultDaemonContext, daemonStateLikeFrom } from "../../../daemon/daemonContext";
@@ -108,6 +113,22 @@ export interface DeviceToolsDependencies {
   notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
   syncInstalledAppResourceRegistry: () => Promise<boolean>;
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
+  /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
+  watchSimulatorLifecycleFactory?: () => Pick<WatchSimulatorLifecycle, "findWatch" | "boot">;
+  /** Process-wide watch runner owner, shared by startup and teardown. */
+  watchRunnerLifecycleFactory?: () => Pick<WatchRunnerLifecycle, "start" | "attach" | "stop">;
+  /** Apple Watch simulator adoption, creation and deletion (#15882); defaults to simctl. */
+  watchSimulatorProvisionerFactory?: () => Pick<
+    WatchSimulatorProvisioner,
+    "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
+  >;
+  /** Apple TV boot through shared simctl readiness and simulator capacity admission. */
+  appleTvSimulatorBootFactory?: () => Pick<AppleTvSimulatorBoot, "boot">;
+  /** Exact Apple TV adoption, creation and verified deletion. */
+  appleTvSimulatorProvisionerFactory?: () => Pick<
+    AppleTvSimulatorProvisioner,
+    "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
+  >;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
   exactDeviceProvisionerFactory: (
@@ -292,8 +313,10 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       androidAdbFactory: unadmittedAdbClientFactory,
       daemonState: daemonStateLikeFrom(defaultDaemonContext),
       deviceResourceControllerFactory: () =>
-        new DefaultDeviceResourceController(undefined, undefined, undefined, undefined, undefined, {
-          applications: new DeviceResourceApplicationRepository(),
+        new DefaultDeviceResourceController(undefined, {
+          extras: {
+            applications: new DeviceResourceApplicationRepository(),
+          },
         }),
       deviceResourceObserverFactory: () =>
         new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
@@ -323,13 +346,10 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceProvisionerFactory: () =>
         createDefaultDeviceProvisioner(undefined, undefined, getDefaultSimulatorCreationService()),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
-        createDefaultExactDeviceProvisioner(
-          deviceManager,
-          deviceCreationGate,
-          undefined,
-          assertNotBindingDeviceForAdoption,
-          getDefaultSimulatorCreationService(),
-        ),
+        createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate, {
+          assertAdoptable: assertNotBindingDeviceForAdoption,
+          simulatorCreation: getDefaultSimulatorCreationService(),
+        }),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,

@@ -85,15 +85,17 @@ export class GrantAndroidPermissions {
       return this.resetPermissions(packageName, permissions, input.userId, perf);
     }
 
-    return this.changePermissions(packageName, permissions, input.userId, action, perf);
+    return this.changePermissions(packageName, permissions, input.userId, { action, perf });
   }
 
   private async changePermissions(
     packageName: string,
     permissions: string[],
     userId: number | undefined,
-    action: Exclude<AndroidPermissionChangeAction, "reset">,
-    perf: PerformanceTracker,
+    {
+      action,
+      perf,
+    }: { action: Exclude<AndroidPermissionChangeAction, "reset">; perf: PerformanceTracker },
   ): Promise<GrantAndroidPermissionsResult> {
     if (permissions.length === 0) {
       perf.end();
@@ -149,16 +151,13 @@ export class GrantAndroidPermissions {
           continue;
         }
         seen.add(item.permission!);
-        const output = await this.runPermissionCommand(
-          packageName,
-          targetUserId,
-          action,
+        const output = await this.runPermissionCommand(packageName, targetUserId, action, {
           item,
           perf,
-        );
+        });
         attempted.push({ item, output });
       }
-      await this.verifyPermissions(packageName, targetUserId, action, attempted, before);
+      await this.verifyPermissions(packageName, targetUserId, action, { attempted, before });
     } finally {
       perf.end();
     }
@@ -215,8 +214,7 @@ export class GrantAndroidPermissions {
     packageName: string,
     userId: number,
     action: "grant" | "revoke",
-    item: GrantAndroidPermissionItemResult,
-    perf: PerformanceTracker,
+    { item, perf }: { item: GrantAndroidPermissionItemResult; perf: PerformanceTracker },
   ): Promise<string> {
     try {
       const cmd = `shell pm ${action} --user ${userId} ${shellQuote(packageName)} ${shellQuote(item.permission!)}`;
@@ -245,8 +243,13 @@ export class GrantAndroidPermissions {
     packageName: string,
     userId: number,
     action: "grant" | "revoke",
-    attempted: Array<{ item: GrantAndroidPermissionItemResult; output: string }>,
-    before: AndroidPackagePermissionState,
+    {
+      attempted,
+      before,
+    }: {
+      attempted: Array<{ item: GrantAndroidPermissionItemResult; output: string }>;
+      before: AndroidPackagePermissionState;
+    },
   ): Promise<void> {
     if (attempted.length === 0) {
       return;
@@ -255,7 +258,7 @@ export class GrantAndroidPermissions {
       const after = await this.readPermissionState(packageName, userId);
       const expected = action === "grant" ? "granted" : "denied";
       for (const attempt of attempted) {
-        this.verifyPermission(attempt, before, after, userId, expected);
+        this.verifyPermission(attempt, before, after, { userId, expected });
       }
     } catch (cause) {
       logger.warn(
@@ -271,8 +274,7 @@ export class GrantAndroidPermissions {
     { item, output }: { item: GrantAndroidPermissionItemResult; output: string },
     before: AndroidPackagePermissionState,
     after: AndroidPackagePermissionState,
-    userId: number,
-    expected: "granted" | "denied",
+    { userId, expected }: { userId: number; expected: "granted" | "denied" },
   ): void {
     if (item.error) {
       return;

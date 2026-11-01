@@ -1,4 +1,6 @@
 import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
@@ -270,6 +272,68 @@ describe("handleDaemonRequest", () => {
           "daemon/registerSession",
         ],
       },
+    });
+  });
+
+  test("capabilities describe an already-open registry only in broker mode", async () => {
+    const registry = new FakeBindingRegistry(new FakeTimer());
+    const describe = spyOn(registry, "describeSchema");
+    const state = Object.assign(new FakeDaemonState(null, null), {
+      isSessionBrokerMode: (): boolean => true,
+      getBindingRegistrySchemaProbe: () => registry,
+    });
+    const response = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(response.result?.bindingRegistry).toEqual(await registry.describeSchema());
+    expect(describe).toHaveBeenCalledTimes(2);
+    state.isSessionBrokerMode = () => false;
+    const local = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(local.result).not.toHaveProperty("bindingRegistry");
+    expect(describe).toHaveBeenCalledTimes(2);
+  });
+
+  test("capabilities omit an unopened registry without starting work", async () => {
+    const probe = mock(() => undefined);
+    const state = Object.assign(new FakeDaemonState(null, null), {
+      isSessionBrokerMode: (): boolean => true,
+      getBindingRegistrySchemaProbe: probe,
+    });
+    const response = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(response.result).not.toHaveProperty("bindingRegistry");
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  test("capabilities log and omit unclassified probe failures", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const state = Object.assign(new FakeDaemonState(null, null), {
+      isSessionBrokerMode: (): boolean => true,
+      getBindingRegistrySchemaProbe: () => ({
+        describeSchema: async () => {
+          throw new Error("locked");
+        },
+      }),
+    });
+    const response = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(response.result).not.toHaveProperty("bindingRegistry");
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  test("capabilities report unsupported only for classified schema refusals", async () => {
+    const future = "2099_future";
+    const state = Object.assign(new FakeDaemonState(null, null), {
+      isSessionBrokerMode: (): boolean => true,
+      getBindingRegistrySchemaProbe: () => ({
+        describeSchema: async () => {
+          throw new BindingRegistrySchemaUnsupportedError(":memory:", [future], {
+            [future]: "2.0.0",
+          });
+        },
+      }),
+    });
+    const response = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+    expect(response.result?.bindingRegistry).toMatchObject({
+      schemaVersion: null,
+      supported: false,
+      writerVersion: null,
     });
   });
 
@@ -914,8 +978,7 @@ describe("handleDaemonRequest", () => {
         reaped.push({ sessionId: id, reason });
         await sessionManager.releaseSession(id, reason);
       },
-      fakeTimer,
-      { heartbeatTimeoutMs: timeoutMs },
+      { timer: fakeTimer, heartbeatTimeoutMs: timeoutMs },
     );
     try {
       const tickMs = Math.floor(timeoutMs / 5);
@@ -1000,7 +1063,9 @@ describe("handleDaemonRequest", () => {
     };
 
     try {
-      await restartedManager.getOrCreateSession(sessionId, recoverer, "android", undefined, true);
+      await restartedManager.getOrCreateSession(sessionId, recoverer, "android", {
+        requireIssuedSession: true,
+      });
       const state = new FakeDaemonState(
         restartedManager,
         new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
@@ -1168,7 +1233,7 @@ describe("handleDaemonRequest", () => {
           await handleDaemonRequest(
             buildRequest("daemon/releaseSession", { sessionId }),
             new FakeDaemonState(sessionManager, pool),
-            tracker,
+            { executions: tracker },
           ),
         ).toEqual({
           success: true,
@@ -1203,7 +1268,7 @@ describe("handleDaemonRequest", () => {
         await handleDaemonRequest(
           buildRequest("daemon/releaseSession", { sessionId: "missing", requireKnown: true }),
           new FakeDaemonState(sessionManager, pool),
-          tracker,
+          { executions: tracker },
         ),
       ).toMatchObject({
         success: false,
@@ -1227,7 +1292,7 @@ describe("handleDaemonRequest", () => {
       await handleDaemonRequest(
         buildRequest("daemon/releaseSession", { sessionId: "missing" }),
         new FakeDaemonState(sessionManager, pool),
-        tracker,
+        { executions: tracker },
       ),
     ).toMatchObject({
       success: true,
@@ -1247,7 +1312,7 @@ describe("handleDaemonRequest", () => {
       handleDaemonRequest(
         buildRequest("daemon/releaseSession", { sessionId: "released-once", requireKnown: true }),
         new FakeDaemonState(sessionManager, pool),
-        tracker,
+        { executions: tracker },
       );
     await release();
 
@@ -1277,7 +1342,7 @@ describe("handleDaemonRequest", () => {
     const pending = handleDaemonRequest(
       buildRequest("daemon/releaseSession", { sessionId }),
       state,
-      tracker,
+      { executions: tracker },
     );
     // The manager is reached synchronously, as before: no idle cancellation await.
     expect(release).toHaveBeenCalledWith(sessionId);

@@ -106,7 +106,7 @@ async function seedRecoverableIOSSession(
     heartbeatTimeoutMs: 10_000,
     hasReceivedHeartbeat: true,
   });
-  await persistence.markReleased("ios-session", "released", 0, releaseReason);
+  await persistence.markReleased("ios-session", "released", 0, { reason: releaseReason });
 }
 
 test("owned iOS simulator loss and same-UDID return preserve the session with a new connection", async () => {
@@ -126,13 +126,9 @@ test("owned iOS simulator loss and same-UDID return preserve the session with a 
 
     manager.bootedDevices = [IOS_SIMULATOR];
     await pool.refreshDevices();
-    const recovered = await sessions.getOrCreateSession(
-      "ios-session",
-      pool,
-      "ios",
-      undefined,
-      true,
-    );
+    const recovered = await sessions.getOrCreateSession("ios-session", pool, "ios", {
+      requireIssuedSession: true,
+    });
     const replacement = pool.getDevice(IOS_SIMULATOR.deviceId);
 
     expect(recovered).toMatchObject({
@@ -236,7 +232,9 @@ test("onLoss-enabled iOS recovery only polls discovery while a user-shut-down si
 
   try {
     await evictAsMissing(pool, captured);
-    const recovery = sessions.getOrCreateSession("ios-session", pool, "ios", undefined, true);
+    const recovery = sessions.getOrCreateSession("ios-session", pool, "ios", {
+      requireIssuedSession: true,
+    });
     for (let i = 0; i < 10 && manager.discoveryCalls === 0; i++) {
       await Promise.resolve();
     }

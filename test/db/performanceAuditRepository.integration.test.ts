@@ -48,7 +48,7 @@ describe("PerformanceAuditRepository", () => {
   beforeEach(async () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new PerformanceAuditRepository(db, timer);
+    repo = new PerformanceAuditRepository({ db, timer });
   });
 
   afterEach(async () => {

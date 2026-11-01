@@ -237,8 +237,7 @@ export function imeCommitExceptionResult(
   error: unknown,
   signal: AbortSignal | undefined,
   result: TextActionResult,
-  text: string,
-  focusedFieldClass?: string | null,
+  { text, focusedFieldClass }: { text: string; focusedFieldClass?: string | null },
 ): { outcome?: TextActionResult; failure?: unknown } {
   if (isImeCommitAbort(error, signal)) {
     return { failure: error };

@@ -90,11 +90,8 @@ export function refuseControlOnForeignOwnedSession(
   const remedy = forced
     ? `${FOREIGN_SESSION_REMEDY} ${FORCED_CALL_REMEDY}`
     : FOREIGN_SESSION_REMEDY;
-  throw new InputDeviceOwnedError(
-    toolName,
-    deviceId ?? "unknown",
-    sessionUuid,
+  throw new InputDeviceOwnedError(toolName, deviceId ?? "unknown", sessionUuid, {
     remedy,
-    `${toolName} refused: session ${sessionUuid} is owned by another connected client. ${remedy}`,
-  );
+    message: `${toolName} refused: session ${sessionUuid} is owned by another connected client. ${remedy}`,
+  });
 }

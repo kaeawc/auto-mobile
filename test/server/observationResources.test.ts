@@ -677,8 +677,7 @@ describe("unscoped latest observation resources", () => {
       device,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { cacheStore },
-      cacheTimer,
-      observationIdGenerator,
+      { timer: cacheTimer, idGenerator: observationIdGenerator },
     );
     const observation: ObserveResult = {
       ...observeScreen.createBaseResult(),
@@ -754,11 +753,9 @@ describe("unscoped latest observation resources", () => {
   test("serves the screenshot captured with the requested observation", async () => {
     const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
     const image = Buffer.from("89504e470d0a1a0a", "hex");
-    getScreenshotStateStore().updateForObservation(
-      deviceA.deviceId,
-      observationId,
-      "/tmp/device-a.png",
-    );
+    getScreenshotStateStore().updateForObservation(deviceA.deviceId, observationId, {
+      path: "/tmp/device-a.png",
+    });
     useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
@@ -780,11 +777,9 @@ describe("unscoped latest observation resources", () => {
     test("returns the raw bytes of the screenshot the resource would serve, through the lease", async () => {
       const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
       const image = Buffer.from("89504e470d0a1a0a", "hex");
-      getScreenshotStateStore().updateForObservation(
-        deviceA.deviceId,
-        observationId,
-        "/tmp/device-a-bytes.png",
-      );
+      getScreenshotStateStore().updateForObservation(deviceA.deviceId, observationId, {
+        path: "/tmp/device-a-bytes.png",
+      });
       useScreenshotFileSystem({
         stat: async () => ({ isFile: () => true }),
         readFile: async () => image,
@@ -833,11 +828,9 @@ describe("unscoped latest observation resources", () => {
   test("serves an observation's stored screenshot without waiting for an unrelated pending capture", async () => {
     const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
     const image = Buffer.from("89504e470d0a1a0a", "hex");
-    getScreenshotStateStore().updateForObservation(
-      deviceA.deviceId,
-      observationId,
-      "/tmp/device-a-stored.png",
-    );
+    getScreenshotStateStore().updateForObservation(deviceA.deviceId, observationId, {
+      path: "/tmp/device-a-stored.png",
+    });
     ScreenshotJobTracker.setTimer(new FakeTimer());
     ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
     useScreenshotFileSystem({
@@ -873,11 +866,9 @@ describe("unscoped latest observation resources", () => {
     const image = Buffer.from("89504e470d0a1a0a", "hex");
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
-      getScreenshotStateStore().updateForObservation(
-        deviceA.deviceId,
-        observationId,
-        "/tmp/device-a-pending.png",
-      );
+      getScreenshotStateStore().updateForObservation(deviceA.deviceId, observationId, {
+        path: "/tmp/device-a-pending.png",
+      });
       return { success: true, path: "/tmp/device-a-pending.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
@@ -962,7 +953,9 @@ describe("unscoped latest observation resources", () => {
     // `ScreenshotJobTracker.waitForCompletion` would have resolved above, but
     // the recorder's later path-existence/write step has not completed yet.
     expect(await Promise.race([screenshotPromise, settleSentinel()])).toBe("still-pending");
-    store.updateForObservation(deviceA.deviceId, observationId, "/tmp/device-a-after-job.png");
+    store.updateForObservation(deviceA.deviceId, observationId, {
+      path: "/tmp/device-a-after-job.png",
+    });
 
     expect((await screenshotPromise).blob).toBe(image.toString("base64"));
   });
@@ -975,7 +968,9 @@ describe("unscoped latest observation resources", () => {
     store.beginObservation(deviceA.deviceId, observationId);
     const observationJob = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
-      store.updateForObservation(deviceA.deviceId, observationId, "/tmp/device-a-exact.png");
+      store.updateForObservation(deviceA.deviceId, observationId, {
+        path: "/tmp/device-a-exact.png",
+      });
       return { success: true, path: "/tmp/device-a-exact.png" };
     });
     ScreenshotJobTracker.startJob(
@@ -1010,11 +1005,9 @@ describe("unscoped latest observation resources", () => {
     const currentImage = Buffer.from("current screenshot");
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
-      getScreenshotStateStore().updateForObservation(
-        deviceA.deviceId,
-        observationId,
-        "/tmp/device-a-current.png",
-      );
+      getScreenshotStateStore().updateForObservation(deviceA.deviceId, observationId, {
+        path: "/tmp/device-a-current.png",
+      });
       return { success: true, path: "/tmp/device-a-current.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
@@ -1039,11 +1032,9 @@ describe("unscoped latest observation resources", () => {
     const gate = createGate();
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
-      getScreenshotStateStore().updateForObservation(
-        deviceA.deviceId,
-        observationId,
-        "/tmp/device-a-newer.png",
-      );
+      getScreenshotStateStore().updateForObservation(deviceA.deviceId, observationId, {
+        path: "/tmp/device-a-newer.png",
+      });
       return { success: true, path: "/tmp/device-a-newer.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
@@ -1097,7 +1088,7 @@ describe("unscoped latest observation resources", () => {
     getScreenshotStateStore().updateForObservation(
       encodedDevice.deviceId,
       observation.observationId,
-      "/tmp/wireless.png",
+      { path: "/tmp/wireless.png" },
     );
     useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
@@ -1124,8 +1115,7 @@ describe("unscoped latest observation resources", () => {
       deviceA,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { cacheStore },
-      cacheTimer,
-      new CountingIdGenerator("observation"),
+      { timer: cacheTimer, idGenerator: new CountingIdGenerator("observation") },
     );
     const first = { ...screen.createBaseResult(), updatedAt: "reused-hierarchy-timestamp" };
     const second = { ...screen.createBaseResult(), updatedAt: "reused-hierarchy-timestamp" };

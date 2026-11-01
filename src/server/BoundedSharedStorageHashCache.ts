@@ -1,4 +1,4 @@
-import { type SharedStorageHashCache } from "./sharedStorageReadService";
+import { type SharedStorageHashCache, type SharedStorageHashKey } from "./sharedStorageReadService";
 
 const SHARED_STORAGE_HASH_CACHE_MAX_ENTRIES = 2_048;
 
@@ -15,16 +15,8 @@ export class BoundedSharedStorageHashCache implements SharedStorageHashCache {
   >();
   private accessCounter = 0;
 
-  get(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-  ): string | undefined {
-    const entry = this.entries.get(
-      hashCacheKey(deviceId, namespace, path, byteCount, modifiedSeconds),
-    );
+  get(key: SharedStorageHashKey): string | undefined {
+    const entry = this.entries.get(hashCacheKey(key));
     if (!entry) {
       return undefined;
     }
@@ -32,20 +24,14 @@ export class BoundedSharedStorageHashCache implements SharedStorageHashCache {
     return entry.sha256;
   }
 
-  set(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-    sha256: string,
-  ): void {
-    for (const [key, entry] of this.entries) {
+  set(key: SharedStorageHashKey, sha256: string): void {
+    const { deviceId, namespace, path } = key;
+    for (const [cacheKey, entry] of this.entries) {
       if (entry.deviceId === deviceId && entry.namespace === namespace && entry.path === path) {
-        this.entries.delete(key);
+        this.entries.delete(cacheKey);
       }
     }
-    this.entries.set(hashCacheKey(deviceId, namespace, path, byteCount, modifiedSeconds), {
+    this.entries.set(hashCacheKey(key), {
       deviceId,
       namespace,
       path,
@@ -77,12 +63,12 @@ export class BoundedSharedStorageHashCache implements SharedStorageHashCache {
   }
 }
 
-function hashCacheKey(
-  deviceId: string,
-  namespace: string,
-  path: string,
-  byteCount: number,
-  modifiedSeconds: number,
-): string {
+function hashCacheKey({
+  deviceId,
+  namespace,
+  path,
+  byteCount,
+  modifiedSeconds,
+}: SharedStorageHashKey): string {
   return JSON.stringify([deviceId, namespace, path, byteCount, modifiedSeconds]);
 }

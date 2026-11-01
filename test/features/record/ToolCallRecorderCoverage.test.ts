@@ -148,6 +148,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "resetAppLogs",
   "resetKeychain",
   "rotate",
+  "rotateCrown",
   "selectAllText",
   "sendBroadcast",
   "sendKeys",

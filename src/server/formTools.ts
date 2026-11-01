@@ -161,9 +161,7 @@ export function createSetUIStateHandler({
       },
       progress,
       signal,
-      transportDeadlineMs,
-      getLiveTransportDeadlineMs,
-      subscribeLiveTransportDeadline,
+      { transportDeadlineMs, getLiveTransportDeadlineMs, subscribeLiveTransportDeadline },
     );
 
     const response = createStructuredToolResponse({
@@ -201,8 +199,8 @@ export function registerFormTools(deps: FormToolDependencies = {}): void {
     "setUIState",
     "Set multiple form fields by desired state.",
     addDeviceTargetingToSchema(setUIStateSchema),
-    createSetUIStateHandler(deps),
     {
+      handler: createSetUIStateHandler(deps),
       ...PLAN_RELEVANT,
       defaultEnabled: true,
       supportsProgress: true,

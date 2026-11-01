@@ -6,7 +6,8 @@ struct PrototypeLibraryListing {
 }
 
 struct PrototypeLibraryContent {
-    let spec: Data
+    let bundle: PrototypeBundle
+    var spec: Data { bundle.spec }
     let assets: PrototypeAssets
     let entry: PrototypeLibraryEntry
 }
@@ -106,7 +107,15 @@ final class PrototypeLibraryStore {
                 throw PrototypeLibraryFailure(path: failure.path ?? "manifest.json", message: failure.code.rawValue)
             } catch { throw PrototypeLibraryFailure(path: "manifest.json", message: error.localizedDescription) }
             return PrototypeLibraryContent(
-                spec: layout.specData,
+                bundle: PrototypeBundle(
+                    spec: layout.specData,
+                    assets: Dictionary(uniqueKeysWithValues: layout.assets.values.filter { !$0.isFont }.map {
+                        (PrototypeBundleID($0.id), PrototypeBundleAsset(mediaType: $0.mediaType, bytes: $0.data))
+                    }),
+                    fonts: Dictionary(uniqueKeysWithValues: layout.assets.values.filter(\.isFont).map {
+                        (PrototypeBundleID($0.id), PrototypeBundleAsset(mediaType: $0.mediaType, bytes: $0.data))
+                    }), requires: entry.requires
+                ),
                 assets: PrototypeAssets(
                     images: layout.assets.filter { !$0.value.isFont }.mapValues(\.data),
                     fonts: layout.assets.filter { $0.value.isFont }.mapValues(\.data)

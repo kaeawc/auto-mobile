@@ -114,8 +114,7 @@ export async function validateRequestedAndroidConfiguredAvdPairBeforeBoot(
   pair: { avdName: string; deviceId: string },
   deviceUtils: PlatformDeviceManager,
   bootDeadlineMs: number,
-  timer: Timer,
-  signal: AbortSignal | undefined,
+  { timer, signal }: { timer: Timer; signal?: AbortSignal },
 ): Promise<boolean> {
   const { avdName, deviceId } = pair;
   if (isAndroidEmulatorSerial(deviceId)) {
@@ -125,8 +124,8 @@ export async function validateRequestedAndroidConfiguredAvdPairBeforeBoot(
     { name: avdName, platform: "android", deviceId },
     timer,
     bootDeadlineMs,
-    "Android pre-boot AVD identity validation did not complete",
     {
+      detail: "Android pre-boot AVD identity validation did not complete",
       requestAbortSignal: signal,
       operation: async (signal) =>
         await deviceUtils.getDeviceImagesDetailed("android", {
@@ -165,9 +164,15 @@ export async function validateRequestedAndroidIdentifiersBeforeBoot(
   pair: { avdName: string; deviceId: string } | undefined,
   deviceUtils: PlatformDeviceManager,
   bootDeadlineMs: number,
-  timer: Timer,
-  signal: AbortSignal | undefined,
-  collectPendingSettlement?: ColdBootSettlementCollector,
+  {
+    timer,
+    signal,
+    collectPendingSettlement,
+  }: {
+    signal: AbortSignal | undefined;
+    collectPendingSettlement?: ColdBootSettlementCollector;
+    timer: Timer;
+  },
 ): Promise<void> {
   if (!pair) {
     return;
@@ -177,13 +182,10 @@ export async function validateRequestedAndroidIdentifiersBeforeBoot(
     return;
   }
   if (
-    await validateRequestedAndroidConfiguredAvdPairBeforeBoot(
-      pair,
-      deviceUtils,
-      bootDeadlineMs,
+    await validateRequestedAndroidConfiguredAvdPairBeforeBoot(pair, deviceUtils, bootDeadlineMs, {
       timer,
       signal,
-    )
+    })
   ) {
     return;
   }
@@ -191,8 +193,8 @@ export async function validateRequestedAndroidIdentifiersBeforeBoot(
     { name: avdName, platform: "android", deviceId },
     timer,
     bootDeadlineMs,
-    "Android pre-boot serial validation did not complete",
     {
+      detail: "Android pre-boot serial validation did not complete",
       requestAbortSignal: signal,
       operation: async (signal) => {
         const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
@@ -392,15 +394,14 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
   deviceId: string,
   deadlineMs: number,
   deviceUtils: Pick<PlatformDeviceManager, "getBootedDevicesDetailed" | "getDeviceImagesDetailed">,
-  timer: Timer,
-  signal: AbortSignal | undefined,
+  { timer, signal }: { timer: Timer; signal?: AbortSignal },
 ): Promise<StableDeviceTarget | undefined> {
   const bootedDiscovery = await runWithinShutdownDeadline(
     { name: deviceId, platform: "android", deviceId },
     timer,
     deadlineMs,
-    "Android booted-device identity discovery did not complete",
     {
+      detail: "Android booted-device identity discovery did not complete",
       requestAbortSignal: signal,
       operation: async (signal) => {
         const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
@@ -435,8 +436,8 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     { name: deviceId, platform: "android", deviceId },
     timer,
     deadlineMs,
-    "Android AVD identity discovery did not complete",
     {
+      detail: "Android AVD identity discovery did not complete",
       requestAbortSignal: signal,
       operation: async () => await deviceUtils.getDeviceImagesDetailed("android"),
     },

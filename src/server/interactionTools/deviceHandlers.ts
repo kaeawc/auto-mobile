@@ -21,8 +21,7 @@ import { createStructuredToolResponse, throwIfAborted } from "../../utils/toolUt
 import { resolveTransportDeadlineMs } from "../formTools";
 import type { PressButtonArgs, RotateArgs, SelectAllTextArgs } from "../interactionToolTypes";
 import { runSessionRotationMutation } from "../sessionRotation";
-import { ProgressCallback } from "../toolRegistry";
-import type { InteractionToolDependencies } from "./dependencies";
+import type { InteractionHandlerOptions, InteractionToolDependencies } from "./dependencies";
 
 const defaultSelectAllTextFactory: NonNullable<
   InteractionToolDependencies["selectAllTextFactory"]
@@ -31,9 +30,7 @@ const defaultSelectAllTextFactory: NonNullable<
 export async function selectAllTextHandler(
   device: BootedDevice,
   args: SelectAllTextArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   try {
     const selectAllText = (deps.selectAllTextFactory ?? defaultSelectAllTextFactory)(device);
@@ -62,9 +59,7 @@ const defaultPressButtonFactory: NonNullable<InteractionToolDependencies["pressB
 export async function pressButtonHandler(
   device: BootedDevice,
   args: PressButtonArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   try {
@@ -92,7 +87,7 @@ export async function pressButtonHandler(
 const defaultRotateFactory: NonNullable<InteractionToolDependencies["rotateFactory"]> = (
   device,
   options,
-) => new Rotate(device, null, defaultTimer, options);
+) => new Rotate(device, { adb: null, timer: defaultTimer, options });
 
 const defaultSetPostureFactory: NonNullable<InteractionToolDependencies["setPostureFactory"]> = (
   device,
@@ -122,9 +117,7 @@ export async function setPostureHandler(
     hingeAngle?: number;
     displayPreset?: "phone" | "unfolded" | "tablet";
   },
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   try {
     throwIfAborted(signal);
@@ -164,9 +157,7 @@ export function formatRotateMessage(
 export async function rotateHandler(
   device: BootedDevice,
   args: RotateArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   try {
     if (args.lockOrientation !== undefined && device.platform !== "android") {

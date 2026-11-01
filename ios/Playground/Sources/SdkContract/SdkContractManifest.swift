@@ -43,7 +43,7 @@ struct CapabilityObservation: Encodable, Sendable {
 /// What a contract scenario fed the SDK and what the SDK serialized for it. The TypeScript
 /// harness compares this with the MCP surface to name the boundary that disagreed.
 struct SdkContractManifest: Encodable {
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     enum Status: String, Encodable {
         /// The scenario ran to the end; the harness judges the captured events.

@@ -91,7 +91,7 @@ enum SdkContractRunner {
             )
             manifest.observation = host.log()
         case SdkContractStorageScenario.registeredScenario, SdkContractStorageScenario.defaultScenario:
-            manifest.storage = SdkContractStorageScenario.run(scenario: launch.scenario, runId: runId)
+            manifest.storage = try SdkContractStorageScenario.run(scenario: launch.scenario, runId: runId)
         case faultScenario:
             try await waitForMarker(
                 runId: runId,

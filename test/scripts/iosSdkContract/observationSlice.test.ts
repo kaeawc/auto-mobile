@@ -27,7 +27,7 @@ const healthyActions: ObservationHostAction[] = [
 
 function manifest(actions = healthyActions): SdkContractManifest {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId: "run-1",
     scenario: "observe",
     status: "complete",

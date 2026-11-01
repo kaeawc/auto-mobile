@@ -5,7 +5,7 @@ import { z } from "zod";
  * (`ios/Playground/Sources/SdkContract/SdkContractManifest.swift`). Keep the two in step:
  * the Swift encoder omits nil optionals, so every optional here means "not asserted".
  */
-export const SDK_CONTRACT_MANIFEST_SCHEMA_VERSION = 3;
+export const SDK_CONTRACT_MANIFEST_SCHEMA_VERSION = 4;
 
 const expectedNetworkEventSchema = z.object({
   caseName: z.string().min(1),
@@ -75,6 +75,7 @@ const storageRegistrationSchema = z.object({
   coreDataStores: z.array(
     z.object({
       identifier: z.string().min(1),
+      queryable: z.boolean(),
       appGroup: z.string().min(1).optional(),
       coordination: z.string().min(1).optional(),
     }),

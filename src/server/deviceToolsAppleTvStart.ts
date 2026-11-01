@@ -5,11 +5,14 @@ import {
   mergeLegacyStartDevicePayload,
   reserveStableDeviceLifecycle,
   watchStartDeviceParametersSchema,
+  type DeviceToolsDependencies,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
+import { holderOf } from "../daemon/deviceBinding";
+import { isAnonymousAcquisitionSession } from "../daemon/sessionManager";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import { assertTvUnclaimed, defaultAppleTvBoot } from "./deviceToolsAppleTvProvision";
@@ -96,7 +99,7 @@ export async function startAppleTvDevice(
               throw new ActionableError("Apple TV simulator identity changed; retry with deviceId");
             }
             const reusableSessionId = internalOneShotCli(rawArgs)
-              ? undefined
+              ? reusableAnonymousSessionId(tv.deviceId, deps)
               : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
                   internalMcpSessionId(rawArgs),
                   tv.deviceId,
@@ -141,4 +144,16 @@ export async function startAppleTvDevice(
         }),
     },
   );
+}
+
+function reusableAnonymousSessionId(
+  deviceId: string,
+  deps: DeviceToolsDependencies,
+): string | undefined {
+  if (!deps.daemonState.isInitialized()) {
+    return undefined;
+  }
+  const holder = holderOf(deps.daemonState.getDevicePool().getDevice(deviceId));
+  const session = holder ? deps.daemonState.getSessionManager().getSession(holder) : null;
+  return holder && session && isAnonymousAcquisitionSession(session) ? holder : undefined;
 }

@@ -25,7 +25,7 @@ import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRe
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { isAnonymousAcquisitionSession, SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { AppleTvSimulatorInventory } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorInventory";
@@ -182,6 +182,60 @@ describe("provisionDevice on an Apple TV simulator", () => {
       }),
     );
     expect(result).toMatchObject({ platform: "tvos", acquisition: "already-booted" });
+    expect(simctl.commands).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("one-shot CLI startDevice reuses the anonymous acquisition session for the same TV", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { sessions, simctl, timer } = await arrange([tv]);
+    const start = () =>
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __oneShotCli: true,
+      });
+    const resultSchema = z.object({
+      runtime: z.object({ session: z.object({ sessionUuid: z.string() }) }),
+    });
+    const first = resultSchema.parse(toolJson(await start()));
+    const sessionId = first.runtime.session.sessionUuid;
+    const session = sessions.getSession(sessionId);
+    expect(session).not.toBeNull();
+    expect(session && isAnonymousAcquisitionSession(session)).toBe(true);
+
+    const repeated = resultSchema.parse(toolJson(await start()));
+    expect(repeated.runtime.session.sessionUuid).toBe(sessionId);
+    expect(sessions.getAllSessions()).toHaveLength(1);
+    expect(simctl.commands).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("one-shot CLI startDevice rejects a TV held by another client's session", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { sessions, simctl, timer } = await arrange([tv]);
+    const result = toolJson(
+      await ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    const sessionId = z
+      .object({ runtime: z.object({ session: z.object({ sessionUuid: z.string() }) }) })
+      .parse(result).runtime.session.sessionUuid;
+    const session = sessions.getSession(sessionId);
+    expect(session).not.toBeNull();
+    expect(session && isAnonymousAcquisitionSession(session)).toBe(false);
+
+    await expect(
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __oneShotCli: true,
+      }),
+    ).rejects.toThrow(`held by session ${sessionId}`);
+    expect(sessions.getAllSessions()).toHaveLength(1);
     expect(simctl.commands).toEqual([]);
     expect(timer.getSleepHistory()).toEqual([]);
   });

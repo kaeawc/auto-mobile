@@ -14,7 +14,10 @@ import { resolvePackageFaultInjector } from "./packageFaultInjectors";
 import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import { resolveProcessFaultInjector } from "./processFaultInjectors";
-import { resolveReadOnlyFilesystemInjector } from "./readOnlyFilesystemInjector";
+import {
+  resolveReadOnlyFilesystemInjector,
+  type ReadOnlyFilesystemInjectorDeps,
+} from "./readOnlyFilesystemInjector";
 import { resolveStorageFaultInjector } from "./storageFaultInjectors";
 import { resolveVehicleStateInjector } from "./vehicleStateInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
@@ -225,32 +228,39 @@ export class DeviceConditionRegistry {
  * Returns undefined for a key with no injector, which the controller reports as
  * `unsupported` rather than silently dropping.
  */
-const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) => {
-  if (!owner.device) {
-    return undefined;
-  }
-  const resolvers = [
-    resolveIosRefusalInjector,
-    resolveRootStateInjector,
-    resolvePowerFaultInjector,
-    resolveLifecycleFaultInjector,
-    resolveStorageFaultInjector,
-    resolveReadOnlyFilesystemInjector,
-    resolvePermissionFaultInjector,
-    resolvePackageFaultInjector,
-    resolveProcessFaultInjector,
-    resolveAppFileFaultInjector,
-    resolveClockFaultInjector,
-    resolveVehicleStateInjector,
-  ];
-  for (const resolve of resolvers) {
-    const injector = resolve(owner.device, key);
-    if (injector) {
-      return injector;
+export function createDefaultInjectorResolver(
+  readOnlyFilesystemDeps: ReadOnlyFilesystemInjectorDeps = {},
+): DeviceConditionInjectorResolver {
+  return (owner, key) => {
+    if (!owner.device) {
+      return undefined;
     }
-  }
-  return undefined;
-};
+    const resolvers = [
+      resolveIosRefusalInjector,
+      resolveRootStateInjector,
+      resolvePowerFaultInjector,
+      resolveLifecycleFaultInjector,
+      resolveStorageFaultInjector,
+      (device: BootedDevice, key: DeviceConditionKey) =>
+        resolveReadOnlyFilesystemInjector(device, key, readOnlyFilesystemDeps),
+      resolvePermissionFaultInjector,
+      resolvePackageFaultInjector,
+      resolveProcessFaultInjector,
+      resolveAppFileFaultInjector,
+      resolveClockFaultInjector,
+      resolveVehicleStateInjector,
+    ];
+    for (const resolve of resolvers) {
+      const injector = resolve(owner.device, key);
+      if (injector) {
+        return injector;
+      }
+    }
+    return undefined;
+  };
+}
+
+const defaultInjectorResolver = createDefaultInjectorResolver();
 
 /**
  * Process-wide registry for the `deviceCondition` surface. It lives in the feature

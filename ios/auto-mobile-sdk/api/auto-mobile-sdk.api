@@ -821,6 +821,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable
   public func closeAll()
 
 // Storage/StorageInspectionPolicy.swift
+public protocol CoreDataReadOnlyFetching: Sendable
+  func fetch(entity: String, limit: Int) throws -> CoreDataQueryResult
 public enum StoreCoordination: String, Codable, Sendable
   case uncoordinated
   case hostCoordinated = "host_coordinated"
@@ -830,7 +832,8 @@ public struct CoreDataStoreRegistration: Sendable, Codable
   public let entities: [String]
   public let appGroup: String?
   public let coordination: StoreCoordination?
-  public init( identifier: String, modelVersion: String? = nil, entities: [String] = [], appGroup: String? = nil, coordination: StoreCoordination? = nil )
+  public var fetcher: (any CoreDataReadOnlyFetching)? = nil
+  public init( identifier: String, modelVersion: String? = nil, entities: [String] = [], appGroup: String? = nil, coordination: StoreCoordination? = nil, fetcher: (any CoreDataReadOnlyFetching)? = nil )
 public struct KeychainDeletionEntry: Hashable, Sendable
   public let service: String
   public let account: String
@@ -1200,6 +1203,7 @@ public enum SdkRoute: String, CaseIterable, Sendable
   case networkFaultRules = "/network/fault-rules"
   case magicTap = "/accessibility/magic-tap"
   case highlight = "/highlight"
+  case dbCoreDataQuery = "/db/core-data/query"
   case dbExecute = "/db/execute"
   case dbList = "/db/list"
   case dbCapabilities = "/db/capabilities"
@@ -1316,6 +1320,16 @@ public struct KeychainCapability: Codable, Equatable, Sendable
   public let reason: String?
   public let deletionScopes: [KeychainItemSelector]
   public init( schemaVersion: Int, capability: String, inspection: String, deletion: String, reason: String?, deletionScopes: [KeychainItemSelector] )
+public struct CoreDataQueryRequest: Codable, Equatable, Sendable
+  public let store: String
+  public let entity: String
+  public let limit: Int?
+  public init(store: String, entity: String, limit: Int? = nil)
+public struct CoreDataQueryResult: Codable, Equatable, Sendable
+  public let columns: [String]
+  public let rows: [[String?]]
+  public let truncated: Bool
+  public init(columns: [String], rows: [[String?]], truncated: Bool = false)
 
 // sdk-wire/WebViewWireModels.swift
 public struct WebViewBridgeEntry: Codable, Equatable, Sendable

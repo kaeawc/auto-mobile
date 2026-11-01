@@ -70,6 +70,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case setNetworkErrorSimulation(RequestSetNetworkErrorSimulation)
     case getSdkCapabilities(RequestEnvelope)
 
+    case queryCoreData(RequestQueryCoreData)
     case executeSql(RequestExecuteSql)
     case listDatabases(RequestListDatabases)
     case storageCapabilities(RequestStorageCapabilities)
@@ -118,7 +119,7 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try decodePreferences(requestType, from: decoder)
         case .setNetworkMockRules, .setNetworkFaultRules, .setNetworkErrorSimulation, .getSdkCapabilities:
             return try decodeNetwork(requestType, from: decoder)
-        case .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData, .getTableStructure:
+        case .queryCoreData, .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData, .getTableStructure:
             return try decodeDatabase(requestType, from: decoder)
         }
     }
@@ -293,6 +294,8 @@ public enum WebSocketRequest: Decodable, Sendable {
 
     private static func decodeDatabase(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
         switch requestType {
+        case .queryCoreData:
+            return try .queryCoreData(RequestQueryCoreData(from: decoder))
         case .executeSql:
             return try .executeSql(RequestExecuteSql(from: decoder))
         case .listDatabases:
@@ -369,6 +372,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .setNetworkFaultRules: return .setNetworkFaultRules
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulation
         case .getSdkCapabilities: return .getSdkCapabilities
+        case .queryCoreData: return .queryCoreData
         case .executeSql: return .executeSql
         case .listDatabases: return .listDatabases
         case .storageCapabilities: return .storageCapabilities
@@ -443,6 +447,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case let .setNetworkMockRules(payload): return payload
         case let .setNetworkFaultRules(payload): return payload
         case let .setNetworkErrorSimulation(payload): return payload
+        case let .queryCoreData(payload): return payload
         case let .executeSql(payload): return payload
         case let .listDatabases(payload): return payload
         case let .storageCapabilities(payload): return payload

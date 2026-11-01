@@ -9,6 +9,7 @@ export const IOS_RUNNER_COMMAND_APPLICABILITY = {
   request_press_button: "both",
   request_multi_finger_swipe: "both",
   add_highlight: "both",
+  query_core_data: "both",
   execute_sql: "both",
   set_network_mock_rules: "both",
   set_hinge_angle: "simulator",

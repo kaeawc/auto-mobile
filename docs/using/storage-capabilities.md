@@ -42,8 +42,33 @@ and `databases.stores` lists its registered Core Data stores. Each entry states:
   `host_coordinated` when the app declared that it coordinates cross-process access, and
   `uncoordinated` otherwise. An uncoordinated read is a point-in-time snapshot that
   another process may change at any moment.
-- `query`: `supported` for suites; `unsupported` for Core Data stores, which can be
-  registered but not queried yet.
+- `query`: `supported` for suites and Core Data stores with read access enabled by
+  the app; `unsupported` for Core Data registrations without read access.
 
 Coordination is whatever the app declared when it registered the store; AutoMobile does
 not infer it. Treat an `uncoordinated` shared store as one that can change between reads.
+
+## Querying databases
+
+`sqlQuery` accepts `appId` and exactly one of these parameter pairs:
+
+- `databasePath` and `query`: execute SQL on an app SQLite database. On Android,
+  the path may also be a file name in the app databases directory.
+- `store` and `entity`: fetch attributes from a registered Core Data entity on iOS.
+  Omit `databasePath` and `query`. Optional `limit` is a positive integer, defaults
+  to the app's row limit, and is clamped to that limit. `limit` is only accepted
+  in this mode. Use a store whose `query` capability is `supported`.
+
+For example: `sqlQuery({appId: "com.example.app", store: "Main", entity: "Item", limit: 10})`.
+Core Data reads return `type: "query"`, `columns`, `rows` (strings or nulls),
+`truncated`, and a message. `truncated: true` means additional rows exist or the
+response was shortened to meet the app's row or byte limit. Sensitive attributes
+are redacted. These reads never require storage mutation authorization.
+
+Core Data queries require iOS and the app's Debug storage inspection support.
+For `unknown_core_data_store` or `unknown_core_data_entity`, check the store identifier
+and registered entity names. For `core_data_query_unavailable`, ask the app developer
+to enable read access for that store. `db_inspection_disabled` requires enabling
+inspection in the app. `core_data_fetch_failed` requires checking the app's store
+availability; `response_too_large` means even the column metadata exceeds the app's
+response limit. Invalid or mixed parameter pairs are rejected before execution.

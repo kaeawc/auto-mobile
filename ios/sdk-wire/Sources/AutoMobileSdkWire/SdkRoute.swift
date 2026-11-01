@@ -10,6 +10,7 @@ public enum SdkRoute: String, CaseIterable, Sendable {
     case networkFaultRules = "/network/fault-rules"
     case magicTap = "/accessibility/magic-tap"
     case highlight = "/highlight"
+    case dbCoreDataQuery = "/db/core-data/query"
     case dbExecute = "/db/execute"
     case dbList = "/db/list"
     case dbCapabilities = "/db/capabilities"

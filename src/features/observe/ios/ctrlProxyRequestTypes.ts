@@ -97,6 +97,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "get_sdk_capabilities",
 
   // Database inspection
+  "query_core_data",
   "execute_sql",
   "list_databases",
   "storage_capabilities",

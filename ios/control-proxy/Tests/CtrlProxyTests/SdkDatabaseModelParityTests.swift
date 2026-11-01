@@ -1,4 +1,6 @@
 import Foundation
+import AutoMobileSdkWire
+@testable import CtrlProxy
 import XCTest
 
 final class SdkDatabaseModelParityTests: XCTestCase {
@@ -13,6 +15,18 @@ final class SdkDatabaseModelParityTests: XCTestCase {
         JSONGolden.assertReencodePreservesWire(
             reencode, input: input, stripTimestamp: stripTimestamp, label, file: file, line: line
         )
+    }
+
+    func testCoreDataWireParity() {
+        assertReencode({ data in
+            try JSONEncoder().encode(JSONDecoder().decode(CoreDataQueryRequest.self, from: data))
+        }, #"{"store":"Main","entity":"Item","limit":2}"#, "CoreDataQueryRequest")
+        assertReencode({ data in
+            try JSONEncoder().encode(JSONDecoder().decode(CoreDataQueryResult.self, from: data))
+        }, #"{"columns":["name"],"rows":[[null]],"truncated":true}"#, "CoreDataQueryResult")
+        assertReencode({ data in
+            try JSONEncoder().encode(JSONDecoder().decode(RequestQueryCoreData.self, from: data))
+        }, #"{"requestId":"r1","appId":"com.example.app","store":"Main","entity":"Item","limit":2}"#, "RequestQueryCoreData")
     }
 
     // MARK: - SDK result models

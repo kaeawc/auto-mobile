@@ -88,6 +88,21 @@ interface ExecuteSqlOptions {
 export class CtrlProxyDatabase {
   constructor(private readonly context: DelegateContext) {}
 
+  async queryCoreData(
+    appId: string,
+    store: string,
+    entity: string,
+    limit?: number,
+    timeout: number | SdkCapabilityQueryOptions = 5000,
+  ): Promise<SQLResult> {
+    const result = await this.request<ExecuteSqlResult>(
+      "query_core_data", "execute_sql_result",
+      { appId, store, entity, ...(limit === undefined ? {} : { limit }) },
+      { timeout, operationName: "Query Core Data" },
+    );
+    return { type: "query", columns: result.columns ?? [], rows: result.rows ?? [], truncated: result.truncated };
+  }
+
   async executeSQL(
     appId: string,
     databasePath: string,

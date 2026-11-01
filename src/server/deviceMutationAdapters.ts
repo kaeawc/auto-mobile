@@ -225,7 +225,8 @@ function mutationCallIsRead(
     case "clipboard":
       return args.action === "get";
     case "sqlQuery":
-      return typeof args.query === "string" && isReadOnlySqlQuery(args.query);
+      return (typeof args.store === "string" && typeof args.entity === "string" && args.query === undefined && args.databasePath === undefined) ||
+        (typeof args.query === "string" && isReadOnlySqlQuery(args.query));
     case "displayConfig":
       return settingMutations(args, platform).length === 0;
     case "network":

@@ -3,6 +3,21 @@ import Foundation
 extension CommandHandler {
     // MARK: - Database
 
+    func handleQueryCoreData(_ request: RequestQueryCoreData, startTime: Date) async -> ExecuteSqlResponse {
+        await respond(requestId: request.requestId, startTime: startTime) {
+            guard let client = self.sdkDatabaseClient else {
+                throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
+            }
+            try await self.validateDatabaseAppId(request.appId)
+            let result = try await client.queryCoreData(store: request.store, entity: request.entity, limit: request.limit)
+            return ExecuteSqlResponse(
+                requestId: request.requestId, success: true, queryType: "query",
+                columns: result.columns, rows: result.rows, rowsAffected: 0,
+                truncated: result.truncated, totalTimeMs: self.totalTimeMs(from: startTime)
+            )
+        }
+    }
+
     func handleExecuteSql(_ request: RequestExecuteSql, startTime: Date) async -> ExecuteSqlResponse {
         await respond(requestId: request.requestId, startTime: startTime) {
             guard let client = self.sdkDatabaseClient else {

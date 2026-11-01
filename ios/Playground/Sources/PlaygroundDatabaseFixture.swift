@@ -1,5 +1,6 @@
 import AutoMobileSDK
 import Foundation
+import CoreData
 
 protocol PlaygroundFileSystem {
     var applicationSupportDirectory: URL? { get }
@@ -132,5 +133,76 @@ private struct DefaultPlaygroundDatabaseInspector: PlaygroundDatabaseInspecting 
 
     func authorizeHostMutations(_ authorized: Bool) {
         DatabaseInspector.shared.authorizeHostMutations(authorized)
+    }
+}
+
+/// A real host-owned Core Data stack. Inspection uses this coordinator without saving.
+final class PlaygroundCoreDataFixture: CoreDataReadOnlyFetching, @unchecked Sendable {
+    private let container: NSPersistentContainer
+
+    init(storeURL: URL) throws {
+        let model = NSManagedObjectModel()
+        let entity = NSEntityDescription()
+        entity.name = "Item"
+        entity.managedObjectClassName = "NSManagedObject"
+        let name = NSAttributeDescription()
+        name.name = "name"
+        name.attributeType = .stringAttributeType
+        name.isOptional = false
+        let quantity = NSAttributeDescription()
+        quantity.name = "quantity"
+        quantity.attributeType = .integer64AttributeType
+        quantity.isOptional = false
+        entity.properties = [name, quantity]
+        model.entities = [entity]
+        container = NSPersistentContainer(name: "PlaygroundItems", managedObjectModel: model)
+        // Add the app's SQLite store synchronously; all later reads reuse this coordinator.
+        try container.persistentStoreCoordinator.addPersistentStore(
+            ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL,
+            options: [NSMigratePersistentStoresAutomaticallyOption: true]
+        )
+        let context = container.newBackgroundContext()
+        try context.performAndWait {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "Item")
+            if try context.count(for: request) == 0 {
+                for (index, value) in ["Apples", "Bread", "Carrots", "Dates"].enumerated() {
+                    let item = NSEntityDescription.insertNewObject(forEntityName: "Item", into: context)
+                    item.setValue(value, forKey: "name")
+                    item.setValue(index + 1, forKey: "quantity")
+                }
+                try context.save()
+            }
+        }
+    }
+
+    static func install(beside databaseURL: URL) throws {
+        let fixture = try PlaygroundCoreDataFixture(
+            storeURL: databaseURL.deletingLastPathComponent().appendingPathComponent("items.sqlite")
+        )
+        DatabaseInspector.shared.registerCoreDataStore(CoreDataStoreRegistration(
+            identifier: "PlaygroundItems", modelVersion: "1", entities: ["Item"], fetcher: fixture
+        ))
+    }
+
+    func fetch(entity: String, limit: Int) throws -> CoreDataQueryResult {
+        let context = container.newBackgroundContext()
+        return try context.performAndWait {
+            let request = NSFetchRequest<NSDictionary>(entityName: entity)
+            request.resultType = .dictionaryResultType
+            request.includesPendingChanges = false
+            request.propertiesToFetch = ["name", "quantity"]
+            request.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+            request.fetchLimit = limit
+            let values = try context.fetch(request)
+            let countRequest = NSFetchRequest<NSManagedObject>(entityName: entity)
+            countRequest.includesPendingChanges = false
+            return CoreDataQueryResult(
+                columns: ["name", "quantity"],
+                rows: values.map { row in
+                    ["name", "quantity"].map { key in row[key].map { String(describing: $0) } }
+                },
+                truncated: try context.count(for: countRequest) > values.count
+            )
+        }
     }
 }

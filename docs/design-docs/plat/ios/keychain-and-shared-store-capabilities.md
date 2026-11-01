@@ -40,10 +40,27 @@ Each registered app-group UserDefaults suite and Core Data store becomes one
 | `kind`                | `sharing`                                                                 | `coordination`                                                                 | `query`                |
 | --------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------- |
 | `user_defaults_suite` | always `app_group`                                                        | declared at `registerAppGroupSuite(_:coordination:)`                           | `supported`            |
-| `core_data`           | `app_group` when the registration names an `appGroup`, else `app_private` | `single_process` when app-private; otherwise declared, default `uncoordinated` | `unsupported` (#15692) |
+| `core_data`           | `app_group` when the registration names an `appGroup`, else `app_private` | `single_process` when app-private; otherwise declared, default `uncoordinated` | `supported` with a fetcher; otherwise `unsupported` |
 
 Hosts declare it at registration:
 `DatabaseInspector.shared.registerAppGroupSuite("group.example", coordination: .hostCoordinated)`
 for suites, and `CoreDataStoreRegistration(identifier:appGroup:coordination:)` for Core Data.
 Coordination is always the host's declaration. The SDK does not probe containers or
 file locks to infer it; re-registering a suite replaces the earlier declaration.
+
+
+Core Data reads use `sqlQuery` with `store`, `entity`, and optional positive `limit`.
+The host supplies `CoreDataReadOnlyFetching` on its registration; the SDK never
+opens a writer or issues SQL for this mode. The host fetches through its existing
+coordinator/context without saving or changing objects, returns at most the requested
+rows, and reports whether more exist with `truncated`. Metadata Codable excludes
+the runtime fetcher; decoded registrations remain unsupported until the host supplies one.
+
+The `query_core_data` CtrlProxy command relays `CoreDataQueryRequest` to
+`POST /db/core-data/query`; `CoreDataQueryResult` carries attribute columns, nullable
+string rows, and truncation. The runner reuses the query-result response envelope.
+The SDK checks inspection enablement, exact store registration and entity membership,
+clamps the requested limit to `maxRows`, redacts sensitive columns, and enforces
+`maxBytes`. A host over-return is trimmed and marked truncated. Unknown registrations
+return `unknown_core_data_store` or `unknown_core_data_entity`; missing fetchers return
+`core_data_query_unavailable`. These reads bypass SQL classification and mutation tokens.

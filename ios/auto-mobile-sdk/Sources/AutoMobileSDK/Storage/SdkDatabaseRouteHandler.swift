@@ -112,8 +112,8 @@
                     coordination: store.appGroup == nil
                         ? "single_process"
                         : (store.coordination ?? .uncoordinated).rawValue,
-                    query: "unsupported",
-                    reason: "core_data_query_unavailable"
+                    query: store.fetcher == nil ? "unsupported" : "supported",
+                    reason: store.fetcher == nil ? "core_data_query_unavailable" : nil
                 )
             }
             return suites + coreData
@@ -206,6 +206,51 @@
                 stores: StorageStoreState.states(for: configuration),
                 keychain: KeychainCapability.capability(for: configuration)
             ))
+        }
+
+        func handleCoreDataQuery(body: Data) -> SdkRouteResponse {
+            guard DatabaseInspector.shared.isEnabled else {
+                return error(statusCode: 503, code: "db_inspection_disabled")
+            }
+            guard let request = try? JSONDecoder().decode(CoreDataQueryRequest.self, from: body),
+                  request.limit == nil || request.limit! > 0 else {
+                return error(statusCode: 400, code: "bad_request")
+            }
+            let configuration = DatabaseInspector.shared.inspectionConfiguration
+            guard let store = configuration.coreDataStores.first(where: { $0.identifier == request.store }) else {
+                return error(statusCode: 404, code: "unknown_core_data_store")
+            }
+            guard store.entities.contains(request.entity) else {
+                return error(statusCode: 404, code: "unknown_core_data_entity")
+            }
+            guard let fetcher = store.fetcher else {
+                return error(statusCode: 501, code: "core_data_query_unavailable")
+            }
+            let limit = min(request.limit ?? configuration.maxRows, configuration.maxRows)
+            do {
+                let result = try fetcher.fetch(entity: request.entity, limit: limit)
+                var rows = StorageInspectionAccess.redactedRows(
+                    columns: result.columns,
+                    rows: Array(result.rows.prefix(limit)),
+                    configuredKeys: configuration.sensitiveKeys
+                )
+                while true {
+                    let payload = CoreDataQueryResult(
+                        columns: result.columns, rows: rows,
+                        truncated: result.truncated || result.rows.count > rows.count
+                    )
+                    let data = try JSONEncoder().encode(payload)
+                    if data.count <= configuration.maxBytes {
+                        return SdkRouteResponse(statusCode: 200, body: data)
+                    }
+                    guard !rows.isEmpty else {
+                        return error(statusCode: 413, code: "response_too_large")
+                    }
+                    rows.removeLast()
+                }
+            } catch {
+                return self.error(statusCode: 500, code: "core_data_fetch_failed")
+            }
         }
 
         func handleListDatabases() -> SdkRouteResponse {

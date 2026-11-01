@@ -20,20 +20,28 @@ import { resolveAndroidDatabasePath } from "../features/database/androidDatabase
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 
 // Schema for sqlQuery tool
-const sqlQuerySchema = withAppIdAliases(
+export const sqlQuerySchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z
       .object({
         appId: z.string(),
         databasePath: z
           .string()
+          .optional()
           .describe(
-            "Absolute path under the app data directory, or on Android a bare file name in the app databases directory",
+            "Absolute path under the app data directory, or on Android a bare file name in the app databases directory; omit when store and entity are supplied",
           ),
-        query: z.string().describe("SQL query"),
+        query: z.string().optional().describe("SQL query; omit when store and entity are supplied"),
+        store: z.string().min(1).optional().describe("Registered Core Data store identifier on iOS; supply with entity instead of databasePath and query"),
+        entity: z.string().min(1).optional().describe("Registered Core Data entity to fetch on iOS; requires store"),
+        limit: z.number().int().positive().optional().describe("Maximum Core Data rows; only with store and entity, clamped to the host row limit"),
       })
       .strict(),
   ),
+).refine((args) =>
+  (args.databasePath !== undefined && args.query !== undefined && args.store === undefined && args.entity === undefined && args.limit === undefined) ||
+  (args.store !== undefined && args.entity !== undefined && args.databasePath === undefined && args.query === undefined),
+  "Supply exactly databasePath and query, or store and entity (with optional limit)",
 );
 
 // Type interface for tool arguments
@@ -103,11 +111,22 @@ export function registerDatabaseTools(
   // SQL Query handler
   const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
     try {
+      args = sqlQuerySchema.parse(args);
+      if (args.store !== undefined && args.entity !== undefined) {
+        if (device.platform !== "ios") {
+          throw new ActionableError("Core Data queries require an iOS app with a registered store and entity. Use databasePath and query for Android SQLite databases.");
+        }
+        const result = await iosClient(device).queryCoreDataForIos(args.appId, args.store, args.entity, args.limit);
+        return createStructuredToolResponse({ message: `Query returned ${result.rows?.length ?? 0} row(s)`, ...result });
+      }
+      if (args.databasePath === undefined || args.query === undefined) {
+        throw new ActionableError("Supply databasePath and query, or store and entity.");
+      }
       const databasePath =
         device.platform === "android"
           ? resolveAndroidDatabasePath(args.appId, args.databasePath)
           : args.databasePath;
-      const result = await executeSqlForDevice(device, { ...args, databasePath }, iosClient);
+      const result = await executeSqlForDevice(device, { ...args, databasePath, query: args.query }, iosClient);
 
       // The executed result type is authoritative; SQL text classification is
       // only an approximation for decisions that must happen before execution.
@@ -141,7 +160,7 @@ export function registerDatabaseTools(
   // Register the sqlQuery tool
   ToolRegistry.registerDeviceAware(
     "sqlQuery",
-    "Execute SQL on app SQLite database.",
+    "Execute SQL on an app SQLite database, or read a registered Core Data entity on iOS using store and entity.",
     sqlQuerySchema,
     {
       handler: sqlQueryHandler,
@@ -151,7 +170,8 @@ export function registerDatabaseTools(
       // Only a single read-only statement watches (#10830); anything the classifier cannot prove
       // read-only needs the device's holder and is refused with device_owned_by_other_session.
       deviceReadOnly: (args: SqlQueryArgs) =>
-        typeof args.query === "string" && isReadOnlySqlQuery(args.query),
+        (args.store !== undefined && args.entity !== undefined) ||
+        (typeof args.query === "string" && isReadOnlySqlQuery(args.query)),
     },
   );
 }
@@ -161,7 +181,7 @@ export function registerDatabaseTools(
  */
 async function executeSqlForDevice(
   device: BootedDevice,
-  args: SqlQueryArgs,
+  args: SqlQueryArgs & { databasePath: string; query: string },
   iosClient: IosDatabaseClientResolver,
 ): Promise<SQLResult> {
   if (device.platform === "android") {

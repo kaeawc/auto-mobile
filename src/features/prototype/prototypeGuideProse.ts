@@ -997,6 +997,7 @@ Authoring choices:
   (changes become instant) and a hidden \`visibleWhen\` node is simply absent, so it is the right
   choice for automated checks. Motion is also off when Android animator or transition scale is 0. The reduced profile
   keeps fades and color/alpha animation while removing spatial movement and ambient loops.
+- **Layout direction.** Set \`window.layoutDirection\` to \`rtl\` or \`ltr\` on iOS to override the prototype layout without changing the system locale or translating text. Omit it to follow the host. Requires \`prototype_layout_direction_v1\`; Android refuses specs that set it.
 - **Window format.** On Android an opaque fullscreen prototype is still composited as a
   translucent layer, whatever the spec says. *Being changed (#12140).*
 - **Accessibility events.** The Android accessibility service resolves an event's window type once

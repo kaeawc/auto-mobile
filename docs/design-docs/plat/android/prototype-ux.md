@@ -2110,6 +2110,11 @@ prototype is shown and is restored on dismiss; none writes a system setting. `or
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
 best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
 
+**Prototype layout direction.** Optional `window.layoutDirection: "ltr" | "rtl"` requires
+`prototype_layout_direction_v1`. Omission inherits the host direction. The iOS renderer overrides
+SwiftUI layout direction and root UIKit semantics for the prototype only, without changing locale.
+Android does not advertise this capability, so the host refuses specs that set it before showing them.
+
 **Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
 `prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
 prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`

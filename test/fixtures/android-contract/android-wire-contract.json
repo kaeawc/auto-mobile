@@ -10393,6 +10393,12 @@
         "hasDefault": true
       },
       {
+        "name": "layoutDirection",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "brightness",
         "type": "json",
         "nullable": true,

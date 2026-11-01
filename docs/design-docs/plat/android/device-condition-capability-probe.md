@@ -66,6 +66,8 @@ read-only. A failing command is recorded in the matrix and never stops the scrip
 
 ## `capabilityProbe` helper (proposal)
 
+`faults.readOnlyFilesystem` requires rootable Android images and remounts the `/storage/emulated` FUSE superblock read-only device-wide, causing app writes to `/sdcard` to fail with EROFS; apply and reset verify mount options, and only mounts changed by the injector are restored to read-write on release or session close, without creating files.
+
 Each injector checks its capability before changing the device. When the capability is
 missing, the injector skips that condition and says why, rather than failing the whole
 `setDeviceState` call or applying half of a condition.

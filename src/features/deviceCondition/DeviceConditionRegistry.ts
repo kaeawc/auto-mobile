@@ -19,6 +19,7 @@ import { resolvePackageFaultInjector } from "./packageFaultInjectors";
 import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import { resolveProcessFaultInjector } from "./processFaultInjectors";
+import { resolveReadOnlyFilesystemInjector } from "./readOnlyFilesystemInjector";
 import { resolveStorageFaultInjector } from "./storageFaultInjectors";
 import { resolveVehicleStateInjector } from "./vehicleStateInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
@@ -222,7 +223,7 @@ export class DeviceConditionRegistry {
 
 /**
  * Default resolver: the root fixture (#14060), power-domain fault injectors
- * (#14063), process-lifecycle fault injectors (#14068) and storage fault injectors
+ * (#14063), process-lifecycle fault injectors (#14068) and device-wide read-only shared storage and storage fault injectors
  * (#14066), permission and package-state fault injectors (#14069) and process fault injectors
  * (#14068), app-file corruption (#14066) and clock skew (#14069) on an Android device, and the
  * iOS refusals (#14073), plus per-signal integrity presets (#16246).
@@ -235,6 +236,7 @@ export function createDefaultInjectorResolver(
   // Factory-local caches keep injected adb clients separate from the production instances.
   const rootCache = new Map<string, DeviceConditionInjector>();
   const integrityCache = new Map<string, DeviceConditionInjector>();
+  const readOnlyCache = new Map<string, DeviceConditionInjector>();
   const resolveFixture = (device: BootedDevice, key: DeviceConditionKey) =>
     resolveIosRefusalInjector(device, key) ??
     resolveRootStateInjector(device, key, adbFactory, rootCache) ??
@@ -245,6 +247,10 @@ export function createDefaultInjectorResolver(
         resolvePowerFaultInjector(owner.device, key, { adbFactory }) ??
         resolveLifecycleFaultInjector(owner.device, key, { adbFactory }) ??
         resolveStorageFaultInjector(owner.device, key, { adbFactory }) ??
+        resolveReadOnlyFilesystemInjector(owner.device, key, {
+          adbFactory,
+          cache: readOnlyCache,
+        }) ??
         resolvePermissionFaultInjector(owner.device, key, { adbFactory }) ??
         resolvePackageFaultInjector(owner.device, key, { adbFactory }) ??
         resolveProcessFaultInjector(owner.device, key, { adbFactory }) ??

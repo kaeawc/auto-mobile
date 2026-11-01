@@ -50,6 +50,7 @@ final class PrototypeSpecModelsTests: XCTestCase {
             .appendingPathComponent("test/fixtures/prototype-spec/models.json")
         let data = try Data(contentsOf: url)
         struct Migrated: Decodable {
+            let windowLayoutDirection: WindowSpec
             let placementFullscreen: Placement
             let placementSheet: Placement
             let placementFloating: Placement
@@ -66,6 +67,7 @@ final class PrototypeSpecModelsTests: XCTestCase {
             let itemString: NavItem
         }
         let models = try JSONDecoder().decode(Migrated.self, from: data)
+        XCTAssertEqual(models.windowLayoutDirection.layoutDirection, .rtl)
         XCTAssertEqual(models.placementFullscreen.type, "fullscreen")
         XCTAssertEqual(models.placementFullscreen.scrim, .modes(light: "#112233", dark: "#445566"))
         XCTAssertNil(models.placementFullscreen.edge)

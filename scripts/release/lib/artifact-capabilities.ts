@@ -57,6 +57,8 @@ export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
  */
 export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string>> = {
   "android-ctrlproxy-apk": {
+    prototype_layout_direction_v1:
+      "Per-prototype direction is implemented only by the iOS prototype agent",
     prototype_platform_share_v1:
       "Share has a validated contract only; Android does not implement the system share sheet yet",
   },

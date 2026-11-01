@@ -147,6 +147,17 @@ describe("artifact capability parsers", () => {
     );
   });
 
+  test("prototype agent: release parser discovers the advertised layout direction capability", () => {
+    const swift = readFileSync(
+      path.resolve(
+        import.meta.dir,
+        "../../ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+      ),
+      "utf8",
+    );
+    expect(parsePrototypeAgentAdvertised(swift)).toContain("prototype_layout_direction_v1");
+  });
+
   test("host: reads versioned literals in code and ignores unversioned strings", () => {
     const ts = `
       features.includes("path_gesture_v1");

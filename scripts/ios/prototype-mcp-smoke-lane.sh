@@ -9,16 +9,18 @@
 #
 # Environment:
 #   XCRUN_BIN                         xcrun executable (default xcrun)
+#   LSOF_BIN                          lsof executable (default lsof)
 #   XCODEBUILD_BIN                    xcodebuild executable (default xcodebuild)
 #   AUTO_MOBILE_CMD                   CLI command (default bun run src/index.ts --debug --embedded-sdk --cli)
 #   PROTOTYPE_MCP_SMOKE_SCRIPT        MCP smoke script (default prototype-mcp-smoke.sh beside this)
 #   PROTOTYPE_MCP_SMOKE_LOG_DIR       output dir (default scratch/prototype-mcp-smoke-lane/ios-<request>)
 #   PROTOTYPE_MCP_SMOKE_AUX_ROOT      private socket dir parent (default /tmp; keep paths short)
+#   PROTOTYPE_MCP_SMOKE_DAEMON_PORT   private daemon port (default 40000 + $$ % 25536)
 #   PROTOTYPE_MCP_SMOKE_RETRY_SLEEP   seconds between simulator delete attempts (default 5)
 #   PROTOTYPE_MCP_SMOKE_NOW_EPOCH     Unix seconds clock override (default date +%s)
 #   PROTOTYPE_SMOKE_DEVICE_TYPE       simulator device type (default highest iPhone model generation)
 #
-# Exit codes: 0 pass; 1 setup/build failed; 2 usage; 3 no matching runtime (skip).
+# Exit codes: 0 pass; 1 setup/build/port/start failed; 2 usage/invalid port; 3 no matching runtime (skip).
 # MCP smoke exit codes are propagated, including 3 for unsupported capability/platform.
 set -euo pipefail
 
@@ -43,6 +45,46 @@ fail() {
   exit 1
 }
 
+daemon_port="${PROTOTYPE_MCP_SMOKE_DAEMON_PORT-$((40000 + $$ % 25536))}"
+if [[ ! ${daemon_port} =~ ^[0-9]{1,5}$ ]] || ((10#${daemon_port} < 40000 || 10#${daemon_port} > 65535)); then
+  echo 'prototype-mcp-smoke-lane: PROTOTYPE_MCP_SMOKE_DAEMON_PORT must be numeric and between 40000 and 65535 (never 3000)' >&2
+  exit 2
+fi
+daemon_port=$((10#${daemon_port}))
+lsof_bin="${LSOF_BIN:-lsof}"
+command -v "${lsof_bin}" >/dev/null || fail 'lsof is required to check the private daemon port'
+if "${lsof_bin}" -nP -iTCP:"${daemon_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+  fail "private daemon port ${daemon_port} is already listening"
+fi
+read -r -a cli_base <<< "${AUTO_MOBILE_CMD}"
+daemon_base=()
+daemon_flags=()
+in_flags=0
+has_entrypoint=0
+for word in ${cli_base[@]+"${cli_base[@]}"}; do
+  case "${word}" in
+    *.ts | *.js | *.mjs | *.cjs | *.mts | *.cts) has_entrypoint=1; break ;;
+  esac
+done
+after_entrypoint=0
+for word in ${cli_base[@]+"${cli_base[@]}"}; do
+  # --cli is a command boundary: parseValueOptions stops there, hiding --port.
+  # Preserve all startup flags so daemon and client reuse-critical options match.
+  [[ ${word} == --cli ]] && continue
+  daemon_base+=("${word}")
+  if [[ ${has_entrypoint} == 1 ]]; then
+    # Runtime options belong only in the executable prefix.
+    if [[ ${after_entrypoint} == 1 ]]; then in_flags=1; fi
+    case "${word}" in
+      *.ts | *.js | *.mjs | *.cjs | *.mts | *.cts) after_entrypoint=1 ;;
+    esac
+  elif [[ ${word} == --* ]]; then
+    in_flags=1
+  fi
+  if [[ ${in_flags} == 1 ]]; then daemon_flags+=("${word}"); fi
+done
+[[ ${#daemon_base[@]} -gt 0 ]] || fail 'AUTO_MOBILE_CMD has no executable'
+daemon_started=0
 udid=""
 derived_data=""
 aux_root=""
@@ -70,19 +112,9 @@ cleanup() {
   local result=$?
   local cleanup_status
   trap - EXIT
-  if [[ -n ${aux_root} ]]; then
-    local -a words=(auto-mobile) cli_words=()
-    local word
-    if [[ -n "${AUTO_MOBILE_CMD:-}" ]]; then
-      read -r -a cli_words <<< "$AUTO_MOBILE_CMD"
-      words=()
-      for word in "${cli_words[@]}"; do
-        [[ "$word" == --* ]] && break
-        words+=("$word")
-      done
-    fi
+  if [[ ${daemon_started} == 1 ]]; then
     set +e
-    run_with_timeout 60 "${words[@]+"${words[@]}"}" --daemon stop
+    run_with_timeout 60 ${daemon_base[@]+"${daemon_base[@]}"} --daemon stop
     cleanup_status=$?
     set -e
     if [[ ${cleanup_status} -ne 0 ]]; then
@@ -125,6 +157,10 @@ while IFS= read -r name; do
 done < <(compgen -e)
 aux_root="$(mktemp -d "${PROTOTYPE_MCP_SMOKE_AUX_ROOT:-/tmp}/apm-aux.XXXXXX")" || fail 'could not allocate private aux socket dir'
 export AUTOMOBILE_AUX_SOCKET_DIR="${aux_root}"
+# Keep the private daemon off the operator database, including inherited exact paths.
+export AUTOMOBILE_DB_DIR="${aux_root}/db"
+export AUTOMOBILE_DB_PATH="${AUTOMOBILE_DB_DIR}/auto-mobile.db"
+unset AUTO_MOBILE_DB_PATH
 
 # Pick the newest installed iOS runtime matching the request ("26" matches 26.x).
 runtimes_json="$("${XCRUN_BIN}" simctl list runtimes available iOS --json)" || fail 'could not list runtimes'
@@ -208,6 +244,15 @@ derived_data="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-prototype-mcp.XXXXXX")"
   build || fail 'Playground build failed'
 export PROTOTYPE_SMOKE_APP_BUNDLE="${derived_data}/Build/Products/Debug-iphonesimulator/Playground.app"
 [[ -d ${PROTOTYPE_SMOKE_APP_BUNDLE} ]] || fail "Playground build produced no app at ${PROTOTYPE_SMOKE_APP_BUNDLE}"
+
+# Arm cleanup before starting: a failed start can leave a daemon behind.
+daemon_started=1
+# Repeat startup flags for the child parsed after --daemon start.
+set +e
+run_with_timeout 60 ${daemon_base[@]+"${daemon_base[@]}"} --daemon start ${daemon_flags[@]+"${daemon_flags[@]}"} --port "${daemon_port}"
+command_status=$?
+set -e
+[[ ${command_status} -eq 0 ]] || fail 'private daemon start failed'
 
 # Run as a simple command so errexit and the EXIT trap preserve its exact status.
 bash "${smoke_script}" "${udid}"

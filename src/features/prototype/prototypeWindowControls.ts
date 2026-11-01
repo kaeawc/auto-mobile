@@ -17,6 +17,13 @@ export function prototypeWindowControlFields(spec: unknown): string[] {
   );
 }
 
+/** The root window direction is independent of system window controls. */
+export function prototypeLayoutDirectionFields(spec: unknown): string[] {
+  return record(record(spec)?.window)?.layoutDirection !== undefined
+    ? ["window.layoutDirection"]
+    : [];
+}
+
 /** Every `hideKeyboard` action (#14320), gated by prototype_hide_keyboard_v1. */
 export function prototypeHideKeyboardFields(spec: unknown): string[] {
   return prototypeFieldsOfKind(spec, "hideKeyboard");

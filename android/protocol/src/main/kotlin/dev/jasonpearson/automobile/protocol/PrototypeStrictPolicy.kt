@@ -546,6 +546,7 @@ internal object PrototypeEnvelopeFeatures {
     if (spec.text("motion") == "reduced") add("reduced_motion")
     if ((spec["window"] as? JsonObject)?.get("transition") != null) add("window_motion")
     if ((spec["window"] as? JsonObject)?.get("backdrop") != null) add("backdrop")
+    if ((spec["window"] as? JsonObject)?.get("layoutDirection") != null) add("layout_direction")
     if (WINDOW_CONTROLS.any { (spec["window"] as? JsonObject)?.containsKey(it) == true })
       add("platform_window_controls")
     if ((spec["theme"] as? JsonObject)?.text("design") == "platform") add("design_platform")

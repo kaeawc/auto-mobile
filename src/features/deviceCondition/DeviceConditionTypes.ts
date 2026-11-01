@@ -142,6 +142,8 @@ export interface DeviceConditionInput {
     thermal?: "throttling" | "critical" | typeof DEVICE_CONDITION_UNSET;
     /** Process-lifecycle fault (#14068). */
     dontKeepActivities?: "on" | typeof DEVICE_CONDITION_UNSET;
+    /** Device-wide read-only shared storage; rootable Android emulators only. */
+    readOnlyFilesystem?: "on" | typeof DEVICE_CONDITION_UNSET;
     /** Storage fault (#14066). */
     storage?: "low" | "full" | typeof DEVICE_CONDITION_UNSET;
     /** Corrupt one file in a debuggable app's data directory (#14066). */
@@ -269,6 +271,12 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .optional()
           .describe(
             "Developer options 'Don't keep activities' via `settings global always_finish_activities`, restored to its prior value, or unset. Applies to activities left after the change.",
+          ),
+        readOnlyFilesystem: z
+          .enum(["on", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Make shared external storage /sdcard read-only for every app (device-wide EROFS). Rootable Android emulators only; reset restores writes. Or unset.",
           ),
         storage: z
           .enum(["low", "full", DEVICE_CONDITION_UNSET])

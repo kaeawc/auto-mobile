@@ -93,6 +93,7 @@ enum PrototypeAgentProtocol {
         storageCapability,
         pagerStateKeyCapability,
         backdropCapability,
+        layoutDirectionCapability,
         timersCapability,
         "prototype_platform_v1",
         "prototype_platform_clipboard_v1",
@@ -107,6 +108,7 @@ enum PrototypeAgentProtocol {
     static let scrollMotionCapability = "prototype_scroll_motion_v1"
     static let formatCapability = "prototype_format_v1"
     static let pagerStateKeyCapability = "prototype_pager_state_key_v1"
+    static let layoutDirectionCapability = "prototype_layout_direction_v1"
     /// `style.effects` (#15130): all ten looks render, the shader-sampled ones falling back to no effect
     /// on a node SwiftUI backs with a platform view, reported in `degradedEffects`.
     static let effectsCapability = "prototype_effects_v1"

@@ -24,6 +24,7 @@ describe("iOS refusals (#14073)", () => {
       "faults.thermal",
       "faults.dontKeepActivities",
       "faults.storage",
+      "faults.readOnlyFilesystem",
     ] satisfies DeviceConditionKey[]) {
       const injector = resolveIosRefusalInjector(ios, key);
       await expect(injector?.apply("on")).rejects.toThrow(/Android device or emulator/);

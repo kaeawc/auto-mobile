@@ -146,6 +146,10 @@ class PrototypeSpecModelsTest {
 
   @Test
   fun `generated placement variants round trip`() {
+    assertRoundTrip<PrototypeWindow>(
+      "windowLayoutDirection",
+      PrototypeWindow(placement = PrototypeFullscreenPlacement(), layoutDirection = "rtl"),
+    )
     val modes = PrototypeModeValue.Modes("#112233", "#445566")
     assertRoundTrip<PrototypePlacement>("placementFullscreen", PrototypeFullscreenPlacement(modes))
     assertRoundTrip<PrototypePlacement>("placementSheet", PrototypeSheetPlacement("bottom", 320.0))

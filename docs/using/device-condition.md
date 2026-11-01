@@ -24,23 +24,24 @@ Turn it on in the AutoMobile IDE plugin under **Settings > AutoMobile > Feature 
 
 Set a condition by passing its value. Pass `"unset"` to clear it, or `{ "reset": true }` to restore everything applied on the device.
 
-| Field                                 | What it does                                                                         | Restored on reset                                         |
-| ------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
-| `rootState: "rooted-detectable"`      | Makes root-detection checks trip (non-Play emulator image with a writable `/system`) | Yes                                                       |
-| `faults.battery`                      | `unplug`, `low` (15%) or `full`                                                      | Yes                                                       |
-| `faults.lowPower`                     | Battery saver on                                                                     | Yes, to its prior value                                   |
-| `faults.doze`                         | Forces deep Doze                                                                     | Yes                                                       |
-| `faults.thermal`                      | `throttling` or `critical` thermal status                                            | Yes                                                       |
-| `faults.dontKeepActivities`           | Developer option "Don't keep activities" on                                          | Yes, to its prior value                                   |
-| `faults.storage`                      | `low` (about 128 MiB free) or `full` (about 8 MiB free)                              | Yes                                                       |
-| `faults.corruptAppFile`               | Damages one file in a debuggable app's data directory                                | Yes, from a saved copy                                    |
-| `faults.revokePermission`             | Revokes one runtime permission                                                       | Yes, re-granted                                           |
-| `faults.disablePackage`               | Disables an app for the current user                                                 | Yes, re-enabled                                           |
-| `faults.clockSkew`                    | Moves the device clock `offsetSeconds` from real time, with automatic time off       | Yes, to real time and the original automatic-time setting |
-| `faults.killApp`                      | Ends an app's process once (`background` or `forceStop`)                             | No: one-shot                                              |
-| `faults.trimMemory`                   | Sends a running app one `onTrimMemory` level                                         | No: one-shot                                              |
-| `faults.clearPackageData`             | Clears an app's data                                                                 | No: one-shot, cannot be undone                            |
-| `vehicle.motion`, `vehicle.nightMode` | Automotive vehicle state; see [Android Automotive OS](android-automotive.md)         | Yes                                                       |
+| Field                                 | What it does                                                                                                                      | Restored on reset                                         |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `rootState: "rooted-detectable"`      | Makes root-detection checks trip (non-Play emulator image with a writable `/system`)                                              | Yes                                                       |
+| `faults.battery`                      | `unplug`, `low` (15%) or `full`                                                                                                   | Yes                                                       |
+| `faults.lowPower`                     | Battery saver on                                                                                                                  | Yes, to its prior value                                   |
+| `faults.doze`                         | Forces deep Doze                                                                                                                  | Yes                                                       |
+| `faults.thermal`                      | `throttling` or `critical` thermal status                                                                                         | Yes                                                       |
+| `faults.dontKeepActivities`           | Developer option "Don't keep activities" on                                                                                       | Yes, to its prior value                                   |
+| `faults.storage`                      | `low` (about 128 MiB free) or `full` (about 8 MiB free)                                                                           | Yes                                                       |
+| `faults.readOnlyFilesystem: "on"`     | Makes shared storage `/sdcard` read-only for every app; writes fail with "Read-only file system" (EROFS). Rootable emulators only | Yes                                                       |
+| `faults.corruptAppFile`               | Damages one file in a debuggable app's data directory                                                                             | Yes, from a saved copy                                    |
+| `faults.revokePermission`             | Revokes one runtime permission                                                                                                    | Yes, re-granted                                           |
+| `faults.disablePackage`               | Disables an app for the current user                                                                                              | Yes, re-enabled                                           |
+| `faults.clockSkew`                    | Moves the device clock `offsetSeconds` from real time, with automatic time off                                                    | Yes, to real time and the original automatic-time setting |
+| `faults.killApp`                      | Ends an app's process once (`background` or `forceStop`)                                                                          | No: one-shot                                              |
+| `faults.trimMemory`                   | Sends a running app one `onTrimMemory` level                                                                                      | No: one-shot                                              |
+| `faults.clearPackageData`             | Clears an app's data                                                                                                              | No: one-shot, cannot be undone                            |
+| `vehicle.motion`, `vehicle.nightMode` | Automotive vehicle state; see [Android Automotive OS](android-automotive.md)                                                      | Yes                                                       |
 
 A condition the device cannot apply comes back `unsupported` with a `detail` reason, and the call reports `success: false`. The call's other changes still apply.
 

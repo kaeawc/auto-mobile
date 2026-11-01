@@ -126,6 +126,21 @@ When the spec has a `storage` block, the generated host opts in to file-backed s
 (`PrototypeStorage.fileBacked(context)` on Android, `.fileBacked` on iOS), so the listed state and
 data keys survive app restarts. Specs without a `storage` block use no storage.
 
+## Window options
+
+Set `window.layoutDirection` to `"rtl"` to mirror a prototype, or `"ltr"` to force left-to-right
+layout. Leave it out to follow the app's direction. For example:
+
+```json
+{ "placement": { "type": "fullscreen" }, "layoutDirection": "rtl" }
+```
+
+Use this object as the spec's `window`. The option changes only the prototype's layout; it does
+not change the device locale or translate text. It is supported on iOS and requires
+`prototype_layout_direction_v1`. Android refuses specs that set it; remove the option to show there.
+Other optional window controls are `keepScreenOn`, `brightness`, `orientation` and `statusBar`;
+these require `prototype_platform_window_controls_v1` and are refused when unsupported.
+
 ## Capability errors
 
 An app may ship an older renderer than the spec needs. The renderer never draws such a spec partly.

@@ -61,7 +61,7 @@ ${condition}
 `;
     const accepted = validator.validateYaml(
       plan(
-        "        rootState: rooted-detectable\n        faults:\n          battery: low\n          thermal: critical\n          storage: full\n          dontKeepActivities: on",
+        "        rootState: rooted-detectable\n        faults:\n          battery: low\n          thermal: critical\n          storage: full\n          readOnlyFilesystem: on\n          dontKeepActivities: on",
       ),
     );
     expect(accepted.errors ?? []).toEqual([]);
@@ -89,6 +89,7 @@ ${condition}
       "        faults:\n          battery: explode",
       "        faults:\n          dontKeepActivities: off",
       "        faults:\n          storage: overflowing",
+      "        faults:\n          readOnlyFilesystem: off",
       "        faults:\n          gravity: low",
       "        faults:\n          revokePermission: on",
       "        faults:\n          disablePackage: on",

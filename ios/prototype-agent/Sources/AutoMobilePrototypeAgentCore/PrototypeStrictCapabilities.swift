@@ -38,8 +38,10 @@ enum PrototypeStrictCapabilities {
         if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
             .contains(where: { $0.hasPrefix("stack:") }) { need("routes") }
         if spec["window"]?.objectFields?["backdrop"] != nil { need("backdrop") }
+        if spec["window"]?.objectFields?["layoutDirection"] != nil { need("layout_direction") }
         if let window = spec["window"]?.objectFields,
-           ["keepScreenOn", "brightness", "orientation", "statusBar"].contains(where: { window[$0] != nil }) {
+           ["keepScreenOn", "brightness", "orientation", "statusBar"].contains(where: { window[$0] != nil })
+        {
             need("platform_window_controls")
         }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,

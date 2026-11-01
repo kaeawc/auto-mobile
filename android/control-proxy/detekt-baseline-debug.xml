@@ -14,7 +14,7 @@
     <ID>InjectDispatcher:CtrlProxy.kt:CtrlProxy$IO</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$Default</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$IO</ID>
-    <ID>LargeClass:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
+    <ID>LargeClass:CtrlProxy.kt:CtrlProxy : AccessibilityService</ID>
     <ID>LargeClass:GestureController.kt:GestureController</ID>
     <ID>LargeClass:PrototypeController.kt:PrototypeController</ID>
     <ID>LargeClass:StorageSubscriptionManager.kt:StorageSubscriptionManager</ID>
@@ -75,7 +75,7 @@
     <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:e: NullPointerException</ID>
     <ID>TooGenericExceptionCaught:WebSocketServer.kt:WebSocketServer$e: Exception</ID>
-    <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
+    <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy : AccessibilityService</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy$&lt;no name provided&gt; : Host</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:dev.jasonpearson.automobile.ctrlproxy.CtrlProxy.kt</ID>
     <ID>TooManyFunctions:CtrlProxyActions.kt:CtrlProxyActions</ID>

@@ -229,6 +229,7 @@ internal class BroadcastGuardAdoptionTestSourceTest {
   private fun readGuardedSources(): List<Pair<String, String>> =
     listOf(
         "CtrlProxy.kt",
+        "CtrlProxyActionRouter.kt",
         "CaCertificateController.kt",
         "SettingsController.kt",
         "PackageController.kt",

@@ -36,8 +36,7 @@ if [[ ${1:-} == run ]]; then
     [[ "$3" == src/index.ts ]] || exit 1
     shift 3
   else
-    # Session release strips startup options from the executable prefix.
-    shift
+    exit 1
   fi
 fi
 if [[ "$*" == *'--daemon start'* ]]; then
@@ -416,5 +415,6 @@ teardown() {
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   start="$(grep '^cli .*--daemon start' "$CALLS")"
   [ "${start%% aux=*}" = 'cli run --silent src/index.ts --debug --embedded-sdk --daemon start --debug --embedded-sdk --port 45678' ]
+  grep -q '^cli run --silent src/index.ts --daemon release-session ' "$CALLS"
   grep -q '^cli run --silent src/index.ts --debug --embedded-sdk --daemon stop aux=' "$CALLS"
 }

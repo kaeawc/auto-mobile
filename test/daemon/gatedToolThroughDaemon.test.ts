@@ -110,7 +110,9 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
     daemonSide = new FakeSocket();
     clientSide = new ClientSideSocket(daemonSide);
     server.connect(daemonSide);
-    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+      clientIdentity: null,
       idGenerator: new FakeIdGenerator(),
     });
     daemonClient.testHooks.attachSocket(clientSide);

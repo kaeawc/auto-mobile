@@ -9,6 +9,7 @@ import {
   isForegroundLauncher,
 } from "../observe/androidLauncherPackages";
 import type { Window } from "../observe/interfaces/Window";
+import type { BootedDevice } from "../../models";
 
 type HomeProbe = "verified" | "expired" | "not-home";
 
@@ -24,6 +25,7 @@ export interface HomeForegroundVerifierDependencies {
   readonly adb: AdbExecutor;
   readonly deviceId: string;
   readonly timer: Timer;
+  readonly formFactor?: BootedDevice["formFactor"];
 }
 
 export class HomeForegroundVerifier {
@@ -31,12 +33,14 @@ export class HomeForegroundVerifier {
   private readonly adb: AdbExecutor;
   private readonly deviceId: string;
   private readonly timer: HomeForegroundVerifierDependencies["timer"];
+  private readonly formFactor: BootedDevice["formFactor"];
 
   constructor(deps: HomeForegroundVerifierDependencies) {
     this.window = deps.window;
     this.adb = deps.adb;
     this.deviceId = deps.deviceId;
     this.timer = deps.timer;
+    this.formFactor = deps.formFactor;
   }
 
   /**
@@ -159,13 +163,12 @@ export class HomeForegroundVerifier {
       return "expired";
     }
     const { deviceId } = this;
-    const isLauncher = await isForegroundLauncher(
-      activeWindow.appId,
-      this.adb,
-      deviceId,
-      this.timer,
-      { ...readBounds(), incarnationToken: deviceIncarnationToken(deviceId) },
-    );
+    const isLauncher = await isForegroundLauncher(activeWindow.appId, this.adb, deviceId, {
+      timer: this.timer,
+      ...readBounds(),
+      incarnationToken: deviceIncarnationToken(deviceId),
+      formFactor: this.formFactor,
+    });
     // A successful launcher lookup is evidence only while it remains within
     // the caller's deadline; a fast cached lookup must not accept success
     // after a preceding foreground read spent the budget.

@@ -112,15 +112,35 @@ describe("stylus pointer capability (#13081)", () => {
     expect(refusal).toContain("could not read");
   });
 
-  test("a tool type other than stylus is refused rather than injected as one", async () => {
+  test("a tool type other than a stylus or eraser is refused rather than injected as one", async () => {
     const adb = adbWithSdk(34);
     const refusal = await checkStylusPointer(adb, {
-      pointer: { toolType: "eraser" } as never,
+      pointer: { toolType: "finger" } as never,
       platform: "android",
       gesture: "tap",
     });
-    expect(refusal).toContain("eraser");
+    expect(refusal).toContain("finger");
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("an eraser skips the adb input check: only the pointer routes can inject it (#13105)", async () => {
+    const adb = adbWithSdk(null);
+    const refusal = await checkStylusPointer(adb, {
+      pointer: { toolType: "eraser" },
+      platform: "android",
+      gesture: "tap",
+    });
+    expect(refusal).toBeUndefined();
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("an eraser is Android-only", async () => {
+    const refusal = await checkStylusPointer(adbWithSdk(34), {
+      pointer: { toolType: "eraser" },
+      platform: "ios",
+      gesture: "tap",
+    });
+    expect(refusal).toContain('"eraser" is Android-only');
   });
 
   test("a request without a pointer is untouched", async () => {

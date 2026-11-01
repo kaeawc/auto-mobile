@@ -67,7 +67,7 @@ export async function waitForDevicePreparation<T>(
     throw timeoutError();
   }
   if (cancelOperation) {
-    return await runOperationWithinDeadline(timer, deadlineMs, signal, timeoutError, operation);
+    return await runOperationWithinDeadline(timer, deadlineMs, signal, { operation, timeoutError });
   }
   return await raceWithDeadline(() => runWithAbortSignal(undefined, () => operation()), {
     timer,

@@ -82,6 +82,7 @@ export function stopResultEntry(
     codec,
     recordedPanel: metadata.recordedPanel,
     transitions: metadata.transitions,
+    hasAudioTrack: metadata.hasAudioTrack,
     metadata: { ...metadata, durationMs, sizeBytes, codec },
     deviceId: device?.deviceId,
     platform: device?.platform,
@@ -104,8 +105,10 @@ function finalizedOwnerVisible(
   ctx: RecordingToolContext,
   owner: string | undefined,
   deviceId: string,
-  requesterSessionUuid: string | undefined,
-  requesterMcpSessionId: string | undefined,
+  {
+    requesterSessionUuid,
+    requesterMcpSessionId,
+  }: { requesterSessionUuid?: string; requesterMcpSessionId?: string } = {},
 ): boolean {
   if (owner === undefined || requesterSessionUuid === undefined) {
     return true;
@@ -145,13 +148,10 @@ async function getFinalizedMetadata(
   const ref = await getVideoRecordingOwnerRef(recordingId);
   if (
     ref?.ownerSessionUuid === undefined ||
-    !finalizedOwnerVisible(
-      ctx,
-      ref.ownerSessionUuid,
-      ref.deviceId,
+    !finalizedOwnerVisible(ctx, ref.ownerSessionUuid, ref.deviceId, {
       requesterSessionUuid,
       requesterMcpSessionId,
-    )
+    })
   ) {
     return null;
   }
@@ -165,7 +165,10 @@ async function finalizedStopResponse(
   requesterMcpSessionId?: string,
 ) {
   const finishedSegmented = segmentedSessions.getFinished(recordingId, (owner, deviceId) =>
-    finalizedOwnerVisible(ctx, owner, deviceId, ownerSessionUuid, requesterMcpSessionId),
+    finalizedOwnerVisible(ctx, owner, deviceId, {
+      requesterSessionUuid: ownerSessionUuid,
+      requesterMcpSessionId,
+    }),
   );
   if (finishedSegmented) {
     return segmentedStopResponse(finishedSegmented);

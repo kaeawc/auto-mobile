@@ -14,8 +14,7 @@ export async function runWithinDeadline<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   deadlineMs: number,
   timer: Timer,
-  callerSignal: AbortSignal | undefined,
-  timeoutMessage: string,
+  { callerSignal, timeoutMessage }: { callerSignal?: AbortSignal; timeoutMessage: string },
 ): Promise<T> {
   callerSignal?.throwIfAborted();
   const deadlineController = new AbortController();
@@ -197,8 +196,10 @@ export class FfmpegCapabilities {
               }),
             deadlineMs,
             this.timer,
-            abortSignal,
-            `Timed out checking FFmpeg availability within ${this.startTimeoutMs()}ms`,
+            {
+              callerSignal: abortSignal,
+              timeoutMessage: `Timed out checking FFmpeg availability within ${this.startTimeoutMs()}ms`,
+            },
           );
     const result = await probe;
     this.ffmpegProbeResult = result;

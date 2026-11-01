@@ -86,12 +86,9 @@ export class IosPostSetupReadinessProbe {
       if (child && IosPostSetupReadinessProbe.exitedRunnerIsCurrent(manager, child)) {
         return false;
       }
-      const health = await this.phases.runPhase(
-        context,
-        "runner-health",
-        attempt,
-        () => manager.checkRunningWithReason?.() ?? Promise.resolve(undefined),
-      );
+      const health = await this.phases.runPhase(context, "runner-health", attempt, {
+        operation: () => manager.checkRunningWithReason?.() ?? Promise.resolve(undefined),
+      });
       if (health?.ok === false && health.reason === "refused") {
         return false;
       }
@@ -132,9 +129,9 @@ export class IosPostSetupReadinessProbe {
   ): Promise<boolean> {
     const connected =
       client.isConnected() ||
-      (await this.phases.runPhase(context, "runner-connect", attempt, (signal) =>
-        client.connectWithoutSetup(signal),
-      ));
+      (await this.phases.runPhase(context, "runner-connect", attempt, {
+        operation: (signal) => client.connectWithoutSetup(signal),
+      }));
     if (!connected) {
       return false;
     }
@@ -145,8 +142,8 @@ export class IosPostSetupReadinessProbe {
             this.phases.remainingForPhase(context, "runner-health"),
           )
         : this.phases.probeTimeout(context);
-    return await this.phases.runPhase(context, "runner-health", attempt, () =>
-      client.verifyServiceReady(1, 0, timeoutMs),
-    );
+    return await this.phases.runPhase(context, "runner-health", attempt, {
+      operation: () => client.verifyServiceReady(1, 0, timeoutMs),
+    });
   }
 }

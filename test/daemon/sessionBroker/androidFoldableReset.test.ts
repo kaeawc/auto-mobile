@@ -30,14 +30,15 @@ for (const fullBaseline of [false, true]) {
         }),
       );
       const profile = { ...ANDROID_RESET_PROFILE, archetype };
-      await reset.capture("r", ANDROID_RESET_DEVICE, profile, "s", {
+      await reset.capture("r", ANDROID_RESET_DEVICE, profile, {
+        sessionId: "s",
         stableDeviceId: "avd",
         timer: new FakeTimer(),
       });
       host.onHealth = () => {
         events.push("health");
       };
-      await reset.reset("r", ANDROID_RESET_DEVICE, profile, async () => {});
+      await reset.reset("r", ANDROID_RESET_DEVICE, profile, { assertOwned: async () => {} });
       expect(events).toEqual(
         archetype === "foldable" ? ["strategy", "opened", "health"] : ["strategy", "health"],
       );
@@ -57,13 +58,14 @@ test("failed or missing fold posture restore fails reset", async () => {
     host.strategy = { reset: async () => {} };
     const reset = new AndroidBaselineReset(Object.assign(host, { postureReset }));
     const profile = { ...ANDROID_RESET_PROFILE, archetype: "foldable" as const };
-    await reset.capture("r", ANDROID_RESET_DEVICE, profile, "s", {
+    await reset.capture("r", ANDROID_RESET_DEVICE, profile, {
+      sessionId: "s",
       stableDeviceId: "avd",
       timer: new FakeTimer(),
     });
-    await expect(reset.reset("r", ANDROID_RESET_DEVICE, profile, async () => {})).rejects.toThrow(
-      "opened",
-    );
+    await expect(
+      reset.reset("r", ANDROID_RESET_DEVICE, profile, { assertOwned: async () => {} }),
+    ).rejects.toThrow("opened");
   }
 });
 
@@ -86,8 +88,12 @@ test("fold posture restoration is bounded by the reset deadline and receives can
     }),
   );
   const profile = { ...ANDROID_RESET_PROFILE, archetype: "foldable" as const };
-  await reset.capture("r", ANDROID_RESET_DEVICE, profile, "s", { stableDeviceId: "avd", timer });
-  const pending = reset.reset("r", ANDROID_RESET_DEVICE, profile, async () => {});
+  await reset.capture("r", ANDROID_RESET_DEVICE, profile, {
+    sessionId: "s",
+    stableDeviceId: "avd",
+    timer,
+  });
+  const pending = reset.reset("r", ANDROID_RESET_DEVICE, profile, { assertOwned: async () => {} });
   await expect(
     settleByFakeEvents(timer, pending, { description: "fold reset deadline" }),
   ).rejects.toThrow("timed out");

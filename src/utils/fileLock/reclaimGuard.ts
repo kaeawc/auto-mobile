@@ -56,13 +56,10 @@ export function* claimReclaimGuard(
   const lower: LockSample[] = [];
   for (let k = 0; k < RECLAIM_GUARD_SLOT_LIMIT; k++) {
     const path = `${prefix}.${k}`;
-    const published = yield* publishReclaimGuard(
-      path,
-      content,
-      pid,
+    const published = yield* publishReclaimGuard(path, content, pid, {
       fileSystem,
-      options.idGenerator,
-    );
+      idGenerator: options.idGenerator,
+    });
     if (published === "created") {
       if (!(yield* revalidateGuardSlots(prefix, lower, fileSystem))) {
         yield* releaseGuard(path, content, fileSystem);

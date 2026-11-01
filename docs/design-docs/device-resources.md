@@ -14,6 +14,20 @@ virtual devices started outside AutoMobile keep unavailable image-only facts as 
 `null`. `runtime.orientation` comes from a bounded live orientation probe (Android) and remains
 `null` where no safe read signal exists (currently iOS).
 
+Apple Watch simulators are `platform: "watchos"` ([decision](../decisions/watchos-platform.md)).
+`simctl list devices` returns them beside iPhone simulators, so the iOS simulator listing skips
+watchOS runtimes and no iOS resource, tool or readiness path sees a watch. Watches, installed
+watchOS runtimes and Apple Watch device types appear only in
+`automobile:devices/images/watchos` (`watchosCount`, a `watchos` catalog and inventory
+observation); the iOS provisioning catalog excludes them. Apple TV simulators are
+`platform: "tvos"` and appear in `listDevices` only when `platform: "tvos"` is requested.
+`listDeviceImages` with `platform: "tvos"` and `automobile:devices/images/tvos` list configured
+Apple TV simulators. The resource includes `tvosCount`, a tvOS inventory observation, installed
+tvOS runtimes and Apple TV device types, with runtime compatibility derived from each device
+type's version bounds. A failed listing is incomplete inventory, never evidence of absence.
+The iOS listing and provisioning catalog exclude Apple TVs. `automobile:devices/images` stays
+Android and iOS.
+
 Read-only Android inventory shares successful AVD-name and display probes, plus configured
 AVD listings, for `ANDROID_INVENTORY_ENRICHMENT_TTL_MS` (2,500 ms). Device enrichment keys
 include the serial and the ADB list observation; a fresh list or bypass cannot reuse a prior
@@ -598,13 +612,22 @@ register a dependency and a scoped preflight call when they ship.
 The `capabilityInventory` of a device reports whether it can record or play audio, so a scheduler can
 keep audio tests off hosts that can never pass them.
 
-| id                                 | `supported` when                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `ios.simulator.audioInput`         | the host's CoreAudio default input has at least one input stream                                  |
-| `ios.simulator.audioOutput`        | the host's CoreAudio default output has at least one output stream                                |
-| `ios.simulator.audioOutputCapture` | the default output is virtual or a known loopback driver, so its signal can be read back (#13629) |
-| `android.emulator.audioInput`      | `hw.audioInput=yes`, no `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`), and a host input exists  |
-| `android.emulator.audioOutput`     | `hw.audioOutput=yes` and no `-no-audio`                                                           |
+| id                                     | `supported` when                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `ios.simulator.audioInput`             | the host's CoreAudio default input has at least one input stream                                  |
+| `ios.simulator.audioOutput`            | the host's CoreAudio default output has at least one output stream                                |
+| `ios.simulator.audioOutputCapture`     | the default output is virtual or a known loopback driver, so its signal can be read back (#13629) |
+| `android.emulator.audioInput`          | `hw.audioInput=yes`, no `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`), and a host input exists  |
+| `android.emulator.audioOutput`         | `hw.audioOutput=yes` and no `-no-audio`                                                           |
+| `android.emulator.audioInputInjection` | the supplied emulator gRPC probe result is reachable                                              |
+| `android.emulator.audioOutputCapture`  | the supplied emulator gRPC probe result is reachable                                              |
+
+The two Android gRPC entries use source `platform` and are omitted when no probe result is supplied.
+A reachable result makes both `available`; unreachable makes both `unavailable` with the probe's
+reason; `not_configured` makes both `unsupported` with the supplied reason or a default naming the
+missing emulator gRPC port. Blank reasons use a non-empty default. These entries are independent of
+the host audio probe, AVD audio settings, and `-no-audio`; the latter still makes the existing
+`android.emulator.audioInput` and `android.emulator.audioOutput` entries unsupported.
 
 An unsupported entry carries an actionable `reason`, for example "No host audio input device;
 install a virtual loopback device and make it the default input". A supported host entry names the

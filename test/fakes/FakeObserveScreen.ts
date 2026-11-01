@@ -288,8 +288,7 @@ export class FakeObserveScreen implements ObserveScreen {
 
   async captureScreenshot(
     _perf?: unknown,
-    _signal?: AbortSignal,
-    observation?: ObserveResult,
+    { observation }: { signal?: AbortSignal; observation?: ObserveResult } = {},
   ): Promise<void> {
     this.executedOperations.push("captureScreenshot");
     this.captureScreenshotCallCount++;

@@ -69,6 +69,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_calendar_v1",
       // Contract only; the motion and sensor runtimes are owed (#14327).
       "prototype_platform_sensors_v1",
+      // Contract only; the map renderers are owed (#14310, #14311).
+      "prototype_platform_map_v1",
       // Contract only; the location runtimes are owed (#14325, #14326).
       "prototype_platform_location_v1",
       // Contract only; the system media picker and camera runtimes are owed (#14197).
@@ -88,6 +90,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audioRecorder_v1",
       // Contract only; the local notification runtime is owed (#14281).
       "prototype_platform_notifications_v1",
+      // Contract only; the scheduled notification runtimes are owed (#14283).
+      "prototype_platform_notifications_scheduled_v1",
       // Contract only; the media players and video renderers are owed (#14255, #14256).
       "prototype_platform_media_v1",
       "prototype_platform_camera_capture_v1",
@@ -95,6 +99,11 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_camera_video_v1",
       // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
       "prototype_platform_cast_v1",
+      // Contract only; the media queue runtime is owed (#14249).
+      "prototype_platform_media_queue_v1",
+      // Contract only; the photo library runtime is owed (#14195).
+      "prototype_platform_mediaLibrary_query_v1",
+      "prototype_platform_mediaLibrary_save_v1",
     )
 
   @Test

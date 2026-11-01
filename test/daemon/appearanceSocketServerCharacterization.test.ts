@@ -55,11 +55,13 @@ function setup(failure?: "update" | "sync") {
       isAuthenticationEnforced: () => false,
     },
     {
-      getPooledDevices: () => [{ deviceId: "device", name: "device", platform: "android" }],
-      getSessionDevice: () => undefined,
-      getSessionForDevice: () => null,
+      deviceSource: {
+        getPooledDevices: () => [{ deviceId: "device", name: "device", platform: "android" }],
+        getSessionDevice: () => undefined,
+        getSessionForDevice: () => null,
+      },
+      dependencies,
     },
-    dependencies,
   );
   return { server, calls };
 }

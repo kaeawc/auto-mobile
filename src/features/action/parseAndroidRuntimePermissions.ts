@@ -51,22 +51,41 @@ function permissionStates(section: DumpSection | undefined): Map<string, AppPerm
   return permissions;
 }
 
-/** Parse only the named package and target user's indented permission sections. */
+function sharedUserSection(pkg: DumpSection, sections: DumpSection[]): DumpSection | undefined {
+  const sharedUserSetting = pkg.children.find((section) =>
+    section.text.startsWith("sharedUser=SharedUserSetting{"),
+  );
+  const sharedUserName = sharedUserSetting?.text.split(" ")[1]?.split("/")[0];
+  return sharedUserName
+    ? sections
+        .find((section) => section.text === "Shared users:")
+        ?.children.find((section) => section.text.startsWith(`SharedUser [${sharedUserName}]`))
+    : undefined;
+}
+
+/** Parse the named package's permissions, including its shared UID, for only the target user. */
 export function parseAndroidRuntimePermissions(
   output: string,
   packageName: string,
   userId: number = 0,
 ): AndroidPackagePermissionState | undefined {
-  const pkg = packageDumpSections(output).find((section) =>
-    section.text.startsWith(`Package [${packageName}]`),
-  );
+  const sections = packageDumpSections(output);
+  const pkg = sections.find((section) => section.text.startsWith(`Package [${packageName}]`));
   const requested = pkg?.children.find((section) => section.text === "requested permissions:");
   if (!pkg) {
     return undefined;
   }
-  const install = pkg?.children.find((section) => section.text === "install permissions:");
-  const user = pkg?.children.find((section) => section.text.startsWith(`User ${userId}:`));
-  const runtime = user?.children.find((section) => section.text === "runtime permissions:");
+  const sharedUser = sharedUserSection(pkg, sections);
+  const install =
+    pkg.children.find((section) => section.text === "install permissions:") ??
+    sharedUser?.children.find((section) => section.text === "install permissions:");
+  const user = pkg.children.find((section) => section.text.startsWith(`User ${userId}:`));
+  const sharedUserUser = sharedUser?.children.find((section) =>
+    section.text.startsWith(`User ${userId}:`),
+  );
+  const runtime =
+    user?.children.find((section) => section.text === "runtime permissions:") ??
+    sharedUserUser?.children.find((section) => section.text === "runtime permissions:");
   return {
     requestedPermissions: new Set(requested?.children.map((section) => section.text) ?? []),
     installPermissions: permissionStates(install),

@@ -25,19 +25,21 @@ export async function runIosRunnerSetup(
     phases.throwIfCallerCancelled(context);
     manager.resetSetupState();
     const setup = await phases
-      .runPhase(context, "runner-setup", attempt, (signal) =>
-        manager.setup(
-          false,
-          context.perf,
-          signal,
-          phases.remainingForPhase(context, "runner-setup"),
-        ),
-      )
+      .runPhase(context, "runner-setup", attempt, {
+        operation: (signal) =>
+          manager.setup(
+            false,
+            context.perf,
+            signal,
+            phases.remainingForPhase(context, "runner-setup"),
+          ),
+      })
       .catch((error: unknown) => {
         if (error instanceof RunnerReadinessError && previousAttemptDetails.length > 0) {
           // Keep the final phase's typed cause and deadline decision, including a
           // timeout thrown by runPhase before setup can return a result.
-          phases.fail(context, "runner-setup", attempt, error.diagnosticCause, {
+          phases.fail(context, "runner-setup", attempt, {
+            detail: error.diagnosticCause,
             deadlineExhausted: error.deadlineExhausted,
             failureKind: error.failureKind,
             previousAttemptDetails,
@@ -57,7 +59,8 @@ export async function runIosRunnerSetup(
       setup.retryableStartupFailure === true &&
       phases.remainingForPhase(context, "runner-setup") <= 0;
     if (!setup.retryableStartupFailure || deadlineExhausted || attempt === maxAttempts) {
-      phases.fail(context, "runner-setup", attempt, setup.error ?? setup.message, {
+      phases.fail(context, "runner-setup", attempt, {
+        detail: setup.error ?? setup.message,
         deadlineExhausted,
         previousAttemptDetails,
       });

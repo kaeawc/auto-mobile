@@ -19,8 +19,7 @@ export interface DaemonToolRegistryPort {
   callInternal(
     name: string,
     args: Record<string, unknown>,
-    progress: undefined,
-    signal: AbortSignal | undefined,
+    request: { signal: AbortSignal | undefined },
   ): Promise<unknown>;
 }
 

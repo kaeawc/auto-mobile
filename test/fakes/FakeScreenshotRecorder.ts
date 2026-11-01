@@ -1,9 +1,10 @@
 import type {
   ObserveCaptureOptions,
+  ObserveScreenshotCaptureRequest,
   ObserveScreenshotRecorder,
+  ObserveSettledScreenshotRequest,
 } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 import type { ObserveScreenshotOptions } from "../../src/features/observe/screenshot/screenshotOptions";
-import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 
 export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   startCalls = 0;
@@ -16,23 +17,14 @@ export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   /** Options passed to captureSettled, in call order. */
   readonly settledOptions: (ObserveScreenshotOptions | undefined)[] = [];
 
-  start(
-    _observationId: string,
-    _perf?: PerformanceTracker,
-    _signal?: AbortSignal,
-    _displayId?: number,
-    capture?: ObserveCaptureOptions,
-  ): void {
+  start(_observationId: string, { capture }: ObserveScreenshotCaptureRequest = {}): void {
     this.startCalls++;
     this.captureOptions.push(capture);
   }
 
   async capture(
     _observationId: string,
-    _perf?: PerformanceTracker,
-    _signal?: AbortSignal,
-    _displayId?: number,
-    capture?: ObserveCaptureOptions,
+    { capture }: ObserveScreenshotCaptureRequest = {},
   ): Promise<void> {
     this.captureCalls++;
     this.captureOptions.push(capture);
@@ -40,10 +32,7 @@ export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
 
   async captureFresh(
     _observationId: string,
-    _perf?: PerformanceTracker,
-    _signal?: AbortSignal,
-    _displayId?: number,
-    capture?: ObserveCaptureOptions,
+    { capture }: ObserveScreenshotCaptureRequest = {},
   ): Promise<void> {
     this.captureFreshCalls++;
     this.captureOptions.push(capture);
@@ -51,10 +40,7 @@ export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
 
   async captureSettled(
     _observationId: string,
-    _perf?: PerformanceTracker,
-    _signal?: AbortSignal,
-    _displayId?: number,
-    options?: ObserveScreenshotOptions,
+    { options }: ObserveSettledScreenshotRequest = {},
   ): Promise<string> {
     this.captureSettledCalls++;
     this.settledOptions.push(options);

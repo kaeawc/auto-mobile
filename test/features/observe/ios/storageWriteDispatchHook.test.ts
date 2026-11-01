@@ -13,7 +13,12 @@ describe("iOS storage write dispatch hooks", () => {
       const options = { onDispatch: () => count++ };
       const write = () =>
         method === "setPreference"
-          ? storage.setPreference("com.example", "prefs", "k", "v", "STRING", options)
+          ? storage.setPreference(
+              "com.example",
+              "prefs",
+              { key: "k", value: "v", type: "STRING" },
+              options,
+            )
           : method === "removePreference"
             ? storage.removePreference("com.example", "prefs", "k", options)
             : storage.clearPreferenceStore("com.example", "prefs", options);

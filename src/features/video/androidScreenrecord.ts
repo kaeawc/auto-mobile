@@ -1,3 +1,7 @@
+import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import type { Timer } from "../../utils/SystemTimer";
+
 /**
  * Android `adb shell screenrecord` enforces a maximum `--time-limit` of 180 seconds.
  * @see https://developer.android.com/studio/command-line/adb#screenrecord
@@ -23,3 +27,39 @@ export const SCREENRECORD_MS = {
   // Exec options for `pkill`.
   pkillOpts: { timeoutMs: 8000 },
 } as const;
+
+// Node may report `exit` before the last stderr chunk is read; wait this long for the pipe to end.
+const SCREENRECORD_STDERR_DRAIN_MS = 100;
+
+/** Best-effort: lets stderr that trails the exit event arrive before it is quoted in an error. */
+export async function waitForStderrDrain(
+  stderrStream: {
+    readableEnded?: boolean;
+    destroyed?: boolean;
+    once(event: "end" | "close", listener: () => void): unknown;
+  } | null,
+  timer: Timer,
+): Promise<void> {
+  if (!stderrStream || stderrStream.readableEnded || stderrStream.destroyed) {
+    return;
+  }
+  const drained = new Promise<void>((resolve) => {
+    stderrStream.once("end", resolve);
+    stderrStream.once("close", resolve);
+  });
+  const drainTimeout = new Error("screenrecord stderr drain timed out");
+  try {
+    await raceWithDeadline(drained, {
+      timer,
+      timeoutMs: SCREENRECORD_STDERR_DRAIN_MS,
+      label: "screenrecord stderr drain",
+      timeoutError: () => drainTimeout,
+    });
+  } catch (error) {
+    if (error !== drainTimeout) {
+      throw error;
+    }
+    // Whatever stderr arrived is still reported; a pipe that stays open must not hold start.
+    logger.debug("[VideoCapture] screenrecord stderr did not end before the drain deadline");
+  }
+}

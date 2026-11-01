@@ -1,4 +1,5 @@
 import type { Platform } from "../../models";
+import type { ActionCall } from "../action/ActionCall";
 
 export interface SystemTrayNotificationArgs {
   title?: string;
@@ -13,3 +14,6 @@ export interface SystemTrayArgs {
   awaitTimeout?: number;
   platform?: Platform;
 }
+
+/** The caller's progress sink and abort signal, threaded through the tray helpers. */
+export type SystemTrayCall = Pick<ActionCall, "progress" | "signal">;

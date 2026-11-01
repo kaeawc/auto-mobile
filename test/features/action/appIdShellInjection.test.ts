@@ -36,13 +36,14 @@ describe("app ID device-shell boundaries", () => {
     "launchApp keeps %s inside one device-shell word",
     async (_label, appId, quoted) => {
       const adb = new FakeAdbExecutor();
-      const launch = new LaunchApp(device, adb);
+      const launch = new LaunchApp(device, { adb });
       const perf = new NoOpPerformanceTracker();
 
-      await launch.performLaunch(appId, undefined, 0, perf);
+      await launch.performLaunch(appId, undefined, 0, { perf });
 
       expect(adb.getExecutedCommands()).toEqual([
         `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER ${quoted}`,
+        `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LEANBACK_LAUNCHER ${quoted}`,
         `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${quoted}`,
         `shell monkey -p ${quoted} -c android.intent.category.LAUNCHER 1`,
       ]);

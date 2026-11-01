@@ -48,7 +48,7 @@ export class RealSettleObserve implements SettleObserve {
   ) {}
 
   async captureScreenshot(observation: ObserveResult, signal?: AbortSignal): Promise<void> {
-    await this.observeScreen.captureScreenshot?.(undefined, signal, observation);
+    await this.observeScreen.captureScreenshot?.(undefined, { signal, observation });
   }
 
   async execute(options: SettleOptions = {}): Promise<SettleResult> {

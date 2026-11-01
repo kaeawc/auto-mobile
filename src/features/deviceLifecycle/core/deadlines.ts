@@ -83,8 +83,10 @@ export function rethrowDeviceLifecycleReservationFailure(
   error: unknown,
   timer: Timer,
   deadlineMs: number,
-  timeoutError: StableDeviceLifecycleTimeoutFactory,
-  timeoutDetail: string,
+  {
+    timeoutError,
+    timeoutDetail,
+  }: { timeoutError: StableDeviceLifecycleTimeoutFactory; timeoutDetail: string },
 ): never {
   if (timer.now() >= deadlineMs) {
     throw timeoutError(timeoutDetail);
@@ -113,8 +115,8 @@ export async function reserveStableDeviceLifecycle(
   target: StableDeviceTarget,
   deadlineDevice: BootedDevice,
   timer: Timer,
-  deadlineMs: number,
   {
+    deadlineMs,
     requestAbortSignal,
     timeoutError = (detail) => shutdownTimeoutError(deadlineDevice, detail),
     operation = "start",
@@ -124,6 +126,7 @@ export async function reserveStableDeviceLifecycle(
     timeoutError?: StableDeviceLifecycleTimeoutFactory;
     operation?: VirtualDeviceLifecycleOperation;
     coordinator?: VirtualDeviceLifecycleCoordinator;
+    deadlineMs: number;
   },
 ): Promise<VirtualDeviceLifecycleLease> {
   try {
@@ -140,13 +143,10 @@ export async function reserveStableDeviceLifecycle(
       },
     );
   } catch (error) {
-    rethrowDeviceLifecycleReservationFailure(
-      error,
-      timer,
-      deadlineMs,
+    rethrowDeviceLifecycleReservationFailure(error, timer, deadlineMs, {
       timeoutError,
-      "waiting for stable device lifecycle reservation",
-    );
+      timeoutDetail: "waiting for stable device lifecycle reservation",
+    });
   }
 }
 
@@ -179,8 +179,8 @@ export async function runWithinShutdownDeadline<T>(
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
-  detail: string,
   {
+    detail,
     requestAbortSignal,
     operation,
     timeoutMs,
@@ -192,6 +192,7 @@ export async function runWithinShutdownDeadline<T>(
     timeoutMs?: number;
     phase?: string;
     onOrphan?: (pending: Promise<unknown>) => void;
+    detail: string;
   },
 ): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
@@ -299,13 +300,21 @@ export type DeadlineBoundOperation<T> = (
   onDelivered: (commit: () => void) => void,
 ) => Promise<T>;
 
+/** How a deadline-bound operation fails on its deadline, and who settles it if it is orphaned. */
+export interface DeadlineBoundOperationOptions {
+  timeoutError: () => Error;
+  onOrphan?: (pending: Promise<unknown>) => void;
+}
+
 export async function runOperationWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
   requestSignal: AbortSignal | undefined,
-  timeoutError: () => Error,
-  operation: DeadlineBoundOperation<T>,
-  onOrphan?: (pending: Promise<unknown>) => void,
+  {
+    operation,
+    timeoutError,
+    onOrphan,
+  }: DeadlineBoundOperationOptions & { operation: DeadlineBoundOperation<T> },
 ): Promise<T> {
   const remainingMs = Math.floor(totalDeadlineMs - timer.now());
   if (remainingMs <= 0) {
@@ -387,16 +396,19 @@ export async function runProvisionDeviceWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
   requestSignal: AbortSignal | undefined,
-  phase: string,
-  operation: DeadlineBoundOperation<T>,
-  onPendingSettlement?: (settlement: Promise<unknown>) => void,
-): Promise<T> {
-  return await runOperationWithinDeadline(
-    timer,
-    totalDeadlineMs,
-    requestSignal,
-    () => provisionDeviceTimeoutError(phase),
+  {
     operation,
+    phase,
     onPendingSettlement,
-  );
+  }: {
+    phase: string;
+    onPendingSettlement?: (settlement: Promise<unknown>) => void;
+    operation: DeadlineBoundOperation<T>;
+  },
+): Promise<T> {
+  return await runOperationWithinDeadline(timer, totalDeadlineMs, requestSignal, {
+    operation,
+    timeoutError: () => provisionDeviceTimeoutError(phase),
+    onOrphan: onPendingSettlement,
+  });
 }

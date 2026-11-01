@@ -90,8 +90,8 @@ class DeferredRowRepository extends DeviceSessionRepository {
   override async markReleased(
     ...args: Parameters<DeviceSessionRepository["markReleased"]>
   ): Promise<void> {
-    this.releases.push(args[3]);
-    this.releaseGenerations.push(args[4]?.expectedRowGeneration);
+    this.releases.push(args[3].reason);
+    this.releaseGenerations.push(args[3].expectedRowGeneration);
     this.releaseEntered?.(this.releases.length);
     await (this.releaseGates.shift() ?? this.releaseGate);
     if (this.failReleases > 0) {
@@ -114,7 +114,7 @@ describe("remaining session row writes (#11557)", () => {
     db = await createTestDatabase();
     // Warm lifecycle modules and SQL statements once; cold initialization is not the race under test.
     const warmTimer = new FakeTimer();
-    const warmStore = new DeferredRowRepository(db, warmTimer);
+    const warmStore = new DeferredRowRepository({ db, timer: warmTimer });
     const warmManager = makeSessionManager({
       timer: warmTimer,
       persistence: warmStore,
@@ -136,8 +136,8 @@ describe("remaining session row writes (#11557)", () => {
     await db.deleteFrom("device_sessions").execute();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    store = new DeferredRowRepository(db, timer);
-    peer = new DeviceSessionRepository(db, timer);
+    store = new DeferredRowRepository({ db, timer });
+    peer = new DeviceSessionRepository({ db, timer });
     manager = makeSessionManager({ timer: timer, persistence: store, fakeBarrier: true });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-1");
@@ -174,7 +174,8 @@ describe("remaining session row writes (#11557)", () => {
         .assignedDevice;
     },
   });
-  const reissue = () => manager.getOrCreateSession(SESSION, pool(), "android", undefined, true);
+  const reissue = () =>
+    manager.getOrCreateSession(SESSION, pool(), "android", { requireIssuedSession: true });
 
   // #11799 W5: a release past its commit point has won; its late terminal row is the row the
   // session ends with, and no live row is rewritten over it.
@@ -392,7 +393,7 @@ describe("remaining session row writes (#11557)", () => {
     await settle();
     expect(timer.getPendingTimeouts()).toEqual([RETRY_MS]);
     // Another shutdown handoff already landed before the retry: equal-reason writes stay legal.
-    await peer.markReleased(SESSION, "released", timer.now(), "daemon-shutdown");
+    await peer.markReleased(SESSION, "released", timer.now(), { reason: "daemon-shutdown" });
     await timer.advanceTimeAsync(RETRY_MS);
     await settle();
     gate.resolve();
@@ -411,7 +412,7 @@ describe("remaining session row writes (#11557)", () => {
       if (reason === "daemon-restart") {
         await sweep();
       } else if (reason !== "active") {
-        await peer.markReleased(SESSION, "released", timer.now(), reason);
+        await peer.markReleased(SESSION, "released", timer.now(), { reason });
       }
       await manager.releaseSession(SESSION, PLAN);
       expect(await row()).toMatchObject({
@@ -509,7 +510,7 @@ describe("remaining session row writes (#11557)", () => {
     store.activityGate = gate.promise;
     const activity = refresh();
     await settle();
-    await peer.markReleased(SESSION, "released", timer.now(), "owner-disconnected");
+    await peer.markReleased(SESSION, "released", timer.now(), { reason: "owner-disconnected" });
     await db
       .updateTable("device_sessions")
       .set({ daemon_session_id: "daemon-peer" })
@@ -651,7 +652,7 @@ describe("remaining session row writes (#11557)", () => {
       };
       const writesBefore = store.releases.length;
       await expect(
-        manager.getOrCreateSession(SESSION, assigner, "android", undefined, true),
+        manager.getOrCreateSession(SESSION, assigner, "android", { requireIssuedSession: true }),
       ).rejects.toMatchObject({
         name: "DaemonSessionCreationRejectedError",
         release: expect.objectContaining({ releaseReason: "daemon-shutdown", terminal: true }),
@@ -701,7 +702,8 @@ describe("remaining session row writes (#11557)", () => {
       const writesBefore = store.releases.length;
       await expect(
         runWithAbortSignal(controller.signal, () =>
-          manager.getOrCreateSession(SESSION, assigner, "android", undefined, true, {
+          manager.getOrCreateSession(SESSION, assigner, "android", {
+            requireIssuedSession: true,
             signal: controller.signal,
           }),
         ),

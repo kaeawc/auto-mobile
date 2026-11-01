@@ -31,6 +31,62 @@ describe("GestureClassifier", () => {
     c = new GestureClassifier(identityScaler, DENSITY);
   });
 
+  test.each([
+    [20, 0, 0.3491],
+    [-20, 0, 0.3491],
+    [20, -20, 0.4885],
+    [0, 0, 0],
+    [90, 90, Math.PI / 2],
+  ])("pen tilt converts signed degrees (%d, %d) to Android radians", (tiltX, tiltY, expected) => {
+    c = new GestureClassifier(identityScaler, DENSITY, undefined, {
+      x: { min: -90, max: 90, resolution: 0 },
+      y: { min: -90, max: 90, resolution: 0 },
+    });
+    c.feedFrame({
+      arrivedAt: 0,
+      releasedSlots: [],
+      activeSlots: [
+        {
+          slotId: 0,
+          trackingId: 1,
+          x: 500,
+          y: 2050,
+          pressure: 4000,
+          toolType: "stylus",
+          tiltX,
+          tiltY,
+        },
+      ],
+    });
+    const gesture = c.feedFrame(makeFrame(50, [], [0]));
+    expect(gesture?.tilt).toBeCloseTo(expected, 4);
+  });
+
+  test("pen tilt is averaged over contact samples and omitted without both axes", () => {
+    c = new GestureClassifier(identityScaler, DENSITY, undefined, {
+      x: { min: -90, max: 90 },
+      y: { min: -90, max: 90 },
+    });
+    const slot = {
+      slotId: 0,
+      trackingId: 1,
+      x: 500,
+      y: 2050,
+      pressure: 4000,
+      toolType: "stylus" as const,
+      tiltX: 20,
+    };
+    c.feedFrame({ arrivedAt: 0, releasedSlots: [], activeSlots: [slot] });
+    expect(c.feedFrame(makeFrame(50, [], [0]))?.tilt).toBeUndefined();
+    c.feedFrame({ arrivedAt: 1000, releasedSlots: [], activeSlots: [{ ...slot, tiltY: 0 }] });
+    c.feedFrame({
+      arrivedAt: 1010,
+      releasedSlots: [],
+      activeSlots: [{ ...slot, tiltX: 0, tiltY: 0 }],
+    });
+    expect(c.feedFrame(makeFrame(1050, [], [0]))?.tilt).toBeCloseTo(Math.PI / 18, 4);
+  });
+
   test.each([50, 500])("unknown axes propagate without screen coordinates (%d ms)", (duration) => {
     c.feedFrame({
       arrivedAt: 0,

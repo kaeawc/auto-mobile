@@ -67,6 +67,7 @@ object ValidTools {
         "provisionDevice",
         "recentApps",
         "rotaryScroll",
+        "rotateCrown",
         "recordDeviceGestures",
         "recordToolCalls",
         "removeKeyValue",

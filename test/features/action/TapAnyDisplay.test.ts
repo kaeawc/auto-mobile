@@ -195,7 +195,7 @@ test("tapAny single-display omitted display retains default dispatch path", asyn
   const points: number[] = [];
   const h = harness(false, { ...device, displays: undefined }, false, {
     androidTapper: {
-      executeAndroidTap: async (_action, x) => {
+      executeAndroidTap: async (_action, { x }) => {
         points.push(x);
       },
       retryAndroidTapIfNoChange: async () => {},

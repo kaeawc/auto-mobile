@@ -8,7 +8,6 @@ import { DeviceAutoStart } from "../deviceAutoStart";
 import { DeviceReservations } from "../deviceReservations";
 import { waitForDeviceReadyOrCancel } from "../../devices/deviceUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal } from "../../utils/AbortContext";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
@@ -29,6 +28,8 @@ type AllocationWiringState = Pick<
   | "criteriaMatcher"
   | "foreignDeviceOwnership"
   | "iosForeignDeviceOwnership"
+  | "watchForeignDeviceOwnership"
+  | "tvForeignDeviceOwnership"
   | "devices"
   | "DEVICE_WAIT_TIMEOUT_MS"
   | "RECOVERY_RESPONSE_MARGIN_MS"
@@ -159,7 +160,6 @@ export class DevicePoolAllocationWiring {
       get timer() {
         return pool.timer;
       },
-      getAbortSignal,
       raceWithDeadline,
       get DEVICE_WAIT_INTERVAL_MS() {
         return pool.DEVICE_WAIT_INTERVAL_MS;
@@ -188,6 +188,12 @@ export class DevicePoolAllocationWiring {
       },
       get iosForeignDeviceOwnership() {
         return pool.iosForeignDeviceOwnership;
+      },
+      get watchForeignDeviceOwnership() {
+        return pool.watchForeignDeviceOwnership;
+      },
+      get tvForeignDeviceOwnership() {
+        return pool.tvForeignDeviceOwnership;
       },
       get timer() {
         return pool.timer;
@@ -579,20 +585,8 @@ export class DevicePoolAllocationWiring {
         this.callbacks.deviceHeldByExistingSession(sessionId),
       addDevice: (device, sourceImage, awaitSessionTracking, identityEvidence) =>
         this.callbacks.addDevice(device, sourceImage, awaitSessionTracking, identityEvidence),
-      waitForDeviceReadyOrCancel: (
-        device,
-        childProcess,
-        timeoutMs,
-        signal,
-        timer,
-        cancelOwnedBoot,
-      ) =>
-        waitForDeviceReadyOrCancel(this.state.deviceManager, device, childProcess, {
-          timeoutMs,
-          signal,
-          timer,
-          cancelOwnedBoot,
-        }),
+      waitForDeviceReadyOrCancel: (device, childProcess, options) =>
+        waitForDeviceReadyOrCancel(this.state.deviceManager, device, childProcess, options),
     });
   }
 }

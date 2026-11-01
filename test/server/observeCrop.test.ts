@@ -92,7 +92,7 @@ function register(extra: Parameters<typeof registerObserveTools>[0] = {}) {
           captures++;
           return current;
         },
-        captureScreenshot: async (_perf, _signal, result, mode) => {
+        captureScreenshot: async (_perf, { observation: result, screenshot: mode } = {}) => {
           captures++;
           modes.push(mode);
           expect(result).toBe(current);
@@ -268,14 +268,11 @@ describe("observe crop capture and output", () => {
       expect(crop.expiresAt).toBe(timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS);
       const files = [{ path: crop.cropPath, size: 129 * 1024 * 1024, mtimeMs: 0 }];
       const sweep = () =>
-        selectScreenshotsToEvict(
-          files,
-          128 * 1024 * 1024,
-          0,
-          timer.now(),
-          () => false,
-          protection.isProtected.bind(protection),
-        );
+        selectScreenshotsToEvict(files, 128 * 1024 * 1024, 0, {
+          nowMs: timer.now(),
+          isReferenced: () => false,
+          isProtected: protection.isProtected.bind(protection),
+        });
       timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
       expect(sweep().toEvict).toEqual([]);
       timer.advanceTime(1);
@@ -667,8 +664,10 @@ describe("observe crop failures", () => {
   test("empty runtime rectangle uses the observe label and structured error", async () => {
     await expect(
       createObserveCrop({ rect: { ...rect, width: 0 } }, current, "android", {
-        imageBackend: image,
-        readFile: async () => source,
+        dependencies: {
+          imageBackend: image,
+          readFile: async () => source,
+        },
       }),
     ).rejects.toThrow("observe crop requires finite, nonempty");
   });
@@ -731,7 +730,7 @@ describe("observe crop failures", () => {
           getActivityHash: async () => "",
         },
       },
-      timer,
+      { timer },
     );
     await expect(
       screen.executeDeviceRead(undefined, "settled", undefined, { requireFreshScreenshot: true }),
@@ -764,7 +763,7 @@ describe("observe crop failures", () => {
           getActivityHash: async () => "",
         },
       },
-      timer,
+      { timer },
     );
     await expect(
       screen.executeDeviceRead(undefined, "settled", undefined, {
@@ -779,10 +778,12 @@ describe("observe crop failures", () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "observe-crop-"));
     try {
       const crop = await createObserveCrop({ rect }, current, "android", {
-        imageBackend: image,
-        readFile: async () => source,
-        outputDirectory: () => directory,
-        ids: new CountingIdGenerator("secure"),
+        dependencies: {
+          imageBackend: image,
+          readFile: async () => source,
+          outputDirectory: () => directory,
+          ids: new CountingIdGenerator("secure"),
+        },
       });
       expect(await fs.readFile(crop.cropPath)).toEqual(Buffer.from("png-crop"));
       if (process.platform !== "win32") {

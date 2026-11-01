@@ -79,7 +79,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -286,7 +287,7 @@
                     "testTag": "ride_option",
                     "headline": "{ride.name}",
                     "supporting": "{ride.priceText} · {ride.eta} min away · {ride.seats} seats",
-                    "leadingIcon": "local_taxi",
+                    "leadingIcon": "directions_car",
                     "styleWhen": [
                       {
                         "when": {

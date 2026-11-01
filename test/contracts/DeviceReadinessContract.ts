@@ -216,13 +216,22 @@ export function runDeviceReadinessContract(name: string, make: () => ScriptedRea
         "SIM-1",
         "emulator-5554",
       ]);
-      expect(scan.scanned).toEqual({ android: true, ios: true, watchos: false });
+      expect(scan.scanned).toEqual({ android: true, ios: true, watchos: false, tvos: false });
     });
 
     test("verifying a device that is not connected rejects", async () => {
       const { readiness, connect } = make();
       connect([android("emulator-5554")]);
       await expect(readiness.verifyDevice("emulator-9999", "android", ready)).rejects.toThrow();
+    });
+
+    test("verifying a watch is refused before any iOS runner check (#14908)", async () => {
+      const { readiness, connect } = make();
+      const udid = "6B1F3C2E-0000-4000-8000-00000000A7C1";
+      connect([ios(udid)]);
+      await expect(readiness.verifyDevice(udid, "watchos", ready)).rejects.toThrow(
+        "Device readiness verification is not supported on watchOS yet",
+      );
     });
   });
 }

@@ -4,6 +4,7 @@ import type {
   Element,
   ElementSelectionResult,
   ObserveResult,
+  Point,
   TapOnSelectedElement,
   ViewHierarchyResult,
 } from "../../../src/models";
@@ -195,22 +196,8 @@ async function executeFocusWithDuplicateEmail(
     hierarchy: { node: { $: {}, node: [hierarchyNode(clickable), hierarchyNode(focused)] } },
   };
   if (moveDuringStability) {
-    identifyObservedHierarchy(
-      "android",
-      before,
-      "cached-ok",
-      undefined,
-      undefined,
-      "initial-capture",
-    );
-    identifyObservedHierarchy(
-      "android",
-      stableHierarchy,
-      "fresh",
-      undefined,
-      undefined,
-      "stable-capture",
-    );
+    identifyObservedHierarchy("android", before, "cached-ok", { captureId: "initial-capture" });
+    identifyObservedHierarchy("android", stableHierarchy, "fresh", { captureId: "stable-capture" });
   }
   const selector = new FakeElementSelector();
   const selectionIntents: string[] = [];
@@ -256,10 +243,9 @@ async function executeFocusWithDuplicateEmail(
   tap.refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
   tap.executeAndroidTap = async (
     _action: string,
-    _x: number,
-    _y: number,
+    _point: Point,
     _duration: number,
-    element: Element,
+    { element }: { element: Element },
   ) => {
     tapped.push(element);
   };
@@ -349,7 +335,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
     expect(result.ok).toBe(true);
     expect(successfulRefind(result).tapElement.bounds).toEqual(SHIFTED_BOUNDS);
@@ -378,7 +364,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { elementId: "generated-label", action: "tap" },
       { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
     expect<unknown>(checked).toBe(label);
     expect(failedRefind(result).error).toContain("matched label changed");
@@ -395,7 +381,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -424,7 +410,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -453,7 +439,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -477,7 +463,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(false);
@@ -500,7 +486,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -517,7 +503,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Ghost Element", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(false);
@@ -544,7 +530,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(false);
@@ -611,7 +597,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -631,7 +617,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(false);
@@ -657,7 +643,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     // The target sits exactly at the floor; a pure-deadline loop would have bailed at
@@ -677,7 +663,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -697,7 +683,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(false);
@@ -725,7 +711,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -746,7 +732,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -772,7 +758,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -788,7 +774,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(false);
@@ -813,7 +799,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -842,7 +828,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(sleepDurations[0]).toBe(500);
@@ -866,7 +852,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
+      { requireResourceId: false },
     );
 
     expect(result.ok).toBe(true);
@@ -886,8 +872,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false,
-      controller.signal,
+      { requireResourceId: false, signal: controller.signal },
     );
 
     await expect(resultPromise).rejects.toThrow();
@@ -929,7 +914,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
         { text: "Contact Name", action: "tap" },
         { screenSize: { width: 1080, height: 1920 } },
         "tap",
-        false,
+        { requireResourceId: false },
       );
 
       expect(result.ok).toBe(true);
@@ -947,7 +932,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
         { text: "Contact Name", action: "tap" },
         { screenSize: { width: 1080, height: 1920 } },
         "tap",
-        false,
+        { requireResourceId: false },
       );
 
       const stale = selectedMetadata(tap.buildSelectedElementMetadata(STALE_SELECTION));
@@ -1061,7 +1046,7 @@ describe("shared capture pre-tap resolution", () => {
         { text: "Contact Name", action: "tap" },
         { viewHierarchy: observed.hierarchy, screenSize: { width: 1080, height: 1920 } },
         "tap",
-        false,
+        { requireResourceId: false },
       );
       expect(policies).toEqual(changed ? ["cached-ok", "fresh"] : ["cached-ok", "fresh", "fresh"]);
       expect(result.ok).toBe(!changed);
@@ -1128,7 +1113,7 @@ test("tap rejects a reused generated ordinal after a fresh capture removes a dup
     { elementId: nodeKey, action: "tap" },
     { viewHierarchy: before.hierarchy },
     "tap",
-    false,
+    { requireResourceId: false },
   );
   expect(result.ok).toBe(false);
   expect(failedRefind(result).error).toContain("Stale reference");

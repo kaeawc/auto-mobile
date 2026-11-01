@@ -6,6 +6,9 @@ marketplace grid with a price filter and an item page, and a messenger thread wi
 neighbour. `today.json` is the slice that runs on today's vocabulary, with literal `data` and timers
 standing in for the backend and the other person.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Messages and the message action use `forum` (`bubble.left.and.bubble.right` on iOS).
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, group, listing and hashtag screens.
@@ -36,19 +39,18 @@ standing in for the backend and the other person.
 
 ## Workarounds and dead ends
 
-| Kind       | Spec path                             | What happens today                                                                                                                                                         | Needs                                                           |
-| ---------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Workaround | `state.kind_text`..`state.kind_video` | Post types switch with `{key: "kind_{post.kind}", equals: "photo"}`: each `kind_<k>` key holds its own name, because a condition cannot compare a row field with a literal | conditions on row fields                                        |
-| Workaround | `post_photo`, `listing_card`          | Photos are tinted boxes: the slice ships no image assets                                                                                                                   | remote images (#14181)                                          |
-| Dead end   | `post_video`                          | A video post is a still frame with a play icon                                                                                                                             | `videoPlayer` (#14253)                                          |
-| Workaround | `state.react_*`, `state.reaction_*`   | One open key and one reaction key per post                                                                                                                                 | keyed writes (#14230)                                           |
-| Workaround | `listing_card` `visibleWhen`          | The price filter matches a precomputed `band` field; there is no distance filter or sort                                                                                   | derived filter and sort (#14228)                                |
-| Dead end   | `group` screen                        | A group page shows its name and member count but no posts: the feed cannot be filtered by group                                                                            | `find` (#14229), derived filter (#14228)                        |
-| Workaround | `join_group`, `leave_group`           | Join and leave are per-group button pairs switched by `groupId` and `joined_<id>`; nothing can fail and roll back                                                          | optimistic keyed writes (#14230)                                |
-| Dead end   | `listing_map`                         | The item page shows a placeholder map                                                                                                                                      | `map` (#14309)                                                  |
-| Dead end   | `pending_message`                     | Only the latest sent message shows: rows cannot be built from the draft                                                                                                    | optimistic keyed writes (#14230)                                |
-| Workaround | `typing_indicator`, `reply_message`   | The neighbour types and answers on fixed timers                                                                                                                            | realtime (#14261), scripted actors (#14211)                     |
-| Workaround | `group_row`                           | The drawer's group repeat has no `key`: iOS re-checks drawer contents after expanding repeats and refuses the internal row key a keyed repeat adds                         | iOS drawer and tooltip check that ignores expansion-only fields |
+| Kind       | Spec path                             | What happens today                                                                                                                                                         | Needs                                       |
+| ---------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Workaround | `state.kind_text`..`state.kind_video` | Post types switch with `{key: "kind_{post.kind}", equals: "photo"}`: each `kind_<k>` key holds its own name, because a condition cannot compare a row field with a literal | conditions on row fields                    |
+| Workaround | `post_photo`, `listing_card`          | Photos are tinted boxes: the slice ships no image assets                                                                                                                   | remote images (#14181)                      |
+| Dead end   | `post_video`                          | A video post is a still frame with a play icon                                                                                                                             | `videoPlayer` (#14253)                      |
+| Workaround | `state.react_*`, `state.reaction_*`   | One open key and one reaction key per post                                                                                                                                 | keyed writes (#14230)                       |
+| Workaround | `listing_card` `visibleWhen`          | The price filter matches a precomputed `band` field; there is no distance filter or sort                                                                                   | derived filter and sort (#14228)            |
+| Dead end   | `group` screen                        | A group page shows its name and member count but no posts: the feed cannot be filtered by group                                                                            | `find` (#14229), derived filter (#14228)    |
+| Workaround | `join_group`, `leave_group`           | Join and leave are per-group button pairs switched by `groupId` and `joined_<id>`; nothing can fail and roll back                                                          | optimistic keyed writes (#14230)            |
+| Dead end   | `listing_map`                         | The item page shows a placeholder map                                                                                                                                      | `map` (#14309)                              |
+| Dead end   | `pending_message`                     | Only the latest sent message shows: rows cannot be built from the draft                                                                                                    | optimistic keyed writes (#14230)            |
+| Workaround | `typing_indicator`, `reply_message`   | The neighbour types and answers on fixed timers                                                                                                                            | realtime (#14261), scripted actors (#14211) |
 
 ## Simulator limits
 

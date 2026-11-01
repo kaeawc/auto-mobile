@@ -1,0 +1,161 @@
+$ adb shell getprop ro.build.characteristics
+automotive
+[rc=0]
+$ adb shell pm has-feature android.hardware.type.automotive
+true
+[rc=0]
+$ adb shell cmd user is-headless-system-user-mode
+true
+[rc=0]
+$ adb shell am get-current-user
+10
+[rc=0]
+$ adb shell getprop ro.fw.mu.headless_system_user
+true
+[rc=0]
+$ adb shell getprop ro.build.type
+user
+[rc=0]
+$ adb shell cmd car_service inject-rotary -c 1
+Succeeded in injecting: RotaryEvent{mInputType:10,mClockwise:false,mUptimeMillisForClicks:[26173536]}
+[rc=0]
+$ adb shell cmd car_service inject-rotary -c 0
+Succeeded in injecting: RotaryEvent{mInputType:10,mClockwise:false,mUptimeMillisForClicks:[26173893]}
+[rc=0]
+$ adb shell cmd car_service inject-rotary -h
+Invalid option at index 1: -h
+[rc=0]
+$ adb shell cmd car_service inject-rotary
+Succeeded in injecting: RotaryEvent{mInputType:10,mClockwise:false,mUptimeMillisForClicks:[26174319]}
+[rc=0]
+$ adb shell cmd car_service inject-vhal-event 0x11200402 1
+
+Exception occurred while executing 'inject-vhal-event':
+java.lang.SecurityException: The command 'inject-vhal-event' requires non-user build
+	at com.android.car.CarShellCommand.exec(CarShellCommand.java:1209)
+	at com.android.car.CarShellCommand.onCommand(CarShellCommand.java:623)
+	at com.android.modules.utils.BasicShellCommandHandler.exec(BasicShellCommandHandler.java:97)
+	at com.android.car.ICarImpl.lambda$new$0(ICarImpl.java:203)
+	at com.android.car.ICarImpl.$r8$lambda$r5HuyUXTLeyBJEuoSMgmzJL7BEI(Unknown Source:0)
+	at com.android.car.ICarImpl$$ExternalSyntheticLambda0.onShellCommand(D8$$SyntheticClass:0)
+	at android.car.builtin.os.BinderHelper.onTransactForCmd(BinderHelper.java:127)
+	at com.android.car.ICarImpl.onTransact(ICarImpl.java:950)
+	at android.os.Binder.execTransactInternal(Binder.java:1396)
+	at android.os.Binder.execTransact(Binder.java:1335)
+[rc=255]
+$ adb shell cmd car_service emulate-driving-state drive
+
+Exception occurred while executing 'emulate-driving-state':
+java.lang.SecurityException: The command 'emulate-driving-state' requires non-user build
+	at com.android.car.CarShellCommand.exec(CarShellCommand.java:1209)
+	at com.android.car.CarShellCommand.onCommand(CarShellCommand.java:623)
+	at com.android.modules.utils.BasicShellCommandHandler.exec(BasicShellCommandHandler.java:97)
+	at com.android.car.ICarImpl.lambda$new$0(ICarImpl.java:203)
+	at com.android.car.ICarImpl.$r8$lambda$r5HuyUXTLeyBJEuoSMgmzJL7BEI(Unknown Source:0)
+	at com.android.car.ICarImpl$$ExternalSyntheticLambda0.onShellCommand(D8$$SyntheticClass:0)
+	at android.car.builtin.os.BinderHelper.onTransactForCmd(BinderHelper.java:127)
+	at com.android.car.ICarImpl.onTransact(ICarImpl.java:950)
+	at android.os.Binder.execTransactInternal(Binder.java:1396)
+	at android.os.Binder.execTransact(Binder.java:1335)
+[rc=255]
+$ adb shell cmd car_service get-property-value 0x11400400
+
+Exception occurred while executing 'get-property-value':
+java.lang.SecurityException: The command 'get-property-value' requires non-user build
+	at com.android.car.CarShellCommand.exec(CarShellCommand.java:1209)
+	at com.android.car.CarShellCommand.onCommand(CarShellCommand.java:623)
+	at com.android.modules.utils.BasicShellCommandHandler.exec(BasicShellCommandHandler.java:97)
+	at com.android.car.ICarImpl.lambda$new$0(ICarImpl.java:203)
+	at com.android.car.ICarImpl.$r8$lambda$r5HuyUXTLeyBJEuoSMgmzJL7BEI(Unknown Source:0)
+	at com.android.car.ICarImpl$$ExternalSyntheticLambda0.onShellCommand(D8$$SyntheticClass:0)
+	at android.car.builtin.os.BinderHelper.onTransactForCmd(BinderHelper.java:127)
+	at com.android.car.ICarImpl.onTransact(ICarImpl.java:950)
+	at android.os.Binder.execTransactInternal(Binder.java:1396)
+	at android.os.Binder.execTransact(Binder.java:1335)
+[rc=255]
+$ adb shell cmd car_service get-do-activities-blocked
+
+Exception occurred while executing 'get-do-activities-blocked':
+java.lang.SecurityException: The command 'get-do-activities-blocked' requires non-user build
+	at com.android.car.CarShellCommand.exec(CarShellCommand.java:1209)
+	at com.android.car.CarShellCommand.onCommand(CarShellCommand.java:623)
+	at com.android.modules.utils.BasicShellCommandHandler.exec(BasicShellCommandHandler.java:97)
+	at com.android.car.ICarImpl.lambda$new$0(ICarImpl.java:203)
+	at com.android.car.ICarImpl.$r8$lambda$r5HuyUXTLeyBJEuoSMgmzJL7BEI(Unknown Source:0)
+	at com.android.car.ICarImpl$$ExternalSyntheticLambda0.onShellCommand(D8$$SyntheticClass:0)
+	at android.car.builtin.os.BinderHelper.onTransactForCmd(BinderHelper.java:127)
+	at com.android.car.ICarImpl.onTransact(ICarImpl.java:950)
+	at android.os.Binder.execTransactInternal(Binder.java:1396)
+	at android.os.Binder.execTransact(Binder.java:1335)
+[rc=255]
+$ adb shell cmd car_service day-night-mode
+Unknown value: . Valid argument: day|night|sensor
+[rc=0]
+$ adb shell cmd car_service day-night-mode night
+DayNightMode changed to: night
+[rc=0]
+$ adb shell cmd uimode night
+Night mode: yes
+[rc=0]
+$ adb shell cmd car_service day-night-mode day
+DayNightMode changed to: day
+[rc=0]
+$ adb shell cmd uimode night
+Night mode: no
+[rc=0]
+$ adb shell dumpsys car_service --services CarDrivingStateService
+** Dumping CarDrivingStateService
+
+*CarDrivingStateService*
+Driving State Clients:
+  callbacks: 4
+  killed: false
+  broadcasts count: -1
+Driving state change log:
+09-25 07:21:30 CarDrivingStateService Boot: changed from -1 to 0
+Current Driving State: 0
+Supported gears: 4 1 2 8 16 32 64 128 256
+
+[rc=0]
+$ adb shell dumpsys car_service --services CarUxRestrictionsManagerService
+** Dumping CarUxRestrictionsManagerService
+
+*CarUxRestrictionsManagerService*
+UX Restrictions Clients:
+  callbacks: 24
+  killed: false
+  broadcasts count: -1
+Display id: 0 UXR: DO: false UxR: 0 time: 244049778949
+Display id: 3 UXR: DO: true UxR: 511 time: 244051410532
+UX Restriction configurations:
+Physical display port: null
+Occupant zone id of the display: -1
+Display type: 0
+===========================================
+baseline mode UXR:
+-------------------------------------------
+State:unknown num restrictions:1
+Requires DO? true
+Restrictions: 0x1ff
+Speed Range: None
+-------------------------------------------
+State:parked num restrictions:1
+Requires DO? false
+Restrictions: 0x0
+Speed Range: None
+-------------------------------------------
+State:idling num restrictions:1
+Requires DO? true
+Restrictions: 0x10
+Speed Range: None
+-------------------------------------------
+State:moving num restrictions:2
+Requires DO? true
+Restrictions: 0xff
+Speed Range: 0.0 - 5.0
+-------------------------------------------
+Requires DO? true
+Restrictions: 0xff
+Speed Range: 5.0 - Infinity
+-------------------------------------------
+[rc=0]

@@ -57,15 +57,39 @@ export interface DaemonIdentityHost {
 /** Publishes PID identity and records precisely which socket paths this daemon owns. */
 export class DaemonIdentity {
   private readonly boundSocketIdentities = new Map<string, SocketFileIdentity>();
+  private readonly host: DaemonIdentityHost;
+  private readonly files: Pick<DaemonCleanupFileSystem, "stat">;
+  private readonly platform: NodeJS.Platform;
+  private readonly databasePath: () => string;
+  private readonly reportStartupFailure: (message: string) => void;
+
+  /**
+   * @param host - Daemon identity state and PID-file callbacks
+   * @param files - Socket-file identity reader
+   * @param platform - Host platform
+   * @param options.databasePath - Resolves the daemon database path
+   * @param options.reportStartupFailure - Reports a startup failure (defaults to stderr)
+   */
   constructor(
-    private readonly host: DaemonIdentityHost,
-    private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statFileIdentity },
-    private readonly platform: NodeJS.Platform = process.platform,
-    private readonly databasePath: () => string = getDatabasePath,
-    private readonly reportStartupFailure: (message: string) => void = (message) => {
-      writeSync(2, `${message}\n`);
-    },
-  ) {}
+    host: DaemonIdentityHost,
+    files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statFileIdentity },
+    platform: NodeJS.Platform = process.platform,
+    {
+      databasePath = getDatabasePath,
+      reportStartupFailure = (message) => {
+        writeSync(2, `${message}\n`);
+      },
+    }: {
+      databasePath?: () => string;
+      reportStartupFailure?: (message: string) => void;
+    } = {},
+  ) {
+    this.host = host;
+    this.files = files;
+    this.platform = platform;
+    this.databasePath = databasePath;
+    this.reportStartupFailure = reportStartupFailure;
+  }
 
   /**
    * Persist a PID-file record to disk (creating the directory as needed).

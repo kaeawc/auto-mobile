@@ -37,7 +37,10 @@ describe("CtrlProxyStorage (iOS)", function () {
 
   test("deletes through the facade with exact selector and mutation credentials", async () => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+      wsFactory: factory,
+      timer: fakeTimer,
+    });
     const selector = {
       itemClass: "genericPassword",
       service: "test.service",
@@ -171,7 +174,11 @@ describe("CtrlProxyStorage (iOS)", function () {
         };
         const write = () =>
           method === "setPreference"
-            ? storage.setPreference("com.example", "prefs", "k", "v", "STRING")
+            ? storage.setPreference("com.example", "prefs", {
+                key: "k",
+                value: "v",
+                type: "STRING",
+              })
             : method === "removePreference"
               ? storage.removePreference("com.example", "prefs", "k")
               : storage.clearPreferenceStore("com.example", "prefs");
@@ -191,12 +198,10 @@ describe("CtrlProxyStorage (iOS)", function () {
   describe("listPreferenceFiles", function () {
     test("sends list_preference_files request and returns files", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.listPreferenceFiles("com.example.app");
@@ -246,12 +251,10 @@ describe("CtrlProxyStorage (iOS)", function () {
     });
 
     test("throws on connection failure", async function () {
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       try {
         await expect(client.listPreferenceFiles("com.example.app")).rejects.toThrow();
@@ -268,12 +271,10 @@ describe("CtrlProxyStorage (iOS)", function () {
   describe("getPreferenceEntries", function () {
     test("sends get_preferences and returns entries", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.getPreferenceEntries("com.example.app", "Standard");
@@ -318,12 +319,10 @@ describe("CtrlProxyStorage (iOS)", function () {
   describe("getPreference", function () {
     test("returns entry when found", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.getPreference("com.example.app", "Standard", "theme");
@@ -362,12 +361,10 @@ describe("CtrlProxyStorage (iOS)", function () {
 
     test("returns null when not found", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.getPreference("com.example.app", "Standard", "missing");
@@ -402,23 +399,19 @@ describe("CtrlProxyStorage (iOS)", function () {
   describe("setPreference", function () {
     test("sends set_preference with correct parameters", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
         client.bindSession("session-1");
-        const resultPromise = client.setPreference(
-          "com.example.app",
-          "Standard",
-          "theme",
-          "dark",
-          "STRING",
-        );
+        const resultPromise = client.setPreference("com.example.app", "Standard", {
+          key: "theme",
+          value: "dark",
+          type: "STRING",
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket!, 1);
@@ -453,21 +446,17 @@ describe("CtrlProxyStorage (iOS)", function () {
 
     test("throws on failure response", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
-        const resultPromise = client.setPreference(
-          "com.example.app",
-          "Standard",
-          "count",
-          "bad",
-          "INT",
-        );
+        const resultPromise = client.setPreference("com.example.app", "Standard", {
+          key: "count",
+          value: "bad",
+          type: "INT",
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket!, 1);
@@ -492,20 +481,16 @@ describe("CtrlProxyStorage (iOS)", function () {
 
     test("maps the runner's SDK authorization error after decoding the real response", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       try {
-        const resultPromise = client.setPreference(
-          "com.example.app",
-          "duoStore",
-          "key",
-          "42",
-          "INT",
-        );
+        const resultPromise = client.setPreference("com.example.app", "duoStore", {
+          key: "key",
+          value: "42",
+          type: "INT",
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket!, 1);
@@ -536,12 +521,10 @@ describe("CtrlProxyStorage (iOS)", function () {
     "%s surfaces the runner authorization error through the registered tool",
     async (toolName, responseType) => {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       ToolRegistry.clearTools();
       serverConfig.setEmbeddedSdkEnabled(true);
       registerStorageTools(deps);
@@ -590,12 +573,10 @@ describe("CtrlProxyStorage (iOS)", function () {
   describe("removePreference", function () {
     test("sends remove_preference request", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         client.bindSession("session-1");
@@ -630,12 +611,10 @@ describe("CtrlProxyStorage (iOS)", function () {
 
     test("maps the runner's SDK authorization error for removal", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         const resultPromise = client.removePreference("com.example.app", "duoStore", "key");
         const socket = await waitForSocket(getSocket);
@@ -666,12 +645,10 @@ describe("CtrlProxyStorage (iOS)", function () {
   describe("clearPreferenceStore", function () {
     test("sends clear_preferences request", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         client.bindSession("session-1");
@@ -756,9 +733,7 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
     const promise = storage.setPreference(
       "com.app",
       "Standard",
-      "theme",
-      "dark",
-      "STRING",
+      { key: "theme", value: "dark", type: "STRING" },
       TIMEOUT,
     );
     await flush();
@@ -793,7 +768,11 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
   ] as const) {
     const call = () =>
       operation === "setPreference"
-        ? storage.setPreference("com.app", "group.x", "key", "value", "STRING")
+        ? storage.setPreference("com.app", "group.x", {
+            key: "key",
+            value: "value",
+            type: "STRING",
+          })
         : operation === "removePreference"
           ? storage.removePreference("com.app", "group.x", "key")
           : storage.clearPreferenceStore("com.app", "group.x");
@@ -820,7 +799,11 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
   }
 
   test("null set maps verification failure as remove", async () => {
-    const promise = storage.setPreference("com.app", "Standard", "key", null, "STRING");
+    const promise = storage.setPreference("com.app", "Standard", {
+      key: "key",
+      value: null,
+      type: "STRING",
+    });
     await flush();
     h.resolveLast({ success: false, totalTimeMs: 1, error: "write_verification_failed" });
     await expect(promise).rejects.toThrow(
@@ -832,7 +815,11 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
     ["iOS key-value storage rejected the value: invalid_store_name", "bundle id"],
     ["iOS key-value storage failed: write_verification_failed", "persistent domain"],
   ])("maps preference SDK errors: %s", async (message, guidance) => {
-    const promise = storage.setPreference("com.app", "Standard", "key", "value", "STRING");
+    const promise = storage.setPreference("com.app", "Standard", {
+      key: "key",
+      value: "value",
+      type: "STRING",
+    });
     await flush();
     h.resolveLast({ success: false, totalTimeMs: 1, error: message });
     try {
@@ -907,7 +894,13 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       wireType: "set_preference",
       timeoutMsg: `Set preference timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Failed to set preference",
-      call: () => storage.setPreference("com.app", "Standard", "theme", "dark", "STRING", TIMEOUT),
+      call: () =>
+        storage.setPreference(
+          "com.app",
+          "Standard",
+          { key: "theme", value: "dark", type: "STRING" },
+          TIMEOUT,
+        ),
       successPayload: { success: true, totalTimeMs: 1 },
       assertSuccess: (value) => {
         expect(value).toBeUndefined();

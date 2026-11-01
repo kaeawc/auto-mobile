@@ -151,10 +151,17 @@ export class FrameDecoder {
    */
   push(
     chunk: Buffer,
-    onMalformed?: (error: MalformedFrameError) => void,
-    onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void,
-    onEncodedVideo?: (video: DecodedEncodedVideo) => void,
+    {
+      onMalformed,
+      onAudio,
+      onFrame,
+      onEncodedVideo,
+    }: {
+      onMalformed?: (error: MalformedFrameError) => void;
+      onAudio?: (audio: DecodedAudio) => void;
+      onFrame?: (frame: DecodedFrame) => void;
+      onEncodedVideo?: (video: DecodedEncodedVideo) => void;
+    } = {},
   ): DecodedFrame[] {
     const frames: DecodedFrame[] = [];
     let offset = 0;
@@ -168,7 +175,7 @@ export class FrameDecoder {
         // MAX_RAW_FRAME_BYTES, and `resynchronize` compacts garbage that carries
         // no validating marker — so every full-buffer state drains, leaving this
         // throw an infinite-loop guard rather than a real teardown path (#4772).
-        if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame, onEncodedVideo)) {
+        if (!this.decodeAvailable(frames, { onMalformed, onAudio, onFrame, onEncodedVideo })) {
           throw new Error(
             "FrameDecoder reached its raw-frame buffer limit without a complete frame",
           );
@@ -179,7 +186,7 @@ export class FrameDecoder {
       this.buffer.append(chunk.subarray(offset, end));
       this.highWaterMarkBytes = Math.max(this.highWaterMarkBytes, this.buffer.length);
       offset = end;
-      this.decodeAvailable(frames, onMalformed, onAudio, onFrame, onEncodedVideo);
+      this.decodeAvailable(frames, { onMalformed, onAudio, onFrame, onEncodedVideo });
     }
     return frames;
   }
@@ -194,10 +201,17 @@ export class FrameDecoder {
 
   private decodeAvailable(
     frames: DecodedFrame[],
-    onMalformed?: (error: MalformedFrameError) => void,
-    onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void,
-    onEncodedVideo?: (video: DecodedEncodedVideo) => void,
+    {
+      onMalformed,
+      onAudio,
+      onFrame,
+      onEncodedVideo,
+    }: {
+      onMalformed?: (error: MalformedFrameError) => void;
+      onAudio?: (audio: DecodedAudio) => void;
+      onFrame?: (frame: DecodedFrame) => void;
+      onEncodedVideo?: (video: DecodedEncodedVideo) => void;
+    } = {},
   ): boolean {
     let madeProgress = false;
     while (true) {
@@ -228,7 +242,7 @@ export class FrameDecoder {
       // avoids the former concatenate-on-every-chunk behavior while retaining
       // no more than this one completed payload.
       const payload = this.buffer.takeDetached(expected);
-      this.emitRecord(pending, payload, frames, onAudio, onFrame, onEncodedVideo);
+      this.emitRecord(pending, payload, frames, { onAudio, onFrame, onEncodedVideo });
       this.pendingHeader = null;
       madeProgress = true;
     }
@@ -239,9 +253,15 @@ export class FrameDecoder {
     header: FrameHeader,
     payload: Buffer,
     frames: DecodedFrame[],
-    onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void,
-    onEncodedVideo?: (video: DecodedEncodedVideo) => void,
+    {
+      onAudio,
+      onFrame,
+      onEncodedVideo,
+    }: {
+      onAudio?: (audio: DecodedAudio) => void;
+      onFrame?: (frame: DecodedFrame) => void;
+      onEncodedVideo?: (video: DecodedEncodedVideo) => void;
+    },
   ): void {
     if (isAudioHeader(header)) {
       onAudio?.({ pcm16le: payload });

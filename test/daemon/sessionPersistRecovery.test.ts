@@ -33,7 +33,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -83,12 +83,12 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
   for (const reason of ["superseded", "allocation-rollback"] as const) {
     test(`a ${reason} row is refused up front and left untouched`, async () => {
       await seedRow();
-      await repo.markReleased(SESSION, "released", 2_000, reason);
+      await repo.markReleased(SESSION, "released", 2_000, { reason });
       const before = await repo.getSession(SESSION);
       const { manager, pool } = daemon();
 
       const outcome = await manager
-        .getOrCreateSession(SESSION, pool, "android", undefined, true)
+        .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
         .then(
           () => "recovered",
           (e: unknown) => (e instanceof Error ? e.message : String(e)),
@@ -102,10 +102,12 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
 
   test("naming a plan-auto-release UUID issues the session again on the real repository", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 2_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 2_000, { reason: PLAN_AUTO_RELEASE_REASON });
     const { manager, pool } = daemon();
 
-    const session = await manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+    const session = await manager.getOrCreateSession(SESSION, pool, "android", {
+      requireIssuedSession: true,
+    });
 
     expect(session.assignedDevice).toBe(DEVICE);
     expect(await repo.getSession(SESSION)).toMatchObject({
@@ -125,24 +127,26 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
         release_reason: PLAN_AUTO_RELEASE_REASON,
       });
 
-      await manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+      await manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true });
       expect(await repo.getSession(SESSION)).toMatchObject({ status: "active" });
     }
   });
 
   test("a device taken between the plans surfaces the pool's typed refusal and hands the claim back", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 2_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 2_000, { reason: PLAN_AUTO_RELEASE_REASON });
     const busy = new ActionableError("Device emulator-5554 is in use by another session.");
     const { manager, pool } = daemon(async () => {
       throw busy;
     });
     const before = await repo.getSession(SESSION);
 
-    const error = await manager.getOrCreateSession(SESSION, pool, "android", undefined, true).then(
-      () => undefined,
-      (e: unknown) => e,
-    );
+    const error = await manager
+      .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
 
     expect(error).toBe(busy);
     expect(error).not.toBeInstanceOf(DeviceSessionRowChangedError);
@@ -156,7 +160,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
 
   test("a restart between the plans does not rehydrate the plan-auto-release row", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 2_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 2_000, { reason: PLAN_AUTO_RELEASE_REASON });
     const { manager, pool } = daemon();
 
     const summary = await manager.rehydratePersistedSessions(pool);
@@ -165,7 +169,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     expect(manager.getSession(SESSION)).toBeNull();
     expect((await repo.listRecoverableSessions(2_000)).map((row) => row.session_uuid)).toEqual([]);
     // The UUID is still issuable by name afterwards.
-    await manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+    await manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true });
     expect(manager.getSession(SESSION)).not.toBeNull();
   });
 
@@ -174,7 +178,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     await manager.createSession(SESSION, DEVICE, "android", { stableDeviceId: "Pixel_8_API_35" });
     await manager.releaseSession(SESSION, "explicit-release");
 
-    await repo.markReleased(SESSION, "released", 3_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 3_000, { reason: PLAN_AUTO_RELEASE_REASON });
 
     expect((await repo.getSession(SESSION))?.release_reason).toBe("explicit-release");
   });
@@ -219,7 +223,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       await setUp([ios(SIM_B), ios(SIM_A)]);
       await runPlanOnSimA();
 
-      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", {
+        requireIssuedSession: true,
+      });
 
       expect(session.assignedDevice).toBe(SIM_A);
     });
@@ -234,7 +240,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
         expectedIdentity: ios(SIM_A),
       });
 
-      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", {
+        requireIssuedSession: true,
+      });
 
       expect(session.assignedDevice).toBe(SIM_B);
       expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
@@ -253,7 +261,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       // A daemon that no longer has the plan's device.
       await setUp([ios(SIM_B)]);
 
-      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", {
+        requireIssuedSession: true,
+      });
 
       expect(session.assignedDevice).toBe(SIM_B);
       expect(await repo.getSession(SESSION)).toMatchObject({ status: "active", device_id: SIM_B });
@@ -270,7 +280,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       });
 
       await expect(
-        manager.getOrCreateSession(SESSION, pool, "ios", undefined, true),
+        manager.getOrCreateSession(SESSION, pool, "ios", { requireIssuedSession: true }),
       ).rejects.toThrow("target-busy");
 
       expect(pool.getDevice(SIM_B)?.sessionId).toBeNull();

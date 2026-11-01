@@ -24,7 +24,7 @@ export interface BootedDeviceTraits {
   model: string | null;
   sdk: number | null;
   abi: string | null;
-  /** `"watch"` or `"automotive"` when the build announces it; null otherwise. */
+  /** `"watch"`, `"automotive"` or `"tv"` when the build announces it; null otherwise. */
   formFactor: TraitFormFactor | null;
 }
 
@@ -72,6 +72,24 @@ async function readTraits(
     );
     return undefined;
   }
+}
+
+/** Resolve Android form factor before constructing a device-specific app lister. */
+export async function resolveFormFactor(
+  device: BootedDevice,
+  timer: Timer,
+  deps: Dependencies,
+): Promise<BootedDevice> {
+  if (device.platform !== "android" || deps.injectedDeviceTraits === null) {
+    return device;
+  }
+  const traits = await readTraits(
+    deps.injectedDeviceTraits ?? defaultDeviceTraits,
+    defaultAdbClientFactory,
+    device,
+    timer,
+  );
+  return traits?.formFactor ? { ...device, formFactor: traits.formFactor } : device;
 }
 
 /** Attach {@link BootedDeviceTraits} to every probeable Android entry, in place. */

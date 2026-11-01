@@ -184,7 +184,11 @@ export class TapAnyElement extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     options: TapAnyElementDependencies = {},
   ) {
-    super(device, adb, options.timer, options.renderedDisplayRevision, options);
+    super(device, {
+      adb,
+      timer: options.timer,
+      displayFence: options,
+    });
     this.lastRenderedObservation = options.lastRenderedObservation ?? sessionRenderedObservation;
     this.geometry = new DefaultElementGeometry();
     this.elementSelector =
@@ -386,14 +390,11 @@ export class TapAnyElement extends BaseVisualChange {
         timeoutMs,
         signal,
       });
-      identifyObservedHierarchy(
-        this.tapPlatform,
-        snapshot.hierarchy,
-        "fresh",
-        this.timer,
-        undefined,
-        { captureId: snapshot.captureId, iosMultiPanel: this.iosMultiPanel },
-      );
+      identifyObservedHierarchy(this.tapPlatform, snapshot.hierarchy, "fresh", {
+        timer: this.timer,
+        captureId: snapshot.captureId,
+        iosMultiPanel: this.iosMultiPanel,
+      });
       return snapshot.hierarchy;
     } catch (error) {
       throwIfAborted(signal);
@@ -466,14 +467,10 @@ export class TapAnyElement extends BaseVisualChange {
           lastHash = hash;
         }
 
-        selectedCapture = identifyObservedHierarchy(
-          this.tapPlatform,
-          refreshed,
-          "fresh",
-          this.timer,
-          undefined,
-          { iosMultiPanel: this.iosMultiPanel },
-        );
+        selectedCapture = identifyObservedHierarchy(this.tapPlatform, refreshed, "fresh", {
+          timer: this.timer,
+          iosMultiPanel: this.iosMultiPanel,
+        });
         const found = this.findClickableElement(options, selectedCapture.hierarchy, {
           observationScreenSize: observeResult.screenSize,
           display: observeResult.viewHierarchy,
@@ -544,14 +541,11 @@ export class TapAnyElement extends BaseVisualChange {
         observeResult.viewHierarchy = viewHierarchy;
       }
     }
-    let selectedCapture = identifyObservedHierarchy(
-      this.tapPlatform,
-      viewHierarchy,
-      "cached-ok",
-      this.timer,
-      undefined,
-      { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
-    );
+    let selectedCapture = identifyObservedHierarchy(this.tapPlatform, viewHierarchy, "cached-ok", {
+      timer: this.timer,
+      captureId: observeResult.observationId,
+      iosMultiPanel: this.iosMultiPanel,
+    });
     const searchDurationMs = this.getSearchUntilDuration(options);
     let startTime = this.timer.now();
     let requestCount = 0;
@@ -594,12 +588,9 @@ export class TapAnyElement extends BaseVisualChange {
       viewHierarchy = cachedRefresh.hierarchy;
       observeResult.viewHierarchy = viewHierarchy;
       startTime = this.timer.now();
-      selectedCapture = identifyObservedHierarchy(
-        this.tapPlatform,
-        viewHierarchy,
-        "fresh",
-        this.timer,
-      );
+      selectedCapture = identifyObservedHierarchy(this.tapPlatform, viewHierarchy, "fresh", {
+        timer: this.timer,
+      });
       const current = this.findClickableElement(options, selectedCapture.hierarchy, {
         observationScreenSize: observeResult.screenSize,
         display: viewHierarchy,
@@ -643,7 +634,7 @@ export class TapAnyElement extends BaseVisualChange {
       action,
     });
     perf.end();
-    return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
+    return this.createSuccessResult(action, target, startTime, { requestCount, changeCount });
   }
 
   private async refreshCachedHierarchy(
@@ -672,9 +663,7 @@ export class TapAnyElement extends BaseVisualChange {
       accessibilityEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
         this.device.deviceId,
         IOSCtrlProxyClient.getInstance(this.device),
-        this.featureFlags,
-        undefined,
-        context.signal,
+        { featureFlags: this.featureFlags, signal: context.signal },
       );
       if (accessibilityEnabled) {
         return { accessibilityEnabled };
@@ -768,41 +757,35 @@ export class TapAnyElement extends BaseVisualChange {
           assertSelectedCapture(selectedCapture);
           await dispatch(tapPoint);
         } else {
-          await this.androidTapper.executeAndroidTap(
-            action,
-            tapPoint.x,
-            tapPoint.y,
-            longPressDuration,
+          await this.androidTapper.executeAndroidTap(action, tapPoint, longPressDuration, {
             target,
-            tapContext,
-          );
+            fenceOptions: tapContext,
+          });
         }
-        await this.androidTapper.retryAndroidTapIfNoChange(
-          preTapHash,
-          target,
-          action,
-          longPressDuration,
-          observeResult.screenSize,
-          { ...tapContext, selectionOptions: options, refresh, dispatch },
-        );
+        await this.androidTapper.retryAndroidTapIfNoChange(preTapHash, target, action, {
+          durationMs: longPressDuration,
+          fenceOptions: {
+            ...tapContext,
+            screenSize: observeResult.screenSize,
+            selectionOptions: options,
+            refresh,
+            dispatch,
+          },
+        });
         break;
       }
       case "ios":
         targetDisplay?.assertCurrent();
         assertSelectedCapture(selectedCapture);
-        await this.iosTapper.executeIosTap(
-          action,
-          tapPoint.x,
-          tapPoint.y,
-          longPressDuration,
+        await this.iosTapper.executeIosTap(action, tapPoint, longPressDuration, {
           element,
-          {
+          fenceOptions: {
             signal,
             displayFence: fence,
             scoped: target.scoped,
             voiceOverEnabled: target.talkBackState ?? undefined,
           },
-        );
+        });
         break;
       default:
         throw unsupportedPlatformError(this.device.platform, "tap any element");
@@ -867,31 +850,23 @@ export class TapAnyElement extends BaseVisualChange {
       const targetDisplay =
         options.display === undefined
           ? undefined
-          : await prepareTargetDisplayAction(
-              this.device,
-              options.display,
-              this.observeScreen,
-              this.adb,
-              {
-                lastRenderedObservation: this.lastRenderedObservation,
-                signal,
-                transitions: this.displayTransitionReader,
-              },
-            );
+          : await prepareTargetDisplayAction(this.device, options.display, this.observeScreen, {
+              adb: this.adb,
+              lastRenderedObservation: this.lastRenderedObservation,
+              signal,
+              transitions: this.displayTransitionReader,
+            });
       const refresh: RefreshViewHierarchy =
         targetDisplay && this.device.platform === "android"
           ? (timeoutMs, _screenSize, refreshSignal) =>
-              refreshTargetDisplayHierarchy(
-                targetDisplay,
-                this.hierarchyCapture,
-                timeoutMs,
-                () =>
+              refreshTargetDisplayHierarchy(targetDisplay, this.hierarchyCapture, timeoutMs, {
+                stale: () =>
                   this.staleDisplay(
                     targetDisplay.observation.display.generation ??
                       this.displayTransitionReader.identityRevision(this.device.deviceId),
                   ),
-                refreshSignal,
-              )
+                signal: refreshSignal,
+              })
           : this.refreshViewHierarchy.bind(this);
       const warnings = new Set<string>();
       const onActivationWarnings = (messages: string[] = []) => {
@@ -979,8 +954,7 @@ export class TapAnyElement extends BaseVisualChange {
     action: TapAnyElementOptions["action"],
     target: CapturedTapTarget,
     startTime: number,
-    requestCount: number,
-    changeCount: number,
+    { requestCount, changeCount }: { requestCount: number; changeCount: number },
   ): TapAnyElementResult {
     return {
       success: true,

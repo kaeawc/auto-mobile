@@ -204,7 +204,7 @@ describe("settled cancellation retry", () => {
     const recorder = new DefaultObserveScreenshotRecorder(device, service, store);
 
     await expect(
-      recorder.captureSettled("missing-observation", undefined, controller.signal),
+      recorder.captureSettled("missing-observation", { signal: controller.signal }),
     ).rejects.toThrow(`the file is missing: ${missingPath}`);
     expect(requests).toEqual([
       { format: "png", queueAfterPending: true, parentSignal: controller.signal },

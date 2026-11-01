@@ -59,8 +59,8 @@ class GatedCtrlProxy extends FakeCtrlProxy {
   override async setPreference(
     ...args: Parameters<FakeCtrlProxy["setPreference"]>
   ): ReturnType<FakeCtrlProxy["setPreference"]> {
-    if (typeof args[5] === "object") {
-      args[5].onDispatch?.();
+    if (typeof args[3] === "object") {
+      args[3].onDispatch?.();
     }
     await this.deviceCall();
   }
@@ -140,9 +140,11 @@ describe("idle release while the holder's device call is in flight", () => {
     // As daemon.ts wires the idle veto.
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(
-        executionTracker,
-        sessionManager,
-        { isSessionRecoveryInFlight: () => false },
+        {
+          tracker: executionTracker,
+          sessionManager,
+          devicePool: { isSessionRecoveryInFlight: () => false },
+        },
         sessionId,
         query,
       ),

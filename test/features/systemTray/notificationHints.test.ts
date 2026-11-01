@@ -1,5 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import {
+  hasIosCoverSheetNotificationCenter,
+  hierarchyShowsIosLockScreen,
   getNodeProperties,
   traverseForHint,
   getHierarchyRoots,
@@ -23,6 +25,35 @@ const ios27NotificationCenterHierarchy = wireCapture(
     ),
   ),
 );
+
+const ios26Captures = [
+  ["lock-screen", false],
+  ["notification-center-empty", true],
+  ["notification-center-notifications", true],
+] as const;
+
+describe("captured iOS cover sheets", () => {
+  it.each(ios26Captures)("recognizes %s as a tray only when unlocked", (name, expected) => {
+    const hierarchy = wireCapture(
+      JSON.parse(
+        readFileSync(
+          new URL(
+            `../../fixtures/ios-notification-center/ios26-${name}-hierarchy.json`,
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ),
+    );
+    expect(hierarchyShowsIosLockScreen(hierarchy)).toBe(!expected);
+    expect(hasIosCoverSheetNotificationCenter(hierarchy)).toBe(expected);
+  });
+
+  it("preserves the captured iOS 27 cover-sheet detection", () => {
+    expect(hierarchyShowsIosLockScreen(ios27NotificationCenterHierarchy)).toBe(false);
+    expect(hasIosCoverSheetNotificationCenter(ios27NotificationCenterHierarchy)).toBe(true);
+  });
+});
 
 /** A capture wrapping an arbitrary hierarchy shape, as it would arrive off the wire. */
 function viewHierarchy(hierarchy: object) {
@@ -147,6 +178,38 @@ describe("nodeHasSystemTrayHint", () => {
 });
 
 describe("nodeHasIosNotificationCenterHint", () => {
+  it("matches only the cover-sheet window containing the empty tray clock", () => {
+    const clock = { $: { "resource-id": "lockscreen-date-view", class: "UIView" } };
+    expect(
+      nodeHasIosNotificationCenterHint({
+        $: { "resource-id": "SBCoverSheetWindow", class: "UIWindow" },
+        node: [clock],
+      }),
+    ).toBe(true);
+    expect(nodeHasIosNotificationCenterHint(clock)).toBe(false);
+  });
+
+  it("rejects a cover-sheet window without the clock or notification list", () => {
+    expect(
+      nodeHasIosNotificationCenterHint({
+        $: { "resource-id": "SBCoverSheetWindow", class: "UIWindow" },
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a clock outside a cover-sheet UIWindow", () => {
+    const clock = { $: { "resource-id": "lockscreen-date-view" } };
+    expect(nodeHasIosNotificationCenterHint({ $: { class: "UIWindow" }, node: [clock] })).toBe(
+      false,
+    );
+    expect(
+      nodeHasIosNotificationCenterHint({
+        $: { "resource-id": "SBCoverSheetWindow", class: "UIView" },
+        node: [clock],
+      }),
+    ).toBe(false);
+  });
+
   it("matches the captured cover-sheet list, not its generic cells or date subtree", () => {
     const matchedIds: string[] = [];
     for (const root of getHierarchyRoots(ios27NotificationCenterHierarchy)) {

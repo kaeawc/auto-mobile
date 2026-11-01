@@ -620,9 +620,11 @@ export function coveringImeOccluder(
 export function markAppRowsCoveredByIme(
   kept: SkeletonAccumulator[],
   occluder: ImeOccluder | undefined,
-  measured?: ImeOccluder,
-  screen?: ObserveResult["screenSize"],
-  ios = false,
+  {
+    measured,
+    screen,
+    ios = false,
+  }: { measured?: ImeOccluder; screen?: ObserveResult["screenSize"]; ios?: boolean } = {},
 ): void {
   if (!occluder) {
     return;

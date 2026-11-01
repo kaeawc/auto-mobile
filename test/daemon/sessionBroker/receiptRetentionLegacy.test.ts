@@ -23,13 +23,10 @@ describe("receipt retention for receipts written before it existed", () => {
         VALUES ('legacy', 'fingerprint', '{}', '{}', 'failed', 'refused', 'capacity_exhausted', 0)`);
       const timer = new FakeTimer();
       timer.setCurrentTime(50_000);
-      const store = new SqliteSessionBrokerStore(
-        db,
-        "scope",
-        () => false,
-        new CountingIdGenerator("resource"),
-        timer,
-      );
+      const store = new SqliteSessionBrokerStore(db, "scope", () => false, {
+        ids: new CountingIdGenerator("resource"),
+        clock: timer,
+      });
       expect(await store.pruneTerminalRequests(WINDOW_MS, 10)).toBe(0);
       timer.advanceTime(WINDOW_MS - 1);
       expect(await store.pruneTerminalRequests(WINDOW_MS, 10)).toBe(0);

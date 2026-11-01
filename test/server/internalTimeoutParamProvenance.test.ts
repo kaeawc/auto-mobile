@@ -49,18 +49,18 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       // `stripInternalToolParams`'s early-return guard is covered by
       // STRICT_TOOL below (#6917 review, PRRT_kwDOP-GF5M6h40fK).
       z.object({}),
-      async (args: unknown) => {
-        const received = (args as Record<string, unknown>)[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-        const receivedDeadline = (args as Record<string, unknown>)[
-          INTERNAL_MCP_REQUEST_DEADLINE_PARAM
-        ];
-        return createStructuredToolResponse({
-          success: true,
-          receivedTimeoutMs: typeof received === "number" ? received : null,
-          receivedDeadlineMs: typeof receivedDeadline === "number" ? receivedDeadline : null,
-        });
-      },
       {
+        handler: async (args: unknown) => {
+          const received = (args as Record<string, unknown>)[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+          const receivedDeadline = (args as Record<string, unknown>)[
+            INTERNAL_MCP_REQUEST_DEADLINE_PARAM
+          ];
+          return createStructuredToolResponse({
+            success: true,
+            receivedTimeoutMs: typeof received === "number" ? received : null,
+            receivedDeadlineMs: typeof receivedDeadline === "number" ? receivedDeadline : null,
+          });
+        },
         outputSchema: z.object({
           success: z.boolean(),
           receivedTimeoutMs: z.number().nullable(),
@@ -80,12 +80,14 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       STRICT_TOOL,
       "probe tool whose input schema rejects undeclared arguments",
       strictSchema,
-      async (args: unknown) => {
-        strictHandlerArgs = args;
-        const publicArgs = strictSchema.parse(stripInternalToolParams(args));
-        return createStructuredToolResponse({ success: true, ...publicArgs });
+      {
+        handler: async (args: unknown) => {
+          strictHandlerArgs = args;
+          const publicArgs = strictSchema.parse(stripInternalToolParams(args));
+          return createStructuredToolResponse({ success: true, ...publicArgs });
+        },
+        outputSchema: z.object({ success: z.boolean() }),
       },
-      { outputSchema: z.object({ success: z.boolean() }) },
     );
   });
 

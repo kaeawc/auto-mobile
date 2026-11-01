@@ -15,9 +15,11 @@ test("configured Android successful sendKeys dismisses the keyboard", async () =
     android,
     serverConfig.isDismissKeyboardAfterInputEnabled(),
     true,
-    async () => {
-      calls++;
-      return closed;
+    {
+      close: async () => {
+        calls++;
+        return closed;
+      },
     },
   );
   expect(calls).toBe(1);
@@ -30,14 +32,16 @@ test("flag off and failed text entry do not close the keyboard", async () => {
     calls++;
     return closed;
   };
-  expect(await dismissKeyboardAfterSendKeys(android, false, true, close)).toEqual({});
-  expect(await dismissKeyboardAfterSendKeys(android, true, false, close)).toEqual({});
+  expect(await dismissKeyboardAfterSendKeys(android, false, true, { close })).toEqual({});
+  expect(await dismissKeyboardAfterSendKeys(android, true, false, { close })).toEqual({});
   expect(calls).toBe(0);
 });
 
 test("keyboard close failure is reported without escaping", async () => {
-  const result = await dismissKeyboardAfterSendKeys(android, true, true, async () => {
-    throw new Error("close failed");
+  const result = await dismissKeyboardAfterSendKeys(android, true, true, {
+    close: async () => {
+      throw new Error("close failed");
+    },
   });
   expect(result).toEqual({
     keyboardDismissed: false,
@@ -48,9 +52,11 @@ test("keyboard close failure is reported without escaping", async () => {
 test("iOS does not close the keyboard", async () => {
   let calls = 0;
   expect(
-    await dismissKeyboardAfterSendKeys(ios, true, true, async () => {
-      calls++;
-      return closed;
+    await dismissKeyboardAfterSendKeys(ios, true, true, {
+      close: async () => {
+        calls++;
+        return closed;
+      },
     }),
   ).toEqual({});
   expect(calls).toBe(0);

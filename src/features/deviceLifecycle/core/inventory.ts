@@ -7,6 +7,8 @@ import {
 } from "../../../daemon/inventoryDeviceDescription";
 import { projectListDevicesEntry, poolHoldFor } from "../../../daemon/deviceDescription";
 import { defaultDaemonContext, type DevicePoolReads } from "../../../daemon/daemonContext";
+import { isUnresolvedAndroidEmulatorName } from "../../../devices/deviceIdentityEvidence";
+import { isAndroidEmulatorSerial } from "../../../utils/androidSerial";
 import {
   type StableConfiguredDeviceImage,
   configuredImageForBootedDevice,
@@ -29,6 +31,7 @@ import { ANDROID_INVENTORY_RETRY_AFTER_MS } from "../../../constants/deviceResou
 import { type DeviceMatchCriteria } from "../../../models/DeviceMatchCriteria";
 import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../../../daemon/wire/constants";
 import { type AvdInfo } from "../../../utils/android-cmdline-tools/avdmanager";
+import type { PlatformArg } from "../../../utils/schemaHelpers";
 
 export function androidSourceImageWithBootedMetadata(
   device: BootedDevice,
@@ -102,26 +105,55 @@ export function initializedDeviceSessionUuid(deviceId: string): string | undefin
 /**
  * The pool's hold on a device. A pooled entry answers for its own device. An id the pool does not
  * list at all can still be broker-bound: a simulator an erase reset shut down leaves the pool while
- * the broker keeps its binding (#15233). An entry that exists but fails runtime identity (a serial
- * another AVD now answers on) lends no ownership to the device on that serial.
+ * the broker keeps its binding (#15233), and so does an emulator an ADB server reset detached, whose
+ * binding names its AVD rather than its serial (#15794). An entry that exists but fails runtime
+ * identity (a serial another AVD now answers on) lends no ownership to the device on that serial.
  */
-function holdFor(devicePool: DevicePoolReads | undefined, deviceId: string, pooled: boolean) {
-  return pooled || !devicePool?.getDevice(deviceId) ? poolHoldFor(devicePool, deviceId) : undefined;
+function holdFor(
+  devicePool: DevicePoolReads | undefined,
+  device: BootedDevice,
+  pooled: boolean,
+  transportAvdName: string | undefined,
+) {
+  if (pooled) {
+    return poolHoldFor(devicePool, device.deviceId);
+  }
+  return devicePool?.getDevice(device.deviceId)
+    ? undefined
+    : poolHoldFor(devicePool, device.deviceId, unpooledEmulatorStableIds(device, transportAvdName));
+}
+
+/** The AVD names an unpooled emulator is known by, matching the pool's own emulator stable id. */
+function unpooledEmulatorStableIds(
+  device: BootedDevice,
+  transportAvdName: string | undefined,
+): Array<string | undefined> {
+  if (device.platform !== "android" || !isAndroidEmulatorSerial(device.deviceId)) {
+    return [];
+  }
+  return [transportAvdName, isUnresolvedAndroidEmulatorName(device) ? undefined : device.name];
+}
+
+/** Per-listing Android transport lookups and holds; absent ones read the device pool. */
+export interface ListDevicePayloadsOptions {
+  aliasesForDevice?: (deviceId: string) => string[];
+  transportAvdNameForDevice?: (deviceId: string) => string | undefined;
+  /**
+   * Held devices their platform lists in a transitional state, by device id: Android in a
+   * non-`device` adb state (#11455), iOS `Booting` / `Shutting Down` (#11573).
+   */
+  transitionalHolds?: ReadonlyMap<string, TransitionalHold>;
 }
 
 export function listDevicePayloads(
   booted: BootedDevice[],
   devicePool: DevicePoolReads | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
-  aliasesForDevice: (deviceId: string) => string[] = (deviceId) =>
-    devicePool?.getAndroidTransportAliases(deviceId) ?? [],
-  transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
-    devicePool?.getAndroidTransportAvdName(deviceId),
-  /**
-   * Held devices their platform lists in a transitional state, by device id: Android in a
-   * non-`device` adb state (#11455), iOS `Booting` / `Shutting Down` (#11573).
-   */
-  transitionalHolds: ReadonlyMap<string, TransitionalHold> = new Map(),
+  {
+    aliasesForDevice = (deviceId) => devicePool?.getAndroidTransportAliases(deviceId) ?? [],
+    transportAvdNameForDevice = (deviceId) => devicePool?.getAndroidTransportAvdName(deviceId),
+    transitionalHolds = new Map(),
+  }: ListDevicePayloadsOptions = {},
 ) {
   const sessionManager = defaultDaemonContext.sessionManager();
   const sessions = new Map(
@@ -131,6 +163,7 @@ export function listDevicePayloads(
     const pooled = devicePool?.describesPooledRuntime(device)
       ? (devicePool.getDevice(device.deviceId) ?? undefined)
       : undefined;
+    const transportAvdName = transportAvdNameForDevice(device.deviceId);
     const description = describeInventoryDevice({
       device,
       pooled,
@@ -138,10 +171,10 @@ export function listDevicePayloads(
       configuredImages,
       sessionsById: sessions,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
-      hold: holdFor(devicePool, device.deviceId, pooled !== undefined),
+      hold: holdFor(devicePool, device, pooled !== undefined, transportAvdName),
       poolStatus: pooled ? devicePool?.poolBucket(device.deviceId) : undefined,
       ...transitionalHoldInputs(transitionalHolds.get(device.deviceId)),
-      transportAvdName: transportAvdNameForDevice(device.deviceId),
+      transportAvdName,
     });
     if (device.platform === "android") {
       return projectAndroidTransportDescription(description, aliasesForDevice(device.deviceId));
@@ -294,7 +327,7 @@ export interface ListDeviceImagesArgs {
 }
 
 export interface ListDevicesArgs {
-  platform?: "android" | "ios";
+  platform?: PlatformArg;
   requires?: DeviceMatchCriteria["requires"];
 }
 

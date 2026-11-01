@@ -34,10 +34,14 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
 
   function createVisualChange(platform: "android" | "ios"): BaseVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new BaseVisualChange(device, fakeAdb, fakeTimer, undefined, {
-      awaitIdle: fakeAwaitIdle,
-      observeScreen: fakeObserveScreen,
-      window: fakeWindow,
+    const instance = new BaseVisualChange(device, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      displayFence: {
+        awaitIdle: fakeAwaitIdle,
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+      },
     });
     return instance;
   }

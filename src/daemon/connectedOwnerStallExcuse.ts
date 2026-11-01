@@ -64,8 +64,10 @@ function connectedOwnerCredit(
   session: Session,
   resumedAt: number,
   lostMs: number,
-  gapBeganAt: number | undefined,
-  reader: OwnerConnectedAtReader | undefined,
+  {
+    gapBeganAt,
+    reader,
+  }: { gapBeganAt: number | undefined; reader: OwnerConnectedAtReader | undefined },
 ): number {
   if (
     lostMs <= 0 ||
@@ -101,7 +103,7 @@ export function daemonStallLeaseExtension(
   const full = ownerLeaseLiveAt(session, gap.gapBeganAt);
   const connectedCreditMs = full
     ? 0
-    : connectedOwnerCredit(session, resumedAt, gap.lostMs, gap.gapBeganAt, reader);
+    : connectedOwnerCredit(session, resumedAt, gap.lostMs, { gapBeganAt: gap.gapBeganAt, reader });
   const credit = full ? gap.lostMs + gap.sleptMs : connectedCreditMs;
   const before = judgedLeaseHeartbeat(session);
   const leaseStart = full || credit > 0 ? forgivenLeaseStart(before, resumedAt, credit) : undefined;

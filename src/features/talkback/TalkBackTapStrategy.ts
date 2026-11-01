@@ -1,5 +1,5 @@
 import { indeterminateTapError } from "../action/coordinateTapDispatch";
-import { ActionableError, type TraversalOrderResult } from "../../models";
+import { ActionableError, type Point, type TraversalOrderResult } from "../../models";
 import type { DisplayFence, DisplayFenceOption } from "../action/BaseVisualChange";
 import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -121,8 +121,8 @@ export class TalkBackTapStrategy {
    * @param deviceId - The device ID
    * @param element - The target element (must have at least one of resource-id, text, or content-desc)
    * @param driver - The TalkBack navigation driver
-   * @param fence - Display fence asserted before each dispatch
-   * @param signal - Request cancellation; the ambient request signal is honoured too. A
+   * @param options.fence - Display fence asserted before each dispatch
+   * @param options.signal - Request cancellation; the ambient request signal is honoured too. A
    *   cancelled request stops before the focus request or the activation and reports how many
    *   focus requests already moved the cursor.
    * @returns Result indicating success/failure and method used
@@ -131,8 +131,7 @@ export class TalkBackTapStrategy {
     deviceId: string,
     element: Element,
     driver: TalkBackNavigationDriver,
-    fence?: DisplayFence,
-    signal?: AbortSignal,
+    { fence, signal }: { fence?: DisplayFence; signal?: AbortSignal } = {},
   ): Promise<TalkBackTapResult> {
     const navigationResult: ScreenReaderNavigationResult = {
       reachable: false,
@@ -197,13 +196,11 @@ export class TalkBackTapStrategy {
     // request that ended during navigation must not reach the activation.
     const guard = () => assertFocusNavigationLive(effectiveSignal, this.timer, focusRequests);
     guard();
-    const activationResult = await this.activateElement(
-      element,
-      driver,
+    const activationResult = await this.activateElement(element, driver, {
       fence,
-      confirmedTraversal,
-      guard,
-    );
+      orderedElements: confirmedTraversal,
+      assertLive: guard,
+    });
     return { ...activationResult, screenReaderNavigation: navigationResult };
   }
 
@@ -318,27 +315,31 @@ export class TalkBackTapStrategy {
   /**
    * Execute a coordinate-based tap as a fallback when focus navigation fails or isn't applicable.
    *
-   * @param x - X coordinate
-   * @param y - Y coordinate
+   * @param point - Coordinate to touch
    * @param action - The action to perform
    * @param durationMs - Duration for the tap (used for longPress)
-   * @param driver - The TalkBack navigation driver
+   * @param options.driver - The TalkBack navigation driver
    * @returns Result indicating success/failure
    */
   async executeCoordinateFallback(
-    x: number,
-    y: number,
+    point: Point,
     action: TalkBackFallbackAction,
     durationMs: number,
-    driver: TalkBackNavigationDriver,
-    fenceOptions: DisplayFenceOption = {},
+    {
+      driver,
+      fenceOptions = {},
+    }: { driver: TalkBackNavigationDriver; fenceOptions?: DisplayFenceOption },
   ): Promise<TalkBackTapResult> {
+    const { x, y } = point;
     const fence = fenceOptions.displayFence;
     const tapDuration = action === "longPress" ? durationMs : 50;
 
     if (action === "doubleTap") {
       fence?.assertCurrent();
-      const result = await this.dispatchDriverTap(driver, x, y, tapDuration, true);
+      const result = await this.dispatchDriverTap(driver, x, y, {
+        durationMs: tapDuration,
+        doubleTap: true,
+      });
       if (!result.success) {
         return {
           success: false,
@@ -361,7 +362,7 @@ export class TalkBackTapStrategy {
     // activate the focused element. Let callers continue to their last resort.
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    const result = await this.dispatchDriverTap(driver, x, y, tapDuration);
+    const result = await this.dispatchDriverTap(driver, x, y, { durationMs: tapDuration });
     if (!result.success) {
       return {
         success: false,
@@ -394,7 +395,7 @@ export class TalkBackTapStrategy {
   ): Promise<TalkBackTapResult> {
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    const focusResult = await this.dispatchDriverTap(driver, x, y, 50);
+    const focusResult = await this.dispatchDriverTap(driver, x, y, { durationMs: 50 });
     if (!focusResult.success) {
       return {
         success: false,
@@ -407,8 +408,11 @@ export class TalkBackTapStrategy {
 
     // Keep the focus tap outside TalkBack's activation double-tap window.
     await this.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
-    const activationResult = await this.executeCoordinateFallback(x, y, "doubleTap", 50, driver, {
-      displayFence: fence,
+    const activationResult = await this.executeCoordinateFallback({ x, y }, "doubleTap", 50, {
+      driver,
+      fenceOptions: {
+        displayFence: fence,
+      },
     });
     return {
       ...activationResult,
@@ -424,21 +428,25 @@ export class TalkBackTapStrategy {
    * against a different row. Nodes without an advertised semantic action retain
    * the coordinate fallback.
    *
-   * @param x - X coordinate (for coordinate fallback)
-   * @param y - Y coordinate (for coordinate fallback)
+   * @param point - Coordinate for the coordinate fallback
    * @param durationMs - Long press duration in milliseconds
    * @param element - The target element
-   * @param driver - The TalkBack navigation driver
+   * @param options.driver - The TalkBack navigation driver
    * @returns Result indicating success/failure and method used
    */
   async executeLongPress(
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     element: Element,
-    driver: TalkBackNavigationDriver,
-    fenceOptions: DisplayFenceOption & TalkBackTargetContext = {},
+    {
+      driver,
+      fenceOptions = {},
+    }: {
+      driver: TalkBackNavigationDriver;
+      fenceOptions?: DisplayFenceOption & TalkBackTargetContext;
+    },
   ): Promise<TalkBackTapResult> {
+    let { x, y } = point;
     const fence = fenceOptions.displayFence;
     const target = await resolveTalkBackActionTarget(
       element,
@@ -463,8 +471,11 @@ export class TalkBackTapStrategy {
       if (targetError) {
         logger.info(`[TalkBackTapStrategy] ${targetError}`);
         return {
-          ...(await this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
-            displayFence: fence,
+          ...(await this.executeCoordinateFallback({ x, y }, "longPress", durationMs, {
+            driver,
+            fenceOptions: {
+              displayFence: fence,
+            },
           })),
           ...confirmedElement,
         };
@@ -503,8 +514,11 @@ export class TalkBackTapStrategy {
     }
 
     return {
-      ...(await this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
-        displayFence: fence,
+      ...(await this.executeCoordinateFallback({ x, y }, "longPress", durationMs, {
+        driver,
+        fenceOptions: {
+          displayFence: fence,
+        },
       })),
       ...confirmedElement,
     };
@@ -516,9 +530,11 @@ export class TalkBackTapStrategy {
   private async activateElement(
     element: Element,
     driver: TalkBackNavigationDriver,
-    fence: DisplayFence = { assertCurrent: () => {} },
-    orderedElements: Element[],
-    assertLive: () => void,
+    {
+      fence = { assertCurrent: () => {} },
+      orderedElements,
+      assertLive,
+    }: { fence?: DisplayFence; orderedElements: Element[]; assertLive: () => void },
   ): Promise<TalkBackTapResult> {
     const resourceId = element["resource-id"] as string | undefined;
     // Activate against the node TalkBack actually focused (live bounds), not the
@@ -557,7 +573,10 @@ export class TalkBackTapStrategy {
     // grow with reply latency the way two separate requests did (#9562).
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence.assertCurrent();
-    const activation = await this.dispatchDriverTap(driver, center.x, center.y, tapDuration, true);
+    const activation = await this.dispatchDriverTap(driver, center.x, center.y, {
+      durationMs: tapDuration,
+      doubleTap: true,
+    });
 
     if (!activation.success) {
       assertLive();
@@ -593,8 +612,7 @@ export class TalkBackTapStrategy {
     driver: TalkBackNavigationDriver,
     x: number,
     y: number,
-    durationMs: number,
-    doubleTap = false,
+    { durationMs, doubleTap = false }: { durationMs: number; doubleTap?: boolean },
   ): Promise<A11yTapCoordinatesResult> {
     let dispatched = false;
     let result: A11yTapCoordinatesResult;

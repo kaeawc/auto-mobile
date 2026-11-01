@@ -46,4 +46,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "adaptive",
   "drawer",
   "videoPlayer",
+  "map",
+  "castButton",
+  "cameraPreview",
 ] as const;

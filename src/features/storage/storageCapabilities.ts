@@ -11,7 +11,8 @@
  * without devices, sockets, or a clock.
  *
  * Secure-state uses platform-specific discovery. Android reports only Keystore
- * metadata support; iOS Keychain / Core Data policy remains owned by #5161.
+ * metadata support; iOS reports the SDK's Keychain capability (#5161). iOS app-group
+ * suites and Core Data stores carry host-declared sharing and coordination states.
  */
 
 import type { Platform } from "../../models/Platform";
@@ -22,6 +23,11 @@ import {
   type SharedStorageReadCoverage,
 } from "./sharedStorageReadCoverage";
 import type { KeystoreDiscoveryState } from "./keystoreDiscovery";
+import type {
+  IosStorageDiscovery,
+  KeychainCapabilityState,
+  StoreState,
+} from "./iosStorageDiscovery";
 
 /** Payload schema version. Bump when the report shape changes incompatibly. */
 export const STORAGE_CAPABILITIES_SCHEMA_VERSION = 1 as const;
@@ -87,6 +93,8 @@ export interface StorageCapabilityContext {
   embeddedSdk: boolean;
   /** Verified through the typed Android test-control bridge, not inferred from SDK presence. */
   keystore?: KeystoreDiscoveryState;
+  /** Keychain capability and shared-store states reported by the iOS SDK (#5161). */
+  iosStorage?: IosStorageDiscovery;
   /** Active CtrlProxy runner session. */
   sessionActive?: boolean;
   /** App built debuggable (required for adb `run-as` file/db access). */
@@ -129,7 +137,9 @@ export interface DomainCapability {
   operations: OperationCapability[];
   note?: string;
   /** Platform-specific bridge discovery; contains metadata support, never secret values. */
-  capabilities?: KeystoreDiscoveryState[];
+  capabilities?: Array<KeystoreDiscoveryState | KeychainCapabilityState>;
+  /** iOS stores in this domain with their sharing and coordination states (#5161). */
+  stores?: StoreState[];
 }
 
 /** A documented platform-specific extension point. */
@@ -231,7 +241,19 @@ function keyValueDomain(ctx: StorageCapabilityContext): DomainCapability {
     platformScope: "cross-platform",
     note: "SharedPreferences / DataStore (Android) and UserDefaults (iOS) via the AutoMobile SDK.",
     operations: operations.map((operation) => deriveOperation(operation, undefined, requirements)),
+    ...storesOfKind(ctx, "user_defaults_suite"),
   };
+}
+
+/** iOS stores of one kind, present only when the SDK reported them. */
+function storesOfKind(
+  ctx: StorageCapabilityContext,
+  kind: StoreState["kind"],
+): Pick<DomainCapability, "stores"> {
+  if (ctx.platform !== "ios" || !ctx.iosStorage) {
+    return {};
+  }
+  return { stores: ctx.iosStorage.stores.filter((store) => store.kind === kind) };
 }
 
 function databasesDomain(ctx: StorageCapabilityContext): DomainCapability {
@@ -248,6 +270,7 @@ function databasesDomain(ctx: StorageCapabilityContext): DomainCapability {
     operations: (["list", "read", "observe", "write"] as StorageOperation[]).map((operation) =>
       deriveOperation(operation, undefined, requirements),
     ),
+    ...storesOfKind(ctx, "core_data"),
   };
 }
 
@@ -456,25 +479,40 @@ function secureStateDomain(ctx: StorageCapabilityContext): DomainCapability {
       ],
     };
   }
-  // Policy is owned by #5161. Values are never exported here; mutation is a non-goal.
-  const policyPrereq = "host secure-state policy (see #5161)";
+  return iosSecureStateDomain(ctx);
+}
+
+/**
+ * iOS Keychain (#5161). Values are never read: inspection needs a host adapter that
+ * does not exist yet. The only Keychain change AutoMobile makes is deleting an exact
+ * allowlisted item through `deleteKeychainItem`, which the capability lists; that is
+ * not a namespace reset, so read, write and reset stay closed even when it is enabled.
+ */
+function iosSecureStateDomain(ctx: StorageCapabilityContext): DomainCapability {
   return {
     domain: "secure_state",
     portable: false,
-    platformScope: "cross-platform",
-    note: "Keychain / Core Data secure state. Inspection policy is owned by #5161; secrets are never exported without an explicit host redaction policy.",
+    platformScope: "ios",
+    note: "Keychain. Values are never read or exported. Deleting an exact allowlisted item uses deleteKeychainItem when the capability reports deletion enabled; it still needs storage mutation authorization.",
+    capabilities: ctx.iosStorage ? [ctx.iosStorage.keychain] : [],
     operations: [
       {
         operation: "read",
         state: "unavailable",
         reason:
-          "Secure-state values are unavailable by default; an opt-in host redaction policy (#5161) must allow the exact field.",
-        prerequisites: [policyPrereq],
+          "Keychain values are unavailable by default; no host Keychain inspection adapter is registered.",
+        prerequisites: [
+          "host Keychain inspection adapter with an explicit allowlist and per-field redaction",
+        ],
       },
-      deriveOperation("write", "Secure-state mutation is not an AutoMobile storage feature.", []),
+      deriveOperation(
+        "write",
+        "Keychain writes are not an AutoMobile storage feature; exact allowlisted deletion uses deleteKeychainItem.",
+        [],
+      ),
       deriveOperation(
         "namespace_reset",
-        "Bulk secure-state reset is out of scope here; scoped resets are tracked separately (#5188 / #5190).",
+        "Bulk Keychain reset is not offered for an app; deleteKeychainItem deletes only exact allowlisted items, and resetKeychain resets the whole simulator Keychain.",
         [],
       ),
     ],
@@ -505,7 +543,7 @@ function extensionPoints(): StorageExtensionPoint[] {
       domain: "secure_state",
       platform: "ios",
       description:
-        "Core Data and Keychain inspection policy is owned by #5161; treat as an extension point, not portable storage.",
+        "Keychain capability and Core Data store states come from the embedded SDK and are iOS-specific; treat as an extension point, not portable storage.",
     },
   ];
 }

@@ -75,7 +75,9 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
             mutationAuthorized: payload.mutationAuthorized,
             registeredAppGroupSuites: payload.registeredAppGroupSuites,
             coreDataStores: payload.coreDataStores,
-            unavailableStores: payload.unavailableStores
+            unavailableStores: payload.unavailableStores,
+            stores: payload.stores,
+            keychain: payload.keychain
         )
     }
 
@@ -201,6 +203,8 @@ private struct StorageCapabilitiesPayload: Codable {
     let registeredAppGroupSuites: [String]
     let coreDataStores: [SdkCoreDataStoreRegistration]
     let unavailableStores: [String]
+    let stores: [StorageStoreState]?
+    let keychain: KeychainCapability?
 }
 
 private struct ListTablesPayload: Codable {

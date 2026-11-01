@@ -74,13 +74,19 @@ const methods: Method[] = [
   {
     name: "settings get",
     signal: true,
-    invoke: (h, signal) => h.client.requestSettingsGet("system", "key", 50, perf, signal),
+    invoke: (h, signal) =>
+      h.client.requestSettingsGet("system", "key", { timeoutMs: 50, perf, signal }),
   },
   {
     name: "settings put",
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestSettingsPut("system", "key", null, "string", 50, perf, signal),
+      h.client.requestSettingsPut("system", "key", null, {
+        valueType: "string",
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "settings list",
@@ -90,13 +96,13 @@ const methods: Method[] = [
   {
     name: "action",
     signal: true,
-    invoke: (h, signal) => h.client.requestAction("click", "id", 50, perf, undefined, signal),
+    invoke: (h, signal) => h.client.requestAction("click", "id", 50, { perf, signal }),
   },
   {
     name: "node action",
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestNodeAction("click", { resourceId: "id" }, 50, perf, signal),
+      h.client.requestNodeAction("click", { resourceId: "id" }, { timeoutMs: 50, perf, signal }),
   },
   {
     name: "focused input click",
@@ -119,12 +125,15 @@ const methods: Method[] = [
     name: `clipboard ${action}`,
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestClipboard(action, action === "copy" ? "text" : undefined, 50, perf, signal),
+      h.client.requestClipboard(action, action === "copy" ? "text" : undefined, 50, {
+        perf,
+        signal,
+      }),
   })),
   {
     name: "global action",
     signal: true,
-    invoke: (h, signal) => h.client.requestGlobalAction("back", 50, perf, undefined, signal),
+    invoke: (h, signal) => h.client.requestGlobalAction("back", 50, perf, { signal }),
   },
   {
     name: "frame validation",
@@ -220,11 +229,12 @@ const methods: Method[] = [
   },
   {
     name: "gesture move",
-    invoke: (h) => h.client.testHooks.gestures().requestGestureMove("g", 1, 2, 50),
+    invoke: (h) => h.client.testHooks.gestures().requestGestureMove("g", 1, 2, { timeoutMs: 50 }),
   },
   {
     name: "gesture end",
-    invoke: (h) => h.client.testHooks.gestures().requestGestureEnd("g", 1, 2, false, 50),
+    invoke: (h) =>
+      h.client.testHooks.gestures().requestGestureEnd("g", 1, 2, { cancel: false, timeoutMs: 50 }),
   },
   {
     name: "set text",
@@ -236,7 +246,8 @@ const methods: Method[] = [
   {
     name: "ime action",
     signal: true,
-    invoke: (h, signal) => h.client.testHooks.text().requestImeAction("done", 50, perf, signal),
+    invoke: (h, signal) =>
+      h.client.testHooks.text().requestImeAction("done", 50, perf, { abortSignal: signal }),
   },
   { name: "select all", invoke: (h) => h.client.testHooks.text().requestSelectAll(50) },
   { name: "insert text state", invoke: (h) => h.client.testHooks.text().requestInsertTextState() },
@@ -246,7 +257,7 @@ const methods: Method[] = [
     invoke: (h, signal) =>
       h.client.testHooks
         .text()
-        .requestInsertText("text", 50, perf, undefined, { abortSignal: signal }),
+        .requestInsertText("text", { timeoutMs: 50, perf, transport: { abortSignal: signal } }),
   },
   {
     name: "commit via ime",
@@ -261,7 +272,9 @@ const methods: Method[] = [
           });
         }
       };
-      return h.client.testHooks.text().commitViaIme("text", undefined, 50, perf, signal);
+      return h.client.testHooks
+        .text()
+        .commitViaIme("text", undefined, 50, { perf, signal: signal });
     },
   },
   {
@@ -311,7 +324,9 @@ const methods: Method[] = [
   {
     name: "set preference",
     invoke: (h) =>
-      h.client.testHooks.storage().setPreference("pkg", "prefs", "key", null, "STRING", 50),
+      h.client.testHooks
+        .storage()
+        .setPreference("pkg", "prefs", { key: "key", value: null, type: "STRING" }, 50),
   },
   {
     name: "remove preference",

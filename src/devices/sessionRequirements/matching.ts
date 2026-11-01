@@ -58,7 +58,7 @@ function matchAndroidHardware(
 
 function matchOs(
   requirement: NormalizedSessionDeviceRequirement,
-  candidate: SessionDeviceProfile,
+  candidate: IosSessionDeviceProfile | AndroidSessionDeviceProfile,
 ): DevicePredicateMatch {
   if (!candidate.osVersion || !parseNumericVersion(candidate.osVersion).ok) {
     return mismatch("unknown-os-metadata");
@@ -94,11 +94,13 @@ export function matchSessionDevice(
   if (candidate.metadataState !== "current") {
     return mismatch("stale-metadata");
   }
-  const hardware =
-    requirement.platform === "ios" && candidate.platform === "ios"
-      ? matchIosHardware(requirement, candidate)
-      : requirement.platform === "android" && candidate.platform === "android"
-        ? matchAndroidHardware(requirement, candidate)
-        : mismatch("platform");
-  return hardware.kind === "match" ? matchOs(requirement, candidate) : hardware;
+  if (requirement.platform === "ios" && candidate.platform === "ios") {
+    const hardware = matchIosHardware(requirement, candidate);
+    return hardware.kind === "match" ? matchOs(requirement, candidate) : hardware;
+  }
+  if (requirement.platform === "android" && candidate.platform === "android") {
+    const hardware = matchAndroidHardware(requirement, candidate);
+    return hardware.kind === "match" ? matchOs(requirement, candidate) : hardware;
+  }
+  return mismatch("platform");
 }

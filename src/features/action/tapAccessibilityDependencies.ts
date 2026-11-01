@@ -13,12 +13,15 @@ import type { TapOnElementDependencies } from "./TapOnElement";
 /** Resolve the screen-reader collaborators and platform strategy used by a tap. */
 export function resolveTapAccessibilityDependencies(
   options: TapOnElementDependencies,
-  device: BootedDevice,
-  adbFactory: AdbClientFactory,
-  adb: AdbExecutor,
-  timer: Timer,
-  accessibilityDetector: AccessibilityDetector,
+  context: {
+    device: BootedDevice;
+    adbFactory: AdbClientFactory;
+    adb: AdbExecutor;
+    timer: Timer;
+    accessibilityDetector: AccessibilityDetector;
+  },
 ) {
+  const { device, adbFactory, adb, timer, accessibilityDetector } = context;
   const talkBackDriverFactory =
     options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(adbFactory);
   const talkBackStrategy =
@@ -28,7 +31,7 @@ export function resolveTapAccessibilityDependencies(
   const featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
   const strategy =
     options.tapStrategy ??
-    createTapStrategy(device, adb, accessibilityDetector, iosVoiceOverDetector, featureFlags);
+    createTapStrategy(device, adb, accessibilityDetector, { iosVoiceOverDetector, featureFlags });
   return {
     talkBackDriverFactory,
     talkBackStrategy,

@@ -29,7 +29,7 @@ type SwipeScript = Array<SwipeResult | Error>;
 function scriptedGesture(script: SwipeScript): { gesture: GestureExecutor; calls: number[] } {
   const calls: number[] = [];
   const gesture: GestureExecutor = {
-    swipe: async (x1, y1, x2, y2, options) => {
+    swipe: async ({ x1, y1, x2, y2 }, options) => {
       calls.push(calls.length);
       const next = script[calls.length - 1] ?? { success: true, x1, y1, x2, y2, duration: 0 };
       if (next instanceof Error) {
@@ -94,13 +94,13 @@ function androidBoomerang(): Boomerang {
 function iosBoomerang(): Boomerang {
   const device: BootedDevice = { name: "ios-sim", platform: "ios", deviceId: "ios-sim" };
   return (gesture, timer, signal) => {
-    const executor = new VoiceOverSwipeExecutor(
+    const executor = new VoiceOverSwipeExecutor({
       device,
-      gesture,
-      new FakeIOSCtrlProxy(),
-      new FakeIosVoiceOverDetector(),
+      executeGesture: gesture,
+      iosClient: new FakeIOSCtrlProxy(),
+      iosVoiceOverDetector: new FakeIosVoiceOverDetector(),
       timer,
-    );
+    });
     return executor.executeBoomerangGesture({
       x1: 100,
       y1: 500,

@@ -36,9 +36,9 @@ test("newest sets use touched time, ignore legacy names and reserve an incoming 
   expect([...newestScreenshotPathKeys(files, 2, touched)]).toEqual(
     [files[0].path, files[2].path].map((path) => screenshotPathKey(path)),
   );
-  expect([...newestScreenshotPathKeys(files, 2, touched, screenshotDeviceToken("a"))]).toEqual([
-    screenshotPathKey(files[0].path),
-  ]);
+  expect([
+    ...newestScreenshotPathKeys(files, 2, touched, { incomingDevice: screenshotDeviceToken("a") }),
+  ]).toEqual([screenshotPathKey(files[0].path)]);
   expect(newestScreenshotPathKeys(files, 0, touched).size).toBe(0);
   expect(screenshotFileDeviceToken(`${screenshotFileName(1, "a", "id", "png")}.temp`)).toBe(
     screenshotDeviceToken("a"),

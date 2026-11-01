@@ -135,7 +135,13 @@ describe("iOS opt-in tap diagnostics", () => {
     try {
       logger.setLogLevel(LogLevel.DEBUG);
       const { sent, gestures } = gestureHarness();
-      expect(await dispatchIosCoordinateTap(gestures, 443, 202, 50, "frame")).toBeUndefined();
+      expect(
+        await dispatchIosCoordinateTap(
+          gestures,
+          { x: 443, y: 202 },
+          { durationMs: 50, frameContext: "frame" },
+        ),
+      ).toBeUndefined();
       expect(JSON.parse(sent[0])).toEqual({
         type: "request_tap_coordinates",
         requestId: expect.any(String),
@@ -230,18 +236,19 @@ describe("iOS opt-in tap diagnostics", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "tap-diagnostics", platform: "ios", name: "Fake Duo" },
       8765,
-      createSuccessWebSocketFactory(timer),
-      timer,
+      { wsFactory: createSuccessWebSocketFactory(timer), timer },
     );
     const boundary = client.testHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       logger.setLogLevel(LogLevel.INFO);
-      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000, () => ({
-        success: false,
-        error: "Tap timed out",
-      }));
+      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000, {
+        timeoutErrorFactory: () => ({
+          success: false,
+          error: "Tap timed out",
+        }),
+      });
       // Model JSON from an untrusted runner, including a malformed optional value.
       const message = {
         type: "tap_coordinates_result",

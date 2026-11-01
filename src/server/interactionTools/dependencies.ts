@@ -23,6 +23,7 @@ import type { WaitForObservationOutcome } from "../observeTools";
 import type { AndroidCtrlProxy } from "../../features/observe/android";
 import type { KeyboardProfileRestoreRegistry } from "../../features/utility/KeyboardProfileRestore";
 import type { SessionKeyboardProfileHost } from "../sessionKeyboardProfile";
+import type { ProgressCallback } from "../toolRegistry";
 
 export interface SendKeysRunnerCommandSource {
   getSupportedCommands(): Promise<string[] | null>;
@@ -68,6 +69,13 @@ export interface InteractionToolDependencies {
   clipboardFactory?: (device: BootedDevice) => Pick<Clipboard, "execute">;
   wakeAndUnlockFactory?: (device: BootedDevice) => Pick<WakeAndUnlock, "execute">;
   keyboardProfile?: KeyboardProfileToolDependencies;
+}
+
+/** Per-call progress, cancellation and collaborator overrides for an interaction tool handler. */
+export interface InteractionHandlerOptions {
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+  deps?: InteractionToolDependencies;
 }
 
 /** Collaborators of `keyboard setProfile`; each defaults to the daemon's own (#14705). */

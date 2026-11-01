@@ -6,12 +6,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { removeTempDbDirSync } from "../db/tempDbDir";
 import { loadJobSteps } from "../helpers/workflowSteps";
 
 const repoRoot = join(import.meta.dir, "../..");
@@ -78,10 +78,11 @@ function fakeToolEnvironment(
 }
 
 afterEach(() => {
+  // spawnSync calls are synchronous, so spawned children have already exited before cleanup.
   while (tempDirs.length > 0) {
     const tempDir = tempDirs.pop();
     if (tempDir) {
-      rmSync(tempDir, { recursive: true, force: true });
+      removeTempDbDirSync(tempDir);
     }
   }
 });
@@ -249,7 +250,7 @@ beforeAll(() => {
     });
     expectExitStatus(result, 0);
   } finally {
-    rmSync(repoDir, { recursive: true, force: true });
+    removeTempDbDirSync(repoDir);
     tempDirs.splice(tempDirs.indexOf(repoDir), 1);
   }
 }, WARM_UP_HOOK_TIMEOUT_MS);

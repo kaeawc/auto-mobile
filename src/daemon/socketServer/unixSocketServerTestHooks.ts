@@ -50,8 +50,7 @@ export interface UnixSocketServerTestHooks {
     request: DaemonRequest,
     socketSessionId: string,
     route: McpForwardRoute,
-    sessionWasActiveBeforeForward: boolean,
-    response: unknown,
+    options: { sessionWasActiveBeforeForward: boolean; response: unknown },
   ): void;
   /** The MCP client key a socket session is currently bound to, if any. */
   boundMcpClientFor(

@@ -77,17 +77,15 @@ describe("MCP Resources List", () => {
       mimeType: "text/plain",
     };
 
-    ResourceRegistry.register(
-      testResource.uri,
-      testResource.name,
-      testResource.description,
-      testResource.mimeType,
-      async () => ({
+    ResourceRegistry.register(testResource.uri, testResource.name, {
+      description: testResource.description,
+      mimeType: testResource.mimeType,
+      handler: async () => ({
         uri: testResource.uri,
         mimeType: testResource.mimeType,
         text: "ok",
       }),
-    );
+    });
 
     // Send resources/list request
     const listResourcesResponseSchema = z.object({

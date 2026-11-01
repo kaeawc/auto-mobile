@@ -108,6 +108,18 @@ interface QueuedDeviceStateRestoreHost extends Pick<
   | "trackPendingDeviceCleanup"
 > {}
 
+/** How a queued restoration of one session cache slot starts, and how it re-enters after setups. */
+export interface PendingRestorationSteps<K extends "clock" | "rotation" | "screenReader"> {
+  start: (
+    deviceId: string,
+    target: PendingRestore<NonNullable<Session["cacheData"][K]> & object>,
+  ) => Promise<{ pending: Promise<void> | null }>;
+  again: (
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ) => Promise<{ pending: Promise<void> | null }>;
+}
+
 /** Owns queued clock, rotation and screen-reader restoration. */
 export class QueuedDeviceStateRestore {
   readonly screenReaderRestores = new DeviceStateRestoreQueue<ScreenReaderSessionState>(
@@ -324,15 +336,11 @@ export class QueuedDeviceStateRestore {
     queue: DeviceStateRestoreQueue<NonNullable<Session["cacheData"][K]> & object>,
     slot: K,
     session: Session,
-    pendingSetups: Promise<void> | null,
-    start: (
-      deviceId: string,
-      target: PendingRestore<NonNullable<Session["cacheData"][K]> & object>,
-    ) => Promise<{ pending: Promise<void> | null }>,
-    again: (
-      session: Session,
-      pendingSetups: Promise<void> | null,
-    ) => Promise<{ pending: Promise<void> | null }>,
+    {
+      pendingSetups,
+      start,
+      again,
+    }: PendingRestorationSteps<K> & { pendingSetups: Promise<void> | null },
   ): { pending: Promise<void> | null } | Promise<{ pending: Promise<void> | null }> {
     // Deliberately not async: the per-kind async wrappers return this as the original bodies did,
     // so release and rebind keep their exact microtask turn counts.
@@ -424,8 +432,10 @@ export class QueuedDeviceStateRestore {
     spec: BoundedRetrySpec<S>,
     deviceId: string,
     target: PendingRestore<S>,
-    restoration: Promise<RestoreAttemptOutcome>,
-    restore: () => Promise<void>,
+    {
+      restoration,
+      restore,
+    }: { restoration: Promise<RestoreAttemptOutcome>; restore: () => Promise<void> },
   ): Promise<void> {
     const result = await restoration;
     if (result.outcome === "restored") {
@@ -523,8 +533,13 @@ export class QueuedDeviceStateRestore {
     queue: DeviceStateRestoreQueue<NonNullable<Session["cacheData"][K]> & object>,
     slot: K,
     session: Session,
-    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
-    startRestore: () => Promise<{ pending: Promise<void> | null }>,
+    {
+      createSetup,
+      startRestore,
+    }: {
+      createSetup: (assertCurrentDevice: () => void) => Promise<void>;
+      startRestore: () => Promise<{ pending: Promise<void> | null }>;
+    },
   ): Promise<void> {
     const deviceId = session.assignedDevice;
     const generation = queue.generation(deviceId);
@@ -564,14 +579,11 @@ export class QueuedDeviceStateRestore {
     session: Session,
     pendingSetups: Promise<void> | null,
   ): Promise<{ pending: Promise<void> | null }> {
-    return this.getPendingRestoration(
-      this.screenReaderRestores,
-      "screenReader",
-      session,
+    return this.getPendingRestoration(this.screenReaderRestores, "screenReader", session, {
       pendingSetups,
-      (deviceId, target) => this.startScreenReaderRestoration(deviceId, target),
-      (next, setups) => this.getPendingScreenReaderRestoration(next, setups),
-    );
+      start: (deviceId, target) => this.startScreenReaderRestoration(deviceId, target),
+      again: (next, setups) => this.getPendingScreenReaderRestoration(next, setups),
+    });
   }
 
   private startScreenReaderRestoration(
@@ -608,13 +620,10 @@ export class QueuedDeviceStateRestore {
       quarantined: (outcome, error) =>
         logger.warn(`Screen reader restore ${outcome}; quarantining ${device.deviceId}`, error),
       retry: (restoration) =>
-        this.retryRestoreBounded(
-          this.screenReaderRetry,
-          device.deviceId,
-          target,
+        this.retryRestoreBounded(this.screenReaderRetry, device.deviceId, target, {
           restoration,
           restore,
-        ),
+        }),
     };
   }
 
@@ -651,13 +660,10 @@ export class QueuedDeviceStateRestore {
     session: Session,
     createSetup: (assertCurrentDevice: () => void) => Promise<void>,
   ): Promise<void> {
-    return this.trackRestoreSetup(
-      this.screenReaderRestores,
-      "screenReader",
-      session,
+    return this.trackRestoreSetup(this.screenReaderRestores, "screenReader", session, {
       createSetup,
-      () => this.getPendingScreenReaderRestoration(session, null),
-    );
+      startRestore: () => this.getPendingScreenReaderRestoration(session, null),
+    });
   }
 
   /** Sequence restoration after any still-draining setup; deduplicate by owned slot. */
@@ -665,14 +671,11 @@ export class QueuedDeviceStateRestore {
     session: Session,
     pendingSetups: Promise<void> | null,
   ): Promise<{ pending: Promise<void> | null }> {
-    return this.getPendingRestoration(
-      this.rotationRestores,
-      "rotation",
-      session,
+    return this.getPendingRestoration(this.rotationRestores, "rotation", session, {
       pendingSetups,
-      (deviceId, target) => this.startRotationRestoration(deviceId, target),
-      (next, setups) => this.getPendingRotationRestoration(next, setups),
-    );
+      start: (deviceId, target) => this.startRotationRestoration(deviceId, target),
+      again: (next, setups) => this.getPendingRotationRestoration(next, setups),
+    });
   }
 
   private startRotationRestoration(
@@ -711,7 +714,10 @@ export class QueuedDeviceStateRestore {
           `Rotation restore ${outcome}; quarantining ${device.deviceId}: ${errorMessage(error)}`,
         ),
       retry: (restoration) =>
-        this.retryRestoreBounded(this.rotationRetry, device.deviceId, target, restoration, restore),
+        this.retryRestoreBounded(this.rotationRetry, device.deviceId, target, {
+          restoration,
+          restore,
+        }),
     };
   }
 
@@ -761,9 +767,10 @@ export class QueuedDeviceStateRestore {
     session: Session,
     createSetup: (assertCurrentDevice: () => void) => Promise<void>,
   ): Promise<void> {
-    return this.trackRestoreSetup(this.rotationRestores, "rotation", session, createSetup, () =>
-      this.getPendingRotationRestoration(session, null),
-    );
+    return this.trackRestoreSetup(this.rotationRestores, "rotation", session, {
+      createSetup,
+      startRestore: () => this.getPendingRotationRestoration(session, null),
+    });
   }
 
   /** Use the same setup drain and pending device cleanup as network restoration. */
@@ -771,14 +778,11 @@ export class QueuedDeviceStateRestore {
     session: Session,
     pendingSetups: Promise<void> | null,
   ): Promise<{ pending: Promise<void> | null }> {
-    return this.getPendingRestoration(
-      this.clockRestores,
-      "clock",
-      session,
+    return this.getPendingRestoration(this.clockRestores, "clock", session, {
       pendingSetups,
-      (deviceId, target) => this.startClockRestoration(deviceId, target),
-      (next, setups) => this.getPendingClockRestoration(next, setups),
-    );
+      start: (deviceId, target) => this.startClockRestoration(deviceId, target),
+      again: (next, setups) => this.getPendingClockRestoration(next, setups),
+    });
   }
 
   private startClockRestoration(
@@ -877,13 +881,10 @@ export class QueuedDeviceStateRestore {
 
   /** Tracked setup retains this exact session even after a bounded release times out. */
   trackClockSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
-    return this.trackRestoreSetup(
-      this.clockRestores,
-      "clock",
-      session,
-      () => createSetup(),
-      () => this.getPendingClockRestoration(session, null),
-    );
+    return this.trackRestoreSetup(this.clockRestores, "clock", session, {
+      createSetup: () => createSetup(),
+      startRestore: () => this.getPendingClockRestoration(session, null),
+    });
   }
 }
 

@@ -33,8 +33,9 @@ const spec = (extra: Record<string, unknown>, root: unknown = { type: "spacer" }
 describe("notifications module contract", () => {
   const notifications = PROTOTYPE_PLATFORM_MODULES.notifications;
 
-  test("post, cancel and setBadge; posting and badging need the notifications permission", () => {
-    expect(Object.keys(notifications.calls)).toEqual(["post", "cancel", "setBadge"]);
+  test("post, cancel, setBadge and schedule; all but cancel need the notifications permission", () => {
+    expect(Object.keys(notifications.calls)).toEqual(["post", "cancel", "setBadge", "schedule"]);
+    expect(notifications.calls.schedule.permissions).toEqual(["notifications"]);
     expect(notifications.calls.post.permissions).toEqual(["notifications"]);
     expect(notifications.calls.setBadge.permissions).toEqual(["notifications"]);
     expect(notifications.calls.cancel.permissions).toEqual([]);
@@ -46,22 +47,25 @@ describe("notifications module contract", () => {
     expect(Object.values(notifications.calls.cancel.args).every((arg) => arg.optional)).toBe(true);
   });
 
-  test("events are opened, action, reply and dismissed, and only reply is sensitive", () => {
+  test("events are opened, action, reply, dismissed and scheduledFired; only reply is sensitive", () => {
     expect(notifications.events).toEqual({
-      opened: { sensitive: false },
-      action: { sensitive: false },
-      reply: { sensitive: true },
+      opened: { sensitive: false, userInitiated: true },
+      action: { sensitive: false, userInitiated: true },
+      reply: { sensitive: true, userInitiated: true },
       dismissed: { sensitive: false },
+      scheduledFired: { sensitive: false },
     });
   });
 
-  test("state is the badge, active and pending counts and the authorization status", () => {
+  test("state is the counts, the authorization status and the per-channel blocked flag", () => {
     expect(Object.keys(notifications.state ?? {})).toEqual([
       "badge",
       "active",
       "pending",
       "authorization",
+      "blocked",
     ]);
+    expect(notifications.state?.blocked?.value).toEqual({ kind: "boolean" });
     expect(notifications.state?.active?.value).toMatchObject({ min: 0, max: 24 });
     expect(notifications.state?.authorization?.value.values).toEqual([
       "granted",
@@ -72,6 +76,18 @@ describe("notifications module contract", () => {
       "restricted",
       "unavailable",
     ]);
+  });
+
+  test("schedule takes the post arguments plus a whole-second delay of 1 to 604800 behind its own capability", () => {
+    const { delaySeconds, ...postArgs } = notifications.calls.schedule.args;
+    expect(postArgs).toEqual(notifications.calls.post.args);
+    expect(delaySeconds).toEqual({
+      optional: false,
+      value: { kind: "number", integer: true, min: 1, max: 604800 },
+    });
+    expect(notifications.calls.schedule.capability).toBe(
+      "prototype_platform_notifications_scheduled_v1",
+    );
   });
 });
 
@@ -797,6 +813,60 @@ describe("system media picker and camera module contracts", () => {
   });
 });
 
+describe("photo library read and save contract", () => {
+  const library = PROTOTYPE_PLATFORM_MODULES.mediaLibrary;
+  const spec = (onTap: unknown[], permissions: string[]) => ({
+    id: "library",
+    window: { placement: { type: "fullscreen" } },
+    requires: {
+      platform: ["mediaLibrary"],
+      permissions: permissions.map((name) => ({ name, purpose: "Photos" })),
+    },
+    root: { type: "button", label: "Go", onTap },
+  });
+  const query = {
+    type: "platform",
+    call: "mediaLibrary.query",
+    args: { media: { value: "images" } },
+  };
+  const save = { type: "platform", call: "mediaLibrary.save", args: { media: { value: {} } } };
+
+  test("query and manageLimitedSelection read the library under photos; save adds under photosAdd", () => {
+    expect(Object.keys(library.calls)).toEqual(["pick", "query", "manageLimitedSelection", "save"]);
+    expect(library.calls.query.permissions).toEqual(["photos"]);
+    expect(library.calls.manageLimitedSelection.permissions).toEqual(["photos"]);
+    expect(library.calls.save.permissions).toEqual(["photosAdd"]);
+    expect(library.calls.query.args.limit.value).toEqual({
+      kind: "number",
+      integer: true,
+      min: 1,
+      max: 64,
+    });
+    expect(library.calls.save.args.media.optional).toBe(false);
+    expect(library.calls.query.sensitive).toBe(true);
+  });
+
+  test("read and save each add their own capability, so a device can offer save alone", () => {
+    const read = requiredPrototypeCapabilities(spec([query], ["photos"]));
+    expect(read).toContain("prototype_platform_mediaLibrary_query_v1");
+    expect(read).not.toContain("prototype_platform_mediaLibrary_save_v1");
+    const write = requiredPrototypeCapabilities(spec([save], ["photosAdd"]));
+    expect(write).toContain("prototype_platform_mediaLibrary_save_v1");
+    expect(write).not.toContain("prototype_platform_mediaLibrary_query_v1");
+    const manage = { type: "platform", call: "mediaLibrary.manageLimitedSelection", args: {} };
+    const limited = requiredPrototypeCapabilities(spec([manage], ["photos"]));
+    expect(limited).toContain("prototype_platform_mediaLibrary_query_v1");
+    expect(limited).not.toContain("prototype_platform_mediaLibrary_save_v1");
+  });
+
+  test("each call needs its declared permission", () => {
+    expect(validatePrototypeSpec(spec([query], ["photos"])).success).toBe(true);
+    expect(validatePrototypeSpec(spec([query], ["photosAdd"])).success).toBe(false);
+    expect(validatePrototypeSpec(spec([save], ["photosAdd"])).success).toBe(true);
+    expect(validatePrototypeSpec(spec([save], ["photos"])).success).toBe(false);
+  });
+});
+
 describe("auth module contract", () => {
   const auth = PROTOTYPE_PLATFORM_MODULES.auth;
 
@@ -1013,7 +1083,14 @@ describe("live camera calls and per-call capabilities", () => {
 
   test("a live call without the camera permission is refused", () => {
     expect(validatePrototypeSpec(spec([call("takePhoto")], [])).success).toBe(false);
-    expect(validatePrototypeSpec(spec([call("takePhoto")])).success).toBe(true);
+    const withPreview = {
+      ...spec([call("takePhoto")]),
+      root: {
+        type: "column",
+        children: [{ type: "cameraPreview", id: "vf" }, spec([call("takePhoto")]).root],
+      },
+    };
+    expect(validatePrototypeSpec(withPreview).success).toBe(true);
   });
 });
 

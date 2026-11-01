@@ -535,18 +535,16 @@ export class SetPosture {
     operation.assertCurrent();
 
     if (requested === "rear_display") {
-      await setPhysicalPosture(adb, requested, states, supportsOpenedReset, operation);
+      await setPhysicalPosture(adb, requested, states, { supportsOpenedReset, operation });
     } else if (emulator) {
-      notFoldable = await setEmulatorPosture(
-        adb,
-        requested,
-        displayPreset,
-        states.some((state) => state.posture === "rear_display") ||
+      notFoldable = await setEmulatorPosture(adb, requested, displayPreset, {
+        supportsRearDisplay:
+          states.some((state) => state.posture === "rear_display") ||
           Boolean(inventoryPostures?.includes("rear_display")),
         operation,
-      );
+      });
     } else {
-      await setPhysicalPosture(adb, requested, states, supportsOpenedReset, operation);
+      await setPhysicalPosture(adb, requested, states, { supportsOpenedReset, operation });
     }
 
     operation.assertCurrent();
@@ -554,13 +552,15 @@ export class SetPosture {
       adb,
       requested,
       { states, notFoldable },
-      this.timer,
-      () => {
-        operation.assertCurrent();
-        ObservedAndroidDisplayCache.clear(this.device.deviceId);
-        return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+      {
+        timer: this.timer,
+        observe: () => {
+          operation.assertCurrent();
+          ObservedAndroidDisplayCache.clear(this.device.deviceId);
+          return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+        },
+        operation,
       },
-      operation,
     );
     operation.assertCurrent();
 
@@ -798,8 +798,7 @@ export class SetPosture {
         () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
         this.device.displays?.panels,
         expectedRole,
-        this.timer,
-        operation,
+        { timer: this.timer, operation },
       );
     const settled = await this.observeFinalPosture(requested, observe, observe, operation);
     assertCurrent();

@@ -35,6 +35,7 @@ import { TerminalSessionError } from "../sessionErrors";
 import { SessionLivenessController } from "../sessionLivenessLease";
 import {
   getDefaultPreFirstHeartbeatGraceMs,
+  type RebindSessionOptions,
   RehydrationSummary,
   releaseWasForced,
   Session,
@@ -46,7 +47,7 @@ import {
 } from "../sessionManager";
 import {
   type RehydrationRowOutcome,
-  type SharedSessionAssignment,
+  type PersistedSessionRecovery,
 } from "../sessionManager/internalContracts";
 import { SessionRecoveryIdentityLossError } from "../sessionManager/SessionRecoveryIdentityLossError";
 import { type SessionRowWriter } from "../sessionRowWriter";
@@ -67,8 +68,7 @@ export interface SessionRecoveryPublicationHost {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    recoveryTarget: SessionRecoveryTarget | undefined,
-    persisted: DeviceSession | undefined,
+    options?: { recoveryTarget?: SessionRecoveryTarget; persisted?: DeviceSession },
   ): Promise<void>;
   sessionNow(): number;
   getSession(sessionId: string): Session | null;
@@ -108,8 +108,7 @@ export interface SessionRecoveryPublicationHost {
     session: Session,
     assignedDevice: string,
     platform: Platform,
-    stableDeviceId: string | undefined,
-    recovery?: boolean,
+    options?: { stableDeviceId?: string; recovery?: boolean },
   ): Session;
   guardedRowRewriteOptions(expectedRowGeneration?: number): UpsertActiveSessionOptions;
   readonly superseded: SupersededRowReasserts<Session>;
@@ -172,9 +171,11 @@ export class SessionRecoveryPublication {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    {
+      persisted,
+      initialOwnership,
+      shared,
+    }: PersistedSessionRecovery & { persisted?: DeviceSession },
   ): Promise<Session> {
     const recoveryTarget = await this.host.recoveryTargetFromPersisted(
       sessionId,
@@ -194,13 +195,10 @@ export class SessionRecoveryPublication {
     }
     try {
       const assign = () =>
-        this.host.assignUnseenSessionToDevicePool(
-          sessionId,
-          devicePool,
-          platform,
+        this.host.assignUnseenSessionToDevicePool(sessionId, devicePool, platform, {
           recoveryTarget,
           persisted,
-        );
+        });
       if (
         recoveryTarget?.restartRecoveryDeadlineMs !== undefined &&
         this.host.sessionNow() < recoveryTarget.restartRecoveryDeadlineMs
@@ -370,9 +368,11 @@ export class SessionRecoveryPublication {
     existing: Session,
     assignedDevice: string,
     platform: Platform,
-    stableDeviceId: string | undefined,
-    deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
-    recovery?: boolean,
+    {
+      stableDeviceId,
+      deferCleanup,
+      recovery,
+    }: Pick<RebindSessionOptions, "deferCleanup" | "recovery"> & { stableDeviceId?: string },
   ): Promise<Session> {
     const activeSetups = Array.from(this.host.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
@@ -391,13 +391,10 @@ export class SessionRecoveryPublication {
     }
     await this.host.liveness.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
       await this.host.persistSession(
-        this.host.createReboundSession(
-          existing,
-          assignedDevice,
-          platform,
+        this.host.createReboundSession(existing, assignedDevice, platform, {
           stableDeviceId,
           recovery,
-        ),
+        }),
         existing,
         this.host.guardedRowRewriteOptions(),
       );
@@ -484,7 +481,10 @@ export class SessionRecoveryPublication {
     // Recreate after awaited work to preserve activity and label-routing updates made in flight.
     Object.assign(
       existing,
-      this.host.createReboundSession(existing, assignedDevice, platform, stableDeviceId, recovery),
+      this.host.createReboundSession(existing, assignedDevice, platform, {
+        stableDeviceId,
+        recovery,
+      }),
     );
     const sessionId = existing.sessionId;
     this.host.rowWriter.noteLive(sessionId);

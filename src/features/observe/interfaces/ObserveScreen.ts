@@ -5,6 +5,14 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ScreenshotMode } from "../automaticScreenshotPolicy";
 import type { ObserveScreenshotOptions } from "../screenshot/screenshotOptions";
 
+/** Per-call options for `ObserveScreen.captureScreenshot`. */
+export interface CaptureScreenshotOptions {
+  signal?: AbortSignal;
+  observation?: ObserveResult;
+  screenshot?: ScreenshotMode;
+  screenshotOptions?: ObserveScreenshotOptions;
+}
+
 /** Options for a session-free device observation. */
 export interface DeviceReadOptions {
   /** Require a fresh screenshot; capture failure throws instead of using cached evidence. */
@@ -74,13 +82,7 @@ export interface ObserveScreen {
    * Optional while fakes and narrow test doubles migrate. The production
    * implementation supplies it for automatic action/waitFor evidence capture.
    */
-  captureScreenshot?(
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    observation?: ObserveResult,
-    screenshot?: ScreenshotMode,
-    screenshotOptions?: ObserveScreenshotOptions,
-  ): Promise<void>;
+  captureScreenshot?(perf?: PerformanceTracker, options?: CaptureScreenshotOptions): Promise<void>;
 
   /**
    * Run the configured accessibility audit for an already-collected observation

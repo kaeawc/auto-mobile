@@ -1,7 +1,7 @@
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { autolockWithSignal } from "../helpers/autolockWithSignal";
 import { afterEach, describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -177,8 +177,12 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       const controller = new AbortController();
       try {
-        const binding = runWithAbortSignal(controller.signal, () =>
-          devicePool.autolockDevice(device.deviceId, "android", "mcp-expired"),
+        const binding = autolockWithSignal(
+          devicePool,
+          device.deviceId,
+          "android",
+          "mcp-expired",
+          controller.signal,
         ).catch((error: unknown) => error);
         await started.promise;
         const cancelledSessionId = devicePool.getDevice(device.deviceId)!.sessionId!;
@@ -235,8 +239,12 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       const controller = new AbortController();
       try {
-        const binding = runWithAbortSignal(controller.signal, () =>
-          devicePool.autolockDevice(first.deviceId, "android", "mcp-cancelled"),
+        const binding = autolockWithSignal(
+          devicePool,
+          first.deviceId,
+          "android",
+          "mcp-cancelled",
+          controller.signal,
         ).catch((error: unknown) => error);
         await metadataStarted.promise;
         const cancelledSessionId = devicePool.getDevice(first.deviceId)!.sessionId!;
@@ -562,9 +570,7 @@ describe("DevicePool", () => {
             reservation.device,
             replacement,
             sourceImage,
-            undefined,
-            undefined,
-            excludeExecutionId,
+            { excludeExecutionId },
           );
         } finally {
           await reservation.release();
@@ -666,11 +672,9 @@ describe("DevicePool", () => {
       await devicePool.initializeWithDevices([device]);
       await bindOwnerSession(device, sourceImage);
       const captured = requirePooledDevice(devicePool, device.deviceId);
-      const readinessRelease = await devicePool.reserveDeviceForReadiness(
-        device.deviceId,
-        device,
-        sourceImage.name,
-      );
+      const readinessRelease = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: sourceImage.name,
+      });
       const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
@@ -688,12 +692,13 @@ describe("DevicePool", () => {
           shutdownReservation.device,
           replacement,
           sourceImage,
-          undefined,
-          () => {
-            // Session work can discover the replacement inside addDevice, so
-            // the marker must exist before that publication point.
-            expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
-            readinessMarkerPublished = true;
+          {
+            beforeReplacementPublishes: () => {
+              // Session work can discover the replacement inside addDevice, so
+              // the marker must exist before that publication point.
+              expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
+              readinessMarkerPublished = true;
+            },
           },
         );
 
@@ -725,11 +730,9 @@ describe("DevicePool", () => {
       // Simulate an autolocked device so recovery must preserve exclusivity; an
       // unset autolockSessionId on the replacement would let any session drive it.
       captured.autolockSessionId = "owner-session";
-      const readinessRelease = await devicePool.reserveDeviceForReadiness(
-        device.deviceId,
-        device,
-        sourceImage.name,
-      );
+      const readinessRelease = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: sourceImage.name,
+      });
       const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
@@ -966,7 +969,7 @@ describe("DevicePool", () => {
           shutdownReservation.device,
           replacement,
           sourceImage,
-          manager.childProcess,
+          { childProcess: manager.childProcess },
         );
         await persistence.waitForUpsert();
         manager.childProcess.emit("exit", 0, null);
@@ -1010,7 +1013,7 @@ describe("DevicePool", () => {
             shutdownReservation.device,
             replacement,
             sourceImage,
-            manager.childProcess,
+            { childProcess: manager.childProcess },
           ),
         ).rejects.toThrow("exited before process tracking completed");
 

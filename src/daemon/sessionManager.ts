@@ -590,10 +590,7 @@ export class SessionManager extends SessionManagerForwarders {
 
   constructor(
     timer: Timer = defaultTimer,
-    deviceSessionRepository: Rows.DeviceSessionPersistence = new DeviceSessionRepository(
-      undefined,
-      timer,
-    ),
+    deviceSessionRepository: Rows.DeviceSessionPersistence = new DeviceSessionRepository({ timer }),
     options: Types.SessionManagerOptions = {},
   ) {
     super();
@@ -737,17 +734,13 @@ export class SessionManager extends SessionManagerForwarders {
     sessionId: string,
     devicePool: Types.SessionDeviceAssigner,
     platform: Platform | undefined,
-    persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: Lifecycle.SharedSessionAssignment,
+    recovery: Lifecycle.PersistedSessionRecovery & { persisted?: DeviceSession },
   ): Promise<Session> {
     return this.wiring.recoveryPublication.recoverPersistedRow(
       sessionId,
       devicePool,
       platform,
-      persisted,
-      initialOwnership,
-      shared,
+      recovery,
     );
   }
 

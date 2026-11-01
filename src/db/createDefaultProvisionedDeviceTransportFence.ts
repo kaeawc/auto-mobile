@@ -23,7 +23,7 @@ export function createDefaultProvisionedDeviceTransportFence(
     return new InMemoryProvisionedDeviceTransportFence();
   }
   return new DurableProvisionedDeviceTransportFence({
-    store: new ProvisionedDeviceTransportTombstoneRepository(options.database),
+    store: new ProvisionedDeviceTransportTombstoneRepository({ db: options.database }),
     timer: options.timer,
   });
 }

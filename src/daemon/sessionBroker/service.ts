@@ -1,3 +1,10 @@
+import { sessionBrokerHostLock, type SessionBrokerHostLock } from "./serviceHostLock";
+export { sessionBrokerHostLock, type SessionBrokerHostLock } from "./serviceHostLock";
+import { nativeCatalogReader } from "./serviceCatalog";
+import {
+  resolveAvdSnapshotCleanupPorts,
+  type BrokerAvdSnapshotCleanupPorts,
+} from "./avdSnapshotCleanupPorts";
 import { AdbAndroidFoldPostureRestore } from "./androidFoldPostureRestore";
 import {
   InMemoryMutationRecordingGaps,
@@ -7,32 +14,21 @@ import { ENV } from "../../config/env";
 import { readEnvInt } from "../../utils/envNumbers";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
-import {
-  readAndroidSessionDeviceCatalog,
-  readIosSessionDeviceCatalog,
-} from "../../devices/sessionCatalog";
+import type { SessionCatalogPlatform } from "./brokerOptions";
+import { nativeWatchReset } from "./watchResetNative";
 import type { SessionDeviceCatalog } from "../../devices/sessionRequirements";
-import {
-  listDevices,
-  listInstalledSystemImages,
-} from "../../utils/android-cmdline-tools/avdmanager";
 import { bootAdmissionServices } from "../../devices/bootAdmissionServices";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { defaultLockOwnerGenerationProbe } from "../lockOwnerGeneration";
 import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import { defaultBindingToolInvoker } from "./provisioning/daemonDeviceAcquisition";
 import { readToolPayload } from "./provisioning/reconcilerPorts";
 import type { BrokerExecutionRelease } from "./provisioning/executionRelease";
 import type { BindingJournal } from "./registry/bindingJournal";
-import {
-  defaultBindingRegistryPath,
-  type SqliteBindingRegistry,
-} from "./registry/sqliteBindingRegistry";
+import type { SqliteBindingRegistry } from "./registry/sqliteBindingRegistry";
 import {
   computeBindingScopeKey,
   type BindingAssignmentRecord,
@@ -93,35 +89,8 @@ import { getHostEmulatorProcessStopper } from "../../devices/hostEmulatorProcess
 import { AVD_DEFAULT_BOOT_SNAPSHOT } from "../../utils/android-cmdline-tools/AvdSnapshotService";
 import { AVD_SNAPSHOTS_DIRNAME } from "../../utils/android-cmdline-tools/AvdConfigReader";
 
-export interface SessionBrokerHostLock {
-  acquire(): void;
-  release(): void;
-}
-
-/** Existing PID/generation lock primitive, held for the lifetime of the broker service. */
-export function sessionBrokerHostLock(
-  owner: BindingProcessIdentity,
-  path = `${defaultBindingRegistryPath()}.session-broker.lock`,
-): SessionBrokerHostLock {
-  return {
-    acquire: () => {
-      if (
-        !tryAcquireExclusiveLock(path, {
-          pid: owner.pid,
-          ownerToken: owner.daemonId,
-          ownerGeneration: defaultLockOwnerGenerationProbe,
-        })
-      ) {
-        throw new ActionableError(
-          "Another provider owns session-broker execution on this host; stop it before starting a replacement",
-        );
-      }
-    },
-    release: () => releaseExclusiveLock(path, owner.pid, owner.daemonId),
-  };
-}
-
 export interface OpenSessionBrokerServiceOptions {
+  avdSnapshotCleanup?: BrokerAvdSnapshotCleanupPorts;
   recordingGaps?: MutationRecordingGaps;
   mutationSessions?: {
     peekSession(
@@ -146,7 +115,10 @@ export interface OpenSessionBrokerServiceOptions {
   liveSessionIds?: () => readonly string[];
   /** Tests supply a fake host lock; production shares the registry's physical namespace. */
   hostLock?: SessionBrokerHostLock;
-  catalog?: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+  catalog?: (
+    platform: SessionCatalogPlatform,
+    signal?: AbortSignal,
+  ) => Promise<SessionDeviceCatalog>;
   androidReset?: {
     inventory(options: {
       signal?: AbortSignal;
@@ -155,27 +127,6 @@ export interface OpenSessionBrokerServiceOptions {
     }): Promise<BootedDevice[]>;
     ctrlProxyReady: AndroidBaselineResetDependencies["ctrlProxyReady"];
     snapshot?: AndroidSnapshotReadiness;
-  };
-}
-
-function nativeCatalogReader(config: SessionBrokerHostConfig) {
-  const ios = new SimCtlClient(null);
-  return (platform: "ios" | "android", signal?: AbortSignal): Promise<SessionDeviceCatalog> => {
-    if (platform === "ios") {
-      return readIosSessionDeviceCatalog(ios, {
-        signal,
-        classifications: config.iosClassifications,
-      });
-    }
-    return readAndroidSessionDeviceCatalog(
-      {
-        listDevices: (signal) => listDevices(undefined, signal),
-        listInstalledSystemImages: (filter, signal) =>
-          listInstalledSystemImages(filter, undefined, signal),
-      },
-      { profileArchetypes: config.androidProfileArchetypes },
-      { signal },
-    );
   };
 }
 
@@ -211,17 +162,14 @@ export async function openSessionBrokerService(
     const store = options.registry.sessionBrokerStore(scopeKey);
     const reuse = iosReusePolicy(options.config);
     const journal = options.registry.deviceMutationJournal();
-    const reset = nativeBaselineReset(
-      options.config,
-      options.androidReset,
-      options.timer,
+    const reset = nativeBaselineReset(options.config, options.androidReset, options.timer, {
       journal,
       recordingGaps,
-    );
+    });
     const iosReset = reset?.ios;
     let resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] =
       iosReset
-        ? (device, profile, assertOwned, signal, context) => {
+        ? (device, profile, assertOwned, { signal, context } = {}) => {
             const operation = () => iosReset.resetWithTiming(device, profile, assertOwned, signal);
             return context?.runResetBoot ? context.runResetBoot(operation) : operation();
           }
@@ -251,6 +199,7 @@ export async function openSessionBrokerService(
         }
       : undefined;
     const devices = new ManagedDevicePort({
+      androidConfigReader: new FileAvdConfigReader(),
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
       leaseKeepalive: preparationLeaseKeepalive(options),
@@ -264,6 +213,7 @@ export async function openSessionBrokerService(
             resetBaseline: {
               ios: resetIosBaseline,
               android: reset.android,
+              watch: reset.watch,
             },
             captureIosBaseline,
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
@@ -290,19 +240,27 @@ export async function openSessionBrokerService(
       sessionDisposition: options.sessionDisposition,
       reuseCleanDevices: reuse.mode !== "off",
       reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
+      idleTtlMs: { android: options.config.androidIdleTtlMs },
     });
     await broker.recoverReceipts();
     const recoverMutationRecorder = (sessionUuid: string) =>
-      recoverSessionMutationRecorder(options, store, scopeKey, bindMutationRecorder, sessionUuid);
+      recoverSessionMutationRecorder(options, store, scopeKey, {
+        bindMutationRecorder,
+        sessionUuid,
+      });
     await recoverActiveMutationRecorders(store, recoverMutationRecorder, recordingGaps);
-    const service = new SessionBrokerService(
-      broker,
-      scopeKey,
-      lock,
-      options.timer,
-      recordingGaps,
-      recoverMutationRecorder,
-    );
+    const service = new SessionBrokerService(broker, scopeKey, lock, {
+      timer: options.timer,
+      avdSnapshotCleanup: resolveAvdSnapshotCleanupPorts(
+        options.avdSnapshotCleanup,
+        options.registry,
+        options.timer,
+      ),
+      mutations: {
+        recordingGaps,
+        recorderFor: recoverMutationRecorder,
+      },
+    });
     if (!options.deferStart) {
       service.start();
     }
@@ -351,12 +309,34 @@ async function recoverActiveMutationRecorders(
   }
 }
 
+/**
+ * The resource of an active broker session whose device mutations are recorded. A watch session
+ * never records them (no journal, baseline or runner): its binding skips the recorder, so recovery
+ * must not attach one either (#15882).
+ */
+async function recordableSessionResource(
+  store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
+  sessionUuid: string,
+): Promise<BrokerResourceRecord | undefined | "not-recordable"> {
+  const request = await store.getSession(sessionUuid);
+  if (request?.state !== "active" || !request.resourceId) {
+    return "not-recordable";
+  }
+  const resource = await store.getResource(request.resourceId);
+  return resource && nativeProfile(resource).platform === "watchos" ? "not-recordable" : resource;
+}
+
 async function recoverSessionMutationRecorder(
   options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "registry">,
   store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
   scopeKey: string,
-  bindMutationRecorder: ((scope: DeviceMutationScope) => void) | undefined,
-  sessionUuid: string,
+  {
+    bindMutationRecorder,
+    sessionUuid,
+  }: {
+    bindMutationRecorder: ((scope: DeviceMutationScope) => void) | undefined;
+    sessionUuid: string;
+  },
 ): Promise<MutationRecorder | undefined> {
   if (!bindMutationRecorder || !options.mutationSessions) {
     return undefined;
@@ -365,11 +345,10 @@ async function recoverSessionMutationRecorder(
   if (!session) {
     return undefined;
   }
-  const request = await store.getSession(sessionUuid);
-  if (request?.state !== "active" || !request.resourceId) {
+  const resource = await recordableSessionResource(store, sessionUuid);
+  if (resource === "not-recordable") {
     return undefined;
   }
-  const resource = await store.getResource(request.resourceId);
   const assignment = resource
     ? await options.registry.getAssignment({ scopeKey, bindingIndex: resource.allocationIndex })
     : null;
@@ -407,17 +386,14 @@ function iosReuseWiring(
 } {
   const { erase, journal, recordingGaps, store } = parts;
   if (reuse.mode === "keep-booted") {
-    return keepBootedIosWiring(options, reuse, erase, journal, recordingGaps, store);
+    return keepBootedIosWiring(options, reuse, erase, { journal, recordingGaps, store });
   }
   if (reuse.mode === "minimal") {
     return {
-      resetIosBaseline: minimalIosResetBaseline(
-        options,
-        reuse.maxUses,
-        journal,
+      resetIosBaseline: minimalIosResetBaseline(options, reuse.maxUses, journal, {
         recordingGaps,
         store,
-      ),
+      }),
       captureIosBaseline: undefined,
     };
   }
@@ -429,9 +405,15 @@ function keepBootedIosWiring(
   options: OpenSessionBrokerServiceOptions,
   reuse: { maxUses: number; fallback: "erase" | "destroy" },
   erase: IosBaselineReset,
-  journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
-  store: Pick<SqliteSessionBrokerStore, "getRequest">,
+  {
+    journal,
+    recordingGaps,
+    store,
+  }: {
+    journal: DeviceMutationJournal;
+    recordingGaps: MutationRecordingGaps;
+    store: Pick<SqliteSessionBrokerStore, "getRequest">;
+  },
 ): {
   resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"];
   captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
@@ -452,7 +434,7 @@ function keepBootedIosWiring(
   });
   return {
     captureIosBaseline: (context) => captureFirstDeviceBaseline(journal, mutations, context),
-    resetIosBaseline: async (device, profile, assertOwned, signal, context) => {
+    resetIosBaseline: async (device, profile, assertOwned, { signal, context } = {}) => {
       const request = context?.resource.requestId
         ? await store.getRequest(context.resource.requestId)
         : undefined;
@@ -461,14 +443,12 @@ function keepBootedIosWiring(
           "iOS keep-booted reset requires its durable released session identity",
         );
       }
-      return fast.resetWithTiming(
-        device,
-        profile,
-        assertOwned,
-        { ...context.scope, sessionUuid: request.sessionId },
-        context.resource.reuseCount ?? 0,
-        { signal, runResetBoot: context.runResetBoot },
-      );
+      return fast.resetWithTiming(device, profile, assertOwned, {
+        scope: { ...context.scope, sessionUuid: request.sessionId },
+        reuseCount: context.resource.reuseCount ?? 0,
+        signal,
+        runResetBoot: context.runResetBoot,
+      });
     },
   };
 }
@@ -478,8 +458,10 @@ function minimalIosResetBaseline(
   options: OpenSessionBrokerServiceOptions,
   maxUses: number,
   journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
-  store: Pick<SqliteSessionBrokerStore, "getRequest">,
+  {
+    recordingGaps,
+    store,
+  }: { recordingGaps: MutationRecordingGaps; store: Pick<SqliteSessionBrokerStore, "getRequest"> },
 ): NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] {
   const simctl = new SimCtlClient(null);
   const minimal = new IosMinimalReset({
@@ -491,21 +473,18 @@ function minimalIosResetBaseline(
     maxUses,
     budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
   });
-  return async (device, profile, assertOwned, signal, context) => {
+  return async (device, profile, assertOwned, { signal, context } = {}) => {
     const request = context?.resource.requestId
       ? await store.getRequest(context.resource.requestId)
       : undefined;
     if (!context || !request?.sessionId) {
       throw new ActionableError("iOS minimal reset requires its durable released session identity");
     }
-    return minimal.resetWithTiming(
-      device,
-      profile,
-      assertOwned,
-      { ...context.scope, sessionUuid: request.sessionId },
-      context.resource.reuseCount ?? 0,
-      { signal },
-    );
+    return minimal.resetWithTiming(device, profile, assertOwned, {
+      scope: { ...context.scope, sessionUuid: request.sessionId },
+      reuseCount: context.resource.reuseCount ?? 0,
+      signal,
+    });
   };
 }
 
@@ -553,8 +532,10 @@ function nativeBaselineReset(
   config: SessionBrokerHostConfig,
   androidReset: OpenSessionBrokerServiceOptions["androidReset"],
   timer: Timer,
-  journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
+  {
+    journal,
+    recordingGaps,
+  }: { journal: DeviceMutationJournal; recordingGaps: MutationRecordingGaps },
 ) {
   if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
     throw new ActionableError("Android baseline reset requires the daemon readiness ports");
@@ -563,9 +544,11 @@ function nativeBaselineReset(
   return reuseIos || config.reuseAndroidCleanDevices
     ? {
         ios: reuseIos ? nativeIosBaselineReset() : undefined,
+        // An Apple Watch follows the iOS reuse mode (#15882).
+        watch: nativeWatchReset(config, timer),
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
-            ? nativeAndroidBaselineReset(androidReset!, timer, config, journal, recordingGaps)
+            ? nativeAndroidBaselineReset(androidReset!, timer, config, { journal, recordingGaps })
             : undefined,
       }
     : undefined;
@@ -594,8 +577,10 @@ function nativeAndroidBaselineReset(
   ports: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>,
   timer: Timer,
   config: SessionBrokerHostConfig,
-  journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
+  {
+    journal,
+    recordingGaps,
+  }: { journal: DeviceMutationJournal; recordingGaps: MutationRecordingGaps },
 ): AndroidBaselineReset {
   const configReader = new FileAvdConfigReader();
   const inventory = boundAndroidResetInventory(ports.inventory, timer);
@@ -823,26 +808,45 @@ async function assertBrokerInventoryOwned(
 /** Receipt retention runs at most this often; pruning is not urgent and takes the write lock. */
 export const RECEIPT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
+/** Mutation-recording seams the service exposes to device-tool calls. */
+export interface SessionBrokerServiceMutations {
+  recordingGaps: Pick<MutationRecordingGaps, "mark">;
+  /** Recovers a session's mutation recorder; absent resolves no recorder. */
+  recorderFor?: (sessionUuid: string) => Promise<MutationRecorder | undefined>;
+}
+
 export class SessionBrokerService {
+  readonly avdSnapshotCleanup: BrokerAvdSnapshotCleanupPorts;
   private stopped = false;
   private lastPruneAtMs: number | undefined;
   private running: Promise<void> | undefined;
   private closing: Promise<void> | undefined;
   private wake: (() => void) | undefined;
 
+  private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
+  private readonly mutations: SessionBrokerServiceMutations;
+
   constructor(
     readonly broker: SessionBroker,
     readonly scopeKey: string,
     private readonly lock: SessionBrokerHostLock,
-    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">,
-    private readonly recordingGaps: Pick<MutationRecordingGaps, "mark">,
-    private readonly recorderFor: (
-      sessionUuid: string,
-    ) => Promise<MutationRecorder | undefined> = async () => undefined,
-  ) {}
+    {
+      timer,
+      mutations,
+      avdSnapshotCleanup,
+    }: {
+      timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
+      mutations: SessionBrokerServiceMutations;
+      avdSnapshotCleanup?: BrokerAvdSnapshotCleanupPorts;
+    },
+  ) {
+    this.timer = timer;
+    this.mutations = mutations;
+    this.avdSnapshotCleanup = resolveAvdSnapshotCleanupPorts(avdSnapshotCleanup);
+  }
 
   markMutationUnrecorded(sessionUuid: string, reason: string): void {
-    this.recordingGaps.mark(sessionUuid, reason);
+    this.mutations.recordingGaps.mark(sessionUuid, reason);
   }
 
   async recoverMutationRecorder(sessionUuid: string): Promise<MutationRecorder | undefined> {
@@ -852,7 +856,7 @@ export class SessionBrokerService {
           "Cannot recover mutation recording from a stopped session broker",
         );
       }
-      return await this.recorderFor(sessionUuid);
+      return await this.mutations.recorderFor?.(sessionUuid);
     } catch (error) {
       this.markMutationUnrecorded(sessionUuid, `recorder recovery: ${errorMessage(error)}`);
       logger.warn(
@@ -906,6 +910,7 @@ export class SessionBrokerService {
       } catch (error) {
         logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
       }
+      await this.expireIdlePool();
       if (this.stopped) {
         return;
       }
@@ -914,6 +919,19 @@ export class SessionBrokerService {
         await this.pruneIfDue();
       }
       firstPass = false;
+    }
+  }
+
+  /** Idle expiry rides the recovery cadence, so its precision is one recovery interval. */
+  private async expireIdlePool(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+    try {
+      await this.broker.expireIdlePool();
+    } catch (error) {
+      // Expiry is housekeeping: an idle device left in the pool stays reusable for the next pass.
+      logger.warn(`Session broker idle expiry failed: ${errorMessage(error)}`, error);
     }
   }
 

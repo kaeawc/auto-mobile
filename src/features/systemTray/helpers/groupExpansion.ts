@@ -10,7 +10,6 @@ import {
 import { boundsEqual } from "../../../utils/bounds";
 import { logger } from "../../../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
-import type { ProgressCallback } from "../../action/BaseVisualChange";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { rawContentDesc, rawNodeValue, rawResourceId } from "../../utility/elementProperties";
 import {
@@ -18,7 +17,7 @@ import {
   matchesNotificationResourceId,
   NOTIFICATION_TITLE_FIELD_IDS,
 } from "../notificationHints";
-import type { SystemTrayNotificationArgs } from "../systemTrayTypes";
+import type { SystemTrayCall, SystemTrayNotificationArgs } from "../systemTrayTypes";
 import { getSystemTrayDependencies } from "./dependencies";
 import {
   findHeaderAppLabel,
@@ -210,11 +209,15 @@ export const expandAndRematchIfCollapsed = async (
   device: BootedDevice,
   notification: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-  deadlineMs: number,
-  progress: ProgressCallback | undefined,
-  result: { observation: ObserveResult; match: SystemTrayNotificationMatch; signal?: AbortSignal },
+  {
+    deadlineMs,
+    result,
+  }: {
+    deadlineMs: number;
+    result: { observation: ObserveResult; match: SystemTrayNotificationMatch } & SystemTrayCall;
+  },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch }> => {
-  const { signal } = result;
+  const { signal, progress } = result;
   throwIfAborted(signal);
   let { observation, match } = result;
   const groupNode = match.candidate.groupNode;
@@ -251,14 +254,11 @@ export const expandAndRematchIfCollapsed = async (
       "Expanded collapsed notification group but the notification wait timed out before it could be re-matched.",
     );
   }
-  const reMatch = await waitForNotificationMatch(
-    device,
-    notification,
-    appMatchTexts,
-    remainingMs,
+  const reMatch = await waitForNotificationMatch(device, notification, appMatchTexts, {
+    awaitTimeoutMs: remainingMs,
     progress,
     signal,
-  );
+  });
   if (reMatch.match) {
     // A few legacy hierarchies promote a child out of its group after
     // expansion. A promoted row still has to satisfy the row-continuity check

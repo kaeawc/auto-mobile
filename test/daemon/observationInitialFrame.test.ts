@@ -57,16 +57,23 @@ class FakeObservationStreamServer {
   pushScreenshotUpdate(
     deviceId: string,
     screenshotBase64: string,
-    screenWidth: number,
-    screenHeight: number,
-    metadata?: Record<string, unknown>,
-    options?: {
-      captureSequence?: number;
-      coordinateSpace?: "px";
-      nativeScale?: number;
-      frameContext?: string;
-      rotation?: number;
-      initialFrameSubscriber?: InitialFrameSubscriber;
+    {
+      screenWidth,
+      screenHeight,
+      metadata,
+      options,
+    }: {
+      screenWidth: number;
+      screenHeight: number;
+      metadata?: Record<string, unknown>;
+      options?: {
+        captureSequence?: number;
+        coordinateSpace?: "px";
+        nativeScale?: number;
+        frameContext?: string;
+        rotation?: number;
+        initialFrameSubscriber?: InitialFrameSubscriber;
+      };
     },
   ): boolean {
     const screenshotOptions =
@@ -142,7 +149,7 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
     waitForFresh?: boolean,
     timeout?: number,
     _perf?: unknown,
-    skipWaitForFresh?: boolean,
+    { skipWaitForFresh }: { skipWaitForFresh?: boolean } = {},
   ): Promise<AccessibilityHierarchyResponse> {
     this.latestHierarchyCalls.push({ waitForFresh, timeout, skipWaitForFresh });
     return {
@@ -1218,14 +1225,11 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
   override pushScreenshotUpdate(
     deviceId: string,
     data: string,
-    width: number,
-    height: number,
-    metadata?: Record<string, unknown>,
-    options?: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[5],
+    details: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[2],
   ): boolean {
-    const destinations = this.destinations(deviceId, options?.initialFrameSubscriber);
+    const destinations = this.destinations(deviceId, details.options?.initialFrameSubscriber);
     for (const destination of destinations) {
-      destination.pushScreenshotUpdate(deviceId, data, width, height, metadata, options);
+      destination.pushScreenshotUpdate(deviceId, data, details);
     }
     return destinations.length > 0;
   }

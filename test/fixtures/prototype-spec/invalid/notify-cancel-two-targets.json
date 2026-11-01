@@ -1,0 +1,58 @@
+{
+  "spec": {
+    "id": "nc",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "postStatus": ""
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Tell you about new messages"
+        }
+      ]
+    },
+    "root": {
+      "type": "button",
+      "label": "Notify",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "notifications.cancel",
+          "args": {
+            "id": {
+              "value": "msg-1"
+            },
+            "all": {
+              "value": true
+            }
+          }
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "messages",
+          "name": "Messages",
+          "importance": "high",
+          "description": "Direct messages",
+          "showBadge": true
+        },
+        {
+          "id": "promos",
+          "name": "Offers",
+          "importance": "low"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args",
+  "expectedMessage": "notifications.cancel takes exactly one of id, group or all"
+}

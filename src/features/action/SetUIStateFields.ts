@@ -1,8 +1,10 @@
 import { isAndroidHintText } from "./androidHintText";
+import { VALUE_REDACTED_ATTRIBUTE } from "../../models/Element";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ProgressCallback } from "./BaseVisualChange";
+import type { ActionCall } from "./ActionCall";
 import {
   BootedDevice,
   Element,
@@ -68,6 +70,11 @@ interface FieldVerificationOutcome {
 
 interface TextFocusRecovery {
   occlusionError?: KeyboardOcclusionError;
+}
+
+/** `ActionCall` for applying one field value; carries the per-field IME recovery state. */
+interface FieldApplyCall extends ActionCall {
+  focusRecovery?: TextFocusRecovery;
 }
 
 type FieldApplicationResult = {
@@ -165,14 +172,11 @@ export class SetUIStateFields {
         }
 
         // Apply the value based on field type
-        const applyResult = await this.applyFieldValue(
-          element,
-          fieldSpec,
-          fieldType,
+        const applyResult = await this.applyFieldValue(element, fieldSpec, fieldType, {
           progress,
           signal,
           focusRecovery,
-        );
+        });
 
         // An unclassified field or exhausted IME recovery cannot benefit from
         // repeating the same operation (#4242, #9258).
@@ -186,13 +190,10 @@ export class SetUIStateFields {
           continue;
         }
 
-        const verification = await this.verifyAppliedFieldValue(
-          fieldSpec,
-          fieldType,
-          element,
+        const verification = await this.verifyAppliedFieldValue(fieldSpec, fieldType, element, {
           attempts,
           signal,
-        );
+        });
         if (!verification.error) {
           return {
             selector: fieldSpec.selector,
@@ -236,8 +237,7 @@ export class SetUIStateFields {
     fieldSpec: FieldSpec,
     fieldType: FieldType,
     element: Element,
-    attempts: number,
-    signal?: AbortSignal,
+    { attempts, signal }: { attempts: number; signal?: AbortSignal },
   ): Promise<FieldVerificationOutcome> {
     if (this.shouldSkipFieldVerification(fieldSpec, fieldType, element)) {
       return {};
@@ -394,7 +394,7 @@ export class SetUIStateFields {
     }
     const control = android
       ? element
-      : findIosToggleControl(this.hierarchy, element, text, viewHierarchy, screenSizeOptions);
+      : findIosToggleControl(this.hierarchy, element, text, { viewHierarchy, screenSizeOptions });
     const fieldType = this.fieldTypeDetector.detect(control);
     return fieldType === "toggle" || fieldType === "checkbox" ? control : null;
   }
@@ -491,7 +491,8 @@ export class SetUIStateFields {
   ): boolean {
     switch (fieldType) {
       case "text":
-        if (fieldSpec.value !== undefined) {
+        // A redacted value is unknown, not empty, so it is never already correct.
+        if (fieldSpec.value !== undefined && element[VALUE_REDACTED_ATTRIBUTE] !== "true") {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
           return (
             currentValue === fieldSpec.value ||
@@ -536,8 +537,7 @@ export class SetUIStateFields {
     element: Element,
     fieldSpec: FieldSpec,
     recovery: TextFocusRecovery,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): ReturnType<TapOnElementLike["execute"]> {
     const focus = (target: Element) =>
       this.getTapOnElement().execute(
@@ -596,10 +596,9 @@ export class SetUIStateFields {
     element: Element,
     fieldSpec: FieldSpec,
     fieldType: FieldType,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    focusRecovery: TextFocusRecovery = {},
+    call: FieldApplyCall = {},
   ): Promise<FieldApplicationResult> {
+    const { progress, signal, focusRecovery = {} } = call;
     const tapOnElement = this.getTapOnElement();
     const inputText = this.getInputText();
     const clearText = this.getClearText();
@@ -619,13 +618,10 @@ export class SetUIStateFields {
 
         case "checkbox":
         case "toggle":
-          return await this.applySelectedFieldValue(
-            element,
-            fieldSpec,
-            tapOnElement,
+          return await this.applySelectedFieldValue(element, fieldSpec, tapOnElement, {
             progress,
             signal,
-          );
+          });
 
         case "dropdown":
           return await this.applyDropdownFieldValue(fieldSpec, tapOnElement, progress, signal);
@@ -680,13 +676,10 @@ export class SetUIStateFields {
     // previously focused field, owns input before ClearText can mutate it.
     logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
     const tapStart = Date.now();
-    const tapResult = await this.focusTextField(
-      element,
-      fieldSpec,
-      focusRecovery,
+    const tapResult = await this.focusTextField(element, fieldSpec, focusRecovery, {
       progress,
       signal,
-    );
+    });
     signal?.throwIfAborted();
     logger.debug(
       `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
@@ -767,8 +760,7 @@ export class SetUIStateFields {
     element: Element,
     fieldSpec: FieldSpec,
     tapOnElement: TapOnElementLike,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): Promise<FieldApplicationResult> {
     if (fieldSpec.selected === undefined) {
       return { success: false, error: "selected is required for checkbox/toggle fields" };

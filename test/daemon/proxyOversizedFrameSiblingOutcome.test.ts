@@ -30,14 +30,13 @@ let spies: Array<ReturnType<typeof spyOn>>;
 
 function makeWire(): Wire {
   const socket = new FakeSocket();
-  const client = new DaemonClient(
-    "in-memory://oversized-siblings",
-    1_000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    { idGenerator: new FakeIdGenerator(), platformOverride: "darwin", maxInboundFrameBytes: LIMIT },
-  );
+  const client = new DaemonClient("in-memory://oversized-siblings", 1_000, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+    clientIdentity: null,
+    idGenerator: new FakeIdGenerator(),
+    platformOverride: "darwin",
+    maxInboundFrameBytes: LIMIT,
+  });
   client.testHooks.attachSocket(socket);
   const requests: DaemonRequest[] = [];
   const answer = (request: DaemonRequest, payload: unknown) =>

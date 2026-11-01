@@ -122,6 +122,13 @@ const PER_FIELD_ADMISSION_HEADROOM_MS = 20_000;
  */
 const RESPONSE_HEADROOM_MS = 3_000;
 
+/** The CURRENT request's transport deadline: a frozen snapshot, a live getter, and extensions. */
+export interface SetUIStateTransportDeadline {
+  transportDeadlineMs?: number;
+  getLiveTransportDeadlineMs?: () => number | undefined;
+  subscribeLiveTransportDeadline?: LiveDeadlineSubscriber;
+}
+
 /**
  * SetUIState - Declarative form field population tool
  *
@@ -142,7 +149,7 @@ export class SetUIState extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SetUIStateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer ?? defaultTimer);
+    super(device, { adb, timer: dependencies.timer ?? defaultTimer });
     this.fields = new SetUIStateFields({
       device,
       adb: this.adb,
@@ -159,7 +166,8 @@ export class SetUIState extends BaseVisualChange {
    * @param options - Configuration options
    * @param progress - Optional progress callback
    * @param signal - Optional abort signal
-   * @param transportDeadlineMs - Absolute wall-clock deadline (same clock as
+   * @param transport - The request's transport deadline, as the three fields below.
+   * @param transport.transportDeadlineMs - Absolute wall-clock deadline (same clock as
    *   `this.timer.now()`) of the CURRENT MCP request, when known. This is the
    *   real transport deadline the caller (`createSetUIStateHandler`'s handler) recovered from
    *   the daemon-forwarded request's own budget -- accounting for time
@@ -171,7 +179,7 @@ export class SetUIState extends BaseVisualChange {
    *   (issue #6222 P1). Undefined on a direct/non-daemon call, where the
    *   internal budget alone is the only bound available. Superseded, on every
    *   check, by `getLiveTransportDeadlineMs()` when that is provided.
-   * @param getLiveTransportDeadlineMs - Optional getter for the CURRENT value
+   * @param transport.getLiveTransportDeadlineMs - Optional getter for the CURRENT value
    *   of the transport deadline, read fresh at every admission check instead
    *   of relying on the `transportDeadlineMs` snapshot above. A
    *   daemon-forwarded, progress-capable call's real deadline can be pushed
@@ -182,7 +190,7 @@ export class SetUIState extends BaseVisualChange {
    *   returns `undefined` (e.g. the daemon-side entry was never registered,
    *   or the call is not daemon-forwarded), `transportDeadlineMs` is used
    *   as-is (issue #6222 P1 reopen, fuQ88 review).
-   * @param subscribeLiveTransportDeadline - Optional subscription to
+   * @param transport.subscribeLiveTransportDeadline - Optional subscription to
    *   extensions of that same live deadline: invoked with a listener, it
    *   calls the listener whenever the deadline is pushed forward and returns
    *   an unsubscribe function (or `undefined` when there is nothing to
@@ -198,10 +206,10 @@ export class SetUIState extends BaseVisualChange {
     options: SetUIStateOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-    transportDeadlineMs?: number,
-    getLiveTransportDeadlineMs?: () => number | undefined,
-    subscribeLiveTransportDeadline?: LiveDeadlineSubscriber,
+    transport: SetUIStateTransportDeadline = {},
   ): Promise<SetUIStateResult> {
+    const { transportDeadlineMs, getLiveTransportDeadlineMs, subscribeLiveTransportDeadline } =
+      transport;
     signal?.throwIfAborted();
     const scrollDirection = options.scrollDirection ?? DEFAULT_SCROLL_DIRECTION;
 

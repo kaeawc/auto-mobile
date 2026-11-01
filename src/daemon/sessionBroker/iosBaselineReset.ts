@@ -40,7 +40,7 @@ export class IosBaselineReset {
     assertOwned: () => Promise<void>,
     signal?: AbortSignal,
   ): Promise<"clean"> {
-    await this.runReset(device, profile, assertOwned, {}, signal);
+    await this.runReset(device, profile, assertOwned, { phases: {}, signal });
     return "clean";
   }
 
@@ -52,7 +52,7 @@ export class IosBaselineReset {
   ): Promise<ResetOutcome> {
     const phases: Record<string, number> = {};
     try {
-      return await this.runReset(device, profile, assertOwned, phases, signal);
+      return await this.runReset(device, profile, assertOwned, { phases, signal });
     } catch (error) {
       throw new ResetFailureError(
         errorMessage(error),
@@ -71,8 +71,7 @@ export class IosBaselineReset {
     device: BootedDevice,
     profile: IosProfile,
     assertOwned: () => Promise<void>,
-    phases: Record<string, number>,
-    signal?: AbortSignal,
+    { phases, signal }: { phases: Record<string, number>; signal?: AbortSignal },
   ): Promise<ResetOutcome> {
     const owned = async () => {
       signal?.throwIfAborted();
@@ -102,7 +101,8 @@ export class IosBaselineReset {
       }
       throw toActionableError(error, "Cannot reserve iOS reset boot slot");
     }
-    const operation = () => this.eraseAndBoot(device, profile, owned, phases, deferredBoot, signal);
+    const operation = () =>
+      this.eraseAndBoot(device, profile, owned, { phases, deferredBoot, signal });
     try {
       return await (reservation ? reservation.run(operation) : operation());
     } finally {
@@ -182,9 +182,11 @@ export class IosBaselineReset {
     device: BootedDevice,
     profile: IosProfile,
     assertOwned: () => Promise<void>,
-    phases: Record<string, number>,
-    deferredBoot: boolean,
-    signal?: AbortSignal,
+    {
+      phases,
+      deferredBoot,
+      signal,
+    }: { deferredBoot: boolean; signal?: AbortSignal } & { phases: Record<string, number> },
   ): Promise<ResetOutcome> {
     if (this.dependencies.iosBootInstrumentation.reserveBoot) {
       await assertOwned();
@@ -278,12 +280,9 @@ export class IosBaselineReset {
     expectedState: ExpectedState,
     action: string,
   ): Promise<void> {
-    await readExpectedIosResetTarget(
-      this.dependencies.simctl,
-      udid,
-      profile,
-      expectedState,
+    await readExpectedIosResetTarget(this.dependencies.simctl, udid, profile, {
+      state: expectedState,
       action,
-    );
+    });
   }
 }

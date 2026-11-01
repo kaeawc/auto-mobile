@@ -1,6 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, Platform } from "../../src/models";
-import { enrich, type BootedDeviceTraits } from "../../src/server/bootedDeviceTraits";
+import {
+  DEVICE_TRAITS_TIMEOUT_MS,
+  enrich,
+  resolveFormFactor,
+  type BootedDeviceTraits,
+} from "../../src/server/bootedDeviceTraits";
+import type { DeviceTraits } from "../../src/utils/android-cmdline-tools/deviceTraits";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { logger } from "../../src/utils/logger";
 import { isAutomotive, isWatch } from "../../src/utils/android-cmdline-tools/deviceTraits";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceTraits, androidDeviceTraits } from "../fakes/FakeDeviceTraits";
@@ -30,6 +38,45 @@ const options = (reader: FakeDeviceTraits | null, serviceStatusEnabled = false) 
   adbFactory: new FakeAdbClientFactory(),
 });
 
+describe("bootedDeviceTraits.resolveFormFactor", () => {
+  test("a stalled read warns with the timeout error and leaves the device unchanged", async () => {
+    const reader = {
+      read: () => new Promise<never>(() => {}),
+    } satisfies DeviceTraits;
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "traits-timeout-device",
+      name: "TV",
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const adb = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
+      new FakeAdbClientFactory().create(),
+    );
+    try {
+      const result = resolveFormFactor(device, timer, { injectedDeviceTraits: reader });
+      timer.advanceTime(DEVICE_TRAITS_TIMEOUT_MS);
+
+      expect(await result).toBe(device);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("timed out"), expect.any(Error));
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      adb.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test.each(["ios", "watchos"] as const)("%s never reads Android traits", async (platform) => {
+    const device: BootedDevice = { platform, deviceId: "apple-traits-device", name: "Apple" };
+    const reader = new FakeDeviceTraits(androidDeviceTraits({ formFactor: "tv" }));
+
+    expect(await resolveFormFactor(device, new FakeTimer(), { injectedDeviceTraits: reader })).toBe(
+      device,
+    );
+    expect(reader.reads).toHaveLength(0);
+  });
+});
+
 describe("bootedDeviceTraits.enrich", () => {
   test("attaches manufacturer and brand to probeable Android entries only", async () => {
     const reader = new FakeDeviceTraits(
@@ -56,14 +103,16 @@ describe("bootedDeviceTraits.enrich", () => {
     expect(reader.reads.map((read) => read.deviceId)).toEqual(["emulator-5554"]);
   });
 
-  test("carries an announced watch or automotive form factor and leaves handhelds null", async () => {
+  test("carries an announced watch, automotive or tv form factor and leaves handhelds null", async () => {
     const reader = new FakeDeviceTraits(androidDeviceTraits());
     reader.setTraitsFor("emulator-5554", androidDeviceTraits({ formFactor: "automotive" }));
     reader.setTraitsFor("emulator-5556", androidDeviceTraits({ formFactor: "watch" }));
+    reader.setTraitsFor("emulator-5560", androidDeviceTraits({ formFactor: "tv" }));
     const devices = [
       entry("android", "emulator-5554"),
       entry("android", "emulator-5556"),
       entry("android", "emulator-5558"),
+      entry("android", "emulator-5560"),
     ];
 
     await enrich(devices, options(reader));
@@ -72,9 +121,15 @@ describe("bootedDeviceTraits.enrich", () => {
       "automotive",
       "watch",
       null,
+      "tv",
     ]);
-    expect(devices.map((device) => isAutomotive(device.traits))).toEqual([true, false, false]);
-    expect(devices.map((device) => isWatch(device.traits))).toEqual([false, true, false]);
+    expect(devices.map((device) => isAutomotive(device.traits))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(devices.map((device) => isWatch(device.traits))).toEqual([false, true, false, false]);
   });
 
   test("a failed read leaves that entry without traits and keeps the others", async () => {

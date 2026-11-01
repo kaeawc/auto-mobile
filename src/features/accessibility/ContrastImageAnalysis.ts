@@ -307,7 +307,7 @@ export class ContrastImageAnalysis {
       if (visited.has(seed.y * image.width + seed.x)) {
         continue;
       }
-      const region = this.strokeRegion(image, bounds, color, seed, visited, budget);
+      const region = this.strokeRegion(image, bounds, color, { seed, visited, budget });
       const width = region.right - region.left + 1;
       const height = region.bottom - region.top + 1;
       if (region.count <= width * height * GLYPH_MAX_FILL) {
@@ -323,9 +323,11 @@ export class ContrastImageAnalysis {
     image: RawImage,
     bounds: Element["bounds"],
     color: RGB,
-    seed: { x: number; y: number },
-    visited: Set<number>,
-    budget: { pixels: number },
+    {
+      seed,
+      visited,
+      budget,
+    }: { visited: Set<number>; budget: { pixels: number }; seed: { x: number; y: number } },
   ): { count: number; left: number; top: number; right: number; bottom: number } {
     const left = Math.ceil(bounds.left);
     const top = Math.ceil(bounds.top);
@@ -428,14 +430,11 @@ export class ContrastImageAnalysis {
           : STROKE_MAX_DISTANCE,
       );
     const isFringe = (color: RGB, text: RGB): boolean =>
-      this.fringe.isFringe(image, ink ?? interior, color, text, backgroundColor);
-    const inkText = this.selectTextColor(
-      supported,
-      backgroundColor,
-      perimeter,
+      this.fringe.isFringe(image, ink ?? interior, color, { text, background: backgroundColor });
+    const inkText = this.selectTextColor(supported, backgroundColor, perimeter, {
       isSolidStroke,
       isFringe,
-    );
+    });
     // Strokes within INK_MIN_DISTANCE of the background are not ink, so a brighter icon
     // alone can set the extent and leave a faint label beside it unmeasured. Judge faint
     // solid strokes anywhere inside the box as text too, keeping the lower contrast. Only
@@ -474,8 +473,10 @@ export class ContrastImageAnalysis {
     clusters: ColorCluster[],
     background: RGB,
     perimeter: ColorCluster[],
-    isSolidStroke: (color: RGB) => boolean,
-    isFringe: (color: RGB, text: RGB) => boolean,
+    {
+      isSolidStroke,
+      isFringe,
+    }: { isSolidStroke: (color: RGB) => boolean; isFringe: (color: RGB, text: RGB) => boolean },
   ): RGB {
     const largest = clusters[0]?.count ?? 0;
     const candidates = clusters.filter(
@@ -504,13 +505,10 @@ export class ContrastImageAnalysis {
   ): Promise<ContrastSample[]> {
     const samples: ContrastSample[] = [];
     for (const point of points) {
-      const backgroundColor = await this.sampleBackgroundAtPoint(
-        image,
-        bounds,
-        elementColors,
-        point.x,
-        point.y,
-      );
+      const backgroundColor = await this.sampleBackgroundAtPoint(image, bounds, elementColors, {
+        x: point.x,
+        y: point.y,
+      });
       samples.push({
         x: point.x,
         y: point.y,
@@ -525,9 +523,7 @@ export class ContrastImageAnalysis {
     image: RawImage,
     bounds: Element["bounds"],
     textColor: RGB,
-    x: number,
-    y: number,
-    radius: number,
+    { x, y, radius }: { x: number; y: number; radius: number },
   ): RGB[] {
     const colors: RGB[] = [];
     for (let dx = -radius; dx <= radius; dx++) {
@@ -547,19 +543,15 @@ export class ContrastImageAnalysis {
     image: RawImage,
     bounds: Element["bounds"],
     elementColors: ElementColors,
-    x: number,
-    y: number,
+    { x, y }: { x: number; y: number },
   ): Promise<RGB> {
     const searchRadii = [2, 4, 6, 8];
     for (const radius of searchRadii) {
-      const colors = this.backgroundColorsAtRadius(
-        image,
-        bounds,
-        elementColors.textColor,
+      const colors = this.backgroundColorsAtRadius(image, bounds, elementColors.textColor, {
         x,
         y,
         radius,
-      );
+      });
       const background = this.colorClusters(colors)[0];
       // A few remaining fringe pixels inside a stroke are not a background.
       // Expand until a locally supported colour is found, then retain its variation.
@@ -572,7 +564,10 @@ export class ContrastImageAnalysis {
           colors.filter((color) => this.isSimilarColor(color, background.color)),
           false,
         )[0].color;
-        return this.fringe.isGlyphPixel(image, bounds, elementColors, local, x, y)
+        return this.fringe.isGlyphPixel(image, bounds, elementColors, {
+          color: local,
+          point: { x, y },
+        })
           ? elementColors.backgroundColor
           : local;
       }
@@ -629,7 +624,7 @@ export class ContrastImageAnalysis {
     // order so the same pixel wins. A pixel with none within 12 never scans at all.
     const table = opaquePixelTable(image);
     for (let radius = 1; radius <= 12; radius++) {
-      if (squareHasOpaquePixel(image, table, x, y, radius)) {
+      if (squareHasOpaquePixel(image, table, { x, y, radius })) {
         return this.underlyingColorAtRadius(image, x, y, radius);
       }
     }

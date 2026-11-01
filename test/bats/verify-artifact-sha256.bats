@@ -70,6 +70,11 @@ write_release_ts() {
     viewer_line="
     prototypeViewerSha256: \"$6\","
   fi
+  local protoviewer_apk_line=""
+  if [ "$#" -ge 7 ]; then
+    protoviewer_apk_line="
+    protoViewerApkSha256: \"$7\","
+  fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
   version: string;
@@ -80,6 +85,7 @@ export interface ReleaseChecksumEntry {
   screenCaptureHelperSha256?: string;
   prototypeAgentSha256?: string;
   prototypeViewerSha256?: string;
+  protoViewerApkSha256?: string;
   networkFilterSha256?: string;
 }
 
@@ -88,7 +94,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line$viewer_line
+    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line$viewer_line$protoviewer_apk_line
   },
 ];
 EOF
@@ -270,4 +276,35 @@ EOF
   run bash "$ABS_SCRIPT" "$ARTIFACT" prototypeviewer
   [ "$status" -ne 0 ]
   [[ "$output" == *"SHA256 mismatch"* ]]
+}
+@test "matching protoViewerApkSha256 verifies successfully (protoviewerapk platform, #15301)" {
+  write_release_ts "" "" "" "" "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" protoviewerapk
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "absent protoViewerApkSha256 reports 'no checksum', not a mismatch (#15301)" {
+  write_release_ts "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" protoviewerapk
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found for protoViewerApkSha256"* ]]
+}
+
+@test "mismatched protoViewerApkSha256 reports a mismatch (#15301)" {
+  write_release_ts "" "" "" "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" protoviewerapk
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
+}
+
+@test "the ProtoViewer APK platform does not read the iOS simulator viewer field (#15301)" {
+  write_release_ts "" "" "" "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" protoviewerapk
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found for protoViewerApkSha256"* ]]
 }

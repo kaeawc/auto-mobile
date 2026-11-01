@@ -66,7 +66,7 @@ async function setUp(options: { sleepCountingClock?: boolean } = {}): Promise<Ri
       reaped.push(reason);
       await manager.releaseSession(sessionId, reason);
     },
-    timer,
+    { timer },
   );
   const state: DaemonStateAccess = {
     isInitialized: () => true,

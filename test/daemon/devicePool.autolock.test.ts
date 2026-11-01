@@ -12,6 +12,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError } from "../../src/models";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { autolockWithSignal } from "../helpers/autolockWithSignal";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -72,24 +73,39 @@ describe("DevicePool autolock", () => {
     clearAutolockEnv();
   });
 
+  function recordCreateSessionSignal(): { forwarded: () => AbortSignal | undefined } {
+    const create = sessionManager.createSession.bind(sessionManager);
+    let forwarded: AbortSignal | undefined;
+    sessionManager.createSession = (...args: Parameters<SessionManager["createSession"]>) => {
+      forwarded = args[3]?.signal;
+      return create(...args);
+    };
+    return { forwarded: () => forwarded };
+  }
+
   arranged(
-    "autolockDevice forwards the ambient request signal into session creation (#11817)",
+    "autolockDevice forwards the caller's policy signal into session creation (#11817, #15671)",
     async () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       await initializeLiveAndroidDevice();
       const controller = new AbortController();
-      const create = sessionManager.createSession.bind(sessionManager);
-      let forwarded: AbortSignal | undefined;
-      sessionManager.createSession = (...args: Parameters<SessionManager["createSession"]>) => {
-        forwarded = args[3]?.signal;
-        return create(...args);
-      };
-      await runWithAbortSignal(controller.signal, () =>
-        pool.autolockDevice(androidDevice.deviceId, "android", "mcp-1"),
-      );
-      expect(forwarded).toBe(controller.signal);
+      const recorded = recordCreateSessionSignal();
+      await autolockWithSignal(pool, androidDevice.deviceId, "android", "mcp-1", controller.signal);
+      expect(recorded.forwarded()).toBe(controller.signal);
     },
   );
+
+  arranged("autolockDevice no longer reads the ambient request signal (#15671)", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    await initializeLiveAndroidDevice();
+    const ambient = new AbortController();
+    const recorded = recordCreateSessionSignal();
+    const sessionId = await runWithAbortSignal(ambient.signal, () =>
+      pool.autolockDevice(androidDevice.deviceId, "android", "mcp-1"),
+    );
+    expect(sessionId).toBeDefined();
+    expect(recorded.forwarded()).toBeUndefined();
+  });
 
   arranged("autolockDevice returns undefined when autolock is disabled", async () => {
     // Autolock env not set -> disabled
@@ -141,7 +157,9 @@ describe("DevicePool autolock", () => {
         heartbeatTimeoutMs: 15_000,
         hasReceivedHeartbeat: true,
       });
-      await persistence.markReleased("recovered-autolock", "released", 30, "daemon-restart");
+      await persistence.markReleased("recovered-autolock", "released", 30, {
+        reason: "daemon-restart",
+      });
 
       try {
         await recoveringManager.rehydratePersistedSessions(recoveringPool);

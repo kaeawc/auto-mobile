@@ -39,6 +39,8 @@ type TestingState = Pick<
   | "emulatorLossLedger"
   | "afterAndroidStartupRecoverySnapshot"
   | "iosForeignDeviceOwnership"
+  | "watchForeignDeviceOwnership"
+  | "tvForeignDeviceOwnership"
   | "releaseSessionForDisconnectedDevice"
   | "ownerDisconnectRelease"
   | "DEVICE_WAIT_TIMEOUT_MS"
@@ -126,6 +128,8 @@ export class DevicePoolTesting {
         this.callbacks.reserveShutdownSessionIdentity(deviceId),
       restartReadiness: this.state.deviceReservations.restartReadiness,
       foreignDeviceOwnership: this.state.foreignDeviceOwnership,
+      watchForeignDeviceOwnership: this.state.watchForeignDeviceOwnership,
+      tvForeignDeviceOwnership: this.state.tvForeignDeviceOwnership,
       refreshForeignOwnership: this.callbacks.refreshForeignOwnership.bind(this.callbacks),
       cancelOldDeviceWorkForSystemUiAnr: interceptableMethod(
         () => this.overrides.cancelOldDeviceWorkForSystemUiAnr.current(),
@@ -189,10 +193,14 @@ export class DevicePoolTesting {
         deviceManager: PlatformDeviceManager;
         foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
         iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+        watchForeignDeviceOwnership?: ForeignDeviceOwnership;
+        tvForeignDeviceOwnership?: ForeignDeviceOwnership;
       }): void => {
         this.state.deviceManager = collaborators.deviceManager;
         this.state.foreignDeviceOwnership = collaborators.foreignDeviceOwnership;
         this.state.iosForeignDeviceOwnership = collaborators.iosForeignDeviceOwnership;
+        this.state.watchForeignDeviceOwnership = collaborators.watchForeignDeviceOwnership;
+        this.state.tvForeignDeviceOwnership = collaborators.tvForeignDeviceOwnership;
         // The reaper captured the previous device manager when the pool was built.
         this.state.idleDeviceReaper = this.callbacks.createIdleDeviceReaper();
       },

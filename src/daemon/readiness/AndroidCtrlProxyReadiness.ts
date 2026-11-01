@@ -29,6 +29,14 @@ interface AndroidServiceSetupContext {
   options?: DeviceReadyOptions;
 }
 
+/** One Android service readiness step: its shared setup state and compatibility handling. */
+interface AndroidServiceStep {
+  setupState: { didSetup: boolean; needsSetup: boolean };
+  skipCtrlProxyDownload: boolean | undefined;
+  verifyCompatibilityWhenSkipping: () => Promise<void>;
+  signal?: AbortSignal;
+}
+
 /** Android service readiness, including compatibility checks and forwarding ownership. */
 export class AndroidCtrlProxyReadiness {
   constructor(private readonly dependencies: AndroidCtrlProxyReadinessDependencies) {}
@@ -44,7 +52,7 @@ export class AndroidCtrlProxyReadiness {
     const state = { didSetup: false, needsSetup: false };
 
     try {
-      await this.ensureService(device, deviceId, options, perf, state);
+      await this.ensureService(device, deviceId, options, { perf, state });
     } catch (error) {
       this.handleSetupFailure(error, deviceId, options);
     } finally {
@@ -112,15 +120,9 @@ export class AndroidCtrlProxyReadiness {
     deviceId: string,
     manager: CtrlProxyManager,
     accessibilityClient: AndroidCtrlProxy,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    setupState: { didSetup: boolean; needsSetup: boolean },
-    compatibility: {
-      skipCtrlProxyDownload: boolean | undefined;
-      verifyCompatibilityWhenSkipping: () => Promise<void>;
-      signal?: AbortSignal;
-    },
+    { perf, step }: { perf: ReturnType<typeof createPerformanceTracker>; step: AndroidServiceStep },
   ): Promise<boolean> {
-    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = compatibility;
+    const { setupState, skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = step;
     logger.info(
       `[DeviceReadiness] Accessibility service already enabled for ${deviceId}, verifying WebSocket connection`,
     );
@@ -193,16 +195,10 @@ export class AndroidCtrlProxyReadiness {
     deviceId: string,
     manager: CtrlProxyManager,
     accessibilityClient: AndroidCtrlProxy,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    setupState: { didSetup: boolean; needsSetup: boolean },
-    compatibility: {
-      skipCtrlProxyDownload: boolean | undefined;
-      verifyCompatibilityWhenSkipping: () => Promise<void>;
-      signal?: AbortSignal;
-    },
+    { perf, step }: { perf: ReturnType<typeof createPerformanceTracker>; step: AndroidServiceStep },
   ): Promise<boolean> {
     const { DeviceOwnedByOtherDaemonError } = this.dependencies.errors;
-    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = compatibility;
+    const { setupState, skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = step;
     logger.info(
       `[DeviceReadiness] Accessibility service installed but not enabled for ${deviceId}, enabling now`,
     );
@@ -262,9 +258,15 @@ export class AndroidCtrlProxyReadiness {
     deviceId: string,
     manager: CtrlProxyManager,
     accessibilityClient: AndroidCtrlProxy,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    state: { didSetup: boolean },
-    signal?: AbortSignal,
+    {
+      perf,
+      state,
+      signal,
+    }: {
+      perf: ReturnType<typeof createPerformanceTracker>;
+      state: { didSetup: boolean };
+      signal?: AbortSignal;
+    },
   ): Promise<void> {
     const { DeviceOwnedByOtherDaemonError, CtrlProxyForwardOwnershipUnreadableError } =
       this.dependencies.errors;
@@ -373,22 +375,24 @@ export class AndroidCtrlProxyReadiness {
 
     if (state.needsSetup || !isInstalled) {
       options?.signal?.throwIfAborted();
-      await this.setupAndroidService(
-        deviceId,
-        manager,
-        accessibilityClient,
+      await this.setupAndroidService(deviceId, manager, accessibilityClient, {
         perf,
         state,
-        options?.signal,
-      );
+        signal: options?.signal,
+      });
     }
   }
   private async ensureService(
     device: BootedDevice,
     deviceId: string,
     options: DeviceReadyOptions | undefined,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    state: { didSetup: boolean; needsSetup: boolean },
+    {
+      perf,
+      state,
+    }: {
+      perf: ReturnType<typeof createPerformanceTracker>;
+      state: { didSetup: boolean; needsSetup: boolean };
+    },
   ): Promise<void> {
     const skipCtrlProxyDownload = this.skipCtrlProxyDownload(options);
     this.warnDeprecatedAccessibilityOptions(options);
@@ -443,18 +447,15 @@ export class AndroidCtrlProxyReadiness {
       context;
     if (isInstalled && isEnabled) {
       if (
-        await this.verifyEnabledAndroidService(
-          deviceId,
-          manager,
-          accessibilityClient,
+        await this.verifyEnabledAndroidService(deviceId, manager, accessibilityClient, {
           perf,
-          state,
-          {
+          step: {
+            setupState: state,
             skipCtrlProxyDownload,
             verifyCompatibilityWhenSkipping,
             signal: options?.signal,
           },
-        )
+        })
       ) {
         return true;
       }
@@ -469,18 +470,15 @@ export class AndroidCtrlProxyReadiness {
 
     if (isInstalled && !isEnabled && !state.needsSetup) {
       if (
-        await this.enableInstalledAndroidService(
-          deviceId,
-          manager,
-          accessibilityClient,
+        await this.enableInstalledAndroidService(deviceId, manager, accessibilityClient, {
           perf,
-          state,
-          {
+          step: {
+            setupState: state,
             skipCtrlProxyDownload,
             verifyCompatibilityWhenSkipping,
             signal: options?.signal,
           },
-        )
+        })
       ) {
         return true;
       }

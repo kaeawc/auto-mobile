@@ -28,7 +28,7 @@ describe("Fast Validation independence from XCTestRunner", () => {
     expect(steps.some((step) => step.name?.includes("forced XCTestRunner"))).toBe(false);
   });
 
-  test("calls the shared XCTestRunner simulator workflow only on label opt-in (#10895)", () => {
+  test("calls the shared XCTestRunner simulator workflow on label opt-in or SDK contract inputs", () => {
     const job = loadWorkflow(WORKFLOW).jobs?.["ios-xctest-runner-simulator-tests"];
     expect(job).toBeDefined();
     expect(job?.uses).toBe(`./${XCTESTRUNNER_WORKFLOW}`);
@@ -43,12 +43,32 @@ describe("Fast Validation independence from XCTestRunner", () => {
       (step) => step.id === "ios_sim_tests_should_run",
     );
     expect(decide?.env?.OPT_IN).toContain("'run-ios-sim'");
-    // The path filter that used to auto-run the lane on src/** is gone.
+    expect(decide?.env?.CONTRACT_INPUTS).toContain("filter-ios-sdk-contract");
+    // The path filter that used to auto-run the lane on src/** is gone (#10895).
     expect(
       loadJobSteps(WORKFLOW, "detect-changes").some(
         (step) => step.id === "filter-native-integration",
       ),
     ).toBe(false);
+  });
+
+  test("auto-runs the lane only for layers the iOS SDK contract suite crosses (#5164)", () => {
+    const filter = loadJobSteps(WORKFLOW, "detect-changes").find(
+      (step) => step.id === "filter-ios-sdk-contract",
+    );
+    const filters = load(String(filter?.with?.filters ?? "")) as { ios_sdk_contract?: string[] };
+    const paths = filters.ios_sdk_contract ?? [];
+    expect(paths).toContain("src/features/observe/ios/**");
+    expect(paths).toContain("ios/auto-mobile-sdk/Sources/**");
+    expect(paths).toContain("ios/control-proxy/Sources/**");
+    // Broad trees would bring back the PR-minute cost #10895 removed.
+    for (const broad of ["src/**", "ios/**", "test/**"]) {
+      expect(paths).not.toContain(broad);
+    }
+    const steps = loadJobSteps(XCTESTRUNNER_WORKFLOW, "ios-xctest-runner-simulator-tests");
+    expect(steps.find((step) => step.name === "Run iOS SDK contract suite")?.run).toContain(
+      "sdk-contract-integration.sh",
+    );
   });
 
   test("runs the XCTestRunner simulator lane nightly on CircleCI, not hosted GitHub (#11010)", () => {

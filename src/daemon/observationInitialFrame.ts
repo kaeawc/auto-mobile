@@ -9,6 +9,7 @@ import type {
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
 } from "../features/observe/android";
+import type { LatestHierarchyOptions } from "../features/observe/android/types";
 import type { ScreenshotCaptureResult } from "../features/observe/ScreenshotBackoffScheduler";
 import type {
   CtrlProxyHierarchy,
@@ -61,8 +62,7 @@ export interface ObservationStreamAndroidClient {
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions & { skipWaitForFresh?: boolean },
   ): Promise<AccessibilityHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
@@ -84,8 +84,7 @@ export interface ObservationStreamIosClient {
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions & { skipWaitForFresh?: boolean },
   ): Promise<CtrlProxyHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
@@ -355,13 +354,10 @@ function deliverInitialObservationFrame(
   // Fresh waiters reuse the broadcast hierarchy, but may still need to send
   // its screenshot if the first target disappeared between the two pushes.
   if (subscriber && !subscriber.replay && frame.hierarchyDelivered) {
-    pushInitialObservationScreenshot(
-      deviceId,
-      frame,
-      frame.captureSequence ?? null,
-      dependencies.streamServer,
+    pushInitialObservationScreenshot(deviceId, frame, frame.captureSequence ?? null, {
+      streamServer: dependencies.streamServer,
       subscriber,
-    );
+    });
     return;
   }
   const sequence = dependencies.streamServer.pushHierarchyUpdate(
@@ -387,13 +383,10 @@ function deliverInitialObservationFrame(
     frame.frameContextGeneration =
       dependencies.streamServer.getCurrentFrameContextGeneration?.(deviceId);
   }
-  pushInitialObservationScreenshot(
-    deviceId,
-    frame,
-    sequence,
-    dependencies.streamServer,
+  pushInitialObservationScreenshot(deviceId, frame, sequence, {
+    streamServer: dependencies.streamServer,
     subscriber,
-  );
+  });
 }
 
 function isInitialObservationFrameCurrent(
@@ -425,8 +418,13 @@ function pushInitialObservationScreenshot(
   deviceId: string,
   frame: InitialObservationFrame,
   sequence: number | null,
-  streamServer: ObservationInitialFrameDependencies["streamServer"],
-  subscriber?: InitialFrameSubscriber,
+  {
+    streamServer,
+    subscriber,
+  }: {
+    streamServer: ObservationInitialFrameDependencies["streamServer"];
+    subscriber?: InitialFrameSubscriber;
+  },
 ): void {
   const screenshot = frame.screenshot;
   if (
@@ -434,13 +432,11 @@ function pushInitialObservationScreenshot(
     (!subscriber || sequence !== null) &&
     (!subscriber || subscriber.replay || !frame.screenshotDelivered)
   ) {
-    const sent = streamServer.pushScreenshotUpdate(
-      deviceId,
-      screenshot.data,
-      screenshot.width,
-      screenshot.height,
-      screenshot.metadata,
-      {
+    const sent = streamServer.pushScreenshotUpdate(deviceId, screenshot.data, {
+      screenWidth: screenshot.width,
+      screenHeight: screenshot.height,
+      metadata: screenshot.metadata,
+      options: {
         ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
         ...canonicalPixelScreenshotOptions(frame.hierarchy),
         initialFrameSubscriber: subscriber
@@ -453,7 +449,7 @@ function pushInitialObservationScreenshot(
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
       },
-    );
+    });
     if (sent) {
       frame.screenshotDelivered = true;
     }
@@ -505,7 +501,7 @@ async function getAndroidInitialHierarchy(
     false,
     INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
     undefined,
-    true,
+    { skipWaitForFresh: true },
   );
   if (hierarchyResponse.hierarchy && hierarchyResponse.fresh) {
     return {
@@ -532,7 +528,7 @@ async function getIosInitialHierarchy(
     false,
     INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
     undefined,
-    true,
+    { skipWaitForFresh: true },
   );
   if (hierarchyResponse.hierarchy && hierarchyResponse.fresh) {
     return {

@@ -199,11 +199,15 @@ describe("daemon exit record", () => {
       actionsNoObserve: true,
     };
     expect(
-      resolveDaemonExitOptions(FLAGLESS_CLIENT, record(options), 0, 100, "build-a").options,
+      resolveDaemonExitOptions(FLAGLESS_CLIENT, record(options), 0, {
+        ttl: 100,
+        buildId: "build-a",
+      }).options,
     ).toEqual(options);
-    expect(resolveDaemonExitOptions(FLAGLESS_CLIENT, undefined, 0, 100, "build-a").options).toEqual(
-      FLAGLESS_CLIENT,
-    );
+    expect(
+      resolveDaemonExitOptions(FLAGLESS_CLIENT, undefined, 0, { ttl: 100, buildId: "build-a" })
+        .options,
+    ).toEqual(FLAGLESS_CLIENT);
   });
 
   test("start sends inherited port and boolean flags to the fake spawner", async () => {
@@ -349,13 +353,10 @@ describe("daemon exit record", () => {
     expect(await internals.inheritExitSettings({ port: 4000 })).toEqual({ ...other, port: 4000 });
     expect(files.files.size).toBe(0);
     expect(
-      resolveDaemonExitOptions(
-        { port: 4000, strictPort: false },
-        record(),
-        0,
-        DAEMON_EXIT_RECORD_TTL_MS,
-        "build-a",
-      ).options.strictPort,
+      resolveDaemonExitOptions({ port: 4000, strictPort: false }, record(), 0, {
+        ttl: DAEMON_EXIT_RECORD_TTL_MS,
+        buildId: "build-a",
+      }).options.strictPort,
     ).toBeUndefined();
   });
 
@@ -525,18 +526,19 @@ describe("daemon exit record", () => {
   });
 
   test("pure resolver reports the outcome and port provenance", () => {
-    expect(resolveDaemonExitOptions({}, undefined, 0, 100, "build-a")).toEqual({
+    expect(resolveDaemonExitOptions({}, undefined, 0, { ttl: 100, buildId: "build-a" })).toEqual({
       options: {},
       outcome: "none",
       inheritedPort: false,
     });
-    expect(resolveDaemonExitOptions({}, record(), 0, 100, "build-a")).toEqual({
+    expect(resolveDaemonExitOptions({}, record(), 0, { ttl: 100, buildId: "build-a" })).toEqual({
       options: OPTIONS,
       outcome: "inherited",
       inheritedPort: true,
     });
     expect(
-      resolveDaemonExitOptions({ port: 4000 }, record(), 0, 100, "build-a").inheritedPort,
+      resolveDaemonExitOptions({ port: 4000 }, record(), 0, { ttl: 100, buildId: "build-a" })
+        .inheritedPort,
     ).toBe(false);
   });
 

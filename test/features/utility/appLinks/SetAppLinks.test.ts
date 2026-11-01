@@ -182,7 +182,7 @@ describe("setAppLinks (#14110)", () => {
     if (!original.found) {
       throw new Error(original.reason);
     }
-    registry.record(device, PKG, original.snapshot, { verification: true }, undefined);
+    registry.record(device, PKG, original.snapshot, { scope: { verification: true } });
     const result = await setAppLinks(device, { appId: PKG, action: "approve" }, deps());
     expect(result.restore?.verification?.some((entry) => !entry.exact)).toBe(true);
     expect(result.note).toBeUndefined();

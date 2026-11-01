@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 
 /** Failures throw, so these results always describe a completed call. */
-const route = z.literal("emulator-grpc");
+const route = z.enum(["emulator-grpc", "host-loopback"]);
 
 export const injectAudioInputResultSchema = z
   .object({
@@ -20,7 +20,8 @@ export const stopAudioInputResultSchema = z
     success: z.literal(true),
     message: z.string(),
     injectionId: z.string(),
-    framesSent: z.number(),
+    framesQueued: z.number(),
+    framesPlayed: z.number(),
     reason: z.enum(["completed", "stopped", "max_duration"]),
   })
   .passthrough();

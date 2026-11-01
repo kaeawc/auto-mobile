@@ -41,14 +41,12 @@ describe("iOS Simulator service transitions (#6693)", () => {
     timer = new FakeTimer();
     timer.enableAutoAdvance();
     store = new FakeDeviceResourceApplicationStore();
-    controller = new DefaultDeviceResourceController(
-      simctl,
+    controller = new DefaultDeviceResourceController(simctl, {
       plist,
       timer,
-      (path) => plist.readDirectory(path),
-      undefined,
-      { applications: store },
-    );
+      readDirectory: (path) => plist.readDirectory(path),
+      extras: { applications: store },
+    });
     request = {
       device: { platform: "ios", name: "Phone", deviceId: udid },
       resources: { wallpaperRendering: "disabled" },
@@ -121,9 +119,11 @@ describe("iOS Simulator service transitions (#6693)", () => {
   test("cancellation during a retry backoff stops before any write", async () => {
     const abort = new AbortController();
     const manual = new FakeTimer();
-    const cancellable = new DefaultDeviceResourceController(simctl, plist, manual, (path) =>
-      plist.readDirectory(path),
-    );
+    const cancellable = new DefaultDeviceResourceController(simctl, {
+      plist,
+      timer: manual,
+      readDirectory: (path) => plist.readDirectory(path),
+    });
     simctl.onCommand = (args) => {
       if (isPrintDisabled(args)) {
         throw new Error("CoreSimulatorService connection interrupted");

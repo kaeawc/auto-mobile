@@ -9,6 +9,8 @@ const recordingEntrySchema = z
     sessionId: z.string().optional(),
     segmented: z.literal(true).optional(),
     warnings: z.array(z.string()).optional(),
+    /** For a recording that asked for audio: whether the file got an audio track. */
+    hasAudioTrack: z.boolean().optional(),
   })
   .passthrough();
 

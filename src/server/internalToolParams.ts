@@ -2,11 +2,16 @@ import {
   deleteInternalToolParams,
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
-  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-  INTERNAL_MCP_SESSION_PARAM,
-  INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_PARAM_NAMES,
 } from "../daemon/wire/constants";
+export {
+  internalMcpSessionId,
+  internalOneShotCli,
+  internalLiveDeadlineKey,
+  internalRequesterSessionUuid,
+  internalMcpRequestDeadlineMs,
+  internalOptionalOneShotCli,
+} from "../daemon/wire/internalToolParams";
 import type { SwipeAtRecordingContext } from "../models/SwipeAtOptions";
 import type { TapAtPlanContext } from "../models/TapAtGeometry";
 
@@ -46,17 +51,6 @@ export function internalExecutionStartTime(args: object): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
-/** The implicit-autolock MCP connection identity (`__mcpSessionId`). */
-export function internalMcpSessionId(args: object): string | undefined {
-  const value = internalParam(args, INTERNAL_MCP_SESSION_PARAM);
-  return typeof value === "string" ? value : undefined;
-}
-
-/** Whether the call is a one-shot `--cli` invocation, which is anonymous (`__oneShotCli`). */
-export function internalOneShotCli(args: object): boolean {
-  return internalParam(args, INTERNAL_ONE_SHOT_CLI_PARAM) === true;
-}
-
 /** The restart-resume reservations a start may bind (`__restartResumeTargets`). */
 export function internalRestartResumeTargets<T>(args: {
   readonly __restartResumeTargets?: T;
@@ -77,12 +71,6 @@ export function adoptRestartResumeTargets<T>(
   targets: T,
 ): void {
   args.__restartResumeTargets ??= targets;
-}
-
-/** The key of the request's live (progress-extended) transport deadline (`__mcpLiveDeadlineKey`). */
-export function internalLiveDeadlineKey(args: object): string | undefined {
-  const value = internalParam(args, INTERNAL_LIVE_DEADLINE_KEY_PARAM);
-  return typeof value === "string" ? value : undefined;
 }
 
 /** Record the session a restart-resume start recovers unless the args already name one. */

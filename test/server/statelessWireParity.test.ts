@@ -174,6 +174,9 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
     "automobile/debugOnly",
     "automobile/deviceResourceBudget",
     "automobile/embeddedSdkOnly",
+    "automobile/hostInventory",
+    "automobile/hostSideState",
+    "automobile/opaquePersistentState",
     "automobile/planOnly",
   ];
 

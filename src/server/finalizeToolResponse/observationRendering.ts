@@ -59,6 +59,8 @@ export function resolveObserveProjection(args?: Record<string, unknown>): "full"
  * because they require projection or provenance merging.
  */
 export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
+  "backend",
+  "fallbackReason",
   "activeWindow",
   "freshness",
   "screenSize",
@@ -445,10 +447,7 @@ function resolveActionObservationDiff(
       shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
     ) {
       ({ observationOut, observationDiff } = emitActionObservationDiff(
-        baseline,
-        rawObservation,
-        sanitized,
-        servedObservation,
+        { baseline, rawObservation, sanitized, servedObservation },
         state,
       ));
     } else {
@@ -466,10 +465,17 @@ function resolveActionObservationDiff(
 }
 
 function emitActionObservationDiff(
-  baseline: ObserveResult,
-  rawObservation: ObserveResult,
-  sanitized: ObserveResult,
-  servedObservation: ObserveResult,
+  {
+    baseline,
+    rawObservation,
+    sanitized,
+    servedObservation,
+  }: {
+    baseline: ObserveResult;
+    rawObservation: ObserveResult;
+    sanitized: ObserveResult;
+    servedObservation: ObserveResult;
+  },
   state: FinalizationState,
 ) {
   const { ctx, payload } = state;

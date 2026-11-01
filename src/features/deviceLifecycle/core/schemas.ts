@@ -20,6 +20,8 @@ import {
   androidProvisionDeviceSpecFields,
   iosProvisionDeviceSpecSchema,
   refineAndroidSpec,
+  watchProvisionDeviceSpecSchema,
+  appleTvProvisionDeviceSpecSchema,
 } from "../../../utils/provisionDeviceSpecSchemas";
 import { NON_EMULATABLE_CAPABILITY_IDS, OEM_PERSONA_IDS } from "../../utility/OemPersonas";
 
@@ -146,49 +148,117 @@ export const startDeviceParametersSchema = z.object({
   enableTools: enableToolsSchemaField,
 });
 
+/**
+ * Accept both the legacy `{ device: {...} }` startDevice payload and the top-level shape.
+ * Top-level fields win so mixed callers can override nested values intentionally.
+ */
+export function mergeLegacyStartDevicePayload(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const parsed = input as Record<string, unknown>;
+  const legacyDevice = parsed.device;
+  if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
+    return input;
+  }
+  return {
+    ...(legacyDevice as Record<string, unknown>),
+    ...parsed,
+  };
+}
+
+/** Cross-field rules shared by startDevice's own parse and its registered input. */
+function refineStartDeviceParameters(
+  value: Pick<
+    z.output<typeof startDeviceParametersSchema>,
+    "cameraPosterQr" | "cameraPosterPath" | "avdName" | "name"
+  > & { platform: string },
+  context: z.RefinementCtx,
+): void {
+  if (value.cameraPosterQr !== undefined && value.cameraPosterPath !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["cameraPosterQr"],
+      message: "cameraPosterQr and cameraPosterPath are mutually exclusive",
+    });
+  }
+  if (value.avdName !== undefined && value.platform !== "android") {
+    context.addIssue({
+      code: "custom",
+      path: ["avdName"],
+      message: "avdName is only supported for Android startDevice requests",
+    });
+  }
+  if (value.avdName !== undefined && value.name !== undefined && value.avdName !== value.name) {
+    context.addIssue({
+      code: "custom",
+      path: ["avdName"],
+      message: "avdName and name must identify the same Android device when both are supplied",
+    });
+  }
+}
+
 export const startDeviceSchema = z.preprocess(
+  mergeLegacyStartDevicePayload,
+  startDeviceParametersSchema.superRefine(refineStartDeviceParameters),
+);
+
+/**
+ * startDevice for an Apple Watch simulator (#14908): an exact UDID and/or exact name only. Every
+ * other startDevice option is Android/iOS-only, so the parse is strict and the handler names the
+ * rejected keys. `sessionUuid` is accepted and ignored here: caller identity comes from routing.
+ */
+export const watchStartDeviceParametersSchema = z
+  .object({
+    platform: z.literal("watchos"),
+    deviceId: z.string().min(1).optional().describe("Apple Watch simulator UDID"),
+    name: z.string().min(1).optional().describe("Exact Apple Watch simulator name"),
+    timeoutMs: startDeviceParametersSchema.shape.timeoutMs.describe("Total boot timeout in ms"),
+    enableTools: enableToolsSchemaField,
+    sessionUuid: z.string().optional(),
+  })
+  .strict();
+
+export const watchStartDeviceSchema = z.preprocess(
   (input) => {
-    if (!input || typeof input !== "object" || Array.isArray(input)) {
-      return input;
+    const merged = mergeLegacyStartDevicePayload(input);
+    if (merged === input || !merged || typeof merged !== "object") {
+      return merged;
     }
-
-    const parsed = input as Record<string, unknown>;
-    const legacyDevice = parsed.device;
-    if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
-      return input;
-    }
-
-    // Accept both the legacy { device: {...} } payload and the new top-level shape.
-    // Top-level fields win so mixed callers can override nested values intentionally.
-    return {
-      ...(legacyDevice as Record<string, unknown>),
-      ...parsed,
-    };
+    // The legacy wrapper was merged in; it is not itself an option.
+    const fields = { ...(merged as Record<string, unknown>) };
+    delete fields.device;
+    return fields;
   },
-  startDeviceParametersSchema.superRefine((value, context) => {
-    if (value.cameraPosterQr !== undefined && value.cameraPosterPath !== undefined) {
+  watchStartDeviceParametersSchema.superRefine((value, context) => {
+    if (value.deviceId === undefined && value.name === undefined) {
       context.addIssue({
         code: "custom",
-        path: ["cameraPosterQr"],
-        message: "cameraPosterQr and cameraPosterPath are mutually exclusive",
-      });
-    }
-    if (value.avdName !== undefined && value.platform !== "android") {
-      context.addIssue({
-        code: "custom",
-        path: ["avdName"],
-        message: "avdName is only supported for Android startDevice requests",
-      });
-    }
-    if (value.avdName !== undefined && value.name !== undefined && value.avdName !== value.name) {
-      context.addIssue({
-        code: "custom",
-        path: ["avdName"],
-        message: "avdName and name must identify the same Android device when both are supplied",
+        path: ["deviceId"],
+        message: "A watchOS startDevice request needs deviceId or name",
       });
     }
   }),
 );
+
+export type WatchStartDeviceArgs = z.output<typeof watchStartDeviceParametersSchema>;
+
+/**
+ * startDevice's registered input: the Android/iOS request with `platform` widened to "watchos".
+ * A watch request's options are then checked strictly by its handler, which names any it refuses.
+ */
+export const startDeviceRegistrationSchema = z.preprocess(
+  mergeLegacyStartDevicePayload,
+  startDeviceParametersSchema
+    .extend({ platform: z.enum(["android", "ios", "watchos", "tvos"]) })
+    .superRefine(refineStartDeviceParameters),
+);
+
+/** A startDevice request as registered, before the platform's own parse. */
+export type StartDeviceRequest = z.output<typeof startDeviceRegistrationSchema>;
+
+/** A registered startDevice request that names an Apple Watch simulator. */
+export type WatchStartDeviceRequest = StartDeviceRequest & { platform: "watchos" };
 
 export const devicePreparationTimeoutSchema = z
   .object({
@@ -327,80 +397,233 @@ export const getAppleSchema = devicePreparationTimeoutSchema
     }
   });
 
-export const provisionDeviceSchema = z
+const androidProvisionDevice = z
   .object({
-    resources: deviceResourceConfigurationSchema
+    platform: z.literal("android"),
+    name: z.string().min(1).describe("Exact AVD name"),
+    spec: androidProvisionDeviceRequestSpecSchema,
+  })
+  .strict();
+
+const iosProvisionDevice = z
+  .object({
+    platform: z.literal("ios"),
+    name: z.string().min(1).describe("Exact simulator name"),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Exact simulator UDID; prevents same-named simulator selection"),
+    spec: iosProvisionDeviceSpecSchema,
+  })
+  .strict();
+
+/** An exact Apple Watch simulator (#15882): adopted when it matches, else created with simctl. */
+const watchProvisionDevice = z
+  .object({
+    platform: z.literal("watchos"),
+    name: z.string().min(1).describe("Exact watch simulator name"),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Exact watch simulator UDID; a UDID that names no watch is refused, not created"),
+    spec: watchProvisionDeviceSpecSchema,
+  })
+  .strict();
+
+/** An exact Apple TV simulator (#15889): adopted when it matches, else created with simctl. */
+const appleTvProvisionDevice = z
+  .object({
+    platform: z.literal("tvos"),
+    name: z.string().min(1).describe("Exact Apple TV simulator name"),
+    deviceId: z
+      .string()
+      .min(1)
       .optional()
       .describe(
-        "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+        "Exact Apple TV simulator UDID; a UDID that names no Apple TV is refused, not created",
       ),
-    device: withCanonicalDiscriminatedUnionJsonSchema(
-      z.discriminatedUnion("platform", [
-        z
-          .object({
-            platform: z.literal("android"),
-            name: z.string().min(1).describe("Exact AVD name"),
-            spec: androidProvisionDeviceRequestSpecSchema,
-          })
-          .strict(),
-        z
-          .object({
-            platform: z.literal("ios"),
-            name: z.string().min(1).describe("Exact simulator name"),
-            deviceId: z
-              .string()
-              .min(1)
-              .optional()
-              .describe("Exact simulator UDID; prevents same-named simulator selection"),
-            spec: iosProvisionDeviceSpecSchema,
-          })
-          .strict(),
-      ]),
-    ),
-    boot: z
-      .boolean()
-      .default(true)
-      .optional()
-      .describe("Boot the resolved device after creation or adoption"),
-    readiness: z
-      .enum(["automation", "none"])
-      .default("automation")
-      .optional()
-      .describe("Whether to wait for the AutoMobile automation runner after device boot"),
-    timeoutMs: z
-      .number()
-      .int()
-      .positive()
-      .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
-      .optional()
-      .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
-    // See getAndroidSchema.enableTools (#6869). Requires boot=true: the
-    // no-boot branch returns before a session exists (#6886 review).
-    enableTools: enableToolsSchemaField.describe(
-      `${enableToolsSchemaField.description} Requires boot=true.`,
-    ),
+    spec: appleTvProvisionDeviceSpecSchema,
   })
-  .strict()
-  .refine((args) => !args.resources || args.boot !== false, {
-    path: ["resources"],
-    message: "Resource configuration requires boot=true.",
-  })
+  .strict();
+
+const provisionDeviceResourcesField = deviceResourceConfigurationSchema
+  .optional()
+  .describe(
+    "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+  );
+
+/** provisionDevice's options after `device`, in their advertised order. */
+const provisionDeviceOptionFields = {
+  boot: z
+    .boolean()
+    .default(true)
+    .optional()
+    .describe("Boot the resolved device after creation or adoption"),
+  readiness: z
+    .enum(["automation", "none"])
+    .default("automation")
+    .optional()
+    .describe("Whether to wait for the AutoMobile automation runner after device boot"),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
+    .optional()
+    .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
+  // See getAndroidSchema.enableTools (#6869). Requires boot=true: the
+  // no-boot branch returns before a session exists (#6886 review).
+  enableTools: enableToolsSchemaField.describe(
+    `${enableToolsSchemaField.description} Requires boot=true.`,
+  ),
+};
+
+interface ProvisionDeviceRefinable {
+  resources?: unknown;
+  enableTools?: unknown;
+  boot?: boolean;
+  readiness?: "automation" | "none";
+  device: { platform: string; spec: object };
+}
+
+/** The cross-field rules every provisionDevice request obeys, whatever its platform. */
+function refineProvisionDeviceOptions(
+  args: ProvisionDeviceRefinable,
+  context: z.RefinementCtx,
+): void {
+  if (args.resources && args.boot === false) {
+    context.addIssue({
+      code: "custom",
+      path: ["resources"],
+      message: "Resource configuration requires boot=true.",
+    });
+  }
   // A boot=false provision returns before any session is minted, so there is
   // nothing to grant the declared capabilities against — accepting the
   // request would discard it silently (#6886 review). Reject it up front,
   // like the resources constraint above.
-  .refine((args) => !args.enableTools || args.boot !== false, {
-    path: ["enableTools"],
-    message: "Capability declaration requires boot=true; boot=false mints no session.",
-  })
+  if (args.enableTools && args.boot === false) {
+    context.addIssue({
+      code: "custom",
+      path: ["enableTools"],
+      message: "Capability declaration requires boot=true; boot=false mints no session.",
+    });
+  }
   // A manufacturer profile is applied to the bound session's ready device (#14058).
-  .refine(
-    (args) =>
-      args.device.platform !== "android" ||
-      !args.device.spec.deviceProfile ||
-      (args.boot !== false && args.readiness !== "none"),
-    {
+  if (
+    args.device.platform === "android" &&
+    Reflect.get(args.device.spec, "deviceProfile") &&
+    (args.boot === false || args.readiness === "none")
+  ) {
+    context.addIssue({
+      code: "custom",
       path: ["device", "spec", "deviceProfile"],
       message: "A manufacturer profile requires boot=true and readiness=automation.",
-    },
-  );
+    });
+  }
+}
+
+export const provisionDeviceSchema = z
+  .object({
+    resources: provisionDeviceResourcesField,
+    device: withCanonicalDiscriminatedUnionJsonSchema(
+      z.discriminatedUnion("platform", [androidProvisionDevice, iosProvisionDevice]),
+    ),
+    ...provisionDeviceOptionFields,
+  })
+  .strict()
+  .superRefine(refineProvisionDeviceOptions);
+
+/** The options a watch cannot honour: resources and tool grants need the automation runner. */
+function refineWatchProvisionOptions(
+  args: ProvisionDeviceRefinable,
+  context: z.RefinementCtx,
+): void {
+  if (args.device.platform !== "watchos") {
+    return;
+  }
+  for (const field of ["resources", "enableTools"] as const) {
+    if (args[field] !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `${field} is not supported on watchOS.`,
+      });
+    }
+  }
+  if (args.readiness === "automation") {
+    context.addIssue({
+      code: "custom",
+      path: ["readiness"],
+      message: 'watchOS has no automation runner; pass readiness "none" or omit it.',
+    });
+  }
+}
+
+/** The options an Apple TV cannot honour: resources and tool grants need the automation runner. */
+function refineAppleTvProvisionOptions(
+  args: ProvisionDeviceRefinable,
+  context: z.RefinementCtx,
+): void {
+  if (args.device.platform !== "tvos") {
+    return;
+  }
+  for (const field of ["resources", "enableTools"] as const) {
+    if (args[field] !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `${field} is not supported on tvOS.`,
+      });
+    }
+  }
+  if (args.readiness === "automation") {
+    context.addIssue({
+      code: "custom",
+      path: ["readiness"],
+      message: 'tvOS has no automation runner; pass readiness "none" or omit it.',
+    });
+  }
+}
+
+/**
+ * provisionDevice as registered: the Android and iOS request, or an exact Apple Watch or Apple TV
+ * simulator. It stays a plain object so the ingress can see which keys it declares. Its
+ * `readiness` has no default, so a watchOS or tvOS request that omits it means "none"; the Android and iOS
+ * handler re-parses its request with {@link provisionDeviceSchema}, which applies "automation".
+ */
+export const provisionDeviceRegistrationSchema = z
+  .object({
+    resources: provisionDeviceResourcesField,
+    device: withCanonicalDiscriminatedUnionJsonSchema(
+      z.discriminatedUnion("platform", [
+        androidProvisionDevice,
+        iosProvisionDevice,
+        watchProvisionDevice,
+        appleTvProvisionDevice,
+      ]),
+    ),
+    ...provisionDeviceOptionFields,
+    readiness: z
+      .enum(["automation", "none"])
+      .optional()
+      .describe(
+        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS and tvOS have no runner and take only "none" (their default)',
+      ),
+  })
+  .strict()
+  .superRefine(refineProvisionDeviceOptions)
+  .superRefine(refineWatchProvisionOptions)
+  .superRefine(refineAppleTvProvisionOptions);
+
+/** A registered provisionDevice request that names an Apple Watch simulator. */
+export type WatchProvisionDeviceRequest = z.output<typeof provisionDeviceRegistrationSchema> & {
+  device: z.output<typeof watchProvisionDevice>;
+};
+
+/** A registered provisionDevice request naming an Apple TV simulator. */
+export type AppleTvProvisionDeviceRequest = z.output<typeof provisionDeviceRegistrationSchema> & {
+  device: z.output<typeof appleTvProvisionDevice>;
+};

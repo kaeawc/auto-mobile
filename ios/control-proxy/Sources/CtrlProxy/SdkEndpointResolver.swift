@@ -113,7 +113,9 @@ actor SdkEndpointResolver {
     /// probes, and reports it as `.unavailable` once for the bundle it was started for.
     private func unavailable(
         _ message: String, startedAt generations: (discovery: Int, bundle: Int)
-    ) -> SdkEndpointError {
+    )
+        -> SdkEndpointError
+    {
         if generations.discovery == discoveryGeneration {
             negativeUntil = now() + negativeTTL
         }
@@ -217,7 +219,12 @@ actor SdkEndpointResolver {
         }
         if let error = SdkEndpointError.wrongSimulatorResponse(data: result.0, response: result.1) { throw error }
         guard let response = result.1 as? HTTPURLResponse, response.statusCode == 200 else { return nil }
-        return try? JSONDecoder().decode(SdkHierarchyServerInfo.self, from: result.0)
+        do {
+            return try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: result.0)
+        } catch {
+            warning("SDK health decode failed; treating endpoint as unavailable: \(error)")
+            return nil
+        }
     }
 
     nonisolated static let identityHeader = "X-AutoMobile-Simulator-Udid"

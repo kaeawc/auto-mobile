@@ -283,7 +283,7 @@ for (const inventoryKind of ["single", "empty", "one panel"] as const) {
                 },
               }),
         });
-        const inventory = new CachingDisplayInventoryProvider(source, source, timer);
+        const inventory = new CachingDisplayInventoryProvider(source, source, { timer });
         const single = { ...device, displays: undefined };
         await pool.initializeWithDevices([single]);
         const handler = createSetActiveDeviceHandler({
@@ -414,12 +414,7 @@ arranged(
     const response = await ToolRegistry.callInternal(
       "swipeOn",
       { direction: "up", lookFor },
-      undefined,
-      undefined,
-      {
-        targetDevice: target,
-        sessionUuid: "one",
-      },
+      { targetDevice: target, sessionUuid: "one" },
     );
     expect(readToolEnvelopePayload(response)?.payload?.success).toBe(true);
   },
@@ -624,10 +619,7 @@ for (const acceptsDisplay of [true, false]) {
         expect(await tools.getTool(name)!.handler({})).toBe(response);
         for (let dispatch = 0; dispatch < 2; dispatch++) {
           expect(
-            await tools.callInternal(name, {}, undefined, undefined, {
-              targetDevice: device,
-              sessionUuid: "one",
-            }),
+            await tools.callInternal(name, {}, { targetDevice: device, sessionUuid: "one" }),
           ).toBe(response);
         }
       }
@@ -657,10 +649,7 @@ for (const schema of [
       expect(tools.getTool("plain")!.deviceAwareHandler).toBe(pinnedHandler);
       expect(await tools.getTool("plain")!.handler({})).toBe(response);
       expect(
-        await tools.callInternal("plain", {}, undefined, undefined, {
-          targetDevice: device,
-          sessionUuid: "one",
-        }),
+        await tools.callInternal("plain", {}, { targetDevice: device, sessionUuid: "one" }),
       ).toBe(response);
     },
   );
@@ -686,7 +675,7 @@ for (const targetDevice of [undefined, device]) {
         },
       );
       tools.registerDeviceAware("outer", "nested caller", z.object({}), async () =>
-        tools.callInternal("inner", {}, undefined, undefined, { targetDevice }),
+        tools.callInternal("inner", {}, { targetDevice }),
       );
       expect(
         readToolEnvelopePayload(await tools.getTool("outer")!.handler({}))?.payload?.display,
@@ -904,8 +893,6 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"] as const) {
               ...args,
               ...(display === undefined ? {} : { display }),
             },
-            undefined,
-            undefined,
             { targetDevice: device, sessionUuid: "one" },
           );
           const payload = readToolEnvelopePayload(response)?.payload!;
@@ -1045,10 +1032,7 @@ arranged("another session's pin cannot select this device", async () => {
   );
   expect(
     readToolEnvelopePayload(
-      await tools.callInternal("observe", {}, undefined, undefined, {
-        targetDevice: device,
-        sessionUuid: "two",
-      }),
+      await tools.callInternal("observe", {}, { targetDevice: device, sessionUuid: "two" }),
     )?.payload?.success,
   ).toBe(true);
 });
@@ -1161,16 +1145,10 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
         expect(await returned).toBe(response);
         expect(
           await runWithSelectedDisplayPin({ pin: "outside", inventory: device.displays }, () =>
-            tools.callInternal(
-              name,
-              scenario === "no session" ? {} : { sessionUuid: "one" },
-              undefined,
-              undefined,
-              {
-                targetDevice:
-                  scenario === "different device" ? { ...device, deviceId: "other" } : device,
-              },
-            ),
+            tools.callInternal(name, scenario === "no session" ? {} : { sessionUuid: "one" }, {
+              targetDevice:
+                scenario === "different device" ? { ...device, deviceId: "other" } : device,
+            }),
           ),
         ).toBe(response);
         expect(reads).toBe(0);
@@ -1481,7 +1459,7 @@ for (const outcome of ["throws", "no inventory", "degraded", "degraded panels"] 
     const inventory =
       outcome === "no inventory"
         ? unreadableInventoryProvider()
-        : new CachingDisplayInventoryProvider(source, source, timer);
+        : new CachingDisplayInventoryProvider(source, source, { timer });
     const handler = createSetActiveDeviceHandler({
       displayInventory: inventory,
       resumeCtrlProxy: async () => {},
@@ -1547,10 +1525,11 @@ arranged("registered tapAny missing pin reports typed details without dispatch",
     },
   });
   registerInteractionTools(interactionDeps);
-  const response = await ToolRegistry.callInternal("tapAny", {}, undefined, undefined, {
-    targetDevice: device,
-    sessionUuid: "one",
-  });
+  const response = await ToolRegistry.callInternal(
+    "tapAny",
+    {},
+    { targetDevice: device, sessionUuid: "one" },
+  );
   expect(toolResponseSchema.parse(response).isError).toBe(true);
   expect(readToolEnvelopePayload(response)?.payload).toMatchObject({
     success: false,

@@ -69,8 +69,14 @@ describe("boot core budget (#15476)", () => {
 describe("resolveBootCapacityLimits cores per device", () => {
   const host = { totalMemoryBytes: 64 * GIB, cpuCount: 16 };
   test("defaults to two and honours an explicit count, never below one", () => {
-    expect(resolveBootCapacityLimits({}, "X", host, 4 * GIB).maxBooted).toBe(8);
-    expect(resolveBootCapacityLimits({}, "X", host, 4 * GIB, 4).maxBooted).toBe(4);
-    expect(resolveBootCapacityLimits({}, "X", host, 1 * GIB, 0).maxBooted).toBe(16);
+    expect(resolveBootCapacityLimits({}, "X", host, { perDeviceBytes: 4 * GIB }).maxBooted).toBe(8);
+    expect(
+      resolveBootCapacityLimits({}, "X", host, { perDeviceBytes: 4 * GIB, coresPerDevice: 4 })
+        .maxBooted,
+    ).toBe(4);
+    expect(
+      resolveBootCapacityLimits({}, "X", host, { perDeviceBytes: 1 * GIB, coresPerDevice: 0 })
+        .maxBooted,
+    ).toBe(16);
   });
 });

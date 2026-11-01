@@ -464,9 +464,11 @@ class OwnershipWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, reason);
+        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
+          reason,
+        });
       },
-      timer,
+      { timer },
     );
     registerDerivedLabelSessionReleaseCascade(manager, pool);
     manager.onSessionCreated((session) => {
@@ -474,7 +476,7 @@ class OwnershipWorld {
         this.liveIncarnations.add(session.sessionId);
       }
     });
-    manager.onSessionRelease((sessionId, deviceId, reason, _snapshot, options) => {
+    manager.onSessionRelease((sessionId, deviceId, reason, options) => {
       if (life.dead || options?.upgradeOnly) {
         return;
       }
@@ -1013,14 +1015,9 @@ class OwnershipWorld {
       : undefined;
     this.log(`c${client.index} read ${sessionId}`);
     this.launch(`c${client.index} read ${sessionId}`, async () => {
-      const session = await this.manager.getOrCreateSession(
-        sessionId,
-        undefined,
-        undefined,
-        undefined,
-        false,
-        "read-only",
-      );
+      const session = await this.manager.getOrCreateSession(sessionId, undefined, undefined, {
+        access: "read-only",
+      });
       const ranAlone = alone && this.launches === launchesAtStart && this.timer.now() === startedAt;
       if (
         ranAlone &&
@@ -1190,14 +1187,9 @@ class OwnershipWorld {
     this.log(`c${client.index} ${label} as ${requester ?? "(none)"}`);
     this.launch(`c${client.index} ${label}`, async () => {
       if (requester) {
-        await this.manager.getOrCreateSession(
-          requester,
-          undefined,
-          undefined,
-          undefined,
-          false,
-          "read-only",
-        );
+        await this.manager.getOrCreateSession(requester, undefined, undefined, {
+          access: "read-only",
+        });
       }
       const ranAlone = alone && this.launches === launchesAtStart && this.timer.now() === startedAt;
       if (!ranAlone) {
@@ -1322,11 +1314,9 @@ class OwnershipWorld {
         return;
       } else if (liveSession) {
         await releaseSessionAndDevice(
-          this.manager,
-          this.pool,
+          { manager: this.manager, pool: this.pool },
           device.deviceId,
           liveSession,
-          undefined,
           {
             // cancelAndReleaseSession frees the device the release returns, which is the session's
             // assigned device, not necessarily the one that disconnected (a rebind may be in flight).
@@ -1598,11 +1588,12 @@ class OwnershipWorld {
           return;
         }
         await releaseSessionAndDevice(
-          this.manager,
-          this.pool,
+          { manager: this.manager, pool: this.pool },
           session.assignedDevice,
           sessionId,
-          PLAN_AUTO_RELEASE_REASON,
+          {
+            reason: PLAN_AUTO_RELEASE_REASON,
+          },
         );
       });
     }
@@ -1617,12 +1608,9 @@ class OwnershipWorld {
     const old = this.daemon;
     this.log("daemon restart");
     for (const session of old.manager.getAllSessions()) {
-      await this.persistence.markReleased(
-        session.sessionId,
-        "expired",
-        this.timer.now(),
-        "daemon-restart",
-      );
+      await this.persistence.markReleased(session.sessionId, "expired", this.timer.now(), {
+        reason: "daemon-restart",
+      });
     }
     await old.monitor.stop();
     old.manager.stopCleanupTimer();

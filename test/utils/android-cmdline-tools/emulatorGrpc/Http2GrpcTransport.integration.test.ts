@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import http2 from "node:http2";
+import { once } from "node:events";
 import type { AddressInfo } from "node:net";
+import { setImmediate } from "node:timers/promises";
 import {
   EmulatorAudioClient,
   INJECT_AUDIO_METHOD,
@@ -17,6 +19,7 @@ import {
   GrpcFrameDecoder,
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/grpcFraming";
 import { Http2GrpcTransport } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/grpcTransport";
+import { Http2GrpcCall } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/Http2GrpcCall";
 import { analyzeLevels, sineTone } from "../../../../src/utils/audio/pcm";
 
 /**
@@ -27,6 +30,7 @@ interface FakeEmulator {
   address: string;
   injectedFrames: number[];
   micBusy: boolean;
+  rejectAudio: boolean;
   close(): Promise<void>;
 }
 
@@ -89,15 +93,29 @@ function handleStream(stream: http2.ServerHttp2Stream): void {
 
 async function startFakeEmulator(): Promise<FakeEmulator> {
   const server = http2.createServer();
+  const sessions = new Set<http2.ServerHttp2Session>();
+  server.on("session", (session) => {
+    sessions.add(session);
+    session.on("close", () => sessions.delete(session));
+  });
   const emulator: FakeEmulator = {
     address: "",
     injectedFrames: [],
     micBusy: false,
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    rejectAudio: false,
+    close: () => {
+      // A rejected request can still be writable; tear down its owned test connection too.
+      for (const session of sessions) {
+        session.destroy();
+      }
+      return new Promise((resolve) => server.close(() => resolve()));
+    },
   };
   server.on("stream", (stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders) => {
     if (headers.authorization !== `Bearer ${TOKEN}`) {
       respondStatus(stream, 16, "bad token");
+    } else if (emulator.rejectAudio) {
+      respondStatus(stream, 3, "invalid JWT");
     } else if (headers[":path"] === INJECT_AUDIO_METHOD) {
       handleInject(stream, emulator);
     } else if (headers[":path"] === STREAM_AUDIO_METHOD) {
@@ -141,15 +159,49 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
   test("injectAudio streams every frame and completes with OK", async () => {
     const { emulator, client } = await connect();
     const injection = await client.injectAudio(sineTone({ durationMs: 100, sampleRate: 16_000 }));
-    expect(await injection.done).toEqual({ framesSent: 1_600, reason: "completed" });
+    expect(await injection.done).toMatchObject({ framesQueued: 1_600, reason: "completed" });
     expect(emulator.injectedFrames).toEqual([1_600]);
+  });
+
+  test("trailers-only rejection leaves status pending while the request is open", async () => {
+    const { emulator, client } = await connect();
+    emulator.rejectAudio = true;
+    const session = http2.connect(`http://${emulator.address}`);
+    const stream = session.request({
+      ":method": "POST",
+      ":path": STREAM_AUDIO_METHOD,
+      "content-type": "application/grpc",
+      authorization: `Bearer ${TOKEN}`,
+    });
+    const call = new Http2GrpcCall(stream);
+    try {
+      const response = once(stream, "response");
+      const ended = once(stream, "end");
+      const [headers] = await response;
+      expect(headers["grpc-status"]).toBe("3");
+      await ended;
+      expect(stream.writableEnded).toBe(false);
+      // Response EOF plus an event-loop turn is a bounded signal, without a timing sleep.
+      expect(await Promise.race([call.status(), setImmediate("pending")])).toBe("pending");
+      expect(await call.responseHeaders()).toEqual({ code: 3, message: "invalid JWT" });
+      call.end();
+      expect(await call.status()).toEqual({ code: 3, message: "invalid JWT" });
+      await expect(client.injectAudio(sineTone({ durationMs: 40 }))).rejects.toMatchObject({
+        code: "audio_grpc_auth_rejected",
+        grpcStatus: { code: 3, message: "invalid JWT" },
+      });
+    } finally {
+      call.cancel();
+      session.destroy();
+    }
   });
 
   test("a busy microphone surfaces as audio_injection_busy", async () => {
     const { emulator, client } = await connect();
     emulator.micBusy = true;
-    const injection = await client.injectAudio(sineTone({ durationMs: 100 }));
-    await expect(injection.done).rejects.toMatchObject({ code: "audio_injection_busy" });
+    await expect(client.injectAudio(sineTone({ durationMs: 100 }))).rejects.toMatchObject({
+      code: "audio_injection_busy",
+    });
   });
 
   test("captureAudio collects the requested duration and cancels the open stream", async () => {
@@ -162,8 +214,9 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
 
   test("a rejected token is a typed gRPC failure, not a hang", async () => {
     const { client } = await connect("wrong");
-    const injection = await client.injectAudio(sineTone({ durationMs: 40 }));
-    await expect(injection.done).rejects.toMatchObject({ code: "audio_grpc_failed" });
+    await expect(client.injectAudio(sineTone({ durationMs: 40 }))).rejects.toMatchObject({
+      code: "audio_grpc_auth_rejected",
+    });
   });
 
   test("an unreachable endpoint is audio_injection_unsupported", async () => {
@@ -175,7 +228,8 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
       createGrpcAuthorizer({ kind: "token", token: TOKEN }, noFs),
     );
     cleanups.push(() => client.close());
-    const injection = await client.injectAudio(sineTone({ durationMs: 40 }));
-    await expect(injection.done).rejects.toMatchObject({ code: "audio_injection_unsupported" });
+    await expect(client.injectAudio(sineTone({ durationMs: 40 }))).rejects.toMatchObject({
+      code: "audio_injection_unsupported",
+    });
   });
 });

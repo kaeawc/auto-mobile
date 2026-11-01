@@ -53,7 +53,7 @@ describe("structural repository characterization", () => {
       scrollable: true,
     },
   ])("UI element creation and reuse %j", async (element) => {
-    const repo = new NavigationRepository(db);
+    const repo = new NavigationRepository({ db });
     await repo.getOrCreateApp("app");
     const first = await repo.getOrCreateUIElement("app", element, 100);
     const second = await repo.getOrCreateUIElement("app", element, 200);
@@ -88,7 +88,7 @@ describe("structural repository characterization", () => {
     },
   };
   test("video updates preserve omitted fields and serialize metadata", async () => {
-    const repo = new VideoRecordingRepository(db);
+    const repo = new VideoRecordingRepository({ db });
     await repo.insertRecording(recording);
     const update: Partial<VideoRecordingRecord> = {
       ...recording,
@@ -118,7 +118,7 @@ describe("structural repository characterization", () => {
   test.each([undefined, false, true, null])(
     "execution metadata and child records with CI %j",
     async (isCi) => {
-      const repo = new TestExecutionRepository(db, timer);
+      const repo = new TestExecutionRepository({ db, timer });
       const record = {
         testClass: "Class",
         testMethod: "method",
@@ -190,7 +190,7 @@ describe("structural repository characterization", () => {
   );
 
   test("execution defaults, empty children and timing filters", async () => {
-    const repo = new TestExecutionRepository(db, timer);
+    const repo = new TestExecutionRepository({ db, timer });
     await repo.recordExecution({
       testClass: "C",
       testMethod: "m",
@@ -213,7 +213,7 @@ describe("structural repository characterization", () => {
   });
 
   test.each([false, true])("ANR optional values and unified failures %j", async (full) => {
-    const repo = new FailureEventRepository(db, timer);
+    const repo = new FailureEventRepository({ db, timer });
     const id = await repo.saveAnr({
       deviceId: "device",
       packageName: "app",
@@ -268,12 +268,12 @@ describe("structural repository characterization", () => {
   test("failure occurrence defaults, optional metadata, merge and notification cursors", async () => {
     const barrier = new FakeDbWriteBarrier();
     barrier.beginDrain();
-    const repo = new FailureAnalyticsRepository(
+    const repo = new FailureAnalyticsRepository({
       db,
       timer,
-      () => barrier,
-      new FakeIdGenerator(["o1", "g1", "o2", "g2", "capture"]),
-    );
+      getBarrier: () => barrier,
+      idGenerator: new FakeIdGenerator(["o1", "g1", "o2", "g2", "capture"]),
+    });
     const base: RecordFailureInput = {
       type: "tool_failure",
       signature: "sig",

@@ -108,15 +108,17 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
       return undefined;
     }
 
-    return this.buildPredictions(interactables, actionableEdges, navGraph, currentScreen, appId);
+    return this.buildPredictions(interactables, actionableEdges, navGraph, {
+      currentScreen,
+      appId,
+    });
   }
 
   private async buildPredictions(
     interactables: InteractableElement[],
     actionableEdges: NavigationEdge[],
     navGraph: PredictionNavGraph,
-    currentScreen: string,
-    appId: string | null,
+    { currentScreen, appId }: { currentScreen: string; appId: string | null },
   ): Promise<Predictions | undefined> {
     const likelyActions: PredictedAction[] = [];
     const interactableElements: InteractablePrediction[] = [];

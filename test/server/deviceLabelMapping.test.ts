@@ -184,7 +184,9 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
       );
       try {
         expect(
-          await registerDeviceLabelMap("base", ["A"], undefined, { keepScreenAwake: false }),
+          await registerDeviceLabelMap("base", ["A"], undefined, {
+            sessionOptions: { keepScreenAwake: false },
+          }),
         ).toEqual({ A: "base" });
         expect(getDeviceLabelMap("base")).toEqual({ A: "base" });
         expect(setup).toHaveBeenCalledTimes(1);
@@ -227,7 +229,9 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
       const releaseDevice = spyOn(pool, "releaseDevice");
       try {
         const error = await registerDeviceLabelMap("base", ["A", "B", "C", "D"], undefined, {
-          keepScreenAwake: false,
+          sessionOptions: {
+            keepScreenAwake: false,
+          },
         }).then(
           () => undefined,
           (error: unknown) => error,

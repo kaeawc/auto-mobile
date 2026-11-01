@@ -39,6 +39,10 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case magicTapResult = "magic_tap_result"
     case accessibilityAuditResult = "accessibility_audit_result"
     case sdkTriggerResult = "sdk_trigger_result"
+    case sdkObservationResult = "sdk_observation_result"
+    case sdkActionResult = "sdk_action_result"
+    case sdkWebSnapshotResult = "sdk_web_snapshot_result"
+    case sdkWebActionResult = "sdk_web_action_result"
     case voiceOverStateResult = "voiceover_state_result"
     case voiceOverSetResult = "voiceover_set_result"
     case connected

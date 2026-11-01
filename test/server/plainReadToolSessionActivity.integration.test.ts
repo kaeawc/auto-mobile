@@ -43,8 +43,12 @@ describe("plain tool read/control session activity (#11107)", () => {
     ToolRegistry.clearTools();
     const schema = z.object({ sessionUuid: z.string().optional(), action: z.string().optional() });
     const handler = async () => ({ content: [{ type: "text" as const, text: "ok" }] });
-    ToolRegistry.register("plainRead", "read", schema, handler, { readOnly: true });
-    ToolRegistry.register("plainMixed", "mixed", schema, handler, {
+    ToolRegistry.register("plainRead", "read", schema, {
+      handler,
+      readOnly: true,
+    });
+    ToolRegistry.register("plainMixed", "mixed", schema, {
+      handler,
       readOnly: (args: { action?: string }) => args.action === "status",
     });
     ToolRegistry.register("plainControl", "control", schema, handler);

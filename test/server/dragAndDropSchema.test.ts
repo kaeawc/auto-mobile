@@ -125,9 +125,7 @@ test("handler forwards both complete endpoints after schema parsing", async () =
     const response = await dragAndDropHandler(
       { name: "fake", deviceId: "fake-drag-handler", platform: "android" },
       dragAndDropSchema.parse(scoped),
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject(scoped);

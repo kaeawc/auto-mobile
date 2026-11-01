@@ -60,10 +60,14 @@ describe("RestoreSnapshot", () => {
         avdName: string,
         timeoutMs?: number,
         childProcess?: null,
-        targetDeviceId?: string,
-        _signal?: AbortSignal,
-        options?: { skipWakeAndUnlock?: boolean },
+        wait?: {
+          targetDeviceId?: string;
+          signal?: AbortSignal;
+          options?: { skipWakeAndUnlock?: boolean };
+        },
       ) => {
+        const targetDeviceId = wait?.targetDeviceId;
+        const options = wait?.options;
         emulatorReadinessCalls.push({ avdName, timeoutMs, childProcess, targetDeviceId, options });
         return device;
       },

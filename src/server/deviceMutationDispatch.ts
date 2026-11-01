@@ -8,9 +8,15 @@ export function invokeRecordedInternalTool(
   tool: RegisteredTool,
   args: Record<string, unknown>,
   progress: ProgressCallback | undefined,
-  signal: AbortSignal | undefined,
-  targetDevice: BootedDevice | undefined,
-  mutationRecording: DeviceMutationRecording,
+  {
+    signal,
+    targetDevice,
+    mutationRecording,
+  }: {
+    signal?: AbortSignal;
+    targetDevice: BootedDevice | undefined;
+    mutationRecording: DeviceMutationRecording;
+  },
 ): Promise<unknown> {
   const markedArgs = markInternalToolCall(args);
   if (targetDevice && tool.deviceAwareHandler) {

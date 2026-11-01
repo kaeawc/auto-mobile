@@ -129,14 +129,11 @@ describe("InputText", () => {
     timer.enableAutoAdvance();
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
-    const inputText = new InputText(
-      androidDevice,
-      new FakeAdbClientFactory(),
-      undefined,
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), {
       timer,
-      undefined,
-      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
-    );
+      observeScreen: observe,
+      awaitIdle: new FakeAwaitIdle(),
+    });
 
     await expect(inputText.execute("hello", {}, { signal: controller.signal })).rejects.toBe(
       deviceLoss,
@@ -150,14 +147,11 @@ describe("InputText", () => {
     timer.enableAutoAdvance();
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
-    const inputText = new InputText(
-      androidDevice,
-      new FakeAdbClientFactory(),
-      undefined,
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), {
       timer,
-      undefined,
-      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
-    );
+      observeScreen: observe,
+      awaitIdle: new FakeAwaitIdle(),
+    });
     observe.enableAutoVaryHierarchy();
 
     await inputText.execute("hello", {}, { signal: controller.signal });
@@ -178,12 +172,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "@Jason Pearson",
-      undefined,
-      false,
-      "eventLast",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("@Jason Pearson", {
+      dismissKeyboard: false,
+      mode: "eventLast",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventLast");
@@ -201,12 +193,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "abc def  ",
-      undefined,
-      false,
-      "eventLast",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("abc def  ", {
+      dismissKeyboard: false,
+      mode: "eventLast",
+    });
 
     expect(result.success).toBe(true);
     expect(setTextCalls).toEqual([
@@ -223,12 +213,10 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "HellO",
-      undefined,
-      false,
-      "eventLast",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("HellO", {
+      dismissKeyboard: false,
+      mode: "eventLast",
+    });
 
     expect(result.success).toBe(true);
     expect(inputCommands(factory)).toEqual([
@@ -247,12 +235,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "HellO",
-      undefined,
-      false,
-      "eventLast",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("HellO", {
+      dismissKeyboard: false,
+      mode: "eventLast",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
@@ -270,12 +256,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "  你好  ",
-      undefined,
-      false,
-      "eventLast",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("  你好  ", {
+      dismissKeyboard: false,
+      mode: "eventLast",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
@@ -294,12 +278,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "@ab C",
-      undefined,
-      false,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("@ab C", {
+      dismissKeyboard: false,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
@@ -337,13 +319,11 @@ describe("InputText", () => {
 
     try {
       await expect(
-        inputText.testHooks.executeAndroidTextInput(
-          "abc",
-          undefined,
-          false,
-          "eventAll",
-          controller.signal,
-        ),
+        inputText.testHooks.executeAndroidTextInput("abc", {
+          dismissKeyboard: false,
+          mode: "eventAll",
+          signal: controller.signal,
+        }),
       ).rejects.toBe(deviceLoss);
       expect(inputCommands(factory)).toEqual(["shell input keyevent KEYCODE_A"]);
     } finally {
@@ -361,12 +341,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "ab你好c😊d",
-      undefined,
-      false,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("ab你好c😊d", {
+      dismissKeyboard: false,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
@@ -384,17 +362,15 @@ describe("InputText", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const calls: string[] = [];
-    const inputText = new InputText(
-      androidDevice,
-      factory,
-      () => ({
+    const inputText = new InputText(androidDevice, factory, {
+      keyboardCloserFactory: () => ({
         close: async () => {
           calls.push("close");
           return { success: true, open: false };
         },
       }),
       timer,
-    );
+    });
     const execute = spyOn(factory.getFakeClient(), "executeCommand");
     stubAndroidSetText(async (text) => {
       calls.push(`set:${text}`);
@@ -405,12 +381,10 @@ describe("InputText", () => {
       };
     });
     try {
-      const result = await inputText.testHooks.executeAndroidTextInput(
-        "a你好b",
-        undefined,
-        true,
-        "eventAll",
-      );
+      const result = await inputText.testHooks.executeAndroidTextInput("a你好b", {
+        dismissKeyboard: true,
+        mode: "eventAll",
+      });
       expect(result.success).toBe(false);
       expect(result.error).toContain("field disappeared");
       expect(result.method).toBe("eventAll");
@@ -438,12 +412,10 @@ describe("InputText", () => {
       totalTimeMs: 1,
     }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "abc",
-      undefined,
-      false,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("abc", {
+      dismissKeyboard: false,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(false);
     expect(result.method).toBe("eventAll");
@@ -463,20 +435,22 @@ describe("InputText", () => {
       const closeCalls: string[] = [];
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const inputText = new InputText(
-        androidDevice,
-        factory as AdbClientFactory,
-        () => ({
+      const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+        keyboardCloserFactory: () => ({
           close: async () => {
             closeCalls.push("close");
             return { success: true, open: false, message: "Keyboard closed" };
           },
         }),
         timer,
-      );
+      });
       stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-      const result = await inputText.testHooks.executeAndroidTextInput(text, "done", true, mode);
+      const result = await inputText.testHooks.executeAndroidTextInput(text, {
+        imeAction: "done",
+        dismissKeyboard: true,
+        mode,
+      });
 
       expect(result.method).toBe("a11y");
       expect(result.success).toBe(true);
@@ -505,12 +479,10 @@ describe("InputText", () => {
           : { success: false, error: "boom", totalTimeMs: 1 };
       });
 
-      const result = await inputText.testHooks.executeAndroidTextInput(
-        text,
-        undefined,
-        false,
+      const result = await inputText.testHooks.executeAndroidTextInput(text, {
+        dismissKeyboard: false,
         mode,
-      );
+      });
 
       expect(result.success).toBe(false);
       expect(result.method).toBe(mode);
@@ -521,9 +493,11 @@ describe("InputText", () => {
   test("eventAll names the failing final setText phase when dismissing the keyboard", async () => {
     const factory = new FakeAdbClientFactory();
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({ success: true, open: false }),
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({ success: true, open: false }),
+      }),
+    });
     const outcomes = [true, false];
     let call = 0;
     stubAndroidSetText(async () =>
@@ -532,12 +506,10 @@ describe("InputText", () => {
         : { success: false, error: "boom", totalTimeMs: 1 },
     );
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "ab",
-      undefined,
-      true,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("ab", {
+      dismissKeyboard: true,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(false);
     expect(result.method).toBe("eventAll");
@@ -555,12 +527,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "a+B",
-      undefined,
-      false,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("a+B", {
+      dismissKeyboard: false,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
@@ -579,12 +549,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "B+",
-      undefined,
-      false,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("B+", {
+      dismissKeyboard: false,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
@@ -602,12 +570,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "你好😊",
-      undefined,
-      false,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("你好😊", {
+      dismissKeyboard: false,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
@@ -625,19 +591,23 @@ describe("InputText", () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async (text, options) => {
       setTextCalls.push({ text, dismissKeyboard: options?.dismissKeyboard });
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", {
+      dismissKeyboard: true,
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
@@ -653,16 +623,20 @@ describe("InputText", () => {
   test("a11y does not invoke the keyboard closer when dismissKeyboard is false", async () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, false);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", {
+      dismissKeyboard: false,
+    });
 
     expect(result.success).toBe(true);
     expect(closeCalls).toEqual([]);
@@ -675,10 +649,8 @@ describe("InputText", () => {
     const factory = new FakeAdbClientFactory();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const inputText = new InputText(
-      androidDevice,
-      factory as AdbClientFactory,
-      () => ({
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
         close: async () => ({
           success: false,
           open: true,
@@ -686,11 +658,14 @@ describe("InputText", () => {
         }),
       }),
       timer,
-    );
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput("hello", "done", true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", {
+      imeAction: "done",
+      dismissKeyboard: true,
+    });
 
     // The dismissal failure surfaces as a warning on a SUCCESSFUL result (#6868),
     // and the IME action (Enter) already ran — pre-#5887 the dismiss-first
@@ -707,17 +682,21 @@ describe("InputText", () => {
 
   test("a11y warns about a keyboard dismissal failure instead of failing the write", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", {
+      dismissKeyboard: true,
+    });
 
     // #6868: the text landed; only the dismissal epilogue failed.
     expect(result.success).toBe(true);
@@ -730,21 +709,21 @@ describe("InputText", () => {
   test("eventAll dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "ab",
-      undefined,
-      true,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("ab", {
+      dismissKeyboard: true,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
@@ -754,21 +733,21 @@ describe("InputText", () => {
   test("eventLast dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "abc",
-      undefined,
-      true,
-      "eventLast",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("abc", {
+      dismissKeyboard: true,
+      mode: "eventLast",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventLast");
@@ -782,20 +761,20 @@ describe("InputText", () => {
   test("append warns about a keyboard dismissal failure instead of failing the typed text", async () => {
     const factory = new FakeAdbClientFactory();
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "abc",
-      undefined,
-      true,
-      "append",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("abc", {
+      dismissKeyboard: true,
+      mode: "append",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("append");
@@ -808,22 +787,22 @@ describe("InputText", () => {
 
   test("eventAll warns about a keyboard dismissal failure instead of failing the write", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "ab",
-      undefined,
-      true,
-      "eventAll",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("ab", {
+      dismissKeyboard: true,
+      mode: "eventAll",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
@@ -833,22 +812,22 @@ describe("InputText", () => {
 
   test("eventLast warns about a keyboard dismissal failure instead of failing the write", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "abc",
-      undefined,
-      true,
-      "eventLast",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("abc", {
+      dismissKeyboard: true,
+      mode: "eventLast",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventLast");
@@ -863,15 +842,19 @@ describe("InputText", () => {
   // `success:false` they might answer by re-typing text that is already there.
   test("a11y warns instead of failing when the keyboard closer rejects", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        throw new Error("KEYCODE_BACK failed");
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          throw new Error("KEYCODE_BACK failed");
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", {
+      dismissKeyboard: true,
+    });
 
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
@@ -888,32 +871,34 @@ describe("InputText", () => {
       `device-disconnected:${androidDevice.deviceId}`,
     );
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        controller.abort(deviceLoss);
-        throw new Error("closer aborted");
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          controller.abort(deviceLoss);
+          throw new Error("closer aborted");
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
     await expect(
-      inputText.testHooks.executeAndroidTextInput(
-        "hello",
-        undefined,
-        true,
-        "a11y",
-        controller.signal,
-      ),
+      inputText.testHooks.executeAndroidTextInput("hello", {
+        dismissKeyboard: true,
+        mode: "a11y",
+        signal: controller.signal,
+      }),
     ).rejects.toBe(deviceLoss);
   });
 
   // A failed TEXT WRITE is still a real error — `isError` stays reserved for it.
   test("a failed setText stays a failure even with dismissKeyboard requested", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({ success: true, open: false, message: "Keyboard closed" }),
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({ success: true, open: false, message: "Keyboard closed" }),
+      }),
+    });
 
     stubAndroidSetText(async () => ({
       success: false,
@@ -921,7 +906,9 @@ describe("InputText", () => {
       totalTimeMs: 1,
     }));
 
-    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", {
+      dismissKeyboard: true,
+    });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("accessibility service unavailable");
@@ -938,12 +925,10 @@ describe("InputText", () => {
       return { success: false, error: "Set text timed out after 5000ms", totalTimeMs: 5000 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "a11y",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("next", {
+      dismissKeyboard: false,
+      mode: "a11y",
+    });
 
     expect(result.success).toBe(false);
     expect(result.method).toBe("a11y");
@@ -962,12 +947,10 @@ describe("InputText", () => {
       return { success: false, error: "No focused editable node found", totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "next",
-      undefined,
-      false,
-      "a11y",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("next", {
+      dismissKeyboard: false,
+      mode: "a11y",
+    });
 
     expect(result.success).toBe(false);
     expect(result.method).toBe("a11y");
@@ -981,7 +964,7 @@ describe("InputText", () => {
     async (outcome) => {
       const factory = new FakeAdbClientFactory();
       const timer = new FakeTimer();
-      const input = new InputText(androidDevice, factory, undefined, timer);
+      const input = new InputText(androidDevice, factory, { timer });
       const controller = new AbortController();
       let marks = 0;
       const validate = async () => {
@@ -994,9 +977,14 @@ describe("InputText", () => {
         }
         return { success: outcome !== "refused", error: "stale", failureSource: "runner" as const };
       };
-      const pending = input.appendText("abc", 500, validate, controller.signal, () => {
-        expect(inputCommands(factory)).toEqual([]);
-        marks++;
+      const pending = input.appendText("abc", {
+        timeoutMs: 500,
+        beforeKeyEvents: validate,
+        signal: controller.signal,
+        onDispatch: () => {
+          expect(inputCommands(factory)).toEqual([]);
+          marks++;
+        },
       });
       if (outcome === "cancelled") {
         await expect(pending).rejects.toThrow();
@@ -1023,12 +1011,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "ab",
-      undefined,
-      false,
-      "append",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("ab", {
+      dismissKeyboard: false,
+      mode: "append",
+    });
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("append");
@@ -1075,12 +1061,10 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await inputText.testHooks.executeAndroidTextInput(
-      "😊",
-      undefined,
-      false,
-      "append",
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("😊", {
+      dismissKeyboard: false,
+      mode: "append",
+    });
 
     expect(result.success).toBe(false);
     expect(result.method).toBe("append");
@@ -1233,16 +1217,16 @@ describe("InputText", () => {
     // wall clock here would race the 5ms budget against the char-unmappable path
     // (repo rule: no real timers in unit tests). Never advanced, so the budget
     // stays positive and the "cannot type" path is exercised deterministically.
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
-    const whileTimedOut = await inputText.appendText("A", 5);
+    const whileTimedOut = await inputText.appendText("A", { timeoutMs: 5 });
     expect(whileTimedOut.success).toBe(false);
     expect(whileTimedOut.error).toContain("append cannot type");
 
     // Fresh budget on the next keystroke: neither InputText nor AdbClient may have
     // cached the timed-out probe as "unsupported", so the capital now types.
     timeOut = false;
-    const afterRetry = await inputText.appendText("A", 5000);
+    const afterRetry = await inputText.appendText("A", { timeoutMs: 5000 });
     expect(afterRetry.success).toBe(true);
   });
 
@@ -1274,9 +1258,9 @@ describe("InputText", () => {
     // FakeTimer into InputText as well, so createBudget never reads the wall clock
     // (repo rule: no real timers). Never advanced, so the budget cannot expire and
     // the assertion is purely about the retry count, not timing.
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
-    const result = await inputText.appendText("a", 5000);
+    const result = await inputText.appendText("a", { timeoutMs: 5000 });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("append key event failed");
@@ -1290,9 +1274,9 @@ describe("InputText", () => {
       Promise.resolve(execResult(command.includes("getprop ro.build.version.sdk") ? "31\n" : ""));
     const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     const execute = spyOn(adb, "execute");
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
-    const result = await inputText.appendText("ab", 5000);
+    const result = await inputText.appendText("ab", { timeoutMs: 5000 });
 
     expect(result.success).toBe(true);
     const keyEventOptions = execute.mock.calls
@@ -1313,9 +1297,9 @@ describe("InputText", () => {
       return Promise.resolve(execResult(""));
     };
     const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
-    const result = await inputText.appendText("ab", 5000);
+    const result = await inputText.appendText("ab", { timeoutMs: 5000 });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("append key event failed");
@@ -1329,11 +1313,11 @@ describe("InputText", () => {
     // the socket race only REPORTS the timeout, it still waits for the operation.
     const factory = new FakeAdbClientFactory();
     const timer = new FakeTimer();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, { timer });
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.appendText("ab", 5_000);
+    const result = await inputText.appendText("ab", { timeoutMs: 5_000 });
 
     expect(result.success).toBe(true);
     const calls = factory.getFakeClient().getCommandCalls();
@@ -1347,12 +1331,12 @@ describe("InputText", () => {
   test("append gives up once the budget is spent instead of issuing more key events", async () => {
     const factory = new FakeAdbClientFactory();
     const timer = new FakeTimer();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, { timer });
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
     // The budget is already gone by the time the first device round trip is due.
-    const result = await inputText.appendText("a", 0);
+    const result = await inputText.appendText("a", { timeoutMs: 0 });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("append exceeded its 0ms budget");

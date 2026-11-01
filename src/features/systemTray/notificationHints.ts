@@ -14,6 +14,8 @@ import { SearchableHierarchy } from "../utility/SearchableNode";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 
+export const IOS_LOCK_SCREEN_INDICATOR_RESOURCE_ID = "proud-lock";
+
 /**
  * Duration in milliseconds for swipes that expand or collapse the
  * notification shade / NotificationCenter. Shared between adapters and
@@ -153,27 +155,34 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
-/** The captured iOS 27 cover sheet must contain its notification list. */
+export const hierarchyShowsIosLockScreen = (viewHierarchy: ViewHierarchyResult): boolean =>
+  getHierarchyRoots(viewHierarchy).some((root) =>
+    traverseForHint(
+      root,
+      (node) => rawResourceId(getNodeProperties(node)) === IOS_LOCK_SCREEN_INDICATOR_RESOURCE_ID,
+    ),
+  );
+
+/** A cover sheet contains the notification list or, when empty, the lock-screen clock. */
 export const nodeIsIosCoverSheetNotificationCenter = (node: ViewHierarchyNode | null): boolean => {
   const props = getNodeProperties(node);
   if (!props) {
     return false;
   }
-  // Require the notification list INSIDE its cover-sheet window: the date/clock,
-  // a generic ListCell, or a cover sheet without the list is insufficient.
-  // Evidence: fixtures/ios-notification-center/ios27-notification-center-hierarchy.json.
+  // Require the list or clock INSIDE its cover-sheet UIWindow, never a standalone clock.
+  // The lock indicator can be a sibling of the cover sheet, so callers check it at hierarchy level.
   return (
     String(props.className ?? props.class ?? "") === "UIWindow" &&
     rawResourceId(props, ["identifier"]) === "SBCoverSheetWindow" &&
-    traverseForHint(
-      node,
-      (descendant: ViewHierarchyNode) =>
-        rawResourceId(getNodeProperties(descendant)) === "combined-list-view",
-    )
+    traverseForHint(node, (descendant: ViewHierarchyNode) => {
+      const resourceId = rawResourceId(getNodeProperties(descendant));
+      return resourceId === "combined-list-view" || resourceId === "lockscreen-date-view";
+    })
   );
 };
 
 export const hasIosCoverSheetNotificationCenter = (viewHierarchy: ViewHierarchyResult): boolean =>
+  !hierarchyShowsIosLockScreen(viewHierarchy) &&
   getHierarchyRoots(viewHierarchy).some((root) =>
     traverseForHint(root, nodeIsIosCoverSheetNotificationCenter),
   );

@@ -116,19 +116,33 @@ export function createSharedStorageServiceForTesting(
     dependencies.adbFactory ?? defaultAdbClientFactory,
     dependencies.fileSystem ?? defaultFileSystem,
     dependencies.timer ?? defaultTimer,
-    dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
-    dependencies.idGenerator ?? defaultIdGenerator,
+    {
+      createUserResolver:
+        dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
+      idGenerator: dependencies.idGenerator ?? defaultIdGenerator,
+    },
   );
 }
 
 class DefaultSharedStorageService implements SharedStorageService {
+  private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver;
+  private readonly idGenerator: IdGenerator;
+
   constructor(
     private readonly adbFactory: AdbClientFactory,
     private readonly fileSystem: SharedStorageFileSystem,
     private readonly timer: Timer,
-    private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver,
-    private readonly idGenerator: IdGenerator,
-  ) {}
+    {
+      createUserResolver,
+      idGenerator,
+    }: {
+      createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver;
+      idGenerator: IdGenerator;
+    },
+  ) {
+    this.createUserResolver = createUserResolver;
+    this.idGenerator = idGenerator;
+  }
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
     if (request.device.platform !== "android") {
@@ -250,7 +264,11 @@ class DefaultSharedStorageService implements SharedStorageService {
     });
     onPushed?.();
     const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
-      ? await indexMediaFile(adb, destination, destinationPath, userId, this.timer, request.signal)
+      ? await indexMediaFile(adb, destination, destinationPath, {
+          userId,
+          timer: this.timer,
+          signal: request.signal,
+        })
       : {
           status: "notRequested" as const,
           reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true),
@@ -789,9 +807,7 @@ async function indexMediaFile(
   adb: AdbExecutor,
   destination: string,
   destinationPath: string,
-  userId: number,
-  timer: Timer,
-  signal?: AbortSignal,
+  { userId, timer, signal }: { userId: number; timer: Timer; signal?: AbortSignal },
 ): Promise<{ status: "completed" }> {
   await execute(adb, `shell ${mediaScanCommand(userId, destination)}`, signal);
   const collection = mediaCollectionFor(destinationPath);

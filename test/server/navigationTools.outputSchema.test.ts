@@ -191,6 +191,42 @@ describe("navigation tool output schemas", () => {
     expect(navigateToResultSchema.safeParse(payload).success).toBe(accepted);
   });
 
+  test("getNavigationGraph's advertised schema accepts a prototypeDiff (#14125)", () => {
+    const withDiff = {
+      ...graph,
+      prototypeDiff: {
+        matched: [{ prototype: "stack:nav/home", real: "Home", by: "name" }],
+        unmatchedPrototypeScreens: [
+          { id: "stack:nav/x", kind: "stackScreen", path: "root", reason: "mappedScreenMissing" },
+        ],
+        unmatchedRealScreens: ["Settings"],
+        observedTransitions: [
+          {
+            from: "stack:nav/home",
+            to: "stack:nav/detail",
+            action: "push",
+            real: { from: "Home", to: "Detail" },
+          },
+        ],
+        unobservedTransitions: [
+          {
+            from: "stack:nav/detail",
+            to: "back",
+            action: "pop",
+            trigger: { path: "root", label: "Back" },
+            reason: "dynamicTarget",
+          },
+        ],
+        ignoredMappings: [],
+      },
+    };
+    const validate = compileAjv2020(advertisedOutputSchema(getNavigationGraphResultSchema, "ref"));
+    expect([
+      validate(withDiff),
+      getNavigationGraphResultSchema.safeParse(withDiff).success,
+    ]).toEqual([true, true]);
+  });
+
   test("getNavigationGraph accepts tool and back transitions and rejects an unknown edge type", () => {
     expect(getNavigationGraphResultSchema.safeParse(graph).success).toBe(true);
     expect(

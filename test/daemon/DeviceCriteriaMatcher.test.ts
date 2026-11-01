@@ -361,3 +361,29 @@ describe("DeviceCriteriaMatcher", () => {
     });
   });
 });
+
+describe("DeviceCriteriaMatcher and Apple Watch (#14908)", () => {
+  const phone = pooledDevice({ id: "IPHONE" });
+  const watch = pooledDevice({ id: "WATCH", platform: "watchos" });
+
+  test("no platform means Android or iOS and never matches a watch", () => {
+    expect(matcher.filterDevices([phone, watch]).map((device) => device.id)).toEqual(["IPHONE"]);
+    expect(matcher.filterDevices([phone, watch], {}).map((device) => device.id)).toEqual([
+      "IPHONE",
+    ]);
+    expect(
+      matcher.deviceImageMatchesCriteria(deviceImage({ name: "Watch", platform: "watchos" })),
+    ).toBe(false);
+  });
+
+  test("a watch request matches only watches", () => {
+    expect(
+      matcher.filterDevices([phone, watch], { platform: "watchos" }).map((device) => device.id),
+    ).toEqual(["WATCH"]);
+    expect(
+      matcher.deviceImageMatchesCriteria(deviceImage({ name: "Watch", platform: "watchos" }), {
+        platform: "watchos",
+      }),
+    ).toBe(true);
+  });
+});

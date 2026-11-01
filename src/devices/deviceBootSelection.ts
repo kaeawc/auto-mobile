@@ -383,6 +383,7 @@ export function createdImageFor(
   request: DeviceBootRequest,
 ): DeviceInfo {
   return {
+    ...("configuredImage" in provisioned ? provisioned.configuredImage : {}),
     name: provisioned.name,
     platform: provisioned.platform,
     deviceId: "deviceId" in provisioned ? provisioned.deviceId : undefined,

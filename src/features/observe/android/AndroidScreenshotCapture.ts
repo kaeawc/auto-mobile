@@ -91,7 +91,12 @@ export class AndroidScreenshotCapture {
         requestId,
         "screenshot",
         3000,
-        (_id, _type, _timeout) => ({ success: false, error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR }),
+        {
+          timeoutErrorFactory: (_id, _type, _timeout) => ({
+            success: false,
+            error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR,
+          }),
+        },
       );
 
       // Advance the shared rate-limit floor clock at the a11y-request boundary so a direct capture

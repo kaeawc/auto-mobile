@@ -15,7 +15,7 @@ describe("NavigationRepository provenance observations", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new NavigationRepository(db);
+    repo = new NavigationRepository({ db });
     await repo.getOrCreateApp("com.example.app");
   });
 
@@ -36,10 +36,30 @@ describe("NavigationRepository provenance observations", () => {
     const buildA = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
     const buildB = await repo.getOrCreateBuildKey("com.example.app", 2, "hashB");
 
-    await repo.recordNodeObservation(node.id, buildA.id, "device-1", "session-1", 100);
-    await repo.recordNodeObservation(node.id, buildB.id, "device-1", "session-1", 110);
-    await repo.recordNodeObservation(node.id, buildA.id, "device-2", "session-1", 120);
-    await repo.recordNodeObservation(node.id, buildA.id, "device-1", "session-2", 130);
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 100,
+    });
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: buildB.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 110,
+    });
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-2",
+      sessionUuid: "session-1",
+      seenAt: 120,
+    });
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-1",
+      sessionUuid: "session-2",
+      seenAt: 130,
+    });
 
     const obs = await db
       .selectFrom("navigation_node_observations")
@@ -53,8 +73,18 @@ describe("NavigationRepository provenance observations", () => {
     const node = await repo.getOrCreateNode("com.example.app", "Home", 100);
     const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
 
-    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 100);
-    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 250);
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 100,
+    });
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 250,
+    });
 
     const obs = await db
       .selectFrom("navigation_node_observations")
@@ -71,9 +101,24 @@ describe("NavigationRepository provenance observations", () => {
     const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
 
     // Arrivals out of order: later timestamp first, then an earlier one.
-    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 200);
-    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 50);
-    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 120);
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 200,
+    });
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 50,
+    });
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 120,
+    });
 
     const obs = await db
       .selectFrom("navigation_node_observations")
@@ -85,11 +130,24 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("out-of-order edge observations keep first_seen <= last_seen (MIN/MAX)", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge("com.example.app", "Home", "Details", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 150,
+    });
     const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
 
-    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 300);
-    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 100);
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 300,
+    });
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 100,
+    });
 
     const obs = await db
       .selectFrom("navigation_edge_observations")
@@ -101,11 +159,24 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("edge observations dedup on (edge, build, device, session)", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge("com.example.app", "Home", "Details", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 150,
+    });
     const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
 
-    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 150);
-    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 400);
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 150,
+    });
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 400,
+    });
 
     const obs = await db
       .selectFrom("navigation_edge_observations")
@@ -123,14 +194,29 @@ describe("NavigationRepository provenance observations", () => {
     const node = await repo.getOrCreateNode("com.example.app", "Home", 100);
     const buildA = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
     const buildB = await repo.getOrCreateBuildKey("com.example.app", 2, "hashB");
-    await repo.recordNodeObservation(node.id, buildA.id, "device-1", "session-1", 100);
-    await repo.recordNodeObservation(node.id, buildB.id, "device-2", "session-2", 200);
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 100,
+    });
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: buildB.id,
+      deviceId: "device-2",
+      sessionUuid: "session-2",
+      seenAt: 200,
+    });
 
     // A different app's observation must not leak into this app's provenance.
     await repo.getOrCreateApp("com.other.app");
     const otherNode = await repo.getOrCreateNode("com.other.app", "Home", 100);
     const otherBuild = await repo.getOrCreateBuildKey("com.other.app", 9, "hashZ");
-    await repo.recordNodeObservation(otherNode.id, otherBuild.id, "device-9", "session-9", 300);
+    await repo.recordNodeObservation(otherNode.id, {
+      buildKeyId: otherBuild.id,
+      deviceId: "device-9",
+      sessionUuid: "session-9",
+      seenAt: 300,
+    });
 
     const rows = await repo.getNodeProvenanceForApp("com.example.app");
     expect(rows).toHaveLength(2);
@@ -145,9 +231,17 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("getEdgeProvenanceForApp joins build keys keyed by edge id", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge("com.example.app", "Home", "Details", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 150,
+    });
     const build = await repo.getOrCreateBuildKey("com.example.app", 3, "hashC");
-    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 150);
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: build.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 150,
+    });
 
     const rows = await repo.getEdgeProvenanceForApp("com.example.app");
     expect(rows).toHaveLength(1);
@@ -164,12 +258,22 @@ describe("NavigationRepository provenance observations", () => {
   test("getNodeProvenanceForApp excludes observations whose build key belongs to another app", async () => {
     const node = await repo.getOrCreateNode("com.example.app", "Home", 100);
     const ownBuild = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
-    await repo.recordNodeObservation(node.id, ownBuild.id, "device-1", "session-1", 100);
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: ownBuild.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 100,
+    });
 
     // A build key from a DIFFERENT app, recorded (mis-scoped) against this app's node.
     await repo.getOrCreateApp("com.other.app");
     const foreignBuild = await repo.getOrCreateBuildKey("com.other.app", 9, "hashZ");
-    await repo.recordNodeObservation(node.id, foreignBuild.id, "device-2", "session-2", 200);
+    await repo.recordNodeObservation(node.id, {
+      buildKeyId: foreignBuild.id,
+      deviceId: "device-2",
+      sessionUuid: "session-2",
+      seenAt: 200,
+    });
 
     const rows = await repo.getNodeProvenanceForApp("com.example.app");
     expect(rows).toHaveLength(1);
@@ -179,14 +283,27 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("getEdgeProvenanceForApp excludes observations whose build key belongs to another app", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge("com.example.app", "Home", "Details", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 150,
+    });
     const ownBuild = await repo.getOrCreateBuildKey("com.example.app", 3, "hashC");
-    await repo.recordEdgeObservation(edge.id, ownBuild.id, "device-1", "session-1", 150);
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: ownBuild.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 150,
+    });
 
     // A build key from a DIFFERENT app, recorded (mis-scoped) against this app's edge.
     await repo.getOrCreateApp("com.other.app");
     const foreignBuild = await repo.getOrCreateBuildKey("com.other.app", 9, "hashZ");
-    await repo.recordEdgeObservation(edge.id, foreignBuild.id, "device-2", "session-2", 400);
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: foreignBuild.id,
+      deviceId: "device-2",
+      sessionUuid: "session-2",
+      seenAt: 400,
+    });
 
     const rows = await repo.getEdgeProvenanceForApp("com.example.app");
     expect(rows).toHaveLength(1);

@@ -1,4 +1,5 @@
 import type { ResolvedDeviceIdentity } from "../../src/daemon/readiness/DeviceReadiness";
+import { splitRegistration } from "../../src/server/toolRegistryErasure";
 import { z } from "zod/v4";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -210,6 +211,7 @@ function harness(
       android: !incomplete || platform !== "android",
       ios: !incomplete || platform !== "ios",
       watchos: false,
+      tvos: false,
     },
   };
   const originalDetect = manager.detectConnectedPlatformsWithStatus;
@@ -319,7 +321,7 @@ const access = {
   listBootedWithStatus: async () =>
     statusListing
       ? statusListing()
-      : { devices: h!.devices, scanned: { android: true, ios: true, watchos: false } },
+      : { devices: h!.devices, scanned: { android: true, ios: true, watchos: false, tvos: false } },
   isAuthorized: () => true,
 };
 
@@ -347,12 +349,10 @@ beforeAll(async () => {
   // Preserve production options and their classification closures; replace only device I/O.
   const register = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
   const stub = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation(
-    (name, description, schema, _handler, options) => {
-      register(
-        name,
-        description,
-        schema,
-        async (device, args) => {
+    (name, description, schema, registration) => {
+      const { options } = splitRegistration(registration);
+      register(name, description, schema, {
+        handler: async (device, args) => {
           h!.handledDevices.push(device);
           h!.handlerSignals.push(getAbortSignal());
           h!.runs.push({
@@ -362,13 +362,11 @@ beforeAll(async () => {
           });
           return { success: true };
         },
-        {
-          ...options,
-          ...(options?.sessionlessDeviceRead
-            ? { sessionlessDeviceRead: sessionlessDeviceReadFor(access, { timer: retryTimer }) }
-            : {}),
-        },
-      );
+        ...options,
+        ...("sessionlessDeviceRead" in options && options.sessionlessDeviceRead
+          ? { sessionlessDeviceRead: sessionlessDeviceReadFor(access, { timer: retryTimer }) }
+          : {}),
+      });
     },
   );
   try {
@@ -747,6 +745,7 @@ for (const platform of ["android", "ios"] as const) {
               android: platform === "android",
               ios: platform === "ios",
               watchos: false,
+              tvos: false,
             };
             h.detect.mockImplementation(async () => ({ devices: h!.devices, scanned }));
             statusListing = async () => {
@@ -768,6 +767,7 @@ for (const platform of ["android", "ios"] as const) {
                   android: !failedOwn || platform !== "android",
                   ios: !failedOwn || platform !== "ios",
                   watchos: false,
+                  tvos: false,
                 },
                 ...(failedOwn
                   ? {
@@ -1068,13 +1068,10 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
     timer: current.timer,
     adbFactory: new FakeAdbClientFactory(current.adb),
   });
-  const inventory = new MultiPlatformDeviceManager(
-    current.adb,
-    current.simctl,
-    client,
-    new FakeVirtualDeviceLifecycleCoordinator(),
-    current.timer,
-  );
+  const inventory = new MultiPlatformDeviceManager(current.adb, current.simctl, client, {
+    lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
+    timer: current.timer,
+  });
   const restoreFactory = snapshotPlatformDeviceManagerFactory();
   const previousInstance = Reflect.get(PlatformDeviceManagerFactory, "instance");
   const previousInjectedManager = Reflect.get(PlatformDeviceManagerFactory, "injectedManager");
@@ -1193,7 +1190,7 @@ test("a probed serial missing from the memoized raw scan is refreshed before rea
   let scans = 0;
   h.detect.mockImplementation(async () => ({
     devices: ++scans === 1 ? [] : h!.devices,
-    scanned: { android: true, ios: true, watchos: false },
+    scanned: { android: true, ios: true, watchos: false, tvos: false },
   }));
   await ToolRegistry.getTool("listApps")!.handler({ platform: "android", deviceId: h.device.name });
   expect(h.runs).toEqual([
@@ -1219,11 +1216,17 @@ test("a serial acquired during discovery is rechecked before readiness", async (
   const listedDevice = { ...h.device, name: "Funnelled_Pixel" };
   statusListing = async () => {
     listings++;
-    return { devices: [listedDevice], scanned: { android: true, ios: true, watchos: false } };
+    return {
+      devices: [listedDevice],
+      scanned: { android: true, ios: true, watchos: false, tvos: false },
+    };
   };
   h.detect.mockImplementation(async () => {
     acquired = true;
-    return { devices: h!.devices, scanned: { android: true, ios: true, watchos: false } };
+    return {
+      devices: h!.devices,
+      scanned: { android: true, ios: true, watchos: false, tvos: false },
+    };
   });
   const original = slotOwner.sessions.getSessionForDevice;
   const holder = spyOn(slotOwner.sessions, "getSessionForDevice").mockImplementation((deviceId) =>
@@ -1333,7 +1336,10 @@ for (const platform of ["android", "ios"] as const) {
         if (phase === "scan") {
           h.detect.mockImplementation(async () => {
             claim();
-            return { devices: h!.devices, scanned: { android: true, ios: true, watchos: false } };
+            return {
+              devices: h!.devices,
+              scanned: { android: true, ios: true, watchos: false, tvos: false },
+            };
           });
         } else if (platform === "android") {
           const list = h.discovery.listDeviceImages.bind(h.discovery);
@@ -1435,6 +1441,7 @@ for (const platform of ["android", "ios"] as const) {
             android: platform === "android" ? healthy : scenario !== "healthy-other",
             ios: platform === "ios" ? healthy : scenario !== "healthy-other",
             watchos: false,
+            tvos: false,
           },
         };
       };
@@ -1610,7 +1617,12 @@ async function onePlatformDecision(
   const daemon = unheld.get(platform)!;
   DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
   const other = platform === "android" ? "ios" : "android";
-  const scanned = { android: platform === "android", ios: platform === "ios", watchos: false };
+  const scanned = {
+    android: platform === "android",
+    ios: platform === "ios",
+    watchos: false,
+    tvos: false,
+  };
   h.detect.mockImplementation(async () => ({ devices: h!.devices, scanned }));
   let listings = 0;
   statusListing = async () => {
@@ -1745,7 +1757,7 @@ for (const platform of ["android", "ios"] as const) {
         listings++;
         return {
           devices: [],
-          scanned: { android: false, ios: false, watchos: false },
+          scanned: { android: false, ios: false, watchos: false, tvos: false },
           discoveryErrors: { [platform]: { code: "failed", message: "listing blipped" } },
         };
       };
@@ -1773,7 +1785,7 @@ for (const platform of ["android", "ios"] as const) {
       listings++;
       return {
         devices: [],
-        scanned: { android: false, ios: false, watchos: false },
+        scanned: { android: false, ios: false, watchos: false, tvos: false },
         discoveryErrors: { [platform]: { code: "unavailable", message: "tooling absent" } },
       };
     };
@@ -1796,7 +1808,7 @@ for (const platform of ["android", "ios"] as const) {
     let listings = 0;
     statusListing = async () => {
       listings++;
-      return { devices: [], scanned: { android: false, ios: false, watchos: false } };
+      return { devices: [], scanned: { android: false, ios: false, watchos: false, tvos: false } };
     };
     const controller = new AbortController();
     const outcome = runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
@@ -1831,7 +1843,12 @@ for (const platform of ["android", "ios"] as const) {
         const device = { ...deviceFor(platform), deviceId: id };
         const list = mock(async () => ({
           devices: running ? [device] : [],
-          scanned: { android: platform === "android", ios: platform === "ios", watchos: false },
+          scanned: {
+            android: platform === "android",
+            ios: platform === "ios",
+            watchos: false,
+            tvos: false,
+          },
           discoveryErrors: { [other]: { code: "failed" as const, message: "other failed" } },
         }));
         const access = {
@@ -1846,11 +1863,19 @@ for (const platform of ["android", "ios"] as const) {
         list.mockClear();
         if (running) {
           expect(
-            await resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+            await resolveDeviceForObservationRead(id, undefined, {
+              access,
+              platform: requested,
+              retry: { timer },
+            }),
           ).toEqual(device);
         } else {
           await expect(
-            resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+            resolveDeviceForObservationRead(id, undefined, {
+              access,
+              platform: requested,
+              retry: { timer },
+            }),
           ).rejects.toThrow(`Device ${id} not found`);
         }
         expect(list).toHaveBeenCalledTimes(1);
@@ -1863,7 +1888,7 @@ for (const platform of ["android", "ios"] as const) {
     const timer = new FakeTimer();
     const list = mock(async () => ({
       devices: [{ ...deviceFor(platform), deviceId: id }],
-      scanned: { android: true, ios: true, watchos: false },
+      scanned: { android: true, ios: true, watchos: false, tvos: false },
     }));
     const access = {
       listBooted: async () => [],
@@ -1871,7 +1896,7 @@ for (const platform of ["android", "ios"] as const) {
       isAuthorized: () => true,
     };
     await expect(
-      resolveDeviceForObservationRead(id, undefined, access, other, { timer }),
+      resolveDeviceForObservationRead(id, undefined, { access, platform: other, retry: { timer } }),
     ).rejects.toThrow(`not found on ${other} platform`);
     expect(list).toHaveBeenCalledTimes(1);
     expect(timer.getSleepCallCount()).toBe(0);

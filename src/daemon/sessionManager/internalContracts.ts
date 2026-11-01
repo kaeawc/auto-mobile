@@ -82,6 +82,12 @@ export interface SharedSessionAssignment {
   recoveryWait: PromiseWithResolvers<RecoveryAssignmentWait | undefined>;
 }
 
+/** Who a recovered persisted session belongs to and the shared assignment it publishes into. */
+export interface PersistedSessionRecovery {
+  initialOwnership: "owned" | "awaiting-owner";
+  shared: SharedSessionAssignment;
+}
+
 /** A recoverable row this daemon claimed for recovery, and the owner a failed recovery restores. */
 export interface ClaimedRecoverableRow {
   row: DeviceSession;
@@ -225,6 +231,20 @@ export interface SessionAcquisitionOptions {
 }
 
 export type ResolvedSessionAcquisition = SessionAcquisitionOptions & { access: SessionAccess };
+
+/** Everything `getOrCreateSession` takes after its session id, device pool and platform. */
+export interface GetOrCreateSessionOptions extends SessionAcquisitionOptions {
+  execution?: SessionExecutionMetadata;
+  /**
+   * #6069: when true, a NEW session (no live in-memory session) may only be
+   * minted for an id this daemon already issued — i.e. a persisted, non-terminal
+   * row (live-during-restart recovery). This is set on the device-tool path so a
+   * fabricated/never-issued sessionUuid can never be auto-assigned a pooled
+   * device just because a device pool is in scope. Internal fresh mints
+   * (device-label derived sessions) leave it false (the default) and keep minting.
+   */
+  requireIssuedSession?: boolean;
+}
 
 export interface RecoveryAssignmentWait {
   responseMarginMs: number;

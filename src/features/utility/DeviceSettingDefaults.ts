@@ -52,15 +52,23 @@ export class DeviceSettingDefaults {
   /** Per device: keys a new owner changed while an acquisition reset was still running (#11254). */
   private readonly pendingResetFences = new Map<string, Set<ResetFence>>();
 
+  private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">;
+  /** How long a settings change waits for the device's pending acquisition reset. */
+  private readonly resetWaitMs: number;
+
   constructor(
     private readonly persistence: DeviceSettingDefaultsPersistence,
     private readonly access: DeviceSettingsAccess,
     /** The session holding a device, if any: only a session's changes are recorded. */
     private readonly holderOf: (deviceId: string) => string | null,
-    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
-    /** How long a settings change waits for the device's pending acquisition reset. */
-    private readonly resetWaitMs: number = PENDING_RESET_WAIT_MS,
-  ) {}
+    {
+      timer = defaultTimer,
+      resetWaitMs = PENDING_RESET_WAIT_MS,
+    }: { timer?: Pick<Timer, "setTimeout" | "clearTimeout">; resetWaitMs?: number } = {},
+  ) {
+    this.timer = timer;
+    this.resetWaitMs = resetWaitMs;
+  }
 
   /**
    * Record the current value of each of `keys` not yet recorded, before a session changes it.
@@ -74,15 +82,14 @@ export class DeviceSettingDefaults {
       sessionId === null || keys.length === 0
         ? this.settled(device.deviceId)
         : this.enqueueRecord(device, keys, sessionId, abandoned);
-    return this.awaitPendingReset(device.deviceId, work, abandoned, sessionId, keys);
+    return this.awaitPendingReset(device.deviceId, work, sessionId, { abandoned, keys });
   }
 
   private async awaitPendingReset(
     deviceId: string,
     work: Promise<void>,
-    abandoned: { value: boolean },
     sessionId: string | null,
-    keys: readonly DeviceSettingKey[],
+    { abandoned, keys }: { abandoned: { value: boolean }; keys: readonly DeviceSettingKey[] },
   ): Promise<void> {
     try {
       await raceWithDeadline(work, {

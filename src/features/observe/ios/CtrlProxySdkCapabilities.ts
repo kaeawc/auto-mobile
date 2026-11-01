@@ -17,6 +17,11 @@ import {
   SdkCapabilityProbeSupersededError,
   type IosSdkCapability,
 } from "./SdkCapabilityProbeSupersededError";
+import {
+  observationBridgeUnavailable,
+  parseObservationBridgeState,
+  type IosObservationBridgeState,
+} from "./observationBridgeState";
 export interface SdkCapabilityQueryOptions {
   deadlineMs?: number;
   abortSignal?: AbortSignal;
@@ -48,6 +53,7 @@ interface SdkCapabilitiesHost {
 interface IosSdkCapabilities {
   bundleId: string;
   capabilities: Set<IosSdkCapability>;
+  observationBridge: IosObservationBridgeState;
 }
 
 interface IosSdkCapabilitiesResult extends BaseResult {
@@ -56,6 +62,7 @@ interface IosSdkCapabilitiesResult extends BaseResult {
   unsupported?: boolean;
   bundleId?: string;
   capabilities?: string[];
+  observationBridge?: unknown;
 }
 type SdkCapabilityProbeResult =
   | { status: "capabilities"; capabilities: IosSdkCapabilities }
@@ -308,6 +315,7 @@ export class CtrlProxySdkCapabilities {
                 Object.hasOwn(commandByCapability, capability),
               ),
             ),
+            observationBridge: parseObservationBridgeState(result.observationBridge),
           }
         : null;
 
@@ -464,15 +472,55 @@ export class CtrlProxySdkCapabilities {
     if (!this.host.getSupportedCommands()?.has("get_sdk_capabilities")) {
       return this.isLegacySdkCommandSupported(capability);
     }
+    return CtrlProxySdkCapabilities.capabilitiesInclude(
+      await this.currentSdkCapabilities(capability, options),
+      capability,
+      bundleId,
+    );
+  }
+
+  /**
+   * Whether the foreground app's SDK observation bridge is available (#5159). Throws the probe's
+   * `SdkCapabilityQueryError` when the runner does not answer, so a caller never mistakes a failed
+   * probe for an unavailable bridge.
+   */
+  async getObservationBridgeState(
+    bundleId: string,
+    options: SdkCapabilityQueryOptions = sdkCapabilityQueryOptions(this.host.timer),
+  ): Promise<IosObservationBridgeState> {
+    const supportedCommands = this.host.getSupportedCommands();
+    if (supportedCommands === null) {
+      return observationBridgeUnavailable("SDK_UNAVAILABLE");
+    }
+    if (!supportedCommands.has("get_sdk_capabilities")) {
+      return observationBridgeUnavailable("SDK_TOO_OLD");
+    }
+    const capabilities = await this.currentSdkCapabilities("observation_bridge", options);
+    if (capabilities === null || capabilities.bundleId !== bundleId.trim()) {
+      return observationBridgeUnavailable("SDK_UNAVAILABLE");
+    }
+    return capabilities.observationBridge;
+  }
+
+  /**
+   * The current foreground generation's capabilities: the cache while it is valid, otherwise a
+   * fresh probe. `null` means no SDK. Throws when the probe fails or is superseded.
+   */
+  private async currentSdkCapabilities(
+    requested: IosSdkCapability | "observation_bridge",
+    options: SdkCapabilityQueryOptions,
+  ): Promise<IosSdkCapabilities | null> {
     if (this.sdkCapabilitiesKnown) {
       if (
-        this.sdkCapabilities === null &&
+        (this.sdkCapabilities === null ||
+          (requested === "observation_bridge" &&
+            this.sdkCapabilities.observationBridge.status === "unavailable")) &&
         this.host.timer.now() - this.sdkCapabilitiesKnownAt >=
           CtrlProxySdkCapabilities.SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS
       ) {
         this.sdkCapabilitiesKnown = false;
       } else {
-        return this.hasSdkCapability(capability, bundleId);
+        return this.sdkCapabilities;
       }
     }
     // Generation binding (#6896): the waiter records the generation it was created
@@ -484,7 +532,7 @@ export class CtrlProxySdkCapabilities {
     const probed = await this.refreshSdkCapabilities(options);
     if (probeGeneration !== this.sdkCapabilityGeneration) {
       throw new SdkCapabilityProbeSupersededError(
-        capability,
+        requested,
         probeGeneration,
         this.sdkCapabilityGeneration,
       );
@@ -492,11 +540,7 @@ export class CtrlProxySdkCapabilities {
     if (probed.status === "unknown") {
       throw probed.error;
     }
-    return CtrlProxySdkCapabilities.capabilitiesInclude(
-      probed.status === "capabilities" ? probed.capabilities : null,
-      capability,
-      bundleId,
-    );
+    return probed.status === "capabilities" ? probed.capabilities : null;
   }
 
   /**
@@ -535,8 +579,12 @@ export class CtrlProxySdkCapabilities {
     }
   }
   /** Seed the known cache without exposing mutable client state. */
-  seedForTesting(bundleId: string, capabilities: Iterable<IosSdkCapability>): void {
-    this.sdkCapabilities = { bundleId, capabilities: new Set(capabilities) };
+  seedForTesting(
+    bundleId: string,
+    capabilities: Iterable<IosSdkCapability>,
+    observationBridge: IosObservationBridgeState = observationBridgeUnavailable("SDK_TOO_OLD"),
+  ): void {
+    this.sdkCapabilities = { bundleId, capabilities: new Set(capabilities), observationBridge };
     this.sdkCapabilitiesKnown = true;
   }
 }

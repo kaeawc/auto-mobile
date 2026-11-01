@@ -235,13 +235,10 @@ export function isReclaimable(observed: LockSample, options: ExclusiveLockOption
     return age >= 0 && age > (options.ownerlessReclaimAgeMs ?? OWNERLESS_LOCK_RECLAIM_AGE_MS);
   }
   return (
-    isOwnStaleLock(
-      owner.pid,
-      owner.token,
-      options.pid ?? process.pid,
-      options.ownerToken,
-      options.reclaimOwnPid ?? false,
-    ) ||
+    isOwnStaleLock(owner.pid, owner.token, options.pid ?? process.pid, {
+      ownerToken: options.ownerToken,
+      reclaimOwnPid: options.reclaimOwnPid ?? false,
+    }) ||
     !(options.isProcessRunning ?? isProcessRunningWithDebug)(owner.pid) ||
     compareLockOwnerGeneration(options.ownerGeneration, owner.pid, owner.generation) === "different"
   );
@@ -255,8 +252,7 @@ function isOwnStaleLock(
   ownerPid: number,
   tokenLine: string | undefined,
   pid: number,
-  ownerToken: string | undefined,
-  reclaimOwnPid: boolean,
+  { ownerToken, reclaimOwnPid }: { ownerToken?: string; reclaimOwnPid: boolean },
 ): boolean {
   // A same-PID lock is a reclaimable stale leak ONLY when its owner token differs
   // from ours (a crashed prior incarnation whose PID the OS recycled) or is absent

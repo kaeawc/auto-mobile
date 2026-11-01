@@ -340,12 +340,9 @@ describe("MemoryBaselineManager - Unit Tests", function () {
     }
 
     test("stores the raw metrics as the baseline on the first observation", async function () {
-      await dbManager.updateBaseline(
-        "device-1",
-        "com.example.app",
-        "tapOn",
-        makeMetrics({ java: 100, native: 40, gcCount: 8, gcDur: 200, unreachable: 10 }),
-      );
+      await dbManager.updateBaseline("device-1", "com.example.app", "tapOn", {
+        metrics: makeMetrics({ java: 100, native: 40, gcCount: 8, gcDur: 200, unreachable: 10 }),
+      });
 
       const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
       expect(baseline?.java_heap_baseline_mb).toBeCloseTo(100);
@@ -354,21 +351,15 @@ describe("MemoryBaselineManager - Unit Tests", function () {
     });
 
     test("blends a second observation as alpha*new + (1-alpha)*old", async function () {
-      await dbManager.updateBaseline(
-        "device-1",
-        "com.example.app",
-        "tapOn",
-        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 }),
-      );
+      await dbManager.updateBaseline("device-1", "com.example.app", "tapOn", {
+        metrics: makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 }),
+      });
 
       // alpha 0.3: java = 0.3*60 + 0.7*100 = 88 (an inverted alpha would give 72).
-      await dbManager.updateBaseline(
-        "device-1",
-        "com.example.app",
-        "tapOn",
-        makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 }),
-        0.3,
-      );
+      await dbManager.updateBaseline("device-1", "com.example.app", "tapOn", {
+        metrics: makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 }),
+        alpha: 0.3,
+      });
 
       const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
       expect(baseline?.java_heap_baseline_mb).toBeCloseTo(88);
@@ -378,19 +369,13 @@ describe("MemoryBaselineManager - Unit Tests", function () {
     });
 
     test("uses the default EMA alpha of 0.3 when none is supplied", async function () {
-      await dbManager.updateBaseline(
-        "device-1",
-        "com.example.app",
-        "tapOn",
-        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 }),
-      );
+      await dbManager.updateBaseline("device-1", "com.example.app", "tapOn", {
+        metrics: makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 }),
+      });
       // No alpha argument -> DEFAULT_EMA_ALPHA (0.3): 0.3*60 + 0.7*100 = 88.
-      await dbManager.updateBaseline(
-        "device-1",
-        "com.example.app",
-        "tapOn",
-        makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 }),
-      );
+      await dbManager.updateBaseline("device-1", "com.example.app", "tapOn", {
+        metrics: makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 }),
+      });
 
       const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
       expect(baseline?.java_heap_baseline_mb).toBeCloseTo(88);

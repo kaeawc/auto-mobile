@@ -7,6 +7,16 @@ import { resolveIosObserveRotation } from "../iosObserveRotation";
 import { deriveIosScreenIdentity } from "../ios/IosScreenIdentity";
 import type { PlatformCollectionContext } from "./AndroidObservationCollector";
 import type { HierarchyCollectorPort } from "./collectorPorts";
+import {
+  deviceIosSdkBridgeReader,
+  mergeIosSdkBridgeInto,
+  type IosSdkBridgeReader,
+} from "../ios/IosSdkBridgeReader";
+import {
+  deviceIosSdkWebReader,
+  mergeIosSdkWebInto,
+  type IosSdkWebReader,
+} from "../ios/IosSdkWebReader";
 
 /** Platform-specific hierarchy collection and metadata derivation for iOS observations. */
 export interface IosObservationCollector {
@@ -17,6 +27,10 @@ export interface IosObservationCollectorDeps {
   hierarchyCollector: () => HierarchyCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
+  /** The app's SDK observation bridge (#5159); defaults to the device's runner client. */
+  sdkBridge?: () => IosSdkBridgeReader;
+  /** The app's opted-in WKWebView bridges (#5162); defaults to the device's runner client. */
+  sdkWeb?: () => IosSdkWebReader;
 }
 
 export class DefaultIosObservationCollector implements IosObservationCollector {
@@ -48,6 +62,8 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     this.applyIosScreenMetadata(result);
     this.applyIosInsetsAndRotation(result);
     this.projectIosObservationHierarchy(result);
+    await this.mergeSdkBridgeObservation(result, signal);
+    await this.mergeSdkWebSnapshots(result, signal);
 
     let sdkScreenIdentity: ScreenIdentity | undefined;
     try {
@@ -67,6 +83,45 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
       : (sdkScreenIdentity ?? hierarchyScreenIdentity);
 
     perf.end();
+  }
+
+  /**
+   * Merge a registered SDK observation bridge's nodes under the app node (#5159). An app without a
+   * bridge, or with routing disabled, observes exactly as before.
+   */
+  private async mergeSdkBridgeObservation(
+    result: ObserveResult,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (!result.viewHierarchy) {
+      return;
+    }
+    const reader = this.deps.sdkBridge?.() ?? deviceIosSdkBridgeReader(this.deps.device());
+    const merged = await mergeIosSdkBridgeInto(result.viewHierarchy, reader, signal);
+    if (merged.backend) {
+      result.backend = merged.backend;
+    }
+    if (merged.fallbackReason) {
+      result.fallbackReason = merged.fallbackReason;
+    }
+  }
+
+  /**
+   * Merge opted-in web views' allowed-origin DOM elements under their WKWebView nodes (#5162). A
+   * screen without a web view, or an app that registered none, observes exactly as before.
+   */
+  private async mergeSdkWebSnapshots(
+    result: ObserveResult,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (!result.viewHierarchy) {
+      return;
+    }
+    const reader = this.deps.sdkWeb?.() ?? deviceIosSdkWebReader(this.deps.device());
+    const merged = await mergeIosSdkWebInto(result.viewHierarchy, reader, signal);
+    if (merged && !result.backend) {
+      result.backend = "sdk";
+    }
   }
 
   private applyIosScreenMetadata(result: ObserveResult): void {

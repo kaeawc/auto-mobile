@@ -37,8 +37,7 @@ export function runKeyedSerial<T>(
   state: KeyedSerialState,
   executionKey: string,
   fn: () => Promise<T>,
-  idleCloseKey?: string,
-  chainWait?: McpForwardChainWait,
+  { idleCloseKey, chainWait }: { idleCloseKey?: string; chainWait?: McpForwardChainWait } = {},
 ): Promise<T> {
   if (idleCloseKey) {
     const idleCloseKeys = state.idleCloseKeys.get(executionKey) ?? new Set<string>();

@@ -98,12 +98,9 @@ describe("failed boot cleanup settlement", () => {
       throw new Error("discovery unavailable");
     };
     const outcome = h.shutdown
-      .shutdownSimulatorCoordinated(
-        "sim",
-        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
-        controller.signal,
-        h.lease.state.ownerToken,
-      )
+      .shutdownSimulatorCoordinated("sim", DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS, controller.signal, {
+        expectedOwnerToken: h.lease.state.ownerToken,
+      })
       .catch((error: unknown) => error);
 
     expect(
@@ -152,7 +149,7 @@ describe("failed boot cleanup settlement", () => {
         "sim",
         DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
         undefined,
-        h.lease.state.ownerToken,
+        { expectedOwnerToken: h.lease.state.ownerToken },
       ),
     ).rejects.toThrow("timed out");
     expect(h.timer.now()).toBe(DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS);
@@ -188,7 +185,7 @@ describe("failed boot cleanup settlement", () => {
           "sim",
           DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
           undefined,
-          owner,
+          { expectedOwnerToken: owner },
         ),
       ).rejects.toThrow("timed out");
       expect(h.timer.now()).toBe(DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS);

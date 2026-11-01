@@ -592,7 +592,7 @@ test("down accepts pooled devices and report counts them", async () => {
     await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pooled release" }),
   ).toBe(0);
   expect(f.logs.join("\n")).toContain(
-    "Pooled a-phone on ambroker-a-phone (device ID native-a-phone): clean idle device retained by the broker pool. No harness command evicts idle pooled devices yet (product path pending, #15653); do not signal the device; shutdown-devices refuses it as broker-held until the product evicts it.",
+    "Pooled a-phone on ambroker-a-phone (device ID native-a-phone): still retained by the broker pool after drain; do not signal the device; shutdown-devices refuses it as broker-held.",
   );
   expect(JSON.parse(f.files.get(join(f.batchDir, "evidence/pool-retained.json"))!)).toEqual([
     { client: "a-phone", deviceId: "native-a-phone", name: "ambroker-a-phone" },
@@ -601,4 +601,193 @@ test("down accepts pooled devices and report counts them", async () => {
   expect(
     JSON.parse(f.files.get(join(f.batchDir, "evidence/broker-report.json"))!).ledger.summary.pooled,
   ).toBe(1);
+});
+
+test("down keeps a cleanup_pending drain outcome across a retried down until native absence is proven", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  f.broker.statusResults = [
+    {
+      ...f.sessions.get("a-phone")!,
+      outcome: "released",
+      timing: {
+        reset: {
+          mode: "erase",
+          outcome: "clean",
+          phases: {},
+          reuseCount: 0,
+          startedAtMs: 0,
+          totalMs: 1,
+        },
+      },
+    },
+  ];
+  f.deps.devicesView = async () => ({
+    devices: [{ name: "ambroker-a-phone", deviceId: "native-a-phone", platform: "android" }],
+    daemons: [{ alive: true }],
+  });
+  const resources = [
+    { resourceId: "pending-resource", outcome: "cleanup_pending" as const, cleanupPending: true },
+  ];
+  const path = join(f.batchDir, "evidence/pool-drain.json");
+  f.broker.drainResults = [{ resources }];
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pending pool drain" }),
+  ).toBe(2);
+  expect(JSON.parse(f.files.get(path)!)).toEqual(resources);
+
+  f.broker.drainResults = [{ resources: [] }];
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "retried pool drain" }),
+  ).toBe(2);
+  expect(JSON.parse(f.files.get(path)!)).toEqual(resources);
+
+  f.deps.devicesView = async () => ({ devices: [], daemons: [{ alive: true }] });
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "native absence" }),
+  ).toBe(0);
+  expect(JSON.parse(f.files.get(path)!)).toEqual([]);
+});
+
+test("down preserves a pending drain when an info-less grant has no proven native absence", async () => {
+  const f = fixture(2);
+  f.broker.infoResults[1] = new Error("identity unavailable");
+  expect(await f.run(["up"])).toBe(2);
+  f.broker.statusResults = ["a-tablet", "a-phone"].map((client) => ({
+    ...f.sessions.get(client)!,
+    outcome: "released" as const,
+    cleanupPending: false,
+  }));
+  f.deps.devicesView = async () => ({ devices: [], daemons: [{ alive: true }] });
+  const resources = [
+    { resourceId: "pending-resource", outcome: "cleanup_pending" as const, cleanupPending: true },
+  ];
+  f.broker.drainResults = [{ resources }];
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "info-less pending drain" }),
+  ).toBe(2);
+  expect(JSON.parse(f.files.get(join(f.batchDir, "evidence/pool-drain.json"))!)).toEqual(resources);
+  expect(f.logs).toContain("Released a-tablet; native absence: not-verifiable (no device info).");
+  expect(f.logs.at(-1)).toStartWith("Leak report:");
+});
+
+test("down reports malformed pool drain evidence without throwing or rewriting it", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  f.broker.statusResults = [
+    { ...f.sessions.get("a-phone")!, outcome: "released", cleanupPending: false },
+  ];
+  const path = join(f.batchDir, "evidence/pool-drain.json");
+  f.files.set(path, "not json{");
+  f.deps.devicesView = async () => ({ devices: [], daemons: [{ alive: true }] });
+  await expect(
+    settleByFakeEvents(f.timer, f.run(["down"]), { description: "malformed pool drain evidence" }),
+  ).resolves.toBe(2);
+  expect(f.logs.some((line) => line.startsWith("Pool drain evidence: "))).toBe(true);
+  expect(f.files.get(path)).toBe("not json{");
+  expect(f.logs.at(-1)).toStartWith("Leak report:");
+});
+
+test("down drains the pool before the absence check and reports per-resource outcomes", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  f.broker.statusResults = [{ ...f.sessions.get("a-phone")!, outcome: "released" }];
+  const resources = [
+    { resourceId: "destroyed-resource", outcome: "destroyed" as const, cleanupPending: false },
+    { resourceId: "pending-resource", outcome: "cleanup_pending" as const, cleanupPending: true },
+  ];
+  f.broker.drainResults = [{ resources }];
+  f.deps.devicesView = async () => {
+    expect(f.proxyCalls).toEqual([
+      ["close", "--client", "i-phone"],
+      ["close", "--client", "a-tablet"],
+      ["close", "--client", "a-phone"],
+    ]);
+    expect(f.broker.calls.map((call) => call.method)).toContain("drainPool");
+    expect(f.logs).toContain(
+      "Drained pool resource pending-resource: cleanup_pending (cleanupPending=true)",
+    );
+    return { devices: [], daemons: [{ alive: true }] };
+  };
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pool drain teardown" }),
+  ).toBe(0);
+  expect(f.logs).toContain(
+    "Drained pool resource destroyed-resource: destroyed (cleanupPending=false)",
+  );
+  expect(JSON.parse(f.files.get(join(f.batchDir, "evidence/pool-drain.json"))!)).toEqual([
+    resources[0],
+  ]);
+  expect(f.logs.at(-1)).toStartWith("Leak report: 0 unverified grant(s) of 1;");
+});
+
+test("down logs drain errors and continues teardown", async () => {
+  const f = fixture();
+  expect(await f.run(["up"])).toBe(0);
+  f.broker.statusResults = [...f.sessions.values()]
+    .filter((session) => session.outcome === "ready")
+    .map((session) => ({ ...session, outcome: "released" }));
+  f.broker.drainResults = [new Error("daemon refused")];
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pool drain teardown" }),
+  ).toBe(2);
+  expect(f.logs).toContain("Drain broker pool: daemon refused");
+  expect(f.proxyCalls).toEqual([
+    ["close", "--client", "i-phone"],
+    ["close", "--client", "a-tablet"],
+    ["close", "--client", "a-phone"],
+  ]);
+  const ledger = new BrokerDeviceLedger({ batchDir: f.batchDir, fs: f.deps.fs, timer: f.timer });
+  expect(ledger.devices().every((row) => ledger.hasEvent(row, "absent"))).toBe(true);
+  expect(f.logs.at(-1)).toStartWith("Leak report: 0 unverified grant(s) of 2;");
+});
+
+test("down omits pooled devices that are absent after drain from the retained report", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  const ledger = new BrokerDeviceLedger({ batchDir: f.batchDir, fs: f.deps.fs, timer: f.timer });
+  ledger.record("pooled", ledger.devices()[0]);
+  f.broker.statusResults = [{ ...f.sessions.get("a-phone")!, outcome: "released" }];
+  f.broker.drainResults = [
+    {
+      resources: [{ resourceId: "resource", outcome: "destroyed", cleanupPending: false }],
+    },
+  ];
+  f.deps.devicesView = async () => ({ devices: [], daemons: [{ alive: true }] });
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pool drain teardown" }),
+  ).toBe(0);
+  expect(f.files.has(join(f.batchDir, "evidence/pool-retained.json"))).toBe(false);
+  expect(f.logs.some((line) => line.startsWith("Pooled "))).toBe(false);
+  const updated = new BrokerDeviceLedger({ batchDir: f.batchDir, fs: f.deps.fs, timer: f.timer });
+  expect(updated.hasEvent(updated.devices()[0], "absent")).toBe(true);
+});
+
+test("down skips pool drain when the ledger has no acquired grants", async () => {
+  const f = fixture();
+  expect(await f.run(["down"])).toBe(0);
+  expect(f.broker.calls.some((call) => call.method === "drainPool")).toBe(false);
+  expect(f.files.has(join(f.batchDir, "evidence/pool-drain.json"))).toBe(false);
+});
+
+test("down bounds pool drain with the cleanup deadline and continues absence verification", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  f.broker.statusResults = [{ ...f.sessions.get("a-phone")!, outcome: "released" }];
+  f.deps.daemonClient = {
+    status: (...args) => f.broker.status(...args),
+    abandon: (...args) => f.broker.abandon(...args),
+    release: (...args) => f.broker.release(...args),
+    info: (id) => f.broker.info(id),
+    capabilities: () => f.broker.capabilities(),
+    drainPool: () => new Promise(() => {}),
+  };
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pool drain teardown" }),
+  ).toBe(2);
+  expect(f.logs.join("\n")).toContain(
+    "Drain broker pool: Drain broker pool timed out after 2000ms",
+  );
+  expect(f.logs.at(-1)).toStartWith("Leak report: 0 unverified grant(s) of 1;");
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
 });

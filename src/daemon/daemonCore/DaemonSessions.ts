@@ -152,14 +152,10 @@ export class DaemonSessions {
       ...(this.host.foreignCtrlProxyForwardEvidence()
         ? {
             foreignDeviceOwnership: androidOwnershipWithMirror(
-              new ForwardLeaseForeignDeviceOwnership(
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                this.host.services.timer(),
-                this.host.foreignCtrlProxyForwardEvidence(),
-              ),
+              new ForwardLeaseForeignDeviceOwnership(undefined, undefined, undefined, {
+                timer: this.host.services.timer(),
+                forwardEvidence: this.host.foreignCtrlProxyForwardEvidence(),
+              }),
               androidClaimMirror,
             ),
           }
@@ -172,8 +168,7 @@ export class DaemonSessions {
         sessionId,
         _deviceId,
         releaseReason,
-        shouldCommit,
-        releaseOptions,
+        { shouldCommit, releaseOptions } = {},
       ) =>
         this.host.cancelAndReleaseSession(sessionId, releaseReason, {
           shouldCommit,
@@ -241,11 +236,10 @@ export class DaemonSessions {
       },
       // Subscribers to the booted-device resources learn of status and holder changes (#11413).
       onDeviceStateChanged: this.host.deviceStateChangeNotifier(),
-      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(
-        undefined,
-        this.host.services.timer(),
-        this.host.services.idGenerator(),
-      ),
+      emulatorLossIncidentStore: new EmulatorLossIncidentRepository({
+        timer: this.host.services.timer(),
+        idGenerator: this.host.services.idGenerator(),
+      }),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(
         (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
@@ -330,9 +324,11 @@ export class DaemonSessions {
     query?: ActiveSessionExecutionQuery,
   ): boolean {
     return hasActiveSessionExecution(
-      executionTracker,
-      this.host.services.sessionManager(),
-      this.host.services.devicePool(),
+      {
+        tracker: executionTracker,
+        sessionManager: this.host.services.sessionManager(),
+        devicePool: this.host.services.devicePool(),
+      },
       sessionId,
       query,
     );
@@ -364,9 +360,11 @@ export class DaemonSessions {
     options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
   ): number | undefined {
     return latestSessionExecutionDeadlineMs(
-      executionTracker,
-      this.host.services.sessionManager(),
-      this.host.services.devicePool(),
+      {
+        tracker: executionTracker,
+        sessionManager: this.host.services.sessionManager(),
+        devicePool: this.host.services.devicePool(),
+      },
       sessionId,
       options,
     );
@@ -443,12 +441,11 @@ export class DaemonSessions {
       let deviceId: string | null = null;
       let superseded = false;
       await releaseSessionAndDevice(
-        this.host.services.sessionManager(),
-        this.host.services.devicePool(),
+        { manager: this.host.services.sessionManager(), pool: this.host.services.devicePool() },
         assignedDeviceId,
         sessionId,
-        releaseReason,
         {
+          // `release` below owns the session release (and its reason), so no `reason` here.
           deferFailureFallback: options?.deferFailureFallback,
           release: async () => {
             if (expectedSession) {

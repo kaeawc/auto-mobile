@@ -213,7 +213,7 @@ for (const controlInFlight of [false, true]) {
         released.push({ id, reason, at: timer.now() });
         await manager.releaseSession(id, reason);
       },
-      timer,
+      { timer },
     );
     monitors.push(monitor);
     for (const at of [13_000, 14_000, 14_001]) {
@@ -432,7 +432,7 @@ test("never-heartbeated CLI mint releases only past its idle timeout", async () 
       released.push(`${id}:${reason}`);
       await manager.releaseSession(id, reason);
     },
-    timer,
+    { timer },
   );
   monitors.push(monitor);
   // Serial scheduled scans avoid introducing daemon-stall forgiveness.
@@ -463,7 +463,7 @@ test("rehydrated awaiting-owner keeps its release window and claim behaviour wit
       hasReceivedHeartbeat: false,
     });
     await persistence.recordLivenessOwnership(id, "minter");
-    await persistence.markReleased(id, "released", 0, "daemon-restart");
+    await persistence.markReleased(id, "released", 0, { reason: "daemon-restart" });
   }
   const manager = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),
@@ -501,7 +501,7 @@ test("rehydrated awaiting-owner keeps its release window and claim behaviour wit
       expect(reason).toBe("rehydration-owner-timeout");
       await manager.releaseSession(id, reason);
     },
-    timer,
+    { timer },
   );
   monitors.push(monitor);
   timer.setCurrentTime(4_001);

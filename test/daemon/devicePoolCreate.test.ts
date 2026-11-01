@@ -1,6 +1,7 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
+import { ForwardLeaseForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
@@ -60,6 +61,32 @@ describe("DevicePool.create", () => {
     expect(factoryPool.getTotalDeviceCount()).toBe(directPool.getTotalDeviceCount());
     expect(factoryPool.getAvailableDeviceCount()).toBe(directPool.getAvailableDeviceCount());
     expect(factoryPool.getAvailableDeviceCount()).toBe(0);
+  });
+
+  test("wires a watch claim store of its own, so watches are cross-daemon owned (#14908)", () => {
+    const timer = new FakeTimer();
+    const pool = DevicePool.create({
+      sessionManager: makeSessionManager(timer),
+      daemonSessionId: "watch-claims-daemon",
+      timer,
+    });
+
+    const watch = pool.testHooks.watchForeignDeviceOwnership;
+    expect(watch).toBeInstanceOf(ForwardLeaseForeignDeviceOwnership);
+    expect(watch).not.toBe(pool.testHooks.foreignDeviceOwnership);
+  });
+
+  test("wires a TV claim store of its own, so TVes are cross-daemon owned", () => {
+    const timer = new FakeTimer();
+    const pool = DevicePool.create({
+      sessionManager: makeSessionManager(timer),
+      daemonSessionId: "tv-claims-daemon",
+      timer,
+    });
+
+    const tv = pool.testHooks.tvForeignDeviceOwnership;
+    expect(tv).toBeInstanceOf(ForwardLeaseForeignDeviceOwnership);
+    expect(tv).not.toBe(pool.testHooks.foreignDeviceOwnership);
   });
 
   test("accepts an injected ADB reset quarantine factory", () => {

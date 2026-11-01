@@ -35,6 +35,12 @@ export interface WcagBaselineStore {
 
 const NO_SCREENSHOT_REASON = "no screenshot for this observation";
 
+/** The screen an audit runs against: its screenshot (when one was captured) and app. */
+export interface WcagAuditTarget {
+  screenshotPath?: string;
+  packageName: string;
+}
+
 type AuditHierarchyOptions = {
   density?: number;
   windows?: ViewHierarchyWindowInfo[];
@@ -179,9 +185,7 @@ export class WcagAudit {
   async audit(
     elements: Element[],
     viewHierarchy: Hierarchy | ViewHierarchyNode,
-    screenshotPath: string | undefined,
-    packageName: string,
-    config: AccessibilityAuditConfig,
+    { screenshotPath, packageName, config }: WcagAuditTarget & { config: AccessibilityAuditConfig },
     densityOrOptions?: number | AuditHierarchyOptions,
   ): Promise<AccessibilityAuditResult> {
     const { density, windows, descendantLabelled, elementWindowIds } =
@@ -200,14 +204,13 @@ export class WcagAudit {
     // Check for insufficient contrast ratios (if screenshot available)
     let contrast: ContrastCheckOutcome | undefined;
     if (screenshotPath) {
-      contrast = await this.checkContrastRatios(
-        elements,
-        screenshotPath,
-        config.level,
-        config.contrast,
+      contrast = await this.checkContrastRatios(elements, screenshotPath, config, {
         density,
-        { windows: windows ?? [], elementWindowIds },
-      );
+        coverage: {
+          windows: windows ?? [],
+          elementWindowIds,
+        },
+      });
       violations.push(...contrast.violations);
     }
 
@@ -316,12 +319,16 @@ export class WcagAudit {
   private async checkContrastRatios(
     elements: Element[],
     screenshotPath: string,
-    wcagLevel: string,
-    contrastConfig: AccessibilityAuditConfig["contrast"] | undefined,
-    density: number | undefined,
-    coverage: {
-      windows: readonly ViewHierarchyWindowInfo[];
-      elementWindowIds?: ReadonlyMap<Element, number>;
+    { level: wcagLevel, contrast: contrastConfig }: AccessibilityAuditConfig,
+    {
+      density,
+      coverage,
+    }: {
+      density?: number;
+      coverage: {
+        windows: readonly ViewHierarchyWindowInfo[];
+        elementWindowIds?: ReadonlyMap<Element, number>;
+      };
     },
   ): Promise<ContrastCheckOutcome> {
     const violations: WcagViolation[] = [];

@@ -40,6 +40,26 @@ export interface ConnectionRecoveryPort {
   releaseKeepsBinding(sessionUuid: string, releaseReason: string | undefined): boolean;
 }
 
+/** What a recoverable reconnect may replay, and the caller's cancellation. */
+export interface RecoverableReconnectOptions {
+  /** Fence the session when the retried request answers not-found (default true). */
+  fenceSessionNotFoundOnRetry?: boolean;
+  /** A tool that may have run must not be replayed on a fresh connection. */
+  nonIdempotentToolName?: string;
+  signal?: AbortSignal;
+}
+
+/** A reconnect without a caller signal still gets one, so every await below can check it. */
+function resolveReconnectOptions(options: RecoverableReconnectOptions | undefined): {
+  nonIdempotentToolName: string | undefined;
+  signal: AbortSignal;
+} {
+  return {
+    nonIdempotentToolName: options?.nonIdempotentToolName,
+    signal: options?.signal ?? new AbortController().signal,
+  };
+}
+
 /**
  * Reconnect-and-retry-once policy for a request that failed recoverably (stale session, daemon
  * handoff, dead transport), with the fences that keep a replay from repeating a device action
@@ -51,14 +71,20 @@ export class ConnectionRecovery {
     private readonly errorClassifier: DaemonErrorClassifier,
   ) {}
 
+  /**
+   * @param operation - The request to run, and to retry once after a recoverable failure
+   * @param attemptedSessionUuid - The session the request names
+   * @param allowReleasedSession - Admit a session the proxy already saw released
+   * @param options - Not-found fencing, replay and cancellation options
+   */
   async withRecoverableReconnect<T>(
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
-    fenceSessionNotFoundOnRetry = true,
-    nonIdempotentToolName?: string,
-    signal: AbortSignal = new AbortController().signal,
+    options?: RecoverableReconnectOptions,
   ): Promise<T> {
+    const fenceSessionNotFoundOnRetry = options?.fenceSessionNotFoundOnRetry ?? true;
+    const { nonIdempotentToolName, signal } = resolveReconnectOptions(options);
     signal.throwIfAborted();
     if (this.port.isClosing()) {
       throw new DaemonUnavailableError("MCP proxy is closing");

@@ -61,8 +61,7 @@ export class SharedTextDelegate {
     action: ImeAction,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
+    { abortSignal, onDispatch }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<ActionTimingResult> {
     return sendCommand<ActionTimingResult>(this.context, {
       idPrefix: "imeAction",

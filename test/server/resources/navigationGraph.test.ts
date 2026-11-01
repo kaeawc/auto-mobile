@@ -171,10 +171,11 @@ describe("MCP Navigation Graph Resource", () => {
       bumpDeviceIncarnation: () => 0,
     };
     const sessionGraph = NavigationGraphManager.createForTesting(
-      new NavigationRepository(sessionDb),
-      new TestCoverageRepository(sessionDb),
-      undefined,
-      sessionId,
+      new NavigationRepository({ db: sessionDb }),
+      {
+        testCoverageRepository: new TestCoverageRepository({ db: sessionDb }),
+        sessionUuid: sessionId,
+      },
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionGraph);
     DaemonState.getInstance().initialize(sessionManager as never, devicePool as never);

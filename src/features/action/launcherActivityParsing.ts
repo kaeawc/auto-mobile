@@ -68,7 +68,10 @@ export function parseLauncherActivitiesFromPackageDump(
     // A remaining open filter can only receive lines deeper than its header.
     if (filter) {
       filter.hasMain ||= line === 'Action: "android.intent.action.MAIN"';
-      filter.hasLauncher ||= line === 'Category: "android.intent.category.LAUNCHER"';
+      filter.hasLauncher ||= [
+        'Category: "android.intent.category.LAUNCHER"',
+        'Category: "android.intent.category.LEANBACK_LAUNCHER"',
+      ].includes(line);
     }
   }
   addPackageDumpLauncherActivity(filter, packageName, activities);

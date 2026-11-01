@@ -5,6 +5,7 @@ import {
   LAUNCHD_SIM_PROBE_TIMEOUT_MS,
   SHUTDOWN_SETTLE_BACKOFF,
   SimulatorBootLease,
+  type SimctlExecAsync,
 } from "./SimCtlSupport";
 
 import { errorMessage } from "../describeUnknownError";
@@ -25,6 +26,15 @@ import { getAbortSignal } from "../AbortContext";
 import { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
 import { isIosSimulatorAlreadyStoppedError } from "./simulatorStateErrors";
 
+/** Trailing options for one `simctl` argv invocation. */
+export interface SimctlArgvOptions {
+  /** Overrides the ambient abort signal for this invocation. */
+  signal?: AbortSignal;
+  /** On timeout, wait for the timed-out child to settle before rejecting. */
+  waitForTimedOutCommandSettlement?: boolean;
+  env?: NodeJS.ProcessEnv;
+}
+
 export interface SimCtlShutdownContext {
   prebootProfile?: Pick<SimulatorPrebootProfile, "removeHostState">;
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
@@ -40,22 +50,14 @@ export interface SimCtlShutdownContext {
     args: string[],
     timeoutMs?: number,
     displayCommand?: string,
-    explicitSignal?: AbortSignal,
-    waitForTimedOutCommandSettlement?: boolean,
-    env?: NodeJS.ProcessEnv,
+    options?: SimctlArgvOptions,
   ): Promise<ExecResult>;
   readSimulatorState(
     udid: string,
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<string | undefined>;
-  execAsync: (
-    file: string,
-    args: string[],
-    maxBuffer?: number,
-    signal?: AbortSignal,
-    env?: NodeJS.ProcessEnv,
-  ) => Promise<ExecResult>;
+  execAsync: SimctlExecAsync;
 }
 export class SimCtlShutdown {
   private readonly prebootProfile: Pick<SimulatorPrebootProfile, "removeHostState">;
@@ -72,8 +74,9 @@ export class SimCtlShutdown {
         udid,
         SIMULATOR_BOOT_CLEANUP_TIMEOUT_MS,
         cleanupSignal,
-        undefined,
-        lease,
+        {
+          heldLease: lease,
+        },
       );
     } catch (error) {
       logger.warn(
@@ -84,12 +87,18 @@ export class SimCtlShutdown {
     }
   }
 
+  /**
+   * @param options.expectedOwnerToken Only shut down when this boot owner still holds the lease.
+   * @param options.heldLease A lease the caller already holds; it is not reacquired.
+   */
   async shutdownSimulatorCoordinated(
     udid: string,
     timeoutMs: number,
     signal: AbortSignal | undefined,
-    expectedOwnerToken?: object,
-    heldLease?: SimulatorBootLease,
+    {
+      expectedOwnerToken,
+      heldLease,
+    }: { expectedOwnerToken?: object; heldLease?: SimulatorBootLease } = {},
   ): Promise<void> {
     const verifyCleanup = heldLease !== undefined || expectedOwnerToken !== undefined;
     const cleanupDeadlineMs = verifyCleanup
@@ -113,13 +122,10 @@ export class SimCtlShutdown {
       if (cleanupDeadlineMs !== undefined) {
         await this.executeCleanupShutdown(udid, cleanupDeadlineMs, signal);
       } else {
-        await this.context.executeCommandArgv(
-          ["shutdown", udid],
-          timeoutMs,
-          `shutdown ${udid}`,
+        await this.context.executeCommandArgv(["shutdown", udid], timeoutMs, `shutdown ${udid}`, {
           signal,
-          true,
-        );
+          waitForTimedOutCommandSettlement: true,
+        });
       }
       this.context.invalidateDeviceListCache();
       if (cleanupDeadlineMs !== undefined) {
@@ -147,13 +153,10 @@ export class SimCtlShutdown {
     try {
       await raceWithDeadline(
         () =>
-          this.context.executeCommandArgv(
-            ["shutdown", udid],
-            remainingMs,
-            `shutdown ${udid}`,
-            cleanupSignal,
-            false,
-          ),
+          this.context.executeCommandArgv(["shutdown", udid], remainingMs, `shutdown ${udid}`, {
+            signal: cleanupSignal,
+            waitForTimedOutCommandSettlement: false,
+          }),
         {
           timer: this.context.timer,
           timeoutMs: remainingMs,
@@ -247,7 +250,7 @@ export class SimCtlShutdown {
       signal?.throwIfAborted();
       const remainingMs = deadlineMs - this.context.timer.now();
       if (remainingMs <= 0) {
-        await this.assertShutdownSettled(device, state, observedShutdown, startedMs, signal);
+        await this.assertShutdownSettled(device, state, { observedShutdown, startedMs, signal });
         return;
       }
       try {
@@ -292,9 +295,11 @@ export class SimCtlShutdown {
   async assertShutdownSettled(
     device: BootedDevice,
     state: string | undefined,
-    observedShutdown: boolean,
-    startedMs: number,
-    signal?: AbortSignal,
+    {
+      observedShutdown,
+      startedMs,
+      signal,
+    }: { observedShutdown: boolean; startedMs: number; signal?: AbortSignal },
   ): Promise<void> {
     if (state === "Shutdown") {
       return;
@@ -302,7 +307,11 @@ export class SimCtlShutdown {
     if (!observedShutdown && state !== undefined) {
       const waitedMs = this.context.timer.now() - startedMs;
       const pid = await this.probeLaunchdSimPid(device.deviceId, signal);
-      throw new SimulatorStillShuttingDownError(device.deviceId, device.name, state, waitedMs, pid);
+      throw new SimulatorStillShuttingDownError(device.deviceId, device.name, {
+        lastState: state,
+        waitedMs,
+        launchdSimPid: pid,
+      });
     }
     throw new ActionableError(
       `iOS simulator '${device.name}' did not remain Shutdown after shutdown (state: ${state ?? "unknown"}).`,
@@ -320,8 +329,7 @@ export class SimCtlShutdown {
               "-f",
               `launchd_sim .*CoreSimulator/Devices/${udid}/data/var/run/launchd_bootstrap[.]plist`,
             ],
-            undefined,
-            signal,
+            { signal },
           ),
         {
           timer: this.context.timer,
@@ -356,12 +364,9 @@ export class SimCtlShutdown {
     let deviceHubRunning = false;
     try {
       // DeviceHub.app runs DevicesTrampoline, so match the app path instead of its executable name.
-      const result = await this.context.execAsync(
-        "pgrep",
-        ["-f", "/DeviceHub.app/Contents/"],
-        undefined,
+      const result = await this.context.execAsync("pgrep", ["-f", "/DeviceHub.app/Contents/"], {
         signal,
-      );
+      });
       deviceHubRunning = /^\d+$/m.test(result.stdout.trim());
     } catch (error) {
       // pgrep exits 1 when Device Hub is not running.
@@ -392,8 +397,7 @@ export class SimCtlShutdown {
         ["erase", udid],
         SIMCTL_COMMAND_TIMEOUT_MS,
         `erase ${udid}`,
-        signal,
-        true,
+        { signal, waitForTimedOutCommandSettlement: true },
       );
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
@@ -423,8 +427,7 @@ export class SimCtlShutdown {
         ["delete", udid],
         options.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS,
         `delete ${udid}`,
-        options.signal,
-        true,
+        { signal: options.signal, waitForTimedOutCommandSettlement: true },
       );
       try {
         await this.prebootProfile.removeHostState(udid);

@@ -338,8 +338,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
         reaped.push({ sessionId, reason });
         await sessionManager.releaseSession(sessionId, reason);
       },
-      daemonTimer,
-      { checkIntervalMs: INTERVAL_MS },
+      { timer: daemonTimer, checkIntervalMs: INTERVAL_MS },
     );
     monitor.start();
     daemonInstance = "daemon-2";
@@ -359,7 +358,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
         reaped.push({ sessionId, reason });
         await sessionManager.releaseSession(sessionId);
       },
-      daemonTimer,
+      { timer: daemonTimer },
     );
     monitor.start();
     daemonManager = new FakeDaemonManager();

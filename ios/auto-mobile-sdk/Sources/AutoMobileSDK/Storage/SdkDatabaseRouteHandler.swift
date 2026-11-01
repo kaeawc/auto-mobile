@@ -1,4 +1,5 @@
 #if DEBUG && !os(watchOS)
+    import AutoMobileSdkWire
     import Foundation
 
     struct SdkRouteResponse {
@@ -80,6 +81,74 @@
         let registeredAppGroupSuites: [String]
         let coreDataStores: [CoreDataStoreRegistration]
         let unavailableStores: [String]
+        /// Sharing and coordination of every registered app-group suite and Core Data store (#5161).
+        let stores: [StorageStoreState]
+        /// Keychain capability (#5161). Values are never read; deletion is exact and allowlisted.
+        let keychain: KeychainCapability
+    }
+
+    extension StorageStoreState {
+        static func states(for configuration: StorageInspectionConfiguration) -> [StorageStoreState] {
+            let suites = configuration.registeredAppGroupSuites.sorted().map { suite in
+                let coordinated = configuration.hostCoordinatedAppGroupSuites.contains(suite)
+                return StorageStoreState(
+                    kind: "user_defaults_suite",
+                    identifier: suite,
+                    sharing: "app_group",
+                    appGroup: suite,
+                    coordination: (coordinated ? StoreCoordination.hostCoordinated : .uncoordinated).rawValue,
+                    query: "supported",
+                    reason: nil
+                )
+            }
+            let coreData = configuration.coreDataStores.sorted { $0.identifier < $1.identifier }.map { store in
+                // An app-private store has one writer, the app; a shared one has the
+                // coordination the host declared, uncoordinated when it declared none.
+                StorageStoreState(
+                    kind: "core_data",
+                    identifier: store.identifier,
+                    sharing: store.appGroup == nil ? "app_private" : "app_group",
+                    appGroup: store.appGroup,
+                    coordination: store.appGroup == nil
+                        ? "single_process"
+                        : (store.coordination ?? .uncoordinated).rawValue,
+                    query: "unsupported",
+                    reason: "core_data_query_unavailable"
+                )
+            }
+            return suites + coreData
+        }
+    }
+
+    extension KeychainCapability {
+        /// Deletion still needs mutation authorization on every call; this reports the policy.
+        static func capability(for configuration: StorageInspectionConfiguration) -> KeychainCapability {
+            let scopes = configuration.allowedKeychainDeletionEntries
+                .map {
+                    KeychainItemSelector(
+                        itemClass: "genericPassword",
+                        service: $0.service,
+                        account: $0.account,
+                        accessGroup: $0.accessGroup
+                    )
+                }
+                .sorted { ($0.service, $0.account, $0.accessGroup) < ($1.service, $1.account, $1.accessGroup) }
+            let reason: String? = if !configuration.allowKeychainDeletion {
+                "DISABLED"
+            } else if scopes.isEmpty {
+                "NO_ALLOWLISTED_SCOPES"
+            } else {
+                nil
+            }
+            return KeychainCapability(
+                schemaVersion: 1,
+                capability: "storage.keychain",
+                inspection: "unavailable",
+                deletion: reason == nil ? "enabled" : "disabled",
+                reason: reason,
+                deletionScopes: reason == nil ? scopes : []
+            )
+        }
     }
 
     struct SdkDatabaseDescriptorPayload: Codable {
@@ -133,7 +202,9 @@
                 ),
                 registeredAppGroupSuites: configuration.registeredAppGroupSuites.sorted(),
                 coreDataStores: configuration.coreDataStores,
-                unavailableStores: ["keychain", "file_caches"]
+                unavailableStores: ["keychain", "file_caches"],
+                stores: StorageStoreState.states(for: configuration),
+                keychain: KeychainCapability.capability(for: configuration)
             ))
         }
 

@@ -3,6 +3,7 @@ import type {
   AudioInjection,
   InjectAudioOptions,
   InjectionResult,
+  PcmSink,
 } from "../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import type { EmulatorGrpcEndpoint } from "../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import type { PcmAudio } from "../../src/utils/audio/pcm";
@@ -21,6 +22,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
   constructor(readonly endpoint: EmulatorGrpcEndpoint) {}
 
   async injectAudio(source: PcmAudio, options?: InjectAudioOptions): Promise<AudioInjection> {
+    options?.beforeStreamOpen?.();
     this.injected.push(source);
     this.injectOptions.push(options);
     const done = new Promise<InjectionResult>((resolve, reject) => {
@@ -32,7 +34,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
       sampleRate: source.sampleRate,
       done,
       stop: async () => {
-        this.settleInjection?.({ framesSent: 7, reason: "stopped" });
+        this.settleInjection?.({ framesQueued: 7, framesPlayed: 0, reason: "stopped" });
         return done;
       },
     };
@@ -43,6 +45,23 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
     return {
       pcm: { sampleRate: options.sampleRate ?? 48_000, channels: 1, samples: this.captureSamples },
       timedOut: this.captureTimedOut,
+    };
+  }
+
+  streamSink: PcmSink | undefined;
+  streamStops = 0;
+  streamStopError: Error | undefined;
+
+  async streamCapture(sink: PcmSink, options: { sampleRate?: number } = {}) {
+    this.streamSink = sink;
+    return {
+      sampleRate: options.sampleRate ?? 48_000,
+      stop: async () => {
+        this.streamStops++;
+        if (this.streamStopError) {
+          throw this.streamStopError;
+        }
+      },
     };
   }
 

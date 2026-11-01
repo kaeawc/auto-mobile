@@ -17,8 +17,10 @@ export function findIosToggleControl(
   hierarchy: SearchableHierarchy,
   element: Element,
   text: string,
-  viewHierarchy: ViewHierarchyResult,
-  screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
+  {
+    viewHierarchy,
+    screenSizeOptions,
+  }: { viewHierarchy: ViewHierarchyResult; screenSizeOptions?: ScreenSizeForOffscreenCheckOptions },
 ): Element {
   const nodes =
     getHierarchySnapshot(viewHierarchy)?.nodes ??

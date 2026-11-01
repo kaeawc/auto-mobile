@@ -440,8 +440,7 @@ describe("broker background recovery", () => {
       broker,
       "scope",
       { acquire: () => {}, release: () => {} },
-      timer,
-      new InMemoryMutationRecordingGaps(),
+      { timer, mutations: { recordingGaps: new InMemoryMutationRecordingGaps() } },
     );
     try {
       service.start();

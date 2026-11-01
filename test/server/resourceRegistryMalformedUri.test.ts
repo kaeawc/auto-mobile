@@ -195,13 +195,14 @@ describe("registry maps a contract parser's malformed-segment error to invalid p
 
   test("decodeSegmentOrThrow surfaces as -32602 with the URI, not -32603", async () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      "automobile:test/contract/{name}",
-      "Contract",
-      "Decodes its capture with decodeSegmentOrThrow",
-      "application/json",
-      async (params) => ({ uri: "automobile:test", text: decodeSegmentOrThrow(params.name) }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test/contract/{name}", "Contract", {
+      description: "Decodes its capture with decodeSegmentOrThrow",
+      mimeType: "application/json",
+      handler: async (params) => ({
+        uri: "automobile:test",
+        text: decodeSegmentOrThrow(params.name),
+      }),
+    });
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server, () => ({}));
     const readHandler = server.server.handlersBySchema.get("resources/read")!;
@@ -226,13 +227,14 @@ describe("registry backstop for a handler that decodes a capture unguarded (#101
 
   test("a URIError from a template handler becomes a structured invalid-params error", async () => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      "automobile:test/unguarded/{name}",
-      "Unguarded",
-      "Decodes its capture without a guard",
-      "application/json",
-      async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test/unguarded/{name}", "Unguarded", {
+      description: "Decodes its capture without a guard",
+      mimeType: "application/json",
+      handler: async (params) => ({
+        uri: "automobile:test",
+        text: decodeURIComponent(params.name),
+      }),
+    });
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server, () => ({}));
     const readHandler = server.server.handlersBySchema.get("resources/read")!;
@@ -254,15 +256,13 @@ describe("registry backstop for a handler that decodes a capture unguarded (#101
   test("any other handler error is rethrown unchanged", async () => {
     ResourceRegistry.clearResources();
     const failure = new Error("boom");
-    ResourceRegistry.registerTemplate(
-      "automobile:test/failing/{name}",
-      "Failing",
-      "Throws an ordinary error",
-      "application/json",
-      async () => {
+    ResourceRegistry.registerTemplate("automobile:test/failing/{name}", "Failing", {
+      description: "Throws an ordinary error",
+      mimeType: "application/json",
+      handler: async () => {
         throw failure;
       },
-    );
+    });
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server, () => ({}));
     const readHandler = server.server.handlersBySchema.get("resources/read")!;

@@ -6,6 +6,8 @@ struct PlaygroundApp: App {
     init() {
         // Initialize AutoMobile SDK
         AutoMobileSDK.shared.initialize(bundleId: "dev.jasonpearson.automobile.Playground")
+        // The host opts in to SwiftUI navigation capture.
+        AutoMobileNavigation.shared.registerSwiftUI()
 
         do {
             try PhotosAuthorizationProbe.writeLiveSnapshotToDocuments()
@@ -32,6 +34,8 @@ struct PlaygroundApp: App {
             } catch {
                 AutoMobileLog.shared.e("PlaygroundApp", "database_fixture_failed error=\(error.localizedDescription)")
             }
+            // No-op unless the SDK contract harness launched this run (#5164).
+            SdkContractRunner.startIfRequested()
         #endif
 
         AutoMobileLog.shared.i("PlaygroundApp", "app_launched")

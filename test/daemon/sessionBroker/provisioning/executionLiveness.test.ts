@@ -141,7 +141,7 @@ describe("managed-execution session liveness", () => {
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.createSession(SESSION, DEVICE, "android", {
       stableDeviceId: "Pixel_managed_execution",
@@ -178,8 +178,10 @@ describe("managed-execution session liveness", () => {
     const ack = await heartbeat({ reportIdleRelease: true });
     expect(ack).toMatchObject({ success: true, result: { idleReleaseAt: null } });
     await manager.getOrCreateSession(SESSION, undefined, undefined, {
-      executionId: "late-control",
-      startTime: timer.now(),
+      execution: {
+        executionId: "late-control",
+        startTime: timer.now(),
+      },
     });
     expect(manager.hasSession(SESSION)).toBe(true);
   });
@@ -220,7 +222,7 @@ describe("managed-execution session liveness", () => {
     const before = { ...manager.getSession(SESSION)! };
     timer.advanceTime(MINUTE);
 
-    await manager.getOrCreateSession(SESSION, undefined, undefined, undefined, false, "read-only");
+    await manager.getOrCreateSession(SESSION, undefined, undefined, { access: "read-only" });
     manager.getSessionCache(SESSION);
 
     const after = manager.getSession(SESSION)!;
@@ -293,11 +295,13 @@ describe("managed-execution session liveness", () => {
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.getOrCreateSession(SESSION, undefined, undefined, {
-      executionId: "held-control",
-      startTime: timer.now(),
+      execution: {
+        executionId: "held-control",
+        startTime: timer.now(),
+      },
     });
     timer.setCurrentTime(session.heartbeatTimeoutMs + SUSPECT_GRACE_MS + 1);
     for (let tick = 0; tick < 3; tick++) {
@@ -451,7 +455,9 @@ describe("managed-execution session liveness", () => {
         await manager.adoptManagedExecutionLivenessPolicy(SESSION);
       }
       manager.stopCleanupTimer();
-      await persistence.markReleased(SESSION, "released", timer.now(), "daemon-restart");
+      await persistence.markReleased(SESSION, "released", timer.now(), {
+        reason: "daemon-restart",
+      });
       timer.setCurrentTime(30 * MINUTE);
       manager = new SessionManager(timer, persistence);
       await manager.rehydratePersistedSessions({
@@ -478,8 +484,10 @@ describe("managed-execution session liveness", () => {
         expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
         expect(await heartbeat()).toMatchObject({ success: true });
         await manager.getOrCreateSession(SESSION, undefined, undefined, {
-          executionId: "restart-control",
-          startTime: timer.now(),
+          execution: {
+            executionId: "restart-control",
+            startTime: timer.now(),
+          },
         });
         expect((await persistence.getSession!(SESSION))?.release_reason).toBeNull();
       } else {

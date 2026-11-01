@@ -4,21 +4,38 @@ import {
   prototypeChannelCallError,
   prototypeRealtimeFields,
 } from "./prototypeChannels";
-import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import {
+  prototypeCameraCallError,
+  prototypeCameraPreviewError,
+  prototypeCameraPreviewIds,
+} from "./prototypeCameraPreview";
+import { prototypeLinksArgumentsError } from "./prototypeLinks";
+import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
+import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
+import {
+  prototypeCastButtonError,
   prototypeMediaCallError,
   prototypeMediaError,
   prototypeMediaPlayers,
   prototypeMediaReadValid,
   prototypeVideoPlayerError,
 } from "./prototypeMedia";
+import { prototypeMapError } from "./prototypeMap";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import { prototypeCommerceBlockError, prototypeCommerceCallError } from "./prototypeCommerce";
+import {
+  prototypeNotificationsBlockError,
+  prototypeNotificationsReadValid,
+  prototypeNotificationsCallError,
+} from "./prototypeNotifications";
 import {
   prototypeSecureStorageEmitError,
+  prototypeSecureStorageRequestError,
   prototypeSecureStorageError,
 } from "./prototypeSecureStorage";
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
+import { prototypeSensorsBlockError, prototypeSensorUseError } from "./prototypeSensorsBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -26,7 +43,7 @@ import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypePlatformPlaceholders } from "./prototypeData";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import { PROTOTYPE_REQUEST_EVENT_NAME, prototypeIntoError } from "./prototypeRequest";
-import type { Rule } from "./prototypeBindingValidation";
+import { numberValid, type Rule } from "./prototypeBindingValidation";
 import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -75,6 +92,8 @@ export interface PrototypePlatformCall {
   background: string[];
   /** Calls and events touching personal data, for the threat model (#14293). */
   sensitive: boolean;
+  /** Side effects that require a user-initiated action chain. */
+  userGesture?: boolean;
   /**
    * A capability the call needs on top of its module's, so a runtime can offer a module but
    * refuse one of its operations (camera recording, media queues).
@@ -97,9 +116,11 @@ export interface PrototypePlatformModule {
   deviceCapability?: string;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
+  /** Shared runtime call budget; the host validates metadata but does not count calls. */
+  rateLimit?: { calls: number; windowMs: number };
   calls: Record<string, PrototypePlatformCall>;
   /** `debounceMs` coalesces bursts of the event into one delivery. */
-  events: Record<string, { sensitive: boolean; debounceMs?: number }>;
+  events: Record<string, { sensitive: boolean; debounceMs?: number; userInitiated?: boolean }>;
   /**
    * The keys `/platform/<module>/<key>` can read. A module without this table (the placeholder
    * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
@@ -107,9 +128,35 @@ export interface PrototypePlatformModule {
   state?: Record<string, PrototypePlatformStateEntry>;
 }
 
+/** Load the shared module table, refusing malformed optional runtime rate budgets. */
+export function loadPrototypePlatformModules(
+  modules: Record<string, PrototypePlatformModule>,
+): Record<string, PrototypePlatformModule> {
+  for (const [name, definition] of Object.entries(modules)) {
+    if (definition.rateLimit === undefined) {
+      continue;
+    }
+    const limit = record(definition.rateLimit);
+    const positiveInteger: Rule = { kind: "number", integer: true, min: 1 };
+    if (
+      !limit ||
+      Object.keys(limit).some((key) => key !== "calls" && key !== "windowMs") ||
+      !numberValid(limit.calls, positiveInteger) ||
+      !numberValid(limit.windowMs, positiveInteger) ||
+      // Swift converts these values to a signed 64-bit Int.
+      !(Number(limit.calls) < 2 ** 63) ||
+      !(Number(limit.windowMs) < 2 ** 63)
+    ) {
+      throw new Error(
+        `platformModules.${name}.rateLimit must contain positive integer calls and windowMs`,
+      );
+    }
+  }
+  return modules;
+}
+
 /** The shared `platformModules` table: each module's calls, events and capability. */
-export const PROTOTYPE_PLATFORM_MODULES: Record<string, PrototypePlatformModule> =
-  contract.platformModules;
+export const PROTOTYPE_PLATFORM_MODULES = loadPrototypePlatformModules(contract.platformModules);
 
 export interface PrototypePlatformError {
   path: string;
@@ -148,6 +195,19 @@ export function prototypePlatformCall(
   return name && definition ? { module: name.module, op: name.member, definition } : undefined;
 }
 
+/** The module and event a handler name identifies, when both exist in the table. */
+export function prototypePlatformEvent(
+  event: unknown,
+):
+  | { module: string; op: string; definition: PrototypePlatformModule["events"][string] }
+  | undefined {
+  const name = qualified(event);
+  const owner = name && module(name.module);
+  const definition =
+    owner && Object.hasOwn(owner.events, name.member) ? owner.events[name.member] : undefined;
+  return name && definition ? { module: name.module, op: name.member, definition } : undefined;
+}
+
 /** The module a `<module>.<event>` handler name belongs to, when the event exists. */
 export function prototypePlatformEventModule(event: unknown): string | undefined {
   const name = qualified(event);
@@ -183,26 +243,36 @@ const sortedKeys = (value: Raw): string[] =>
 export type PrototypePlatformUse =
   | { kind: "requires"; path: string }
   | { kind: "declared"; path: string; module: string }
+  | { kind: "node"; path: string; module: string }
   | { kind: "handlers"; path: string }
-  | { kind: "handler"; path: string; event: string }
-  | { kind: "call"; path: string; action: Raw }
+  | { kind: "handler"; path: string; event: string; userGesture: boolean }
+  | { kind: "call"; path: string; action: Raw; userGesture: boolean }
   | { kind: "read"; path: string; pointer: string; condition?: Raw }
-  | { kind: "event"; path: string; inHandler: boolean };
+  | { kind: "event"; path: string; inHandler: boolean; inTimer: boolean };
+
+interface ScanContext {
+  inHandler: boolean;
+  inTimer: boolean;
+  inNode: boolean;
+  userGesture: boolean;
+}
+const USER_GESTURE_KEYS = new Set(["onTap", "onLongPress", "onDoubleTap", "onSubmit"]);
 
 // Opaque JSON: an emit payload, literal repeat items and a literal binding's value are data.
 const OPAQUE_KEYS = new Set(["payload", "repeat"]);
 
 /** The constructs `object` is itself: a call, a `{platform}` read or an `{event}` binding. */
-function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+function ownUses(object: Raw, path: string, context: ScanContext, uses: PrototypePlatformUse[]) {
   if (object.type === "pasteButton") {
     uses.push({
       kind: "call",
+      userGesture: context.userGesture,
       path,
       action: { type: "platform", call: "clipboard.paste", into: object.into },
     });
   }
   if (object.type === "platform" && typeof object.call === "string") {
-    uses.push({ kind: "call", path, action: object });
+    uses.push({ kind: "call", path, action: object, userGesture: context.userGesture });
   }
   if (object.type !== undefined) {
     return;
@@ -216,28 +286,72 @@ function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypeP
     });
   }
   if (typeof object.event === "string") {
-    uses.push({ kind: "event", path: `${path}.event`, inHandler });
+    uses.push({
+      kind: "event",
+      path: `${path}.event`,
+      inHandler: context.inHandler,
+      inTimer: context.inTimer,
+    });
   }
 }
 
+/** Whether a member starts a timer or a deferred non-gesture handler. */
+function isDeferredMember(object: Raw, key: string): boolean {
+  return (
+    object.type === "startTimer" ||
+    (key.startsWith("on") &&
+      !USER_GESTURE_KEYS.has(key) &&
+      key !== "onSuccess" &&
+      key !== "onError")
+  );
+}
+
+/** Gesture provenance for a node handler, nested UI owner or action continuation. */
+function memberContext(object: Raw, key: string, context: ScanContext): ScanContext {
+  const node =
+    typeof object.type === "string" &&
+    Object.hasOwn(contract.definitions.node.variants, object.type);
+  const gesture = USER_GESTURE_KEYS.has(key);
+  const deferred = isDeferredMember(object, key);
+  // Nested UI owners can start gestures, but lifecycle and timer chains cannot regain one.
+  // Request completion handlers retain the enclosing chain's provenance.
+  return {
+    inHandler: context.inHandler,
+    inTimer: context.inTimer || object.type === "startTimer",
+    inNode: !deferred && (node || context.inNode),
+    userGesture: node ? gesture : !deferred && ((gesture && context.inNode) || context.userGesture),
+  };
+}
+
 /** Members in sorted order; stack screens are named in brackets, as the screen-map walk does. */
-function scanMembers(object: Raw, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+function scanMembers(
+  object: Raw,
+  path: string,
+  context: ScanContext,
+  uses: PrototypePlatformUse[],
+) {
   for (const key of sortedKeys(object)) {
+    const next = memberContext(object, key, context);
     const screens = key === "screens" ? record(object.screens) : undefined;
     if (screens) {
       for (const name of sortedKeys(screens)) {
-        scanValue(screens[name], `${path}.screens[${JSON.stringify(name)}]`, inHandler, uses);
+        scanValue(screens[name], `${path}.screens[${JSON.stringify(name)}]`, next, uses);
       }
     } else if (!OPAQUE_KEYS.has(key)) {
-      scanValue(object[key], memberPath(path, key), inHandler, uses);
+      scanValue(object[key], memberPath(path, key), next, uses);
     }
   }
 }
 
 /** Deep scan of nodes and actions for platform calls, `{platform}` reads and `{event}` bindings. */
-function scanValue(value: unknown, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+function scanValue(
+  value: unknown,
+  path: string,
+  context: ScanContext,
+  uses: PrototypePlatformUse[],
+) {
   if (Array.isArray(value)) {
-    value.forEach((child, index) => scanValue(child, `${path}[${index}]`, inHandler, uses));
+    value.forEach((child, index) => scanValue(child, `${path}[${index}]`, context, uses));
     return;
   }
   const object = record(value);
@@ -245,8 +359,8 @@ function scanValue(value: unknown, path: string, inHandler: boolean, uses: Proto
   if (!object || (Object.keys(object).length === 1 && Object.hasOwn(object, "value"))) {
     return;
   }
-  ownUses(object, path, inHandler, uses);
-  scanMembers(object, path, inHandler, uses);
+  ownUses(object, path, context, uses);
+  scanMembers(object, path, context, uses);
 }
 
 /** `{platform:/pointer}` placeholders in every text-kind field of every node. */
@@ -286,16 +400,39 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   }
   for (const event of handlers ? sortedKeys(handlers) : []) {
     const at = `platform.on[${JSON.stringify(event)}]`;
-    uses.push({ kind: "handler", path: at, event });
-    scanValue(handlers![event], at, true, uses);
+    const userGesture = prototypePlatformEvent(event)?.definition.userInitiated === true;
+    uses.push({ kind: "handler", path: at, event, userGesture });
+    scanValue(
+      handlers![event],
+      at,
+      { inHandler: true, inTimer: false, inNode: false, userGesture },
+      uses,
+    );
   }
   for (const handler of prototypeChannelHandlers(root)) {
-    scanValue(handler.value, handler.path, true, uses);
+    scanValue(
+      handler.value,
+      handler.path,
+      { inHandler: true, inTimer: false, inNode: false, userGesture: false },
+      uses,
+    );
   }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
-    scanValue(node, path, false, uses);
+    scanValue(
+      node,
+      path,
+      { inHandler: false, inTimer: false, inNode: false, userGesture: false },
+      uses,
+    );
   }
   placeholderUses(root, uses);
+  // A map node draws through the map module (#14309), so its gate names the node. Only node
+  // positions count: a map-shaped value in a request field or payload is data.
+  walkPrototypeNodes(root, (node, path) => {
+    if (node.type === "map") {
+      uses.push({ kind: "node", path, module: "map" });
+    }
+  });
   return uses;
 }
 
@@ -349,7 +486,12 @@ function argumentsError(
       }
       continue;
     }
-    const error = argumentValueError(action, name, args[name], at, declared.value, check);
+    const error = argumentValueError(
+      action,
+      { name, value: args[name], at },
+      declared.value,
+      check,
+    );
     if (error) {
       return error;
     }
@@ -364,6 +506,8 @@ interface PlatformContext {
   background: Set<string>;
   channels: Raw;
   players: ReadonlySet<string>;
+  root: Raw;
+  previews: ReadonlySet<string>;
 }
 
 function callError(
@@ -434,7 +578,12 @@ function strings(value: unknown): Set<string> {
 
 function readError(
   use: { path: string; pointer: string },
-  { declared, channels, players }: Pick<PlatformContext, "declared" | "channels" | "players">,
+  {
+    declared,
+    channels,
+    players,
+    root,
+  }: Pick<PlatformContext, "declared" | "channels" | "players" | "root">,
 ): PrototypePlatformError | undefined {
   const name = prototypePlatformPointerModule(use.pointer);
   if (!module(name)) {
@@ -443,9 +592,11 @@ function readError(
   if (!declared.has(name)) {
     return notDeclared(use.path, name);
   }
-  return stateKnown(name, use.pointer, { channels, players })
-    ? undefined
-    : { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  if (!stateKnown(name, use.pointer, { channels, players, root })) {
+    return { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  }
+  const key = prototypePlatformPointerKey(use.pointer);
+  return name === "sensors" && key ? prototypeSensorUseError(key, use.path, root) : undefined;
 }
 
 /**
@@ -455,7 +606,7 @@ function readError(
 function stateKnown(
   name: string,
   pointer: string,
-  { channels, players }: Pick<PlatformContext, "channels" | "players">,
+  { channels, players, root }: Pick<PlatformContext, "channels" | "players" | "root">,
 ): boolean {
   const state = module(name)?.state;
   const tokens = pointer
@@ -464,6 +615,9 @@ function stateKnown(
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
   if (name === "media") {
     return prototypeMediaReadValid(tokens, players, state ?? {});
+  }
+  if (name === "notifications") {
+    return prototypeNotificationsReadValid(tokens, root, state ?? {});
   }
   if (name === "realtime") {
     return (
@@ -503,6 +657,17 @@ function comparisonError(
   return undefined;
 }
 
+function callGestureError(
+  use: Extract<PrototypePlatformUse, { kind: "call" }>,
+): PrototypePlatformError | undefined {
+  return prototypePlatformCall(use.action.call)?.definition.userGesture && !use.userGesture
+    ? {
+        path: use.path,
+        message: `Side-effecting platform call ${String(use.action.call)} needs a user gesture: move it into onTap, onLongPress, onDoubleTap or onSubmit`,
+      }
+    : undefined;
+}
+
 function useError(
   use: PrototypePlatformUse,
   context: PlatformContext,
@@ -514,16 +679,31 @@ function useError(
       if (!owner) {
         return { path: use.path, message: "Unknown platform event" };
       }
-      return context.declared.has(owner) ? undefined : notDeclared(use.path, owner);
+      if (!context.declared.has(owner)) {
+        return notDeclared(use.path, owner);
+      }
+      return owner === "sensors"
+        ? prototypeSensorUseError(use.event.slice("sensors.".length), use.path, context.root)
+        : undefined;
     }
     case "call":
-      return callError(use.action, use.path, context, check);
+      return callError(use.action, use.path, context, check) ?? callGestureError(use);
     case "read":
       return readError(use, context) ?? comparisonError(use, check);
     case "event":
-      return use.inHandler
-        ? undefined
-        : { path: use.path, message: "{event} is only available inside a platform.on handler" };
+      if (!use.inHandler) {
+        return {
+          path: use.path,
+          message: "{event} is only available inside a platform.on handler",
+        };
+      }
+      return use.inTimer
+        ? {
+            path: use.path,
+            message:
+              "{event} is unavailable in startTimer actions: copy the needed event fields into data or state before starting the timer",
+          }
+        : undefined;
     default:
       return undefined;
   }
@@ -564,6 +744,8 @@ function platformContext(root: Raw): PlatformContext {
   return {
     channels: record(root.channels) ?? {},
     players: prototypeMediaPlayers(root),
+    root,
+    previews: prototypeCameraPreviewIds(root),
     declared: strings(requires.platform),
     permissions: new Set(
       (Array.isArray(requires.permissions) ? requires.permissions : []).map(
@@ -585,18 +767,21 @@ export function prototypePlatformError(
 ): PrototypePlatformError | undefined {
   const root = record(spec) ?? {};
   const context = platformContext(root);
-  const error = rootBlockError(root);
+  const error = rootBlockError(root, check);
   if (error) {
     return error;
   }
   for (const use of prototypePlatformUses(root)) {
-    const found = useError(use, context, check) ?? channelUseError(use, root, context.players);
+    const found = useError(use, context, check) ?? channelUseError(use, root, context);
     if (found) {
       return found;
     }
   }
   for (const { value, path } of actions) {
-    const found = emitNameError(value, path) ?? prototypeSecureStorageEmitError(value, path, root);
+    const found =
+      emitNameError(value, path) ??
+      prototypeSecureStorageEmitError(value, path, root) ??
+      prototypeSecureStorageRequestError(value, path, root);
     if (found) {
       return found;
     }
@@ -605,25 +790,50 @@ export function prototypePlatformError(
 }
 
 /**
- * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
- * the location block, then `requires`.
+ * The root-level checks, in order: realtime channels, the auth, commerce, secure storage, location,
+ * sensors and notifications blocks, media players and nodes, then `requires`. Kotlin's
+ * `rootChecks` keeps the same order.
  */
-function rootBlockError(root: Raw): PrototypePlatformError | undefined {
-  return (
-    prototypeChannelsError(root) ??
-    prototypeAuthBlockError(root) ??
-    prototypeSecureStorageError(root) ??
-    prototypeLocationBlockError(root) ??
-    prototypeMediaError(root) ??
-    prototypeVideoPlayerError(root) ??
-    requiresError(root)
-  );
+const ROOT_BLOCK_CHECKS: readonly ((
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+) => PrototypePlatformError | undefined)[] = [
+  prototypeChannelsError,
+  prototypeAuthBlockError,
+  prototypeCommerceBlockError,
+  prototypeSecureStorageError,
+  prototypeLocationBlockError,
+  prototypeSensorsBlockError,
+  prototypeNotificationsBlockError,
+  prototypeMediaError,
+  prototypeMediaQueueError,
+  prototypeVideoPlayerError,
+  prototypeMapError,
+  prototypeMediaCaptionsError,
+  prototypeCastButtonError,
+  prototypeCameraPreviewError,
+  requiresError,
+];
+
+/** The first error in the root-level blocks. */
+function rootBlockError(
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  for (const rootCheck of ROOT_BLOCK_CHECKS) {
+    const error = rootCheck(root, check);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */
 function usedModule(use: PrototypePlatformUse): string | undefined {
   switch (use.kind) {
     case "declared":
+    case "node":
       return use.module;
     case "handler":
       return prototypePlatformEventModule(use.event);
@@ -735,12 +945,34 @@ const callCapabilities = (): { capability: string; calls: string[] }[] => {
   return [...byCapability].map(([capability, calls]) => ({ capability, calls }));
 };
 
+/** Spec fields beyond its calls that a per-call capability also gates: a queued player (#14249). */
+const CALL_CAPABILITY_FIELDS: Record<
+  string,
+  { fields: (spec: unknown) => string[]; name: string }
+> = {
+  prototype_platform_media_queue_v1: {
+    fields: prototypeMediaQueueFields,
+    name: "a media player `queue`",
+  },
+};
+
 /** One generated gate per per-call capability, after the module gates. */
 const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, calls }) => ({
   capability,
-  fields: (spec: unknown) => prototypePlatformCallCapabilityFields(spec, capability),
+  fields: (spec: unknown) => [
+    ...(CALL_CAPABILITY_FIELDS[capability]?.fields(spec) ?? []),
+    ...prototypePlatformCallCapabilityFields(spec, capability),
+  ],
   unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-    unsupported(fields, platform, capability, calls.map((call) => `\`${call}\``).join(" or ")),
+    unsupported(
+      fields,
+      platform,
+      capability,
+      [
+        ...calls.map((call) => `\`${call}\``),
+        ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
+      ].join(" or "),
+    ),
 }));
 
 /** One generated gate per module in the `platformModules` table, then one per call capability. */
@@ -777,9 +1009,7 @@ export const PROTOTYPE_PLATFORM_MODULE_GATES = [
 
 function argumentValueError(
   action: Raw,
-  name: string,
-  value: unknown,
-  at: string,
+  { name, value, at }: { name: string; value: unknown; at: string },
   rule: Rule,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
@@ -806,11 +1036,14 @@ function argumentValueError(
 function channelUseError(
   use: PrototypePlatformUse,
   root: Raw,
-  players: ReadonlySet<string>,
+  context: PlatformContext,
 ): PrototypePlatformError | undefined {
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
         prototypeAuthCallError(use.action, use.path, root) ??
-        prototypeMediaCallError(use.action, use.path, players))
+        prototypeCommerceCallError(use.action, use.path, root) ??
+        prototypeNotificationsCallError(use.action, use.path, root) ??
+        prototypeMediaCallError(use.action, use.path, context.players) ??
+        prototypeCameraCallError(use.action, use.path, context.previews))
     : undefined;
 }

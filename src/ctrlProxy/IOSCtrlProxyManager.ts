@@ -422,9 +422,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static createForTesting(
     device: BootedDevice,
     timer: Timer,
-    builder?: IosCtrlProxyBuilderSurface,
-    tunnelClient?: IosTunnelClient,
-    processExecutor?: HostProcessExecutor,
+    {
+      builder,
+      tunnelClient,
+      processExecutor,
+    }: {
+      builder?: IosCtrlProxyBuilderSurface;
+      tunnelClient?: IosTunnelClient;
+      processExecutor?: HostProcessExecutor;
+    } = {},
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager({
       device,
@@ -954,8 +960,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return readEnvPositiveInteger(
       ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS.name,
       ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS.legacyName,
-      { fallback: IOS_CTRL_PROXY_DEFAULT_HEALTH_POLL_MAX_ATTEMPTS },
-      env,
+      { fallback: IOS_CTRL_PROXY_DEFAULT_HEALTH_POLL_MAX_ATTEMPTS, env },
     );
   }
   ensureServicePortReadyForLaunch(): Promise<void> {

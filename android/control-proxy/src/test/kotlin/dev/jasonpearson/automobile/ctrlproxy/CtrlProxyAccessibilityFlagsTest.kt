@@ -10,8 +10,8 @@ import org.robolectric.RobolectricTestRunner
  * Regression coverage for the bug where every ensureConnected() call reconfigured a live
  * AccessibilityService (serviceInfo = info) even when nothing changed, disrupting in-flight
  * hierarchy capture (observed as elements=0 on every observe() for an entire CI run). The fix is
- * the equality check at the applyAccessibilityFlags call site in CtrlProxy.kt; this test covers the
- * extracted pure bitmask computation it depends on.
+ * the equality check in [AccessibilityFlagsController.apply]; this test covers the pure bitmask
+ * computation it depends on.
  */
 @RunWith(RobolectricTestRunner::class)
 class CtrlProxyAccessibilityFlagsTest {
@@ -20,14 +20,14 @@ class CtrlProxyAccessibilityFlagsTest {
   fun `computing the same flags twice from a stable base is idempotent`() {
     val base = 0
     val first =
-      CtrlProxy.computeAccessibilityServiceFlags(
+      AccessibilityFlagsController.computeServiceFlags(
         currentFlags = base,
         includeNotImportantViews = false,
         reportViewIds = true,
         retrieveInteractiveWindows = false,
       )
     val second =
-      CtrlProxy.computeAccessibilityServiceFlags(
+      AccessibilityFlagsController.computeServiceFlags(
         currentFlags = first,
         includeNotImportantViews = false,
         reportViewIds = true,
@@ -42,7 +42,7 @@ class CtrlProxyAccessibilityFlagsTest {
   @Test
   fun `sets each flag bit on when requested true`() {
     val flags =
-      CtrlProxy.computeAccessibilityServiceFlags(
+      AccessibilityFlagsController.computeServiceFlags(
         currentFlags = 0,
         includeNotImportantViews = true,
         reportViewIds = true,
@@ -73,7 +73,7 @@ class CtrlProxyAccessibilityFlagsTest {
         AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
 
     val flags =
-      CtrlProxy.computeAccessibilityServiceFlags(
+      AccessibilityFlagsController.computeServiceFlags(
         currentFlags = base,
         includeNotImportantViews = false,
         reportViewIds = false,
@@ -89,7 +89,7 @@ class CtrlProxyAccessibilityFlagsTest {
   @Test
   fun `requesting the currently-applied config is a true no-op on the bitmask`() {
     val current =
-      CtrlProxy.computeAccessibilityServiceFlags(
+      AccessibilityFlagsController.computeServiceFlags(
         currentFlags = 0,
         includeNotImportantViews = false,
         reportViewIds = true,
@@ -97,7 +97,7 @@ class CtrlProxyAccessibilityFlagsTest {
       )
 
     val recomputed =
-      CtrlProxy.computeAccessibilityServiceFlags(
+      AccessibilityFlagsController.computeServiceFlags(
         currentFlags = current,
         includeNotImportantViews = false,
         reportViewIds = true,

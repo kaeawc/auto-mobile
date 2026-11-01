@@ -18,12 +18,12 @@ describe("EmulatorLossIncidentRepository", () => {
   });
 
   test("persists recovery attempts and prunes oldest records", async () => {
-    const repository = new EmulatorLossIncidentRepository(
+    const repository = new EmulatorLossIncidentRepository({
       db,
-      new FakeTimer(),
-      new CountingIdGenerator("incident"),
-      2,
-    );
+      timer: new FakeTimer(),
+      idGenerator: new CountingIdGenerator("incident"),
+      maxRetained: 2,
+    });
     const first = await repository.open({
       deviceId: "emulator-5554",
       detectionPath: "device-discovery-miss",
@@ -54,12 +54,12 @@ describe("EmulatorLossIncidentRepository", () => {
 
   test("retains the most recently inserted incident when timestamps tie", async () => {
     const ids = ["z-first", "a-second"];
-    const repository = new EmulatorLossIncidentRepository(
+    const repository = new EmulatorLossIncidentRepository({
       db,
-      new FakeTimer(),
-      { next: () => ids.shift()! },
-      1,
-    );
+      timer: new FakeTimer(),
+      idGenerator: { next: () => ids.shift()! },
+      maxRetained: 1,
+    });
     const first = await repository.open({
       deviceId: "emulator-5554",
       detectionPath: "device-discovery-miss",
@@ -77,18 +77,18 @@ describe("EmulatorLossIncidentRepository", () => {
 
   test("preserves concurrent recovery updates", async () => {
     const timer = new FakeTimer();
-    const repository = new EmulatorLossIncidentRepository(
+    const repository = new EmulatorLossIncidentRepository({
       db,
       timer,
-      new CountingIdGenerator("incident"),
-      2,
-    );
-    const concurrentRepository = new EmulatorLossIncidentRepository(
+      idGenerator: new CountingIdGenerator("incident"),
+      maxRetained: 2,
+    });
+    const concurrentRepository = new EmulatorLossIncidentRepository({
       db,
       timer,
-      new CountingIdGenerator("concurrent"),
-      2,
-    );
+      idGenerator: new CountingIdGenerator("concurrent"),
+      maxRetained: 2,
+    });
     const incident = await repository.open({
       deviceId: "emulator-5554",
       detectionPath: "watched-process-exit",
@@ -109,12 +109,12 @@ describe("EmulatorLossIncidentRepository", () => {
 
   test("persists session diagnostics and replacement settlement", async () => {
     const timer = new FakeTimer();
-    const repository = new EmulatorLossIncidentRepository(
+    const repository = new EmulatorLossIncidentRepository({
       db,
       timer,
-      new CountingIdGenerator("incident"),
-      50,
-    );
+      idGenerator: new CountingIdGenerator("incident"),
+      maxRetained: 50,
+    });
     const opened = await repository.open({
       deviceId: "emulator-5554",
       avdName: "Pixel_8_API_35",
@@ -134,12 +134,12 @@ describe("EmulatorLossIncidentRepository", () => {
       sessionState: "active",
     });
 
-    const reopened = new EmulatorLossIncidentRepository(
+    const reopened = new EmulatorLossIncidentRepository({
       db,
       timer,
-      new CountingIdGenerator("other"),
-      50,
-    );
+      idGenerator: new CountingIdGenerator("other"),
+      maxRetained: 50,
+    });
     await expect(reopened.get(opened.id)).resolves.toMatchObject({
       deviceId: "emulator-5554",
       avdName: "Pixel_8_API_35",

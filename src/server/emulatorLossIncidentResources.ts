@@ -51,8 +51,11 @@ export function registerEmulatorLossIncidentResources(
   ResourceRegistry.register(
     EMULATOR_LOSS_INCIDENT_RESOURCE_URIS.ARCHIVE,
     "Android Emulator Loss Incidents",
-    "Bounded diagnostics and recovery outcomes for unexpectedly lost Android emulators.",
-    "application/json",
-    () => getIncidentArchive(deps),
+    {
+      description:
+        "Bounded diagnostics and recovery outcomes for unexpectedly lost Android emulators.",
+      mimeType: "application/json",
+      handler: () => getIncidentArchive(deps),
+    },
   );
 }

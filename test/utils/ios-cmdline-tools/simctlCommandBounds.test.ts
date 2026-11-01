@@ -10,7 +10,7 @@ function stalledClient(timer: FakeTimer) {
   let commandSignal: AbortSignal | undefined;
   const client = new SimCtlClient(
     null,
-    async (_file, _args, _buffer, signal) => {
+    async (_file, _args, { signal } = {}) => {
       commandSignal = signal;
       return new Promise<ExecResult>(() => {});
     },
@@ -112,7 +112,7 @@ describe("simctl command bounds under cancellation", () => {
     let received: AbortSignal | undefined;
     const client = new SimCtlClient(
       null,
-      async (_file, _args, _buffer, signal) => {
+      async (_file, _args, { signal } = {}) => {
         received = signal;
         return createExecResult("", "");
       },

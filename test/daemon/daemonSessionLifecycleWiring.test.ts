@@ -147,7 +147,10 @@ test("failed network cleanup marks the ownership session before settlement", asy
   };
   try {
     wireSessionLifecycle(manager, timer, host);
-    state.startSimulation("fake-device", "timeout", 30, null, "derived-session");
+    state.startSimulation("fake-device", "timeout", 30, {
+      limit: null,
+      ownerSessionUuid: "derived-session",
+    });
     callbacks[1]!("derived-session", "fake-device");
     expect(ownership).toHaveBeenCalledWith("derived-session");
     expect(base).toHaveBeenCalledWith("derived-session");

@@ -3788,13 +3788,11 @@ describe("Android app-file resource user round trips", () => {
         ]);
         expect(adb.listUsersCalls).toBe(scenario.explicit === undefined ? 1 : 0);
 
-        ResourceRegistry.registerTemplate(
-          APP_FILE_RESOURCE_TEMPLATES.FILE,
-          "File",
-          "File",
-          "text/plain",
-          async () => ({ uri }),
-        );
+        ResourceRegistry.registerTemplate(APP_FILE_RESOURCE_TEMPLATES.FILE, "File", {
+          description: "File",
+          mimeType: "text/plain",
+          handler: async () => ({ uri }),
+        });
         const match = ResourceRegistry.matchTemplate(uri);
         expect(match).toBeDefined();
         const parts = parseAppFileResourceParams(match!.params);

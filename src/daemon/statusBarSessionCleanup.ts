@@ -80,7 +80,7 @@ export function registerStatusBarSessionCleanup(
       leftover: "the released session's status bar override",
     });
   };
-  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     // A terminal upgrade of a finished release would clear the next owner's override (#10825).
     if (releaseOptions?.upgradeOnly) {
       return;

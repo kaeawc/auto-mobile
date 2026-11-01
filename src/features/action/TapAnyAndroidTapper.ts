@@ -21,6 +21,7 @@ import {
   BootedDevice,
   Element,
   ObserveResult,
+  type Point,
   TapAnyElementOptions,
   ViewHierarchyResult,
   requireAndroidOrIosPlatform,
@@ -116,15 +117,20 @@ export class TapAnyAndroidTapper {
 
   async executeAndroidTap(
     action: TapAnyElementOptions["action"],
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
-    target: CapturedTapTarget,
-    fenceOptions: DisplayFenceOption & {
-      signal?: AbortSignal;
-      onActivationWarnings?: (warnings?: string[]) => void;
-    } = {},
+    {
+      target,
+      fenceOptions = {},
+    }: {
+      target: CapturedTapTarget;
+      fenceOptions?: DisplayFenceOption & {
+        signal?: AbortSignal;
+        onActivationWarnings?: (warnings?: string[]) => void;
+      };
+    },
   ): Promise<void> {
+    const { x, y } = point;
     const { signal } = fenceOptions;
     const fence = resolveDisplayFence(fenceOptions);
     const { element, capture } = target;
@@ -147,11 +153,14 @@ export class TapAnyAndroidTapper {
     const talkBackEnabled = element["hierarchy-source"] !== "uiautomator" && talkBackState === true;
     if (
       talkBackEnabled &&
-      (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
-        displayFence: fence,
-        scoped: target.scoped,
-        hierarchy: resolveViewHierarchyForSearch(capture.hierarchy),
-        onActivationWarnings: fenceOptions.onActivationWarnings,
+      (await this.executeAndroidTalkBackTap(action, { x, y }, durationMs, {
+        element,
+        fenceOptions: {
+          displayFence: fence,
+          scoped: target.scoped,
+          hierarchy: resolveViewHierarchyForSearch(capture.hierarchy),
+          onActivationWarnings: fenceOptions.onActivationWarnings,
+        },
       }))
     ) {
       return;
@@ -161,7 +170,10 @@ export class TapAnyAndroidTapper {
       if (await this.trySemanticAndroidLongPress(element, { signal, scoped: target.scoped })) {
         return;
       }
-      await this.executeAndroidLongPress(x, y, durationMs, signal, { displayFence: fence });
+      await this.executeAndroidLongPress(x, y, durationMs, {
+        signal,
+        fenceOptions: { displayFence: fence },
+      });
       return;
     }
 
@@ -193,10 +205,8 @@ export class TapAnyAndroidTapper {
       await dispatchAndroidCoordinateTap(
         this.deps.accessibilityService,
         this.deps.getAdb(),
-        point.x,
-        point.y,
-        10,
-        { signal },
+        point,
+        { durationMs: 10, options: { signal } },
       );
     };
     if (action !== "doubleTap") {
@@ -218,8 +228,7 @@ export class TapAnyAndroidTapper {
     x: number,
     y: number,
     durationMs: number,
-    signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
+    { signal, fenceOptions = {} }: { signal?: AbortSignal; fenceOptions?: DisplayFenceOption } = {},
   ): Promise<void> {
     const fence = resolveDisplayFence(fenceOptions);
     throwIfAborted(signal);
@@ -291,26 +300,29 @@ export class TapAnyAndroidTapper {
 
   async executeAndroidTalkBackTap(
     action: TapAnyElementOptions["action"],
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
-    element: Element,
-    fenceOptions: DisplayFenceOption &
-      TalkBackTargetContext & {
-        scoped?: boolean;
-        onActivationWarnings?: (warnings?: string[]) => void;
-      } = {},
+    {
+      element,
+      fenceOptions = {},
+    }: {
+      element: Element;
+      fenceOptions?: DisplayFenceOption &
+        TalkBackTargetContext & {
+          scoped?: boolean;
+          onActivationWarnings?: (warnings?: string[]) => void;
+        };
+    },
   ): Promise<boolean> {
+    const { x, y } = point;
     const fence = fenceOptions.displayFence;
     const driver = this.deps.talkBackDriverFactory.createDriver(this.deps.device);
     if (action === "longPress" && !fenceOptions.scoped) {
       const result = await this.deps.talkBackStrategy.executeLongPress(
-        x,
-        y,
+        { x, y },
         durationMs,
         element,
-        driver,
-        { ...fenceOptions, displayFence: fence },
+        { driver, fenceOptions: { ...fenceOptions, displayFence: fence } },
       );
       if (!result.success && result.semanticActionFailure) {
         throw new ActionableError(
@@ -335,16 +347,12 @@ export class TapAnyAndroidTapper {
     const fallback =
       action === "tap"
         ? await this.deps.talkBackStrategy.executePreciseTap(x, y, driver, fence)
-        : await this.deps.talkBackStrategy.executeCoordinateFallback(
-            x,
-            y,
-            action,
-            durationMs,
+        : await this.deps.talkBackStrategy.executeCoordinateFallback({ x, y }, action, durationMs, {
             driver,
-            {
+            fenceOptions: {
               displayFence: fence,
             },
-          );
+          });
     fenceOptions.onActivationWarnings?.(fallback.warnings);
     return fallback.success;
   }
@@ -353,18 +361,23 @@ export class TapAnyAndroidTapper {
     preTapHash: string | null,
     target: CapturedTapTarget,
     action: TapAnyElementOptions["action"],
-    durationMs: number,
-    screenSize?: ObserveResult["screenSize"],
-    fenceOptions: DisplayFenceOption & {
-      signal?: AbortSignal;
-      selectionOptions?: TapAnyElementOptions;
-      refresh?: RefreshViewHierarchy;
-      dispatch?: (point: { x: number; y: number }) => Promise<void>;
-      onActivationWarnings?: (warnings?: string[]) => void;
-    } = {},
+    {
+      durationMs,
+      fenceOptions = {},
+    }: {
+      durationMs: number;
+      fenceOptions?: DisplayFenceOption & {
+        screenSize?: ObserveResult["screenSize"];
+        signal?: AbortSignal;
+        selectionOptions?: TapAnyElementOptions;
+        refresh?: RefreshViewHierarchy;
+        dispatch?: (point: { x: number; y: number }) => Promise<void>;
+        onActivationWarnings?: (warnings?: string[]) => void;
+      };
+    },
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
-    const { signal } = fenceOptions;
+    const { signal, screenSize } = fenceOptions;
     const reportedTarget = target;
     if (action !== "tap" || !preTapHash) {
       return;
@@ -374,8 +387,7 @@ export class TapAnyAndroidTapper {
       (timeoutMs) =>
         (fenceOptions.refresh ?? this.deps.refreshViewHierarchy)(timeoutMs, screenSize, signal),
       (postTapHierarchy) => hierarchyFingerprint(postTapHierarchy),
-      preTapHash,
-      signal,
+      { preTapHash, signal },
     );
     if (probe.status === "unavailable") {
       logger.warn(
@@ -392,7 +404,7 @@ export class TapAnyAndroidTapper {
         requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
         probe.hierarchy,
         "cached-ok",
-        this.deps.timer,
+        { timer: this.deps.timer },
       );
       const refound = this.deps.findClickableElement(options, capture.hierarchy, {
         observationScreenSize: screenSize,
@@ -408,13 +420,10 @@ export class TapAnyAndroidTapper {
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
     await this.deps.timer.sleep(PRE_RETRY_DELAY_MS);
-    await this.refreshTalkBackRetryTarget(
-      target,
-      options,
-      fenceOptions.refresh,
+    await this.refreshTalkBackRetryTarget(target, options, fenceOptions.refresh, {
       screenSize,
       signal,
-    );
+    });
     if (target.talkBackState) {
       reportedTarget.element = target.element;
       reportedTarget.capture = target.capture;
@@ -425,10 +434,13 @@ export class TapAnyAndroidTapper {
       await fenceOptions.dispatch(retryPoint);
       return;
     }
-    await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, {
-      signal,
-      displayFence: fence,
-      onActivationWarnings: fenceOptions.onActivationWarnings,
+    await this.executeAndroidTap(action, retryPoint, durationMs, {
+      target,
+      fenceOptions: {
+        signal,
+        displayFence: fence,
+        onActivationWarnings: fenceOptions.onActivationWarnings,
+      },
     });
   }
 
@@ -436,8 +448,7 @@ export class TapAnyAndroidTapper {
     target: CapturedTapTarget,
     options: TapAnyElementOptions | undefined,
     refresh: RefreshViewHierarchy | undefined,
-    screenSize: ObserveResult["screenSize"] | undefined,
-    signal?: AbortSignal,
+    { screenSize, signal }: { screenSize?: ObserveResult["screenSize"]; signal?: AbortSignal } = {},
   ): Promise<void> {
     if (!target.talkBackState || !options) {
       return;
@@ -453,7 +464,7 @@ export class TapAnyAndroidTapper {
       requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
       hierarchy,
       "fresh",
-      this.deps.timer,
+      { timer: this.deps.timer },
     );
     const found = this.deps.findClickableElement(options, capture.hierarchy, {
       observationScreenSize: screenSize,

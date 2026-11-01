@@ -48,13 +48,10 @@ describe("announceSessionRelease", () => {
     const announcer = new FakeAnnouncer();
     announcer.captured.set("a", ["rec-1"]);
     const announced = new Set<string>();
-    announceSessionRelease(
-      announcer,
-      { fallbacks: new Set(), announced },
-      "a",
-      "daemon-shutdown",
-      snapshot("a"),
-    );
+    announceSessionRelease(announcer, "a", "daemon-shutdown", {
+      shutdown: { fallbacks: new Set(), announced },
+      snapshot: snapshot("a"),
+    });
     expect(announcer.emitted).toEqual([
       { sessionId: "a", reason: "daemon-shutdown", recordingIds: ["rec-1"] },
     ]);
@@ -64,23 +61,17 @@ describe("announceSessionRelease", () => {
   test("a release already covered by the shutdown fallback drops its captured ids (#11058)", () => {
     const announcer = new FakeAnnouncer();
     announcer.captured.set("a", ["rec-1"]);
-    announceSessionRelease(
-      announcer,
-      { fallbacks: new Set(["a"]), announced: new Set() },
-      "a",
-      "daemon-shutdown",
-      snapshot("a"),
-    );
+    announceSessionRelease(announcer, "a", "daemon-shutdown", {
+      shutdown: { fallbacks: new Set(["a"]), announced: new Set() },
+      snapshot: snapshot("a"),
+    });
     expect(announcer.emitted).toEqual([]);
 
     // A later release reusing the UUID must not report the earlier release's recordings.
-    announceSessionRelease(
-      announcer,
-      { fallbacks: null, announced: null },
-      "a",
-      "heartbeat-timeout",
-      snapshot("a"),
-    );
+    announceSessionRelease(announcer, "a", "heartbeat-timeout", {
+      shutdown: { fallbacks: null, announced: null },
+      snapshot: snapshot("a"),
+    });
     expect(announcer.emitted).toEqual([
       { sessionId: "a", reason: "heartbeat-timeout", recordingIds: undefined },
     ]);
@@ -88,14 +79,11 @@ describe("announceSessionRelease", () => {
 
   test("an upgrade-only release is announced with its marker (#11206)", () => {
     const announcer = new FakeAnnouncer();
-    announceSessionRelease(
-      announcer,
-      { fallbacks: null, announced: null },
-      "a",
-      "explicit-release",
-      snapshot("a"),
-      { upgradeOnly: true },
-    );
+    announceSessionRelease(announcer, "a", "explicit-release", {
+      shutdown: { fallbacks: null, announced: null },
+      snapshot: snapshot("a"),
+      upgradeOnly: true,
+    });
     expect(announcer.emitted).toEqual([
       { sessionId: "a", reason: "explicit-release", recordingIds: undefined, upgradeOnly: true },
     ]);

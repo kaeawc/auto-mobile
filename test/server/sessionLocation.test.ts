@@ -280,9 +280,14 @@ describe("session location admission", () => {
             deviceId,
             mutation: async () => {
               mutations++;
-              registry.start(deviceId, points, 1000, 500, true, async () => {
-                writes++;
-              });
+              registry.start(
+                deviceId,
+                points,
+                { durationMs: 1000, updateIntervalMs: 500, loop: true },
+                async () => {
+                  writes++;
+                },
+              );
             },
           }),
         ).rejects.toBeInstanceOf(ActionableError);
@@ -503,7 +508,12 @@ describe("session route cleanup", () => {
         const { runSessionLocationMutation, createSessionLocationWriteAdmission } =
           await import("../../src/server/sessionLocation");
         await manager.createSession("session", targetId, platform);
-        registry.start(targetId, points, 10_000, 3000, true, () => finished.promise);
+        registry.start(
+          targetId,
+          points,
+          { durationMs: 10_000, updateIntervalMs: 3000, loop: true },
+          () => finished.promise,
+        );
         timer.advanceTime(0);
         await flush();
         const state = new DeviceState(
@@ -650,14 +660,19 @@ describe("session route cleanup", () => {
           deviceId,
           platform: "android",
         });
-        registry.start(deviceId, points, 1000, 500, true, async (_point, options) => {
-          signal = options.signal;
-          attempts++;
-          await finished.promise;
-          if (!options.signal.aborted) {
-            writes++;
-          }
-        });
+        registry.start(
+          deviceId,
+          points,
+          { durationMs: 1000, updateIntervalMs: 500, loop: true },
+          async (_point, options) => {
+            signal = options.signal;
+            attempts++;
+            await finished.promise;
+            if (!options.signal.aborted) {
+              writes++;
+            }
+          },
+        );
         timer.advanceTime(0);
         await flush();
         expect(attempts).toBe(1);

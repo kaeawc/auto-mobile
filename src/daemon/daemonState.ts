@@ -1,3 +1,4 @@
+import type { BindingRegistrySchemaProbe } from "./sessionBroker/registry/bindingRegistryMigrations";
 import { registerDefaultForeignAndroidSerialSource } from "../devices/foreignAndroidSerialResolver";
 import type { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import { setDeviceAdmissionGate } from "../utils/deviceAdmissionGate";
@@ -37,6 +38,15 @@ export class DaemonState implements DaemonStateLike {
   private readonly brokerConnectionScopes = new BrokerConnectionScopes();
   private sessionBrokerService: SessionBrokerService | undefined;
   private sessionBrokerMode = false;
+  private bindingRegistrySchemaProbe: BindingRegistrySchemaProbe | undefined;
+
+  setBindingRegistrySchemaProbe(probe: BindingRegistrySchemaProbe | undefined): void {
+    this.bindingRegistrySchemaProbe = probe;
+  }
+
+  getBindingRegistrySchemaProbe(): BindingRegistrySchemaProbe | undefined {
+    return this.bindingRegistrySchemaProbe;
+  }
   private brokerExecutionReowner: ManagedExecutionReowner | null = null;
   setBrokerExecutionReowner(reowner: ManagedExecutionReowner | null): void {
     this.brokerExecutionReowner = reowner;
@@ -208,6 +218,7 @@ export class DaemonState implements DaemonStateLike {
     this.brokerExecutionReowner = null;
     this.brokerConnectionScopes.clear();
     this.sessionBrokerService = undefined;
+    this.bindingRegistrySchemaProbe = undefined;
     this.sessionBrokerMode = false;
     this.sessionManager = null;
     this.devicePool = null;

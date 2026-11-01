@@ -8,6 +8,7 @@ import {
   type SimCtlBootOptions,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
+import type { SimctlExecOptions } from "../../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
 import { ActionableError, toActionableError } from "../../../src/models";
@@ -84,12 +85,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
   let listDevicesFailure: Error | null = null;
   const nextState = (): string => (states.length > 1 ? states.shift()! : states[0]);
 
-  const execAsync = async (
-    file: string,
-    args: string[],
-    _maxBuffer?: number,
-    signal?: AbortSignal,
-  ) => {
+  const execAsync = async (file: string, args: string[], { signal }: SimctlExecOptions = {}) => {
     const command = `${file} ${args.join(" ")}`;
     calls.push(command);
     const timeoutUsage = commandTimeouts.get(command) ?? [];
@@ -275,12 +271,7 @@ function createConcurrentStartHarness(
   let shutdownCount = 0;
   let shutdownSucceeded = false;
   let listDevicesCount = 0;
-  const execAsync = async (
-    file: string,
-    args: string[],
-    _maxBuffer?: number,
-    signal?: AbortSignal,
-  ) => {
+  const execAsync = async (file: string, args: string[], { signal }: SimctlExecOptions = {}) => {
     const command = `${file} ${args.join(" ")}`;
     if (command === "xcrun simctl --version") {
       return createExecResult("", "");
@@ -359,7 +350,7 @@ describe("SimCtlClient boot self-verification", () => {
 
   test.each([
     new ActionableError("boot failed"),
-    new DeviceBootTimeoutError("startDevice", "boot", 1000, 1000, UDID),
+    new DeviceBootTimeoutError("startDevice", "boot", 1000, { budgetMs: 1000, device: UDID }),
   ])("attaches failed cleanup while preserving the original boot error: %s", async (failure) => {
     const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
     harness.timer.enableAutoAdvance();
@@ -431,7 +422,7 @@ describe("SimCtlClient boot self-verification", () => {
   test.each([
     new Error("cancelled after boot"),
     new DOMException("cancelled after boot", "AbortError"),
-    new DeviceBootTimeoutError("startDevice", "boot", 1000, 1000, UDID),
+    new DeviceBootTimeoutError("startDevice", "boot", 1000, { budgetMs: 1000, device: UDID }),
   ])("an aborted presentation annotates only a copy of its shared reason: %s", async (reason) => {
     const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
     harness.timer.enableAutoAdvance();
@@ -553,7 +544,7 @@ describe("SimCtlClient boot self-verification", () => {
     const calls: string[] = [];
     const simctl = new SimCtlClient(
       null,
-      async (file, args, _maxBuffer, signal) => {
+      async (file, args, { signal } = {}) => {
         const command = `${file} ${args.join(" ")}`;
         calls.push(command);
         if (command === "xcrun simctl --version" || command === `xcrun simctl shutdown ${UDID}`) {
@@ -593,7 +584,7 @@ describe("SimCtlClient boot self-verification", () => {
     let shutdownStartedAborted: boolean | undefined;
     const simctl = new SimCtlClient(
       null,
-      async (file, args, _maxBuffer, signal) => {
+      async (file, args, { signal } = {}) => {
         const command = `${file} ${args.join(" ")}`;
         calls.push(command);
         if (command === "xcrun simctl --version") {
@@ -680,12 +671,7 @@ describe("SimCtlClient boot self-verification", () => {
   test("does not serialize boot attempts for different UDIDs", async () => {
     const calls: string[] = [];
     const firstController = new AbortController();
-    const execAsync = async (
-      file: string,
-      args: string[],
-      _maxBuffer?: number,
-      signal?: AbortSignal,
-    ) => {
+    const execAsync = async (file: string, args: string[], { signal }: SimctlExecOptions = {}) => {
       const command = `${file} ${args.join(" ")}`;
       calls.push(command);
       if (command === `xcrun simctl bootstatus ${UDID} -b`) {
@@ -2153,7 +2139,10 @@ describe("boot readiness provisioning classification", () => {
   } as const;
 
   test.each([
-    new DeviceBootTimeoutError("provisionDevice", "boot readiness", 20, 20, UDID),
+    new DeviceBootTimeoutError("provisionDevice", "boot readiness", 20, {
+      budgetMs: 20,
+      device: UDID,
+    }),
     new SimctlCommandTimeoutError("simctl list timed out"),
     new DOMException("caller deadline expired", "TimeoutError"),
   ])("preserves readiness cause and retryable timeout for %s", async (failure) => {
@@ -2302,7 +2291,9 @@ describe("boot readiness provisioning classification", () => {
   test("operation failure preferred during phase settlement still maps to timeout", async () => {
     const timer = new FakeTimer();
     const boot = leaseHarness(timer);
-    const deadline = new DeviceBootTimeoutError("provisionDevice", "readiness", 10, 10);
+    const deadline = new DeviceBootTimeoutError("provisionDevice", "readiness", 10, {
+      budgetMs: 10,
+    });
     const pending = runPhaseWithSettlement(
       {
         timer,

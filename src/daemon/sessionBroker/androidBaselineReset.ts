@@ -14,25 +14,19 @@ import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/s
 import { isUnknownEmulatorName } from "../../utils/android-cmdline-tools/emulatorReadinessEvaluation";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
 import type { BrokerNativeProfile } from "./profile";
 import type { ExecutionTracker } from "../executionTracker";
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
+import {
+  staticToolChangesHostSideState,
+  staticToolChangesOpaquePersistentState,
+} from "../staticToolDefinitions";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 
 export const DEFAULT_ANDROID_RESET_TIMEOUT_MS = 600_000;
 const ANDROID_BASELINE_STEP_ATTEMPTS = 3;
-// User snapshot capture writes emulator state outside the guest that a broker snapshot load keeps.
-// Host-side state (AVD config, mock-network rules) survives snapshot load and wipe-data alike.
-const HOST_SIDE_TOOLS: ReadonlySet<string> = new Set([
-  "network",
-  "mockNetwork",
-  "clearMockNetwork",
-  "setDeviceResources",
-]);
-const OPAQUE_PERSISTENT_TOOLS: ReadonlySet<string> = new Set(["deviceSnapshot"]);
 
 function activityAllowsReset(
   strategy: AndroidResetStrategy,
@@ -66,8 +60,10 @@ export function watchAndroidResetSession(
   const close = tracker.onSessionExecutionEnded((sessionIds, activity) => {
     if (sessionIds.includes(sessionId) && activity.admitted) {
       safe = false;
-      opaque ||= OPAQUE_PERSISTENT_TOOLS.has(activity.toolName);
-      hostSide ||= HOST_SIDE_TOOLS.has(activity.toolName);
+      // The tool traits say which tools leave state a snapshot load (opaque) or any guest reset
+      // (host-side) cannot revert (#15672).
+      opaque ||= staticToolChangesOpaquePersistentState(activity.toolName);
+      hostSide ||= staticToolChangesHostSideState(activity.toolName);
     }
   });
   return {
@@ -137,6 +133,7 @@ export interface AndroidBaselineResetDependencies {
 }
 
 interface AndroidBaselineCaptureOptions {
+  sessionId: string;
   stableDeviceId: string;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -176,9 +173,9 @@ export class AndroidBaselineReset {
     resourceId: string,
     device: BootedDevice,
     profile: AndroidResetProfile,
-    sessionId: string,
     options: AndroidBaselineCaptureOptions,
   ): Promise<{ bootId: string | null } | undefined> {
+    const { sessionId } = options;
     this.closeBaseline(resourceId);
     if (!this.dependencies.strategy) {
       return;
@@ -255,7 +252,7 @@ export class AndroidBaselineReset {
     };
     try {
       await runStep(
-        (timeoutMs) => this.assertTarget(device, profile, signal, timeoutMs),
+        (timeoutMs) => this.assertTarget(device, profile, signal, { timeoutMs }),
         "Android reset baseline target verification",
         true,
       );
@@ -290,13 +287,10 @@ export class AndroidBaselineReset {
           timeoutMs: Math.max(0, deadlineMs - timer.now()),
           assertOwned: async () => {
             await options.assertOwned?.();
-            await this.assertTarget(
-              device,
-              profile,
-              signal,
-              Math.max(1, deadlineMs - timer.now()),
-              { allowPendingName: true },
-            );
+            await this.assertTarget(device, profile, signal, {
+              timeoutMs: Math.max(1, deadlineMs - timer.now()),
+              allowPendingName: true,
+            });
             if (bootId) {
               await this.assertBootIdentity(device, bootId, signal);
             }
@@ -343,7 +337,7 @@ export class AndroidBaselineReset {
     resourceId: string,
     device: BootedDevice,
     profile: AndroidResetProfile,
-    assertOwned: () => Promise<void>,
+    { assertOwned, signal }: { assertOwned: () => Promise<void>; signal?: AbortSignal },
   ): Promise<"clean" | ResetOutcome> {
     const timing: ResetOutcome = { outcome: "pending", mode: "none", phases: {} };
     const timer = this.dependencies.timer ?? this.baselines.get(resourceId)?.timer ?? defaultTimer;
@@ -353,19 +347,18 @@ export class AndroidBaselineReset {
     }
     const deadlineMs = timer.now() + timeoutMs;
     const controller = new AbortController();
-    const ambientSignal = getAbortSignal();
-    const signal = ambientSignal
-      ? AbortSignal.any([ambientSignal, controller.signal])
-      : controller.signal;
+    const resetSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const owned = async () => {
-      signal.throwIfAborted();
+      resetSignal.throwIfAborted();
       await assertOwned();
-      signal.throwIfAborted();
+      resetSignal.throwIfAborted();
     };
     try {
       return await raceWithDeadline(
         () =>
-          this.resetWithinDeadline(resourceId, device, profile, owned, signal, {
+          this.resetWithinDeadline(resourceId, device, profile, {
+            assertOwned: owned,
+            signal: resetSignal,
             deadlineMs,
             timing,
             timer,
@@ -373,7 +366,7 @@ export class AndroidBaselineReset {
         {
           timer,
           timeoutMs,
-          signal,
+          signal: resetSignal,
           label: "Android baseline reset",
           onTimeout: () =>
             controller.abort(new ActionableError("Android baseline reset deadline exceeded")),
@@ -439,17 +432,18 @@ export class AndroidBaselineReset {
     resourceId: string,
     device: BootedDevice,
     profile: AndroidResetProfile,
-    assertOwned: () => Promise<void>,
-    signal: AbortSignal,
     {
+      assertOwned,
+      signal,
       deadlineMs,
       timing,
       timer,
     }: {
+      signal: AbortSignal;
       deadlineMs: number;
       timing: ResetOutcome;
       timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
-    },
+    } & { assertOwned: () => Promise<void> },
   ): Promise<"clean" | ResetOutcome> {
     const strategy = this.dependencies.strategy;
     if (!strategy) {
@@ -463,17 +457,12 @@ export class AndroidBaselineReset {
       if (!strategy.handlesSessionMutations && !activityAllowsReset(strategy, baseline.activity)) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
-      await this.assertTarget(
-        device,
-        profile,
-        signal,
-        Math.max(1, deadlineMs - timer.now()),
-        {
-          requireBoot: !strategy.handlesSessionMutations,
-          allowPendingName: true,
-        },
+      await this.assertTarget(device, profile, signal, {
+        timeoutMs: Math.max(1, deadlineMs - timer.now()),
+        requireBoot: !strategy.handlesSessionMutations,
+        allowPendingName: true,
         budget,
-      );
+      });
       if (baseline.bootId) {
         await this.assertBootIdentity(device, baseline.bootId, signal, budget);
       }
@@ -486,8 +475,7 @@ export class AndroidBaselineReset {
           device,
           baseline.packages,
           "Android reset detected untracked package inventory changes",
-          signal,
-          budget,
+          { signal, budget },
         );
       }
       const healthCheck = (context?: DeviceMutationResetContext) =>
@@ -527,14 +515,11 @@ export class AndroidBaselineReset {
           assertBindingOwned: assertOwned,
           rebindIncarnation: async () => {
             await assertOwned();
-            await this.assertTarget(
-              device,
-              profile,
-              signal,
-              Math.max(1, deadlineMs - timer.now()),
-              { allowPendingName: true },
+            await this.assertTarget(device, profile, signal, {
+              timeoutMs: Math.max(1, deadlineMs - timer.now()),
+              allowPendingName: true,
               budget,
-            );
+            });
             const bootId = await this.bootIdentity(device, signal, undefined, budget);
             await assertOwned();
             baseline.bootId = bootId;
@@ -559,8 +544,7 @@ export class AndroidBaselineReset {
           device,
           baseline.packages,
           "Android reset did not restore the original package inventory",
-          signal,
-          budget,
+          { signal, budget },
         );
       }
       await healthCheck();
@@ -578,14 +562,11 @@ export class AndroidBaselineReset {
     budget: ResetReadBudget,
   ): Promise<void> {
     await budget.assertOwned();
-    await this.assertTarget(
-      device,
-      profile,
-      signal,
-      Math.max(1, budget.deadlineMs - budget.timer.now()),
-      { allowPendingName: true },
+    await this.assertTarget(device, profile, signal, {
+      timeoutMs: Math.max(1, budget.deadlineMs - budget.timer.now()),
+      allowPendingName: true,
       budget,
-    );
+    });
     await budget.assertOwned();
     await this.packages(device, signal, undefined, budget);
     await budget.assertOwned();
@@ -600,12 +581,14 @@ export class AndroidBaselineReset {
     profile: AndroidResetProfile,
     signal?: AbortSignal,
     // Capture-only default; reset callers always supply an absolute read budget.
-    timeoutMs = 2000,
     {
+      timeoutMs = 2000,
       requireBoot = true,
       allowPendingName = false,
-    }: { requireBoot?: boolean; allowPendingName?: boolean } = {},
-    budget?: ResetReadBudget,
+      budget,
+    }: { requireBoot?: boolean; allowPendingName?: boolean; budget?: ResetReadBudget } & {
+      timeoutMs?: number;
+    } = {},
   ): Promise<void> {
     const runtime = parseAndroidSystemImageRuntime(profile.systemImagePackage);
     const validInput = [
@@ -775,8 +758,7 @@ export class AndroidBaselineReset {
     device: BootedDevice,
     baseline: ReadonlySet<string>,
     message: string,
-    signal?: AbortSignal,
-    budget?: ResetReadBudget,
+    { signal, budget }: { signal?: AbortSignal; budget?: ResetReadBudget } = {},
   ): Promise<void> {
     const packages = await this.packages(device, signal, undefined, budget);
     if (

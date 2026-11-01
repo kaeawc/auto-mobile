@@ -69,6 +69,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only runner bundle.",
   },
   { name: "AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH", kind: "input", reason: "Read-only IPA artifact." },
+  {
+    name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
+    kind: "input",
+    reason: "Read-only prebuilt watchOS runner artifact.",
+  },
   { name: "AUTOMOBILE_CWEBP_PATH", kind: "input", reason: "Read-only codec executable." },
   {
     name: "AUTOMOBILE_TRACE_PROCESSOR",
@@ -127,6 +132,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   { name: "AUTOMOBILE_VIDEO_SERVER_JAR", kind: "input", reason: "Read-only encoder JAR." },
   {
     name: "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER",
+    kind: "input",
+    reason: "Read-only helper executable.",
+  },
+  {
+    name: "AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER",
     kind: "input",
     reason: "Read-only helper executable.",
   },

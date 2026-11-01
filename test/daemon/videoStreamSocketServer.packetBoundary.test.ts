@@ -53,8 +53,7 @@ function createHarness() {
     },
     "/unused/video-stream.sock",
     new FakeTimer(),
-    { authorize: () => {} },
-    permissiveDeviceAdmissionGate,
+    { authenticator: { authorize: () => {} }, admissionGate: permissiveDeviceAdmissionGate },
   );
   return {
     server,

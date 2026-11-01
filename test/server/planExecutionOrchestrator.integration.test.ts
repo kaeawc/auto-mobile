@@ -388,7 +388,8 @@ steps:
         expect(executePlanMock.mock.calls[0][3]).toBe(iosDevice.deviceId);
         expect(executePlanMock.mock.calls[0][4]).toBe("base");
       } else {
-        expect(allocate).toHaveBeenCalledWith(["base", "base:Y"], 5000, "ios");
+        // The plan hands the allocator its request signal explicitly (#15671); none is set here.
+        expect(allocate).toHaveBeenCalledWith(["base", "base:Y"], 5000, "ios", undefined);
         expect(sessionManager.getSession("base:Y")).not.toBeNull();
         expect(sessionManager.getDeviceLabels("base")).toEqual({ X: "base", Y: "base:Y" });
         expect(result.deviceMapping).toEqual({ X: iosDevice.deviceId, Y: iosDevice.deviceId });
@@ -431,7 +432,7 @@ steps:
       async (sessionId) => {
         await sessionManager.releaseSession(sessionId);
       },
-      timer,
+      { timer },
     );
 
     devicePool.assignMultipleDevices = async (sessionIds) => {

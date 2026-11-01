@@ -15,6 +15,7 @@ import { parseAndroidSystemImageRuntime } from "../../../utils/android-cmdline-t
 import type { AvdConfigReader } from "../../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { matchesWatchSimulator } from "./watchBindingSpec";
 
 type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceType"> & {
   deviceType?: string;
@@ -29,6 +30,10 @@ type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceT
  */
 export type BindingRequestedSpec =
   | WithOptionalDeviceType<AndroidDeviceSpecification>
+  /**
+   * Also an Apple Watch spec (#15882), which is the subset `{ runtime, deviceType }` with both
+   * required (`watchBindingSpecSchema`); the watch resolver refuses anything more or less.
+   */
   | WithOptionalDeviceType<IosDeviceSpecification>;
 
 /** `unknown` means the device's configuration could not be read; it never justifies deletion. */
@@ -43,59 +48,78 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
   constructor(private readonly androidConfigReader: Pick<AvdConfigReader, "readConfig">) {}
 
   async matches(device: DeviceInfo, spec: BindingRequestedSpec): Promise<ManagedSpecMatch> {
-    if (device.platform === "android") {
-      let config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>;
-      try {
-        config = await this.androidConfigReader.readConfig(device.name);
-      } catch (error) {
-        logger.warn(
-          `[Bindings] cannot read AVD config for '${device.name}': ${errorMessage(error)}`,
-          error,
-        );
-        return "unknown";
-      }
-      if (!config) {
-        return "unknown";
-      }
-      // An omitted hardware profile is unconstrained: the AVD's own profile (even an unset one)
-      // satisfies it.
-      const constraints = {
-        ...(spec as WithOptionalDeviceType<AndroidDeviceSpecification>),
-        deviceType: (spec.deviceType ?? config.deviceName) as string,
-      };
-      if (!matchesAndroidDeviceSpecification(constraints, config)) {
+    switch (device.platform) {
+      case "watchos":
+        // Exact runtime and device type only: never an AVD config or iOS form-factor inference.
+        return matchesWatchSimulator(device, spec);
+      case "android":
+        return await this.matchesAndroid(device, spec);
+      case "ios":
+        return matchesIosSimulator(device, spec);
+      case "tvos":
+        // No binding spec describes an Apple TV yet, so one is never reused for a binding.
         return "mismatch";
-      }
-      return matchDeviceFamily(spec.deviceFamily, () =>
-        androidProfileFormFactor({
-          systemImageTag: config.systemImagePackage
-            ? parseAndroidSystemImageRuntime(config.systemImagePackage)?.tag
-            : undefined,
-          profileId: config.deviceName,
-          width: config.screenWidth,
-          height: config.screenHeight,
-          density: config.screenDensity,
-        }),
-      );
     }
-    // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
-    // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
-    if (
-      device.isAvailable === false ||
-      device.runtime === undefined ||
-      (spec.deviceType !== undefined && device.deviceType === undefined)
-    ) {
+  }
+
+  private async matchesAndroid(
+    device: DeviceInfo,
+    spec: BindingRequestedSpec,
+  ): Promise<ManagedSpecMatch> {
+    let config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>;
+    try {
+      config = await this.androidConfigReader.readConfig(device.name);
+    } catch (error) {
+      logger.warn(
+        `[Bindings] cannot read AVD config for '${device.name}': ${errorMessage(error)}`,
+        error,
+      );
       return "unknown";
     }
-    // An omitted model is unconstrained: the simulator's own model satisfies it.
+    if (!config) {
+      return "unknown";
+    }
+    // An omitted hardware profile is unconstrained: the AVD's own profile (even an unset one)
+    // satisfies it.
     const constraints = {
-      runtime: spec.runtime,
-      deviceType: spec.deviceType ?? device.deviceType!,
+      ...(spec as WithOptionalDeviceType<AndroidDeviceSpecification>),
+      deviceType: (spec.deviceType ?? config.deviceName) as string,
     };
-    return iosDeviceSpecificationMismatch(constraints, device) === undefined
-      ? matchDeviceFamily(spec.deviceFamily, () => inferIosFormFactor(device.deviceType))
-      : "mismatch";
+    if (!matchesAndroidDeviceSpecification(constraints, config)) {
+      return "mismatch";
+    }
+    return matchDeviceFamily(spec.deviceFamily, () =>
+      androidProfileFormFactor({
+        systemImageTag: config.systemImagePackage
+          ? parseAndroidSystemImageRuntime(config.systemImagePackage)?.tag
+          : undefined,
+        profileId: config.deviceName,
+        width: config.screenWidth,
+        height: config.screenHeight,
+        density: config.screenDensity,
+      }),
+    );
   }
+}
+
+function matchesIosSimulator(device: DeviceInfo, spec: BindingRequestedSpec): ManagedSpecMatch {
+  // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
+  // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
+  if (
+    device.isAvailable === false ||
+    device.runtime === undefined ||
+    (spec.deviceType !== undefined && device.deviceType === undefined)
+  ) {
+    return "unknown";
+  }
+  // An omitted model is unconstrained: the simulator's own model satisfies it.
+  const constraints = {
+    runtime: spec.runtime,
+    deviceType: spec.deviceType ?? device.deviceType!,
+  };
+  return iosDeviceSpecificationMismatch(constraints, device) === undefined
+    ? matchDeviceFamily(spec.deviceFamily, () => inferIosFormFactor(device.deviceType))
+    : "mismatch";
 }
 
 function matchDeviceFamily(

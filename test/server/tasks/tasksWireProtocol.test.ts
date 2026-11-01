@@ -44,17 +44,14 @@ describe("Tasks extension over the wire (#4668)", () => {
 
   beforeAll(async () => {
     restoreHermeticServer = installHermeticServerFixture();
-    ToolRegistry.register(
-      ECHO,
-      "echo",
-      z.object({ text: z.string() }),
-      async (args, progress) => {
+    ToolRegistry.register(ECHO, "echo", z.object({ text: z.string() }), {
+      handler: async (args, progress) => {
         await progress?.(1, 2, "halfway");
         currentTaskContext()?.holdDeviceLease("session-1");
         return { content: [{ type: "text", text: `echo:${args.text}` }] };
       },
-      { supportsProgress: true },
-    );
+      supportsProgress: true,
+    });
     ToolRegistry.register(WAIT, "wait", z.object({}), async (_args, _progress, signal) => {
       await new Promise<void>((resolve, reject) => {
         releaseWait = resolve;

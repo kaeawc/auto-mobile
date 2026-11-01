@@ -101,7 +101,7 @@ describe("heartbeat monitor check interval env", () => {
       new SessionManager(timer, new FakeDeviceSessionPersistence()),
       () => false,
       async () => {},
-      timer,
+      { timer },
     );
     monitor.start();
     const [period] = timer.getPendingIntervals().slice(-1);

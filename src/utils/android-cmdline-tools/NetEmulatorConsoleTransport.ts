@@ -1,7 +1,10 @@
 import * as net from "node:net";
 import { ActionableError } from "../../models";
 import { Timer, defaultTimer } from "../SystemTimer";
-import type { EmulatorConsoleTransport } from "./EmulatorConsoleClient";
+import type {
+  EmulatorConsoleExecuteOptions,
+  EmulatorConsoleTransport,
+} from "./EmulatorConsoleClient";
 
 export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
   constructor(
@@ -14,9 +17,7 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
     host: string,
     port: number,
     authToken: string | null,
-    commands: string[],
-    signal?: AbortSignal,
-    timeoutMs: number = this.timeoutMs,
+    { commands, signal, timeoutMs = this.timeoutMs }: EmulatorConsoleExecuteOptions,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {

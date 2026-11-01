@@ -146,8 +146,7 @@ export function unsupportedAppFileOperation(
   operation: string,
   platform: Platform,
   appId: string,
-  container: AppFileContainer,
-  reason: string,
+  { container, reason }: { container: AppFileContainer; reason: string },
 ): ActionableError {
   return new ActionableError(
     `${operation} is not supported for appId ${appId} in ${container} on ${platform}: ${reason}`,
@@ -207,13 +206,10 @@ export function iosContainerRelativePath(
     case "tmp":
       return "tmp";
     case "externalFiles":
-      throw unsupportedAppFileOperation(
-        operation,
-        platform,
-        appId,
+      throw unsupportedAppFileOperation(operation, platform, appId, {
         container,
-        "externalFiles is not available for iOS app containers",
-      );
+        reason: "externalFiles is not available for iOS app containers",
+      });
   }
 }
 
@@ -239,10 +235,10 @@ export async function listLocalFilesWithPaths(
       const childPath = paths.join(dir, child.name);
       const stat = await fileSystem.lstat(childPath);
       if (stat.isDirectory()) {
-        entries.push(buildLocalListEntry(root, childPath, stat, true, paths));
+        entries.push(buildLocalListEntry(root, childPath, stat, { isDirectory: true, paths }));
         await visit(childPath);
       } else if (stat.isFile()) {
-        entries.push(buildLocalListEntry(root, childPath, stat, false, paths));
+        entries.push(buildLocalListEntry(root, childPath, stat, { isDirectory: false, paths }));
       }
     }
   }
@@ -262,8 +258,7 @@ function buildLocalListEntry(
   root: string,
   childPath: string,
   stat: AppFileStats,
-  isDirectory: boolean,
-  paths: typeof posix,
+  { isDirectory, paths }: { isDirectory: boolean; paths: typeof posix },
 ): LocalFileListEntry {
   const filePath = paths.relative(root, childPath).replace(/\\/g, "/");
   return {
@@ -335,14 +330,13 @@ export function parseAndroidStatListing(
   stdout: string,
   root: string,
   device: BootedDevice,
-  appId: string,
-  container: AppFileContainer,
+  { appId, container }: { appId: string; container: AppFileContainer },
 ): AppFileListEntry[] {
   return stdout
     .split(/\n/)
     .map((line) => line.replace(/\r$/, ""))
     .filter((line) => line.length > 0)
-    .map((line) => parseAndroidStatLine(line, root, device, appId, container))
+    .map((line) => parseAndroidStatLine(line, root, device, { appId, container }))
     .filter((entry): entry is AppFileListEntry => entry !== null);
 }
 
@@ -350,8 +344,7 @@ function parseAndroidStatLine(
   line: string,
   root: string,
   device: BootedDevice,
-  appId: string,
-  container: AppFileContainer,
+  { appId, container }: { appId: string; container: AppFileContainer },
 ): AppFileListEntry | null {
   const parts = line.split("|");
   if (parts.length < 4) {

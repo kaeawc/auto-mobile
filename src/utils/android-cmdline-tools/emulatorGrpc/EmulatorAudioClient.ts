@@ -1,6 +1,7 @@
 import { errorMessage } from "../../../models/describeUnknownError";
 import { durationMs, resampleMono, toMono, type PcmAudio } from "../../audio/pcm";
 import { logger } from "../../logger";
+import { raceWithDeadline } from "../../raceWithDeadline";
 import { defaultTimer, type Timer } from "../../SystemTimer";
 import type { GrpcAuthorizer } from "./emulatorGrpcAuth";
 import {
@@ -11,8 +12,9 @@ import {
   type EmulatorAudioFormat,
 } from "./emulatorAudioMessages";
 import { captureError, injectionError } from "./EmulatorAudioError";
-import { GrpcStatus } from "./grpcFraming";
+import { GrpcStatus, type GrpcStatusResult } from "./grpcFraming";
 import type { GrpcCall, GrpcTransport } from "./grpcTransport";
+import { SilenceFiller } from "./SilenceFiller";
 
 const SERVICE = "/android.emulation.control.EmulatorController";
 export const INJECT_AUDIO_METHOD = `${SERVICE}/injectAudio`;
@@ -20,9 +22,10 @@ export const STREAM_AUDIO_METHOD = `${SERVICE}/streamAudio`;
 
 /** Packet length for injection. The emulator buffers ~300ms and rejects oversized packets. */
 const INJECT_PACKET_MS = 20;
+// Bound the wait for response headers; a server that stays silent counts as accepted.
+const INJECT_ACCEPTANCE_WINDOW_MS = 200;
 /** How long capture waits past the requested duration before reporting what it has. */
 const CAPTURE_GRACE_MS = 2_000;
-
 /** Mono 16-bit PCM at a rate the emulator accepts, the one format injection sends. */
 export function prepareForInjection(pcm: PcmAudio): PcmAudio {
   const mono = toMono(pcm);
@@ -54,10 +57,18 @@ export interface InjectAudioOptions {
   startDelayMs?: number;
   /** Stop after this long even when looping. */
   maxDurationMs?: number;
+  /** Runs after authorization, immediately before opening the stream. Throw to refuse it. */
+  beforeStreamOpen?: () => void;
 }
 
 export interface InjectionResult {
-  framesSent: number;
+  /** Frames handed to the gRPC stream. Flow control lets this run far ahead of playback, so it is not audio heard. */
+  framesQueued: number;
+  /**
+   * Frames the emulator should have rendered by the time streaming ended: monotonic-clock time since the
+   * first packet at the clip rate, capped at framesQueued. An estimate; the emulator reports no ack.
+   */
+  framesPlayed: number;
   /** Why streaming ended: the clip finished, `stop()` was called, or the max duration elapsed. */
   reason: "completed" | "stopped" | "max_duration";
 }
@@ -109,12 +120,30 @@ interface InjectionRun {
   pcm: PcmAudio;
   options: InjectAudioOptions;
   control: InjectionControl;
-  framesSent: number;
+  framesQueued: number;
+  /** Monotonic clock time (ms) when the first packet was written; playback is measured from here. */
+  playbackStartMs?: number;
 }
 
 export interface CaptureAudioOptions {
   durationMs: number;
   sampleRate?: number;
+}
+
+/**
+ * Receives captured PCM. A returned promise is backpressure: the source delivers nothing more until
+ * it settles, so a slow consumer (a stalled disk) bounds memory instead of queueing audio.
+ */
+export type PcmSink = (pcm: Uint8Array) => void | Promise<void>;
+
+/** An open-ended capture; PCM is 16-bit little-endian mono at `sampleRate`. */
+export interface AudioStream {
+  readonly sampleRate: number;
+  /**
+   * Ends the capture and resolves once the last PCM was delivered. Idempotent. Rejects when the
+   * capture did not run to the stop: the device refused it, or it failed partway through.
+   */
+  stop(): Promise<void>;
 }
 
 export interface CaptureResult {
@@ -131,12 +160,33 @@ export class EmulatorAudioClient {
   constructor(
     private readonly transport: GrpcTransport,
     private readonly authorizer: GrpcAuthorizer,
-    private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout"> = defaultTimer,
+    private readonly timer: Pick<
+      Timer,
+      "now" | "monotonicNow" | "setTimeout" | "clearTimeout"
+    > = defaultTimer,
   ) {}
 
   async injectAudio(source: PcmAudio, options: InjectAudioOptions = {}): Promise<AudioInjection> {
     const pcm = prepareForInjection(source);
-    const call = await this.open(INJECT_AUDIO_METHOD);
+    const call = await this.open(INJECT_AUDIO_METHOD, options.beforeStreamOpen);
+    let acceptanceTimer!: NodeJS.Timeout;
+    const acceptanceWindow = new Promise<undefined>((resolve) => {
+      acceptanceTimer = this.timer.setTimeout(
+        () => resolve(undefined),
+        INJECT_ACCEPTANCE_WINDOW_MS,
+      );
+    });
+    try {
+      const status = await raceWithDeadline<GrpcStatusResult | undefined>(
+        [call.status(), call.responseHeaders(), acceptanceWindow],
+        { timer: this.timer, label: "Audio injection acceptance" },
+      );
+      if (status && status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
+        throw injectionError(status);
+      }
+    } finally {
+      this.timer.clearTimeout(acceptanceTimer);
+    }
     const control = createInjectionControl(call);
     const done = this.streamInjection(call, pcm, options, control);
     // Keep an unobserved failure from becoming an unhandled rejection; callers read it via done/stop.
@@ -208,13 +258,66 @@ export class EmulatorAudioClient {
     return { pcm: { sampleRate, channels: 1, samples }, timedOut: timedOut && collected < wanted };
   }
 
+  /**
+   * Streams the emulator's audio output to `sink` until stopped, for recordings of any length. A
+   * silent guest sends no packets, so its quiet stretches are filled with silence to keep the PCM
+   * in step with the wall clock.
+   */
+  async streamCapture(sink: PcmSink, options: { sampleRate?: number } = {}): Promise<AudioStream> {
+    const sampleRate = Math.min(
+      options.sampleRate ?? EMULATOR_MAX_SAMPLING_RATE,
+      EMULATOR_MAX_SAMPLING_RATE,
+    );
+    const call = await this.open(STREAM_AUDIO_METHOD);
+    await call.write(
+      encodeAudioFormat({ samplingRate: sampleRate, channels: "mono", format: "s16" }),
+    );
+    call.end();
+    const filler = new SilenceFiller(sampleRate, () => this.timer.now() * 1000);
+    const pump = (async () => {
+      try {
+        for await (const message of call.messages()) {
+          const packet = decodeAudioPacket(message);
+          const silence = filler.before(packet);
+          // Awaiting the sink holds the next read, and HTTP/2 flow control the emulator.
+          if (silence) {
+            await sink(silence);
+          }
+          await sink(packet.audio);
+        }
+      } catch (error) {
+        // The call status, read at stop, says whether this was the cancel or a failure.
+        logger.debug(`audio stream ended: ${errorMessage(error)}`);
+      }
+    })();
+    let stopping: Promise<void> | undefined;
+    const stop = async (): Promise<void> => {
+      call.cancel();
+      await pump;
+      // A stream that failed before the cancel failed even after some audio: the track would end
+      // early and be padded with silence, so report it rather than keep it (#15860).
+      const status = await call.status();
+      if (status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
+        throw captureError(status);
+      }
+    };
+    return {
+      sampleRate,
+      stop: () => {
+        stopping ??= stop();
+        return stopping;
+      },
+    };
+  }
+
   async close(): Promise<void> {
     this.transport.close();
     await this.authorizer.dispose();
   }
 
-  private async open(method: string): Promise<GrpcCall> {
+  private async open(method: string, beforeStreamOpen?: () => void): Promise<GrpcCall> {
     const authorization = await this.authorizer.authorization(method);
+    beforeStreamOpen?.();
     return this.transport.open(method, authorization ? { authorization } : {});
   }
 
@@ -224,7 +327,7 @@ export class EmulatorAudioClient {
     options: InjectAudioOptions,
     control: InjectionControl,
   ): Promise<InjectionResult> {
-    const run: InjectionRun = { call, pcm, options, control, framesSent: 0 };
+    const run: InjectionRun = { call, pcm, options, control, framesQueued: 0 };
     // A timer, not a check between writes, so it also ends a write parked on back-pressure.
     const deadline =
       options.maxDurationMs === undefined
@@ -245,7 +348,11 @@ export class EmulatorAudioClient {
     if (status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
       throw injectionError(status);
     }
-    return { framesSent: run.framesSent, reason: control.endReason ?? "completed" };
+    return {
+      framesQueued: run.framesQueued,
+      framesPlayed: this.framesPlayed(run),
+      reason: control.endReason ?? "completed",
+    };
   }
 
   private async sendAll(run: InjectionRun): Promise<void> {
@@ -272,6 +379,20 @@ export class EmulatorAudioClient {
     });
   }
 
+  private playbackNowMs(): number {
+    return this.timer.monotonicNow?.() ?? this.timer.now();
+  }
+
+  /** Frames the emulator has rendered by now at the clip rate, never more than were queued. */
+  private framesPlayed(run: InjectionRun): number {
+    if (run.playbackStartMs === undefined) {
+      return 0;
+    }
+    const elapsedMs = Math.max(0, this.playbackNowMs() - run.playbackStartMs);
+    const rendered = Math.floor((elapsedMs * run.pcm.sampleRate) / 1000);
+    return Math.min(run.framesQueued, rendered);
+  }
+
   /** Sends the clip once; true when it finished, false when the injection ended first. */
   private async sendPass(run: InjectionRun): Promise<boolean> {
     const { pcm } = run;
@@ -286,15 +407,16 @@ export class EmulatorAudioClient {
         return false;
       }
       const audio = pcmBytes(pcm.samples.subarray(start, start + packetSamples));
+      run.playbackStartMs ??= this.playbackNowMs();
       // Only the first packet's format is honored by the emulator.
       await run.call.write(
         encodeAudioPacket({
-          format: run.framesSent === 0 ? format : undefined,
+          format: run.framesQueued === 0 ? format : undefined,
           timestampUs: this.timer.now() * 1000,
           audio,
         }),
       );
-      run.framesSent += audio.byteLength / 2;
+      run.framesQueued += audio.byteLength / 2;
     }
     return true;
   }

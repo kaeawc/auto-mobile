@@ -41,28 +41,43 @@ const cases: PressCase[] = [
     name: "home",
     home: true,
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestPressHome(50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestPressHome(50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "back",
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestPressBack(50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestPressBack(50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "recent",
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestRecentApps(50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestRecentApps(50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   ...["volume_up", "volume_down", "power", "home"].map((button): PressCase => ({
     name: `button ${button}`,
     home: button === "home",
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestPressButton(button, 50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestPressButton(button, 50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   })),
   {
     name: "input/key",
     request: (h, s, d) =>
-      new CtrlProxyKeyboard(h.context).requestPressKey("enter", [], 50, undefined, s, d),
+      new CtrlProxyKeyboard(h.context).requestPressKey("enter", [], 50, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "multi-finger swipe",
@@ -289,30 +304,51 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "physical-iphone", platform: "ios", name: "iPhone" },
       8765,
-      (url) => new FakeWebSocket(url, "none", 0, h.timer),
-      h.timer,
+      { wsFactory: (url) => new FakeWebSocket(url, "none", 0, h.timer), timer: h.timer },
     );
     try {
-      expect(await client.requestPressHome(50, undefined, "frame", signal, onDispatch)).toBe(
-        result,
-      );
-      expect(home).toHaveBeenCalledWith(50, undefined, "frame", signal, onDispatch);
-      expect(await client.requestPressBack(50, undefined, "frame", signal, onDispatch)).toBe(
-        result,
-      );
-      expect(back).toHaveBeenCalledWith(50, undefined, "frame", signal, onDispatch);
-      expect(await client.requestRecentApps(50, undefined, "frame", signal, onDispatch)).toBe(
-        result,
-      );
-      expect(recent).toHaveBeenCalledWith(50, undefined, "frame", signal, onDispatch);
       expect(
-        await client.requestPressButton("power", 50, undefined, "frame", signal, onDispatch),
+        await client.requestPressHome(50, undefined, { frameContext: "frame", signal, onDispatch }),
       ).toBe(result);
-      expect(button).toHaveBeenCalledWith("power", 50, undefined, "frame", signal, onDispatch);
-      expect(await client.requestPressKey("enter", [], 50, undefined, signal, onDispatch)).toBe(
-        result,
-      );
-      expect(key).toHaveBeenCalledWith("enter", [], 50, undefined, signal, onDispatch);
+      expect(home).toHaveBeenCalledWith(50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(
+        await client.requestPressBack(50, undefined, { frameContext: "frame", signal, onDispatch }),
+      ).toBe(result);
+      expect(back).toHaveBeenCalledWith(50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(
+        await client.requestRecentApps(50, undefined, {
+          frameContext: "frame",
+          signal,
+          onDispatch,
+        }),
+      ).toBe(result);
+      expect(recent).toHaveBeenCalledWith(50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(
+        await client.requestPressButton("power", 50, undefined, {
+          frameContext: "frame",
+          signal,
+          onDispatch,
+        }),
+      ).toBe(result);
+      expect(button).toHaveBeenCalledWith("power", 50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(await client.requestPressKey("enter", [], 50, { signal, onDispatch })).toBe(result);
+      expect(key).toHaveBeenCalledWith("enter", [], 50, { signal, onDispatch });
       expect(
         await client.requestMultiFingerSwipe({
           x1: 1,

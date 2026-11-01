@@ -78,7 +78,7 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
         reaped.push(reason);
         await manager.releaseSession(id, reason);
       },
-      timer,
+      { timer },
     );
     state = {
       isInitialized: () => true,
@@ -408,8 +408,8 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
           reaped.push(reapReason);
           await manager.releaseSession(id, reapReason);
         },
-        timer,
         {
+          timer,
           forceStuckRelease: async (id) => {
             forcedAt.push(timer.now());
             manager.forceStuckRelease(id);

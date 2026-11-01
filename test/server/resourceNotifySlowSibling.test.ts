@@ -28,11 +28,15 @@ describe("device resource notifications do not wait on one slow session", () => 
     ResourceRegistry.clearServersForTesting();
     ResourceRegistry.clearResources();
     ListChangedBroadcaster.clearForTesting();
-    ResourceRegistry.register(URI, "Booted", "d", "application/json", async () => ({
-      uri: URI,
+    ResourceRegistry.register(URI, "Booted", {
+      description: "d",
       mimeType: "application/json",
-      text: "{}",
-    }));
+      handler: async () => ({
+        uri: URI,
+        mimeType: "application/json",
+        text: "{}",
+      }),
+    });
     slow = new FakeMcpServer();
     healthy = new FakeMcpServer();
     release = Promise.withResolvers<void>();

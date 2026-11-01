@@ -59,6 +59,14 @@ export function isAdbDeviceOfflineError(error: unknown): boolean {
 }
 
 /**
+ * A freshly booted device still completing the adb key handshake ("device still authorizing").
+ * It clears on its own, unlike "unauthorized", which needs the user to accept the key.
+ */
+export function isAdbDeviceAuthorizingError(error: unknown): boolean {
+  return /\bdevice\s+still\s+authorizing\b/i.test(errorMessage(error));
+}
+
+/**
  * Match complete transport diagnostics in stderr, never argv or stdout wording.
  * With shell protocol v2, remote stderr shares the stream with adb's stderr,
  * so wording matches are best-effort. Keep explicit wording independent of
@@ -68,8 +76,7 @@ export function isAdbPostDispatchTransportError(
   stderr: string,
   exitCode: number | undefined,
   expectedDeviceId: string,
-  expectedTransportId?: string,
-  stdout = "",
+  { expectedTransportId, stdout = "" }: { expectedTransportId?: string; stdout?: string } = {},
 ): boolean {
   const lines = stderr
     .trim()

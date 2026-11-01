@@ -37,10 +37,18 @@ describe("dispatchAndroidCoordinateTap", () => {
         },
       };
 
-      const pending = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, {
-        signal: controller.signal,
-        onTapDelivered,
-      });
+      const pending = dispatchAndroidCoordinateTap(
+        client,
+        adb,
+        { x: 10, y: 20 },
+        {
+          durationMs: 10,
+          options: {
+            signal: controller.signal,
+            onTapDelivered,
+          },
+        },
+      );
 
       await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
       await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
@@ -58,11 +66,19 @@ describe("dispatchAndroidCoordinateTap", () => {
       requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
     };
 
-    const pending = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, {
-      signal: controller.signal,
-      assertCurrent: () => {},
-      onTapDelivered,
-    });
+    const pending = dispatchAndroidCoordinateTap(
+      client,
+      adb,
+      { x: 10, y: 20 },
+      {
+        durationMs: 10,
+        options: {
+          signal: controller.signal,
+          assertCurrent: () => {},
+          onTapDelivered,
+        },
+      },
+    );
 
     await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
@@ -85,7 +101,17 @@ describe("dispatchAndroidCoordinateTap", () => {
         }),
       };
 
-      const pending = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, { onTapDelivered });
+      const pending = dispatchAndroidCoordinateTap(
+        client,
+        adb,
+        { x: 10, y: 20 },
+        {
+          durationMs: 10,
+          options: {
+            onTapDelivered,
+          },
+        },
+      );
 
       if (route === "failed ADB") {
         await expect(pending).rejects.toThrow("Synthetic fallback failure");
@@ -113,7 +139,17 @@ describe("dispatchAndroidCoordinateTap", () => {
         },
       };
 
-      const request = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, { frameContext });
+      const request = dispatchAndroidCoordinateTap(
+        client,
+        adb,
+        { x: 10, y: 20 },
+        {
+          durationMs: 10,
+          options: {
+            frameContext,
+          },
+        },
+      );
 
       await expect(request).rejects.toBeInstanceOf(ActionableError);
       await expect(request).rejects.toThrow(
@@ -129,7 +165,7 @@ describe("dispatchAndroidCoordinateTap", () => {
       requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
     };
 
-    await dispatchAndroidCoordinateTap(client, adb, 10, 20, 10);
+    await dispatchAndroidCoordinateTap(client, adb, { x: 10, y: 20 }, { durationMs: 10 });
 
     expect(adb.getExecutedCommands()).toEqual(["shell input touchscreen tap 10 20"]);
     expect(adb.getCommandCalls()[0].timeoutMs).toBeUndefined();
@@ -141,8 +177,18 @@ describe("dispatchAndroidCoordinateTap", () => {
       requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
     };
 
-    await dispatchAndroidCoordinateTap(client, adb, 10, 20, LONG_PRESS_MIN_MS - 1);
-    await dispatchAndroidCoordinateTap(client, adb, 10, 20, LONG_PRESS_MIN_MS);
+    await dispatchAndroidCoordinateTap(
+      client,
+      adb,
+      { x: 10, y: 20 },
+      { durationMs: LONG_PRESS_MIN_MS - 1 },
+    );
+    await dispatchAndroidCoordinateTap(
+      client,
+      adb,
+      { x: 10, y: 20 },
+      { durationMs: LONG_PRESS_MIN_MS },
+    );
 
     expect(adb.getExecutedCommands()).toEqual([
       "shell input touchscreen tap 10 20",
@@ -160,9 +206,17 @@ describe("dispatchAndroidCoordinateTap", () => {
         requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
       };
 
-      await dispatchAndroidCoordinateTap(client, adb, 10, 20, 20000, {
-        assertCurrent: fenced ? () => {} : undefined,
-      });
+      await dispatchAndroidCoordinateTap(
+        client,
+        adb,
+        { x: 10, y: 20 },
+        {
+          durationMs: 20000,
+          options: {
+            assertCurrent: fenced ? () => {} : undefined,
+          },
+        },
+      );
 
       expect(adb.getCommandCalls()[0].timeoutMs).toBeGreaterThanOrEqual(22000);
     },
@@ -174,7 +228,7 @@ describe("dispatchAndroidCoordinateTap", () => {
       requestTapCoordinates: async () => ({ success: true }),
     };
 
-    await dispatchAndroidCoordinateTap(client, adb, 10, 20, 10);
+    await dispatchAndroidCoordinateTap(client, adb, { x: 10, y: 20 }, { durationMs: 10 });
 
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -622,9 +676,14 @@ describe("coordinate tap transport timeouts", () => {
           requestDoubleTapCoordinates: async () => ({ success: true }),
         };
         if (platform === "ios") {
-          await dispatchIosCoordinateTap(client, 10, 20, duration);
+          await dispatchIosCoordinateTap(client, { x: 10, y: 20 }, { durationMs: duration });
         } else {
-          await dispatchAndroidCoordinateTap(client, new FakeAdbExecutor(), 10, 20, duration);
+          await dispatchAndroidCoordinateTap(
+            client,
+            new FakeAdbExecutor(),
+            { x: 10, y: 20 },
+            { durationMs: duration },
+          );
         }
         expect(requestTapCoordinates.mock.calls[0][0]?.timeoutMs).toBe(expectedTimeout);
       },
@@ -639,9 +698,14 @@ describe("coordinate tap transport timeouts", () => {
         requestDoubleTapCoordinates: async () => ({ success: true }),
       };
       if (platform === "ios") {
-        await dispatchIosCoordinateTap(client, 10, 20, 50);
+        await dispatchIosCoordinateTap(client, { x: 10, y: 20 }, { durationMs: 50 });
       } else {
-        await dispatchAndroidCoordinateTap(client, new FakeAdbExecutor(), 10, 20, 10);
+        await dispatchAndroidCoordinateTap(
+          client,
+          new FakeAdbExecutor(),
+          { x: 10, y: 20 },
+          { durationMs: 10 },
+        );
       }
       expect(requestTapCoordinates.mock.calls[0][0]?.timeoutMs).toBeUndefined();
     });
@@ -658,8 +722,13 @@ test.each([500, 4000, MAX_SETTIMEOUT_DELAY_MS])(
       requestTapCoordinates,
       requestDoubleTapCoordinates: async () => ({ success: true }),
     };
-    await dispatchIosCoordinateTap(client, 10, 20, duration);
-    await dispatchAndroidCoordinateTap(client, new FakeAdbExecutor(), 10, 20, duration);
+    await dispatchIosCoordinateTap(client, { x: 10, y: 20 }, { durationMs: duration });
+    await dispatchAndroidCoordinateTap(
+      client,
+      new FakeAdbExecutor(),
+      { x: 10, y: 20 },
+      { durationMs: duration },
+    );
     for (const call of requestTapCoordinates.mock.calls) {
       expect(call[0].timeoutMs).toBe(resolveGestureCtrlProxyTimeoutMs(duration));
     }
@@ -747,7 +816,7 @@ describe("androidDisplayTapDispatch with TalkBack on (#9905)", () => {
       expect(strategy.executePreciseTap).toHaveBeenCalledTimes(1);
       await run("doubleTap");
       await run("longPress");
-      expect(strategy.executeCoordinateFallback.mock.calls.map((call) => call[2])).toEqual([
+      expect(strategy.executeCoordinateFallback.mock.calls.map((call) => call[1])).toEqual([
         "doubleTap",
         "longPress",
       ]);

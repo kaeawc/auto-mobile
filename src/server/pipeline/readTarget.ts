@@ -135,8 +135,21 @@ async function resolveStoppedReservedRead(
   deviceId: string,
 ): Promise<BootedDevice> {
   return withReadRestartReservation(input, deviceId, () =>
-    read.resolve(deviceId, input.signal, input.args.platform || "either"),
+    read.resolve(
+      deviceId,
+      input.signal,
+      input.args.platform || pooledSimctlAppPlatform(deviceId) || "either",
+    ),
   );
+}
+
+/**
+ * A pooled watch or Apple TV read without a platform uses its own platform:
+ * "either" lists Android and iOS only, so it would never find it (#14908).
+ */
+function pooledSimctlAppPlatform(deviceId: string): "watchos" | "tvos" | undefined {
+  const platform = defaultDaemonContext.devicePool()?.getDevice(deviceId)?.platform;
+  return platform === "watchos" || platform === "tvos" ? platform : undefined;
 }
 
 class ReadTargetBecameHeld extends Error {
@@ -190,9 +203,15 @@ export async function ensureReadTargetOrWatch(
   input: ExecutionTargetInput,
   platform: SomePlatform,
   providedDeviceId: string | undefined,
-  options: DeviceReadyOptions,
-  read: SessionlessDeviceRead,
-  readinessTarget: string | undefined,
+  {
+    options,
+    read,
+    readinessTarget,
+  }: {
+    options: DeviceReadyOptions;
+    read: SessionlessDeviceRead;
+    readinessTarget: string | undefined;
+  },
 ): Promise<
   | { device: BootedDevice; watched?: undefined }
   | { watched: ExecutionTargetContext; device?: undefined }
@@ -320,8 +339,13 @@ export async function findRunningExplicitReadTarget(
   input: ExecutionTargetInput,
   read: SessionlessDeviceRead,
   platform: SomePlatform,
-  getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>,
-  alreadyChecked: boolean,
+  {
+    getConnectedPlatforms,
+    alreadyChecked,
+  }: {
+    getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>;
+    alreadyChecked: boolean;
+  },
 ): Promise<{ device: BootedDevice; fromListing: boolean } | undefined> {
   const scan = await getConnectedPlatforms();
   const exact = scan.devices.find(

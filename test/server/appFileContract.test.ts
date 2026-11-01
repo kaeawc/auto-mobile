@@ -45,17 +45,15 @@ describe("App file resource contract", () => {
   });
 
   test("resource registry matches nested path template segments", async () => {
-    ResourceRegistry.registerTemplate(
-      APP_FILE_RESOURCE_TEMPLATES.FILE,
-      "App File",
-      "Read app file",
-      "application/octet-stream",
-      async (params) => ({
+    ResourceRegistry.registerTemplate(APP_FILE_RESOURCE_TEMPLATES.FILE, "App File", {
+      description: "Read app file",
+      mimeType: "application/octet-stream",
+      handler: async (params) => ({
         uri: buildAppFileResourceUri(parseAppFileResourceParams(params)),
         mimeType: "application/json",
         text: JSON.stringify(parseAppFileResourceParams(params)),
       }),
-    );
+    });
 
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
@@ -103,9 +101,11 @@ describe("App file resource userId", () => {
             ? APP_FILE_RESOURCE_TEMPLATES.CONTAINER
             : APP_FILE_RESOURCE_TEMPLATES.FILE,
           "Files",
-          "Files",
-          "application/json",
-          async () => ({ uri, mimeType: "application/json", text: "{}" }),
+          {
+            description: "Files",
+            mimeType: "application/json",
+            handler: async () => ({ uri, mimeType: "application/json", text: "{}" }),
+          },
         );
         const match = ResourceRegistry.matchTemplate(uri);
         expect(match).toBeDefined();

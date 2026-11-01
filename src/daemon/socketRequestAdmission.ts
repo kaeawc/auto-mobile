@@ -4,6 +4,7 @@ import {
   DAEMON_RELEASED_SESSION_PARAM,
 } from "./wire/constants";
 import type { DaemonRequest } from "./types";
+import { staticToolDeclaresHostInventory } from "./staticToolDefinitions";
 import type { Timer } from "../utils/SystemTimer";
 
 let socketRequestOrder = 0;
@@ -153,7 +154,12 @@ export class SocketRequestAdmissionQueue {
   }
 }
 
-/** Acquisition and profile tools rebind the socket's routing state, so they stay barriers. */
+/**
+ * Acquisition and profile tools rebind the socket's routing state, so they stay barriers.
+ * It stays a name list rather than a tool trait (#15672): it names the hidden `startDevice`, which
+ * `schemas/tool-definitions.json` deliberately omits, so a trait read from the committed definitions
+ * could not reach it.
+ */
 const SOCKET_ROUTING_MUTATING_TOOLS = new Set([
   "getAndroid",
   "getApple",
@@ -162,8 +168,6 @@ const SOCKET_ROUTING_MUTATING_TOOLS = new Set([
   "setActiveDevice",
   "setToolEnabled",
 ]);
-
-const HOST_INVENTORY_TOOLS = new Set(["listDevices", "listDeviceImages"]);
 
 /**
  * Arguments that route to, restore, or rebind a device session. A call carrying any
@@ -204,7 +208,7 @@ export function resolveSocketAdmissionLane(request: DaemonRequest): string | und
 }
 
 export function isHostInventoryCall(name: unknown, args: unknown): boolean {
-  return typeof name === "string" && HOST_INVENTORY_TOOLS.has(name) && hasNoRoutingArgs(args);
+  return staticToolDeclaresHostInventory(name) && hasNoRoutingArgs(args);
 }
 
 function hasNoRoutingArgs(args: unknown): boolean {

@@ -1,5 +1,5 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
 import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import type { DevicePool } from "../../src/daemon/devicePool";
@@ -15,6 +15,7 @@ import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepositor
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
+import { warmedTests } from "../helpers/warmedTests";
 
 // Hunt 2026-10-10. The heartbeat monitor's veto counts a session's implicit (autolock) calls as
 // in flight, exactly as it counts calls that name the session UUID (`hasActiveSessionExecution`).
@@ -36,16 +37,16 @@ const CALL_DEADLINE_MS = 20_000;
 
 describe("heartbeat reap of a session with an implicit (autolock) control call in flight", () => {
   let timer: FakeTimer;
-  let daemon: DaemonLifecycleHarness;
-  let started: ActiveExecution[];
+  let daemon: DaemonLifecycleHarness | undefined;
+  let started: ActiveExecution[] = [];
 
   const settle = (ms: number) =>
     timer.advanceTimeAsync(ms, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
 
-  beforeEach(() => {
+  function arrange(): DaemonLifecycleHarness {
     resetDbWriteBarrier();
     timer = new FakeTimer();
-    daemon = new DaemonLifecycleHarness(
+    const harness = new DaemonLifecycleHarness(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
@@ -53,25 +54,34 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
         deviceSessionRepository: new FakeDeviceSessionRepository(),
       },
     );
-    daemon.getSessionManager().stopCleanupTimer();
+    harness.getSessionManager().stopCleanupTimer();
+    daemon = harness;
     started = [];
-  });
+    return harness;
+  }
 
-  afterEach(async () => {
+  async function teardown(): Promise<void> {
     for (const execution of started) {
       executionTracker.endExecution(execution.id);
     }
-    await daemon.stopMonitorAndWait();
+    started = [];
+    await daemon?.stopMonitorAndWait();
+    daemon = undefined;
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
     resetDbWriteBarrier();
-  });
+  }
+
+  // The first reap in this file pays one-time module and first-use compilation for the daemon,
+  // monitor and release paths: run each scenario once in beforeAll, outside the per-test budget,
+  // before it runs again as the measured test. Each test builds its own fresh daemon.
+  const test = warmedTests(teardown);
 
   /** A session on a pooled device, acquired by a connection that stays open. */
-  async function sessionOnPooledDevice(): Promise<DevicePool> {
-    const devicePool = daemon.getDevicePool();
+  async function sessionOnPooledDevice(harness: DaemonLifecycleHarness): Promise<DevicePool> {
+    const devicePool = harness.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
     devicePool.testHooks.deviceManager = deviceManager;
@@ -91,10 +101,11 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
    * call that never settles and is driving the session's device.
    */
   async function reapPastHungCall(startCall: () => ActiveExecution): Promise<ActiveExecution> {
-    const sessionManager = daemon.getSessionManager();
-    const devicePool = await sessionOnPooledDevice();
+    const harness = arrange();
+    const sessionManager = harness.getSessionManager();
+    const devicePool = await sessionOnPooledDevice(harness);
     await deliverDaemonHeartbeat(sessionManager, SESSION);
-    daemon.startMonitor();
+    harness.startMonitor();
 
     const hung = startCall();
     started.push(hung);

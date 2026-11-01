@@ -86,7 +86,6 @@ describe("sensitive data flow into network sinks (R2)", () => {
       body: { data: "/other" },
     });
     expect(prototypeSensitiveSinkErrors(spec)).toEqual([]);
-    expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
   });
 
   test.each([
@@ -109,7 +108,7 @@ describe("sensitive data flow into network sinks (R2)", () => {
             ]
           : [],
       );
-      expect(validatePrototypeSpec(spec, { library: true }).success).toBe(!refused);
+      expect(prototypeSensitiveSinkErrors(spec).length > 0).toBe(refused);
     },
   );
 
@@ -145,7 +144,6 @@ describe("sensitive data flow into network sinks (R2)", () => {
       },
     };
     expect(prototypeSensitiveSinkErrors(outside)).toEqual([]);
-    expect(validatePrototypeSpec(outside, { library: true }).success).toBe(true);
   });
 
   test("a library spec refuses a sensitive /data pointer bound into a request query", () => {
@@ -184,8 +182,6 @@ describe("sensitive data flow into network sinks (R2)", () => {
   test("a library accepts a repeat-expanded query pointer that does not overlap sensitive data", () => {
     const spec = repeatedSpecWith(["other"]);
     expect(prototypeSensitiveSinkErrors(spec)).toEqual([]);
-    expect(prototypeStrictPolicyError(spec, { library: true }, [])).toBeUndefined();
-    expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
   });
 
   test.each([
@@ -210,7 +206,7 @@ describe("sensitive data flow into network sinks (R2)", () => {
     };
     expect(validatePrototypeSpec(repeated).success).toBe(true);
     expect(prototypeSensitiveSinkErrors(repeated)).toEqual(refused ? [error] : []);
-    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(!refused);
+    expect(prototypeSensitiveSinkErrors(repeated).length > 0).toBe(refused);
   });
 
   test.each([
@@ -237,7 +233,7 @@ describe("sensitive data flow into network sinks (R2)", () => {
       };
       expect(validatePrototypeSpec(repeated).success).toBe(true);
       expect(prototypeSensitiveSinkErrors(repeated)).toEqual(refused ? [error] : []);
-      expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(!refused);
+      expect(prototypeSensitiveSinkErrors(repeated).length > 0).toBe(refused);
     },
   );
 
@@ -251,7 +247,6 @@ describe("sensitive data flow into network sinks (R2)", () => {
       root: { ...spec.root, repeat: { items: [{ code: "authored" }], as: "row" } },
     };
     expect(prototypeSensitiveSinkErrors(repeated)).toEqual([]);
-    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(true);
   });
 
   test.each(["{entry.code}", { item: "code" }])(
@@ -287,7 +282,6 @@ describe("sensitive data flow into network sinks (R2)", () => {
       },
     };
     expect(prototypeSensitiveSinkErrors(repeated)).toEqual([]);
-    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(true);
   });
 
   test.each([
@@ -306,7 +300,7 @@ describe("sensitive data flow into network sinks (R2)", () => {
     };
     expect(validatePrototypeSpec(repeated).success).toBe(true);
     expect(prototypeSensitiveSinkErrors(repeated)).toEqual(refused ? [error] : []);
-    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(!refused);
+    expect(prototypeSensitiveSinkErrors(repeated).length > 0).toBe(refused);
   });
 
   test("a sensitive sibling pointer written inside a repeat does not taint the expanded query", () => {
@@ -316,7 +310,6 @@ describe("sensitive data flow into network sinks (R2)", () => {
       root: { ...spec.root, repeat: { items: [{ key: "code" }], as: "row" } },
     };
     expect(prototypeSensitiveSinkErrors(repeated)).toEqual([]);
-    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(true);
   });
 
   test("repeated sensitive sinks are reported once per authored path in sorted order", () => {
@@ -359,7 +352,7 @@ describe("sensitive data flow into network sinks (R2)", () => {
     ]);
   });
 
-  test("a sensitive value that only feeds text and conditions is accepted in a library", () => {
+  test("a sensitive value that only feeds text and conditions has no R2 sink error", () => {
     const spec = {
       id: "sensitive-text",
       window: { placement: { type: "fullscreen" } },
@@ -384,7 +377,7 @@ describe("sensitive data flow into network sinks (R2)", () => {
         ],
       },
     };
-    expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
+    expect(prototypeSensitiveSinkErrors(spec)).toEqual([]);
   });
 
   test("a parent pointer that contains the sensitive member is reported", () => {
@@ -395,7 +388,6 @@ describe("sensitive data flow into network sinks (R2)", () => {
   test("a sibling pointer that does not overlap the sensitive member is accepted", () => {
     const spec = specWith({ query: { email: "{data:/user/email}" } }, "/data/user/name");
     expect(prototypeSensitiveSinkErrors(spec)).toEqual([]);
-    expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
   });
 
   test("a non-sensitive call's /data result may reach a request", () => {

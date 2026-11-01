@@ -7,6 +7,33 @@ final class PrototypeMcpRequestTests: XCTestCase {
         try XCTUnwrap(URL(string: string))
     }
 
+    func testRequestFilesUseTheFilenameIdentityAndTypedArguments() {
+        XCTAssertEqual(
+            PrototypeMcpRequest.parseFile(Data(#"{"action":"import","label":"Demo"}"#.utf8), request: "r"),
+            .importBundle(request: "r", label: "Demo")
+        )
+        XCTAssertEqual(
+            PrototypeMcpRequest.parseFile(Data(#"{"action":"import"}"#.utf8), request: "r"),
+            .importBundle(request: "r", label: nil)
+        )
+        XCTAssertEqual(
+            PrototypeMcpRequest.parseFile(Data(#"{"action":"open","libraryId":"id"}"#.utf8), request: "r"),
+            .open(request: "r", libraryId: "id")
+        )
+        for json in [
+            "bad",
+            "{}",
+            #"{"action":"open"}"#,
+            #"{"action":"future"}"#,
+            #"{"action":"import","label":42}"#,
+        ] {
+            guard case .unsupported(request: "r", reason: _) = PrototypeMcpRequest
+                .parseFile(Data(json.utf8), request: "r")
+            else { XCTFail("Expected a typed rejection: \(json)"); continue }
+        }
+        XCTAssertNil(PrototypeMcpRequest.parseFile(Data("{}".utf8), request: "../bad"))
+    }
+
     func testGrammar() throws {
         XCTAssertEqual(
             try PrototypeMcpRequest.parse(url("automobile-proto://import?request=a_1&label=Hello%20%26%20world")),

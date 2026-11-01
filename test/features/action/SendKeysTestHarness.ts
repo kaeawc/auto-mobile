@@ -10,6 +10,7 @@ import {
   type SendKeysDependencies,
   type SendKeysObserver,
   type SendKeysTextClient,
+  type SendKeysPlatformDependencies,
 } from "../../../src/features/action/SendKeys";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -189,6 +190,7 @@ export function createSendKeysHarness(
   device: BootedDevice,
   observe: SendKeysObserver = observer,
   timer = autoAdvancingTimer(),
+  dependencies: Pick<SendKeysPlatformDependencies, "iosSdkTextRouter" | "iosSdkWebTextRouter"> = {},
 ) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
@@ -228,7 +230,7 @@ export function createSendKeysHarness(
     supportsImeInsertedText: async () => true,
     supportsKeyboardProfiles: async () => true,
     setKeyboardProfile: async () => ({ success: true, previousProfileId: "direct" }),
-    commitViaIme: async (text, _prior, _signal, delivery) => {
+    commitViaIme: async (text, _prior, _signal, { delivery } = {}) => {
       if (delivery === "clearField") {
         clientCalls.push("clearField");
         return { success: true };
@@ -253,6 +255,7 @@ export function createSendKeysHarness(
       timer,
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },
+      ...dependencies,
     }),
   };
 }
@@ -302,11 +305,14 @@ export function createSendKeysCaptureHarness(
       const observation = frame(`read-${reads.length}`, reads.length);
       events.push(`read:${observation.observationId}`);
       if (!options.skipScreenshot) {
-        await observer.captureScreenshot(undefined, options.signal, observation);
+        await observer.captureScreenshot(undefined, { signal: options.signal, observation });
       }
       return observation;
     },
-    async captureScreenshot(_perf?: unknown, _signal?: AbortSignal, observation?: ObserveResult) {
+    async captureScreenshot(
+      _perf?: unknown,
+      { observation }: { signal?: AbortSignal; observation?: ObserveResult } = {},
+    ) {
       if (!observation) {
         throw new Error("Missing capture observation");
       }
@@ -367,7 +373,7 @@ export function createSendKeysCaptureHarness(
       return result;
     },
     async captureScreenshot(observation: ObserveResult, signal?: AbortSignal) {
-      await observer.captureScreenshot(undefined, signal, observation);
+      await observer.captureScreenshot(undefined, { signal, observation });
     },
   };
   return { ...h, action, commands, observer, timer, events, reads, captures, settleObserve };

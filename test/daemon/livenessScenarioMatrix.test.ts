@@ -305,31 +305,41 @@ describe("live stdio proxy", () => {
     expectHeld(b, DEVICE_B);
   });
 
-  test("a long-running call in flight past the window keeps the session; it is freed one window after the call settles", async () => {
-    scenario = await LivenessScenario.start();
-    const session = await scenario.acquire();
-    await scenario.idle(IDLE_WINDOW_MS / 2);
-    const call = scenario.startLongCall(session);
+  describe("a long-running call", () => {
+    let session: string;
+    // Booting the scenario and acquiring are this row's setup (~20 ms of real daemon work):
+    // they run outside the per-test budget, which the held/released timeline below needs.
+    beforeAll(async () => {
+      scenario = await LivenessScenario.start();
+      session = await scenario.acquire();
+    });
 
-    // Held side: the window that began at acquisition ends with the call open. The call runs
-    // 110 s, inside its own 120 s request deadline.
-    expect(await scenario.idleWhileHeld(session, IDLE_WINDOW_MS + 50_000, 10_000)).toBe(undefined);
-    expectHeld(session);
-    expect(call.failure()).toBeUndefined();
+    test("a long-running call in flight past the window keeps the session; it is freed one window after the call settles", async () => {
+      await scenario.idle(IDLE_WINDOW_MS / 2);
+      const call = scenario.startLongCall(session);
 
-    await call.settle();
-    const settledAt = scenario.timer.now();
-    expectHeld(session);
-    expect(await scenario.idleWhileHeld(session, settledAt + IDLE_WINDOW_MS - 10_000)).toBe(
-      undefined,
-    );
+      // Held side: the window that began at acquisition ends with the call open. The call runs
+      // 110 s, inside its own 120 s request deadline.
+      expect(await scenario.idleWhileHeld(session, IDLE_WINDOW_MS + 50_000, 10_000)).toBe(
+        undefined,
+      );
+      expectHeld(session);
+      expect(call.failure()).toBeUndefined();
 
-    // Released side: the window runs from the END of the call.
-    const releasedAt = await scenario.idleUntilReleased(session, 2 * RELEASE_SLACK_MS);
-    expect(releasedAt).toBeGreaterThan(settledAt + IDLE_WINDOW_MS);
-    expect(releasedAt).toBeLessThanOrEqual(settledAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
-    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
-    expectFreed();
+      await call.settle();
+      const settledAt = scenario.timer.now();
+      expectHeld(session);
+      expect(await scenario.idleWhileHeld(session, settledAt + IDLE_WINDOW_MS - 10_000)).toBe(
+        undefined,
+      );
+
+      // Released side: the window runs from the END of the call.
+      const releasedAt = await scenario.idleUntilReleased(session, 2 * RELEASE_SLACK_MS);
+      expect(releasedAt).toBeGreaterThan(settledAt + IDLE_WINDOW_MS);
+      expect(releasedAt).toBeLessThanOrEqual(settledAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+      expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+      expectFreed();
+    });
   });
 });
 
@@ -374,51 +384,64 @@ describe("the daemon's idle instant outranks the proxy's own idle clock (#10823)
   // admitted in between (inside its grace) moved the instant: the passed instant is not evidence,
   // only a heartbeat answered at or after it is.
   for (const beforeInstantMs of [KEEPER_INTERVAL_MS - 100, 500]) {
-    test(`a held session used ${beforeInstantMs} ms before its reported idle instant is not dropped on the stale report: it stays heartbeated and is freed as idle one window after that call`, async () => {
-      scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
-      const a = await scenario.acquire(DEVICE_A);
-      await scenario.idle(30_000);
-      // B becomes the latest binding; A is now held behind it.
-      const b = await scenario.acquire(DEVICE_B);
-      const reportedInstant = (
-        (await scenario.daemonMethod("daemon/sessionInfo", { sessionId: a })) as {
-          result: { idleReleaseAt: number };
-        }
-      ).result.idleReleaseAt;
+    describe(`used ${beforeInstantMs} ms before the reported instant`, () => {
+      let a: string;
+      let b: string;
+      // Booting the two-device scenario and both acquisitions are this row's setup (~30 ms of real
+      // daemon work): they run outside the per-test budget the long timeline below needs.
+      beforeAll(async () => {
+        scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+        a = await scenario.acquire(DEVICE_A);
+        await scenario.idle(30_000);
+        // B becomes the latest binding; A is now held behind it.
+        b = await scenario.acquire(DEVICE_B);
+      });
 
-      // The agent keeps driving B; A is used once, inside the last keeper interval before its
-      // instant, by a call the proxy never saw: no ack before the instant can report the restart.
-      await scenario.idle(60_000);
-      await scenario.toolCall(b);
-      await scenario.idle(reportedInstant - beforeInstantMs - scenario.timer.now());
-      await scenario.daemonToolCallWith({ sessionUuid: a }, "homeScreen", scenario.proxyConnection);
-      const usedAt = scenario.timer.now();
-      expect(reportedInstant - usedAt).toBeLessThan(KEEPER_INTERVAL_MS);
-      const beatsBeforeInstant = scenario.heartbeatsBySession.get(a) ?? 0;
+      test(`a held session used ${beforeInstantMs} ms before its reported idle instant is not dropped on the stale report: it stays heartbeated and is freed as idle one window after that call`, async () => {
+        const reportedInstant = (
+          (await scenario.daemonMethod("daemon/sessionInfo", { sessionId: a })) as {
+            result: { idleReleaseAt: number };
+          }
+        ).result.idleReleaseAt;
 
-      // Held side: the proxy heartbeats A through the stale instant and the whole new window, so
-      // the daemon never sees a silent owner.
-      const heldUntil = usedAt + IDLE_WINDOW_MS - 15_000;
-      for (let at = usedAt + 30_000; at < heldUntil; at += 30_000) {
-        expect(await scenario.idleWhileHeld(a, at, 5_000)).toBe(undefined);
+        // The agent keeps driving B; A is used once, inside the last keeper interval before its
+        // instant, by a call the proxy never saw: no ack before the instant can report the restart.
+        await scenario.idle(60_000);
         await scenario.toolCall(b);
-      }
-      expect(await scenario.idleWhileHeld(a, heldUntil, 5_000)).toBe(undefined);
-      expectHeld(a, DEVICE_A);
-      expect(scenario.reaped).toEqual([]);
-      expect(scenario.heartbeatsBySession.get(a) ?? 0).toBeGreaterThanOrEqual(
-        beatsBeforeInstant + (heldUntil - reportedInstant) / KEEPER_INTERVAL_MS,
-      );
+        await scenario.idle(reportedInstant - beforeInstantMs - scenario.timer.now());
+        await scenario.daemonToolCallWith(
+          { sessionUuid: a },
+          "homeScreen",
+          scenario.proxyConnection,
+        );
+        const usedAt = scenario.timer.now();
+        expect(reportedInstant - usedAt).toBeLessThan(KEEPER_INTERVAL_MS);
+        const beatsBeforeInstant = scenario.heartbeatsBySession.get(a) ?? 0;
 
-      // Released side: the daemon's window, counted from that call, frees A as an idle expiry.
-      const releasedAt = await scenario.idleUntilReleased(a, 15_000 + RELEASE_SLACK_MS);
-      expect(releasedAt).toBeGreaterThan(usedAt + IDLE_WINDOW_MS);
-      expect(releasedAt).toBeLessThanOrEqual(usedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
-      expect(IDLE_REASONS).toContain(scenario.releaseOf(a)?.reason!);
-      expect(scenario.reaped).toEqual([]);
-      await scenario.idle(1_000);
-      expectFreed(DEVICE_A);
-      expectHeld(b, DEVICE_B);
+        // Held side: the proxy heartbeats A through the stale instant and the whole new window, so
+        // the daemon never sees a silent owner.
+        const heldUntil = usedAt + IDLE_WINDOW_MS - 15_000;
+        for (let at = usedAt + 30_000; at < heldUntil; at += 30_000) {
+          expect(await scenario.idleWhileHeld(a, at, 5_000)).toBe(undefined);
+          await scenario.toolCall(b);
+        }
+        expect(await scenario.idleWhileHeld(a, heldUntil, 5_000)).toBe(undefined);
+        expectHeld(a, DEVICE_A);
+        expect(scenario.reaped).toEqual([]);
+        expect(scenario.heartbeatsBySession.get(a) ?? 0).toBeGreaterThanOrEqual(
+          beatsBeforeInstant + (heldUntil - reportedInstant) / KEEPER_INTERVAL_MS,
+        );
+
+        // Released side: the daemon's window, counted from that call, frees A as an idle expiry.
+        const releasedAt = await scenario.idleUntilReleased(a, 15_000 + RELEASE_SLACK_MS);
+        expect(releasedAt).toBeGreaterThan(usedAt + IDLE_WINDOW_MS);
+        expect(releasedAt).toBeLessThanOrEqual(usedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+        expect(IDLE_REASONS).toContain(scenario.releaseOf(a)?.reason!);
+        expect(scenario.reaped).toEqual([]);
+        await scenario.idle(1_000);
+        expectFreed(DEVICE_A);
+        expectHeld(b, DEVICE_B);
+      });
     });
   }
 });
@@ -1095,11 +1118,17 @@ describe("second proxy names a session another proxy owns", () => {
 });
 
 describe("selector-routed calls (#10821)", () => {
-  test("a provisionDevice session driven only by deviceId beside a second session stays held; it is freed one window after its last call", async () => {
+  let provisioned: string;
+  let other: string;
+  // Booting the two-device scenario, provisioning A and acquiring B are this row's setup: they run
+  // outside the per-test budget the two-idle-window timeline below needs.
+  beforeAll(async () => {
     scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
-    const provisioned = await scenario.provision(DEVICE_A);
-    const other = await scenario.acquire(DEVICE_B);
+    provisioned = await scenario.provision(DEVICE_A);
+    other = await scenario.acquire(DEVICE_B);
+  });
 
+  test("a provisionDevice session driven only by deviceId beside a second session stays held; it is freed one window after its last call", async () => {
     // Held side: A is used every minute through its device id for two idle windows. A session the
     // proxy stopped heartbeating would already be freed after the first, so holding through the
     // second needs the proxy to credit those calls to the provisioned session.
@@ -2112,10 +2141,14 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     scenario = await LivenessScenario.start();
     await scenario.acquire();
     for (const uri of [WATCHED_RESOURCE, OTHER_RESOURCE]) {
-      ResourceRegistry.register(uri, uri, "scenario resource", "application/json", async () => ({
-        uri,
-        text: "{}",
-      }));
+      ResourceRegistry.register(uri, uri, {
+        description: "scenario resource",
+        mimeType: "application/json",
+        handler: async () => ({
+          uri,
+          text: "{}",
+        }),
+      });
     }
     try {
       const pushed: string[] = [];

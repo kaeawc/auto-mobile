@@ -12,7 +12,7 @@ function wedgedUninstall() {
   let childSignal: AbortSignal | undefined;
   const client = new SimCtlClient(
     null,
-    async (_file, args, _maxBuffer, signal) => {
+    async (_file, args, { signal } = {}) => {
       if (args[1] !== "uninstall") {
         return createExecResult("", "");
       }
@@ -89,7 +89,7 @@ describe("SimCtlClient.installApp explicit bound", () => {
     let childSignal: AbortSignal | undefined;
     const client = new SimCtlClient(
       null,
-      async (_file, args, _maxBuffer, signal) => {
+      async (_file, args, { signal } = {}) => {
         if (args[1] !== "install") {
           return createExecResult("", "");
         }

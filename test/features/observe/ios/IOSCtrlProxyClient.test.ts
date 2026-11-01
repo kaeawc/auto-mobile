@@ -111,12 +111,10 @@ describe("IOSCtrlProxyClient", function () {
     NetworkState.resetInstance();
     serverConfig.setNetworkMockableEnabled(false);
 
-    ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      serverPort,
-      createSuccessWebSocketFactory(fakeTimer),
-      fakeTimer,
-    );
+    ctrlProxyClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+      wsFactory: createSuccessWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+    });
   });
 
   test("client installs the iOS serializer and rounds hierarchy polling intervals", () => {
@@ -416,7 +414,9 @@ describe("IOSCtrlProxyClient", function () {
     socket: CapturingWebSocket,
     type: string,
   ): Promise<Record<string, unknown>> => {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    // A microtask budget, not a timeout: each awaited hop between the probe reply and the send
+    // costs a few turns, so leave headroom for the capability lookup's internal awaits.
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       const message = socket.sentMessages
         .map((payload) => JSON.parse(payload))
         .find((payload) => payload.type === type);
@@ -477,12 +477,10 @@ describe("IOSCtrlProxyClient", function () {
       socket: CapturingWebSocket;
     }> => {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
       expect(socket).not.toBeNull();
@@ -585,13 +583,12 @@ describe("IOSCtrlProxyClient", function () {
           error: "iOS CtrlProxy runner exited during startup",
           recoveryInterrupted: true,
         });
-        const client = IOSCtrlProxyClient.createForTesting(
-          testDevice,
-          serverPort,
-          createInstantFailureWebSocketFactory(timer),
+        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: createInstantFailureWebSocketFactory(timer),
           timer,
-          { serviceManagerFactory: () => manager, bootedDeviceLister: async () => [testDevice] },
-        );
+          serviceManagerFactory: () => manager,
+          bootedDeviceLister: async () => [testDevice],
+        });
         client.connectionTestHooks.autoReconnectEnabled = false;
         try {
           expect(await client.ensureConnected()).toBe(false);
@@ -625,13 +622,12 @@ describe("IOSCtrlProxyClient", function () {
           error: "iOS CtrlProxy startup was cancelled by stop()",
           recoveryInterrupted: true,
         });
-        const client = IOSCtrlProxyClient.createForTesting(
-          testDevice,
-          serverPort,
-          createInstantFailureWebSocketFactory(timer),
+        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: createInstantFailureWebSocketFactory(timer),
           timer,
-          { serviceManagerFactory: () => manager, bootedDeviceLister: async () => [testDevice] },
-        );
+          serviceManagerFactory: () => manager,
+          bootedDeviceLister: async () => [testDevice],
+        });
         client.connectionTestHooks.autoReconnectEnabled = false;
         try {
           expect(await client.ensureConnected()).toBe(false);
@@ -655,16 +651,12 @@ describe("IOSCtrlProxyClient", function () {
       timer.enableAutoAdvance();
       const manager = new FakeIOSCtrlProxyManager(timer);
       manager.setup = async () => ({ success: false, message });
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(timer),
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(timer),
         timer,
-        {
-          serviceManagerFactory: () => manager,
-          bootedDeviceLister: async () => (booted ? [testDevice] : []),
-        },
-      );
+        serviceManagerFactory: () => manager,
+        bootedDeviceLister: async () => (booted ? [testDevice] : []),
+      });
       client.connectionTestHooks.autoReconnectEnabled = false;
       try {
         expect(await client.ensureConnected()).toBe(false);
@@ -698,12 +690,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("sends hierarchy cadence updates to the runner", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -729,12 +719,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("does not send hierarchy cadence updates to stale runners without command support", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -769,17 +757,13 @@ describe("IOSCtrlProxyClient", function () {
           lostDeviceIds.push(deviceId);
         },
       };
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: notifier,
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: notifier,
+      });
 
       testClient.testHooks.onConnectionClosed();
 
@@ -820,12 +804,10 @@ describe("IOSCtrlProxyClient", function () {
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
       const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -867,12 +849,10 @@ describe("IOSCtrlProxyClient", function () {
     test("syncNetworkMockRulesIfAvailable reports noCapability when the app lacks network_mocking", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -929,12 +909,10 @@ describe("IOSCtrlProxyClient", function () {
     }> => {
       serverConfig.setNetworkMockableEnabled(true);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       await testClient.ensureConnected();
       const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
       await waitForSocketOpen(socket);
@@ -1023,12 +1001,10 @@ describe("IOSCtrlProxyClient", function () {
     test("syncNetworkMockRulesIfAvailable reports sent only when the socket accepted the rules", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1062,7 +1038,7 @@ describe("IOSCtrlProxyClient", function () {
     test("syncs SDK-backed state after capability detection", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.startSimulation(testDevice.deviceId, "tlsFailure", 20, 4);
+      state.startSimulation(testDevice.deviceId, "tlsFailure", 20, { limit: 4 });
       state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
@@ -1074,12 +1050,10 @@ describe("IOSCtrlProxyClient", function () {
         contentType: "application/json",
       });
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1140,7 +1114,7 @@ describe("IOSCtrlProxyClient", function () {
     test("does not push another device's rules or simulation on connect (#10061)", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.startSimulation("emulator-5554", "tlsFailure", 20, 4);
+      state.startSimulation("emulator-5554", "tlsFailure", 20, { limit: 4 });
       state.addMock("emulator-5554", {
         host: "api\\.example\\.com",
         path: "/v1/items",
@@ -1152,12 +1126,10 @@ describe("IOSCtrlProxyClient", function () {
         contentType: "application/json",
       });
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1206,14 +1178,12 @@ describe("IOSCtrlProxyClient", function () {
         responseBody: "{}",
         contentType: "application/json",
       });
-      state.startSimulation(testDevice.deviceId, "timeout", 10, 2);
+      state.startSimulation(testDevice.deviceId, "timeout", 10, { limit: 2 });
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1240,12 +1210,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("retries an SDK capability query after a transient failure", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1283,12 +1251,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("rechecks an unavailable SDK after the negative capability cache expires", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1316,12 +1282,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("keeps generic hierarchy requests independent of SDK availability", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1334,7 +1298,9 @@ describe("IOSCtrlProxyClient", function () {
           }),
         );
 
-        const hierarchyPromise = testClient.requestHierarchySync(undefined, false, undefined, 1000);
+        const hierarchyPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 1000,
+        });
         const hierarchyRequest = await waitForMessageType(socket, "request_hierarchy_if_stale");
         socket.simulateMessage(
           JSON.stringify({
@@ -1362,12 +1328,10 @@ describe("IOSCtrlProxyClient", function () {
     test("sends capability-gated request and resolves runner acknowledgement", async function () {
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1440,12 +1404,10 @@ describe("IOSCtrlProxyClient", function () {
     test("fails without sending when the runner does not advertise network error simulation", async function () {
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1477,12 +1439,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("preserves explicit SDK operations on released runners without negotiation", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1528,14 +1488,12 @@ describe("IOSCtrlProxyClient", function () {
 
   describe("SDK capability transitions", function () {
     test("refreshes capabilities and syncs simulation after launching an SDK-enabled app", async function () {
-      NetworkState.getInstance().startSimulation(testDevice.deviceId, "timeout", 20, 2);
+      NetworkState.getInstance().startSimulation(testDevice.deviceId, "timeout", 20, { limit: 2 });
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1585,12 +1543,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("ignores a stale available result after the app transitions to SpringBoard", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -1651,7 +1607,10 @@ describe("IOSCtrlProxyClient", function () {
     test("hierarchy failure exposes the runner error to observe without a cached fallback", async () => {
       const timer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, timer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer,
+      });
       try {
         await client.ensureConnected();
         const socket = getSocket()!;
@@ -1688,7 +1647,9 @@ describe("IOSCtrlProxyClient", function () {
         const timer = new FakeTimer(); // Manual clock: the response must settle without advancing it.
         const ingestor = new FakeIosSdkEventIngestor();
         const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, timer, {
+        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: factory,
+          timer,
           serviceManagerFactory: undefined,
           bootedDeviceLister: undefined,
           deviceConnectionLostNotifier: undefined,
@@ -1712,7 +1673,7 @@ describe("IOSCtrlProxyClient", function () {
         const updates: XCTestHierarchy[] = [];
         const unsubscribe = client.onPushUpdate((hierarchy) => updates.push(hierarchy));
         const options: NonNullable<
-          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[5]
+          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[3]
         > = {
           failureSink: {},
         };
@@ -1726,7 +1687,7 @@ describe("IOSCtrlProxyClient", function () {
           const pending = hasPendingRequest
             ? client.testHooks
                 .hierarchy()
-                .requestHierarchySync(undefined, false, undefined, 1000, false, options)
+                .requestHierarchySync(undefined, false, undefined, { timeoutMs: 1000, ...options })
             : undefined;
           if (hasPendingRequest) {
             const request = await waitForMessageType(socket, "request_hierarchy_if_stale");
@@ -1794,12 +1755,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
@@ -1846,12 +1805,10 @@ describe("IOSCtrlProxyClient", function () {
       };
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       const suppressionIds = () =>
         testClient.getObservationStreamTestHooks().suppressedRequestIds();
 
@@ -1892,12 +1849,10 @@ describe("IOSCtrlProxyClient", function () {
     test("should return null hierarchy when not connected", async function () {
       const testTimer = fakeTimer;
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
 
       try {
         const result = await testClient.getLatestHierarchy(false, 100);
@@ -1912,12 +1867,10 @@ describe("IOSCtrlProxyClient", function () {
     test("uses a short reconnect cooldown for failed iOS CtrlProxy connections", async function () {
       const testTimer = new FakeTimer();
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -1940,12 +1893,10 @@ describe("IOSCtrlProxyClient", function () {
     test("keeps reconnect cooldown active after iOS WebSocket connection timeouts", async function () {
       const testTimer = new FakeTimer();
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createConnectionTimeoutWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createConnectionTimeoutWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       const failAfterConnectionTimeout = async (): Promise<void> => {
@@ -1975,12 +1926,10 @@ describe("IOSCtrlProxyClient", function () {
     test("returns reconnecting metadata instead of an ambiguous empty hierarchy during cooldown", async function () {
       const testTimer = new FakeTimer();
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -2008,12 +1957,10 @@ describe("IOSCtrlProxyClient", function () {
     test("returns reconnecting metadata for default observe skip-wait hierarchy calls during cooldown", async function () {
       const testTimer = new FakeTimer();
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -2021,7 +1968,9 @@ describe("IOSCtrlProxyClient", function () {
         await testClient.ensureConnected();
         await testClient.ensureConnected();
 
-        const result = await testClient.getLatestHierarchy(false, 100, undefined, true);
+        const result = await testClient.getLatestHierarchy(false, 100, undefined, {
+          skipWaitForFresh: true,
+        });
 
         expect(result.hierarchy).toBeNull();
         expect(result.fresh).toBe(false);
@@ -2046,12 +1995,10 @@ describe("IOSCtrlProxyClient", function () {
         hierarchy: { text: "Cached screen" },
       };
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
       testClient.testHooks.cachedHierarchy = {
         hierarchy: cachedHierarchy,
@@ -2089,12 +2036,10 @@ describe("IOSCtrlProxyClient", function () {
         const testTimer = fakeTimer;
 
         const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-        const testClient = IOSCtrlProxyClient.createForTesting(
-          testDevice,
-          serverPort,
-          factory,
-          testTimer,
-        );
+        const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: factory,
+          timer: testTimer,
+        });
 
         try {
           const resultPromise = testClient.requestSwipe({
@@ -2150,12 +2095,10 @@ describe("IOSCtrlProxyClient", function () {
     test("should return error when not connected", async function () {
       const testTimer = fakeTimer;
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
 
       try {
         const result = await testClient.requestSwipe({
@@ -2180,12 +2123,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestTapCoordinates({
@@ -2227,12 +2168,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestSetText("Hello World", {
@@ -2270,12 +2209,10 @@ describe("IOSCtrlProxyClient", function () {
     test("requestAddHighlight sends payload and resolves highlight response", async function () {
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       const shape: HighlightShape = {
         type: "circle",
 
@@ -2332,12 +2269,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       const shape: HighlightShape = {
         type: "circle",
         bounds: {
@@ -2425,12 +2360,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("rejects a pending highlight waiter as superseded when a hierarchy update completes a replacement-generation probe first", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const socket = await connectWithSdkCommands(testClient, getSocket);
@@ -2463,12 +2396,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("rejects the waiter as superseded even when only the replacement probe ever completes", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const socket = await connectWithSdkCommands(testClient, getSocket);
@@ -2496,12 +2427,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("throwing callers receive the typed superseded error", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const socket = await connectWithSdkCommands(testClient, getSocket);
@@ -2529,12 +2458,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("resolves a waiter from its own generation's probe result and sends the highlight", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const socket = await connectWithSdkCommands(testClient, getSocket);
@@ -2562,12 +2489,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("does not authorize a waiter from a same-generation probe that reports the capability missing", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const socket = await connectWithSdkCommands(testClient, getSocket);
@@ -2594,12 +2519,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestScreenshot(5000);
@@ -2638,12 +2561,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestImeAction("done", 5000);
@@ -2680,12 +2601,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestKeyboard("detect", 5000);
@@ -2720,12 +2639,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -2757,12 +2674,10 @@ describe("IOSCtrlProxyClient", function () {
   describe("requestSetHingeAngle", function () {
     test("sends the angle and resolves a typed runner result", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         const promise = testClient.requestSetHingeAngle(180);
         const socket = await waitForSocket(getSocket);
@@ -2795,12 +2710,10 @@ describe("IOSCtrlProxyClient", function () {
   describe("requestPressKey", function () {
     test("should send a discrete key chord and resolve the result", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = testClient.requestPressKey("tab", ["shift", "meta"], 5000);
@@ -2837,12 +2750,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -2898,12 +2809,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -2956,12 +2865,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("preserves required fields for not-connected non-BaseResult command contracts", async function () {
       const testTimer = fakeTimer;
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
 
       try {
         const imeAction = await testClient.requestImeAction("done", 100);
@@ -2993,12 +2900,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -3083,12 +2988,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestRecentApps(5000);
@@ -3122,12 +3025,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestShake(5000);
@@ -3161,12 +3062,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestLaunchApp("com.apple.Preferences", 5000);
@@ -3201,20 +3100,17 @@ describe("IOSCtrlProxyClient", function () {
       const controller = new AbortController();
       const cancellation = new Error("launch retarget cancelled");
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestLaunchApp(
           "com.apple.Preferences",
           5000,
           undefined,
-          false,
-          controller.signal,
+          { coldBoot: false, signal: controller.signal },
         );
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
@@ -3239,12 +3135,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestPressBack(5000);
@@ -3277,12 +3171,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestPressBack(5000);
@@ -3315,12 +3207,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("rejects runner_busy as an ActionableError without retrying an action", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = testClient.requestPressBack(5000);
@@ -3365,12 +3255,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestPressButton("volume_up", 5000);
@@ -3404,17 +3292,13 @@ describe("IOSCtrlProxyClient", function () {
   describe("connection management", function () {
     test("diagnostic reads reuse a resident socket without setup or hierarchy recovery", async () => {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: () => {
-            throw new Error("diagnostics must not resolve the manager");
-          },
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: () => {
+          throw new Error("diagnostics must not resolve the manager");
         },
-      );
+      });
       try {
         await client.connectWithoutSetup();
         const socket = getSocket()!;
@@ -3473,27 +3357,23 @@ describe("IOSCtrlProxyClient", function () {
       const sockets: FakeWebSocket[] = [];
       const modes: ("none" | "instant" | "timeout")[] = [];
       let lostConnections = 0;
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        (url) => {
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: (url) => {
           const socket = new FakeWebSocket(url, modes.shift() ?? "none", 60_000, timer);
           sockets.push(socket);
           socket.on("open", () => queueMicrotask(() => handshake(socket)));
           return socket;
         },
         timer,
-        {
-          serviceManagerFactory: () => manager,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: {
-            onDeviceConnectionLost: () => {
-              lostConnections++;
-            },
+        serviceManagerFactory: () => manager,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: {
+          onDeviceConnectionLost: () => {
+            lostConnections++;
           },
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
         },
-      );
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const handshake = (socket: FakeWebSocket) =>
         socket.simulateMessage(
           JSON.stringify({
@@ -3774,21 +3654,17 @@ describe("IOSCtrlProxyClient", function () {
       async (read) => {
         const timer = new FakeTimer();
         const sockets: FakeWebSocket[] = [];
-        const client = IOSCtrlProxyClient.createForTesting(
-          testDevice,
-          serverPort,
-          (url) => {
+        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: (url) => {
             const socket = new FakeWebSocket(url, "none", 0, timer);
             sockets.push(socket);
             return socket;
           },
           timer,
-          {
-            serviceManagerFactory: () => {
-              throw new Error("diagnostics must not resolve the manager");
-            },
+          serviceManagerFactory: () => {
+            throw new Error("diagnostics must not resolve the manager");
           },
-        );
+        });
         const abort = new AbortController();
         const reason = new Error("doctor aborted during handshake");
         let settled = false;
@@ -3893,18 +3769,14 @@ describe("IOSCtrlProxyClient", function () {
     test("connectWithoutSetup does not invoke automatic runner setup", async function () {
       const testTimer = fakeTimer;
       let serviceManagerFactoryCalls = 0;
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-        {
-          serviceManagerFactory: () => {
-            serviceManagerFactoryCalls++;
-            throw new Error("automatic setup must not run");
-          },
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+        serviceManagerFactory: () => {
+          serviceManagerFactoryCalls++;
+          throw new Error("automatic setup must not run");
         },
-      );
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -3919,12 +3791,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = new FakeTimer();
       const controller = new AbortController();
       const cancellation = new Error("readiness cancelled");
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createConnectionTimeoutWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createConnectionTimeoutWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -3945,12 +3815,10 @@ describe("IOSCtrlProxyClient", function () {
       const cancellation = new Error("caller A cancelled");
       const { factory, getSocket, getCreatedSocketCount } =
         createCapturingConnectionTimeoutWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -3983,12 +3851,10 @@ describe("IOSCtrlProxyClient", function () {
       const cancellation = new Error("caller A cancelled");
       const { factory, getSocket, getCreatedSocketCount } =
         createCapturingConnectionTimeoutWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -4021,12 +3887,10 @@ describe("IOSCtrlProxyClient", function () {
       const cancellation = new Error("readiness cancelled");
       const { factory, getSocket, getCreatedSocketCount } =
         createCapturingConnectionTimeoutWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const initialConnection = testClient.connectWithoutSetup();
@@ -4070,12 +3934,10 @@ describe("IOSCtrlProxyClient", function () {
       const callerB = new AbortController();
       const { factory, getSocket, getCreatedSocketCount } =
         createCapturingConnectionTimeoutWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -4112,12 +3974,10 @@ describe("IOSCtrlProxyClient", function () {
       const cancellation = new Error("already cancelled");
       const { factory, getCreatedSocketCount } =
         createCapturingConnectionTimeoutWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       controller.abort(cancellation);
 
       try {
@@ -4133,12 +3993,10 @@ describe("IOSCtrlProxyClient", function () {
     test("connectWithoutSetup removes abort listeners after every settle path", async function () {
       const testTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingConnectionTimeoutWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       testClient.connectionTestHooks.autoReconnectEnabled = false;
 
       try {
@@ -4155,12 +4013,10 @@ describe("IOSCtrlProxyClient", function () {
         await testClient.close();
 
         const failed = createTrackedAbortSignal();
-        const failedClient = IOSCtrlProxyClient.createForTesting(
-          testDevice,
-          serverPort,
-          createInstantFailureWebSocketFactory(testTimer),
-          testTimer,
-        );
+        const failedClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: createInstantFailureWebSocketFactory(testTimer),
+          timer: testTimer,
+        });
         failedClient.connectionTestHooks.autoReconnectEnabled = false;
         const failedConnection = failedClient.connectWithoutSetup(failed.signal);
         expect(failed.getListenerCount()).toBe(1);
@@ -4169,12 +4025,10 @@ describe("IOSCtrlProxyClient", function () {
         await failedClient.close();
 
         const aborted = createTrackedAbortSignal();
-        const abortedClient = IOSCtrlProxyClient.createForTesting(
-          testDevice,
-          serverPort,
-          createConnectionTimeoutWebSocketFactory(testTimer),
-          testTimer,
-        );
+        const abortedClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: createConnectionTimeoutWebSocketFactory(testTimer),
+          timer: testTimer,
+        });
         abortedClient.connectionTestHooks.autoReconnectEnabled = false;
         const abortedConnection = abortedClient.connectWithoutSetup(aborted.signal);
         await flushPromises();
@@ -4193,12 +4047,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         // Initially not connected
@@ -4218,12 +4070,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       await testClient.ensureConnected();
       await flushPromises();
@@ -4240,12 +4090,10 @@ describe("IOSCtrlProxyClient", function () {
     test("fails in-flight requests instead of stranding them when the CtrlProxy service port changes", async function () {
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         // Register an in-flight request over the live socket. A long timeout keeps
@@ -4295,17 +4143,13 @@ describe("IOSCtrlProxyClient", function () {
         notifier?: DeviceConnectionLostNotifier,
       ): Promise<{ client: IOSCtrlProxyClient; socket: CapturingWebSocket }> => {
         const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-        const client = IOSCtrlProxyClient.createForTesting(
-          testDevice,
-          serverPort,
-          factory,
-          fakeTimer,
-          {
-            serviceManagerFactory: undefined,
-            bootedDeviceLister: undefined,
-            deviceConnectionLostNotifier: notifier,
-          },
-        );
+        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: factory,
+          timer: fakeTimer,
+          serviceManagerFactory: undefined,
+          bootedDeviceLister: undefined,
+          deviceConnectionLostNotifier: notifier,
+        });
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
         if (!socket) {
@@ -4436,12 +4280,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("drops eight same-tree rebroadcasts despite solicited cache refreshes (#9259)", async () => {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       const current: XCTestHierarchy = {
         updatedAt: 20_000,
         packageName: "com.test.app",
@@ -4460,7 +4302,9 @@ describe("IOSCtrlProxyClient", function () {
           // A navigation invalidates the cache; its solicited response refreshes it.
           client.invalidateCache();
           const sentBefore = socket.sentMessages.length;
-          const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
+          const pending = client.requestHierarchySync(undefined, false, undefined, {
+            timeoutMs: 1000,
+          });
           const request = await waitForSentRequest(
             socket,
             "request_hierarchy_if_stale",
@@ -4619,12 +4463,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("a solicited cache replacement resets an advancing older run", async () => {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       const current: XCTestHierarchy = {
         updatedAt: 20_000,
         packageName: "com.test.app",
@@ -4646,7 +4488,9 @@ describe("IOSCtrlProxyClient", function () {
         }
         client.invalidateCache();
         const sentBefore = socket.sentMessages.length;
-        const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
+        const pending = client.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 1000,
+        });
         const request = await waitForSentRequest(socket, "request_hierarchy_if_stale", sentBefore);
         socket.simulateMessage(
           JSON.stringify({
@@ -4724,12 +4568,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         expect(testClient.hasCachedHierarchy()).toBe(false);
@@ -4761,12 +4603,10 @@ describe("IOSCtrlProxyClient", function () {
     test("retains the first host receipt time when a push re-delivers the same capture", async function () {
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
       const hierarchy: XCTestHierarchy = {
         updatedAt: 1_750_934_583_218,
         packageName: "com.test.app",
@@ -4799,12 +4639,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         // Get hierarchy to populate cache
@@ -4843,12 +4681,10 @@ describe("IOSCtrlProxyClient", function () {
   describe("convertToViewHierarchyResult", function () {
     test("should convert CtrlProxyHierarchy to ViewHierarchyResult format", async function () {
       const testTimer = fakeTimer;
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createSuccessWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createSuccessWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
 
       try {
         const ctrlProxyHierarchy: XCTestHierarchy = {
@@ -4902,12 +4738,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestClearText();
@@ -4940,12 +4774,10 @@ describe("IOSCtrlProxyClient", function () {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         const resultPromise = testClient.requestClearText("com.app:id/email_field");
@@ -4977,12 +4809,10 @@ describe("IOSCtrlProxyClient", function () {
     test("returns error when not connected", async function () {
       const testTimer = fakeTimer;
 
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
 
       try {
         const result = await testClient.requestClearText(undefined, 100);
@@ -4999,7 +4829,10 @@ describe("IOSCtrlProxyClient", function () {
     [["double_tap_v1"], ["display_cutout_info"], [], undefined].map((features) => ({ features })),
   )("double tap requires runner feature %p before dispatch", async ({ features }) => {
     const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+      wsFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -5037,12 +4870,10 @@ describe("IOSCtrlProxyClient", function () {
     test("returns the advertised command set (sorted) once the runner handshakes", async function () {
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -5078,12 +4909,10 @@ describe("IOSCtrlProxyClient", function () {
     test("waits for the connected handshake that arrives after the socket opens", async function () {
       const testTimer = fakeTimer;
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
 
       try {
         // Probe before any handshake — the runner sends `connected` a beat after
@@ -5137,13 +4966,11 @@ describe("IOSCtrlProxyClient", function () {
           restarts += 1;
         },
       } as CtrlProxyIosManager;
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        { serviceManagerFactory: () => manager },
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: () => manager,
+      });
       IOSCtrlProxyClient.registerForTesting(client, testDevice.deviceId);
 
       const screenshot = client.requestScreenshot(5_000);
@@ -5171,16 +4998,14 @@ describe("IOSCtrlProxyClient", function () {
           restarts += 1;
         },
       } as CtrlProxyIosManager;
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        (url) => {
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: (url) => {
           socketCreations += 1;
           return new FakeWebSocket(url, "none", 0, fakeTimer);
         },
-        fakeTimer,
-        { serviceManagerFactory: () => manager },
-      );
+        timer: fakeTimer,
+        serviceManagerFactory: () => manager,
+      });
       await client.close();
       for (let attempt = 0; attempt < 3; attempt += 1) {
         client.testHooks.onConnectAttemptFailed();
@@ -5211,13 +5036,11 @@ describe("IOSCtrlProxyClient", function () {
       await IOSCtrlProxyClient.retireInstance(testDevice.deviceId);
       const retired = IOSCtrlProxyClient.getInstance(testDevice);
       IOSCtrlProxyClient.resumeAfterDeviceStart(testDevice.deviceId);
-      const fresh = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-        { serviceManagerFactory: () => manager },
-      );
+      const fresh = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+        serviceManagerFactory: () => manager,
+      });
       IOSCtrlProxyClient.registerForTesting(fresh, testDevice.deviceId);
       expect(IOSCtrlProxyClient.getInstance(testDevice, serverPort)).toBe(fresh);
       expect(fresh).not.toBe(retired);
@@ -5257,19 +5080,15 @@ describe("IOSCtrlProxyClient", function () {
         [otherDevice.deviceId, managerFor(otherDevice)],
       ]);
       const factoryCalls: string[] = [];
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-        {
-          serviceManagerFactory: (device) => {
-            factoryCalls.push(device.deviceId);
-            return managers.get(device.deviceId)!;
-          },
-          bootedDeviceLister: async () => [testDevice, otherDevice],
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+        serviceManagerFactory: (device) => {
+          factoryCalls.push(device.deviceId);
+          return managers.get(device.deviceId)!;
         },
-      );
+        bootedDeviceLister: async () => [testDevice, otherDevice],
+      });
       factoryCalls.length = 0;
       try {
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -5296,15 +5115,13 @@ describe("IOSCtrlProxyClient", function () {
     test("intentional retirement cancels a reconnect scheduled before runner shutdown", async function () {
       const timer = new FakeTimer();
       let socketCreations = 0;
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        () => {
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: () => {
           socketCreations += 1;
           throw new Error("retired client must not reconnect");
         },
         timer,
-      );
+      });
       client.testHooks.scheduleReconnect();
 
       await client.close();
@@ -5332,12 +5149,10 @@ describe("IOSCtrlProxyClient", function () {
 
     test("returns null when the runner cannot be reached", async function () {
       const testTimer = fakeTimer;
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(testTimer),
-        testTimer,
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(testTimer),
+        timer: testTimer,
+      });
 
       try {
         const commands = await testClient.getSupportedCommands();
@@ -5357,18 +5172,14 @@ describe("IOSCtrlProxyClient", function () {
     test("forwards a hierarchy_update to the ingestor's recordLayoutTelemetryEvent", async function () {
       const fakeIngestor = new FakeIosSdkEventIngestor();
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: fakeIngestor,
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: fakeIngestor,
+      });
 
       try {
         await testClient.ensureConnected();
@@ -5401,19 +5212,15 @@ describe("IOSCtrlProxyClient", function () {
       const probedDevices: string[] = [];
       const urls: string[] = [];
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-          logDemandProbe: (deviceId) => {
-            probedDevices.push(deviceId);
-            return demand;
-          },
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+        logDemandProbe: (deviceId) => {
+          probedDevices.push(deviceId);
+          return demand;
         },
-      );
+      });
       const originalFetch = globalThis.fetch;
       globalThis.fetch = createFetchMock(async (url) => {
         urls.push(String(url));
@@ -5440,18 +5247,14 @@ describe("IOSCtrlProxyClient", function () {
     test("forwards decoded SDK events from the /sdk-events poll to the ingestor", async function () {
       const fakeIngestor = new FakeIosSdkEventIngestor();
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: fakeIngestor,
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: fakeIngestor,
+      });
 
       // SDK envelopes carry a base64-encoded JSON payload; verify the client
       // decodes the envelope (base64 → JSON, timestamp default, bundleId → applicationId)
@@ -5488,18 +5291,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("drains a navigation envelope before returning the SDK screen identity", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const payload = {
         destination: "ScrollPerformanceDemo",
         timestamp: 4242,
@@ -5558,18 +5357,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("keeps the newest navigation identity when SDK events arrive out of order", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (destination: string, timestamp: number): string =>
         Buffer.from(JSON.stringify({ destination, timestamp })).toString("base64");
       const originalFetch = globalThis.fetch;
@@ -5598,18 +5393,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("uses the navigation sequence to order same-millisecond SDK events", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (destination: string, sequenceNumber: number): string =>
         Buffer.from(
           JSON.stringify({
@@ -5644,18 +5435,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("keeps the last navigation event when same-millisecond events lack a sequence", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (destination: string): string =>
         Buffer.from(JSON.stringify({ destination, timestamp: 100 })).toString("base64");
       const originalFetch = globalThis.fetch;
@@ -5684,18 +5471,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("retries an empty SDK-event drain within the identity refresh budget", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (destination: string, timestamp: number): string =>
         Buffer.from(
           JSON.stringify({
@@ -5741,18 +5524,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("retries after telemetry until the requested app reports navigation", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const oldEvent = {
@@ -5807,18 +5586,14 @@ describe("IOSCtrlProxyClient", function () {
         new Promise<void>((resolve) => {
           releaseTelemetry = resolve;
         });
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: blockingIngestor,
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: blockingIngestor,
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const originalFetch = globalThis.fetch;
@@ -5855,18 +5630,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("clears SDK identities for a replaced application process", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encoded = Buffer.from(
         JSON.stringify({ destination: "OldScreen", timestamp: 1 }),
       ).toString("base64");
@@ -5891,18 +5662,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("rejects late navigation from a process replaced by a session announcement", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (
         destination: string,
         timestamp: number,
@@ -5978,18 +5745,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("resets tracking fences when a newer SDK session starts", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const batches = [
@@ -6091,18 +5854,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("ignores a delayed session announcement from an older epoch", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const batches = [
@@ -6181,18 +5940,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("ignores a delayed tracking control from an older session", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const batches = [
@@ -6271,18 +6026,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("accepts navigation after an in-band tracking disable and enable", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const originalFetch = globalThis.fetch;
@@ -6341,18 +6092,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("treats a malformed SDK event batch as a non-fatal empty poll", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const originalFetch = globalThis.fetch;
       globalThis.fetch = createFetchMock(async () => ({
         ok: true,
@@ -6371,18 +6118,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("backs off the SDK-event poll after consecutive empty batches (#5472)", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const originalFetch = globalThis.fetch;
       globalThis.fetch = createFetchMock(async () => ({
         ok: true,
@@ -6435,18 +6178,14 @@ describe("IOSCtrlProxyClient", function () {
     ])("only app activity resets SDK-event poll backoff: %j (#13966)", async function (activity) {
       const timer = new FakeTimer();
       const { factory } = createCapturingWebSocketFactory(timer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
         timer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const poll = spyOn(testClient, "pollSdkEvents").mockResolvedValue({
         receivedEvents: false,
         rememberedApplicationIds: new Set<string>(),
@@ -6497,7 +6236,7 @@ describe("IOSCtrlProxyClient", function () {
               activity.requestId,
               "request_tap_coordinates",
               2000,
-              () => ({ success: false }),
+              { timeoutErrorFactory: () => ({ success: false }) },
             )
           : undefined;
         receiveMessage(Buffer.from(JSON.stringify(activity)));
@@ -6523,18 +6262,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("orders tracking re-enable before an earlier-arriving navigation event", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const batches = [
@@ -6615,18 +6350,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("clears every SDK identity when the CtrlProxy connection resets", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encoded = Buffer.from(
         JSON.stringify({ destination: "OldScreen", timestamp: 1 }),
       ).toString("base64");
@@ -6651,18 +6382,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("does not restore an SDK identity after the application is cleared during a poll", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encoded = Buffer.from(
         JSON.stringify({ destination: "StaleScreen", timestamp: 100 }),
       ).toString("base64");
@@ -6701,18 +6428,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("does not let a malformed navigation timestamp poison later identity ordering", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       let polls = 0;
@@ -6752,18 +6475,14 @@ describe("IOSCtrlProxyClient", function () {
 
     test("does not restore an SDK identity after the connection closes during a poll", async function () {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       const encoded = Buffer.from(
         JSON.stringify({ destination: "StaleScreen", timestamp: 100 }),
       ).toString("base64");
@@ -6803,18 +6522,14 @@ describe("IOSCtrlProxyClient", function () {
     test("falls back without waiting for a stalled SDK-event poll", async function () {
       const controlledTimer = new FakeTimer();
       const { factory } = createCapturingWebSocketFactory(controlledTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        controlledTimer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: new FakeIosSdkEventIngestor(),
-        },
-      );
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: controlledTimer,
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: new FakeIosSdkEventIngestor(),
+      });
       let releaseFetch:
         | ((response: { ok: boolean; json: () => Promise<unknown> }) => void)
         | undefined;
@@ -6995,19 +6710,15 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     const buildClient = (timer: FakeTimer, stub: ProbeStub): IOSCtrlProxyClient => {
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createSuccessWebSocketFactory(timer),
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createSuccessWebSocketFactory(timer),
         timer,
-        {
-          serviceManagerFactory: undefined,
-          bootedDeviceLister: undefined,
-          deviceConnectionLostNotifier: undefined,
-          sdkEventIngestor: undefined,
-          retryExecutor: new DefaultRetryExecutor(timer),
-        },
-      );
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: undefined,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      });
 
       let connectIndex = 0;
       client["ensureConnected"] = async (): Promise<boolean> => {

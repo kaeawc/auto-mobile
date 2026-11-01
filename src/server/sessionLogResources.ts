@@ -107,11 +107,14 @@ export function registerSessionLogResources(
   ResourceRegistry.registerTemplateWithReadContext(
     SESSION_LOG_RESOURCE_TEMPLATE,
     "Session Execution Logs",
-    "Collect bounded execution logs for an app on the device owned by the caller's session: " +
-      "named app-container log files (`container`, `paths`), iOS Simulator App Group files " +
-      "(`groupId`, `groupPaths`), and an app-scoped unified-log window (`lastSeconds`, `level`). " +
-      "Each source reports its own outcome; `maxBytes` bounds every entry.",
-    "application/json",
-    createSessionLogHandler(deps),
+    {
+      description:
+        "Collect bounded execution logs for an app on the device owned by the caller's session: " +
+        "named app-container log files (`container`, `paths`), iOS Simulator App Group files " +
+        "(`groupId`, `groupPaths`), and an app-scoped unified-log window (`lastSeconds`, `level`). " +
+        "Each source reports its own outcome; `maxBytes` bounds every entry.",
+      mimeType: "application/json",
+      handler: createSessionLogHandler(deps),
+    },
   );
 }

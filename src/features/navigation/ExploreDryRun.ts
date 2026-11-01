@@ -60,8 +60,7 @@ export async function planExplorationDryRun(
   observation: ObserveResult,
   options: ExploreOptions,
   context: DryRunPlanningContext,
-  perf: PerformanceTracker,
-  startTime: number,
+  { perf, startTime }: { perf: PerformanceTracker; startTime: number },
 ): Promise<ExploreDryRunResult> {
   const strategy = options.strategy ?? "weighted";
   const mode = options.mode ?? "hybrid";

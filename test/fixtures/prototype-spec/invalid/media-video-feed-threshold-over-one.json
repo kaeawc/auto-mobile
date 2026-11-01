@@ -1,0 +1,59 @@
+{
+  "spec": {
+    "id": "f",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "first",
+          "source": {
+            "sample": "countdown"
+          },
+          "controls": "none",
+          "contentScale": "crop",
+          "autoplay": "whenVisible",
+          "muted": true,
+          "loop": true,
+          "visibleThreshold": 0.5,
+          "resumePosition": true
+        },
+        {
+          "type": "videoPlayer",
+          "id": "second",
+          "source": {
+            "sample": "countdown"
+          },
+          "controls": "none",
+          "contentScale": "crop",
+          "autoplay": "whenVisible",
+          "muted": true,
+          "loop": true,
+          "visibleThreshold": 1.5
+        },
+        {
+          "type": "videoPlayer",
+          "id": "third",
+          "source": {
+            "sample": "countdown"
+          },
+          "controls": "none",
+          "contentScale": "crop",
+          "autoplay": "whenVisible",
+          "muted": true,
+          "loop": true,
+          "resumePosition": false
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].visibleThreshold"
+}

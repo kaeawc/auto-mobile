@@ -102,5 +102,9 @@ export async function cleanupIfNeeded(
   checkInterval?: number,
   inserted?: number,
 ): Promise<void> {
-  await cleanupEventTable("log_events", retentionState, db, maxRows, checkInterval, inserted);
+  await cleanupEventTable("log_events", retentionState, db, {
+    maxRows,
+    checkInterval,
+    inserted,
+  });
 }

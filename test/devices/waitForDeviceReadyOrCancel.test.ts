@@ -105,9 +105,12 @@ describe("waitForDeviceReadyOrCancel", () => {
         device: DeviceInfo,
         timeoutMs: number,
         childProcess: ChildProcess | null | undefined,
-        signal: AbortSignal | undefined,
+        { signal }: { signal?: AbortSignal } = {},
       ) =>
-        client.waitForEmulatorReady(device.name, timeoutMs, childProcess, device.deviceId, signal),
+        client.waitForEmulatorReady(device.name, timeoutMs, childProcess, {
+          targetDeviceId: device.deviceId,
+          signal,
+        }),
     } as PlatformDeviceManager;
 
     await expect(

@@ -117,6 +117,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                       |
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                     |
 | 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                  |
+| ⌚ <code>rotateCrown</code>                 | watchOS: rotate the Digital Crown by a signed delta with optional velocity           |
 | 🌍 <code>openLink</code>                    | Open URL in browser                                                                  |
 | 🏠 <code>homeScreen</code>                  | Go to home screen                                                                    |
 | 🕘 <code>recentApps</code>                  | Open recent apps                                                                     |
@@ -131,9 +132,9 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🪪 <code>biometricAuth</code>               | Simulate biometric success or failure                                                |
 | 📳 <code>shake</code>                       | Shake the device (simulator/emulator)                                                |
 | 🧲 <code>setSensor</code>                   | Set an emulator sensor (accelerometer, gyro, …)                                      |
-| 🎙️ <code>injectAudioInput</code>            | Android emulator: play a WAV file or tone into the microphone. Off by default        |
+| 🎙️ <code>injectAudioInput</code>            | Emulator or simulator: play a WAV file or tone into the microphone. Off by default   |
 | ⏹️ <code>stopAudioInput</code>              | Stop an audio injection. Off by default                                              |
-| 🔊 <code>captureAudio</code>                | Android emulator: record audio output and report its level. Off by default           |
+| 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default      |
 | 📞 <code>phoneCall</code>                   | Simulate an incoming phone call                                                      |
 | 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                             |
 | 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                               |
@@ -182,7 +183,7 @@ A read never writes settings on a device another session holds. A sessionless re
 while the input-focused element (`focusedElement`) does not match `until` (`text`, `contentDesc` and/or `resourceId`) it
 presses the D-pad arrow toward the nearest match, or `direction` when given, then observes again. With no focused
 element or no match on screen it presses down. It returns the `path` of focused elements and a `status`: `focused`,
-`max_steps` (default 30, at most 100) or `stuck` (two presses left focus unchanged). Activate the focused item
+`max_steps` (default 30, at most 100) or `stuck` (every direction toward the nearest match is blocked on the current element; an explicit `direction` stops after two unchanged presses). A direction that leaves focus unchanged is skipped for that element for the rest of the call, so steering tries the next-best axis. Activate the focused item
 afterwards with `sendKeys` key `enter`; Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so no
 separate `select` key exists. Android only; not yet verified on a TV image
 (see `docs/design-docs/plat/android/form-factors.md`).
@@ -209,8 +210,16 @@ virtual loopback device the default input) or the AVD audio settings. The `messa
 | `pointer` shape                                                                                                      | Route                     | Needs                           |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------- |
 | `{ toolType: "stylus" }`, `pressure` omitted or `1` (`tapAt`, `swipeAt`)                                             | `adb shell input stylus`  | Android 12+ (API 31)            |
-| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
-| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
+| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
+| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
+
+On an emulator or userdebug build whose `adb shell` already runs as root (after `adb root`) and has the `uinput` tool, a stylus
+stroke with `pressure` and a `dragPath` also work without `stylus_input_v1`, through a virtual pen; `tilt`,
+`orientation` and `buttons` still need the runner, and each stroke starts about 4 seconds later while the pen attaches.
+
+`pointer: { toolType: "eraser" }` touches with the pen's eraser end (apps see `TOOL_TYPE_ERASER`) on `tapAt`, `swipeAt` and
+`dragPath`, with optional `pressure`. It needs that same root `adb shell` with the `uinput` tool, and is refused before any
+input everywhere else; `tilt`, `orientation` and `buttons` are refused with an eraser.
 
 `dragPath` points also take `pressure` and `tilt` (they need `pointer`), interpolated between points; `holdMs` and
 `releaseHoldMs` become holds at the first and last point. A device or runner that cannot honour the request is refused before
@@ -232,7 +241,8 @@ Hover enter, move and exit over `points` with no contact (Android only; the reas
 | `stylus` (default) | `ACTION_HOVER_*` with `TOOL_TYPE_STYLUS`, `SOURCE_STYLUS` and an `AXIS_DISTANCE` value    |
 | `mouse`            | `ACTION_HOVER_*` with `TOOL_TYPE_MOUSE` and `SOURCE_MOUSE`; no distance; desktop-style UI |
 
-It needs the `hover_input_v1` runner capability. A device or runner without it, and iOS, are refused before
+It needs the `hover_input_v1` runner capability, or, for a `stylus` hover, an `adb shell` that already runs as
+root with a writable `/dev/uinput` (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
 anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
 advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
 [stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
@@ -240,4 +250,71 @@ are the documented intent and still need on-device confirmation (#13082).
 
 ### prototype
 
-Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md).
+Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md). Camera and media support per runtime: [camera and media guide](design-docs/prototype-camera-media.md).
+
+#### Watch-sized mockups
+
+Prototypes cannot run on watchOS, but a watch-sized spec gives a quick visual mockup of a watch
+screen on an iPhone simulator or Android emulator. Float the window in the centre and give the root
+`box` the watch screen's size, a large corner radius (which also clips its content) and a black
+background:
+
+| Case        | `width` × `height` (dp/pt) | `cornerRadius` |
+| ----------- | -------------------------- | -------------- |
+| 41 mm       | 176 × 215                  | 36             |
+| 45 mm       | 198 × 242                  | 40             |
+| 49 mm Ultra | 205 × 251                  | 44             |
+
+```json
+{
+  "id": "watch-41mm",
+  "window": {
+    "placement": { "type": "floating", "gravity": "center", "offset": { "x": 0, "y": 0 } }
+  },
+  "components": {
+    "watchRow": {
+      "root": {
+        "type": "row",
+        "style": {
+          "width": "fill",
+          "background": "#222222",
+          "cornerRadius": 16,
+          "padding": { "start": 10, "end": 10, "top": 8, "bottom": 8 }
+        },
+        "children": [{ "type": "text", "text": "{props.title}", "style": { "color": "#FFFFFF" } }]
+      }
+    }
+  },
+  "root": {
+    "type": "box",
+    "style": {
+      "width": { "dp": 176 },
+      "height": { "dp": 215 },
+      "cornerRadius": 36,
+      "background": "#000000"
+    },
+    "children": [
+      {
+        "type": "scroll",
+        "child": {
+          "type": "column",
+          "style": { "spacing": 6, "padding": { "start": 8, "end": 8, "top": 12 } },
+          "children": [
+            { "type": "use", "component": "watchRow", "props": { "title": "Drink water" } },
+            { "type": "use", "component": "watchRow", "props": { "title": "Stand up" } }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+Put each common watch pattern in `components` and reuse it with `use`: a vertically scrolling list
+of rows, a full-screen metric (one large number with a label and unit), a two-button confirmation
+(two `button`s with `weight: 1` in a `row`, swapped in with `visibleWhen`), and a now-playing card
+(title, artist, previous / play-pause / next `iconButton`s and a linear `progress`).
+
+The mockup is a phone overlay sized like a watch. It does not simulate the Digital Crown, Always-On
+or wrist-down dimming, real watchOS or Wear OS fonts and controls, or the round Wear OS screen, and
+nothing runs on a watch. Check the final design on a real watch.

@@ -9,9 +9,22 @@ interface DisconnectTargetHost {
   forceDisconnectedDeviceGenerations: () => Map<string, number>;
 }
 
-export interface CapturedDisconnectCleanup {
+/** The device and session a disconnect captured, checked again before cleanup acts on them. */
+export interface CapturedDisconnectTarget {
   pooledDeviceAtDisconnect: PooledDevice | null;
   assignmentCountAtDisconnect: number | undefined;
+  sessionIdAtDisconnect?: string | null;
+  sessionAtDisconnect?: Session | null;
+}
+
+/** A captured disconnect target, with the force generation its recovery is fenced by. */
+export interface CapturedDisconnectRecovery extends CapturedDisconnectTarget {
+  assignmentCountAtDisconnect: number;
+  sessionAtDisconnect: Session | null;
+  forceGenerationAtDisconnect: number | undefined;
+}
+
+export interface CapturedDisconnectCleanup extends CapturedDisconnectTarget {
   sessionIdAtDisconnect: string | null;
   sessionAtDisconnect: Session | null;
   forceGenerationAtDisconnect: number | undefined;
@@ -86,10 +99,12 @@ export function captureDisconnectCleanup(
 export function isCapturedDisconnectTargetCurrent(
   host: Pick<DisconnectTargetHost, "services">,
   deviceId: string,
-  pooledDeviceAtDisconnect: PooledDevice | null,
-  assignmentCountAtDisconnect: number | undefined,
-  sessionIdAtDisconnect?: string | null,
-  sessionAtDisconnect?: Session | null,
+  {
+    pooledDeviceAtDisconnect,
+    assignmentCountAtDisconnect,
+    sessionIdAtDisconnect,
+    sessionAtDisconnect,
+  }: CapturedDisconnectTarget,
 ): boolean {
   if (pooledDeviceAtDisconnect) {
     if (

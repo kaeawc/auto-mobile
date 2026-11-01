@@ -40,7 +40,7 @@ import { SessionCache } from "./cache";
 import { SessionCallbacks } from "./callbacks";
 import { SessionCreationGuard } from "./creationGuard";
 import { ForcedStuckRelease } from "./forcedStuckRelease";
-import { type SessionAcquisitionOptions } from "./internalContracts";
+import { type GetOrCreateSessionOptions } from "./internalContracts";
 import { SessionLeaseExpiry } from "./leaseExpiry";
 import { PersistedSessionAdmission } from "./persistedAdmission";
 import { SessionPlanLabels } from "./planLabelsLifecycle";
@@ -460,23 +460,13 @@ export abstract class SessionManagerForwarders {
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
     platform?: Platform,
-    execution?: SessionExecutionMetadata,
-    // #6069: when true, a NEW session (no live in-memory session) may only be
-    // minted for an id this daemon already issued — i.e. a persisted, non-terminal
-    // row (live-during-restart recovery). This is set on the device-tool path so a
-    // fabricated/never-issued sessionUuid can never be auto-assigned a pooled
-    // device just because a device pool is in scope. Internal fresh mints
-    // (device-label derived sessions) leave it false and keep minting.
-    requireIssuedSession = false,
-    accessOptions: SessionAccess | SessionAcquisitionOptions = "acquire",
+    options: GetOrCreateSessionOptions = {},
   ): Promise<Session> {
     return this.forwardersHost.admission.getOrCreateSession(
       sessionId,
       devicePool,
       platform,
-      execution,
-      requireIssuedSession,
-      accessOptions,
+      options,
     );
   }
 

@@ -43,6 +43,7 @@ export {
   type RecoverableRowIncarnation,
   type UpsertActiveSessionOptions,
 } from "./deviceSessionPersistence";
+import type { RepositoryDeps } from "./repositoryDeps";
 export { DeviceSessionRowChangedError } from "./DeviceSessionRowChangedError";
 export { DeviceSessionRowNotReleasableError } from "./DeviceSessionRowNotReleasableError";
 export { DeviceSessionRowNotRewritableError } from "./DeviceSessionRowNotRewritableError";
@@ -356,10 +357,10 @@ function newActiveSessionRow(record: DeviceSessionRecord, nowIso: string): NewDe
 export class DeviceSessionRepository implements DeviceSessionPersistence {
   private db: Kysely<Database> | null;
 
-  constructor(
-    db?: Kysely<Database>,
-    private readonly timer: Timer = defaultTimer,
-  ) {
+  private readonly timer: Timer;
+
+  constructor({ db, timer = defaultTimer }: Pick<RepositoryDeps, "db" | "timer"> = {}) {
+    this.timer = timer;
     this.db = db ?? null;
   }
 
@@ -676,8 +677,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options: MarkReleasedOptions = {},
+    { reason, ...options }: MarkReleasedOptions & { reason: string },
   ): Promise<void> {
     const { expectedRowGeneration, onlyIfRecoverable, onlyIfExpiredAtMs, onlyIfOwnedByDaemon } =
       options;
@@ -879,7 +879,8 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
     for (const row of expired) {
       try {
         const reason = persistedSessionExpiryReason(row, nowMs)!;
-        await this.markReleased(row.session_uuid, "expired", nowMs, reason, {
+        await this.markReleased(row.session_uuid, "expired", nowMs, {
+          reason,
           expectedRowGeneration: row.stable_identity_generation ?? 0,
           onlyIfRecoverable: true,
           ...(reason === "restart-recovery-timeout"

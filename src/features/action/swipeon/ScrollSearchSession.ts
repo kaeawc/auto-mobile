@@ -1,7 +1,8 @@
-import { freshSwipeHierarchy } from "./freshSwipeHierarchy";
+import { freshSwipeHierarchy, swipeHierarchyReadTimeoutMs } from "./freshSwipeHierarchy";
+import type { IosSdkTapOutcome } from "../IosSdkBridgeTapRouter";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { type StaleDisplayDetails } from "../../observe/StaleDisplayError";
-import { scopedSearchDescription } from "./swipeSelectorScopes";
+import { scopedSearchDescription, usesScopedSwipeLookFor } from "./swipeSelectorScopes";
 import {
   ActionableError,
   Element,
@@ -14,6 +15,7 @@ import {
   requireAndroidOrIosPlatform,
 } from "../../../models";
 import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeOnResolvedOptions } from "./types";
 import { iosSwipeStartWarning } from "./iosChromeInsets";
@@ -54,9 +56,11 @@ interface ScrollSearchOperations {
   findElementInHierarchy(
     lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
     viewHierarchy: ViewHierarchyResult,
-    container?: SwipeOnOptions["container"],
-    containerElement?: Element,
-    layer?: SwipeOnOptions["layer"],
+    options?: {
+      container?: SwipeOnOptions["container"];
+      containerElement?: Element;
+      layer?: SwipeOnOptions["layer"];
+    },
   ): Promise<Element | null>;
   isElementWithinContainer(
     element: Element,
@@ -126,6 +130,8 @@ type SearchStepOutcome =
   | { kind: "failed"; result: SwipeOnResult }
   | { kind: "continue"; failedAndroidSwipe: boolean };
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
+/** The page script posts a snapshot about 100 ms after a scroll; wait for it before re-reading. */
+const WEB_SCROLL_SNAPSHOT_SETTLE_MS = 250;
 /** One scroll search, with explicit dispatch, recovery and end-of-container stages. */
 export class ScrollSearchSession {
   private readonly observe: (options?: {
@@ -157,6 +163,8 @@ export class ScrollSearchSession {
   private reverseDirection!: SwipeDirection;
   private reverseOptions!: SwipeOnResolvedOptions;
   private fallbackLogged = false;
+  /** The backend that brought the target into view, when the page scrolled it there (#5162). */
+  private webScroll?: IosSdkTapOutcome;
   private readonly onSearchFallback = () => {
     if (!this.fallbackLogged) {
       logger.debug("[SwipeOn] lookFor using slow ADB swipe fallback (600ms, at most 75% viewport)");
@@ -176,6 +184,7 @@ export class ScrollSearchSession {
       | "featureFlags"
       | "getDuration"
       | "captureTerminalObservationScreenshot"
+      | "webScrollIntoView"
     >,
     private readonly host: ScrollSearchOperations,
     private readonly perf: PerformanceTracker,
@@ -195,6 +204,10 @@ export class ScrollSearchSession {
   async execute(): Promise<SwipeOnResult> {
     await this.initialize();
     await this.initialSearch();
+    if (this.foundElement) {
+      return this.initialSuccess();
+    }
+    await this.scrollWebElementIntoView();
     if (this.foundElement) {
       return this.initialSuccess();
     }
@@ -323,9 +336,11 @@ export class ScrollSearchSession {
       this.host.findElementInHierarchy(
         this.request.options.lookFor!,
         this.lastObservation.viewHierarchy!,
-        this.request.options.container,
-        this.containerElement,
-        this.request.options.layer,
+        {
+          container: this.request.options.container,
+          containerElement: this.containerElement,
+          layer: this.request.options.layer,
+        },
       ),
     );
 
@@ -342,6 +357,80 @@ export class ScrollSearchSession {
       );
       this.foundElement = null;
     }
+  }
+
+  /**
+   * A text target that is a DOM element of the screen's web view is scrolled into view by the page
+   * (#5162) before any swipe. The page posts its new snapshot shortly after scrolling, so the search
+   * waits for it, re-reads the screen and searches again. When the element is still not in view,
+   * or the page cannot scroll it, the search swipes as usual.
+   */
+  private async scrollWebElementIntoView(): Promise<void> {
+    const scroller = this.deps.webScrollIntoView;
+    if (!scroller || !this.webScrollApplies()) {
+      return;
+    }
+    const outcome = await scroller.scroll(
+      this.request.options.lookFor!,
+      this.lastObservation,
+      this.request.signal,
+    );
+    if (!outcome) {
+      return;
+    }
+    if (outcome.backend === "xctest") {
+      // The swipe search below stands in for the page; the result says why.
+      this.webScroll = outcome;
+      return;
+    }
+    await this.deps.timer.sleep(WEB_SCROLL_SNAPSHOT_SETTLE_MS);
+    throwIfAborted(this.request.signal);
+    const timeoutMs = swipeHierarchyReadTimeoutMs(this.deps.timer);
+    if (timeoutMs <= 0) {
+      return;
+    }
+    try {
+      // A forced read: the observation from before the page scrolled is no longer the screen.
+      this.lastObservation = await this.observe({ freshness: "fresh", timeoutMs });
+    } catch (error) {
+      throwIfAborted(this.request.signal);
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      // The swipe search below re-reads the screen itself; log why this read was skipped.
+      logger.warn(`[SwipeOn] Read after the page scrolled failed: ${errorMessage(error)}`, error);
+      return;
+    }
+    throwIfAborted(this.request.signal);
+    await this.initialSearch();
+    if (this.foundElement) {
+      this.webScroll = outcome;
+    }
+  }
+
+  /**
+   * Only an unscoped iOS search asks the page: the snapshot carries no native container or layer,
+   * so a scoped search could scroll an element outside its scope; it swipes as usual.
+   */
+  private webScrollApplies(): boolean {
+    const { container, layer, lookFor } = this.request.options;
+    return (
+      !this.request.strategy &&
+      this.deps.device.platform === "ios" &&
+      container === undefined &&
+      layer === undefined &&
+      !usesScopedSwipeLookFor(lookFor)
+    );
+  }
+
+  /** The backend fields of a page-scrolled search, or none when only swipes ran. */
+  private webScrollFields(): Pick<SwipeOnResult, "backend" | "fallbackReason"> {
+    if (!this.webScroll) {
+      return {};
+    }
+    return this.webScroll.backend === "xctest"
+      ? { backend: "xctest", fallbackReason: this.webScroll.fallbackReason }
+      : { backend: "sdk" };
   }
 
   private async initialSuccess(): Promise<SwipeOnResult> {
@@ -369,6 +458,7 @@ export class ScrollSearchSession {
       ...(this.accessibilityWarnings.size ? { warnings: [...this.accessibilityWarnings] } : {}),
       scrollIterations: 0,
       elapsedMs: this.deps.timer.now() - this.startTime,
+      ...this.webScrollFields(),
       x1: 0,
       y1: 0,
       x2: 0,
@@ -759,6 +849,7 @@ export class ScrollSearchSession {
       found: true,
       scrollIterations: this.scrollIteration,
       elapsedMs: this.deps.timer.now() - this.startTime,
+      ...this.webScrollFields(),
       observation: this.lastObservation,
       x1: 0,
       y1: 0,

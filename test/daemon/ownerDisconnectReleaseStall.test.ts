@@ -66,8 +66,7 @@ async function setUp(checkIntervalMs?: number): Promise<Rig> {
     async (sessionId, reason) => {
       await sessionManager.releaseSession(sessionId, reason);
     },
-    timer,
-    checkIntervalMs === undefined ? {} : { checkIntervalMs },
+    { timer, ...(checkIntervalMs === undefined ? {} : { checkIntervalMs }) },
   );
   monitor.start();
   timer.advanceTime(CLOSE_AFTER_HEARTBEAT_MS);

@@ -1,3 +1,7 @@
+import {
+  withHostOnlySavedPrototypes,
+  removeDeletedSavedPrototypeMirror,
+} from "../../prototype/savedPrototypeMirror";
 import { requirePrototypeTimersSupport } from "../../prototype/prototypeTimers";
 import { collectPrototypeStrings } from "../../prototype/prototypeAssetReferences";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
@@ -80,7 +84,6 @@ import {
   PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   UNKNOWN_PROTOTYPE_EVENT_KIND,
-  type PrototypeAppearanceOverride,
   type InspectPrototypesMessage,
   type ShowPrototypeMessage,
   type DismissPrototypeMessage,
@@ -342,24 +345,23 @@ export class CtrlProxyPrototypes {
   ) {}
 
   /**
-   * [displayId] is the Android logical display; undefined and 0 both mean the default display and
-   * keep the wire byte-identical to a request from before display targeting existed. [reset] true
-   * starts a same-id show fresh instead of replacing it in place; false/undefined send nothing.
-   * [appearance] pins the system setting for this show; the caller passes it only for a device
-   * advertising `prototype_appearance_v1`, and undefined (follow the device) sends nothing.
-   * An options object also carries replaceOthers; only false is sent, capability-gated before dispatch.
+   * [overrides.displayId] is the Android logical display; undefined and 0 both mean the default
+   * display and keep the wire byte-identical to a request from before display targeting existed.
+   * [overrides.reset] true starts a same-id show fresh instead of replacing it in place;
+   * false/undefined send nothing. [overrides.appearance] pins the system setting for this show; the
+   * caller passes it only for a device advertising `prototype_appearance_v1`, and undefined (follow
+   * the device) sends nothing. [overrides.replaceOthers]: only false is sent, capability-gated
+   * before dispatch.
    */
   async requestShowPrototype(
     spec: PrototypeSpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides: PrototypeShowOverrides = {},
   ): Promise<PrototypeResult> {
     this.validateSpec(spec);
     await this.validateShaderAssets(spec);
-    const overrides = typeof appearance === "string" ? { appearance } : appearance;
+    const { displayId, reset } = overrides;
     const target = displayId === undefined || displayId === 0 ? undefined : displayId;
     return this.request(
       ctrlProxyRequests.showPrototype({
@@ -367,9 +369,9 @@ export class CtrlProxyPrototypes {
         spec,
         displayId: target,
         reset,
-        appearance: overrides?.appearance,
-        locale: spec.strings ? overrides?.locale : undefined,
-        replaceOthers: overrides?.replaceOthers,
+        appearance: overrides.appearance,
+        locale: spec.strings ? overrides.locale : undefined,
+        replaceOthers: overrides.replaceOthers,
       }),
       timeoutMs,
       perf,
@@ -431,11 +433,16 @@ export class CtrlProxyPrototypes {
     );
   }
 
-  requestListSavedPrototypes(
+  async requestListSavedPrototypes(
     timeoutMs = 5000,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult> {
-    return this.request(ctrlProxyRequests.listSavedPrototypes({ requestId: "" }), timeoutMs, perf);
+    const reply = await this.request(
+      ctrlProxyRequests.listSavedPrototypes({ requestId: "" }),
+      timeoutMs,
+      perf,
+    );
+    return withHostOnlySavedPrototypes(reply, this.context.savedPrototypeMirror);
   }
   async requestAdvancePrototypeClock(
     id: string,
@@ -485,14 +492,7 @@ export class CtrlProxyPrototypes {
       timeoutMs,
       perf,
     );
-    const recorder = this.context.savedPrototypeMirror;
-    if (reply.success && !reply.error && recorder) {
-      try {
-        await recorder.mirror.remove(recorder.serial, id);
-      } catch (error) {
-        logger.warn(`[CTRL_PROXY] Failed to remove saved prototype mirror ${id}`, error);
-      }
-    }
+    await removeDeletedSavedPrototypeMirror(reply, this.context.savedPrototypeMirror, id);
     return reply;
   }
 

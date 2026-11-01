@@ -133,7 +133,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["launchApp", "measureStartup", "installApp", "uninstallApp"],
-    "clearAppData, a persistent compilation mode, an install over, or an uninstall of an app the baseline held records a fallback intent unless the session installed an app the baseline did not hold; installs also keep their installed-app row. Other calls only start or stop processes.",
+    "clearAppData, a persistent compilation mode, an install over, or an uninstall of an app the baseline held records a fallback intent unless the session installed an app the baseline did not hold; installs also keep their installed-app row. Android launches and startup measurements record a non-fallback launch row so keep-booted cleaning clears a launched preinstalled app's data. Other calls only start or stop processes.",
     "journaled",
     { fallback: true },
   ),
@@ -164,6 +164,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "pinchOn",
       "recentApps",
       "rotaryScroll",
+      "rotateCrown",
       "selectAllText",
       "shake",
       "siri",

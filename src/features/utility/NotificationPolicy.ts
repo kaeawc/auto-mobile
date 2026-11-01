@@ -294,15 +294,17 @@ export class NotificationPolicy {
     // Never echo the request: read the policy-access state back (one extra
     // `shell dumpsys notification`) and report what the device now says.
     const observed = await this.getPolicy(appId);
-    return this.buildSetResult(platform, appId, input, result, observed);
+    return this.buildSetResult(platform, appId, input, { command: result, observed });
   }
 
   private buildSetResult(
     platform: "android",
     appId: string,
     input: SetNotificationPolicyInput,
-    command: AndroidDeviceShellToolResult,
-    observed: NotificationPolicyResult,
+    {
+      command,
+      observed,
+    }: { command: AndroidDeviceShellToolResult; observed: NotificationPolicyResult },
   ): NotificationPolicyResult {
     const base = { appId, deviceId: this.device.deviceId, platform };
     const readBack = observed.policyAccess;
@@ -313,7 +315,7 @@ export class NotificationPolicy {
       method: observed.success ? "android_dumpsys_notification" : "android_cmd_notification",
     };
 
-    const verdict = classifySetOutcome(appId, input, command, allowed, readBack);
+    const verdict = classifySetOutcome(appId, input, command, { allowed, readBack });
     if (verdict.error) {
       const { error } = verdict;
       return { ...base, success: false, policyAccess: { ...policyAccess, error }, error };
@@ -331,8 +333,7 @@ function classifySetOutcome(
   appId: string,
   input: SetNotificationPolicyInput,
   command: AndroidDeviceShellToolResult,
-  allowed: boolean | null,
-  readBack: NotificationPolicyAccessState,
+  { allowed, readBack }: { allowed: boolean | null; readBack: NotificationPolicyAccessState },
 ): { error?: string; warning?: string } {
   if (!command.success) {
     const commandError = command.error ?? "cmd notification failed";

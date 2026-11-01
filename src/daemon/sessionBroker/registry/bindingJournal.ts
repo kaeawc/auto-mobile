@@ -330,7 +330,7 @@ export class BindingJournal {
     }
     const located = await this.locator.locateForDeletion(entry, oldId, signal, options.device);
     if (located.kind === "blocked") {
-      return this.recordBlocked(entry, located.reason, located.message, undefined, signal);
+      return this.recordBlocked(entry, located.reason, located.message, { signal });
     }
     if (located.kind === "present" && entry.target.quarantinedAtMs !== undefined) {
       return this.probeQuarantine(entry, oldId, signal);
@@ -507,14 +507,10 @@ export class BindingJournal {
       );
     }
     if (located.kind === "blocked") {
-      return this.removalBlocked(
-        entry,
-        located.reason,
-        located.message,
-        undefined,
+      return this.removalBlocked(entry, located.reason, located.message, {
         signal,
-        options.deadlineMs,
-      );
+        deadlineMs: options.deadlineMs,
+      });
     }
     const { device, stableId } = located;
     const locatedPending = this.pendingRemoval(
@@ -561,15 +557,14 @@ export class BindingJournal {
           entry,
           "discovery_incomplete",
           `Configuration of '${stableId}' is unreadable.`,
-          undefined,
-          signal,
+          { signal },
         );
       }
       if (match === "match") {
         return this.adoptCreated(entry, device, stableId, signal);
       }
     }
-    return this.removeCreated(entry, device, stableId, options.deadlineMs, signal);
+    return this.removeCreated(entry, device, stableId, { deadlineMs: options.deadlineMs, signal });
   }
 
   /** Close an entry at a terminal phase (no assignment change). */
@@ -749,7 +744,7 @@ export class BindingJournal {
     if (stableId) {
       const free = await this.locator.checkDeviceFree(entry, stableId, signal);
       if (free.kind === "blocked") {
-        return this.recordBlocked(entry, free.reason, free.message, undefined, signal);
+        return this.recordBlocked(entry, free.reason, free.message, { signal });
       }
     }
     const restored = await this.advanceStep(
@@ -778,7 +773,7 @@ export class BindingJournal {
     signal?: AbortSignal,
   ): Promise<Step> {
     if (this.removalFlags.removalIntended(entry)) {
-      return this.removeCreated(entry, device, stableId, undefined, signal);
+      return this.removeCreated(entry, device, stableId, { signal });
     }
     // Readiness is unproven after an interruption: bind as `provisioning`; the acquisition's reuse
     // path re-provisions it to automation readiness before anyone may claim it.
@@ -810,15 +805,14 @@ export class BindingJournal {
       return blocked(entry, "reconcile_in_progress", "The journal entry changed during adoption.");
     }
     // The binding moved on underneath: the device is now an orphan of this entry.
-    return this.removeCreated(entry, device, stableId, undefined, signal);
+    return this.removeCreated(entry, device, stableId, { signal });
   }
 
   private async removeCreated(
     entry: BindingJournalEntry,
     device: DeviceInfo,
     stableId: string,
-    deadlineMs?: number,
-    signal?: AbortSignal,
+    { deadlineMs, signal }: { deadlineMs?: number; signal?: AbortSignal } = {},
   ): Promise<Step> {
     if (!entry.target.removalRequested) {
       this.markRemovalIntended(entry);
@@ -853,9 +847,7 @@ export class BindingJournal {
         entry,
         claim.kind === "held" ? "device_busy" : "discovery_incomplete",
         `Uncommitted device '${stableId}' cannot be removed: ${claim.reason}`,
-        { newStableId: stableId },
-        signal,
-        deadlineMs,
+        { target: { newStableId: stableId }, signal, deadlineMs },
       );
     }
     const deletion = await this.stages.deleteDevice(
@@ -873,9 +865,7 @@ export class BindingJournal {
         entry,
         "cleanup_pending",
         `Removing uncommitted device '${stableId}' failed: ${deletion.message}`,
-        { newStableId: stableId },
-        signal,
-        deadlineMs,
+        { target: { newStableId: stableId }, signal, deadlineMs },
       );
     }
     const closed = await this.removalRegistryStage(
@@ -951,12 +941,18 @@ export class BindingJournal {
     entry: BindingJournalEntry,
     reason: BindingJournalBlockReason,
     message: string,
-    target?: Partial<BindingJournalEntry["target"]>,
-    signal?: AbortSignal,
-    deadlineMs?: number,
+    {
+      target,
+      signal,
+      deadlineMs,
+    }: {
+      target?: Partial<BindingJournalEntry["target"]>;
+      signal?: AbortSignal;
+      deadlineMs?: number;
+    },
   ) {
     return this.removalRegistryStage(
-      () => this.recordBlocked(entry, reason, message, target, signal),
+      () => this.recordBlocked(entry, reason, message, { target, signal }),
       deadlineMs,
     );
   }
@@ -965,8 +961,10 @@ export class BindingJournal {
     entry: BindingJournalEntry,
     reason: BindingJournalBlockReason,
     message: string,
-    target?: Partial<BindingJournalEntry["target"]>,
-    signal?: AbortSignal,
+    {
+      target,
+      signal,
+    }: { target?: Partial<BindingJournalEntry["target"]>; signal?: AbortSignal } = {},
   ): Promise<Extract<Step, { kind: "blocked" }>> {
     const phase: BindingJournalPhase =
       target?.newStableId && entry.phase === "creating" ? "created" : entry.phase;

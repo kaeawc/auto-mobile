@@ -15,19 +15,19 @@ describe("DeviceSettingDefaultsRepository (#11145)", () => {
   });
 
   test("round-trips, upserts and deletes the per-device record across instances", async () => {
-    await new DeviceSettingDefaultsRepository(db).put("emulator-5554", {
+    await new DeviceSettingDefaultsRepository({ db }).put("emulator-5554", {
       platform: "android",
       name: "Pixel",
       sessionId: "a",
       values: { fontScale: "default", density: 480, timeFormat: null },
     });
-    await new DeviceSettingDefaultsRepository(db).put("emulator-5554", {
+    await new DeviceSettingDefaultsRepository({ db }).put("emulator-5554", {
       platform: "android",
       name: "Pixel",
       sessionId: "b",
       values: { nightMode: "light" },
     });
-    const reopened = new DeviceSettingDefaultsRepository(db);
+    const reopened = new DeviceSettingDefaultsRepository({ db });
     expect(await reopened.get("emulator-5554")).toEqual({
       platform: "android",
       name: "Pixel",
@@ -45,7 +45,7 @@ describe("DeviceSettingDefaultsRepository (#11145)", () => {
     );
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      expect(await new DeviceSettingDefaultsRepository(db).get("x")).toBeNull();
+      expect(await new DeviceSettingDefaultsRepository({ db }).get("x")).toBeNull();
       expect(warn).toHaveBeenCalled();
     } finally {
       warn.mockRestore();

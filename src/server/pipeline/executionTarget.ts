@@ -56,13 +56,11 @@ import {
   refuseControlCallBeforeAdmission,
 } from "./deviceCallDispatch";
 import { createToolExecutionContext } from "../ToolExecutionContext";
-import { resolveDirectSessionDevice } from "../../utils/directSessionDeviceRegistry";
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
-import { DeviceOutsideBoundSessionError } from "../../daemon/deviceOutsideBoundSessionRefusal";
-import { DirectSessionNotActiveError } from "../../models/DirectSessionNotActiveError";
+import { adoptDirectSessionDevice } from "./directSessionTarget";
 
 export interface ExecutionTargetInput {
   name: string;
@@ -227,14 +225,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private async resolveImplicitSession(state: TargetResolution): Promise<void> {
     const { args, options, deviceReadiness, signal } = state.input;
     const { platform, providedDeviceId, execution, mcpSessionId, autolockEnabled } = state;
-    const implicitSessionUuid = this.resolveImplicitAutolockSession(
-      platform,
-      state.sessionUuid,
-      providedDeviceId,
-      mcpSessionId,
-      execution,
-      autolockEnabled,
-    );
+    const implicitSessionUuid = this.resolveImplicitAutolockSession(state);
     if (implicitSessionUuid) {
       state.sessionUuid = implicitSessionUuid;
       if (execution) {
@@ -377,13 +368,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       { ...bindingAccessFor(state), deviceId: providedDeviceId },
       signal,
     );
-    assertToolCallerHoldsDevice(
-      name,
-      state.readOnly,
-      providedDeviceId,
+    assertToolCallerHoldsDevice(name, state.readOnly, providedDeviceId, {
       sessionUuid,
-      state.autolockEnabled,
-    );
+      autolockEnabled: state.autolockEnabled,
+    });
     if (providedDeviceId && !sessionUuid) {
       options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid);
     }
@@ -421,7 +409,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // is sufficient on its own — without this, a client that omits `platform`
       // (now optional) with both platforms connected falls through to
       // ensureDeviceReady("either", undefined) and hits an ambiguity error.
-      this.adoptDirectSessionDevice(state, sessionUuid);
+      adoptDirectSessionDevice(state, sessionUuid);
     } else if (sessionUuid) {
       logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
     }
@@ -450,37 +438,26 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // Only an admitted control call's end is session use (#10824, #10964).
       executionTracker.markSessionAdmitted(execution.executionId);
     }
-    assertSessionDeviceRouting(
-      name,
-      providedDeviceId,
-      sessionUuid,
-      admittedSession?.assignedDevice,
-      admittedSession?.platform,
-    );
+    assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, {
+      sessionDeviceId: admittedSession?.assignedDevice,
+      sessionPlatform: admittedSession?.platform,
+    });
     await this.assertAdmittedSessionHeld(state, sessionUuid, admittedSession);
-    const context = await createToolExecutionContext(
-      sessionUuid,
-      sessionManager,
-      devicePool,
-      toolContextSessionOptions(state),
-      {
-        execution,
-        admittedSession,
-        // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
-        // above already partitions every state, so this flag rejects nothing
-        // admit does not already reject HERE. It exists so the pool-minting
-        // primitive itself refuses to mint a never-issued id.
-        requireIssuedSession: true,
-        signal,
-      },
-    );
-    assertSessionDeviceRouting(
-      name,
-      providedDeviceId,
-      sessionUuid,
-      context.deviceId,
-      context.devicePlatform,
-    );
+    const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
+      sessionOptions: toolContextSessionOptions(state),
+      execution,
+      admittedSession,
+      // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
+      // above already partitions every state, so this flag rejects nothing
+      // admit does not already reject HERE. It exists so the pool-minting
+      // primitive itself refuses to mint a never-issued id.
+      requireIssuedSession: true,
+      signal,
+    });
+    assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, {
+      sessionDeviceId: context.deviceId,
+      sessionPlatform: context.devicePlatform,
+    });
     if (context.deviceId && !providedDeviceId) {
       state.providedDeviceId = context.deviceId;
       logger.info(`[ToolRegistry] Resolved device from session: ${state.providedDeviceId}`);
@@ -505,29 +482,6 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       deviceId: admittedSession.assignedDevice || state.providedDeviceId,
     });
     options.assertHeldDeviceStart(admittedSession.assignedDevice || undefined, sessionUuid);
-  }
-
-  private adoptDirectSessionDevice(state: TargetResolution, sessionUuid: string): void {
-    const directSession = resolveDirectSessionDevice(sessionUuid);
-    if (!directSession) {
-      throw new DirectSessionNotActiveError(sessionUuid);
-    }
-    if (state.providedDeviceId && state.providedDeviceId !== directSession.device.deviceId) {
-      throw new DeviceOutsideBoundSessionError(
-        sessionUuid,
-        directSession.device,
-        { deviceId: state.providedDeviceId },
-        `${state.input.name} deviceId '${state.providedDeviceId}' does not match session '${sessionUuid}' device '${directSession.device.deviceId}'. ` +
-          "Omit deviceId to target the session's device.",
-      );
-    }
-    if (!state.providedDeviceId) {
-      state.providedDeviceId = directSession.device.deviceId;
-      logger.info(
-        `[ToolRegistry] Resolved device from direct session ${sessionUuid}: ${state.providedDeviceId}`,
-      );
-      state.platform = directSession.device.platform;
-    }
   }
 
   /** Resolves the device this call runs on, or answers early from the read-only device path. */
@@ -656,11 +610,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   ) {
     const { options, signal } = state.input;
     const { sessionUuid, readOnly } = state;
-    return ensureReadTargetOrWatch(
-      state.input,
-      state.platform,
-      deviceId,
-      {
+    return ensureReadTargetOrWatch(state.input, state.platform, deviceId, {
+      options: {
         sessionId: sessionUuid,
         connectionId: state.deviceConnectionId,
         // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
@@ -671,9 +622,9 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms: state.getConnectedPlatforms,
       },
-      options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+      read: options.sessionlessDeviceRead ?? this.defaultDeviceRead,
       readinessTarget,
-    );
+    });
   }
 
   /**
@@ -716,13 +667,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const { sessionUuid, providedDeviceId, platform, readOnly } = state;
     const sessionlessExplicitRead = readOnly && !sessionUuid && providedDeviceId;
     const runningReadMatch = sessionlessExplicitRead
-      ? await findRunningExplicitReadTarget(
-          state.input,
-          read,
-          platform,
-          state.getConnectedPlatforms,
-          state.runningReadAlreadyChecked,
-        )
+      ? await findRunningExplicitReadTarget(state.input, read, platform, {
+          getConnectedPlatforms: state.getConnectedPlatforms,
+          alreadyChecked: state.runningReadAlreadyChecked,
+        })
       : undefined;
     const runningReadTarget = runningReadMatch?.device;
     const readinessTarget = runningReadTarget?.deviceId ?? initialReadinessTarget;
@@ -796,13 +744,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
       );
     }
-    assertToolCallerHoldsDevice(
-      name,
-      readOnly,
-      readinessTarget,
+    assertToolCallerHoldsDevice(name, readOnly, readinessTarget, {
       sessionUuid,
-      state.autolockEnabled,
-    );
+      autolockEnabled: state.autolockEnabled,
+    });
     options.assertHeldDeviceStart?.(readinessTarget, sessionUuid);
     if (readinessTarget && execution && !sessionUuid && !readOnly) {
       executionTracker.markSessionlessDeviceUse(execution.executionId, readinessTarget);
@@ -830,13 +775,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
       );
     }
-    assertToolCallerHoldsDevice(
-      name,
-      readOnly,
-      device?.deviceId,
+    assertToolCallerHoldsDevice(name, readOnly, device?.deviceId, {
       sessionUuid,
-      state.autolockEnabled,
-    );
+      autolockEnabled: state.autolockEnabled,
+    });
     if (device) {
       options.assertHeldDeviceStart?.(device.deviceId, sessionUuid);
     }
@@ -947,14 +889,22 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     return explicitPin;
   }
 
-  private resolveImplicitAutolockSession(
-    platform: SomePlatform,
-    sessionUuid: string | undefined,
-    providedDeviceId: string | undefined,
-    mcpSessionId: string | undefined,
-    execution: import("../../daemon/sessionManager").SessionExecutionMetadata | undefined,
-    autolockEnabled: boolean,
-  ): string | undefined {
+  private resolveImplicitAutolockSession({
+    platform,
+    sessionUuid,
+    providedDeviceId,
+    mcpSessionId,
+    execution,
+    autolockEnabled,
+  }: Pick<
+    TargetResolution,
+    | "platform"
+    | "sessionUuid"
+    | "providedDeviceId"
+    | "mcpSessionId"
+    | "execution"
+    | "autolockEnabled"
+  >): string | undefined {
     if (sessionUuid) {
       return undefined;
     }
@@ -963,7 +913,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return undefined;
     }
 
-    const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
+    // "either" names no platform; a named one (watchOS included, #14908) narrows the selection.
+    const platformFilter = platform === "either" ? undefined : platform;
     const sessionId = devicePool.resolveAutolockSessionForMcpSession(
       mcpSessionId,
       platformFilter,

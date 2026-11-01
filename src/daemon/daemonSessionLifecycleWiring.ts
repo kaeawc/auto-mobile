@@ -190,7 +190,7 @@ export function wireSessionLifecycle(
     new DeviceSettingDefaultsRepository(),
     new DefaultDeviceSettingsAccess(),
     (deviceId) => sessionManager.getSessionForDevice(deviceId),
-    timer,
+    { timer },
   );
   installDeviceSettingDefaults(settingDefaults);
   registerDeviceSettingDefaultsIdentityListener(settingDefaults);
@@ -219,7 +219,7 @@ export function wireSessionLifecycle(
   // The device a session is created on or rebound to takes that session's appearance (#11363).
   registerAppearanceClaimSync(sessionManager, host);
   // Register centralized cleanup for session-scoped state
-  sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
+  sessionManager.onSessionRelease((sessionId, deviceId, _reason, options) => {
     // A terminal upgrade of an already-cleaned-up release must not touch the device's next
     // owner: its pin, caches and CtrlProxy binding (#10825).
     if (options?.upgradeOnly) {
@@ -271,7 +271,7 @@ export function wireSessionLifecycle(
   // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
   // for every released key — base and derived `${base}:${label}` alike; the
   // proxy matches its bound (base) UUID by exact equality (issue #4610).
-  sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot, opts) => {
+  sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, { snapshot, ...opts }) => {
     // Name the recordings this release is finalizing so the previous owner can fetch them
     // (#10958); the recording cleanup captured them when the release began.
     announceSessionRelease(
@@ -279,14 +279,16 @@ export function wireSessionLifecycle(
         takeRecordingIds: takeRecordingIdsFinalizedByRelease,
         emit: (...args) => SessionReleaseBroadcaster.emit(...args),
       },
-      {
-        fallbacks: host.shutdownFallbackReleaseNotifications(),
-        announced: host.shutdownReleaseNotifications(),
-      },
       sessionId,
       releaseReason,
-      snapshot,
-      { upgradeOnly: opts?.upgradeOnly },
+      {
+        shutdown: {
+          fallbacks: host.shutdownFallbackReleaseNotifications(),
+          announced: host.shutdownReleaseNotifications(),
+        },
+        snapshot,
+        upgradeOnly: opts?.upgradeOnly,
+      },
     );
     if (host.shutdownFallbackReleaseNotifications()?.has(sessionId)) {
       return;

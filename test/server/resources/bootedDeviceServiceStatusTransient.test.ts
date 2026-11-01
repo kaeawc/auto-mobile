@@ -41,12 +41,10 @@ describe("iOS service status command applicability", () => {
           isVirtual,
         };
         const manager = IOSCtrlProxyManager.getInstance(device, timer);
-        const client = IOSCtrlProxyClient.createForTesting(
-          device,
-          18547,
-          createInstantFailureWebSocketFactory(),
+        const client = IOSCtrlProxyClient.createForTesting(device, 18547, {
+          wsFactory: createInstantFailureWebSocketFactory(),
           timer,
-        );
+        });
         const installed = spyOn(manager, "isInstalled").mockResolvedValue(true);
         const running = spyOn(manager, "checkRunningWithReason").mockResolvedValue({ ok: true });
         const cachedClient = spyOnIosExistingInstance(client);
@@ -73,8 +71,10 @@ describe("iOS service status command applicability", () => {
             device,
             undefined,
             { getVersion: async () => undefined },
-            timer,
-            useDefaultRequirements ? undefined : { runnerCommandRequirements: requirements },
+            {
+              timer,
+              ...(useDefaultRequirements ? undefined : { runnerCommandRequirements: requirements }),
+            },
           );
           expect(status?.supportedCommandsComplete).toBe(complete);
           expect(status?.isCompatible).toBe(complete);
@@ -170,7 +170,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
         { name: "iPhone", platform: "ios", deviceId: "SIM-A" },
         undefined,
         { getVersion: async () => ({ build: "0.0.75", source: "ios-runner-bundle" }) },
-        new FakeTimer(),
+        { timer: new FakeTimer() },
       );
       expect(status?.installed).toBe(false);
       expect(status?.running).toBe(true);
@@ -233,7 +233,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
               target,
               undefined,
               { getVersion: async () => undefined },
-              timer,
+              { timer },
             ),
           timer.now() + 5000,
           timer,
@@ -246,7 +246,12 @@ describe("booted iOS service-status transient handling (#7053)", () => {
       const settled = await probeServiceStatusWithBudget(
         device,
         (target) =>
-          queryDeviceServiceStatus(target, undefined, { getVersion: async () => undefined }, timer),
+          queryDeviceServiceStatus(
+            target,
+            undefined,
+            { getVersion: async () => undefined },
+            { timer },
+          ),
         timer.now() + 5000,
         timer,
       );
@@ -274,7 +279,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
         { name: "iPhone", platform: "ios", deviceId: "SIM-HEALTH" },
         undefined,
         { getVersion: async () => undefined },
-        new FakeTimer(),
+        { timer: new FakeTimer() },
       );
       expect(status).toBeUndefined();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("installation lookup failed"));

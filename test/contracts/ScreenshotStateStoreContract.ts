@@ -59,8 +59,11 @@ export function runScreenshotStateStoreContract(
 
     test("observation state is keyed by device and observation, with size only for the same path", () =>
       withStore((store) => {
-        store.updateForObservation("d1", "o1", "/a.png", undefined, { width: 10, height: 20 });
-        store.updateForObservation("d1", "o2", undefined, "failed");
+        store.updateForObservation("d1", "o1", {
+          path: "/a.png",
+          imageSize: { width: 10, height: 20 },
+        });
+        store.updateForObservation("d1", "o2", { error: "failed" });
         expect(store.getPathForObservation("d1", "o1")).toBe("/a.png");
         expect(store.getErrorForObservation("d1", "o2")).toBe("failed");
         expect(store.getPathForObservation("d2", "o1")).toBeUndefined();
@@ -75,7 +78,7 @@ export function runScreenshotStateStoreContract(
 
     test("observation state expires after the TTL", () =>
       withStore((store, timer) => {
-        store.updateForObservation("d1", "o1", "/a.png");
+        store.updateForObservation("d1", "o1", { path: "/a.png" });
         timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
         expect(store.getPathForObservation("d1", "o1")).toBeUndefined();
       }));
@@ -84,7 +87,7 @@ export function runScreenshotStateStoreContract(
       withStore((store) => {
         const total = MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE + 2;
         for (let i = 0; i < total; i++) {
-          store.updateForObservation("d1", `o${i}`, `/${i}.png`);
+          store.updateForObservation("d1", `o${i}`, { path: `/${i}.png` });
         }
         expect(store.getPathForObservation("d1", "o0")).toBeUndefined();
         expect(store.getPathForObservation("d1", "o1")).toBeUndefined();
@@ -102,7 +105,7 @@ export function runScreenshotStateStoreContract(
         });
         await Promise.resolve();
         expect(resolved).toBe(false);
-        store.updateForObservation("d1", "o1", "/a.png");
+        store.updateForObservation("d1", "o1", { path: "/a.png" });
         await waiting;
         expect(resolved).toBe(true);
         expect(store.isObservationPending("d1", "o1")).toBe(false);
@@ -130,7 +133,7 @@ export function runScreenshotStateStoreContract(
         expect(store.isObservationPending("d1", "o1")).toBe(false);
 
         store.beginObservation("d1", "o2");
-        store.updateForObservation("d1", "o2", "/real.png");
+        store.updateForObservation("d1", "o2", { path: "/real.png" });
         store.endObservation("d1", "o2", "late cancel");
         expect(store.getPathForObservation("d1", "o2")).toBe("/real.png");
         expect(store.getErrorForObservation("d1", "o2")).toBeUndefined();
@@ -149,20 +152,20 @@ export function runScreenshotStateStoreContract(
         expect(store.isObservationPending("d1", "pending")).toBe(false);
 
         // The capture behind the cleared observation may still call back late.
-        store.updateForObservation("d1", "pending", "/late.png");
+        store.updateForObservation("d1", "pending", { path: "/late.png" });
         store.endObservation("d1", "pending", "late");
         expect(store.getPathForObservation("d1", "pending")).toBeUndefined();
 
         // Reusing the id starts a fresh observation.
         store.beginObservation("d1", "pending");
-        store.updateForObservation("d1", "pending", "/fresh.png");
+        store.updateForObservation("d1", "pending", { path: "/fresh.png" });
         expect(store.getPathForObservation("d1", "pending")).toBe("/fresh.png");
       }));
 
     test("clear() drops every device", () =>
       withStore((store) => {
         store.update("d1", "/a.png");
-        store.updateForObservation("d2", "o1", "/b.png");
+        store.updateForObservation("d2", "o1", { path: "/b.png" });
         store.clear();
         expect(store.getPath("d1")).toBeUndefined();
         expect(store.getPathForObservation("d2", "o1")).toBeUndefined();
@@ -174,7 +177,7 @@ export function runScreenshotStateStoreContract(
         store.update("d1", "/old.png");
         timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS);
         store.update("d2", "/latest.png");
-        store.updateForObservation("d2", "o1", "/obs.png");
+        store.updateForObservation("d2", "o1", { path: "/obs.png" });
         timer.advanceTime(1);
         expect([...store.getReferencedScreenshotPaths()].sort()).toEqual([
           "/latest.png",

@@ -23,7 +23,7 @@ test("nowIso renders the injected timer's clock", () => {
 test("PredictionHistoryRepository stamps rows from the injected timer", async () => {
   const timer = new FakeTimer();
   timer.setCurrentTime(Date.UTC(2026, 5, 7, 8, 9, 10));
-  const repo = new PredictionHistoryRepository(db, timer);
+  const repo = new PredictionHistoryRepository({ db, timer });
   await repo.recordOutcome({
     appId: "com.example",
     predictionId: "p1",
@@ -49,7 +49,7 @@ test("PredictionHistoryRepository stamps rows from the injected timer", async ()
 test("SqliteFeatureFlagRepository stamps ensureFlags and upsertFlag from the injected timer", async () => {
   const timer = new FakeTimer();
   timer.setCurrentTime(Date.UTC(2026, 1, 3, 4, 5, 6));
-  const repo = new SqliteFeatureFlagRepository(db, timer);
+  const repo = new SqliteFeatureFlagRepository({ db, timer });
   await repo.ensureFlags([
     {
       key: "accessibility-audit",
@@ -68,7 +68,7 @@ test("SqliteFeatureFlagRepository stamps ensureFlags and upsertFlag from the inj
 
 test("SqliteSessionToolSelectionRepository stamps set and setMany conflict updates from the injected timer", async () => {
   const timer = new FakeTimer();
-  const repo = new SqliteSessionToolSelectionRepository(() => db, timer);
+  const repo = new SqliteSessionToolSelectionRepository({ resolveDatabase: () => db, timer });
   const stamp = async (): Promise<string | undefined> =>
     (
       await db

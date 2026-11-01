@@ -79,9 +79,12 @@ function harness(initiallyVerified = true, revealAfterAction = false) {
     override async captureSettled(observationId: string) {
       captures.push(phase);
       const path = await super.captureSettled(observationId);
-      screenshotState.updateForObservation(device.deviceId, observationId, path, undefined, {
-        width: 1080,
-        height: 1920,
+      screenshotState.updateForObservation(device.deviceId, observationId, {
+        path,
+        imageSize: {
+          width: 1080,
+          height: 1920,
+        },
       });
       return path;
     }
@@ -204,7 +207,7 @@ function harness(initiallyVerified = true, revealAfterAction = false) {
       accessibilityDetector: accessibility,
     }),
   );
-  const base = attach(new BaseVisualChange(device, adb, timer));
+  const base = attach(new BaseVisualChange(device, { adb, timer }));
   const settle = new RealSettleObserve(screen, timer);
   const settleExecute = settle.execute.bind(settle);
   settle.execute = async (...args) => {
@@ -532,7 +535,10 @@ describe("BaseVisualChange previous observation with real ObserveScreen", () => 
       h.base.observedInteraction(
         async (previous) => {
           previousCaptureAttempted = previous.screenshotCaptureAttempted;
-          return tap["handleElementNotFound"]({ action: "tap", text: "Missing" }, previous, true);
+          return tap["handleElementNotFound"](
+            { action: "tap", text: "Missing" },
+            { observeResult: previous, containerFound: true },
+          );
         },
         { changeExpected: false },
       ),

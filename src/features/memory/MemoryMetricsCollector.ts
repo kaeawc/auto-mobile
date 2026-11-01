@@ -268,8 +268,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     packageName: string,
     startTimestamp: number,
     endTimestamp: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    pid?: string,
+    { perf = new NoOpPerformanceTracker(), pid }: { perf?: PerformanceTracker; pid?: string } = {},
   ): Promise<GCEvent[]> {
     try {
       const resolvedPid = pid ?? (await this.resolvePid(packageName, perf));
@@ -614,13 +613,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     // collector-induced GC line cannot exist yet in the buffer we read: only
     // real app GC activity from the audited action can appear in this
     // capture, boundary second included.
-    const gcEvents = await this.captureGCEvents(
-      packageName,
-      startTimestamp,
-      endTimestamp,
+    const gcEvents = await this.captureGCEvents(packageName, startTimestamp, endTimestamp, {
       perf,
-      auditedPid,
-    );
+      pid: auditedPid,
+    });
 
     // Trigger explicit GC to ensure we get post-GC measurements. Any GC this
     // induces happens strictly after the logcat dump above, so it cannot be

@@ -8,6 +8,7 @@ import {
 
 const checksums = {
   apk: "a".repeat(64),
+  protoViewerApk: "2".repeat(64),
   ipa: "b".repeat(64),
   videoJar: "c".repeat(64),
   screenCaptureHelper: "d".repeat(64),
@@ -24,6 +25,12 @@ const tail = `
 **SHA256 Checksum:** \`${checksums.apk}\`
 
 Download the APK from the release assets below.
+
+## ProtoViewer Android APK
+
+**SHA256 Checksum:** \`${checksums.protoViewerApk}\`
+
+Download \`automobile-protoviewer-<version>.apk\` and its \`.sha256\` file from the release assets below, verify with \`sha256sum -c\`, then install with \`adb install -r\`.
 
 ## CtrlProxy iOS IPA
 

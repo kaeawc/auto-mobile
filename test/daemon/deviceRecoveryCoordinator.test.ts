@@ -146,7 +146,9 @@ describe("DeviceRecoveryCoordinator", () => {
       state: "pending",
       reservations: new Set(["image"]),
     });
-    coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(["emulator-5554"]), false, own);
+    coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(["emulator-5554"]), false, {
+      replacementHandoffOwner: own,
+    });
     expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
     expect(coordinator.recoveringAndroidDeviceIds.has("emulator-5554")).toBe(false);
     expect(coordinator.isAndroidRecoveryHandoffReserved("emulator-5554")).toBe(false);
@@ -155,7 +157,9 @@ describe("DeviceRecoveryCoordinator", () => {
       false,
     );
     records.clear();
-    coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), false, other);
+    coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), false, {
+      replacementHandoffOwner: other,
+    });
     expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
   });
 
@@ -172,7 +176,10 @@ describe("DeviceRecoveryCoordinator", () => {
       const h = harness();
       h.setRefreshGeneration(generation);
       h.coordinator.setRecoveringAndroidImage("Pixel", image);
-      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, owner, lateShutdown);
+      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, {
+        replacementHandoffOwner: owner,
+        lateShutdownSettled: lateShutdown,
+      });
       return h;
     };
 
@@ -187,7 +194,9 @@ describe("DeviceRecoveryCoordinator", () => {
       const h = harness();
       h.coordinator.setRecoveringAndroidImage("Pixel", image);
       const waiting = h.coordinator.waitForRecoveringAndroidImages(["Pixel"]);
-      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, owner);
+      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, {
+        replacementHandoffOwner: owner,
+      });
       await waiting;
       expect(h.coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBe("Pixel");
     });
@@ -265,7 +274,9 @@ describe("DeviceRecoveryCoordinator", () => {
           return await offline();
         };
         h.coordinator.setRecoveringAndroidImage("Pixel", image);
-        h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set([serial]), true, owner);
+        h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set([serial]), true, {
+          replacementHandoffOwner: owner,
+        });
         return { ...h, asked };
       };
 
@@ -303,7 +314,9 @@ describe("DeviceRecoveryCoordinator", () => {
         const h = harness();
         h.setRefreshGeneration(3);
         h.coordinator.setRecoveringAndroidImage("Pixel", image);
-        h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set([serial]), true, owner);
+        h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set([serial]), true, {
+          replacementHandoffOwner: owner,
+        });
         await h.coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 4);
         expect(h.coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
       });
@@ -349,7 +362,9 @@ describe("DeviceRecoveryCoordinator", () => {
         state: "pending",
         reservations: new Set(["image"]),
       });
-      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, owner);
+      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, {
+        replacementHandoffOwner: owner,
+      });
       expect(h.coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBeUndefined();
       await h.coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 4);
       expect(h.coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
@@ -359,7 +374,9 @@ describe("DeviceRecoveryCoordinator", () => {
       const { coordinator } = retained();
       coordinator.setRecoveringAndroidImage("Pixel", image);
       expect(coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBeUndefined();
-      coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), false, owner);
+      coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), false, {
+        replacementHandoffOwner: owner,
+      });
       expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
     });
   });

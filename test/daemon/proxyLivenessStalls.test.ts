@@ -1186,13 +1186,9 @@ describe("proxy liveness stalls (#10053)", () => {
         const reason = new Error("Caller cancelled recovery wait");
         const cancelled = (
           kind === "tool"
-            ? proxy.callTool(
-                "observe",
-                { sessionUuid: "android-session" },
-                undefined,
-                undefined,
-                controller.signal,
-              )
+            ? proxy.callTool("observe", { sessionUuid: "android-session" }, undefined, {
+                signal: controller.signal,
+              })
             : proxy.readResource("automobile:devices/booted", { signal: controller.signal })
         ).catch((error: unknown) => error);
         const sibling = proxy.callTool("observe", { sessionUuid: "android-session" });
@@ -1453,13 +1449,9 @@ describe("proxy liveness stalls (#10053)", () => {
       const controller = new AbortController();
       const cancelled = new Error("cancelled by client");
 
-      const call = proxy.callTool(
-        "observe",
-        { sessionUuid: "android-session" },
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const call = proxy.callTool("observe", { sessionUuid: "android-session" }, undefined, {
+        signal: controller.signal,
+      });
       await drain();
       expect(observeCalls).toBe(1);
       controller.abort(cancelled);

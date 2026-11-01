@@ -297,7 +297,7 @@ export class NetworkConditionOperations {
   private async applyEmulatorNetworkCondition(
     request: EmulatorNetworkConditionRequest,
   ): Promise<NetworkConditionState> {
-    const { profile, effectiveInput, values, degrades, isReset, input, base } = request;
+    const { profile, effectiveInput, values, degrades, base } = request;
     const failure = (error: string): NetworkConditionState => ({
       supported: true,
       capability: degrades ? "partial" : "full",
@@ -325,7 +325,7 @@ export class NetworkConditionOperations {
       // Toggle Wi-Fi so a shaping/cut condition reaches traffic (best-effort;
       // never aborts — a failure only feeds the `partial`/unverified report).
       const wifiWarning = await this.toggleWifiBestEffort(adb, wifiToggleCommand(degrades));
-      return this.buildAppliedNetworkResult(base, profile, degrades, wifiWarning, isReset, input);
+      return this.buildAppliedNetworkResult(request, wifiWarning);
     } catch (error) {
       // A THROWN command can also leave a partial application, so roll back a
       // degrade here too — the `KO` path is not the only failure mode.
@@ -389,12 +389,14 @@ export class NetworkConditionOperations {
 
   /** Assemble the success result for an applied (or reset) network condition. */
   private buildAppliedNetworkResult(
-    base: NetworkConditionResultBase,
-    profile: NetworkConditionProfile,
-    degrades: boolean,
+    {
+      base,
+      profile,
+      degrades,
+      isReset,
+      input,
+    }: Pick<EmulatorNetworkConditionRequest, "base" | "profile" | "degrades" | "isReset" | "input">,
     wifiWarning: string | undefined,
-    isReset: boolean,
-    input: SetNetworkConditionInput,
   ): NetworkConditionState {
     const applied = { supported: true as const, profile, appliedProfile: profile, ...base };
     if (!degrades) {

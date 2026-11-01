@@ -220,9 +220,13 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
     tapOn: row.offscreen,
   });
   if (!row.offscreen) {
-    const capture = identifyObservedHierarchy(platform, hierarchy, "fresh", new FakeTimer());
+    const capture = identifyObservedHierarchy(platform, hierarchy, "fresh", {
+      timer: new FakeTimer(),
+    });
     const anyPoint = tapAny["resolveTapPoint"]({ element: target, capture }, options);
-    const visibleBounds = tapOn["visibleTapBounds"](selection, hierarchy, tapOnSize);
+    const visibleBounds = tapOn["visibleTapBounds"](selection, hierarchy, {
+      screenSize: tapOnSize,
+    });
     expect(visibleBounds).not.toBeNull();
     const onPoint = tapOn["resolveVisibleTapPoint"](target, hierarchy, visibleBounds!, {
       options: { action: "tap" },

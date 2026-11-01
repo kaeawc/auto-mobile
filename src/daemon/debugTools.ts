@@ -92,7 +92,7 @@ export async function getDaemonHealthReport(
     await checkDaemonPidFile(report, pidFilePath, timer);
   }
   if (isWin32 || report.socketExists) {
-    await probeDaemonHealthSocket(report, socketPath, isWin32, timer, options);
+    await probeDaemonHealthSocket(report, socketPath, isWin32, { timer, ...options });
   }
   addDaemonHealthRecommendations(report);
 
@@ -143,8 +143,7 @@ async function probeDaemonHealthSocket(
   report: DaemonHealthReport,
   socketPath: string,
   isWin32: boolean,
-  timer: Timer,
-  options: DaemonHealthReportOptions,
+  { timer, ...options }: DaemonHealthReportOptions & { timer: Timer },
 ): Promise<void> {
   // Try to connect to socket to verify daemon responsiveness. A daemon can be
   // serving via socket even when PID bookkeeping is stale or missing. On POSIX

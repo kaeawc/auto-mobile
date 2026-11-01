@@ -1,6 +1,5 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
-import type { PointerOption } from "../../../models/PointerOption";
 import type {
   GestureEmitter,
   GestureEvent,
@@ -9,7 +8,7 @@ import type {
   ReceivedInteraction,
   TouchTrackFailure,
 } from "./types";
-import { GESTURE_THRESHOLDS } from "./types";
+import { GESTURE_THRESHOLDS, pointerOf } from "./types";
 import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
 import { noteExportLoss } from "./penExportWarnings";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
@@ -77,6 +76,12 @@ export const MERGE_WINDOW_MS = 750;
  */
 export const GEOMETRY_FINALIZE_BUDGET_MS = 3_000;
 
+/** Test overrides; default: geometry built from the device at start, CtrlProxy display changes. */
+export interface DualTrackDisplayOverrides {
+  geometry?: DisplayGeometryTracker;
+  displaySource?: DisplayChangeSource;
+}
+
 export const GEOMETRY_UNCONFIRMED_WARNING =
   "rotation/size could not be confirmed at stop; tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction";
 
@@ -107,6 +112,7 @@ export class DualTrackRecorder {
   private firstTouchTrackFailure?: TouchTrackFailure;
   /** Rotation/size timeline for the touch track; built at start in real mode (#10174). */
   private geometry?: DisplayGeometryTracker;
+  private readonly displaySource?: DisplayChangeSource;
   private unsubscribeDisplay: (() => void) | null = null;
   /** Touch time span of each step whose coordinates or direction depend on the geometry. */
   private readonly geometrySpans = new Map<PlanStep, { downAt: number; upAt: number }>();
@@ -130,6 +136,8 @@ export class DualTrackRecorder {
     return [...this.exportWarnings];
   }
 
+  private readonly timer: Timer;
+
   constructor(
     private readonly device: BootedDevice,
     /** Optional override for testing — defaults to a real GetEventReader */
@@ -137,13 +145,11 @@ export class DualTrackRecorder {
     /** Optional override for testing — defaults to AndroidCtrlProxyClient */
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
-    private readonly timer: Timer = defaultTimer,
-    /** Optional override for testing — defaults to the timeline built from the device at start */
-    geometry?: DisplayGeometryTracker,
-    /** Optional override for testing — defaults to the CtrlProxy client's display changes */
-    private readonly displaySource?: DisplayChangeSource,
+    { timer = defaultTimer, ...overrides }: DualTrackDisplayOverrides & { timer?: Timer } = {},
   ) {
-    this.geometry = geometry;
+    this.timer = timer;
+    this.geometry = overrides.geometry;
+    this.displaySource = overrides.displaySource;
   }
 
   async start(): Promise<void> {
@@ -686,8 +692,7 @@ export class DualTrackRecorder {
       timeline,
       penNodes,
       { rotation, display },
-      this.timer.now(),
-      caveats,
+      { startedAt: this.timer.now(), caveats },
     );
 
     const reader = new GetEventReader({
@@ -711,8 +716,7 @@ function followWithPenTimelines(
   primary: ScreenGeometryTimeline,
   penNodes: ReadonlyArray<TouchInputNode>,
   initial: { rotation: number; display: { width: number; height: number } },
-  startedAt: number,
-  caveats: readonly string[],
+  { startedAt, caveats }: { startedAt: number; caveats: readonly string[] },
 ): Array<{ node: TouchInputNode; scaler: ScreenGeometryTimeline }> {
   return penNodes.map((node) => {
     const penTimeline = new ScreenGeometryTimeline(
@@ -960,11 +964,11 @@ function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): Pla
 
 /**
  * A pen contact replays only as a coordinate step that carries its pointer: an element tap or a
- * swipe direction cannot say "stylus", so either would replay as a finger. A swipe keeps only its
- * endpoints. Only a stylus can be injected, so any other tool (an eraser) has no step.
+ * swipe direction cannot say "stylus" or "eraser", so either would replay as a finger. A swipe keeps
+ * only its endpoints.
  */
 function buildPenStep(gesture: GestureEvent): PlanStep | null {
-  if (gesture.toolType !== "stylus") {
+  if (gesture.toolType !== "stylus" && gesture.toolType !== "eraser") {
     return null;
   }
   if (gesture.type === "swipe") {
@@ -997,14 +1001,6 @@ function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): Plan
     params.speed = "fast";
   }
   return { tool: "swipeOn", params };
-}
-
-/**
- * The replayable pointer for a recorded pen gesture. Only "stylus" can be injected, so an eraser
- * has none (the recorder skips those gestures instead of replaying them as another tool).
- */
-function pointerOf(gesture: GestureEvent): PointerOption | undefined {
-  return gesture.toolType === "stylus" ? { toolType: "stylus" } : undefined;
 }
 
 function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {

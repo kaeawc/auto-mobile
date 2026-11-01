@@ -57,7 +57,7 @@ export class MemoryAudit {
     this.baselineManager = new MemoryBaselineManager(db);
     this.resultStore = new MemoryAuditResultStore(
       device.deviceId,
-      new MemoryAuditResultRepository(db),
+      new MemoryAuditResultRepository({ db }),
     );
   }
 
@@ -68,8 +68,10 @@ export class MemoryAudit {
     packageName: string,
     toolName: string,
     toolArgs: unknown,
-    action: () => Promise<void>,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    {
+      action,
+      perf = new NoOpPerformanceTracker(),
+    }: { action: () => Promise<void>; perf?: PerformanceTracker },
   ): Promise<MemoryAuditResult> {
     logger.info(`[MemoryAudit] Running memory audit for ${packageName} (${toolName})`);
 
@@ -112,12 +114,9 @@ export class MemoryAudit {
 
     // Update baseline with new metrics (only if passed, to avoid poisoning baseline)
     if (passed) {
-      await this.baselineManager.updateBaseline(
-        this.device.deviceId,
-        packageName,
-        toolName,
+      await this.baselineManager.updateBaseline(this.device.deviceId, packageName, toolName, {
         metrics,
-      );
+      });
     }
 
     // Update threshold weights based on result

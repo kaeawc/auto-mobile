@@ -21,11 +21,10 @@ describe("navigation build-context changes", () => {
   });
 
   test("set, change and clear notify once; identical sets and absent clears do nothing", () => {
-    const manager = new NavigationGraphManager(
-      new NavigationRepository(harness.db),
-      new TestCoverageRepository(harness.db),
-      new FakeTimer(),
-    );
+    const manager = new NavigationGraphManager(new NavigationRepository({ db: harness.db }), {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
+      timer: new FakeTimer(),
+    });
     const changes: Array<{
       appId: string;
       deviceId: string;
@@ -53,11 +52,10 @@ describe("navigation build-context changes", () => {
   });
 
   test("changing device attribution publishes only that device's new context", () => {
-    const manager = new NavigationGraphManager(
-      new NavigationRepository(harness.db),
-      new TestCoverageRepository(harness.db),
-      new FakeTimer(),
-    );
+    const manager = new NavigationGraphManager(new NavigationRepository({ db: harness.db }), {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
+      timer: new FakeTimer(),
+    });
     const context = { appId: "app", deviceId: "device-a", versionCode: 1, contentHash: "hash" };
     manager.setBuildContext(context);
     const changes: Array<{

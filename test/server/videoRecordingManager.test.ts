@@ -54,6 +54,7 @@ import {
   type VideoRetentionPolicy,
 } from "../../src/daemon/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
+import { stopResultEntry } from "../../src/server/videoRecordingStopById";
 import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
 import {
   restoreDeviceSnapshot,
@@ -492,6 +493,43 @@ describe("videoRecordingManager", () => {
     expect(recordings[0]?.recordingId).toBe(active.recordingId);
   });
 
+  describe("an audio recording finalized before the caller's stop keeps its audio state (#15858)", () => {
+    const AUDIO_WARNING = "The recording has no audio track: the audio capture ended early.";
+
+    // Waits for the auto-stop to finish, so later reads see only the finalized row.
+    const autoStopped = async (audio: { hasAudioTrack: boolean; warnings?: string[] }) => {
+      const stopCall = fakeBackend.waitForStopCall();
+      const active = await startVideoRecording({
+        device: testDevice,
+        maxDurationSeconds: 2,
+        audio: true,
+      });
+      fakeBackend.setStopResultOverrides(audio);
+      fakeTimer.advanceTime(2000);
+      await stopCall;
+      await stopVideoRecording(active.recordingId);
+      return active.recordingId;
+    };
+
+    test("a stop by id after the duration limit reports the stored hasAudioTrack and warning", async () => {
+      const recordingId = await autoStopped({ hasAudioTrack: false, warnings: [AUDIO_WARNING] });
+      const metadata = await getVideoRecordingMetadata(recordingId);
+      if (!metadata) {
+        throw new Error("the finalized recording has no metadata");
+      }
+      expect(metadata.warnings).toEqual([AUDIO_WARNING]);
+      // The stop-by-id tool answers a finalized recording from this stored metadata.
+      expect(stopResultEntry(metadata).hasAudioTrack).toBe(false);
+    });
+
+    test("a later metadata read restores a complete track", async () => {
+      const recordingId = await autoStopped({ hasAudioTrack: true });
+      const metadata = await getVideoRecordingMetadata(recordingId);
+      expect(metadata?.hasAudioTrack).toBe(true);
+      expect(metadata?.warnings).toBeUndefined();
+    });
+  });
+
   describe("timer-driven stops do not inherit the start request's context (#10217)", () => {
     // AsyncLocalStorage stores are captured by timers created inside a run() scope (verified
     // under Bun), so an auto-stop armed during the `start` tool call fires with that call's
@@ -812,6 +850,27 @@ describe("videoRecordingManager", () => {
       expect(probed).toEqual([active.liveCapturePath!]);
       expect(fakeBackend.stopCalls).toHaveLength(1);
       expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test("size cap counts sidecar files such as an audio track's PCM", async () => {
+      const probed: string[] = [];
+      fakeBackend.setInProgressSidecarPaths((config) => [`${config.outputPath}.audio.pcm`]);
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        // Neither file alone reaches the cap; together they do.
+        statFileSize: async (filePath) => {
+          probed.push(filePath);
+          return Math.ceil(capBytes / 2);
+        },
+      });
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      const stopping = fakeBackend.waitForStopCall();
+      fakeTimer.advanceTime(15_000);
+      await stopping;
+      await stopVideoRecording(active.recordingId);
+
+      expect(probed).toEqual([active.outputPath, `${active.outputPath}.audio.pcm`]);
+      expect(fakeBackend.stopCalls).toHaveLength(1);
     });
 
     test("size cap still measures the output path when the backend reports no live path", async () => {
@@ -2453,7 +2512,7 @@ describe("VideoRecordingRepository latest ordering", () => {
   });
 
   bunTest("getVideoRecordingStatus is owner-scoped and read-only", async () => {
-    const repo = new VideoRecordingRepository(db);
+    const repo = new VideoRecordingRepository({ db });
     const timer = new FakeTimer();
     await setVideoRecordingManagerDependencies({
       recordingRepository: repo,
@@ -2526,7 +2585,9 @@ describe("VideoRecordingRepository latest ordering", () => {
     "latest uses startedAt and recordingId, independently of LRU (%s)",
     async (kind) => {
       const repo =
-        kind === "database" ? new VideoRecordingRepository(db) : new FakeVideoRecordingRepository();
+        kind === "database"
+          ? new VideoRecordingRepository({ db })
+          : new FakeVideoRecordingRepository();
       const base: VideoRecordingRecord = {
         recordingId: "older",
         deviceId: "device",

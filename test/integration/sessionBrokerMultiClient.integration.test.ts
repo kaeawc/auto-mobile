@@ -123,9 +123,7 @@ describe("session broker with several MCP clients", () => {
         params: { sessionId: b1.sessionUuid },
       },
       host.state,
-      undefined,
-      undefined,
-      { socketSessionId: a1.socket },
+      { context: { socketSessionId: a1.socket } },
     );
     expect(foreignEnd).toMatchObject({ success: false, code: DEVICE_OUTSIDE_BROKER_GRANT_CODE });
     await expect(release(host, A, b1.sessionUuid)).rejects.toThrow(/another liveness owner/);
@@ -304,9 +302,7 @@ describe("session broker with several MCP clients", () => {
             },
           },
           second.state,
-          undefined,
-          undefined,
-          { socketSessionId: a.socket },
+          { context: { socketSessionId: a.socket } },
         ),
       ).rejects.toThrow(/another liveness owner/);
     });

@@ -123,10 +123,13 @@ export async function setEmulatorSensor(
     };
   }
   const recordedNow = !reset && registry.record(device, sensor, previous, deps.owner);
-  await writeTarget(device, sensor, target, deps, () => {
-    if (recordedNow) {
-      registry.forget(device.deviceId, sensor);
-    }
+  await writeTarget(device, sensor, target, {
+    deps,
+    onRefused: () => {
+      if (recordedNow) {
+        registry.forget(device.deviceId, sensor);
+      }
+    },
   });
   const original = registry.original(device.deviceId, sensor);
   // Back at the value found before the first change: release must not later
@@ -155,8 +158,7 @@ async function writeTarget(
   device: BootedDevice,
   sensor: EmulatorSensorName,
   target: readonly number[],
-  deps: SetSensorDependencies,
-  onRefused: () => void,
+  { deps, onRefused }: { deps: SetSensorDependencies; onRefused: () => void },
 ): Promise<void> {
   const command = `sensor set ${sensor} ${formatEmulatorSensorValue(target)}`;
   let written;

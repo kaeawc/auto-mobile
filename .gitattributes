@@ -7,7 +7,9 @@ test/fixtures/android-display-geometry/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
 test/fixtures/ci-time-to-green/*.json text eol=lf
+test/fixtures/ios-notification-center/ios26-*.json text eol=lf
 test/fixtures/prototype-capabilities/*.json text eol=lf
+test/fixtures/android-wrapper-pruning/*.json text eol=lf
 # ProtoViewer iOS notices are compared byte-for-byte against the generator output.
 test/fixtures/protoviewer-notices/*.json text eol=lf
 ios/prototype-agent/ProtoViewer/Acknowledgements.generated.swift text eol=lf
@@ -22,11 +24,15 @@ test/fixtures/android-notification-enabled/*.txt text eol=lf
 test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/ios-simctl/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
+test/fixtures/android-car-service/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
 test/fixtures/android-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
+test/fixtures/tvos-xcuitest/*.json text eol=lf
+test/fixtures/watchos-xcuitest/*.json text eol=lf
+test/fixtures/watchos-xcuitest/sdk-hierarchy-live.json text eol=lf
 test/fixtures/ios-simctl/*.plist text eol=lf
 test/fixtures/ios-notification-center/*.json text eol=lf
 test/fixtures/ios-devicetype-order/*.json text eol=lf
@@ -196,6 +202,7 @@ ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/PlanCorpus/** text eol=lf
 
 # Shared iOS wire contracts are compared across Swift and TypeScript.
 test/fixtures/ios-contract/*.json text eol=lf
+ios/control-proxy/Tests/CtrlProxyTests/Fixtures/sdk-health-*.json text eol=lf
 test/fixtures/android-contract/*.json text eol=lf
 test/fixtures/ios-ctrlproxy-request-snapshots.json text eol=lf
 test/fixtures/ios-tcc-photos/*.json text eol=lf
@@ -212,6 +219,7 @@ test/fixtures/ide-route-params/*.json text eol=lf
 test/fixtures/docs-site/*.html text eol=lf
 test/fixtures/android-pin-dialog/*.json text eol=lf
 test/fixtures/android-pin-dialog/*.xml text eol=lf
+test/fixtures/android-launcher-home/*.xml text eol=lf
 test/fixtures/android-pin-dialog/*.md text eol=lf
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift text eol=lf
 

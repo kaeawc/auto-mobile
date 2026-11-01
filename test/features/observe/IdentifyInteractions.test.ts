@@ -227,13 +227,10 @@ describe("IdentifyInteractions scoring characterization", () => {
         hasText: true,
       },
     ];
-    const result = classifier.buildInteractions(
-      candidates,
-      false,
-      false,
-      [edge("tapOn", { id: "submit" })],
-      "Home",
-    );
+    const result = classifier.buildInteractions(candidates, false, false, {
+      navigationEdges: [edge("tapOn", { id: "submit" })],
+      currentScreen: "Home",
+    });
     expect(result).toEqual([
       { id: "int_1", type: "scroll", description: "Scrollable area", confidence: 0.7 },
       {
@@ -244,24 +241,18 @@ describe("IdentifyInteractions scoring characterization", () => {
         predictedOutcome: { type: "screen_change", destination: "Detail", confidence: 0.95 },
       },
     ]);
-    const noMatch = classifier.buildInteractions(
-      candidates,
-      true,
-      true,
-      [edge("tapOn", { text: "Other" })],
-      "Home",
-    );
+    const noMatch = classifier.buildInteractions(candidates, true, true, {
+      navigationEdges: [edge("tapOn", { text: "Other" })],
+      currentScreen: "Home",
+    });
     expect(noMatch[0].suggestedToolCall?.tool).toBe("swipeOn");
     expect(noMatch[1].element?.resourceId).toBe("submit");
     expect(noMatch[1].predictedOutcome).toBeUndefined();
     expect(
-      classifier.buildInteractions(
-        candidates,
-        false,
-        false,
-        [edge("tapOn", { id: "submit" })],
-        null,
-      )[1].predictedOutcome,
+      classifier.buildInteractions(candidates, false, false, {
+        navigationEdges: [edge("tapOn", { id: "submit" })],
+        currentScreen: null,
+      })[1].predictedOutcome,
     ).toBeUndefined();
   });
 });

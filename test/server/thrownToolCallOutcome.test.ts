@@ -46,8 +46,10 @@ describe("thrown tool call outcomes", () => {
     };
 
     await expect(
-      runRecordedToolCall(repository, new FakeTimer(), "launchApp", undefined, async () => {
-        throw error;
+      runRecordedToolCall(repository, new FakeTimer(), "launchApp", {
+        handler: async () => {
+          throw error;
+        },
       }),
     ).rejects.toBe(error);
 

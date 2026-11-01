@@ -48,7 +48,7 @@ describe("cli-idle session with a read in flight past its idle deadline", () => 
         reaped.push({ at: timer.now(), reason });
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     manager.adoptCliLivenessPolicy(SESSION, CLI_IDLE_MS);

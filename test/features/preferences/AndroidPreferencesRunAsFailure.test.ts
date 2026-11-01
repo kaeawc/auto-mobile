@@ -156,23 +156,18 @@ describe("key-value direct edits share the missing-user classification (#10085)"
     const result = removeAndroidKeyValueDirect(
       missingUserAdb(),
       "emulator-5600",
-      APP_ID,
-      "mt38prefs",
+      { appId: APP_ID, fileName: "mt38prefs", userId: 10 },
       "k1",
-      10,
     );
 
     await expect(result).rejects.toThrow(/user 10 does not exist/);
   });
 
   test("clearKeyValueFile names the missing user instead of silently doing nothing", async () => {
-    const result = clearAndroidKeyValueFileDirect(
-      missingUserAdb(),
-      "emulator-5600",
-      APP_ID,
-      "mt38prefs",
-      10,
-    );
+    const result = clearAndroidKeyValueFileDirect(missingUserAdb(), "emulator-5600", APP_ID, {
+      fileName: "mt38prefs",
+      userId: 10,
+    });
 
     await expect(result).rejects.toThrow(/user 10 does not exist/);
   });

@@ -76,7 +76,10 @@ test("input/typeText submit reports a returned IME failure after successful typi
     abortSignal: undefined,
     onDispatch: expect.any(Function),
   });
-  expect(ime).toHaveBeenCalledWith("done", 1000, undefined, undefined, expect.any(Function));
+  expect(ime).toHaveBeenCalledWith("done", 1000, undefined, {
+    abortSignal: undefined,
+    onDispatch: expect.any(Function),
+  });
   expect(warn).toHaveBeenCalled();
 });
 
@@ -96,13 +99,10 @@ test("input/typeText submit preserves a rejected IME error's class and metadata"
   expect(error.code).toBe("runner_failed");
   expect(error.failureSource).toBe("transport");
   expect(controller.signal.aborted).toBe(false);
-  expect(ime).toHaveBeenCalledWith(
-    "done",
-    1000,
-    undefined,
-    expect.any(AbortSignal),
-    expect.any(Function),
-  );
+  expect(ime).toHaveBeenCalledWith("done", 1000, undefined, {
+    abortSignal: expect.any(AbortSignal),
+    onDispatch: expect.any(Function),
+  });
 });
 
 function prototypeOnlyIosClient(): IOSCtrlProxyClient {
@@ -139,13 +139,13 @@ test.each([
       spyOnIosClientInstance(iosClient);
       spyOn(iosClient, "requestSetText").mockResolvedValue({ success: true, totalTimeMs: 0 });
       ime = spyOn(iosClient, "requestImeAction").mockImplementation(
-        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
+        (_action, _timeoutMs, _perf, options) => abortingIme(options?.abortSignal),
       );
     } else {
       const androidClient = prototypeOnlyAndroidClient();
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(androidClient);
       ime = spyOn(androidClient, "requestImeAction").mockImplementation(
-        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
+        (_action, _timeoutMs, _perf, options) => abortingIme(options?.abortSignal),
       );
     }
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -216,7 +216,12 @@ test("submit budget exhaustion retains its message and append progress", async (
   });
   // Exercise the budget primitive directly: the outer request race owns the
   // deadline on the full handler path, as documented by the production method.
-  expect(await handler.executeInputTypeText("ios", device, "1\n", "done", 1000)).toEqual({
+  expect(
+    await handler.executeInputTypeText("ios", device, "1\n", {
+      imeAction: "done",
+      timeoutMs: 1000,
+    }),
+  ).toEqual({
     success: false,
     error: "input/typeText exceeded 1000ms budget before submit",
   });
@@ -224,8 +229,7 @@ test("submit budget exhaustion retains its message and append progress", async (
     { requestImeAction: ime },
     "done",
     timer.now(),
-    1000,
-    2,
+    { totalTimeoutMs: 1000, appendCharsSent: 2 },
   );
   expect(result).toEqual({
     success: false,
@@ -246,13 +250,10 @@ test.each([false, true])(
       error: reason,
     }));
     expect<object>(
-      await handler.runImeActionWithinBudget(
-        { requestImeAction: ime },
-        "done",
-        1000,
-        1000,
-        append ? 2 : undefined,
-      ),
+      await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+        totalTimeoutMs: 1000,
+        appendCharsSent: append ? 2 : undefined,
+      }),
     ).toEqual({
       success: false,
       action: "done",
@@ -269,7 +270,10 @@ test("runImeActionWithinBudget keeps append rejection as a returned failure", as
     throw new Error(reason);
   });
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, 2),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+      totalTimeoutMs: 1000,
+      appendCharsSent: 2,
+    }),
   ).toEqual({ success: false, error: guidance, charsSent: 2 });
 });
 
@@ -279,7 +283,9 @@ test("a non-Error IME rejection remains thrown with its reason and cause", async
     throw reason;
   });
   await expect(
-    handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000),
+    handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+      totalTimeoutMs: 1000,
+    }),
   ).rejects.toMatchObject({ message: guidance, cause: reason });
 });
 
@@ -287,7 +293,9 @@ test("an IME failure with no runner reason uses the existing fallback", async ()
   const { handler } = createHandler();
   const ime = mock(async () => ({ success: false, action: "next", totalTimeMs: 0 }));
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "next", 1000, 1000),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "next", 1000, {
+      totalTimeoutMs: 1000,
+    }),
   ).toMatchObject({
     success: false,
     error:
@@ -299,10 +307,16 @@ test("a successful IME action and an absent submit preserve append progress", as
   const { handler } = createHandler();
   const ime = mock(async () => ({ success: true, action: "done", totalTimeMs: 0 }));
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, 2),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+      totalTimeoutMs: 1000,
+      appendCharsSent: 2,
+    }),
   ).toEqual({ success: true, action: "done", totalTimeMs: 0, charsSent: 2 });
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, undefined, 1000, 1000, 2),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, undefined, 1000, {
+      totalTimeoutMs: 1000,
+      appendCharsSent: 2,
+    }),
   ).toEqual({ success: true, charsSent: 2 });
   expect(ime).toHaveBeenCalledTimes(1);
 });

@@ -29,11 +29,13 @@ import {
   isAndroidCriticalSetting,
 } from "./androidKeepBootedCleanup";
 import { parsePowerIntentKey, POSTURE_OPAQUE_PARTS } from "./mutations/deviceStateKeys";
+import { systemPropertyJournalName } from "./mutations/systemPropertyMutation";
 import { opaqueIntentKey } from "./mutations/types";
 import {
   opaqueForcesFallback,
   type DeviceBaseline,
   type DeviceMutationEntry,
+  type DeviceMutationInput,
   type DeviceMutationJournal,
   type DeviceMutationScope,
 } from "./mutations/types";
@@ -284,7 +286,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     };
     try {
       await fence();
-      const reason = await this.escalationReason(session, port, mutationContext, context, phases);
+      const reason = await this.whyEscalate(session, port, mutationContext, { context, phases });
       await fence();
       if (reason) {
         fallbackReason = reason;
@@ -396,12 +398,12 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     }
   }
 
-  private async escalationReason(
+  /** Returns why this reset must escalate to the fallback, or undefined when cleaning may proceed. */
+  private async whyEscalate(
     session: AndroidKeepBootedSession,
     port: AndroidKeepBootedResetPort,
     mutationContext: DeviceMutationResetContext,
-    context: AndroidResetSessionContext,
-    phases: Record<string, number>,
+    { context, phases }: { context: AndroidResetSessionContext; phases: Record<string, number> },
   ): Promise<string | undefined> {
     if (session.uses >= this.maxUses) {
       return "maxUses retirement";
@@ -426,9 +428,12 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     if (opaque) {
       return `opaque journaled mutation (${opaque.toolName}) cannot be journal-reverted`;
     }
+    // A system property row the port reverts in place (#15792) needs no baseline coverage.
     const appState = entries.filter(
       (entry) =>
-        entry.kind === "preference" && !APP_INTERACTION_BREADCRUMB_KEYS.includes(entry.key),
+        entry.kind === "preference" &&
+        !APP_INTERACTION_BREADCRUMB_KEYS.includes(entry.key) &&
+        !revertsSystemPropertyInPlace(entry, port),
     );
     if (appState.length > 0) {
       let baseline: DeviceBaseline | null;
@@ -631,7 +636,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
             observation.key === mutation.key &&
             observation.value.state === "present",
         );
-      if (!port.canRevert(mutation) || mutation.kind === "preference" || baselinePackage) {
+      if (!replaysInPlace(mutation, port) || baselinePackage) {
         logger.warn(`Android keep-booted skipped journal revert ${mutation.kind}:${mutation.key}`);
         continue;
       }
@@ -656,4 +661,26 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
       }
     }
   }
+}
+
+/** Preferences replay only as system property rows; every other row needs a port revert. */
+function replaysInPlace(
+  entry: DeviceMutationInput,
+  port: Pick<AndroidKeepBootedResetPort, "canRevert">,
+): boolean {
+  return entry.kind === "preference"
+    ? revertsSystemPropertyInPlace(entry, port)
+    : port.canRevert(entry);
+}
+
+/** A `setPreference` system property row: its revert is a verified `setprop`, not a baseline clean. */
+function revertsSystemPropertyInPlace(
+  entry: DeviceMutationInput,
+  port: Pick<AndroidKeepBootedResetPort, "canRevert">,
+): boolean {
+  return (
+    entry.kind === "preference" &&
+    systemPropertyJournalName(entry.key) !== null &&
+    port.canRevert(entry)
+  );
 }

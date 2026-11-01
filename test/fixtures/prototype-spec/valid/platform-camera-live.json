@@ -12,7 +12,10 @@
     }
   },
   "state": {
-    "camStatus": ""
+    "camStatus": "",
+    "lens": "back",
+    "flash": "off",
+    "zoom": 0
   },
   "requires": {
     "platform": ["camera"],
@@ -36,6 +39,19 @@
   "root": {
     "type": "column",
     "children": [
+      {
+        "type": "cameraPreview",
+        "id": "vf",
+        "lensKey": "lens",
+        "flashKey": "flash",
+        "zoomKey": "zoom",
+        "aspectRatio": "4:3",
+        "contentScale": "crop",
+        "tapToFocus": true,
+        "pinchToZoom": true,
+        "mode": "photo",
+        "contentDescription": "Camera viewfinder"
+      },
       {
         "type": "text",
         "text": "{platform:/camera/status} {platform:/camera/recordingMs}"

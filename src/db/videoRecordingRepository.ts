@@ -16,6 +16,7 @@ import type {
   VideoRecording as DbVideoRecording,
 } from "./types";
 import { logger } from "../utils/logger";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /**
  * `incomplete`: a release-time stop exceeded its finalize cap (#10957), so the capture was
@@ -164,6 +165,8 @@ function parseHighlights(
   return valid;
 }
 
+const warningsSchema = z.array(z.string());
+
 function parseDisplayMetadata<S extends z.ZodTypeAny>(
   value: string | null,
   schema: S,
@@ -229,6 +232,8 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
     highlights: parseHighlights(row.highlights_json ?? null),
     recordedPanel: parseDisplayMetadata(row.recorded_panel_json, panelSchema),
     transitions: parseDisplayMetadata(row.display_transitions_json, transitionsSchema),
+    ...(row.has_audio_track === null ? {} : { hasAudioTrack: row.has_audio_track === 1 }),
+    warnings: parseDisplayMetadata(row.warnings_json, warningsSchema),
     ownerSessionUuid: row.owner_session_uuid ?? undefined,
   };
 }
@@ -397,12 +402,33 @@ function applyRecordingMetadataUpdate(
   if (update.ownerSessionUuid !== undefined) {
     payload.owner_session_uuid = update.ownerSessionUuid ?? null;
   }
+  applyRecordingAudioStateUpdate(payload, update);
+}
+
+/** SQLite has no boolean: 1 or 0, and null for a recording that did not ask for audio. */
+function audioTrackColumn(hasAudioTrack: boolean | undefined): number | null {
+  if (hasAudioTrack === undefined) {
+    return null;
+  }
+  return hasAudioTrack ? 1 : 0;
+}
+
+function applyRecordingAudioStateUpdate(
+  payload: VideoRecordingUpdate,
+  update: Partial<VideoRecordingRecord>,
+): void {
+  if (update.hasAudioTrack !== undefined) {
+    payload.has_audio_track = audioTrackColumn(update.hasAudioTrack);
+  }
+  if (update.warnings !== undefined) {
+    payload.warnings_json = JSON.stringify(update.warnings);
+  }
 }
 
 export class VideoRecordingRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.db = db ?? null;
   }
 
@@ -438,6 +464,8 @@ export class VideoRecordingRepository {
       capture_teardown_json: record.captureTeardown ? JSON.stringify(record.captureTeardown) : null,
       recorded_panel_json: record.recordedPanel ? JSON.stringify(record.recordedPanel) : null,
       display_transitions_json: record.transitions ? JSON.stringify(record.transitions) : null,
+      has_audio_track: audioTrackColumn(record.hasAudioTrack),
+      warnings_json: record.warnings ? JSON.stringify(record.warnings) : null,
       owner_session_uuid: record.ownerSessionUuid ?? null,
     };
 
@@ -471,6 +499,8 @@ export class VideoRecordingRepository {
           capture_teardown_json: row.capture_teardown_json,
           recorded_panel_json: row.recorded_panel_json,
           display_transitions_json: row.display_transitions_json,
+          has_audio_track: row.has_audio_track,
+          warnings_json: row.warnings_json,
           owner_session_uuid: row.owner_session_uuid,
         }),
       )

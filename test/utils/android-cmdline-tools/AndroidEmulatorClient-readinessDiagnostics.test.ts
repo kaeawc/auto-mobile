@@ -162,7 +162,9 @@ describe("Android emulator readiness diagnostics", () => {
     );
 
     await expect(
-      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"),
+      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, {
+        targetDeviceId: "emulator-5554",
+      }),
     ).rejects.toThrow("phase=avd-name-resolution");
   });
 
@@ -173,12 +175,9 @@ describe("Android emulator readiness diagnostics", () => {
     configureReadyDevice(adb);
     adb.discoveryErrors = [new Error("temporary adb server failure")];
 
-    const device = await clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      5_000,
-      null,
-      "emulator-5554",
-    );
+    const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+      targetDeviceId: "emulator-5554",
+    });
 
     expect(device.deviceId).toBe("emulator-5554");
     expect(adb.discoveryAttempts).toBeGreaterThan(1);
@@ -190,13 +189,10 @@ describe("Android emulator readiness diagnostics", () => {
     const adb = new ReadinessAdbExecutor();
     adb.blockDiscovery = true;
     const controller = new AbortController();
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      5_000,
-      null,
-      "emulator-5554",
-      controller.signal,
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+      targetDeviceId: "emulator-5554",
+      signal: controller.signal,
+    });
 
     while (!adb.releaseDiscovery) {
       await Promise.resolve();
@@ -212,13 +208,10 @@ describe("Android emulator readiness diagnostics", () => {
     const timer = new FakeTimer();
     const adb = new ReadinessAdbExecutor();
     const controller = new AbortController();
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      5_000,
-      null,
-      "emulator-5554",
-      controller.signal,
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+      targetDeviceId: "emulator-5554",
+      signal: controller.signal,
+    });
     let rejection: Error | undefined;
     const observedReadiness = readiness.catch((error: unknown) => {
       rejection = error instanceof Error ? error : new Error(String(error));
@@ -255,13 +248,10 @@ describe("Android emulator readiness diagnostics", () => {
     configureReadyDevice(adb);
     adb.blockReadinessProbes = true;
     const controller = new AbortController();
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      5_000,
-      null,
-      "emulator-5554",
-      controller.signal,
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+      targetDeviceId: "emulator-5554",
+      signal: controller.signal,
+    });
     let rejection: Error | undefined;
     void readiness.catch((error: unknown) => {
       rejection = error instanceof Error ? error : new Error(String(error));
@@ -317,7 +307,9 @@ describe("Android emulator readiness diagnostics", () => {
       adb.setCommandResponse("emu avd name", result("Pixel_9_Pro\n"));
 
       await expect(
-        clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"),
+        clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, {
+          targetDeviceId: "emulator-5554",
+        }),
       ).rejects.toThrow(`target=emulator-5554; state=${row.name}`);
     });
   }
@@ -332,12 +324,9 @@ describe("Android emulator readiness diagnostics", () => {
       result("package:android\n", "WARNING: linker: /system/bin/app_process32 unused DT entry\n"),
     );
 
-    const device = await clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      5_000,
-      null,
-      "emulator-5554",
-    );
+    const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+      targetDeviceId: "emulator-5554",
+    });
 
     expect(device.deviceId).toBe("emulator-5554");
   });
@@ -348,12 +337,9 @@ describe("Android emulator readiness diagnostics", () => {
     const adb = new ReadinessAdbExecutor();
     configureReadyDevice(adb);
 
-    const device = await clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      5_000,
-      null,
-      "emulator-5554",
-    );
+    const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+      targetDeviceId: "emulator-5554",
+    });
 
     expect(device).toMatchObject({
       deviceId: "emulator-5554",
@@ -373,7 +359,7 @@ describe("Android emulator readiness diagnostics", () => {
       "Pixel_9_Pro",
       5_000,
       null,
-      "emulator-5554",
+      { targetDeviceId: "emulator-5554" },
     );
 
     expect(device.deviceId).toBe("emulator-5554");
@@ -444,12 +430,9 @@ describe("Android emulator readiness diagnostics", () => {
       configureReadyDevice(adb);
       adb.setCommandResponse(row.command, row.response);
 
-      const readiness = clientWith(adb, timer).waitForEmulatorReady(
-        "Pixel_9_Pro",
-        100,
-        null,
-        "emulator-5554",
-      );
+      const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, {
+        targetDeviceId: "emulator-5554",
+      });
 
       await expect(readiness).rejects.toThrow(`phase=${row.phase}`);
       await expect(readiness).rejects.toThrow(row.observed);

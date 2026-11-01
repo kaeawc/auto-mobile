@@ -15,15 +15,23 @@ describe("exact-tool selection union policy", () => {
   });
 
   test("uses the registered tool default before a session binds", async () => {
-    expect(await isToolEnabledForAnySession("observe", true, [undefined], only("x"))).toBe(true);
-    expect(await isToolEnabledForAnySession("clipboard", false, [undefined], only("x"))).toBe(
-      false,
-    );
+    expect(
+      await isToolEnabledForAnySession("observe", true, [undefined], {
+        sessionToolSelectionService: only("x"),
+      }),
+    ).toBe(true);
+    expect(
+      await isToolEnabledForAnySession("clipboard", false, [undefined], {
+        sessionToolSelectionService: only("x"),
+      }),
+    ).toBe(false);
   });
 
   test("enables when either the base or derived session grants the exact tool", async () => {
     expect(
-      await isToolEnabledForAnySession("clipboard", false, ["base", "base:B"], only("base:B")),
+      await isToolEnabledForAnySession("clipboard", false, ["base", "base:B"], {
+        sessionToolSelectionService: only("base:B"),
+      }),
     ).toBe(true);
   });
 
@@ -39,24 +47,18 @@ describe("exact-tool selection union policy", () => {
     };
 
     expect(
-      await isToolEnabledForAnySession(
-        "observe",
-        true,
-        ["connection", "base", "base:B"],
-        service,
-        "connection",
-      ),
+      await isToolEnabledForAnySession("observe", true, ["connection", "base", "base:B"], {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(false);
 
     overrides.set("base:B", true);
     expect(
-      await isToolEnabledForAnySession(
-        "observe",
-        true,
-        ["connection", "base", "base:B"],
-        service,
-        "connection",
-      ),
+      await isToolEnabledForAnySession("observe", true, ["connection", "base", "base:B"], {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(true);
   });
 
@@ -69,16 +71,16 @@ describe("exact-tool selection union policy", () => {
     };
 
     expect(
-      await isToolEnabledForAnySession(
-        "observe",
-        true,
-        ["connection", "routing"],
-        service,
-        "connection",
-      ),
+      await isToolEnabledForAnySession("observe", true, ["connection", "routing"], {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(false);
     expect(
-      await isToolEnabledForAnySession("observe", true, ["connection"], service, "connection"),
+      await isToolEnabledForAnySession("observe", true, ["connection"], {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(true);
   });
 
@@ -92,17 +94,26 @@ describe("exact-tool selection union policy", () => {
     const candidates = ["connection", "base", "base:B"];
 
     expect(
-      await isToolEnabledForAnySession("observe", true, candidates, service, "connection"),
+      await isToolEnabledForAnySession("observe", true, candidates, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(false);
 
     overrides.set("base", true);
     expect(
-      await isToolEnabledForAnySession("observe", true, candidates, service, "connection"),
+      await isToolEnabledForAnySession("observe", true, candidates, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(true);
 
     overrides.clear();
     expect(
-      await isToolEnabledForAnySession("observe", true, candidates, service, "connection"),
+      await isToolEnabledForAnySession("observe", true, candidates, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(true);
   });
 
@@ -119,47 +130,56 @@ describe("exact-tool selection union policy", () => {
     ];
 
     expect(
-      await isToolEnabledForAnySession(
-        "observe",
-        true,
-        ["connection", ...routes[0]],
-        service,
-        "connection",
-      ),
+      await isToolEnabledForAnySession("observe", true, ["connection", ...routes[0]], {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(false);
     expect(
-      await isToolEnabledForAnySession(
-        "observe",
-        true,
-        ["connection", ...routes[1]],
-        service,
-        "connection",
-      ),
+      await isToolEnabledForAnySession("observe", true, ["connection", ...routes[1]], {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
     ).toBe(true);
-    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
-      true,
-    );
+    expect(
+      await isToolEnabledForAnyRoute("observe", true, routes, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
+    ).toBe(true);
 
     overrides.set("base:B", false);
-    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
-      false,
-    );
+    expect(
+      await isToolEnabledForAnyRoute("observe", true, routes, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
+    ).toBe(false);
 
     overrides.set("base:B", true);
-    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
-      true,
-    );
+    expect(
+      await isToolEnabledForAnyRoute("observe", true, routes, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
+    ).toBe(true);
 
     overrides.clear();
     overrides.set("connection", false);
-    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
-      false,
-    );
+    expect(
+      await isToolEnabledForAnyRoute("observe", true, routes, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
+    ).toBe(false);
 
     overrides.set("base:B", true);
-    expect(await isToolEnabledForAnyRoute("observe", true, routes, service, "connection")).toBe(
-      true,
-    );
+    expect(
+      await isToolEnabledForAnyRoute("observe", true, routes, {
+        sessionToolSelectionService: service,
+        connectionProfileUuid: "connection",
+      }),
+    ).toBe(true);
   });
 
   test("reports the exact disabled tool rather than a capability group", async () => {
@@ -167,7 +187,9 @@ describe("exact-tool selection union policy", () => {
       isEnabled: async () => false,
     };
     await expect(
-      assertToolEnabledForAnySession("selectAllText", false, ["session-1"], disabled),
+      assertToolEnabledForAnySession("selectAllText", false, ["session-1"], {
+        sessionToolSelectionService: disabled,
+      }),
     ).rejects.toThrow("Tool selectAllText is disabled");
   });
 
@@ -176,7 +198,9 @@ describe("exact-tool selection union policy", () => {
       isEnabled: async () => false,
     };
     await expect(
-      assertToolEnabledForAnySession("systemTray", false, ["session-abc"], disabled),
+      assertToolEnabledForAnySession("systemTray", false, ["session-abc"], {
+        sessionToolSelectionService: disabled,
+      }),
     ).rejects.toThrow(
       'Enable it with setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "session-abc" }.',
     );
@@ -214,14 +238,10 @@ describe("exact-tool selection union policy", () => {
     // a new one the retry (ide/setKeyValue etc.) never rechecks, and the tool would stay
     // disabled. There is nothing to advertise — tell the caller to acquire a session first.
     await expect(
-      assertToolEnabledForAnySession(
-        "systemTray",
-        false,
-        [undefined],
-        disabled,
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
-      ),
+      assertToolEnabledForAnySession("systemTray", false, [undefined], {
+        sessionToolSelectionService: disabled,
+        remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      }),
     ).rejects.toThrow(
       "Tool systemTray is disabled for device session (not yet bound). " +
         "No device session owns this device yet, so there is nothing ide/setSessionToolEnabled could enable " +
@@ -230,14 +250,10 @@ describe("exact-tool selection union policy", () => {
         'ide/setSessionToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "<uuid from getAndroid/getApple>" }.',
     );
     await expect(
-      assertToolEnabledForAnySession(
-        "systemTray",
-        false,
-        [],
-        disabled,
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
-      ),
+      assertToolEnabledForAnySession("systemTray", false, [], {
+        sessionToolSelectionService: disabled,
+        remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      }),
     ).rejects.toThrow(/Acquire a device session with getAndroid \{ deviceId \}/);
   });
 
@@ -251,14 +267,18 @@ describe("exact-tool selection union policy", () => {
     // unlike the IDE-socket channel above — the sessionless form is real remediation here, even
     // for a non-device tool. Device acquisition is not required just to enable the tool.
     await expect(
-      assertToolEnabledForAnySession("systemTray", false, [undefined], disabled),
+      assertToolEnabledForAnySession("systemTray", false, [undefined], {
+        sessionToolSelectionService: disabled,
+      }),
     ).rejects.toThrow(
       "Tool systemTray is disabled for device session (not yet bound). " +
         'Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
     );
-    await expect(assertToolEnabledForAnySession("systemTray", false, [], disabled)).rejects.toThrow(
-      'Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
-    );
+    await expect(
+      assertToolEnabledForAnySession("systemTray", false, [], {
+        sessionToolSelectionService: disabled,
+      }),
+    ).rejects.toThrow('Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.');
   });
 
   test("assertToolEnabledForAnySession omits sessionUuid across composite connection/base/label profiles when a connection profile is actually rechecked (PRRT_kwDOP-GF5M6fuHM5)", async () => {
@@ -269,13 +289,10 @@ describe("exact-tool selection union policy", () => {
     // the 5th arg, so the omitted-sessionUuid remediation lands on a profile the retry actually
     // rechecks.
     await expect(
-      assertToolEnabledForAnySession(
-        "systemTray",
-        false,
-        ["connection", "base", "base:label"],
-        disabled,
-        "connection",
-      ),
+      assertToolEnabledForAnySession("systemTray", false, ["connection", "base", "base:label"], {
+        sessionToolSelectionService: disabled,
+        connectionProfileUuid: "connection",
+      }),
     ).rejects.toThrow(
       "Tool systemTray is disabled for device session connection / base / base:label. " +
         'Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
@@ -292,12 +309,9 @@ describe("exact-tool selection union policy", () => {
     // never looks at, so the remediation must name a real profile the gate rechecks instead —
     // the first (base) candidate.
     await expect(
-      assertToolEnabledForAnySession(
-        "setKeyValue",
-        false,
-        ["base-session", "base-session:label"],
-        disabled,
-      ),
+      assertToolEnabledForAnySession("setKeyValue", false, ["base-session", "base-session:label"], {
+        sessionToolSelectionService: disabled,
+      }),
     ).rejects.toThrow(
       'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
     );
@@ -312,14 +326,10 @@ describe("exact-tool selection union policy", () => {
     // `ide/setSessionToolEnabled` method (src/daemon/socketServer.ts:2418-2444), which requires
     // sessionUuid, toolName, and enabled params.
     await expect(
-      assertToolEnabledForAnySession(
-        "setKeyValue",
-        false,
-        ["base-session", "base-session:label"],
-        disabled,
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
-      ),
+      assertToolEnabledForAnySession("setKeyValue", false, ["base-session", "base-session:label"], {
+        sessionToolSelectionService: disabled,
+        remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      }),
     ).rejects.toThrow(
       'Enable it with ide/setSessionToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
     );
@@ -332,7 +342,9 @@ describe("exact-tool selection union policy", () => {
     // src/server/index.ts calls assertToolEnabledForAnySession without a remediationMethodName,
     // so the MCP channel keeps naming the `setToolEnabled` MCP tool.
     await expect(
-      assertToolEnabledForAnySession("setKeyValue", false, ["base-session"], disabled),
+      assertToolEnabledForAnySession("setKeyValue", false, ["base-session"], {
+        sessionToolSelectionService: disabled,
+      }),
     ).rejects.toThrow(
       'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
     );
@@ -343,7 +355,9 @@ describe("exact-tool selection union policy", () => {
       isEnabled: async () => false,
     };
     await expect(
-      assertToolEnabledForAnySession("setKeyValue", false, ["derived-only"], disabled),
+      assertToolEnabledForAnySession("setKeyValue", false, ["derived-only"], {
+        sessionToolSelectionService: disabled,
+      }),
     ).rejects.toThrow(
       'Enable it with setToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "derived-only" }.',
     );
@@ -358,7 +372,10 @@ describe("exact-tool selection union policy", () => {
     // form (which targets the connection profile) still works and must be preferred over the
     // "acquire a session" message.
     await expect(
-      assertToolEnabledForAnySession("observe", true, [], disabled, "connection"),
+      assertToolEnabledForAnySession("observe", true, [], {
+        sessionToolSelectionService: disabled,
+        connectionProfileUuid: "connection",
+      }),
     ).rejects.toThrow('Enable it with setToolEnabled { toolName: "observe", enabled: true }.');
   });
 
@@ -371,7 +388,9 @@ describe("exact-tool selection union policy", () => {
     // resolveSelectionSessionUuid (src/server/toolSelectionTools.ts) would accept: the
     // caller's own connection or routing profile uuid, never a joined display string.
     await expect(
-      assertToolEnabledForAnySession("systemTray", false, ["session-abc", "session-abc"], disabled),
+      assertToolEnabledForAnySession("systemTray", false, ["session-abc", "session-abc"], {
+        sessionToolSelectionService: disabled,
+      }),
     ).rejects.toThrow(
       'Enable it with setToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "session-abc" }.',
     );

@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { z } from "zod/v4";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -33,6 +33,7 @@ import { noopObserveAudits } from "../fakes/noopObserveAudits";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { readToolResponse } from "../helpers/toolResponse";
+import { warmedTests } from "../helpers/warmedTests";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const emulator: BootedDevice = {
@@ -47,7 +48,11 @@ const roundDisplay = readFileSync(
 );
 const restorers: Array<() => void> = [];
 
-afterEach(() => {
+// The file's first observe and first prototype show pay one-time module and first-use compilation
+// for the held-session observe, display and prototype paths. warmedTests runs both once in
+// beforeAll, outside the per-test budget, and restores the registry, daemon state and spies after
+// each warm-up and after every test.
+const warmed = warmedTests(() => {
   for (const restore of restorers.splice(0).reverse()) {
     restore();
   }
@@ -127,7 +132,7 @@ async function arrange(reader: AvdConfigReader, image?: Partial<DeviceInfo>) {
           window: new FakeWindow(),
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       ),
   });
   restorers.push(
@@ -166,16 +171,19 @@ async function arrange(reader: AvdConfigReader, image?: Partial<DeviceInfo>) {
   return { pool, probe, observe, show, adb };
 }
 
-test("held-session observe resolves watch form factor and reports the real display flag", async () => {
-  const reader = new FakeAvdConfigReader({ deviceName: "wearos_small_round" });
-  const { observe, probe, adb } = await arrange(reader);
-  expect((await observe()).isScreenRound).toBe(true);
-  expect((await probe()).formFactor).toBe("watch");
-  expect(reader.readConfigCalls).toEqual([emulator.name]);
-  expect(adb.getExecutedCommands()).toContain("shell dumpsys display");
-});
+warmed(
+  "held-session observe resolves watch form factor and reports the real display flag",
+  async () => {
+    const reader = new FakeAvdConfigReader({ deviceName: "wearos_small_round" });
+    const { observe, probe, adb } = await arrange(reader);
+    expect((await observe()).isScreenRound).toBe(true);
+    expect((await probe()).formFactor).toBe("watch");
+    expect(reader.readConfigCalls).toEqual([emulator.name]);
+    expect(adb.getExecutedCommands()).toContain("shell dumpsys display");
+  },
+);
 
-test("prototype show resolves watch form factor through the held session", async () => {
+warmed("prototype show resolves watch form factor through the held session", async () => {
   const reader = new FakeAvdConfigReader({ deviceName: "wearos_small_round" });
   const { show } = await arrange(reader);
   expect(await show()).toMatchObject({ success: true, screenRound: true });

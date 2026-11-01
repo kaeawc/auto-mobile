@@ -22,9 +22,11 @@ import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionB
 test.each(["getApple", "getAndroid"] as const)(
   "strict registry refusal is shaped for %s",
   (toolName) => {
-    const error = new BindingRegistrySchemaUnsupportedError("/registry/slots.sqlite", [
-      "2099_01_01_016_future_schema",
-    ]);
+    const error = new BindingRegistrySchemaUnsupportedError(
+      "/registry/slots.sqlite",
+      ["2099_01_01_016_future_schema"],
+      { "2099_01_01_016_future_schema": "2.0.0" },
+    );
     const result = shapeToolCallError(error, { toolName, source: "MCP" });
     const payload: Record<string, unknown> = JSON.parse(result.content[0].text);
 
@@ -33,6 +35,7 @@ test.each(["getApple", "getAndroid"] as const)(
       retryable: false,
       dbPath: "/registry/slots.sqlite",
       unknownMigrations: ["2099_01_01_016_future_schema"],
+      writerVersions: { "2099_01_01_016_future_schema": "2.0.0" },
     });
     expect(payload).not.toHaveProperty("retryAfterMs");
   },
@@ -43,7 +46,10 @@ test.each(["getApple", "getAndroid"] as const)(
 test("boot and shutdown timeouts agree on the socket frame and the MCP result", () => {
   const device = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" } as const;
   const errors = [
-    new DeviceBootTimeoutError("startDevice", "starting the device", 5, 10, "Pixel 8"),
+    new DeviceBootTimeoutError("startDevice", "starting the device", 5, {
+      budgetMs: 10,
+      device: "Pixel 8",
+    }),
     shutdownTimeoutError(device, "still listed"),
   ];
   for (const error of errors) {

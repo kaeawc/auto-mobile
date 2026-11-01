@@ -1,4 +1,3 @@
-import { getAbortSignal } from "../utils/AbortContext";
 import type { Platform } from "../models";
 import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
 import {
@@ -25,16 +24,13 @@ export const DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS = 2_000;
  */
 export function devicePreparedForOtherRequestError(deviceId: string): InputDeviceOwnedError {
   const retryAfterMs = DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS;
-  return new InputDeviceOwnedError(
-    "setActiveDevice",
-    deviceId,
-    undefined,
-    undefined,
-    `Device '${deviceId}' is being prepared for another request, which has not bound it to a ` +
+  return new InputDeviceOwnedError("setActiveDevice", deviceId, undefined, {
+    message:
+      `Device '${deviceId}' is being prepared for another request, which has not bound it to a ` +
       `session yet. Retry in about ${retryAfterMs}ms, once that request has bound the device or ` +
       "failed, or use another device.",
     retryAfterMs,
-  );
+  });
 }
 
 /**
@@ -47,13 +43,9 @@ export function deviceAssignedToOtherSessionError(
   holderSessionUuid: string,
   requesterSessionUuid: string | undefined,
 ): InputDeviceOwnedError {
-  return new InputDeviceOwnedError(
-    "setActiveDevice",
-    deviceId,
-    requesterSessionUuid,
-    undefined,
-    `Device '${deviceId}' is already assigned to session ${holderSessionUuid}`,
-  );
+  return new InputDeviceOwnedError("setActiveDevice", deviceId, requesterSessionUuid, {
+    message: `Device '${deviceId}' is already assigned to session ${holderSessionUuid}`,
+  });
 }
 
 /** The pool read is optional so older daemon-state and autolock fakes keep their contracts. */
@@ -65,13 +57,23 @@ function readsHolderRelease(pool: object): pool is HolderReleaseQuery {
   return typeof Reflect.get(pool, "holderReleaseRemainingMs") === "function";
 }
 
-/** Preserve each bind/select refusal's wording, adding a hint only for a hold ending by itself. */
+/**
+ * Preserve each bind/select refusal's wording, adding a hint only for a hold ending by itself.
+ *
+ * @param pool - Pool consulted for the holder's remaining release time
+ * @param deviceId - The refused device
+ * @param holderSessionUuid - The device's holder
+ * @param options.requesterSessionUuid - The refused requester
+ * @param options.wording - Which refusal wording to keep
+ */
 export function heldDeviceBindRefusal(
   pool: object | undefined,
   deviceId: string,
   holderSessionUuid: string | undefined,
-  requesterSessionUuid?: string,
-  wording: "assigned" | "another" = "assigned",
+  {
+    requesterSessionUuid,
+    wording = "assigned",
+  }: { requesterSessionUuid?: string; wording?: "assigned" | "another" } = {},
 ): InputDeviceOwnedError {
   const original =
     wording === "another"
@@ -84,14 +86,10 @@ export function heldDeviceBindRefusal(
   if (retryAfterMs === undefined) {
     return original;
   }
-  return new InputDeviceOwnedError(
-    "acquire",
-    deviceId,
-    requesterSessionUuid,
-    undefined,
-    `${original.message}${original.message.endsWith(".") ? "" : "."} The holder is being released; retry in about ${retryAfterMs}ms.`,
+  return new InputDeviceOwnedError("acquire", deviceId, requesterSessionUuid, {
+    message: `${original.message}${original.message.endsWith(".") ? "" : "."} The holder is being released; retry in about ${retryAfterMs}ms.`,
     retryAfterMs,
-  );
+  });
 }
 
 /** Keep held-device wording while explaining the bounded restart-recovery refusal. */
@@ -100,16 +98,13 @@ export function deviceReservedForRestartRecoveryError(
   holderSessionUuid: string,
   retryAfterMs: number,
 ): InputDeviceOwnedError {
-  return new InputDeviceOwnedError(
-    "acquire",
-    deviceId,
-    undefined,
-    undefined,
-    `Device '${deviceId}' is already assigned to session ${holderSessionUuid}; ` +
+  return new InputDeviceOwnedError("acquire", deviceId, undefined, {
+    message:
+      `Device '${deviceId}' is already assigned to session ${holderSessionUuid}; ` +
       `it is reserved for that session's device-restart recovery. Retry in ${retryAfterMs}ms, ` +
       "or acquire another device.",
     retryAfterMs,
-  );
+  });
 }
 
 /**
@@ -120,14 +115,11 @@ export function deviceReservedForRestartRecoveryError(
 export function deviceAlreadyAssignedToAnotherSessionError(
   deviceId: string,
 ): InputDeviceOwnedError {
-  return new InputDeviceOwnedError(
-    "acquire",
-    deviceId,
-    undefined,
-    undefined,
-    `Device '${deviceId}' is already assigned to another session. ` +
+  return new InputDeviceOwnedError("acquire", deviceId, undefined, {
+    message:
+      `Device '${deviceId}' is already assigned to another session. ` +
       "Acquire a different device or wait for its owner to release it.",
-  );
+  });
 }
 
 /** True when the requester is the holder, a derived `${base}:${label}` session counting as its base. */
@@ -162,7 +154,9 @@ export function assertInputRequesterHoldsDevice(input: {
   if (isSameHolderSession(ownerSessionUuid, requesterSessionUuid, sessionManager)) {
     return;
   }
-  throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid, input.remedy);
+  throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid, {
+    remedy: input.remedy,
+  });
 }
 
 /**
@@ -193,12 +187,18 @@ function admitsIssuedSessions<T extends object>(manager: T): manager is T & Inpu
  * released at the owner-reconnect timeout, which cuts an input in flight with the typed refusal),
  * and it stamps neither the owner lease nor the activity clocks. The input's END is tool use, as
  * it was before admission existed: the tracker reports it and the idle window restarts there.
+ *
+ * `signal` is the caller's explicit cancellation, not the ambient one (#15671): the input's tracked
+ * execution signal, plus the frame's or `ide/*` route's own where it has one. A release, teardown
+ * or client cancel that lands while admission waits (for example on restart recovery) stops that
+ * wait. `undefined` admits without cancellation.
  */
 export async function admitInputOnHolderSession(input: {
   deviceId: string;
   holderSessionUuid: string;
   sessionManager: object | undefined;
   execution: SessionExecutionMetadata;
+  signal: AbortSignal | undefined;
 }): Promise<void> {
   const { sessionManager, holderSessionUuid, deviceId } = input;
   if (!sessionManager || !admitsIssuedSessions(sessionManager)) {
@@ -207,7 +207,7 @@ export async function admitInputOnHolderSession(input: {
   const admitted = await sessionManager.admitIssuedSessionForAutomation(
     holderSessionUuid,
     input.execution,
-    { access: "non-owner-control", signal: getAbortSignal() },
+    { access: "non-owner-control", signal: input.signal },
   );
   if (admitted?.assignedDevice !== deviceId) {
     // Typed session_no_longer_owns_device (#11351): clients branch on the code, not this wording.

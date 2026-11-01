@@ -62,8 +62,16 @@ export class RotationOutcomes {
     orientation: "portrait" | "landscape",
     value: number,
     currentOrientation: string,
-    options: { beforeWrite: RotationCallSettings["beforeWrite"]; cleanup: RotationSettingCleanup },
-    signal?: AbortSignal,
+    {
+      options,
+      signal,
+    }: {
+      options: {
+        beforeWrite: RotationCallSettings["beforeWrite"];
+        cleanup: RotationSettingCleanup;
+      };
+      signal?: AbortSignal;
+    },
   ): Promise<AlreadyAppliedOrientationDecision> {
     throwIfAborted(signal);
     const { beforeWrite, cleanup } = options;
@@ -166,17 +174,22 @@ export class RotationOutcomes {
     orientation: "portrait" | "landscape",
     value: number,
     currentOrientation: string,
-    autoRotateState: "locked" | "enabled" | "unknown",
-    plan: {
-      preserveLock: boolean;
-      restoreAutomaticRotation: boolean;
-      beforeWrite: RotationCallSettings["beforeWrite"];
-      cleanup: RotationSettingCleanup;
+    {
+      autoRotateState,
+      plan,
+    }: {
+      autoRotateState: "locked" | "enabled" | "unknown";
+      plan: {
+        preserveLock: boolean;
+        restoreAutomaticRotation: boolean;
+        beforeWrite: RotationCallSettings["beforeWrite"];
+        cleanup: RotationSettingCleanup;
+        signal?: AbortSignal;
+      };
     },
-    signal?: AbortSignal,
   ): Promise<AlreadyAppliedOrientationDecision> {
+    const { preserveLock, restoreAutomaticRotation, beforeWrite, cleanup, signal } = plan;
     throwIfAborted(signal);
-    const { preserveLock, restoreAutomaticRotation, beforeWrite, cleanup } = plan;
     if (currentOrientation !== orientation) {
       return { kind: "requires-rotation", reason: "orientation-differs" };
     }
@@ -211,13 +224,10 @@ export class RotationOutcomes {
     }
 
     if (preserveLock) {
-      return this.lockAlreadyAppliedOrientation(
-        orientation,
-        value,
-        currentOrientation,
-        { beforeWrite, cleanup },
+      return this.lockAlreadyAppliedOrientation(orientation, value, currentOrientation, {
+        options: { beforeWrite, cleanup },
         signal,
-      );
+      });
     }
 
     if (!restoreAutomaticRotation) {
@@ -321,8 +331,7 @@ export class RotationOutcomes {
     result: RotateResult,
     plan: AutoRotatePlan,
     settings: RotationCallSettings,
-    cleanup: RotationSettingCleanup,
-    sessionMode: boolean,
+    { cleanup, sessionMode }: { cleanup: RotationSettingCleanup; sessionMode: boolean },
   ): Promise<RotateResult> {
     if (
       result.success ||
@@ -439,13 +448,10 @@ export class RotationOutcomes {
       orientationLockState,
       warning,
       message: rotationPerformed
-        ? this.buildRotationMessage(
-            orientation,
-            currentOrientation,
-            achievedOrientation,
+        ? this.buildRotationMessage(orientation, currentOrientation, achievedOrientation, {
             warning,
             restoreConfirmed,
-          )
+          })
         : `Locked device orientation to ${orientation}.`,
     };
   }
@@ -594,8 +600,7 @@ export class RotationOutcomes {
     requestedOrientation: "portrait" | "landscape",
     previousOrientation: string,
     achievedOrientation: string,
-    warning: string | undefined,
-    restoreConfirmed: boolean,
+    { warning, restoreConfirmed }: { warning?: string; restoreConfirmed: boolean },
   ): string {
     if (!warning) {
       return `Successfully rotated from ${previousOrientation} to ${requestedOrientation}`;

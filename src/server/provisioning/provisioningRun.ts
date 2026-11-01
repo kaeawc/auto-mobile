@@ -89,9 +89,15 @@ async function reserveProvisionLifecycleLease(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  perf: ReturnType<typeof createPerformanceTracker>,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
+  {
+    perf,
+    totalDeadlineMs,
+    signal,
+  }: {
+    perf: ReturnType<typeof createPerformanceTracker>;
+    totalDeadlineMs: number;
+    signal: AbortSignal | undefined;
+  },
 ): Promise<VirtualDeviceLifecycleLease> {
   if (args.device.platform === "android") {
     return await reserveStableDeviceLifecycle(
@@ -102,8 +108,8 @@ async function reserveProvisionLifecycleLease(
         deviceId: args.device.name,
       },
       deps.timer,
-      totalDeadlineMs,
       {
+        deadlineMs: totalDeadlineMs,
         requestAbortSignal: signal,
         timeoutError: (detail) =>
           new ProvisionDeviceError(
@@ -119,13 +125,10 @@ async function reserveProvisionLifecycleLease(
     // (→ `simctl list`) before the provision/boot scopes, so its discovery
     // command would otherwise be missing from perfTiming (see PerfContext).
     return await runWithPerfTracker(ambientPerfFor(perf), async () => {
-      const existing = await reserveExistingIosProvisionDeviceLifecycle(
-        args,
-        deps,
-        deviceManager,
+      const existing = await reserveExistingIosProvisionDeviceLifecycle(args, deps, deviceManager, {
         totalDeadlineMs,
         signal,
-      );
+      });
       return (
         existing ??
         (await reserveIosSelectorProvisionDeviceLifecycle(args, deps, totalDeadlineMs, signal))
@@ -166,21 +169,18 @@ async function runProvisionDeviceLifecycle(
   };
   try {
     admitRestartReservedProvision(args, args.device.deviceId);
-    lifecycleLease = await reserveProvisionLifecycleLease(
-      args,
-      deps,
-      deviceManager,
+    lifecycleLease = await reserveProvisionLifecycleLease(args, deps, deviceManager, {
       perf,
       totalDeadlineMs,
       signal,
-    );
+    });
     const deviceCreationGate = deps.deviceCreationGateFactory();
     provisioned = await provisionExactDevice(
       args,
       deps.exactDeviceProvisionerFactory(deviceManager, deviceCreationGate),
       perf,
-      deps.timer,
       {
+        timer: deps.timer,
         totalDeadlineMs: totalDeadlineMs,
         markDeviceCreationStarted: () => {
           creationStarted = true;
@@ -205,7 +205,7 @@ async function runProvisionDeviceLifecycle(
         notifyResourcesChangedBestEffort();
       }
       perf.end();
-      return buildProvisionDeviceResult(args, provisioned, createdByRequest, perf, undefined);
+      return buildProvisionDeviceResult(args, provisioned, createdByRequest, { perf });
     }
     // Ambient scope (only under --debug-perf) so the emulator/simctl boot
     // commands attribute their time into this provisioning tree. Capture the
@@ -214,7 +214,9 @@ async function runProvisionDeviceLifecycle(
     const provisionedDevice = provisioned;
     const bootLifecycleLease = lifecycleLease;
     const booted = await runWithPerfTracker(ambientPerfFor(perf), () =>
-      bootExactProvisionedDevice(ctx, args, deps, deviceManager, deviceCreationGate, {
+      bootExactProvisionedDevice(ctx, args, deps, {
+        deviceManager,
+        deviceCreationGate,
         provisioned: provisionedDevice,
         perf: perf,
         totalDeadlineMs: totalDeadlineMs,
@@ -243,35 +245,30 @@ async function runProvisionDeviceLifecycle(
       notifyResourcesChangedBestEffort();
     }
     perf.end();
-    return buildProvisionDeviceResult(args, provisioned, createdByRequest, perf, booted);
+    return buildProvisionDeviceResult(args, provisioned, createdByRequest, { perf, booted });
   } catch (error) {
     perf.end();
-    return await rethrowFailedProvisionDeviceLifecycle(
-      ctx,
-      args,
-      deps,
+    return await rethrowFailedProvisionDeviceLifecycle(ctx, args, deps, {
       deviceManager,
       provisioned,
-      {
-        createdAvdNeverLaunched:
-          args.device.platform === "android" &&
-          provisioned?.created === true &&
-          !settlementState.bootAttempted,
-        creationStarted: creationStarted,
-        retainCreatedForRetry: settlementState.retainCreatedForRetry,
-        signal: combineAbortSignals(signal, lifecycleLease?.signal),
-        takeLifecycleLease: () => {
-          const rollbackLease = lifecycleLease;
-          lifecycleLease = undefined;
-          return rollbackLease;
-        },
-        error: error,
-        unownedColdBootSettlement: settlementState.unownedColdBootSettlement,
-        pendingMutationSettlement: settlementState.exactProvisioning,
-        recordLifecycle: recordLifecycle,
-        observedRuntimeDevice: observedRuntimeDevice,
+      createdAvdNeverLaunched:
+        args.device.platform === "android" &&
+        provisioned?.created === true &&
+        !settlementState.bootAttempted,
+      creationStarted: creationStarted,
+      retainCreatedForRetry: settlementState.retainCreatedForRetry,
+      signal: combineAbortSignals(signal, lifecycleLease?.signal),
+      takeLifecycleLease: () => {
+        const rollbackLease = lifecycleLease;
+        lifecycleLease = undefined;
+        return rollbackLease;
       },
-    );
+      error: error,
+      unownedColdBootSettlement: settlementState.unownedColdBootSettlement,
+      pendingMutationSettlement: settlementState.exactProvisioning,
+      recordLifecycle: recordLifecycle,
+      observedRuntimeDevice: observedRuntimeDevice,
+    });
   } finally {
     releaseProvisionLifecycleReservations(settlementState, () => lifecycleLease);
   }

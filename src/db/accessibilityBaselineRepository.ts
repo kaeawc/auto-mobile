@@ -1,6 +1,7 @@
 import { sql, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /** Raw `accessibility_baselines` row, as stored. */
 export interface AccessibilityBaselineRow {
@@ -16,7 +17,7 @@ export interface AccessibilityBaselineRow {
 export class AccessibilityBaselineRepository {
   private readonly injectedDb: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.injectedDb = db ?? null;
   }
 

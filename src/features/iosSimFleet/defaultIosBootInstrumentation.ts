@@ -44,7 +44,7 @@ export function createIosSimCapacityGate(
         options.executor ?? new DefaultHostCommandExecutor(),
         timer,
         undefined,
-        options.simctl,
+        { simctl: options.simctl },
       ),
       options.history,
       timer,

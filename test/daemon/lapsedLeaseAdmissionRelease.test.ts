@@ -50,8 +50,10 @@ beforeAll(async () => {
     call = executionTracker.startExecution("tapOn", undefined, SESSION);
     const refusal = await sessionManager
       .getOrCreateSession(SESSION, undefined, undefined, {
-        executionId: call.id,
-        startTime: call.startTime,
+        execution: {
+          executionId: call.id,
+          startTime: call.startTime,
+        },
       })
       .catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(TerminalSessionError);
@@ -120,8 +122,10 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
     const refusal = await daemon
       .getSessionManager()
       .getOrCreateSession(SESSION, undefined, undefined, {
-        executionId: call.id,
-        startTime: call.startTime,
+        execution: {
+          executionId: call.id,
+          startTime: call.startTime,
+        },
       })
       .catch((error: unknown) => error);
 
@@ -139,9 +143,7 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
 
     const refusal = await daemon
       .getSessionManager()
-      .getOrCreateSession(SESSION, undefined, undefined, undefined, false, {
-        callerExecutionId: call.id,
-      })
+      .getOrCreateSession(SESSION, undefined, undefined, { callerExecutionId: call.id })
       .catch((error: unknown) => error);
 
     expect(refusal).not.toBeInstanceOf(SessionSuspectError);
@@ -157,9 +159,7 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
 
     const refusal = await daemon
       .getSessionManager()
-      .getOrCreateSession(SESSION, undefined, undefined, undefined, false, {
-        callerExecutionId: call.id,
-      })
+      .getOrCreateSession(SESSION, undefined, undefined, { callerExecutionId: call.id })
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(SessionSuspectError);
@@ -177,8 +177,10 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
     const refusal = await daemon
       .getSessionManager()
       .getOrCreateSession(SESSION, undefined, undefined, {
-        executionId: call.id,
-        startTime: call.startTime,
+        execution: {
+          executionId: call.id,
+          startTime: call.startTime,
+        },
       })
       .catch((error: unknown) => error);
 

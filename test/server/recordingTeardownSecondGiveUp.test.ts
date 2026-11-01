@@ -158,11 +158,8 @@ describe("two recorder teardown failures on one device share one health recovery
       // The rehydrated holder is released: both recording cleanups run for the device.
       holder.mockReturnValue(null);
       for (const [listener] of releaseListeners.mock.calls) {
-        listener(
-          HOLDER,
-          DEVICE.deviceId,
-          "idle-timeout",
-          {
+        listener(HOLDER, DEVICE.deviceId, "idle-timeout", {
+          snapshot: {
             sessionId: HOLDER,
             deviceId: DEVICE.deviceId,
             releaseReason: "idle-timeout",
@@ -170,8 +167,7 @@ describe("two recorder teardown failures on one device share one health recovery
             terminal: true,
             heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
           },
-          {},
-        );
+        });
       }
       await drainUntilQuiescent(timer);
       // The orphan confirm failed and marked the device; the release's stop is still retrying.

@@ -45,8 +45,8 @@ const expiresAt = 600_000;
 
 function makeHarness() {
   const store = new FakeScreenshotStateStore(new FakeTimer());
-  store.updateForObservation("device-A", "obs-A", "A.jpg");
-  store.updateForObservation("device-B", "obs-B", "B.png"); // B was observed last.
+  store.updateForObservation("device-A", "obs-A", { path: "A.jpg" });
+  store.updateForObservation("device-B", "obs-B", { path: "B.png" }); // B was observed last.
   const observations = new Map<string, ObserveResult>([
     ["device-A", observeA],
     ["device-B", observeB],
@@ -158,7 +158,7 @@ describe("session-bound observe App captures", () => {
       expect(harness.protectedPaths).toEqual([path]);
       return jpeg; // Byte MIME wins even if a capture path ends in .png.
     };
-    harness.store.updateForObservation("device-A", "obs-A", "A.png");
+    harness.store.updateForObservation("device-A", "obs-A", { path: "A.png" });
     const html = await harness.read(contextA);
     expect(html).toContain(`data:image/jpeg;base64,${jpeg.toString("base64")}`);
     expect(html).toContain('data-screenshot="present"');
@@ -219,7 +219,7 @@ describe("session-bound observe App captures", () => {
   ])("%s screenshot is visibly omitted and never replaced by another capture", async (scenario) => {
     const harness = makeHarness();
     // A different capture is available for the same device; it must never be selected.
-    harness.store.updateForObservation("device-A", "other-observation", "B.png");
+    harness.store.updateForObservation("device-A", "other-observation", { path: "B.png" });
     if (scenario === "gone") {
       harness.files.delete("A.jpg");
     }
@@ -233,7 +233,7 @@ describe("session-bound observe App captures", () => {
     }
     if (scenario === "not captured") {
       harness.store.clear("device-A");
-      harness.store.updateForObservation("device-A", "other-observation", "B.png");
+      harness.store.updateForObservation("device-A", "other-observation", { path: "B.png" });
     }
     if (scenario === "superseded before read") {
       let lookups = 0;

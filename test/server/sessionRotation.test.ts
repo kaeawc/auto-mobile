@@ -143,15 +143,19 @@ function harness() {
         restore: async (state, signal) => {
           restored.push(target.deviceId);
           signals.push(signal);
-          await new Rotate(target, adb, timer).restoreRotationSettings(state, signal);
+          await new Rotate(target, { adb, timer }).restoreRotationSettings(state, signal);
         },
       }),
     },
   });
-  const rotate = new Rotate(device, adb, timer, {
-    sessionRotation: async (mutation) => {
-      const { runSessionRotationMutation } = await import("../../src/server/sessionRotation");
-      return runSessionRotationMutation(manager, "rotation-session", device.deviceId, mutation);
+  const rotate = new Rotate(device, {
+    adb,
+    timer,
+    options: {
+      sessionRotation: async (mutation) => {
+        const { runSessionRotationMutation } = await import("../../src/server/sessionRotation");
+        return runSessionRotationMutation(manager, "rotation-session", device.deviceId, mutation);
+      },
     },
   });
   const observe = new FakeObserveScreen();
@@ -713,7 +717,7 @@ describe("session rotation restoration", () => {
     const daemon = DaemonState.getInstance();
     daemon.initialize(h.manager, pool);
     interactionDeps.rotateFactory = (target, options) => {
-      const feature = new Rotate(target, h.adb, h.timer, options);
+      const feature = new Rotate(target, { adb: h.adb, timer: h.timer, options });
       Object.assign(feature, {
         awaitIdle: h.rotate.awaitIdle,
         observeScreen: h.rotate.observeScreen,
@@ -726,9 +730,7 @@ describe("session rotation restoration", () => {
       await rotateHandler(
         device,
         { orientation: "landscape", lockOrientation: true, sessionUuid: "rotation-session" },
-        undefined,
-        undefined,
-        interactionDeps,
+        { deps: interactionDeps },
       );
       expect(h.adb.auto).toBe(0);
       expect(h.manager.getRotation("rotation-session")).toEqual({
@@ -1034,7 +1036,7 @@ describe("restoreRotationSettings compare-and-skip and managed read-back", () =>
     }
   }
   const restore = (adb: RotationAdb) =>
-    new Rotate(device, adb, new FakeTimer()).restoreRotationSettings({
+    new Rotate(device, { adb, timer: new FakeTimer() }).restoreRotationSettings({
       userRotation: 0,
       accelerometerRotation: 1,
     });
@@ -1091,7 +1093,7 @@ describe("restoreRotationSettings compare-and-skip and managed read-back", () =>
     });
 
     const adb = locked();
-    await new Rotate(device, adb, new FakeTimer()).restoreRotationSettings({
+    await new Rotate(device, { adb, timer: new FakeTimer() }).restoreRotationSettings({
       userRotation: 0,
       accelerometerRotation: 1,
       deviceStateRotationLock: "0:1:1:2:2:0",
@@ -1115,7 +1117,7 @@ describe("restoreRotationSettings compare-and-skip and managed read-back", () =>
     adb.failLockWrite = true;
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      await new Rotate(device, adb, new FakeTimer()).restoreRotationSettings({
+      await new Rotate(device, { adb, timer: new FakeTimer() }).restoreRotationSettings({
         userRotation: 0,
         accelerometerRotation: 1,
         deviceStateRotationLock: "0:1:1:2:2:0",
@@ -1157,7 +1159,7 @@ describe("restoreRotationSettings compare-and-skip and managed read-back", () =>
     adb.failLockWrite = true;
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const error = await new Rotate(device, adb, new FakeTimer())
+      const error = await new Rotate(device, { adb, timer: new FakeTimer() })
         .restoreRotationSettings({
           userRotation: 0,
           accelerometerRotation: 1,
@@ -1183,14 +1185,14 @@ describe("restoreRotationSettings compare-and-skip and managed read-back", () =>
     adb.auto = 1;
     adb.lock = "0:1:1:1:2:0";
     const state = { userRotation: 0, accelerometerRotation: 1 as const };
-    await new Rotate(device, adb, new FakeTimer()).restoreRotationSettings({
+    await new Rotate(device, { adb, timer: new FakeTimer() }).restoreRotationSettings({
       ...state,
       deviceStateRotationLock: "0:1:1:1:2:0",
     });
     expect(adb.getExecutedCommands().some((c) => c.includes("settings put"))).toBe(false);
 
     adb.lockBaseline = "0:1:1:2:2:0";
-    await new Rotate(device, adb, new FakeTimer()).restoreRotationSettings({
+    await new Rotate(device, { adb, timer: new FakeTimer() }).restoreRotationSettings({
       ...state,
       deviceStateRotationLock: "0:1:1:2:2:0",
     });

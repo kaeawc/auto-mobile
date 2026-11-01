@@ -5,6 +5,12 @@ read step, resting heart rate and sleep history. `today.json` is the slice that 
 vocabulary: the band scan, the heart-rate stream and the health history are literal `data` and
 timers standing in for Bluetooth and the health store.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Scanning uses `sensors` (`sensor` on iOS), connected status uses `link` (`link`), and
+band entries/settings use `fitness_center` (`dumbbell`) for the fitness companion. Battery uses
+`battery_std` (`battery.100percent`) as a generic glyph beside the numeric charge; unpair uses
+`close` (`xmark`). Labels retain the specific Bluetooth, band and unpair meanings.
+
 ## Capabilities used
 
 - `prototype_stack_v1`: pair, home and band settings screens; unpairing pops to the pair screen.

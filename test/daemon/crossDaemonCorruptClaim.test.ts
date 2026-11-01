@@ -49,13 +49,10 @@ describe("cross-daemon claim store: torn claims cannot exist and unreadable ones
       takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
       release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
     };
-    return new ForwardLeaseForeignDeviceOwnership(
-      selfPid,
-      source,
-      new UnreachableProbe(),
-      () => undefined,
-      new FakeTimer(),
-    );
+    return new ForwardLeaseForeignDeviceOwnership(selfPid, source, new UnreachableProbe(), {
+      ownerSocketPath: () => undefined,
+      timer: new FakeTimer(),
+    });
   }
 
   test.each([

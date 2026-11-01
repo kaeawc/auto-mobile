@@ -134,9 +134,7 @@ test("tapAtHandler forwards image, snapshot, action and duration and reports nat
   const response = await tapAtHandler(
     { deviceId: "fake", name: "Fake", platform: "ios" },
     { ...args, snapshotId: "same-frame", action: "longPress", durationMs: 750 },
-    undefined,
-    undefined,
-    interactionDeps,
+    { deps: interactionDeps },
   );
   expect(calls).toEqual([
     { image, display: undefined, snapshotId: "same-frame", action: "longPress", durationMs: 750 },

@@ -66,7 +66,7 @@ describe("rotate in a session pinned to a non-default display", () => {
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
     window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });
-    const rotate = new Rotate(device, adb, timer);
+    const rotate = new Rotate(device, { adb, timer });
     rotate.awaitIdle = new FakeAwaitIdle();
     rotate.observeScreen = observeScreen;
     rotate.window = window;

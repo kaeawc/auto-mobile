@@ -200,19 +200,34 @@ function parseLeaseFileListing(output: string): {
   }
   return { nowEpochMs, files };
 }
+/** How lease teardown bounds each adb command. */
+export interface VideoServerLeaseTeardown {
+  timeoutMs: number;
+  withTimeout: <T>(operation: Promise<T>, ms: number, label: string) => Promise<T>;
+}
+
 export class VideoServerLeases {
+  private readonly teardownTimeoutMs: number;
+  private readonly withTimeout: VideoServerLeaseTeardown["withTimeout"];
+
+  private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry;
+
   constructor(
     private readonly options: PersistentEncoderH264SourceOptions,
     private readonly adbFactory: VideoSourceAdbFactory,
     private readonly timer: Timer,
-    private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry,
-    private readonly teardownTimeoutMs: number,
-    private readonly withTimeout: <T>(
-      operation: Promise<T>,
-      ms: number,
-      label: string,
-    ) => Promise<T>,
-  ) {}
+    {
+      activeVideoSessionRegistry,
+      teardown,
+    }: {
+      activeVideoSessionRegistry: ActiveVideoSessionRegistry;
+      teardown: VideoServerLeaseTeardown;
+    },
+  ) {
+    this.activeVideoSessionRegistry = activeVideoSessionRegistry;
+    this.teardownTimeoutMs = teardown.timeoutMs;
+    this.withTimeout = teardown.withTimeout;
+  }
 
   async reconcileExpiredLeases(adb: VideoSourceAdb): Promise<void> {
     let leases: VideoServerLease[];

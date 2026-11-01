@@ -41,14 +41,26 @@ export function subscribeToolCallEndActivity(
  * for a derived `${base}:${label}` session), or a session-preserving recovery. The daemon's
  * session manager and release vetoes ask this. With `excludeReads`, only control calls hold
  * liveness releases, within the unsettled-execution bound; reads are cut by the release.
+ *
+ * @param sources.tracker - In-flight tool-call tracker
+ * @param sources.sessionManager - Resolves a derived session to its base
+ * @param sources.devicePool - Session-preserving recovery state
+ * @param sessionId - The session asked about
+ * @param query - Which executions count
  */
 export function hasActiveSessionExecution(
-  tracker: Pick<
-    ExecutionTracker,
-    "hasActiveSessionUuidExecutions" | "hasActiveAutolockSessionExecutions"
-  >,
-  sessionManager: ToolSelectionSessionManager,
-  devicePool: Pick<DevicePool, "isSessionRecoveryInFlight">,
+  {
+    tracker,
+    sessionManager,
+    devicePool,
+  }: {
+    tracker: Pick<
+      ExecutionTracker,
+      "hasActiveSessionUuidExecutions" | "hasActiveAutolockSessionExecutions"
+    >;
+    sessionManager: ToolSelectionSessionManager;
+    devicePool: Pick<DevicePool, "isSessionRecoveryInFlight">;
+  },
   sessionId: string,
   query?: ActiveSessionExecutionQuery,
 ): boolean {
@@ -74,11 +86,23 @@ export function hasActiveSessionExecution(
  * The latest request deadline among a session's in-flight executions, over the same scope
  * {@link hasActiveSessionExecution} counts; a recovery in flight carries no deadline. With
  * `excludeReads`, reads' deadlines are left out, as the reads themselves are (#11322).
+ *
+ * @param sources.tracker - In-flight tool-call tracker
+ * @param sources.sessionManager - Resolves a derived session to its base
+ * @param sources.devicePool - Session-preserving recovery state
+ * @param sessionId - The session asked about
+ * @param options - Clock and read-exclusion options for the deadline lookup
  */
 export function latestSessionExecutionDeadlineMs(
-  tracker: Pick<ExecutionTracker, "getLatestSessionExecutionDeadlineMs">,
-  sessionManager: ToolSelectionSessionManager,
-  devicePool: Pick<DevicePool, "isSessionRecoveryInFlight">,
+  {
+    tracker,
+    sessionManager,
+    devicePool,
+  }: {
+    tracker: Pick<ExecutionTracker, "getLatestSessionExecutionDeadlineMs">;
+    sessionManager: ToolSelectionSessionManager;
+    devicePool: Pick<DevicePool, "isSessionRecoveryInFlight">;
+  },
   sessionId: string,
   options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
 ): number | undefined {
@@ -121,9 +145,9 @@ export function sessionExecutionProbe(
   const query: ActiveSessionExecutionQuery = options.excludeReads ? { excludeReads: true } : {};
   return {
     hasActiveExecutions: (sessionId) =>
-      hasActiveSessionExecution(tracker, sessionManager, devicePool, sessionId, query),
+      hasActiveSessionExecution({ tracker, sessionManager, devicePool }, sessionId, query),
     latestExecutionDeadlineMs: (sessionId) =>
-      latestSessionExecutionDeadlineMs(tracker, sessionManager, devicePool, sessionId, {
+      latestSessionExecutionDeadlineMs({ tracker, sessionManager, devicePool }, sessionId, {
         onSessionClock: true,
         ...query,
       }),

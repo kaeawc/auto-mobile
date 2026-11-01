@@ -30,7 +30,7 @@ describe("navigation suggestion provenance migration", () => {
 
   test("upgrades the previous migration version without inventing old provenance", async () => {
     db = await createTestDatabase({ foreignKeys: true, throughMigration: PREVIOUS });
-    const repo = new NavigationRepository(db);
+    const repo = new NavigationRepository({ db });
     await repo.getOrCreateApp("com.example.app");
     const suggestion = await repo.addOrUpdateSuggestion("com.example.app", "old", "{}", 100);
 

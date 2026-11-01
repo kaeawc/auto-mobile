@@ -11,6 +11,7 @@ import type {
   PooledDevice,
   SessionRecoveryPreparation,
 } from "./devicePool";
+import type { MissingDeviceEvictionOptions } from "./missingDeviceLiveness";
 import type { SessionManager } from "./sessionManager";
 
 export interface EmulatorProcessLifecyclePoolPort {
@@ -39,10 +40,10 @@ export interface EmulatorProcessLifecyclePoolPort {
   evictMissingPooledDevice(
     device: PooledDevice,
     reason: string,
-    attemptDeviceLossRecovery: boolean,
-    incidentId: string | undefined,
-    incidentCaptureComplete: boolean,
-    recoveryPreparation: SessionRecoveryPreparation | undefined,
+    options: Pick<
+      MissingDeviceEvictionOptions,
+      "attemptDeviceLossRecovery" | "incidentId" | "incidentCaptureComplete" | "recoveryPreparation"
+    >,
   ): Promise<void>;
 }
 
@@ -276,8 +277,7 @@ export class EmulatorProcessLifecycle {
     try {
       await this.withProcessExitIncident(
         deviceId,
-        code,
-        signal,
+        { code, signal },
         childProcess,
         async (incidentId) => {
           if (
@@ -294,10 +294,12 @@ export class EmulatorProcessLifecycle {
             await this.pool.evictMissingPooledDevice(
               device,
               `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-              true,
-              incidentId,
-              true,
-              preparation,
+              {
+                attemptDeviceLossRecovery: true,
+                incidentId,
+                incidentCaptureComplete: true,
+                recoveryPreparation: preparation,
+              },
             );
           } catch (error) {
             await this.finishFailedEvictionIncident(incidentId);
@@ -310,10 +312,16 @@ export class EmulatorProcessLifecycle {
     }
   }
 
+  /**
+   * @param deviceId - The emulator whose process exited
+   * @param exit.code - The process exit code
+   * @param exit.signal - The signal that ended the process
+   * @param childProcess - The exited process, when tracked
+   * @param handleIncident - Runs once the shared incident id is known
+   */
   private async withProcessExitIncident(
     deviceId: string,
-    code: number | null,
-    signal: NodeJS.Signals | null,
+    { code, signal }: { code: number | null; signal: NodeJS.Signals | null },
     childProcess: ChildProcess | undefined,
     handleIncident: (incidentId: string | undefined) => Promise<void>,
   ): Promise<void> {

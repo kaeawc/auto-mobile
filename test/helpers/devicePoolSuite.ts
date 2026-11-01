@@ -84,6 +84,7 @@ export class TransportAwareFakeDeviceManager extends FakeDeviceManager {
     | {
         bypassAndroidDeviceListCache?: boolean;
         bypassIosDeviceListCache?: boolean;
+        includeWatchOs?: boolean;
       }
     | undefined
   > = [];
@@ -93,6 +94,7 @@ export class TransportAwareFakeDeviceManager extends FakeDeviceManager {
     options?: {
       bypassAndroidDeviceListCache?: boolean;
       bypassIosDeviceListCache?: boolean;
+      includeWatchOs?: boolean;
     },
   ) {
     this.discoveryOptions.push(options);
@@ -648,7 +650,7 @@ export class FakeDeviceManagerWithPendingReadiness extends FakeDeviceManager {
     _device: DeviceInfo,
     _timeoutMs?: number,
     _childProcess?: ChildProcess | null,
-    _signal?: AbortSignal,
+    { signal: _signal }: { signal?: AbortSignal } = {},
   ): Promise<BootedDevice> {
     return await new Promise<BootedDevice>(() => {});
   }

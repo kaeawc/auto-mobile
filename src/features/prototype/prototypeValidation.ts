@@ -106,12 +106,11 @@ function visitReference(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const nested = nestedReferences[String(rule.name)];
   if (nested) {
-    return visitNested(value, rule, path, context, depth, nested);
+    return visitNested(value, rule, path, { context, depth, nested });
   }
   const itemImages = rule.name === "item" ? imageSlotUses(object(value)?.image) : 0;
   if (itemImages > 0) {
@@ -121,15 +120,14 @@ function visitReference(
     }
   }
   return rule.name === "node"
-    ? visitNodeReference(value, rule, path, context, depth)
-    : walk(value, refRule(rule), path, context, depth);
+    ? visitNodeReference(value, rule, path, { context, depth })
+    : walk(value, refRule(rule), path, { context, depth });
 }
 function visitNodeReference(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const node = object(value);
   if (!node) {
@@ -149,7 +147,7 @@ function visitNodeReference(
   if (budgetError) {
     return budgetError;
   }
-  return walk(value, refRule(rule), path, context, depth + 1);
+  return walk(value, refRule(rule), path, { context, depth: depth + 1 });
 }
 /** Adds a node's images and `style.effects` to the spec-wide totals; the node that crosses a limit is reported. */
 function chargeNodeBudgets(
@@ -181,15 +179,17 @@ function visitNested(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
-  nested: { limit: number; message: string },
+  {
+    context,
+    depth,
+    nested,
+  }: { depth: number; nested: { limit: number; message: string } } & { context: Context },
 ): PrototypeValidationError | undefined {
   const name = rule.name ?? "";
   if (++context.nesting[name] > nested.limit) {
     return fail(path, nested.message);
   }
-  const error = walk(value, refRule(rule), path, context, depth);
+  const error = walk(value, refRule(rule), path, { context, depth });
   context.nesting[name]--;
   return error;
 }
@@ -197,8 +197,7 @@ function visitTagged(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const data = object(value);
   if (!data) {
@@ -214,7 +213,7 @@ function visitTagged(
   if (rule === definitions.action) {
     context.actions.push({ value: data, path });
   }
-  return walk(data, variant, path, context, depth);
+  return walk(data, variant, path, { context, depth });
 }
 /** Text's two content forms and its span count are pinned by the shared contract. */
 function textNodeConstraint(
@@ -254,8 +253,7 @@ function visitObject(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const data = object(value);
   if (!data) {
@@ -283,7 +281,7 @@ function visitObject(
       }
       continue;
     }
-    const error = walk(data[key], field.rule, childPath, context, depth);
+    const error = walk(data[key], field.rule, childPath, { context, depth });
     if (error) {
       return error;
     }
@@ -365,8 +363,7 @@ function visitArray(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   if (!Array.isArray(value)) {
     return fail(path, "Expected array");
@@ -377,7 +374,7 @@ function visitArray(
   const seen = new Set<string>();
   for (let index = 0; index < value.length; index++) {
     const childPath = `${path}[${index}]`;
-    const error = walk(value[index], rule.item ?? { kind: "json" }, childPath, context, depth);
+    const error = walk(value[index], rule.item ?? { kind: "json" }, childPath, { context, depth });
     if (error) {
       return error;
     }
@@ -393,8 +390,7 @@ function visitMap(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const data = object(value);
   if (!data) {
@@ -408,7 +404,7 @@ function visitMap(
     if (!prototypeContractPatterns.stateKey.test(key)) {
       return fail(childPath, "Invalid state key");
     }
-    const error = walk(data[key], rule.item ?? { kind: "scalar" }, childPath, context, depth);
+    const error = walk(data[key], rule.item ?? { kind: "scalar" }, childPath, { context, depth });
     if (error) {
       return error;
     }
@@ -419,8 +415,7 @@ function visitScreenMap(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const screens = object(value);
   if (!screens) {
@@ -435,7 +430,7 @@ function visitScreenMap(
     if (!name.length) {
       return fail(at, "Empty screen name");
     }
-    const error = walk(screens[name], rule.item!, at, context, depth);
+    const error = walk(screens[name], rule.item!, at, { context, depth });
     if (error) {
       return error;
     }
@@ -459,8 +454,7 @@ function visitRecord(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const data = object(value);
   if (!data) {
@@ -483,7 +477,7 @@ function visitRecord(
     ) {
       return fail(at, "Invalid record key");
     }
-    const error = walk(child, rule.item ?? { kind: "json" }, at, context, depth);
+    const error = walk(child, rule.item ?? { kind: "json" }, at, { context, depth });
     if (error) {
       return error;
     }
@@ -571,8 +565,7 @@ function visitChoice(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const options = rule.options ?? [];
   const candidates = options.filter((option) => {
@@ -600,7 +593,7 @@ function visitChoice(
   // Several options can accept the same JSON type (a hex colour or a role name are both strings).
   let firstError: PrototypeValidationError | undefined;
   for (const option of candidates) {
-    const error = walk(value, option, path, context, depth);
+    const error = walk(value, option, path, { context, depth });
     if (!error) {
       return undefined;
     }
@@ -612,8 +605,7 @@ function walk(
   value: unknown,
   rule: Rule,
   path: string,
-  context: Context,
-  depth: number,
+  { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const handlers: Record<string, typeof visitObject> = {
     strings: (value) => prototypeStringsTableError(value),
@@ -629,7 +621,7 @@ function walk(
   };
   const handler = handlers[rule.kind];
   if (handler) {
-    return handler(value, rule, path, context, depth);
+    return handler(value, rule, path, { context, depth });
   }
   return primitiveChecks[rule.kind]?.(value, rule)
     ? undefined
@@ -810,7 +802,7 @@ function platformArgumentError(
     keyframeNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
-  return walk(value, rule, path, context, 0);
+  return walk(value, rule, path, { context, depth: 0 });
 }
 /** The host-owned vocabulary: the reserved `automobile-` testTag namespace, then the platform rules. */
 function hostVocabularyError(
@@ -851,8 +843,7 @@ function behaviourErrors(
   value: unknown,
   context: Context,
   data: Record<string, unknown>,
-  repeats: PrototypeRepeatData,
-  componentTimers: Located[],
+  { repeats, componentTimers }: { repeats: PrototypeRepeatData; componentTimers: Located[] },
 ): PrototypeValidationError | undefined {
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
@@ -870,7 +861,9 @@ function behaviourErrors(
 }
 
 function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
-  return walk(value, definitions.spec, "", context, 0) ?? excludeAccessoryReferences(context);
+  return (
+    walk(value, definitions.spec, "", { context, depth: 0 }) ?? excludeAccessoryReferences(context)
+  );
 }
 
 function validateValue(
@@ -896,7 +889,7 @@ function validateValue(
     prototypeSharedElementError(context.nodes, repeats, context.actions) ??
     layoutErrors(value, context, repeats) ??
     prototypeScrollMotionError(value, context.nodes) ??
-    behaviourErrors(value, context, data, repeats, componentTimers);
+    behaviourErrors(value, context, data, { repeats, componentTimers });
   if (error) {
     return { success: false, error };
   }

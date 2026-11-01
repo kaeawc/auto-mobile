@@ -149,14 +149,23 @@ export function setKeyboardProfileRecorded(
   device: BootedDevice,
   profile: KeyboardProfileId,
   client: KeyboardProfileWriteClient | undefined,
-  signal: AbortSignal | undefined,
-  record: { owner?: string; registry?: KeyboardProfileRestoreRegistry } = {},
+  {
+    signal,
+    record = {},
+  }: {
+    signal?: AbortSignal;
+    record?: { owner?: string; registry?: KeyboardProfileRestoreRegistry };
+  } = {},
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   const registry = record.registry ?? defaultKeyboardProfileRestoreRegistry;
-  return setKeyboardProfile(device, profile, client, signal, (previousProfileId) => {
-    if (previousProfileId !== undefined) {
-      registry.record(device, previousProfileId, record.owner);
-    }
+  return setKeyboardProfile(device, profile, {
+    client,
+    signal,
+    onWritten: (previousProfileId) => {
+      if (previousProfileId !== undefined) {
+        registry.record(device, previousProfileId, record.owner);
+      }
+    },
   });
 }
 
@@ -175,6 +184,10 @@ export async function resetKeyboardProfileFromRecord(
   if (profile === undefined) {
     return {};
   }
-  await setKeyboardProfile(device, profile, client, signal, () => registry.forget(device.deviceId));
+  await setKeyboardProfile(device, profile, {
+    client,
+    signal,
+    onWritten: () => registry.forget(device.deviceId),
+  });
   return { restoredProfileId: profile };
 }

@@ -37,12 +37,20 @@ function harness(refreshIntervalMs = ACTION_CLOCK_REFRESH_INTERVAL_MS) {
   });
   screen.setObserveResult(observation);
   const createAction = (deviceId = "clock-test", platform: BootedDevice["platform"] = "android") =>
-    new BaseVisualChange({ deviceId, platform, name: deviceId }, adb, timer, () => undefined, {
-      actionClockSkewCache: cache,
-      observeScreen: screen,
-      awaitIdle: new FakeAwaitIdle(),
-      window: new FakeWindow(),
-    });
+    new BaseVisualChange(
+      { deviceId, platform, name: deviceId },
+      {
+        adb,
+        timer,
+        renderedDisplayRevision: () => undefined,
+        displayFence: {
+          actionClockSkewCache: cache,
+          observeScreen: screen,
+          awaitIdle: new FakeAwaitIdle(),
+          window: new FakeWindow(),
+        },
+      },
+    );
   const run = async (
     action = createAction(),
     hostFloor?: () => number,

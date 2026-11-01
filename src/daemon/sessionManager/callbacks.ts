@@ -130,9 +130,10 @@ export class SessionCallbacks {
       this.host.restartReleasePersistence.set(snapshot, persistence);
       options = { ...options, releasePersisted: persistence.promise };
     }
+    const notice = { ...options, snapshot };
     for (const callback of this.host.releaseCallbacks) {
       try {
-        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
+        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, notice);
       } catch (error) {
         logger.warn(`Session release callback failed for ${snapshot.sessionId}: ${error}`);
       }

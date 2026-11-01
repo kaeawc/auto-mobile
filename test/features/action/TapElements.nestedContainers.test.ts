@@ -9,7 +9,7 @@ import { ResolverElementSelector } from "../../../src/features/utility/ResolverE
 import type { ElementSelectionOptions } from "../../../src/utils/interfaces/ElementSelector";
 import type { ElementQuery } from "../../../src/models/ElementQuery";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
-import type { Element, TapOnElementOptions, ViewHierarchyResult } from "../../../src/models";
+import type { Element, Point, TapOnElementOptions, ViewHierarchyResult } from "../../../src/models";
 import {
   encodeAndroidFlat,
   encodeIosDollar,
@@ -69,10 +69,9 @@ class RecordingTapOn extends TapOnElement {
   }
   override async executeAndroidTap(
     _action: string,
-    _x: number,
-    _y: number,
+    _point: Point,
     _duration: number,
-    element: Element,
+    { element }: { element: Element },
   ) {
     this.taps.push(element);
     return undefined;
@@ -327,7 +326,7 @@ for (const action of ["tap", "longPress", "doubleTap"] as const) {
       },
       { viewHierarchy: hierarchy },
       action,
-      false,
+      { requireResourceId: false },
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -353,7 +352,7 @@ test("tapOn stability polling fails if a refreshed container becomes ambiguous",
       },
       { viewHierarchy: capture() },
       "tap",
-      false,
+      { requireResourceId: false },
     ),
   ).rejects.toThrow("Container level 2 ambiguous");
   expect(h.taps()).toBe(0);
@@ -492,7 +491,8 @@ for (const action of ["tap", "longPress"] as const) {
     if (!element) {
       throw new Error("Expected scoped target");
     }
-    await tap.executeAndroidTap(action, 50, 50, 500, element, {
+    await tap.executeAndroidTap(action, { x: 50, y: 50 }, 500, {
+      element,
       options: { action, container: scope, selectionStrategy: "unique" },
       isTalkBackEnabled: true,
     });
@@ -545,7 +545,8 @@ test("tapOn scoped long press does not reselect a global native resource ID", as
     "requestAction",
   ).mockResolvedValue({ success: true, action: "long_click", totalTimeMs: 1 });
   try {
-    await tap.executeAndroidTap("longPress", 50, 50, 500, element, {
+    await tap.executeAndroidTap("longPress", { x: 50, y: 50 }, 500, {
+      element,
       options: { action: "longPress", container: scope, selectionStrategy: "unique" },
       isTalkBackEnabled: false,
     });

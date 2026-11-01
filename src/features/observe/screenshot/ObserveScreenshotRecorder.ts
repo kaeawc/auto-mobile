@@ -32,6 +32,22 @@ export const SCREENSHOT_RECORD_ATTEMPTS = 2;
 /** Capture-time options for the non-settled captures, which keep the device's own encoding. */
 export type ObserveCaptureOptions = Pick<ObserveScreenshotOptions, "hidePrototypes">;
 
+/** Per-call request for the non-settled `start`, `capture`, and `captureFresh` captures. */
+export interface ObserveScreenshotCaptureRequest {
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  displayId?: number;
+  capture?: ObserveCaptureOptions;
+}
+
+/** Per-call request for the strict, queued settled capture. */
+export interface ObserveSettledScreenshotRequest {
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  displayId?: number;
+  options?: ObserveScreenshotOptions;
+}
+
 /**
  * Minimal capability surface needed by the recorder: the standard
  * `ScreenshotService` plus the `startTrackedCapture` helper that
@@ -58,47 +74,23 @@ export interface ObserveScreenshotRecorder {
    * Fire-and-forget capture. Returns immediately while the capture continues
    * in the background. State is updated when the capture completes.
    */
-  start(
-    observationId: string,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    capture?: ObserveCaptureOptions,
-  ): void;
+  start(observationId: string, options?: ObserveScreenshotCaptureRequest): void;
 
   /**
    * Awaitable capture. The promise resolves once the capture has completed
    * (successfully or not) and state has been updated.
    */
-  capture(
-    observationId: string,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    capture?: ObserveCaptureOptions,
-  ): Promise<void>;
+  capture(observationId: string, options?: ObserveScreenshotCaptureRequest): Promise<void>;
 
   /**
    * Await a fresh capture after any already-pending capture. Terminal evidence
    * must reflect the completed action or wait condition rather than an earlier
    * in-flight observation.
    */
-  captureFresh(
-    observationId: string,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    capture?: ObserveCaptureOptions,
-  ): Promise<void>;
+  captureFresh(observationId: string, options?: ObserveScreenshotCaptureRequest): Promise<void>;
 
   /** Strict, queued PNG capture for settled observations. Optional for legacy fakes. */
-  captureSettled?(
-    observationId: string,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    options?: ObserveScreenshotOptions,
-  ): Promise<string>;
+  captureSettled?(observationId: string, opts?: ObserveSettledScreenshotRequest): Promise<string>;
 }
 
 /**
@@ -126,10 +118,12 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
 
   start(
     observationId: string,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    displayId?: number,
-    capture?: ObserveCaptureOptions,
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      displayId,
+      capture,
+    }: ObserveScreenshotCaptureRequest = {},
   ): void {
     this.store.beginObservation(this.device.deviceId, observationId);
     perf.startOperation("screenshot");
@@ -189,47 +183,47 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
 
   async capture(
     observationId: string,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    displayId?: number,
-    capture?: ObserveCaptureOptions,
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      displayId,
+      capture,
+    }: ObserveScreenshotCaptureRequest = {},
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
-    await this.captureWithOptions(
-      observationId,
-      perf,
-      signal,
-      {
+    await this.captureWithOptions(observationId, perf, signal, {
+      trackerOptions: {
         coalesceWithPending: true,
         queueAfterPendingIfRunning: true,
       },
-      captureRequest(displayId, capture),
-    );
+      request: captureRequest(displayId, capture),
+    });
   }
 
   async captureFresh(
     observationId: string,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    displayId?: number,
-    capture?: ObserveCaptureOptions,
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      displayId,
+      capture,
+    }: ObserveScreenshotCaptureRequest = {},
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
-    await this.captureWithOptions(
-      observationId,
-      perf,
-      signal,
-      { queueAfterPending: true },
-      captureRequest(displayId, capture),
-    );
+    await this.captureWithOptions(observationId, perf, signal, {
+      trackerOptions: { queueAfterPending: true },
+      request: captureRequest(displayId, capture),
+    });
   }
 
   async captureSettled(
     observationId: string,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    displayId?: number,
-    options?: ObserveScreenshotOptions,
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      displayId,
+      options,
+    }: ObserveSettledScreenshotRequest = {},
   ): Promise<string> {
     this.store.beginObservation(this.device.deviceId, observationId);
     try {
@@ -254,20 +248,17 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
             this.device.deviceId,
           );
           this.store.update(this.device.deviceId, validated);
-          this.store.updateForObservation(
-            this.device.deviceId,
-            observationId,
-            validated,
-            undefined,
-            result.screenshotImageSize,
-          );
+          this.store.updateForObservation(this.device.deviceId, observationId, {
+            path: validated,
+            imageSize: result.screenshotImageSize,
+          });
           return validated;
         }
         throw new ActionableError("Screenshot capture retry exhausted");
       });
     } catch (error) {
       const message = errorMessage(error);
-      this.store.updateForObservation(this.device.deviceId, observationId, undefined, message);
+      this.store.updateForObservation(this.device.deviceId, observationId, { error: message });
       logger.warn(`[OBSERVE] Settled screenshot capture failed: ${message}`);
       throw toActionableError(
         error,
@@ -306,11 +297,16 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     observationId: string,
     perf: PerformanceTracker,
     signal: AbortSignal | undefined,
-    trackerOptions: Pick<
-      ScreenshotJobOptions,
-      "coalesceWithPending" | "queueAfterPending" | "queueAfterPendingIfRunning"
-    >,
-    request: ScreenshotOptions,
+    {
+      trackerOptions,
+      request,
+    }: {
+      trackerOptions: Pick<
+        ScreenshotJobOptions,
+        "coalesceWithPending" | "queueAfterPending" | "queueAfterPendingIfRunning"
+      >;
+      request: ScreenshotOptions;
+    },
   ): Promise<void> {
     try {
       await perf.track("screenshot", async () => {
@@ -357,7 +353,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         return;
       }
       this.store.update(this.device.deviceId, undefined, errorMsg);
-      this.store.updateForObservation(this.device.deviceId, observationId, undefined, errorMsg);
+      this.store.updateForObservation(this.device.deviceId, observationId, { error: errorMsg });
       logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMsg}`);
     }
   }
@@ -371,13 +367,11 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         this.store.update(this.device.deviceId, path, error);
       }
       if (options.observationId) {
-        this.store.updateForObservation(
-          this.device.deviceId,
-          options.observationId,
+        this.store.updateForObservation(this.device.deviceId, options.observationId, {
           path,
           error,
-          screenshotResult.screenshotImageSize,
-        );
+          imageSize: screenshotResult.screenshotImageSize,
+        });
       }
     };
     if (!screenshotResult.success) {
@@ -468,7 +462,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       .catch((error) => {
         releaseCompletion();
         const errorMsg = errorMessage(error);
-        this.store.updateForObservation(this.device.deviceId, observationId, undefined, errorMsg);
+        this.store.updateForObservation(this.device.deviceId, observationId, { error: errorMsg });
         logger.warn(
           `[OBSERVE] Failed to record screenshot for observation ${observationId}: ${errorMsg}`,
         );

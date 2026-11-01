@@ -21,8 +21,7 @@ export async function addOrUpdateSuggestion(
   ctx: NavigationQueryContext,
   appId: string,
   hash: string,
-  data: string,
-  timestamp: number,
+  { data, timestamp }: { data: string; timestamp: number },
 ): Promise<NavigationSuggestion> {
   const db = ctx.getDb();
 
@@ -56,14 +55,20 @@ export async function addOrUpdateSuggestion(
   return result;
 }
 
+/** The build, device and session one provenance observation was made under. */
+export interface ObservationSource {
+  buildKeyId: number;
+  deviceId: string;
+  sessionUuid: string;
+}
+
 export async function recordSuggestionObservation(
   ctx: NavigationQueryContext,
   suggestionId: number,
-  buildKeyId: number,
-  deviceId: string,
-  sessionUuid: string,
+  source: ObservationSource,
   seenAt: number,
 ): Promise<void> {
+  const { buildKeyId, deviceId, sessionUuid } = source;
   const observation: NewNavigationSuggestionObservation = {
     suggestion_id: suggestionId,
     build_key_id: buildKeyId,
@@ -123,20 +128,19 @@ export async function promoteSuggestion(
 ): Promise<NavigationNodeFingerprint> {
   const db = ctx.getDb();
   if (db.isTransaction) {
-    return promoteSuggestionWithin(ctx, db, suggestionId, nodeId, timestamp);
+    return promoteSuggestionWithin(ctx, db, suggestionId, { nodeId, timestamp });
   }
 
   return db
     .transaction()
-    .execute((trx) => promoteSuggestionWithin(ctx, trx, suggestionId, nodeId, timestamp));
+    .execute((trx) => promoteSuggestionWithin(ctx, trx, suggestionId, { nodeId, timestamp }));
 }
 
 async function promoteSuggestionWithin(
   ctx: NavigationQueryContext,
   db: Kysely<Database>,
   suggestionId: number,
-  nodeId: number,
-  timestamp: number,
+  { nodeId, timestamp }: { nodeId: number; timestamp: number },
 ): Promise<NavigationNodeFingerprint> {
   // Get the suggestion
   const suggestion = await db
@@ -152,13 +156,10 @@ async function promoteSuggestionWithin(
   // Create fingerprint record (using app_id from suggestion)
   const fingerprint = await ctx.repository
     .withExecutor(db)
-    .getOrCreateFingerprint(
-      suggestion.app_id,
-      nodeId,
-      suggestion.fingerprint_hash,
-      suggestion.fingerprint_data,
+    .getOrCreateFingerprint(suggestion.app_id, nodeId, suggestion.fingerprint_hash, {
+      data: suggestion.fingerprint_data,
       timestamp,
-    );
+    });
 
   // Link suggestion to fingerprint
   await db
@@ -225,27 +226,19 @@ export async function getOrCreateBuildKey(
 export async function recordNodeObservation(
   ctx: NavigationQueryContext,
   nodeId: number,
-  buildKeyId: number,
-  deviceId: string,
-  sessionUuid: string,
+  source: ObservationSource,
   seenAt: number,
 ): Promise<void> {
-  await recordNodeObservationWindow(
-    ctx,
-    nodeId,
-    { buildKeyId, deviceId, sessionUuid },
-    { firstSeenAt: seenAt, lastSeenAt: seenAt },
-  );
+  await recordNodeObservationWindow(ctx, nodeId, source, {
+    firstSeenAt: seenAt,
+    lastSeenAt: seenAt,
+  });
 }
 
 async function recordNodeObservationWindow(
   ctx: NavigationQueryContext,
   nodeId: number,
-  {
-    buildKeyId,
-    deviceId,
-    sessionUuid,
-  }: { buildKeyId: number; deviceId: string; sessionUuid: string },
+  { buildKeyId, deviceId, sessionUuid }: ObservationSource,
   { firstSeenAt, lastSeenAt }: { firstSeenAt: number; lastSeenAt: number },
 ): Promise<void> {
   const db = ctx.getDb();
@@ -273,11 +266,10 @@ async function recordNodeObservationWindow(
 export async function recordEdgeObservation(
   ctx: NavigationQueryContext,
   edgeId: number,
-  buildKeyId: number,
-  deviceId: string,
-  sessionUuid: string,
+  source: ObservationSource,
   seenAt: number,
 ): Promise<void> {
+  const { buildKeyId, deviceId, sessionUuid } = source;
   const db = ctx.getDb();
   const observation: NewNavigationEdgeObservation = {
     edge_id: edgeId,

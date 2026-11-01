@@ -289,8 +289,10 @@ There are no iOS prototype screenshot baselines to re-record.
 | bottomSheet     | material | material | —     |
 | box             | neutral  | neutral  | —     |
 | button          | native   | material | —     |
+| cameraPreview   | material | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
+| castButton      | material | material | —     |
 | chart           | material | material | —     |
 | checkbox        | material | material | —     |
 | chip            | material | material | —     |
@@ -309,6 +311,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | image           | neutral  | neutral  | —     |
 | list            | material | material | —     |
 | listItem        | material | material | —     |
+| map             | neutral  | neutral  | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |
 | pasteButton     | native   | material | —     |
@@ -477,6 +480,16 @@ Other form factors omit the tool's `screenRound` output.
 On a watch whose launcher does not support pinned shortcuts, `save` with `pin:true` keeps the save
 and reports `pinned:"unsupported"`. Round-aware layouts, `ScalingLazyColumn`, Wear Material
 components and rotary input in prototypes are out of scope.
+
+## Android Automotive
+
+The renderer is phone-oriented; on a car display it lays out wide and landscape. A successful `show`
+on an Android device whose booted form factor is `automotive` reports `formFactor: "automotive"`,
+taken from the device's form factor with no extra read; other devices omit it. `save` with `pin:true`
+uses the same launcher check as everywhere else, so a car launcher without pinned-shortcut support keeps
+the save and reports `pinned:"unsupported"`. Dismiss placement relative to the car system bars, and
+whether the overlay stays visible while driving restrictions are on, are unverified on an AAOS emulator
+(#14916). Car App Library templates and car-specific spec nodes are out of scope.
 
 ## Common node properties
 
@@ -1030,6 +1043,9 @@ The wire protocol has no host opt-in channel. The existing host gate `AUTOMOBILE
 
 ### Device media items (#14192, contract only)
 
+Which camera, media-library, scanner and microphone routes work on each emulator, simulator and
+device, and how to seed them, is in the [camera and media guide](../../prototype-camera-media.md).
+
 Camera, picker and recorder producers write a media item (or an array of them) to an `into`
 pointer in `/data`, under the rules of `applyPrototypeDataWrite` and with no nulls. The device
 mints its ids with the reserved `media:` prefix and keeps the bytes in its own store, so an `image`
@@ -1386,9 +1402,24 @@ Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the s
 `pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
 `bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
 the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
-and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
-`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
-state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
+and its spec path. A screen node carries the `testTag` of the node that draws it. A `pop` targets
+`back` (the previous screen is runtime state), and `setPage` with `next` or `prev` keeps the authored
+word. `visibleWhen` alternatives and sheet or dialog opening by state are not resolved.
+
+`getNavigationGraph` (debug-gated with the rest of that tool) diffs the map against the app's recorded
+graph when given `prototypeSpec` or `prototypeSpecPath`, and returns `prototypeDiff`. A prototype screen
+matches a real screen through, in order: an explicit `screenMapping` (or `screenMappingPath`) entry from
+prototype screen id to real screen name; its `testTag` equal to the real screen name; or its stack
+screen key (whole, slashes included), tab label or sheet/dialog id equal to the real name ignoring
+case and punctuation, with or without a trailing `Screen`, `Activity`, `Fragment`, `Page`, `View` or
+`Controller` on either side, so `Overview` still meets `OverviewActivity`. Letters of any script count;
+a name with none never matches. A mapped screen never falls
+back to the other rules, and a mapping to a name the graph lacks reports `mappedScreenMissing`. The root
+is a destination only when the mapping names it. The result lists `matched` screens,
+`unmatchedPrototypeScreens`, `unmatchedRealScreens`, `observedTransitions`, `unobservedTransitions`
+(`unmatchedScreen`, `dynamicTarget` for `back` and `next`/`prev`, or `notObserved`) and
+`ignoredMappings` (keys naming no prototype screen). The live cross-check against `screen_changed`
+events from an explored prototype is not built.
 
 ### Route contract
 
@@ -1493,8 +1524,10 @@ uses the default visibility animation; wrap the stack in a box to give that a cu
   directly.
 
 Android draws scale and rotation with a `graphicsLayer`, animates with `animateFloatAsState` and
-`animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
-yet and does not advertise the capability (#14684), so the host refuses these fields there.
+`animateColorAsState`, and zooms with `transformable`. The iOS agent supports and advertises
+`prototype_motion_v2`: `animate`, style `scale`/`rotation`, `slideStart`/`slideEnd`/`scale`
+transitions, and `image.zoomable`. Motion v3 requirements are detected, but iOS does not advertise
+`prototype_motion_v3`, so the host refuses motion v3 features until iOS advertises that capability.
 
 ### Transition choreography (#15247, `prototype_choreography_v1`, not device-verified)
 
@@ -1793,6 +1826,7 @@ without them. A device advertising `prototype_network_v1` also writes `/data` fo
 | `statusKey`            | A declared **string** state key (a numeric or boolean key is refused). Set to `"loading"`, then `"success"` or `"error"`, so `visibleWhen` can show a spinner or an error. Inside a repeat it may hold placeholders like any state key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `via`                  | `"host"` (default) or `"device"`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `timeoutMs`            | Optional integer, 1 to `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `allowSecureInRequest` | Optional boolean. Lets this request send a `storage.secure` key; without it any reference to one is refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `onSuccess`, `onError` | Optional action lists (1 to 32). Recursive: a request may carry requests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
@@ -2010,8 +2044,10 @@ vocabulary testable before any real module exists; no production runtime adverti
 
 **Device status (#14316).** Three state-only modules expose read-only device status under
 `/platform/<module>/<key>`; a spec lists the module in `requires.platform` and reads keys with the
-`{platform}` forms. Each module has a `<module>.changed` event, debounced to one delivery per
-500 ms, whose `{event}` data carries the new values. Unknown keys and events fail validation with a
+`{platform}` forms. Each module has a `<module>.changed` event whose `{event}` data carries the new
+values, delivered like `connectivity.changed`: the state updates at once, the event fires once the
+state has been quiet for 500 ms, and a flap that settles back on the last delivered values is not an
+event. Unknown keys and events fail validation with a
 path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
 
 | Module (capability)                         | Keys                                                                                                                                                                                  |
@@ -2045,8 +2081,17 @@ first path after start is the baseline, not a change. Every path that changes th
 a prototype shown before the first path still sees it; only `connectivity.changed` waits for the
 debounce. The offline simulation override is not built.
 
-The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
-`fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
+The reading mappings are normative. `prototypeDeviceStatusReference.ts` is the reference the device status
+runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
+
+- Thermal: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2 `fair`, 3 `serious` and 4-6
+  `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
+- Battery `state`: Android `BATTERY_STATUS_CHARGING` is `charging`, `FULL` is `full`, `DISCHARGING` and
+  `NOT_CHARGING` are `unplugged`, anything else `unknown`; iOS `UIDevice.BatteryState` maps one to one.
+- Battery `level` and audio `volume` are whole percents (Android level over scale and stream index over
+  its maximum; iOS `batteryLevel` and `outputVolume`). An unknown reading, such as the Simulator's
+  battery level of -1, leaves the key absent.
+- `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
 
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
@@ -2132,6 +2177,21 @@ with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usag
 plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
 system-UI call per prototype at a time). No production runtime advertises either module yet.
 
+**Photo library (#14195, calls only).** Three more `mediaLibrary` calls read and write the library
+itself. `query` and `manageLimitedSelection` share `prototype_platform_mediaLibrary_query_v1`;
+`save` has its own capability, so a runtime can offer save without read:
+
+- `mediaLibrary.query` (`media` as for `pick`, optional `limit` 1-64) writes the newest items to
+  `into` as device media items; `mediaLibrary.manageLimitedSelection` (no arguments) re-opens the
+  partial-access selection. Both need `photos` in `requires.permissions` and
+  `prototype_platform_mediaLibrary_query_v1`; `query` is `sensitive`.
+- `mediaLibrary.save` (required `media`, an item usually bound from `/data`, and optional nonempty
+  `album`) adds an item to the library and writes its saved identifier to `into`. It needs
+  `photosAdd` in `requires.permissions` and `prototype_platform_mediaLibrary_save_v1`.
+
+All three also need the module's `prototype_platform_mediaLibrary_v1`; no production runtime
+advertises the per-call capabilities yet.
+
 **Fake sign-in (#14303).** The `auth` module (`prototype_platform_auth_v1`) has two calls. `auth.signIn` takes
 an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated sign-in" sheet and writes
 `{userId, name, email}` into `into`; it is `sensitive`, and a back-out is the typed error `cancelled`.
@@ -2182,9 +2242,15 @@ replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and r
 `{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`; a back-out is the
 typed error `cancelled`. `commerce.restore` takes no arguments. The `commerce.entitlementsChanged` event and the
 read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTransaction` complete the module.
-No argument carries an amount, merchant, key or card: prices come only from the catalog. The root `commerce`
-catalog block, the check that `productId` names a catalog product and `commerce.checkout` are not in the
-contract yet, and no production runtime advertises the module.
+No argument carries an amount, merchant, key or card: prices come only from the catalog.
+
+The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backend: "fake", products}` with 1 to
+32 products. Each product has a unique `id` (an identifier), a `title`, a `kind` (`consumable`, `nonConsumable`
+or `subscription`) and a `price` of a decimal-string `amount` (up to two decimal places) and an upper-case
+three-letter `currency`. Only a subscription may have a `period` or `trialPeriod`, an ISO 8601 duration of
+whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, gateway, key, card or URL field.
+Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
+`commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
@@ -2192,8 +2258,11 @@ and it may not also appear in `storage.keys`. The list needs the `secureStorage`
 (`prototype_platform_secureStorage_v1`) in `requires.platform`; its one read-only key,
 `/platform/secureStorage/locked`, is true while a biometric-bound key is still locked.
 `secureAuth: {"state:<key>": "biometric"}` binds a secure key to a `biometric.authenticate` and needs `biometric`
-in `requires.platform`. A secure key never leaves the device through an emit `context`. The validators refuse
-`{state: <secure key>}` there. No production runtime advertises the module yet.
+in `requires.platform`. A secure key never leaves the device through an emit `context`: the validators refuse
+`{state: <secure key>}` there. A `request` may send one only with `allowSecureInRequest: true`; otherwise a
+`{state: <secure key>}` binding in a header, query value or body (whole, form entry or multipart value), or a
+`{<secure key>}` placeholder in the URL, a header or a query value, is refused. No production runtime advertises
+the module yet.
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
@@ -2202,9 +2271,13 @@ exactly one `/<module>/<key>`: `pitchDeg` and `rollDeg` (whole degrees, -180 to 
 only; iOS has no public ambient-light API). A sensor the device lacks leaves its key absent, so it compares as
 missing. `prototypeSensorReference.ts` is the reference the runtimes copy: whole-unit rounding, per-key
 throttling at `1000 / rateHz` ms (`rateHz` 1 to 30), and a shake at 2.7 g or more with a 1000 ms cooldown,
-replayed from `test/fixtures/prototype-sensors/`. The root `sensors` subscription block (which sensors to listen
-to and their `rateHz`) and the `motion` permission for `steps` are outside this contract. No production
-runtime advertises the module.
+replayed from `test/fixtures/prototype-sensors/`.
+
+The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`:
+`shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
+`rateHz` of 1 to 30. `steps` also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
+read or a `sensors.shake` handler must name a sensor the block lists. No production runtime advertises the
+module.
 
 **Voice notes (#14194, contract only).** The `audioRecorder` module
 (`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`
@@ -2228,13 +2301,22 @@ and `progress` is `{value: 0..1}` or `{indeterminate: true}`. `notifications.can
 `all: true`, and `notifications.setBadge` takes `count` (0-9999). `post` and `setBadge` need `notifications`
 in `requires.permissions`; `cancel` does not. Events are `notifications.opened`, `.action`, `.reply` (marked
 sensitive, since it carries typed text) and `.dismissed`. State is `/platform/notifications/{badge, active,
-pending, authorization}`: `active` is at most 24 per prototype, and `authorization` uses the permission
+pending, authorization}` plus `/platform/notifications/channels/<id>/blocked` (a boolean, readable only
+for a declared channel): `active` is at most 24 per prototype, and `authorization` uses the permission
 vocabulary (`granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The
 runtime homes follow the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and
 ProtoViewer advertise the module, the CtrlProxy overlay advertises it as a disclosed preview, and the iOS
-injected agent never does. The validators do not yet check the top-level `notifications.channels` block,
-that `channel` names a declared channel, unique action ids, or that `cancel` names exactly one target. No
-production runtime advertises the module yet.
+injected agent never does. Channels come from a root `notifications` block, `{channels: [{id, name,
+importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped ids, a non-blank `name` (at
+most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
+256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
+must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
+`notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
+and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
+apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283). On iOS, `min` and `low`
+map to the passive interruption level and `default` and `high` to active. No production runtime
+advertises the module yet.
 
 **Media players (#14253, contract only).** The root `media` block declares long-lived players
 that outlive a screen (mini-player, background audio, picture-in-picture):
@@ -2287,15 +2369,71 @@ one-key union), which is a node-scoped player released when the node leaves comp
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
 
+**Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
+`{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`
+pointer to an array of `{startMs, endMs, text}` cues that each end after they start. Track ids are
+unique per player; `hls:` ids are reserved for in-band HLS tracks. `media.setCaptions` (`player`,
+`track`, `""` for off) selects a track and `/platform/media/players/<id>/captionTrack` reports it.
+The cue parser and caption overlay are separate slices.
+
+**Feed autoplay.** A `videoPlayer` with
+`autoplay: "whenVisible"` may set `visibleThreshold` (0.1-1, default 0.6) and `resumePosition`;
+either field without `"whenVisible"` is an error. Feed players share at most
+`MAX_PROTOTYPE_ACTIVE_DECODERS` (3) decoders, allocated by a pure function that Kotlin and Swift
+both replay against `test/fixtures/prototype-media-pool`:
+
+- The anchor is the settled pager page, or else the most visible player, with ties going to the
+  topmost.
+- The window is the anchor, the next item and the previous item, in that order.
+- The anchor plays only in the foreground, and only when its page has settled or, in a list, when
+  it is at least `visibleThreshold` visible.
+- Other window players preload; held players outside the window are released.
+- When nothing is visible, every player is released.
+
+The allocator only decides which players play, preload or release. Each renderer reports visible
+fractions, the settled page and foreground state, binds pooled players to surfaces and preloads.
+
+**Queues (#14249, contract only).** A declared player takes exactly one of `source` or `queue`, a
+`/data` pointer to an array of `{id, title, artist?, album?, artwork?, source, durationMs?}` items
+with unique ids; `appendData` and `removeData` edit the queue at runtime. A queued player, and the
+calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setShuffle`,
+`setRepeat` (`off`, `one`, `all`) and `setSleepTimer` (`timer` `{ms}`, 0 cancels, or
+`{endOfItem: true}`), need `prototype_platform_media_queue_v1`. Per-player state adds
+`currentItemId`, `currentIndex`, `rate`, `sleepRemainingMs`, `shuffle` and `repeat`, and
+`media.itemChanged` reports an item change. No runtime advertises the capability yet.
+
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
 `maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes
 `preview`, the id of the viewfinder it acts on, needs `camera` in `requires.permissions` and is
-`sensitive`; the viewfinder node itself is a separate slice. Recording also needs
-`prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
+`sensitive`. Recording also needs `prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
 `/platform/camera/status` state report `starting`, `ready`, `capturing`, `recording`, `unavailable`,
 `permission_denied` or `error`; `/platform/camera/flashAvailable`, `recordingMs` and `source`
 (`camera` or `injected`, the fake frame source on a Simulator) complete the state.
+
+The `cameraPreview` node is that viewfinder; a story-capture screen pairs it with ordinary buttons:
+
+```json
+{
+  "type": "cameraPreview",
+  "lensKey": "lens",
+  "flashKey": "flash",
+  "zoomKey": "zoom",
+  "aspectRatio": "4:3",
+  "contentScale": "crop",
+  "tapToFocus": true,
+  "pinchToZoom": true,
+  "mode": "photo"
+}
+```
+
+- A spec has at most one `cameraPreview`. It needs an `id` that is a state key, which `camera.*`
+  calls name as their literal `preview` (`platform-camera-live.json` is the full story-capture spec).
+- It needs `camera` in `requires.platform` and in `requires.permissions`.
+- `lensKey` and `flashKey` name declared string state keys (`back` or `front`; `off`, `on`, `auto`
+  or `torch`) and `zoomKey` a declared number key (0-1), so `setState` and a slider drive them.
+- Optional: `aspectRatio` (`4:3`, `16:9`, `1:1`), `contentScale` (`fit`, `crop`, `fill`),
+  `tapToFocus`, `pinchToZoom` and `mode` (`photo` or `video`). No renderer draws it yet.
 
 **Per-call capabilities.** A `platformModules` call may name a `capability` it needs on top of its
 module's, named `prototype_platform_<module>_<op>_vN`. The host, Kotlin and Swift validators add it to
@@ -2311,8 +2449,12 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 `sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
 `receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
 `connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module; the `castButton` node is a
-separate slice.
+cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+
+The `castButton` node is the system route picker that starts a session; there is no start call. Its
+required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
+`protocols` (1-2 unique of `googleCast`, `airplay`) limits the routes it offers. Every `castButton`
+needs `cast` in `requires.platform`. No renderer draws it yet.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
@@ -3431,9 +3573,9 @@ to the resolved runtime count. Shared fixtures define host validation behavior.
 ## Carousel and pager indicator (not device-verified)
 
 `prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
-(default `none`): page dots drawn over the pager (a centred row at the bottom, or a column at the
-end edge for a vertical pager) with the current page filled. The dots are decoration and add no
-semantics node.
+(default `none`): Android draws page dots over the pager (a centred row at the bottom, or a column at
+the end edge for a vertical pager); iOS lays them out below horizontal pages or beside vertical pages.
+The current page is filled. The dots are decoration and add no semantics node.
 
 A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
 `repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is
@@ -3666,14 +3808,13 @@ in `PrototypeEffectShaders`.
 
 ## Maps (#14308, design for the `map` node)
 
-The `map` node (#14309) is not in the contract yet; these are the owner-decided rules its contract and
-renderers (#14310, #14311) follow.
+These are the owner-decided rules the `map` node (#14309) and its renderers (#14310, #14311) follow.
 
 - **Backends.** A spec never names a tile URL or SDK. An optional `backend` defaults to `auto`: MapLibre on
   Android, MapKit on iOS. Google Maps is an Android opt-in backend, offered only when the runtime holds a
   host-configured key, because a disposable app's package and signature change per prototype and a key cannot
   be pre-restricted to them. MapLibre on iOS stays optional, for the offline style and pixel parity.
-- **Styles.** `style` is a closed list, never a URL. `plain` is the default: offline and deterministic (a
+- **Styles.** `mapStyle` is a closed list, never a URL (`style` is the shared node style). `plain` is the default: offline and deterministic (a
   background colour, an optional grid and graticule, then markers and polylines), with no network. CI and every
   screenshot test use it. `streets` draws tiles from the runtime's configured source. `satellite` is not offered
   until a source for it is chosen. On iOS, MapKit always fetches Apple tiles, so `plain` there is drawn by
@@ -3688,6 +3829,45 @@ renderers (#14310, #14311) follow.
   prototypes (#13622). With the switch off, `streets` falls back to `plain` with a visible "offline map" chip.
   Only the configured tile origin is contacted, and the runtime draws the data attribution outside spec
   control.
+
+The `map` node (#14309, contract only: no renderer draws it and no runtime advertises
+`prototype_platform_map_v1`) needs `map` in `requires.platform`:
+
+```json
+{
+  "type": "map",
+  "style": { "height": { "dp": 360 } },
+  "camera": { "data": "/camera" },
+  "markers": {
+    "path": "/drivers",
+    "as": "driver",
+    "id": "{driver.id}",
+    "lat": "{driver.lat}",
+    "lng": "{driver.lng}",
+    "title": "{driver.name}"
+  },
+  "onMarkerTap": [{ "type": "setState", "key": "selected", "value": "{driver.id}" }]
+}
+```
+
+- `camera` is a literal `{lat, lng, zoom, bearing?, tilt?}` (lat -90 to 90, lng -180 to 180, zoom 0 to
+  22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. `fit` is `none`,
+  `markers` or `route`; `mapStyle` is `plain` (default) or `streets`.
+- `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
+  `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
+  templates resolved per item. `icon` is a Material icon name. `animateMs` (0 to 2000) eases a moved marker.
+  Every marker is an accessibility node with the identifier `<mapId>/marker/<id>`, so `observe` and `tapOn`
+  reach it.
+- `polylines` (1 to 8) each draw the `{lat, lng}` points of the `/data` array at `path`, with an optional
+  `width` (1 to 16) and `color`.
+- `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
+  path that receives the settled camera.
+- `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
+  and the `location` permission in `requires.permissions`.
+- The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a
+  simulation can deliver them.
+- Checked when the map is drawn, not at validation: at most 500 markers and 2000 polyline points in total,
+  and marker ids unique within the resolved data.
 
 ## Charts (#14209, not device-verified)
 

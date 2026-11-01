@@ -192,8 +192,7 @@ export const formatLogRecord = (
   logFormat: LogFormat,
   ownLogPrefix: string,
   level: string,
-  message: string,
-  args: any[],
+  { message, args }: { message: string; args: any[] },
 ): string => {
   const timestamp = new Date().toISOString();
   const sanitizedMessage = sanitizeMessage(message);

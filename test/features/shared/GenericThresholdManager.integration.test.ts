@@ -255,8 +255,7 @@ describe("ThresholdManager wrappers", function () {
         cpuUsageThresholdPercent: 50,
         touchLatencyThresholdMs: 100,
       },
-      1,
-      24,
+      { weight: 1, ttlHours: 24 },
     );
     await db
       .insertInto("performance_thresholds")

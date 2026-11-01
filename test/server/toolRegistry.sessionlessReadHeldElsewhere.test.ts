@@ -136,23 +136,18 @@ describe("a sessionless read never readies a device held outside this daemon's s
     await pool.initializeWithDevices([mine, theirs]);
     DaemonState.getInstance().initialize(sessionManager, pool);
 
-    ToolRegistry.registerDeviceAware(
-      "readProbe",
-      "Read-only probe",
-      z.object({}).passthrough(),
-      async (device: BootedDevice) => {
+    ToolRegistry.registerDeviceAware("readProbe", "Read-only probe", z.object({}).passthrough(), {
+      handler: async (device: BootedDevice) => {
         reads.push({ deviceId: device.deviceId, readPath: isSessionlessDeviceRead() });
         return { success: true };
       },
-      { deviceReadOnly: true, deviceReadiness: "booted" },
-    );
-    ToolRegistry.registerDeviceAware(
-      "controlProbe",
-      "Control probe",
-      z.object({}).passthrough(),
-      async () => ({ success: true }),
-      { deviceReadiness: "booted" },
-    );
+      deviceReadOnly: true,
+      deviceReadiness: "booted",
+    });
+    ToolRegistry.registerDeviceAware("controlProbe", "Control probe", z.object({}).passthrough(), {
+      handler: async () => ({ success: true }),
+      deviceReadiness: "booted",
+    });
   }
 
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.

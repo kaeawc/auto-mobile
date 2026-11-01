@@ -5,6 +5,7 @@ set -euo pipefail
 constants_path="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/src/constants/release.ts"
 release_version="${RELEASE_VERSION:-}"
 apk_checksum="${APK_SHA256_CHECKSUM:-}"
+protoviewer_apk_checksum="${PROTOVIEWER_APK_SHA256:-}"
 ios_checksum="${IOS_CTRL_PROXY_SHA256_CHECKSUM:-}"
 ios_app_hash="${IOS_CTRL_PROXY_APP_HASH:-}"
 ios_runner_sha256="${IOS_CTRL_PROXY_RUNNER_SHA256:-}"
@@ -21,7 +22,7 @@ max_registry_entries=100
 #   - Checksums only (no version): update registry[0] checksums in place
 #   - Nothing set: no-op
 has_checksums=false
-if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ]; then
+if [ -n "$apk_checksum" ] || [ -n "$protoviewer_apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ]; then
   has_checksums=true
 fi
 
@@ -34,6 +35,12 @@ fi
 if [ -n "$apk_checksum" ] && ! [[ "$apk_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: APK_SHA256_CHECKSUM must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${apk_checksum}"
+  exit 1
+fi
+
+if [ -n "$protoviewer_apk_checksum" ] && ! [[ "$protoviewer_apk_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: PROTOVIEWER_APK_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${protoviewer_apk_checksum}"
   exit 1
 fi
 
@@ -177,8 +184,8 @@ PY
 
 if [ -n "$release_version" ]; then
   # Mode: add new registry entry (requires every production release artifact).
-  if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$prototype_viewer_checksum" ] || [ -z "$network_filter_checksum" ]; then
-    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, PROTOTYPE_VIEWER_SHA256, and NETWORK_FILTER_SHA256"
+  if [ -z "$apk_checksum" ] || [ -z "$protoviewer_apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$prototype_viewer_checksum" ] || [ -z "$network_filter_checksum" ]; then
+    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, PROTOVIEWER_APK_SHA256, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, PROTOTYPE_VIEWER_SHA256, and NETWORK_FILTER_SHA256"
     exit 1
   fi
 
@@ -195,6 +202,7 @@ if [ -n "$release_version" ]; then
     version: \"${release_version}\",
     apkSha256: \"${apk_checksum}\",
     ipaSha256: \"${ios_checksum}\",
+    protoViewerApkSha256: \"${protoviewer_apk_checksum}\",
     runnerSha256: \"${ios_runner_sha256}\",
     runnerSha256Target: \"xctest\",
     videoJarSha256: \"${video_jar_checksum}\",
@@ -252,6 +260,10 @@ else
 
   if [ -n "$ios_checksum" ]; then
     update_registry_field "$tmp_file" "nightly" "ipaSha256" "$ios_checksum"
+  fi
+
+  if [ -n "$protoviewer_apk_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "protoViewerApkSha256" "$protoviewer_apk_checksum"
   fi
 
   if [ -n "$ios_runner_sha256" ]; then
@@ -328,6 +340,13 @@ if [ -n "$ios_checksum" ]; then
     update_registry_field "$tmp_file" "$release_version" "ipaSha256" "$ios_checksum"
   fi
   echo "   iOS CtrlProxy SHA256: ${ios_checksum}"
+fi
+
+if [ -n "$protoviewer_apk_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "protoViewerApkSha256" "$protoviewer_apk_checksum"
+  fi
+  echo "   ProtoViewer APK SHA256: ${protoviewer_apk_checksum}"
 fi
 
 if [ -n "$ios_runner_sha256" ]; then

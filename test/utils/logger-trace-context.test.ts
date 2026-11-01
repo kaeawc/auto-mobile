@@ -68,7 +68,7 @@ describe("logger trace context provider", () => {
         // installed it.
         setLogContextProvider(undefined);
         const component = mod.resolveProcessLogPrefix(process.argv, process.pid);
-        const expected = `${formatLogRecord(format, component, "INFO", "same message", [{ safe: 1 }])}\n`;
+        const expected = `${formatLogRecord(format, component, "INFO", { message: "same message", args: [{ safe: 1 }] })}\n`;
         withMcpTrace(ctx, () => mod.logger.info("same message", { safe: 1 }));
         setLogContextProvider(currentMcpTrace);
         mod.logger.info("same message", { safe: 1 });

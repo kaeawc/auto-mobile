@@ -556,6 +556,54 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_mediaLibrary_query_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["mediaLibrary"],
+        permissions: [{ name: "photos", purpose: "Show recent photos" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "mediaLibrary.query",
+                args: { media: { value: "images" } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_mediaLibrary_v1"],
+  },
+  prototype_platform_mediaLibrary_save_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["mediaLibrary"],
+        permissions: [{ name: "photosAdd", purpose: "Save a ticket" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "mediaLibrary.save", args: { media: { value: {} } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_mediaLibrary_v1"],
+  },
   prototype_platform_camera_v1: {
     minimalSpec: {
       ...base,
@@ -572,6 +620,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
               { type: "platform", call: "camera.takePhoto", args: { preview: { value: "vf" } } },
             ],
           },
+          { type: "cameraPreview", id: "vf" },
         ],
       },
     },
@@ -617,6 +666,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
               },
             ],
           },
+          { type: "cameraPreview", id: "vf" },
         ],
       },
     },
@@ -659,6 +709,38 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_notifications_scheduled_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["notifications"],
+        permissions: [{ name: "notifications", purpose: "Remind you" }],
+      },
+      notifications: { channels: [{ id: "reminders", name: "Reminders", importance: "default" }] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "notifications.schedule",
+                args: {
+                  id: { value: "eta" },
+                  channel: { value: "reminders" },
+                  title: { value: "Soon" },
+                  delaySeconds: { value: 60 },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
+  },
   prototype_platform_media_v1: {
     minimalSpec: {
       ...base,
@@ -676,6 +758,25 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     },
     ops: [],
     with: ["prototype_platform_v1"],
+  },
+  prototype_platform_media_queue_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["media"] },
+      data: { episodes: [{ id: "ep1", title: "Pilot", source: { sample: "tone440" } }] },
+      media: { players: { main: { kind: "audio", queue: "/data/episodes" } } },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "media.next", args: { player: { value: "main" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_media_v1", "prototype_data_model_v1"],
   },
   prototype_platform_cast_v1: {
     minimalSpec: {
@@ -753,6 +854,17 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: {
       ...base,
       requires: { platform: ["commerce"] },
+      commerce: {
+        backend: "fake",
+        products: [
+          {
+            id: "coins_100",
+            title: "100 coins",
+            kind: "consumable",
+            price: { amount: "0.99", currency: "USD" },
+          },
+        ],
+      },
       root: {
         ...base.root,
         children: [
@@ -772,13 +884,26 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_map_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["map"] },
+      root: {
+        ...base.root,
+        children: [{ type: "map", camera: { lat: 0, lng: 0, zoom: 2 } }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_sensors_v1: {
     minimalSpec: {
       ...base,
       requires: { platform: ["sensors"] },
+      sensors: { proximity: {} },
       root: {
         ...base.root,
-        children: [{ ...label, text: "{platform:/sensors/steps}" }],
+        children: [{ ...label, text: "{platform:/sensors/proximityNear}" }],
       },
     },
     ops: [],

@@ -108,8 +108,7 @@ interface AppDatabaseClient {
     appId: string,
     databasePath: string,
     table: string,
-    limit: number,
-    offset: number,
+    options: { limit: number; offset: number },
   ): Promise<TableDataResult>;
   getTableStructure(
     appId: string,
@@ -156,9 +155,9 @@ function createDatabaseClient(
       listDatabases: async (appId) => iosStorageRequest(() => client.listDatabasesForIos(appId)),
       listTables: async (appId, databasePath) =>
         iosStorageRequest(() => client.listTablesForIos(appId, databasePath)),
-      getTableData: async (_appId, databasePath, table, limit, offset) =>
+      getTableData: async (_appId, databasePath, table, { limit, offset }) =>
         iosStorageRequest(() =>
-          client.getTableDataForIos(_appId, databasePath, table, limit, offset),
+          client.getTableDataForIos(_appId, databasePath, table, { page: { limit, offset } }),
         ),
       getTableStructure: async (appId, databasePath, table) =>
         iosStorageRequest(() => client.getTableStructureForIos(appId, databasePath, table)),
@@ -425,7 +424,7 @@ async function getTableDataResource(
     }
 
     const inspector = createDatabaseClient(device, context, iosClient);
-    const data = await inspector.getTableData(appId, decodedPath, decodedTable, limit, offset);
+    const data = await inspector.getTableData(appId, decodedPath, decodedTable, { limit, offset });
     const lastUpdated = new Date().toISOString();
 
     return {
@@ -588,18 +587,23 @@ export function registerDatabaseResources(
   ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.DATABASES,
     "App Databases",
-    "List all SQLite databases in an Android or iOS app. Requires app to have AutoMobile SDK with database inspection enabled; iOS support requires a DEBUG SDK server.",
-    "application/json",
-    (params, context) => getDatabasesResource(params, context, iosClient),
+    {
+      description:
+        "List all SQLite databases in an Android or iOS app. Requires app to have AutoMobile SDK with database inspection enabled; iOS support requires a DEBUG SDK server.",
+      mimeType: "application/json",
+      handler: (params, context) => getDatabasesResource(params, context, iosClient),
+    },
   );
 
   // Register template for listing tables
   ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.TABLES,
     "Database Tables",
-    "List all tables in a database.",
-    "application/json",
-    (params, context) => getTablesResource(params, context, iosClient),
+    {
+      description: "List all tables in a database.",
+      mimeType: "application/json",
+      handler: (params, context) => getTablesResource(params, context, iosClient),
+    },
   );
 
   // Register template for table data. appId, limit, and offset are all
@@ -612,19 +616,24 @@ export function registerDatabaseResources(
   ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.TABLE_DATA,
     "Table Data",
-    "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
-    "application/json",
-    (params, context) => getTableDataResource(params, context, iosClient),
-    ["limit", "offset"],
+    {
+      description:
+        "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
+      mimeType: "application/json",
+      handler: (params, context) => getTableDataResource(params, context, iosClient),
+      paginationParams: ["limit", "offset"],
+    },
   );
 
   // Register template for table structure
   ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.TABLE_STRUCTURE,
     "Table Structure",
-    "Get column definitions for a database table.",
-    "application/json",
-    (params, context) => getTableStructureResource(params, context, iosClient),
+    {
+      description: "Get column definitions for a database table.",
+      mimeType: "application/json",
+      handler: (params, context) => getTableStructureResource(params, context, iosClient),
+    },
   );
 
   logger.info("[DatabaseResources] Registered database resources");

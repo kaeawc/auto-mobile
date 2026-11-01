@@ -6,7 +6,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { AppFileFileSystem } from "./appFileService";
-import type { ResetAppLogsRequest, SessionLogProvider } from "./DefaultSessionLogService";
+import type {
+  ResetAppLogsRequest,
+  SessionLogProvider,
+  UnifiedLogReadBounds,
+} from "./DefaultSessionLogService";
 import { SessionLogSourceError } from "./SessionLogSourceError";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 import type {
@@ -104,8 +108,7 @@ export class PhysicalIosSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: UnifiedLogWindowRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    { maxBytes, signal }: UnifiedLogReadBounds,
   ): Promise<UnifiedLogWindowResult> {
     if (this.deps.hostPlatform !== "darwin") {
       throw new SessionLogSourceError(
@@ -124,7 +127,8 @@ export class PhysicalIosSessionLogProvider implements SessionLogProvider {
       const archive = join(workDir, "window.logarchive");
       const stdout = await this.runBounded(
         device,
-        (childSignal) => this.collectAndShow(device, request, predicate, archive, childSignal),
+        (childSignal) =>
+          this.collectAndShow(device, request, predicate, { archive, signal: childSignal }),
         signal,
       );
       return unifiedLogWindowResult(request, stdout, maxBytes, {
@@ -142,8 +146,7 @@ export class PhysicalIosSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     request: UnifiedLogWindowRequest,
     predicate: string,
-    archive: string,
-    signal: AbortSignal,
+    { archive, signal }: { archive: string; signal: AbortSignal },
   ): Promise<string> {
     const options = { timeoutMs: this.deps.timeoutMs, signal };
     try {

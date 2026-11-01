@@ -16,6 +16,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../../utils/toolUtils";
 import { CARET_UNKNOWN_WARNING } from "./AndroidTypingConstants";
 import { readBackWithSettle } from "./readBackWithSettle";
+import type { KeyEventLetterCaseCheck } from "./KeyEventSupport";
 /** Field text and collapsed caret expected after the eventLast prefix insert (UTF-16 units). */
 interface EventLastCaretExpectation {
   text: string;
@@ -54,10 +55,7 @@ export interface EventLastTyperHost {
   verifyKeyEventLetterCase(
     text: string,
     typed: TextActionResult,
-    mode: "eventAll" | "eventOnly" | "eventLast",
-    signal?: AbortSignal,
-    display?: string,
-    before?: string,
+    check: KeyEventLetterCaseCheck,
   ): Promise<TextActionResult>;
   checkAbort(signal?: AbortSignal, error?: unknown): void;
   getKeyEventPlan(char: string, signal?: AbortSignal): Promise<KeyEventPlan | null>;
@@ -151,10 +149,7 @@ export class EventLastTyper implements AndroidModeTyper {
     const verified = await this.host.verifyKeyEventLetterCase(
       text,
       this.host.markPartialAfterMutation(suffixResult),
-      "eventLast",
-      signal,
-      display,
-      beforeText,
+      { mode: "eventLast", signal, display, before: beforeText },
     );
     return this.host.withTextWarnings(verified, [initialResult.warning]);
   }

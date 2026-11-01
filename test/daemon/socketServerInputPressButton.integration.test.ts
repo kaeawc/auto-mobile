@@ -118,13 +118,11 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "volume_up",
     });
-    expect(press).toHaveBeenCalledWith(
-      "volume_up",
-      expect.any(Number),
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("volume_up", {
+      timeoutMs: expect.any(Number),
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -148,13 +146,12 @@ describe("UnixSocketServer input/pressButton", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith(
-      "back",
-      30_000,
-      "frame-1",
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("back", {
+      timeoutMs: 30_000,
+      frameContext: "frame-1",
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("routes iOS button presses through the existing pressButton implementation", async () => {
@@ -182,13 +179,11 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "home",
     });
-    expect(press).toHaveBeenCalledWith(
-      "home",
-      expect.any(Number),
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("home", {
+      timeoutMs: expect.any(Number),
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("threads the client-supplied timeout budget into the button implementation", async () => {
@@ -216,13 +211,11 @@ describe("UnixSocketServer input/pressButton", () => {
     );
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith(
-      "home",
-      500,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("home", {
+      timeoutMs: 500,
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("maps the socket app_switch contract name to the existing recent button implementation", async () => {
@@ -250,13 +243,11 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "app_switch",
     });
-    expect(press).toHaveBeenCalledWith(
-      "recent",
-      expect.any(Number),
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("recent", {
+      timeoutMs: expect.any(Number),
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
@@ -300,13 +291,11 @@ describe("UnixSocketServer input/pressButton", () => {
       deviceId: "emulator-5554",
       button: "back",
     });
-    expect(press).toHaveBeenCalledWith(
-      "back",
-      expect.any(Number),
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("back", {
+      timeoutMs: expect.any(Number),
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("propagates clear unsupported platform-gap errors from the button implementation", async () => {
@@ -329,13 +318,11 @@ describe("UnixSocketServer input/pressButton", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("iOS has no menu hardware button");
-    expect(press).toHaveBeenCalledWith(
-      "menu",
-      expect.any(Number),
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("menu", {
+      timeoutMs: expect.any(Number),
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("forwards the tracked session abort signal to press on the bound-session path (#6289)", async () => {
@@ -347,11 +334,9 @@ describe("UnixSocketServer input/pressButton", () => {
     const press = mock(
       async (
         button: string,
-        _timeoutMs?: number,
-        _frameContext?: string,
-        signal?: AbortSignal,
+        options: { signal?: AbortSignal } = {},
       ): Promise<PressButtonResult> => {
-        receivedSignal = signal;
+        receivedSignal = options.signal;
         return { success: true, button, keyCode: 3 };
       },
     );
@@ -394,13 +379,11 @@ describe("UnixSocketServer input/pressButton", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith(
-      "home",
-      expect.any(Number),
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(press).toHaveBeenCalledWith("home", {
+      timeoutMs: expect.any(Number),
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
     expect(receivedSignal).toBeInstanceOf(AbortSignal);
   });
 
@@ -464,8 +447,8 @@ describe("UnixSocketServer input/pressButton", () => {
     spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
     const deviceRequest = spyOn(client, "requestGlobalAction").mockImplementation(
       async (...args: Parameters<typeof client.requestGlobalAction>) => {
-        args[4]?.throwIfAborted();
-        args[5]?.();
+        args[3]?.signal?.throwIfAborted();
+        args[3]?.onDispatch?.();
         sent = true;
         operationStarted.resolve();
         await releaseOperation.promise;
@@ -521,8 +504,8 @@ describe("UnixSocketServer input/pressButton", () => {
       async (...args: Parameters<typeof client.requestGlobalAction>) => {
         operationStarted.resolve();
         await releaseOperation.promise;
-        args[4]?.throwIfAborted();
-        args[5]?.();
+        args[3]?.signal?.throwIfAborted();
+        args[3]?.onDispatch?.();
         sent = true;
         return { success: true, totalTimeMs: 1, action: "global" };
       },

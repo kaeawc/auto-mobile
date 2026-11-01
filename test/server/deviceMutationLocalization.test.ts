@@ -84,19 +84,15 @@ describe("changeLocalization journal priors on Android", () => {
   });
 
   test("the journal prior reader takes the app-locale prior and keeps calendarSystem's", async () => {
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({ calendarSystem: "gregory" }) },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({ calendarSystem: "gregory" }) },
+      observationReaders: {
         dataReader: new LocalizationMutationPriorReader(() =>
           source({}, { userId: 0, locales: "" }),
         ),
         deviceStateReader: { read: async (_device, mutations) => mutations.map(() => UNOBSERVED) },
       },
-    );
+    });
     expect(
       await reader.read(ANDROID, [APP_LOCALE, { kind: "device-setting", key: "calendarSystem" }]),
     ).toEqual([
@@ -150,6 +146,20 @@ describe("AdbLocalizationPriorSource", () => {
       createExecResult(`Unknown package ${APP} for userId 0`, ""),
     );
     expect(await new AdbLocalizationPriorSource(missing).readAppLocales(APP)).toBeNull();
+  });
+
+  test("with more than one running user there is no prior, so reset escalates", async () => {
+    const fake = adb(34);
+    fake.setUsers([
+      { userId: 0, name: "Owner", flags: 0x4000, running: true },
+      { userId: 10, name: "Work", flags: 0x1030, running: true },
+    ]);
+    fake.setCommandResponse(
+      "get-app-locales",
+      createExecResult(`Locales for ${APP} for user 0 are [fr-FR]\n`, ""),
+    );
+    expect(await new AdbLocalizationPriorSource(fake).readAppLocales(APP)).toBeNull();
+    expect(fake.getExecutedCommands().some((c) => c.includes("get-app-locales"))).toBe(false);
   });
 
   test("a settings row reads as its raw value, null when unset, unreadable on stderr", async () => {

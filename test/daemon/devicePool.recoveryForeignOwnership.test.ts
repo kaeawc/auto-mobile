@@ -125,7 +125,7 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
           upserts.push(session.sessionUuid);
         },
         async recordActivity() {},
-        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+        async markReleased(_sessionUuid, status, releasedAtMs, { reason: releaseReason }) {
           releaseReasons.push(releaseReason);
           persisted.status = status;
           persisted.released_at_ms = releasedAtMs;
@@ -148,10 +148,12 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
   };
 
   const resume = async (a: Awaited<ReturnType<typeof restartedDaemonA>>) =>
-    await a.sessions.getOrCreateSession(SESSION, a.pool, "android", undefined, true).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    await a.sessions
+      .getOrCreateSession(SESSION, a.pool, "android", { requireIssuedSession: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
   test("a live foreign claim refuses recovery with device_owned_by_other_daemon and leaves it unassigned", async () => {
     const store = new SharedClaimStore();
@@ -222,8 +224,7 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
         DAEMON_A_PID,
         source,
         { query: async () => ({ kind: "unsupported", detail: "fake" }) },
-        () => undefined,
-        timer,
+        { ownerSocketPath: () => undefined, timer },
       );
       const mirror = new StoreDeviceClaimMirror({
         platform: "android",
@@ -420,8 +421,7 @@ describe("startup rehydration respects foreign device claims", () => {
           },
         }),
       },
-      () => undefined,
-      timer,
+      { ownerSocketPath: () => undefined, timer },
     );
     ownership.attachClaimMirror(mirror);
     const devices = new FakeDeviceManager();

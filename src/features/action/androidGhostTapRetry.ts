@@ -18,8 +18,7 @@ export async function checkAndroidTapHierarchyChange(
   timer: Timer,
   refresh: (timeoutMs: number) => Promise<ViewHierarchyResult | null>,
   hash: (hierarchy: ViewHierarchyResult) => string | null,
-  preTapHash: string | null,
-  signal?: AbortSignal,
+  { preTapHash, signal }: { preTapHash: string | null; signal?: AbortSignal },
 ): Promise<
   | { status: "unavailable" }
   | { status: "changed" }

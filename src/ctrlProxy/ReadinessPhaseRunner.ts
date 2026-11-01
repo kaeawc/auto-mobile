@@ -1,4 +1,5 @@
 import { ActionableError, toActionableError } from "../models";
+import { isAdbDeviceAuthorizingError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import type { AdjustableDeadline } from "../utils/AdjustableDeadline";
@@ -11,6 +12,7 @@ import type {
   RunnerReadinessPhase,
 } from "./RunnerReadinessAttemptContext";
 import { RunnerReadinessError } from "./RunnerReadinessError";
+import { isForegroundUserPending } from "./setupUser";
 import { normalizeDiagnostic, phaseElapsedLabel } from "./runnerReadinessDiagnosticText";
 
 export const READINESS_PROBE_TIMEOUT_MS = 2_000;
@@ -36,8 +38,10 @@ export class ReadinessPhaseRunner {
     context: ReadinessAttemptContext,
     phase: RunnerReadinessPhase,
     attempts: number,
-    operation: (signal: AbortSignal) => Promise<T>,
-    operationDeadlineMs?: number,
+    {
+      operation,
+      operationDeadlineMs,
+    }: { operation: (signal: AbortSignal) => Promise<T>; operationDeadlineMs?: number },
   ): Promise<T> {
     const remainingMs = Math.min(
       this.remainingForPhase(context, phase),
@@ -46,7 +50,8 @@ export class ReadinessPhaseRunner {
         : Math.max(0, operationDeadlineMs - this.timer.now()),
     );
     if (remainingMs <= 0) {
-      this.fail(context, phase, attempts, "readiness budget exhausted before phase started", {
+      this.fail(context, phase, attempts, {
+        detail: "readiness budget exhausted before phase started",
         deadlineExhausted: true,
       });
     }
@@ -132,7 +137,8 @@ export class ReadinessPhaseRunner {
       }
       // An operation fault remains a fault; only the owned deadline or a
       // request abort captured at that deadline is a timeout.
-      return this.fail(context, phase, attempts, error, {
+      return this.fail(context, phase, attempts, {
+        detail: error,
         deadlineExhausted: phaseTimedOut || callerTimedOut,
       });
     } finally {
@@ -237,12 +243,15 @@ export class ReadinessPhaseRunner {
     context: ReadinessAttemptContext,
     phase: RunnerReadinessPhase,
     attempts: number,
-    detail: unknown,
-    options: {
+    {
+      detail,
+      ...options
+    }: {
+      detail: unknown;
       deadlineExhausted?: boolean;
       failureKind?: "ctrlproxy_forward_unavailable";
       previousAttemptDetails?: readonly string[];
-    } = {},
+    },
   ): never {
     const { device } = context;
     const mapping =
@@ -263,14 +272,19 @@ export class ReadinessPhaseRunner {
       options.failureKind
         ? `${detailMessage}; ${readinessContext}`
         : `${readinessContext}: ${detailMessage}`,
-      device.platform === "android" &&
-        ReadinessPhaseRunner.isSetupPhase(phase) &&
-        isAndroidFrameworkUnavailable(detail),
-      options.deadlineExhausted ?? false,
-      phase,
-      attempts,
-      detail,
-      options.failureKind,
+      {
+        retryableAndroidFrameworkFailure:
+          device.platform === "android" &&
+          ReadinessPhaseRunner.isSetupPhase(phase) &&
+          (isAndroidFrameworkUnavailable(detail) ||
+            isForegroundUserPending(detail) ||
+            isAdbDeviceAuthorizingError(detail)),
+        deadlineExhausted: options.deadlineExhausted ?? false,
+        phase,
+        attempts,
+        diagnosticCause: detail,
+        failureKind: options.failureKind,
+      },
     );
     if (options.deadlineExhausted) {
       context.deadlineFailure = failure;

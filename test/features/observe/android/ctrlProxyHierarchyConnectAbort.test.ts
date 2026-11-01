@@ -92,14 +92,11 @@ describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
     const h = createHangingConnectHarness();
     const controller = new AbortController();
 
-    const pending = h.hierarchy.getLatestHierarchy(
-      false,
-      1000,
-      undefined,
-      false,
-      0,
-      controller.signal,
-    );
+    const pending = h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+      signal: controller.signal,
+    });
     await h.connectStarted;
     controller.abort();
 
@@ -112,7 +109,9 @@ describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
     const h = createHangingConnectHarness();
     const controller = new AbortController();
 
-    const pending = h.hierarchy.requestHierarchySync(undefined, false, controller.signal, 1000);
+    const pending = h.hierarchy.requestHierarchySync(undefined, false, controller.signal, {
+      timeoutMs: 1000,
+    });
     await h.connectStarted;
     controller.abort();
 
@@ -124,14 +123,11 @@ describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const result = await h.hierarchy.getLatestHierarchy(
-      false,
-      1000,
-      undefined,
-      false,
-      0,
-      controller.signal,
-    );
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+      signal: controller.signal,
+    });
 
     expect(result).toEqual({ hierarchy: null, fresh: false });
   });

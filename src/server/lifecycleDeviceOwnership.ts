@@ -165,16 +165,13 @@ export function assertLifecycleCallerMayStopRestartReservation({
     reservation?.foreignConnection ||
     pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester, identity)
   ) {
-    throw new InputDeviceOwnedError(
-      toolName,
-      device.deviceId,
-      requester.sessionUuid,
-      undefined,
-      `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
+    throw new InputDeviceOwnedError(toolName, device.deviceId, requester.sessionUuid, {
+      message:
+        `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
         `${requester.sessionUuid}'s device-restart recovery, and this connection did not own ` +
         "that session when the device restarted. Call from the owning connection, or wait for " +
         "the recovery window to end. force: true does not override naming another client's session.",
-    );
+    });
   }
   assertNotStoppingAnotherRestartHold(pool, { toolName, device, requester }, reservation);
 }
@@ -221,20 +218,17 @@ function assertNotStoppingAnotherRestartHold(
   if (!differentSession) {
     return;
   }
-  throw new InputDeviceOwnedError(
-    toolName,
-    device.deviceId,
-    requester.sessionUuid,
-    undefined,
-    `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
+  throw new InputDeviceOwnedError(toolName, device.deviceId, requester.sessionUuid, {
+    message:
+      `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
       `${reservation.sessionUuid}'s device-restart recovery. ` +
       (requester.sessionUuid
         ? `Session ${requester.sessionUuid} does not hold it. `
         : "This connection holds another device session. ") +
       `Retry in ${reservation.retryAfterMs}ms, once the recovery window ends. ` +
       "force: true does not override a reservation held for another session.",
-    reservation.retryAfterMs,
-  );
+    retryAfterMs: reservation.retryAfterMs,
+  });
 }
 
 /** Remedy text for a lifecycle call refused because another live daemon holds the device. */

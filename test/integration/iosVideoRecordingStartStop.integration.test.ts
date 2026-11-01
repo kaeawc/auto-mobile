@@ -153,16 +153,13 @@ async function startVideoRecordingSessionHeartbeat(
   // Keep one daemon socket open for the lifetime of the recording. Spawning a
   // fresh CLI process every two seconds can exceed the command deadline on a
   // loaded macOS runner even after the daemon accepted the heartbeat.
-  const client = new DaemonClient(
-    undefined,
-    undefined,
-    defaultTimer,
-    {},
-    {
+  const client = new DaemonClient(undefined, undefined, defaultTimer, {
+    recoveryOptions: {},
+    clientIdentity: {
       version: DAEMON_VERSION,
       build: computeBuildIdentity(LOCAL_CLI_ENTRYPOINT),
     },
-  );
+  });
   await client.connect();
   try {
     const heartbeat = await startSessionOwnershipHeartbeat({

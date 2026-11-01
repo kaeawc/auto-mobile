@@ -16,13 +16,18 @@ import type {
   BrokerAdmissionInput,
 } from "./store";
 
+/** The admission decision a pending acquisition timing records. */
+export interface PendingAdmissionTiming {
+  kind: "create" | "reuse" | "evict" | "wait";
+  now: number;
+  creationProfile?: unknown;
+}
+
 function continuedAcquisitionTiming(
   previous: SessionBrokerAcquisitionTiming,
   request: BrokerRequestRecord,
   resource: BrokerResourceRecord,
-  kind: "create" | "reuse" | "evict" | "wait",
-  now: number,
-  creationProfile: unknown,
+  { kind, now, creationProfile }: PendingAdmissionTiming,
 ) {
   if (
     kind === "wait" ||
@@ -53,16 +58,15 @@ export function pendingAcquisitionTiming(
   input: BrokerAdmissionInput,
   request: BrokerRequestRecord,
   resource: BrokerResourceRecord,
-  kind: "create" | "reuse" | "evict" | "wait",
-  now: number,
-  creationProfile?: unknown,
+  admission: PendingAdmissionTiming,
 ) {
+  const { kind, now, creationProfile } = admission;
   if (input.timingStartedAtMs === undefined) {
     return {};
   }
   const previous = request.timing?.acquisition;
   if (previous) {
-    return continuedAcquisitionTiming(previous, request, resource, kind, now, creationProfile);
+    return continuedAcquisitionTiming(previous, request, resource, admission);
   }
   const acquisition: SessionBrokerAcquisitionTiming = {
     admission: kind === "evict" ? "evict-then-create" : kind,

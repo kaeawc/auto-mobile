@@ -31,11 +31,10 @@ describe("navigation telemetry device and count (#10195)", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    manager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      new FakeTimer(),
-    );
+    manager = NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+      testCoverageRepository: new TestCoverageRepository({ db }),
+      timer: new FakeTimer(),
+    });
     records = [];
     const repository: TelemetryRepository = {
       ...getNoOpTelemetryRepository(),

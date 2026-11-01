@@ -27,6 +27,15 @@ export type RefusedRowWriteGuard = NonNullable<
   UpsertActiveSessionOptions["rewriteOverSupersededRelease"]
 > & { supersededReasons?: readonly string[] };
 
+/** The release a refused row write belongs to, when it is a release's write. */
+export interface RefusedRowWriteRelease {
+  /** The reason of the release whose row write was refused. */
+  writingReleaseReason?: string;
+  unlessDaemonShutdown?: boolean;
+  resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
+  incarnation?: Session;
+}
+
 /** A terminal reason ends the UUID unless it is one the writing release itself replaces. */
 function endsTheUuid(reason: string, guard: RefusedRowWriteGuard): boolean {
   return isTerminalReleaseReason(reason) && !(guard.supersededReasons ?? []).includes(reason);
@@ -177,13 +186,11 @@ export class SupersededSessionRows {
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
     sessionId: string,
     guard: RefusedRowWriteGuard,
-    write: (guard: RefusedRowWriteGuard) => Promise<T>,
-    releaseReason?: string,
-    releaseOptions: {
-      unlessDaemonShutdown?: boolean;
-      resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
-      incarnation?: Session;
-    } = {},
+    {
+      write,
+      writingReleaseReason: releaseReason,
+      ...releaseOptions
+    }: RefusedRowWriteRelease & { write: (guard: RefusedRowWriteGuard) => Promise<T> },
   ): Promise<T> {
     const resolveRow = (row: DeviceSession | undefined) => {
       const withGuard = (current: DeviceSession | undefined) => ({

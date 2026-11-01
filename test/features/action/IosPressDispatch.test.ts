@@ -148,13 +148,12 @@ for (const action of [
           action === "recentApps tool"
             ? new RecentApps(device, null, h.timer)["executeIosRecentApps"](controller.signal)
             : action === "input/key"
-              ? new InputKey(
-                  device,
-                  new FakeAdbClientFactory(),
-                  undefined,
-                  h.timer,
-                  () => client,
-                ).press("enter", 50, undefined, [], {
+              ? new InputKey(device, {
+                  adbFactory: new FakeAdbClientFactory(),
+                  timer: h.timer,
+                  iosClientFactory: () => client,
+                }).press("enter", 50, undefined, {
+                  modifiers: [],
                   signal: controller.signal,
                   onDispatch: () => dispatchCount++,
                 })
@@ -163,12 +162,10 @@ for (const action of [
                     durationMs: 300,
                     signal: controller.signal,
                   })
-                : new PressButton(device, null, h.timer).press(
-                    action,
-                    50,
-                    undefined,
-                    controller.signal,
-                  );
+                : new PressButton(device, null, h.timer).press(action, {
+                    timeoutMs: 50,
+                    signal: controller.signal,
+                  });
         const outcome = pending.then(
           (value) => ({ value }),
           (error) => ({ error: error as unknown }),

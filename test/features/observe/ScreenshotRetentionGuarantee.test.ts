@@ -160,12 +160,18 @@ describe.each([3, 6])("round 4 scale run with %d simulators", (sims) => {
 });
 
 describe("overload past the ceiling", () => {
-  test("evicts under pressure instead of failing the capture and keeps each newest three", async () => {
-    const limits: ScreenshotRetentionLimits = {
-      ...DEFAULT_SCREENSHOT_RETENTION_LIMITS,
-      ceilingBytes: 256 * MiB,
-    };
-    const result = await run(6, 30, limits);
+  const limits: ScreenshotRetentionLimits = {
+    ...DEFAULT_SCREENSHOT_RETENTION_LIMITS,
+    ceilingBytes: 256 * MiB,
+  };
+  let result: RoundFour;
+  beforeAll(async () => {
+    // 180 captures under eviction pressure: replay once outside the per-test budget, like the
+    // scale runs above, and assert on the outcome.
+    result = await run(6, 30, limits);
+  });
+
+  test("evicts under pressure instead of failing the capture and keeps each newest three", () => {
     expect(result.peakBytes).toBeLessThanOrEqual(limits.ceilingBytes);
     expect(evictionWarnings(result).length).toBeGreaterThan(0);
     for (let sim = 0; sim < 6; sim++) {

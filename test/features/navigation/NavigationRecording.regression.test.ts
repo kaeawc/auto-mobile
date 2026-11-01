@@ -41,15 +41,14 @@ describe("navigation recording source state and routing", () => {
     harness = await installInMemoryNavManager();
   });
   beforeEach(async () => {
-    repository = new NavigationRepository(harness.db);
+    repository = new NavigationRepository({ db: harness.db });
     await repository.clearAppGraph(APP);
     timer = new FakeTimer();
     timer.setCurrentTime(100_000);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
-    );
+    });
     NavigationGraphManager.setInstanceForTesting(manager);
     await navigate("Home");
   });
@@ -77,8 +76,11 @@ describe("navigation recording source state and routing", () => {
       capture.structuredContent,
     );
     try {
-      const handle = recorder.record("tapOn", recordedArgs, undefined, undefined, {
-        recordsNavigation: true,
+      const handle = recorder.record("tapOn", recordedArgs, undefined, {
+        sessionUuid: undefined,
+        traits: {
+          recordsNavigation: true,
+        },
       });
       if (!handle) {
         throw new Error("Expected navigation recording handle");
@@ -103,11 +105,10 @@ describe("navigation recording source state and routing", () => {
 
   for (const knownApp of [false, true]) {
     test(`unknown start screen preserves selections on dispatch, known app=${knownApp}`, async () => {
-      manager = NavigationGraphManager.createForTesting(
-        repository,
-        new TestCoverageRepository(harness.db),
+      manager = NavigationGraphManager.createForTesting(repository, {
+        testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
         timer,
-      );
+      });
       if (knownApp) {
         await manager.setCurrentApp(APP);
       }
@@ -146,8 +147,14 @@ describe("navigation recording source state and routing", () => {
   });
 
   test("old routed DB rows collapse in reads, counts, adjacency, and replay identity", async () => {
-    const older = await repository.createEdge(APP, "Home", "DemoIndex", "tapOn", args, 200);
-    const newest = await repository.createEdge(APP, "Home", "DemoIndex", "tapOn", routed, 100);
+    const older = await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: args },
+      timestamp: 200,
+    });
+    const newest = await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: routed },
+      timestamp: 100,
+    });
     expect(newest.id).toBeGreaterThan(older.id);
     expect(await repository.getDistinctEdges(APP)).toEqual([newest]);
     expect(await repository.getEdgesFrom(APP, "Home")).toEqual([newest]);
@@ -169,15 +176,14 @@ describe("navigation recording source state and routing", () => {
   test("normalization preserves action arguments, inputs, and distinct actions", async () => {
     expect(stripNavigationToolParams(routed)).toEqual(args);
     expect(routed.deviceId).toBe("emulator-5600");
-    await repository.createEdge(APP, "Home", "DemoIndex", "tapOn", args, 1);
-    await repository.createEdge(
-      APP,
-      "Home",
-      "DemoIndex",
-      "tapOn",
-      { ...args, action: "longPress" },
-      2,
-    );
+    await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: args },
+      timestamp: 1,
+    });
+    await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: { ...args, action: "longPress" } },
+      timestamp: 2,
+    });
     expect(await repository.getDistinctEdges(APP)).toHaveLength(2);
   });
 });

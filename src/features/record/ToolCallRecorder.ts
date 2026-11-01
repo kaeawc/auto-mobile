@@ -112,10 +112,11 @@ export function isReadOnlyCall(toolName: string, params: Record<string, unknown>
  * to excluded device-management tools). PlanExecutor re-injects `sessionUuid`
  * at replay, which satisfies the tool's explicit-device-target guard, so a
  * recorded `confirm: true` would make a replay wipe the iOS Simulator Keychain
- * of every app with no prompt. The recorder therefore writes the guard as
- * `false`: the step still parses (the schema requires the field) and the tool
- * refuses with its own "Set confirm: true to proceed" error until the plan's
- * author flips it by hand.
+ * of every app, or delete an Android app's declared Keystore aliases, with no
+ * prompt. The recorder therefore writes the guard as `false` on every platform:
+ * Android does not need `confirm`, but refuses an explicit `false`, so on both
+ * platforms the tool stops with its own "Set confirm: true to proceed" error
+ * until the plan's author flips it by hand (#16274).
  */
 const DESTRUCTIVE_CONFIRM_PARAMS: Readonly<Record<string, readonly string[]>> = {
   resetKeychain: ["confirm"],

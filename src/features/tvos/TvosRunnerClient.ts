@@ -59,6 +59,14 @@ interface Pending {
   reject(error: unknown): void;
 }
 
+function expectedReplyType(requestType: string): string {
+  return requestType === "request_hierarchy"
+    ? "hierarchy_update"
+    : requestType === "request_screenshot"
+      ? "screenshot"
+      : `${requestType.slice("request_".length)}_result`;
+}
+
 export class WebSocketTvosRunnerClient implements TvosRunnerClient {
   private readonly socket: TvosSocket;
   private readonly pending = new Map<string, Pending>();
@@ -150,12 +158,7 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
         ),
       );
     } else if (
-      response.type ===
-        (pending.type === "request_hierarchy"
-          ? "hierarchy_update"
-          : pending.type === "request_screenshot"
-            ? "screenshot"
-            : `${pending.type.slice("request_".length)}_result`) &&
+      response.type === expectedReplyType(pending.type) &&
       (response.success === true ||
         (["request_hierarchy", "request_screenshot"].includes(pending.type) &&
           response.success === undefined))

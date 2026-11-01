@@ -47,6 +47,7 @@ import {
   DefaultCtrlProxyCodesignVerifier,
 } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 import { sortedReaddir } from "../utils/io";
+import { matchesXctestrunPlatform } from "./IosXctestrunPlatform";
 import { ENV, readEnvBool, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export {
@@ -375,19 +376,7 @@ export class IosCtrlProxyBuilder {
       }
 
       // The release-mode default remains iOS-only even when local watch products share this dir.
-      const platformFilter = {
-        device: "iphoneos",
-        simulator: "iphonesimulator",
-        watchSimulator: "watchsimulator",
-        tvSimulator: "appletvsimulator",
-        any: "",
-      }[cacheKey];
-      const candidates = xctestrunFiles.filter(
-        (file) =>
-          file.includes(platformFilter) &&
-          (platform === "watchSimulator" || !file.includes("watchsimulator")) &&
-          (platform === "tvSimulator" || !file.includes("appletvsimulator")),
-      );
+      const candidates = xctestrunFiles.filter((file) => matchesXctestrunPlatform(file, platform));
 
       if (candidates.length === 0) {
         return null;

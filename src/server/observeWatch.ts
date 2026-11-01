@@ -185,10 +185,7 @@ export async function observeWatch(
   const { png, width, height } = await captureWatchPng(
     device,
     display.captureKey,
-    dependencies.screenshots ??
-      (platform === "tvos" && tvosRunners.get(device.deviceId)
-        ? runnerTvosScreenshotSource
-        : simctlWatchScreenshotSource),
+    dependencies.screenshots ?? defaultWatchScreenshotSource(device),
     signal,
   );
   // A cancelled call must not leave a retained screenshot nobody will read.
@@ -258,13 +255,20 @@ function watchObservationPayload(
   };
 }
 
+function defaultWatchScreenshotSource(device: BootedDevice): WatchScreenshotSource {
+  return device.platform === "tvos" && tvosRunners.get(device.deviceId)
+    ? runnerTvosScreenshotSource
+    : simctlWatchScreenshotSource;
+}
+
 const runnerTvosScreenshotSource: WatchScreenshotSource = {
   capture: async (device, _display, signal) => {
     const data = await tvosRunners
       .require(device.deviceId)
       .request({ type: "request_screenshot" }, signal);
-    if (typeof data !== "string")
+    if (typeof data !== "string") {
       throw new ActionableError("Invalid tvOS screenshot; reconnect the runner.");
+    }
     return Buffer.from(data, "base64");
   },
 };

@@ -235,7 +235,9 @@ describe("deleteDevice on an Apple TV simulator", () => {
     await runner.start({ deviceId: udid });
     for (const devices of Object.values(simctl.listing.devices)) {
       const index = devices.findIndex((tv) => tv.udid === udid);
-      if (index >= 0) devices.splice(index, 1);
+      if (index >= 0) {
+        devices.splice(index, 1);
+      }
     }
     await expect(remove(target(udid), "client-b")).rejects.toBeInstanceOf(ActionableError);
     expect(launcher.stops).toBe(0);

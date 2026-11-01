@@ -9,7 +9,9 @@ export function unsupportedTvosAction(action: string): never {
   );
 }
 export function rejectTvosTouch(platform: Platform, action: string): void {
-  if (platform === "tvos") unsupportedTvosAction(action);
+  if (platform === "tvos") {
+    unsupportedTvosAction(action);
+  }
 }
 export async function tvosPress(
   deviceId: string,
@@ -17,7 +19,9 @@ export async function tvosPress(
   signal?: AbortSignal,
 ): Promise<PressButtonResult> {
   const action = TV_REMOTE_BUTTONS.find((value): value is TVRemoteButton => value === button);
-  if (!action) unsupportedTvosAction(`press ${button}`);
+  if (!action) {
+    unsupportedTvosAction(`press ${button}`);
+  }
   signal?.throwIfAborted();
   await tvosRunners.require(deviceId).request({ type: "request_press_button", action }, signal);
   return { success: true, button, keyCode: 0 };

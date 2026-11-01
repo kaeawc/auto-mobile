@@ -117,7 +117,6 @@ import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.File
 import java.util.UUID
 import kotlin.math.max
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1703,20 +1702,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val logBuffer = BoundedLogBuffer(capacity = 128, stats = workStats)
       logEventBuffer = logBuffer
       serviceScope.launch {
-        var reportedFailure = false
-        for (response in logBuffer.channel) {
-          try {
-            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-              webSocketServer.broadcast(response)
-            }
-            reportedFailure = false
-          } catch (e: CancellationException) {
-            throw e
-          } catch (e: Exception) {
-            if (!reportedFailure) Log.w(TAG, "Error broadcasting log event", e)
-            reportedFailure = true
-          }
-        }
+        logBuffer.drainTo(
+          isRunning = { ::webSocketServer.isInitialized && webSocketServer.isRunning() },
+          broadcast = { webSocketServer.broadcast(it) },
+          onFailure = { Log.w(TAG, "Error broadcasting log event", it) },
+        )
       }
       logcatReader =
         LogcatReader(

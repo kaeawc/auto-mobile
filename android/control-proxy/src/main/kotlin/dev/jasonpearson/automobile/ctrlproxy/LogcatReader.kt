@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.LogEventResponse
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.channels.Channel
 
 /** Parses one logcat line before the resulting event enters the shared delivery queue. */
@@ -72,6 +73,31 @@ internal class BoundedLogBuffer(
       return channel.trySend(response).isSuccess
     }
     return false
+  }
+
+  /**
+   * Broadcasts queued events until the channel closes, dropping those taken while the server is
+   * down. Only the first failure of a streak reaches [onFailure], so a dead socket cannot flood the
+   * log with one warning per line; the next event that is not a failure re-arms it.
+   */
+  @Suppress("TooGenericExceptionCaught") // Any send failure must not end the drain loop.
+  suspend fun drainTo(
+    isRunning: () -> Boolean,
+    broadcast: suspend (WebSocketResponse) -> Unit,
+    onFailure: (Exception) -> Unit,
+  ) {
+    var reportedFailure = false
+    for (response in channel) {
+      try {
+        if (isRunning()) broadcast(response)
+        reportedFailure = false
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        if (!reportedFailure) onFailure(e)
+        reportedFailure = true
+      }
+    }
   }
 }
 

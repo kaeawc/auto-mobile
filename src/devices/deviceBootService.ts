@@ -5,7 +5,10 @@ import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { errorMessage } from "../utils/describeUnknownError";
-import { runWithDeviceExecutionBinding } from "../utils/deviceExecutionBinding";
+import {
+  ambientDeviceExecutionBinding,
+  runWithDeviceExecutionBinding,
+} from "../utils/deviceExecutionBinding";
 import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import { DeviceBootExecution } from "./DeviceBootExecution";
@@ -292,6 +295,8 @@ export class DeviceBootService {
       hasExplicitConstraints,
       context,
     );
+    // Explicit selection owns this target; shared display reads do not bind executions.
+    ambientDeviceExecutionBinding.bindDeviceExecution(enriched.device.deviceId);
     const [resolvedRunning] = await hydrateRequiredDisplayInventories(
       [enriched.device],
       criteria.requires,

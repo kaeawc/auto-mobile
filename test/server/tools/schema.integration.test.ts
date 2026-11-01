@@ -230,10 +230,10 @@ describe("MCP Tools Schema", () => {
     }
   });
 
-  test("tapOn should default action to 'tap' when omitted", async () => {
+  test("tapOn leaves action unset when omitted; the handler resolves tap or longPress", async () => {
     const { tapOnSchema } = await import("../../../src/server/interactionTools");
     const result = tapOnSchema.parse({ platform: "android", selector: { text: "Online" } });
-    expect(result.action).toBe("tap");
+    expect(result.action).toBeUndefined();
   });
 
   // Issue #5872 / #5886: every observation-producing action tool gains observe's

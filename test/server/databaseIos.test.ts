@@ -63,6 +63,7 @@ describe("iOS database inspection server integration", function () {
   };
   const useIosClient = (overrides: Partial<IosDatabaseClient>): void => {
     const client: IosDatabaseClient = {
+      queryCoreDataForIos: unusedIos,
       executeSQLForIos: unusedIos,
       listDatabasesForIos: unusedIos,
       listTablesForIos: unusedIos,
@@ -93,6 +94,70 @@ describe("iOS database inspection server integration", function () {
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
     serverConfig.setEmbeddedSdkEnabled(false);
+  });
+
+  test("Core Data mode forwards only the store, entity and limit and preserves truncation", async () => {
+    const calls: unknown[][] = [];
+    useIosClient({
+      queryCoreDataForIos: async (...args) => {
+        calls.push(args);
+        return { type: "query", columns: ["name"], rows: [["Apple"]], truncated: true };
+      },
+    });
+    registerDatabaseTools(iosClient);
+    const tool = ToolRegistry.getTool("sqlQuery")!;
+    const result = await tool.deviceAwareHandler!(iosDevice, {
+      appId: "com.example.app",
+      store: "Main",
+      entity: "Item",
+      limit: 2,
+    });
+    expect(calls).toEqual([["com.example.app", "Main", "Item", 2]]);
+    expect(result).toMatchObject({
+      structuredContent: { type: "query", rows: [["Apple"]], truncated: true },
+    });
+    expect(tool.isDeviceReadOnlyCall?.({ store: "Main", entity: "Item" })).toBe(true);
+  });
+
+  test("Core Data SDK refusal reaches the tool client with mapped entity guidance", async () => {
+    const failure = new Error(
+      "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true): unknown_core_data_entity",
+    );
+    useIosClient({
+      queryCoreDataForIos: async () => {
+        throw failure;
+      },
+    });
+    registerDatabaseTools(iosClient);
+    const error = await rejectionOf(
+      ToolRegistry.getTool("sqlQuery")!.deviceAwareHandler!(iosDevice, {
+        appId: "com.example.app",
+        store: "PlaygroundItems",
+        entity: "Nope",
+      }),
+    );
+    expect(error.message).toBe(
+      "The requested Core Data entity is not registered for this store (unknown_core_data_entity). The entity must be one of the store's registered entities.",
+    );
+    expect(error.cause).toBe(failure);
+    const result = shapeToolCallError(error, { toolName: "sqlQuery", source: "MCP" });
+    expect(result.content[0].text).toContain(error.message);
+    expect(result.content[0].text).not.toContain("database inspection unavailable");
+  });
+
+  test("Core Data mode refuses Android before contacting a database bridge", async () => {
+    registerDatabaseTools(iosClient);
+    const tool = ToolRegistry.getTool("sqlQuery")!;
+    await expect(
+      tool.deviceAwareHandler!(
+        { deviceId: "android-1", platform: "android", name: "Android" },
+        {
+          appId: "com.example.app",
+          store: "Main",
+          entity: "Item",
+        },
+      ),
+    ).rejects.toThrow("Core Data queries require an iOS app");
   });
 
   test.each(["timeout", "not_connected", "sdk_capability_query_failed"] as const)(

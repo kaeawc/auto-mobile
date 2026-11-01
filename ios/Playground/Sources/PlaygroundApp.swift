@@ -30,7 +30,8 @@ struct PlaygroundApp: App {
                 DatabaseInspector.shared.authorizeMutationToken(arguments[flagIndex + 1])
             }
             do {
-                try PlaygroundDatabaseFixture().install(allowMutations: allowStorageMutations)
+                let databaseURL = try PlaygroundDatabaseFixture().install(allowMutations: allowStorageMutations)
+                try PlaygroundCoreDataFixture.install(beside: databaseURL)
             } catch {
                 AutoMobileLog.shared.e("PlaygroundApp", "database_fixture_failed error=\(error.localizedDescription)")
             }

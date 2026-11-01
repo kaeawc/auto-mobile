@@ -1,4 +1,11 @@
+import AutoMobileSdkWire
 import Foundation
+
+/// Host-owned read seam. Implementations fetch at most `limit` rows and report whether more exist.
+/// Use the host coordinator/context; never save, mutate objects, or open a writer for inspection.
+public protocol CoreDataReadOnlyFetching: Sendable {
+    func fetch(entity: String, limit: Int) throws -> CoreDataQueryResult
+}
 
 /// How a store that other processes (app extensions, a widget, another app in the same
 /// app group) can open is coordinated. The host declares it; the SDK never infers it.
@@ -20,19 +27,27 @@ public struct CoreDataStoreRegistration: Sendable, Codable {
     /// How cross-process access is coordinated; only meaningful with `appGroup`. Nil is
     /// reported as uncoordinated.
     public let coordination: StoreCoordination?
+    /// Runtime-only read access, omitted from advertised metadata and decoded as nil.
+    public var fetcher: (any CoreDataReadOnlyFetching)? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case identifier, modelVersion, entities, appGroup, coordination
+    }
 
     public init(
         identifier: String,
         modelVersion: String? = nil,
         entities: [String] = [],
         appGroup: String? = nil,
-        coordination: StoreCoordination? = nil
+        coordination: StoreCoordination? = nil,
+        fetcher: (any CoreDataReadOnlyFetching)? = nil
     ) {
         self.identifier = identifier
         self.modelVersion = modelVersion
         self.entities = entities
         self.appGroup = appGroup
         self.coordination = coordination
+        self.fetcher = fetcher
     }
 }
 

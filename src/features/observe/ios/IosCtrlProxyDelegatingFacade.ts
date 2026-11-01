@@ -868,6 +868,17 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   // Delegated Public Methods - Database (SQLite)
   // ===========================================================================
 
+  async queryCoreDataForIos(
+    appId: string,
+    store: string,
+    entity: string,
+    limit?: number,
+  ): Promise<import("../../database/DatabaseInspector").SQLResult> {
+    const options = sdkCapabilityQueryOptions(this.timer, 5000);
+    await this.sdkCapability.requireSdkCapability("database", appId, options);
+    return this.database.queryCoreData(appId, store, entity, { limit, timeout: options });
+  }
+
   async executeSQLForIos(
     appId: string,
     databasePath: string,

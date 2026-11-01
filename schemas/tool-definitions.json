@@ -44924,7 +44924,7 @@
       "destructiveHint": true,
       "idempotentHint": true
     },
-    "description": "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization, without confirm. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
+    "description": "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -44947,7 +44947,7 @@
           "minLength": 1
         },
         "confirm": {
-          "description": "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not use confirm; app opt-in, declared aliases and the SDK mutation gate authorize deletion.",
+          "description": "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize deletion), but confirm: false refuses the reset.",
           "type": "boolean"
         },
         "platform": {
@@ -58115,7 +58115,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Execute SQL on app SQLite database.",
+    "description": "Execute SQL on an app SQLite database, or read a registered Core Data entity on iOS using store and entity.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -58127,12 +58127,28 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "databasePath": {
-          "description": "Absolute path under the app data directory, or on Android a bare file name in the app databases directory",
+          "description": "Absolute path under the app data directory, or on Android a bare file name in the app databases directory; omit when store and entity are supplied",
           "type": "string"
         },
         "query": {
-          "description": "SQL query",
+          "description": "SQL query; omit when store and entity are supplied",
           "type": "string"
+        },
+        "store": {
+          "description": "Registered Core Data store identifier on iOS; supply with entity instead of databasePath and query",
+          "type": "string",
+          "minLength": 1
+        },
+        "entity": {
+          "description": "Registered Core Data entity to fetch on iOS; requires store",
+          "type": "string",
+          "minLength": 1
+        },
+        "limit": {
+          "description": "Maximum Core Data rows; only with store and entity, clamped to the host row limit",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
         },
         "platform": {
           "type": "string",
@@ -58150,7 +58166,7 @@
           "type": "string"
         }
       },
-      "required": ["appId", "databasePath", "query"],
+      "required": ["appId"],
       "additionalProperties": false
     },
     "outputSchema": {

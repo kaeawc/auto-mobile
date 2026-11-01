@@ -190,7 +190,8 @@ final class CommandHandler: CommandHandling {
             return try await dispatchPreferences(request, startTime: startTime)
         case .setNetworkMockRules, .setNetworkFaultRules, .setNetworkErrorSimulation, .getSdkCapabilities:
             return try await dispatchNetwork(request, startTime: startTime)
-        case .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData, .getTableStructure:
+        case .queryCoreData, .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData,
+             .getTableStructure:
             return try await dispatchDatabase(request, startTime: startTime)
         }
     }
@@ -405,6 +406,8 @@ final class CommandHandler: CommandHandling {
         async throws -> any WebSocketResponsePayload
     {
         switch request {
+        case let .queryCoreData(payload):
+            return await handleQueryCoreData(payload, startTime: startTime)
         case let .executeSql(payload):
             return await handleExecuteSql(payload, startTime: startTime)
         case let .listDatabases(payload):

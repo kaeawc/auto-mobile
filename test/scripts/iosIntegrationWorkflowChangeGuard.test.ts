@@ -94,3 +94,50 @@ describe("Fast Validation independence from XCTestRunner", () => {
     }
   });
 });
+
+describe("advisory watchOS simulator smoke", () => {
+  const watchWorkflow = ".github/workflows/watchos-sim-smoke.yml";
+
+  test("runs standalone on nightly, dispatch and labelled PR updates", () => {
+    const document = load(readFileSync(join(repoRoot, watchWorkflow), "utf8")) as {
+      on: {
+        schedule: { cron: string }[];
+        workflow_dispatch: unknown;
+        pull_request: { types: string[] };
+      };
+    };
+    expect(document.on.schedule).toHaveLength(1);
+    expect(document.on).toHaveProperty("workflow_dispatch");
+    expect(document.on.pull_request.types).toEqual([
+      "opened",
+      "synchronize",
+      "reopened",
+      "labeled",
+    ]);
+    const job = loadWorkflow(watchWorkflow).jobs?.["watchos-sim-smoke"];
+    expect(job?.["runs-on"]).toBe("macos-26");
+    expect(job?.if).toBe(
+      "github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-watchos-sim')",
+    );
+    expect(job?.needs).toBeUndefined();
+    expect(Object.keys(loadWorkflow(watchWorkflow).jobs ?? {})).toEqual(["watchos-sim-smoke"]);
+    expect(JSON.stringify(loadWorkflow(WORKFLOW))).not.toContain("watchos-sim-smoke");
+  });
+
+  test("pins Xcode and preserves private namespace and failure artifacts", () => {
+    const steps = loadJobSteps(watchWorkflow, "watchos-sim-smoke");
+    expect(steps.find((step) => step.name === "Select Xcode 26.5")?.with?.["xcode-version"]).toBe(
+      "26.5",
+    );
+    expect(steps.find((step) => step.name === "Ensure watchOS runtime")?.run).toContain(
+      "xcodebuild -downloadPlatform watchOS",
+    );
+    const smoke = steps.find((step) => step.name === "Run watch smoke");
+    expect(smoke?.run).toContain('mktemp -d "${RUNNER_TEMP}/watch-aux.XXXXXX"');
+    expect(smoke?.run).toContain('watch-smoke-lane.sh "${WATCH_SMOKE_VERSION}"');
+    const upload = steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
+    expect(upload?.if).toBe("failure()");
+    expect(upload?.with?.path).toContain("scratch/watch-smoke-lane/");
+    expect(upload?.with?.path).toContain("!scratch/watch-smoke-lane/**/derived-data/**");
+  });
+});

@@ -5,6 +5,7 @@ import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import type { PlistReader, PlistWriter } from "../../../utils/ios-cmdline-tools/PlistClient";
 import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
 import type { PrototypeJson } from "../prototypeSpec";
+import { prototypeRequiresSchema } from "../prototypePlatformSchema";
 import type { PrototypeAssetUpload } from "../prototypeAssets";
 import { isPrototypeBundleId, prototypeBundleId } from "./iosPrototypeBundleId";
 import type { IconRenderer, PrototypeIconInput } from "./iosPrototypeIconRenderer";
@@ -74,6 +75,35 @@ export interface PrototypeInstallInput {
   icon?: PrototypeIconInput;
 }
 
+const permissionUsageKeys = new Map<string, string>([
+  ["camera", "NSCameraUsageDescription"],
+  ["microphone", "NSMicrophoneUsageDescription"],
+  ["location", "NSLocationWhenInUseUsageDescription"],
+  ["locationBackground", "NSLocationAlwaysAndWhenInUseUsageDescription"],
+  ["photos", "NSPhotoLibraryUsageDescription"],
+  ["photosAdd", "NSPhotoLibraryAddUsageDescription"],
+  ["contacts", "NSContactsUsageDescription"],
+  ["calendar", "NSCalendarsFullAccessUsageDescription"],
+  ["bluetooth", "NSBluetoothAlwaysUsageDescription"],
+  ["motion", "NSMotionUsageDescription"],
+  ["speech", "NSSpeechRecognitionUsageDescription"],
+]);
+
+function permissionUsageStrings(spec: PrototypeJson): Record<string, string> {
+  const requires = prototypeRequiresSchema.parse(
+    spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
+  );
+  const strings: Record<string, string> = {};
+  for (const permission of requires.permissions ?? []) {
+    // Notifications and nearbyWifi have no iOS Info.plist usage key.
+    const key = permissionUsageKeys.get(permission.name);
+    if (key) {
+      strings[key] = permission.purpose;
+    }
+  }
+  return strings;
+}
+
 async function step<T>(
   run: () => Promise<T>,
   error: (cause: unknown) => ActionableError,
@@ -114,7 +144,7 @@ export class IosPrototypeInstaller {
         (cause) => new TemplateCopyError(cause),
       );
       await step(
-        () => this.rewritePlist(app, bundleId, displayName),
+        () => this.rewritePlist(app, bundleId, displayName, input.spec),
         (cause) => new PlistRewriteError(cause),
       );
       await step(
@@ -178,14 +208,28 @@ export class IosPrototypeInstaller {
     );
   }
 
-  private async rewritePlist(app: string, bundleId: string, displayName: string): Promise<void> {
+  private async rewritePlist(
+    app: string,
+    bundleId: string,
+    displayName: string,
+    spec: PrototypeJson,
+  ): Promise<void> {
     const plistPath = path.posix.join(app, "Info.plist");
     const value = await this.deps.plist.readJsonFile(plistPath);
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("Template Info.plist must be a dictionary");
     }
+    const derived: Record<string, unknown> = { ...value };
+    for (const key of Object.keys(derived)) {
+      if (/^NS.*UsageDescription$/.test(key) || key === "UIBackgroundModes") {
+        delete derived[key];
+      }
+    }
+    // Omit UIBackgroundModes: the shared background vocabulary has no documented,
+    // unambiguous mapping to Apple's modes. Never inherit modes from the template.
     await this.deps.plist.writeXmlFromJson(plistPath, {
-      ...value,
+      ...derived,
+      ...permissionUsageStrings(spec),
       CFBundleIdentifier: bundleId,
       CFBundleDisplayName: displayName,
       CFBundleName: displayName,

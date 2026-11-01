@@ -805,20 +805,8 @@ const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermis
   return withIsErrorOnFailure(response, result.success);
 };
 
-export function registerAppTools(dependencies: AppToolsDependencies = {}) {
-  const {
-    listAppsHandler,
-    launchAppDependencies,
-    launchAppHandler,
-    terminateAppHandler,
-    uninstallAppHandler,
-    installAppHandler,
-    crashAppHandler,
-    appLifecycleHandler,
-    inspectPackageSigningToolDependencies,
-    setAppPermissionsHandler,
-  } = createAppToolHandlers(dependencies);
-  const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {
+const createResetKeychainHandler =
+  (dependencies: AppToolsDependencies) => async (device: BootedDevice, args: ResetKeychainArgs) => {
     // A destructive, device-wide reset must target an explicitly selected device.
     // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
     // present the device was ambiently resolved and the action refuses to run.
@@ -837,6 +825,21 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
     return withIsErrorOnFailure(createStructuredToolResponse({ ...result }), result.success);
   };
+
+export function registerAppTools(dependencies: AppToolsDependencies = {}) {
+  const {
+    listAppsHandler,
+    launchAppDependencies,
+    launchAppHandler,
+    terminateAppHandler,
+    uninstallAppHandler,
+    installAppHandler,
+    crashAppHandler,
+    appLifecycleHandler,
+    inspectPackageSigningToolDependencies,
+    setAppPermissionsHandler,
+  } = createAppToolHandlers(dependencies);
+  const resetKeychainHandler = createResetKeychainHandler(dependencies);
   unsubscribePrototypeAgentLifecycle?.();
   unsubscribePrototypeAgentLifecycle = subscribePrototypeAgentLifecycle(launchAppDependencies);
   const inspectPackageSigningHandler = async (

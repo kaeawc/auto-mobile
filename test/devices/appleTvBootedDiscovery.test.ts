@@ -1,3 +1,5 @@
+import { bootedSweepsFor } from "../../src/devices/bootedDiscoveryAppend";
+import { resolveBootedAppleTvForCall } from "../../src/daemon/readiness/appleTvReadiness";
 import { describe, expect, test } from "bun:test";
 import fixture from "../fixtures/ios-simctl/list-all-appletv-26-5.json";
 import { FakeAppleTvSimctl } from "../fakes/FakeAppleTvSimctl";
@@ -33,6 +35,29 @@ describe("booted Apple TV discovery", () => {
     expect(result.succeededSources).toEqual(new Set(["tvos-simulator"]));
     expect(result.freshDeviceIds).toEqual(new Set([tv.udid]));
     expect(discoverySourceFor("tvos", tv.udid)).toBe("tvos-simulator");
+  });
+  test("an unqualified discovery never sweeps Apple TVs", () => {
+    expect(bootedSweepsFor("either", {}).tvos).toBe(false);
+    expect(bootedSweepsFor("either", { includeWatchOs: true }).tvos).toBe(false);
+    expect(bootedSweepsFor("tvos", {}).tvos).toBe(true);
+  });
+  test("explicit TV readiness uses fresh simctl discovery and no automation preparation", async () => {
+    const { simctl, manager } = host();
+    const tv = simctl.listing.devices[runtimeId][0];
+    tv.state = "Booted";
+    expect(await resolveBootedAppleTvForCall(manager, tv.udid, undefined)).toEqual({
+      deviceId: tv.udid,
+      name: tv.name,
+      platform: "tvos",
+    });
+    tv.state = "Shutdown";
+    await expect(resolveBootedAppleTvForCall(manager, tv.udid, undefined)).rejects.toThrow(
+      "No booted Apple TV",
+    );
+    simctl.listingError = new Error("simctl unavailable");
+    await expect(resolveBootedAppleTvForCall(manager, tv.udid, undefined)).rejects.toThrow(
+      "discovery failed",
+    );
   });
   test("an empty host is complete", async () => {
     const { simctl, manager } = host();

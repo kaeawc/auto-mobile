@@ -142,6 +142,19 @@ assert_cleaned() {
 }
 
 teardown() {
+  # Bats displays teardown stdout only when the test fails.
+  if [[ -n ${output:-} ]]; then
+    printf '%s\n' '--- captured output (last 40 lines) ---' || true
+    printf '%s\n' "${output:-}" | tail -n 40 || true
+  fi
+  if [[ -n ${PROTOTYPE_MCP_SMOKE_LOG_DIR:-} && -f ${PROTOTYPE_MCP_SMOKE_LOG_DIR:-}/smoke.log ]]; then
+    printf '%s\n' '--- smoke.log (last 40 lines) ---' || true
+    tail -n 40 -- "${PROTOTYPE_MCP_SMOKE_LOG_DIR:-}/smoke.log" || true
+  fi
+  if [[ -n ${STUB_LOG:-} && -f ${STUB_LOG:-} ]]; then
+    printf '%s\n' '--- STUB_LOG (last 40 lines) ---' || true
+    tail -n 40 -- "${STUB_LOG:-}" || true
+  fi
   if [[ -n ${lane_pid:-} ]]; then
     local record command_pid watcher_pid _caller_pid
     for record in "$BATS_TEST_TMPDIR"/pgid.* "$PROTOTYPE_MCP_SMOKE_LOG_DIR"/inflight.*/pgid.*; do

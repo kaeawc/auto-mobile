@@ -128,6 +128,19 @@ STUB
 }
 
 teardown() {
+  # Bats displays teardown stdout only when the test fails.
+  if [[ -n ${output:-} ]]; then
+    printf '%s\n' '--- captured output (last 40 lines) ---' || true
+    printf '%s\n' "${output:-}" | tail -n 40 || true
+  fi
+  if [[ -n ${WATCH_SMOKE_LOG_DIR:-} && -f ${WATCH_SMOKE_LOG_DIR:-}/smoke.log ]]; then
+    printf '%s\n' '--- smoke.log (last 40 lines) ---' || true
+    tail -n 40 -- "${WATCH_SMOKE_LOG_DIR:-}/smoke.log" || true
+  fi
+  if [[ -n ${CALLS:-} && -f ${CALLS:-} ]]; then
+    printf '%s\n' '--- CALLS (last 40 lines) ---' || true
+    tail -n 40 -- "${CALLS:-}" || true
+  fi
   if [[ -n ${lane_pid:-} ]]; then
     # The test starts this private group; timeout commands have separate groups.
     local record command_pid watcher_pid _caller_pid

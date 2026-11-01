@@ -232,7 +232,7 @@ describe("performance poll in-memory repository", () => {
     const server = new TestablePerformanceStreamSocketServer(
       "/fake/performance.sock",
       timer,
-      new PerformanceAuditRepository(db, timer),
+      new PerformanceAuditRepository({ db, timer }),
       { authenticator: { authorize() {} } },
     );
     const response = await server.handleRequestForTest({

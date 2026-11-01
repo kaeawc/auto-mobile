@@ -38,7 +38,7 @@ describe("VideoRecordingRepository owner scope with a base session (#11533)", ()
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new VideoRecordingRepository(db);
+    repo = new VideoRecordingRepository({ db });
     const rows: Array<[string, string | undefined]> = [
       ["derived", "plan-base:pixel"],
       ["sibling", "plan-base:tablet"],

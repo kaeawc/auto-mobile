@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 export interface DeviceSnapshotRecord extends DeviceSnapshotMetadata {}
 
@@ -202,7 +203,7 @@ function buildUpdatePayload(update: Partial<DeviceSnapshotRecord>): DeviceSnapsh
 export class DeviceSnapshotRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.db = db ?? null;
   }
 

@@ -90,10 +90,9 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
-import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.GlobalActionResult
 import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.PermissionResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.RequestCommitText
@@ -110,7 +109,6 @@ import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
-import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
@@ -123,7 +121,6 @@ import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -281,43 +278,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     // Result broadcast actions
     const val ACTION_OPERATION_RESULT = "dev.jasonpearson.automobile.OPERATION_RESULT"
-
-    /**
-     * Pure bitmask computation for [applyAccessibilityFlags], extracted so the equality check that
-     * guards the disruptive `serviceInfo =` reassignment (see call site) is unit-testable without a
-     * live [AccessibilityService]/Robolectric harness.
-     */
-    internal fun computeAccessibilityServiceFlags(
-      currentFlags: Int,
-      includeNotImportantViews: Boolean,
-      reportViewIds: Boolean,
-      retrieveInteractiveWindows: Boolean,
-    ): Int {
-      var flags = currentFlags
-
-      flags =
-        if (includeNotImportantViews) {
-          flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-        } else {
-          flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
-        }
-
-      flags =
-        if (reportViewIds) {
-          flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-        } else {
-          flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
-        }
-
-      flags =
-        if (retrieveInteractiveWindows) {
-          flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-        } else {
-          flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS.inv()
-        }
-
-      return flags
-    }
 
     /**
      * Preserves the legacy `systemInsets` contract for gesture callers while typed categories
@@ -633,6 +593,103 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
+  private val globalActionController by lazy {
+    GlobalActionController(
+      host =
+        object : GlobalActionController.Host {
+          override fun performGlobalAction(actionId: Int) =
+            this@CtrlProxy.performGlobalAction(actionId)
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+          override suspend fun broadcast(result: GlobalActionResult) =
+            webSocketServer.broadcast(result)
+        },
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+    )
+  }
+  private val screenshotRequests by lazy {
+    ScreenshotRequestHandler(
+      host =
+        object : ScreenshotRequestHandler.Host {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+
+          override suspend fun broadcast(response: WebSocketResponse) =
+            webSocketServer.broadcast(response)
+
+          override suspend fun broadcast(frame: String) = webSocketServer.broadcast(frame)
+
+          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
+
+          override fun activeDisplayId() = this@CtrlProxy.activeDisplayId()
+
+          override fun panelUniqueId(displayId: Int) = displayController.panelUniqueId(displayId)
+
+          override suspend fun capture(displayId: Int) =
+            dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+              screenshotController.takeScreenshotAsync(displayId)
+            }
+
+          override suspend fun captureWithPrototypeHidden(displayId: Int) =
+            this@CtrlProxy.captureWithPrototypeHidden(displayId)
+        },
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+    )
+  }
+  private val hierarchyExtractCommands by lazy {
+    HierarchyExtractCommandHandler(
+      object : HierarchyExtractCommandHandler.Host {
+        override fun cleanupUuidHierarchyFiles() = hierarchyController.cleanupUuidHierarchyFiles()
+
+        override fun extractHierarchy(textFilter: String?, disableAllFiltering: Boolean) =
+          hierarchyController.extractHierarchy(textFilter, disableAllFiltering)
+
+        override fun serialize(hierarchy: ViewHierarchy) =
+          perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+
+        override fun writeHierarchyToFile(
+          hierarchy: ViewHierarchy,
+          filename: String,
+          serialized: String,
+        ) = hierarchyController.writeHierarchyToFile(hierarchy, filename, serialized = serialized)
+
+        override suspend fun broadcastHierarchyUpdate(
+          hierarchy: ViewHierarchy,
+          serialized: String,
+          requestId: String,
+        ) =
+          hierarchyController.broadcastHierarchyUpdate(
+            hierarchy,
+            serialized = serialized,
+            requestId = requestId,
+          )
+
+        override fun releaseFrameContext(hierarchy: ViewHierarchy) {
+          hierarchyController.extractedHierarchyFrameContexts.remove(hierarchy)
+        }
+
+        override fun sendResult(success: Boolean, data: String?, error: String?) =
+          this@CtrlProxy.sendResult(success, data, error)
+
+        override suspend fun sendErrorFrame(frame: ErrorResponse?) =
+          broadcastHierarchyExtractFrame(frame)
+      },
+    )
+  }
+  private val permissionController by lazy {
+    PermissionController(
+      permissions = { permission, request ->
+        permissionManager.getPermissionState(permission, request)
+      },
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+      resultSender = resultSender,
+    )
+  }
   private lateinit var overlayDrawer: OverlayDrawer
   private val clipboardManager by lazy {
     getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -705,6 +762,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val appDiscovery by lazy {
+    AppDiscoveryController(
+      source =
+        object : AppDiscoveryController.Source {
+          override fun keystore(packageName: String) =
+            dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(
+              this@CtrlProxy,
+              packageName,
+            )
+
+          override fun sdkCapabilities(packageName: String, userId: Int?) =
+            dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
+              this@CtrlProxy,
+              packageName,
+              userId,
+            )
+        },
+      asyncActionRunner = asyncActionRunner,
+      resultSender = resultSender,
+      timeProvider = timeProvider,
+    )
+  }
   private val clipboardController by lazy {
     ClipboardController(
       clipboardManager = { clipboardManager },
@@ -760,7 +839,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
 
-          override fun occlusionEnabled() = this@CtrlProxy.occlusionEnabled
+          override fun occlusionEnabled() = accessibilityFlags.occlusionEnabled
 
           override fun wakefulness() = deviceInfoController.getWakefulness()
 
@@ -883,31 +962,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun createView() = View(this@CtrlProxy)
 
           override suspend fun publishSettledHierarchy() {
-            val freshHierarchy =
-              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
-                quiescenceMs = HierarchyQuiescence.POLL_MS,
-                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-                pollIntervalMs = 10L,
-              )
-            if (freshHierarchy != null) {
-              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
-            }
+            hierarchyController.publishSettledHierarchy()
           }
 
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
-
-          override suspend fun sendActionResult(outcome: NodeActionResult) =
-            this@CtrlProxy.broadcastActionResult(
-              outcome.requestId,
-              outcome.action,
-              outcome.success,
-              outcome.error,
-              outcome.totalTimeMs,
-              outcome.alreadySatisfied,
-            )
         },
       perfProvider = perfProvider,
       timeProvider = timeProvider,
+      resultSender = resultSender,
     )
   }
   private val focusController by lazy {
@@ -987,15 +1049,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
 
           override suspend fun publishSettledHierarchy() {
-            val freshHierarchy =
-              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
-                quiescenceMs = HierarchyQuiescence.POLL_MS,
-                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-                pollIntervalMs = 10L,
-              )
-            if (freshHierarchy != null) {
-              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
-            }
+            hierarchyController.publishSettledHierarchy()
           }
         },
       serviceScope = serviceScope,
@@ -1095,12 +1149,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
 
           override suspend fun settledHierarchy(displayId: Int?) =
-            hierarchyController.debouncer.extractAfterQuiescenceSuspending(
-              quiescenceMs = HierarchyQuiescence.POLL_MS,
-              maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-              pollIntervalMs = 10L,
-              snapshotOptions = HierarchySnapshotOptions(displayId = displayId),
-            )
+            hierarchyController.settledHierarchy(displayId)
 
           override suspend fun publishHierarchy(hierarchy: ViewHierarchy) =
             hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)
@@ -1115,20 +1164,121 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       gestureThreadFactory = { gestureThreadFactory() },
     )
   @Volatile private var lastWindowClassName: String? = null
-  /**
-   * Changes immediately on a native UI event; capture and input share this device-owned context.
-   */
-  private val frameContext = AtomicLong(0)
-  /** Fresh for every service process, preventing a restarted runner from reusing an old token. */
-  private val frameContextEpoch = UUID.randomUUID().toString()
+  private val frameContextGate =
+    FrameContextGate(
+      epoch = UUID.randomUUID().toString(),
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+      broadcast = { webSocketServer.broadcast(it) },
+    )
+
+  private val staleFrames =
+    StaleFrameRejector(
+      isStale = frameContextGate::isStale,
+      host =
+        object : StaleFrameRejector.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override suspend fun broadcastTapCoordinatesResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+          ) =
+            gestureController.broadcastTapCoordinatesResult(requestId, success, error, totalTimeMs)
+
+          override suspend fun broadcastSwipeResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+            gestureTimeMs: Long?,
+          ) =
+            gestureController.broadcastSwipeResult(
+              requestId,
+              success,
+              error,
+              totalTimeMs,
+              gestureTimeMs,
+            )
+
+          override suspend fun broadcastDragResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+            gestureTimeMs: Long?,
+          ) =
+            gestureController.broadcastDragResult(
+              requestId,
+              success,
+              error,
+              totalTimeMs,
+              gestureTimeMs,
+            )
+
+          override suspend fun broadcastSetTextResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+          ) = textInputController.broadcastSetTextResult(requestId, success, error, totalTimeMs)
+
+          override suspend fun broadcastImeActionResult(outcome: ImeActionFrameResult) =
+            textInputController.broadcastImeActionResult(outcome)
+
+          override suspend fun broadcastGlobalActionResult(
+            result: GlobalActionResult,
+          ) = webSocketServer.broadcast(result)
+        },
+      timeProvider = timeProvider,
+    )
+
+  private val accessibilityEvents =
+    AccessibilityEventDispatcher(
+      object : AccessibilityEventDispatcher.Host {
+        override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+        override fun onTextSelectionChanged(fromIndex: Int, toIndex: Int) =
+          textInputController.onTextSelectionChanged(fromIndex, toIndex)
+
+        override fun onWindowStateChanged(className: String?) {
+          lastWindowClassName = className
+        }
+
+        override fun advanceFrameContext() = frameContextGate.advance()
+
+        override fun connectionCount() =
+          if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+
+        override fun recordInteraction(event: AccessibilityEvent, dispatch: InteractionDispatch) =
+          interactionEventController.record(event, dispatch)
+
+        override fun refreshHierarchy() = hierarchyController.onAccessibilityEvent()
+      },
+    )
 
   private val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
-  private fun currentFrameContext(): String = "$frameContextEpoch:${frameContext.get()}"
+  private fun currentFrameContext(): String = frameContextGate.current()
 
-  // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
-  // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
-  @Volatile private var occlusionEnabled: Boolean = true
+  private val accessibilityFlags =
+    AccessibilityFlagsController(
+      object : AccessibilityFlagsController.Host {
+        override fun updateServiceFlags(compute: (currentFlags: Int) -> Int?): Boolean {
+          val info = serviceInfo ?: return false
+          val flags = compute(info.flags) ?: return true
+          info.flags = flags
+          serviceInfo = info
+          return true
+        }
+      },
+    )
 
   // Job for collecting navigation event updates
   private var navigationEventJob: Job? = null
@@ -1866,7 +2016,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
     val hidePrototypes = request.hidePrototypes
 
-    broadcastScreenshot(requestId, displayId, hidePrototypes)
+    screenshotRequests.broadcastScreenshot(requestId, displayId, hidePrototypes)
   }
 
   override suspend fun requestDoubleTapCoordinates(
@@ -1876,7 +2026,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     frameContext: String?,
     displayId: Int?,
   ) {
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
+      return
     gestureController.performTapCoordinates(
       RequestTapCoordinates(
         requestId = requestId,
@@ -1892,140 +2043,37 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun requestTapCoordinates(request: RequestTapCoordinates) {
     val requestId = request.requestId
-    val x = request.x
-    val y = request.y
-    val duration = request.duration
     val frameContext = request.frameContext
-    val displayId = request.displayId
-
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    gestureController.performTapCoordinates(
-      RequestTapCoordinates(
-        requestId = requestId,
-        x = x,
-        y = y,
-        duration = duration,
-        frameContext = frameContext,
-        displayId = displayId,
-      ),
-    )
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
+      return
+    // A plain tap request is never a double tap; that arrives as its own request.
+    gestureController.performTapCoordinates(request.copy(doubleTap = false))
   }
 
   override suspend fun requestSwipe(request: RequestSwipe) {
     val requestId = request.requestId
-    val x1 = request.x1
-    val y1 = request.y1
-    val x2 = request.x2
-    val y2 = request.y2
-    val duration = request.duration
     val frameContext = request.frameContext
-    val displayId = request.displayId
-
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
-    gestureController.performSwipe(
-      RequestSwipe(
-        requestId = requestId,
-        x1 = x1,
-        y1 = y1,
-        x2 = x2,
-        y2 = y2,
-        duration = duration,
-        frameContext = frameContext,
-        displayId = displayId,
-      ),
-    )
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE))
+      return
+    gestureController.performSwipe(request)
   }
 
-  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
-    val requestId = request.requestId
-    val x1 = request.x1
-    val y1 = request.y1
-    val x2 = request.x2
-    val y2 = request.y2
-    val duration = request.duration
-    val offset = request.offset
-    val displayId = request.displayId
-
-    gestureController.performTwoFingerSwipe(
-      RequestTwoFingerSwipe(
-        requestId = requestId,
-        x1 = x1,
-        y1 = y1,
-        x2 = x2,
-        y2 = y2,
-        duration = duration,
-        offset = offset,
-        displayId = displayId,
-        fingerCount = request.fingerCount,
-      ),
-    )
-  }
+  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) =
+    gestureController.performTwoFingerSwipe(request)
 
   override suspend fun requestDrag(request: RequestDrag) {
     val requestId = request.requestId
-    val x1 = request.x1
-    val y1 = request.y1
-    val x2 = request.x2
-    val y2 = request.y2
-    val pressDurationMs = request.resolvedPressDurationMs
-    val dragDurationMs = request.resolvedDragDurationMs
-    val holdDurationMs = request.holdDurationMs
     val frameContext = request.frameContext
-    val displayId = request.displayId
-
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
-    gestureController.performDrag(
-      RequestDrag(
-        requestId = requestId,
-        x1 = x1,
-        y1 = y1,
-        x2 = x2,
-        y2 = y2,
-        pressDurationMs = pressDurationMs,
-        dragDurationMs = dragDurationMs,
-        holdDurationMs = holdDurationMs,
-        frameContext = frameContext,
-        displayId = displayId,
-      ),
-    )
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG))
+      return
+    // The drag reads the resolved durations, so the legacy holdTime/duration fields need no copy.
+    gestureController.performDrag(request)
   }
 
-  override suspend fun requestPinch(request: RequestPinch) {
-    val requestId = request.requestId
-    val centerX = request.centerX
-    val centerY = request.centerY
-    val distanceStart = request.distanceStart
-    val distanceEnd = request.distanceEnd
-    val rotationDegrees = request.rotationDegrees
-    val duration = request.duration
-    val displayId = request.displayId
+  override suspend fun requestPinch(request: RequestPinch) = gestureController.performPinch(request)
 
-    gestureController.performPinch(
-      RequestPinch(
-        requestId = requestId,
-        centerX = centerX,
-        centerY = centerY,
-        distanceStart = distanceStart,
-        distanceEnd = distanceEnd,
-        rotationDegrees = rotationDegrees,
-        duration = duration,
-        displayId = displayId,
-      ),
-    )
-  }
-
-  override suspend fun requestGestureStart(request: RequestGestureStart) {
-    gestureController.startStream(
-      RequestGestureStart(
-        requestId = request.requestId,
-        gestureId = request.gestureId,
-        x = request.x,
-        y = request.y,
-        displayId = request.displayId,
-      ),
-      requester = CommandOriginContext.currentClient(),
-    )
-  }
+  override suspend fun requestGestureStart(request: RequestGestureStart) =
+    gestureController.startStream(request, requester = CommandOriginContext.currentClient())
 
   override suspend fun requestGestureMove(
     requestId: String?,
@@ -2055,78 +2103,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  private enum class StaleFrameContextAction(val wireName: String) {
-    TAP("tap"),
-    SWIPE("swipe"),
-    DRAG("drag"),
-    SET_TEXT("set_text"),
-    IME_ACTION("ime_action"),
-    GLOBAL_ACTION("global_action"),
-  }
-
-  /**
-   * Rejects an input that was mapped through a screen state the service has since observed change.
-   */
-  private fun rejectStaleFrameContext(
-    requestId: String?,
-    expected: String?,
-    action: StaleFrameContextAction,
-  ): Boolean {
-    if (expected == null || expected == currentFrameContext()) return false
-    val error =
-      "Stale frame context for input/${action.wireName}; observe a fresh frame before retrying"
-    launchRequestScope(requestId) { broadcastStaleFrameRejection(requestId, action, error) }
-    return true
-  }
-
-  /**
-   * Broadcasts the correlated stale-frame rejection for [action].
-   *
-   * A future [StaleFrameContextAction] added without its own branch must never route through no
-   * branch and leave the caller to hang until timeout (issue #4577). At this module's Kotlin
-   * language version the compiler already enforces that: a non-exhaustive `when` over the enum is a
-   * compile error in statement or expression form. This is written expression-bodied so the
-   * guarantee also survives lowering the language version below the level where non-exhaustive
-   * `when` *statements* became errors (they are only warnings pre-2.0). Do not add an `else ->`
-   * branch — it would defeat the check by making a missing action compile.
-   */
-  private suspend fun broadcastStaleFrameRejection(
-    requestId: String?,
-    action: StaleFrameContextAction,
-    error: String,
-  ) =
-    when (action) {
-      StaleFrameContextAction.TAP ->
-        gestureController.broadcastTapCoordinatesResult(requestId, false, error, 0)
-      StaleFrameContextAction.SWIPE ->
-        gestureController.broadcastSwipeResult(requestId, false, error, 0, null)
-      StaleFrameContextAction.DRAG ->
-        gestureController.broadcastDragResult(requestId, false, error, 0, null)
-      StaleFrameContextAction.SET_TEXT ->
-        textInputController.broadcastSetTextResult(requestId, false, error, 0)
-      StaleFrameContextAction.IME_ACTION ->
-        textInputController.broadcastImeActionResult(
-          ImeActionFrameResult(
-            requestId = requestId,
-            action = action.wireName,
-            success = false,
-            error = error,
-            totalTimeMs = 0,
-          ),
-        )
-      StaleFrameContextAction.GLOBAL_ACTION ->
-        webSocketServer.broadcast(
-          dev.jasonpearson.automobile.protocol.GlobalActionResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = requestId,
-            success = false,
-            action = action.wireName,
-            totalTimeMs = 0,
-            error = error,
-          ),
-        )
-    }
-
   override suspend fun requestSetText(request: RequestSetText) {
     val requestId = request.requestId
     val text = request.text
@@ -2134,7 +2110,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val dismissKeyboard = request.dismissKeyboard
     val frameContext = request.frameContext
 
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)) return
+    if (
+      staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)
+    )
+      return
     textInputController.performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
@@ -2176,51 +2155,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val action = request.action
     val frameContext = request.frameContext
 
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.IME_ACTION)) return
+    if (
+      staleFrames.rejectStaleFrameContext(
+        requestId,
+        frameContext,
+        StaleFrameContextAction.IME_ACTION,
+      )
+    )
+      return
     textInputController.performImeAction(requestId, action)
   }
 
   override suspend fun requestSelectAll(requestId: String?) =
     textInputController.performSelectAll(requestId)
 
-  override suspend fun requestClickFocusedInput(requestId: String?) {
-    textInputController.forgetRememberedInsert()
-    val startTime = System.currentTimeMillis()
-    // Like NodeActionController.performNodeAction, stay on the inbound command queue until settling
-    // and replying.
-    try {
-      val outcome =
-        clickFocusedInput(
-          findFocusedInput = {
-            findNodeInDisplayWindows { root -> findFocusedEditableNode(root) }
-          },
-          click = { node ->
-            nodeActionFailure("click", node.actionList?.map { it.id }) == null &&
-              node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-          },
-          recycle = { node -> node.recycle() },
-          settleAfterClick = nodeActionController::refreshHierarchyAfterNodeAction,
-        )
-      broadcastActionResult(
-        requestId,
-        "click",
-        outcome.success,
-        outcome.error,
-        System.currentTimeMillis() - startTime,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Focused input click failed", e)
-      broadcastActionResult(
-        requestId,
-        "click",
-        false,
-        e.message ?: "Focused input click failed",
-        System.currentTimeMillis() - startTime,
-      )
-    }
-  }
+  override suspend fun requestClickFocusedInput(requestId: String?) =
+    nodeActionController.clickFocusedInputRequest(requestId)
 
   override suspend fun requestAction(
     requestId: String?,
@@ -2254,30 +2204,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val action = request.action
     val frameContext = request.frameContext
 
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.GLOBAL_ACTION))
+    if (
+      staleFrames.rejectStaleFrameContext(
+        requestId,
+        frameContext,
+        StaleFrameContextAction.GLOBAL_ACTION,
+      )
+    )
       return
-    performGlobalActionRequest(requestId, action)
+    globalActionController.performGlobalActionRequest(requestId, action)
   }
 
-  override suspend fun validateFrameContext(requestId: String?, frameContext: String) {
-    val matches = frameContext == currentFrameContext()
-    asyncActionRunner.launch(requestId, "validate_frame_context") {
-      webSocketServer.broadcast(
-        dev.jasonpearson.automobile.protocol.FrameContextValidationResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = matches,
-          totalTimeMs = 0,
-          error =
-            if (matches) {
-              null
-            } else {
-              "Stale frame context for input/key; observe a fresh frame before retrying"
-            },
-        ),
-      )
-    }
-  }
+  override suspend fun validateFrameContext(requestId: String?, frameContext: String) =
+    frameContextGate.validate(requestId, frameContext)
 
   override suspend fun requestDeviceInfo(requestId: String?) =
     deviceInfoController.performDeviceInfoRequest(requestId)
@@ -2289,7 +2228,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     requestId: String?,
     permission: String?,
     requestPermission: Boolean?,
-  ) = handleGetPermission(requestId, permission, requestPermission)
+  ) = permissionController.getPermission(requestId, permission, requestPermission)
 
   override suspend fun setRecompositionTracking(enabled: Boolean) =
     sdkControlController.setRecompositionTrackingEnabled(enabled)
@@ -2299,13 +2238,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
     occlusionEnabled: Boolean,
-  ) =
-    applyAccessibilityFlags(
+  ) {
+    accessibilityFlags.apply(
       includeNotImportantViews = includeNotImportantViews,
       reportViewIds = reportViewIds,
       retrieveInteractiveWindows = retrieveInteractiveWindows,
       occlusionEnabled = occlusionEnabled,
     )
+  }
 
   override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
     sdkControlController.broadcastNetworkMockRules(requestId, rulesJson)
@@ -2418,37 +2358,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     storageController.handleGetPreferences(requestId, packageName, fileName)
 
-  override suspend fun discoverKeystore(requestId: String?, packageName: String) {
-    asyncActionRunner.launch(requestId, "discover_keystore") {
-      val state =
-        dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(this@CtrlProxy, packageName)
-      resultSender.send(requestId, "keystore_discovery", attachPerf = false) { _ ->
-        dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          state = state,
-        )
-      }
-    }
-  }
+  override suspend fun discoverKeystore(requestId: String?, packageName: String) =
+    appDiscovery.discoverKeystore(requestId, packageName)
 
-  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) {
-    asyncActionRunner.launch(requestId, "get_sdk_capabilities") {
-      val state =
-        dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
-          this@CtrlProxy,
-          packageName,
-          userId,
-        )
-      resultSender.send(requestId, "sdk_capabilities", attachPerf = false) { _ ->
-        dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          state = state,
-        )
-      }
-    }
-  }
+  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
+    appDiscovery.discoverSdkCapabilities(requestId, packageName, userId)
 
   override suspend fun listDataStores(
     requestId: String?,
@@ -2530,55 +2444,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
     packageController.performLaunchIntent(requestId, packageName)
-
-  private fun applyAccessibilityFlags(
-    includeNotImportantViews: Boolean,
-    reportViewIds: Boolean,
-    retrieveInteractiveWindows: Boolean,
-    occlusionEnabled: Boolean,
-  ) {
-    // occlusionEnabled isn't an AccessibilityServiceInfo flag, so store it unconditionally —
-    // it must take effect even before serviceInfo is available (the early-return below).
-    this.occlusionEnabled = occlusionEnabled
-
-    val info =
-      serviceInfo
-        ?: run {
-          Log.w(TAG, "Cannot apply accessibility flags — serviceInfo is null")
-          return
-        }
-
-    val flags =
-      computeAccessibilityServiceFlags(
-        currentFlags = info.flags,
-        includeNotImportantViews = includeNotImportantViews,
-        reportViewIds = reportViewIds,
-        retrieveInteractiveWindows = retrieveInteractiveWindows,
-      )
-
-    // Skip the reassignment when the computed bitmask matches what's already applied.
-    // serviceInfo = info reconfigures a LIVE AccessibilityService on the system side, not a
-    // local no-op - the client now re-invokes this on every ensureConnected() (not just fresh
-    // connects), so without this guard every single tool call reconfigures the service even
-    // when nothing changed, which was observed to disrupt in-flight hierarchy capture
-    // (elements=0 on every observe for an entire run).
-    if (flags == info.flags) {
-      Log.d(TAG, "Accessibility flags unchanged (flags=$flags) - skipping serviceInfo reassignment")
-      return
-    }
-
-    info.flags = flags
-    serviceInfo = info
-
-    Log.i(
-      TAG,
-      "Applied accessibility flags: " +
-        "includeNotImportantViews=$includeNotImportantViews, " +
-        "reportViewIds=$reportViewIds, " +
-        "retrieveInteractiveWindows=$retrieveInteractiveWindows, " +
-        "occlusionEnabled=$occlusionEnabled",
-    )
-  }
 
   /** The application in front, from the accessibility windows; null when none qualifies. */
   private fun currentForegroundApp(): String? =
@@ -2690,54 +2555,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       refreshPrototypeWindow()
 
     try {
-      when (event.eventType) {
-        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-        AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-        AccessibilityEvent.TYPE_VIEW_FOCUSED,
-        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED ->
-          textInputController.forgetRememberedInsert()
-        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ->
-          textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)
-        else -> Unit
-      }
-      if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-        lastWindowClassName = event.className?.toString()
-      }
-
-      // Advance the frameContext staleness token on every UI-changing event REGARDLESS of observers
-      // (issue #5470 review). If it froze while unobserved, a token minted before the last client
-      // disconnected could still pass the daemon/runner staleness check after reconnect even though
-      // the screen changed during the gap, aiming an input action at the wrong UI state. This is a
-      // cheap atomic increment maintaining the invariant; only the expensive work below is gated.
-      if (advancesFrameContext(event.eventType)) {
-        frameContext.incrementAndGet()
-      }
-
-      val connectionCount =
-        if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
-
-      // "Is anyone observing?" gate (issue #5470). Both the interaction/scroll recording below and
-      // the debounced hierarchy refresh further down are PUSH work only a connected client
-      // consumes, so with zero connections we skip them — before touching event.source, allocating,
-      // extracting, or hashing. The frameContext token above still advanced. Stale cross-session
-      // scroll deltas are discarded at scroll-accumulation time via accumulatePendingScroll (keyed
-      // on the observer-session generation), so no observer-gap cleanup is needed here. The pull
-      // path (request_hierarchy) does not go through here and stays functional with zero observers.
-      val work = accessibilityEventWorkFor(event.eventType, connectionCount)
-
-      // Broadcast interaction events for telemetry tracking. Classification is routed through the
-      // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
-      // classifier) can never drift from what the controller actually acts on.
-      work.interaction?.let { interactionEventController.record(event, it) }
-
-      // Delegate to the smart debouncer for content/window changes (same shared classifier). The
-      // debouncer uses structural hash comparison to detect animation vs real changes. Gated on an
-      // observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so the
-      // extraction/hash is skipped. The frameContext token advanced unconditionally above.
-      if (work.refreshesHierarchy) {
-        hierarchyController.onAccessibilityEvent()
-      }
+      accessibilityEvents.dispatch(event)
     } catch (e: Exception) {
       Log.e(TAG, "Error handling accessibility event", e)
       // Don't let event handling crash the service
@@ -2761,124 +2579,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
 
-  /**
-   * Execute a global action (back, home, recents, etc.) via the accessibility service. Returns true
-   * if the action was dispatched successfully.
-   */
-  private fun executeGlobalAction(action: String): Boolean {
-    val actionId = SystemGlobalActions.resolve(action, Build.VERSION.SDK_INT) ?: return false
-    return performGlobalAction(actionId)
-  }
+  private suspend fun handleCommand(intent: Intent) =
+    hierarchyExtractCommands.handle(extractHierarchyCommand(intent))
 
-  /** Handle a request_global_action WebSocket message. */
-  private fun performGlobalActionRequest(requestId: String?, action: String) {
-    textInputController.forgetRememberedInsert()
-    val startTime = System.currentTimeMillis()
-    val success = executeGlobalAction(action)
-    val totalTimeMs = System.currentTimeMillis() - startTime
-    asyncActionRunner.launch(requestId, "request_global_action") {
-      webSocketServer.broadcast(
-        dev.jasonpearson.automobile.protocol.GlobalActionResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          action = action,
-          totalTimeMs = totalTimeMs,
-          error =
-            if (!success) {
-              SystemGlobalActions.refusal(action, Build.VERSION.SDK_INT)
-                ?: "Global action failed: $action"
-            } else {
-              null
-            },
-        ),
-      )
-    }
-  }
-
-  private suspend fun handleCommand(intent: Intent) {
-    // Clean up any lingering UUID-based hierarchy files before processing new requests
-    hierarchyController.cleanupUuidHierarchyFiles()
-
-    when (intent.action) {
-      ACTION_EXTRACT_HIERARCHY -> {
-        val uuid = intent.getStringExtra("uuid")
-        if (uuid.isNullOrBlank()) {
-          // No uuid to correlate a WebSocket error frame to, so only the legacy ADB result is sent.
-          sendResult(success = false, error = "UUID parameter is required")
-          return
-        }
-
-        // The daemon's ADB-broadcast hierarchy fallback awaits this uuid over the WebSocket in
-        // waitForFreshData. On extraction failure we send a correlated error frame keyed by the
-        // uuid so that wait fails fast rather than hanging to timeout, closing the last member of
-        // the #3032/#3061 hang class (issue #3089). The legacy ADB result broadcast is retained.
-        try {
-          val textFilter = intent.getStringExtra("text")
-          val disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false)
-          val hierarchy = hierarchyController.extractHierarchy(textFilter, disableAllFiltering)
-          if (hierarchy != null) {
-            val filename = "hierarchy_$uuid.json"
-            // Explicit request: serialize once and reuse for the file and the wire frame (#5469).
-            // Routed through deliverHierarchyFrame so the frame-context entry is released even if
-            // the encode throws (leak fix) — the outer catch still reports the failure frame.
-            deliverHierarchyFrame(
-              serialize = {
-                perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-              },
-              write = { serialized ->
-                hierarchyController.writeHierarchyToFile(
-                  hierarchy,
-                  filename,
-                  serialized = serialized,
-                )
-              },
-              broadcast = { serialized ->
-                hierarchyController.broadcastHierarchyUpdate(
-                  hierarchy,
-                  serialized = serialized,
-                  requestId = uuid,
-                )
-              },
-              releaseFrameContext = {
-                hierarchyController.extractedHierarchyFrameContexts.remove(hierarchy)
-              },
-            )
-
-            val message =
-              if (textFilter != null) {
-                "Hierarchy extracted with text filter: '$textFilter', saved as $filename"
-              } else {
-                "Hierarchy extracted successfully, saved as $filename"
-              }
-            sendResult(success = true, data = message)
-          } else {
-            sendResult(success = false, error = HierarchyExtractErrorFrames.NULL_HIERARCHY_ERROR)
-            broadcastHierarchyExtractFrame(HierarchyExtractErrorFrames.nullResultFrame(uuid))
-          }
-        } catch (e: CancellationException) {
-          // Cooperative cancellation (service scope shutting down) must never be converted into an
-          // error frame — let it propagate so the coroutine unwinds cleanly.
-          throw e
-        } catch (e: Exception) {
-          Log.e(TAG, "Error extracting hierarchy for uuid=$uuid", e)
-          sendResult(success = false, error = CorrelatedErrorReporter.causeOf(e))
-          broadcastHierarchyExtractFrame(HierarchyExtractErrorFrames.thrownFrame(uuid, e))
-        }
-      }
-    }
-  }
-
-  private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {
-    val resultIntent =
-      Intent(ACTION_OPERATION_RESULT).apply {
-        putExtra("success", success)
-        putExtra("timestamp", System.currentTimeMillis())
-        data?.let { putExtra("data", it) }
-        error?.let { putExtra("error", it) }
-      }
-    sendBroadcast(resultIntent)
-  }
+  private fun sendResult(success: Boolean, data: String? = null, error: String? = null) =
+    sendBroadcast(operationResultIntent(success, data, error, timeProvider.currentTimeMillis()))
 
   /**
    * Emit the correlated WebSocket `type:"error"` [frame] for a failed `EXTRACT_HIERARCHY`
@@ -2931,123 +2636,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       emptyList()
     }
 
-  /** Broadcast accessibility action result to WebSocket clients */
-  private suspend fun broadcastActionResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    alreadySatisfied: Boolean = false,
-  ) {
-    resultSender.send(requestId, "action_result") { perfTiming ->
-      ActionResult(
-        timestamp = System.currentTimeMillis(),
-        requestId = requestId,
-        success = success,
-        action = action,
-        totalTimeMs = totalTimeMs,
-        error = error,
-        perfTiming = perfTiming,
-        alreadySatisfied = alreadySatisfied,
-      )
-    }
-  }
-
-  /** Broadcast permission result to WebSocket clients */
-  private suspend fun broadcastPermissionResult(
-    requestId: String?,
-    result: PermissionManager.PermissionState,
-    totalTimeMs: Long,
-  ) {
-    resultSender.send(requestId, "permission_result") { perfTiming ->
-      PermissionResult(
-        timestamp = System.currentTimeMillis(),
-        requestId = requestId,
-        success = result.error == null,
-        permission = result.permission,
-        granted = result.granted,
-        requestLaunched = result.requestLaunched,
-        canRequest = result.canRequest,
-        requiresSettings = result.requiresSettings,
-        instructions = result.instructions,
-        adbCommand = result.adbCommand,
-        totalTimeMs = totalTimeMs,
-        error = result.error,
-        perfTiming = perfTiming,
-      )
-    }
-  }
-
-  /** Broadcast screenshot to WebSocket clients */
-  private fun broadcastScreenshot(
-    requestId: String?,
-    displayId: Int? = null,
-    hidePrototypes: Boolean = false,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping screenshot broadcast")
-      return
-    }
-
-    // Routed through asyncActionRunner: a throw in takeScreenshotAsync() (or the broadcast) would
-    // otherwise be logged-and-swallowed here, emitting neither `screenshot` nor `screenshot_error`
-    // and hanging the awaiting client until timeout (issue #3023).
-    asyncActionRunner.launch(requestId, "screenshot") {
-      val contextBeforeCapture = currentFrameContext()
-      val targetDisplayId = displayId ?: activeDisplayId()
-      val prototypesHidden: Boolean?
-      val outcome =
-        if (hidePrototypes) {
-          val capture = captureWithPrototypeHidden(targetDisplayId)
-          prototypesHidden = capture.prototypeExcluded
-          capture.value
-        } else {
-          prototypesHidden = null
-          dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
-            screenshotController.takeScreenshotAsync(targetDisplayId)
-          }
-        }
-      val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
-      when (outcome) {
-        is ScreenshotCaptureOutcome.Success -> {
-          val screenshot = outcome.payload
-          webSocketServer.broadcast(
-            ProtocolScreenshotResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = requestId,
-              data = screenshot.base64Image,
-              format = "jpeg",
-              rotation = screenshot.rotation,
-              displayId = screenshot.displayId,
-              panelUniqueId = screenshot.panelUniqueId,
-              screenshotCaptureDurationMs = screenshot.captureDurationMs,
-              screenshotEncodeDurationMs = screenshot.encodeDurationMs,
-              screenshotByteLength = screenshot.byteLength,
-              screenshotBase64Length = screenshot.base64Length,
-              frameContext = stableContext?.toString(),
-              prototypesHidden = prototypesHidden,
-            ),
-          )
-          Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
-        }
-        is ScreenshotCaptureOutcome.Failure -> {
-          // Surface a rate limit distinctly so the daemon classifies it as ctrlproxy_rate_limited
-          // rather than a generic capture failure (issue #4927).
-          val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
-          webSocketServer.broadcast(
-            screenshotErrorFrame(
-              requestId,
-              error,
-              targetDisplayId,
-              displayController.panelUniqueId(targetDisplayId),
-            ),
-          )
-        }
-      }
-    }
-  }
-
   /**
    * Hide-capture-restore in one device-side step (#9305), so a host that gives up mid-request can
    * never leave the prototype hidden: the host restores in its own finally.
@@ -3068,25 +2656,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
         prototypeExcluded = true,
       )
-
-  /** Get permission state and optionally request missing permissions. */
-  private fun handleGetPermission(
-    requestId: String?,
-    permission: String?,
-    requestPermission: Boolean?,
-  ) {
-    val startTime = System.currentTimeMillis()
-    Log.d(
-      TAG,
-      "handleGetPermission (requestId: $requestId, permission: $permission, requestPermission: $requestPermission)",
-    )
-
-    asyncActionRunner.launch(requestId, "get_permission") {
-      val result = permissionManager.getPermissionState(permission, requestPermission ?: true)
-      val totalTime = System.currentTimeMillis() - startTime
-      broadcastPermissionResult(requestId, result, totalTime)
-    }
-  }
 }
 
 internal data class ImeFocusCandidate(

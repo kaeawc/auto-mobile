@@ -78,7 +78,7 @@ describe("daemon owner stamp on persisted sessions (#11114)", () => {
 
   test("the daemon wires its own id into its session manager", async () => {
     const timer = new FakeTimer();
-    const repository = new RecordingDeviceSessionRepository(undefined, timer);
+    const repository = new RecordingDeviceSessionRepository({ timer });
     const daemon = new Daemon({}, { timer, deviceSessionRepository: repository });
     daemon.getSessionManager().stopCleanupTimer();
 

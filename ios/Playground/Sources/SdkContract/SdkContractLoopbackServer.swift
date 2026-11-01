@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 import Network
 
@@ -35,23 +36,6 @@ enum SdkContractError: LocalizedError {
             "The harness did not finish the observation cases within \(Int(seconds)) s"
         case let .rulesNotInstalled(seconds):
             "The harness did not install the fault rules within \(Int(seconds)) s"
-        }
-    }
-}
-
-/// Resumes a checked continuation at most once; Network.framework state handlers can report
-/// several terminal states.
-final class SdkContractResumeOnce: @unchecked Sendable {
-    private let lock = NSLock()
-    private var resumed = false
-
-    func run(_ body: () -> Void) {
-        lock.lock()
-        let first = !resumed
-        resumed = true
-        lock.unlock()
-        if first {
-            body()
         }
     }
 }
@@ -121,29 +105,28 @@ final class SdkContractLoopbackServer: @unchecked Sendable {
 
     private func ready(_ listener: NWListener) async throws -> UInt16 {
         queue.sync { listeners.append(listener) }
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = SdkContractResumeOnce()
+        return try await withCancellableCheckedContinuation { continuation in
             listener.stateUpdateHandler = { [self] state in
                 switch state {
                 case .ready:
-                    once.run {
-                        if let port = listener.port?.rawValue {
-                            record("listening \(port)")
-                            continuation.resume(returning: port)
-                        } else {
-                            continuation.resume(throwing: SdkContractError.listenerFailed("ready without a port"))
-                        }
+                    if let port = listener.port?.rawValue {
+                        record("listening \(port)")
+                        continuation.resume(returning: port)
+                    } else {
+                        continuation.resume(throwing: SdkContractError.listenerFailed("ready without a port"))
                     }
                 case let .failed(error):
                     record("listener failed \(error)")
-                    once.run { continuation.resume(throwing: error) }
+                    continuation.resume(throwing: error)
                 case .cancelled:
-                    once.run { continuation.resume(throwing: SdkContractError.listenerFailed("cancelled")) }
+                    continuation.resume(throwing: SdkContractError.listenerFailed("cancelled"))
                 default:
                     break
                 }
             }
             listener.start(queue: queue)
+        } onCancel: {
+            listener.cancel()
         }
     }
 

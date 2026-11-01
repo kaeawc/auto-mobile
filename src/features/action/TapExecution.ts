@@ -736,11 +736,14 @@ export class TapExecution {
       target.activationWarnings,
     );
     this.host.logClickableParentSelection(target.usedParent);
+    const planningHierarchy = await this.host
+      .tapPoints()
+      .prototypeTapHierarchy(target.viewHierarchy, target.tapElement, requestedAction);
     const { tapPoint, warning: tapPointWarning } = this.host.tapPoints().planVisibleTapPoint({
       options: target.tapOptions,
       requestedAction,
       observeResult,
-      viewHierarchy: target.viewHierarchy,
+      viewHierarchy: planningHierarchy,
       finalSelection: target.finalSelection,
       tapElement: target.tapElement,
     });

@@ -19,7 +19,13 @@ Apple Watch simulators are `platform: "watchos"` ([decision](../decisions/watcho
 watchOS runtimes and no iOS resource, tool or readiness path sees a watch. Watches, installed
 watchOS runtimes and Apple Watch device types appear only in
 `automobile:devices/images/watchos` (`watchosCount`, a `watchos` catalog and inventory
-observation); the iOS provisioning catalog excludes them. `automobile:devices/images` stays
+observation); the iOS provisioning catalog excludes them. Apple TV simulators are
+`platform: "tvos"` and appear in `listDevices` only when `platform: "tvos"` is requested.
+`listDeviceImages` with `platform: "tvos"` and `automobile:devices/images/tvos` list configured
+Apple TV simulators. The resource includes `tvosCount`, a tvOS inventory observation, installed
+tvOS runtimes and Apple TV device types, with runtime compatibility derived from each device
+type's version bounds. A failed listing is incomplete inventory, never evidence of absence.
+The iOS listing and provisioning catalog exclude Apple TVs. `automobile:devices/images` stays
 Android and iOS.
 
 Read-only Android inventory shares successful AVD-name and display probes, plus configured

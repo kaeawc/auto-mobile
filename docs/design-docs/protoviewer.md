@@ -464,7 +464,7 @@ deliberately failing Android case.
 
 ### 8.1.1 Device checks for release artifacts (#15387)
 
-Two checks need a device and run from `scripts/release/protoviewer-release-smoke.sh` (logic in
+Release checks need a device and run from `scripts/release/protoviewer-release-smoke.sh` (logic in
 `scripts/release/protoviewer-release-smoke.ts`, fake-tested in `test/scripts/protoviewerReleaseSmoke.test.ts`):
 
 - **Upgrade in place** (`--mode upgrade`): install the previous release, import a prototype through
@@ -476,6 +476,16 @@ Two checks need a device and run from `scripts/release/protoviewer-release-smoke
   validated asset-free specs (one standing in for the bundled sample, one for an import), and on
   Android read the library screen's settings switch and open "Open-source licenses" through
   `uiautomator dump`.
+
+- **iPhone Duo** (`--duo`, iOS only): after the normal flows install the candidate, import and
+  open the smoke bundle in each posture. `--posture-command <executable>` receives `closed` or
+  `opened` directly (no shell); exit 0 means the posture is reached. The caller supplies daemon
+  session wiring because simctl cannot change posture. Each screenshot explicitly selects the
+  enumerated display name: `primary` for the closed cover and `primary-1` for the opened inner
+  panel. Missing displays and posture failures are failed checks. PNGs are written and checked
+  for a PNG signature under `--screenshots-dir` (default `scratch/protoviewer-smoke/duo`, relative
+  to the current working directory). Fold-back to `closed` is always attempted and reported,
+  including after a failed posture command.
 
 Not automated: settings persistence (the network switch needs a runtime permission grant), and the
 iOS Settings and licenses screens (no UI driver in the script); both are reported as `SKIPPED`.

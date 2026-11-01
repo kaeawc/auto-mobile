@@ -1,4 +1,9 @@
 import { ActionableError } from "../models/ActionableError";
+import {
+  isAdbDeviceAuthorizingError,
+  isAdbDeviceOfflineError,
+  isAdbPostDispatchTransportError,
+} from "../utils/android-cmdline-tools/AdbDeviceHealth";
 
 // Install failures that an in-place `install -r -d` cannot fix but a fresh uninstall + reinstall can.
 // VERSION_DOWNGRADE: `-d` only permits downgrades of debuggable apps/builds, so a user-build device
@@ -31,5 +36,28 @@ export function isTransientInstallFailureCode(code: string | undefined): boolean
   return (
     code === undefined ||
     (!SIGNATURE_MISMATCH_FAILURE_CODES.has(code) && TRANSIENT_INSTALL_FAILURE_CODES.has(code))
+  );
+}
+
+/** Only the header-only streamed-install failure is newly retryable outside automotive/watch. */
+export function isEmptyStreamedInstallFailure(
+  stdout: string,
+  stderr: string,
+  message: string,
+  deviceId: string,
+): boolean {
+  const diagnostics = `${stdout}\n${stderr}\n${message}`;
+  return (
+    stdout.trim() === "Performing Streamed Install" &&
+    /^adb: failed to install [^\r\n]+\.apk:\s*$/i.test(stderr.trim()) &&
+    extractInstallFailureCode(diagnostics) === undefined &&
+    !/Failure\s*\[/i.test(diagnostics) &&
+    !isAdbDeviceAuthorizingError(diagnostics) &&
+    !isAdbDeviceOfflineError(diagnostics) &&
+    !diagnostics.split(/\r?\n/).some((line) => {
+      // CommandError can prefix the raw adb message with its excerpt label.
+      const diagnostic = line.slice(Math.max(0, line.toLowerCase().indexOf("adb:")));
+      return isAdbPostDispatchTransportError(diagnostic, undefined, deviceId, { stdout });
+    })
   );
 }

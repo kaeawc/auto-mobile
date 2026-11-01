@@ -84,8 +84,8 @@ describe("navigation resource session resolution", () => {
   beforeAll(async () => {
     harness = await installInMemoryNavManager();
     const make = (id: string) =>
-      NavigationGraphManager.createForTesting(new NavigationRepository(harness.db), {
-        testCoverageRepository: new TestCoverageRepository(harness.db),
+      NavigationGraphManager.createForTesting(new NavigationRepository({ db: harness.db }), {
+        testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
         timer: new FakeTimer(),
         sessionUuid: id,
       });

@@ -8,6 +8,7 @@ import * as deviceClaims014 from "./migrations/2026_10_26_014_device_claims";
 import * as deviceClaimsMetadata015 from "./migrations/2026_10_27_015_device_claims_metadata";
 import * as watchosPlatform016 from "./migrations/2026_10_30_016_watchos_binding_platform";
 import { sql, type Kysely } from "kysely";
+import type { BunSqliteHandle } from "../../../db/bunSqliteDialect";
 import { Migrator, type Migration, type MigrationProvider } from "kysely/migration";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -146,6 +147,61 @@ function unknownRegistryMigrations(executed: readonly string[]): string[] {
 }
 
 /** Optional provenance must never replace the typed compatibility refusal with a lookup error. */
+function registryWriterVersionsQuery(migrationNames: readonly string[]) {
+  return sql<{ migration_name: string; writer_version: string }>`
+    SELECT migration_name, writer_version FROM binding_registry_migration_writers
+    WHERE migration_name IN (${sql.join(migrationNames)})
+  `;
+}
+
+/** Same optional provenance lookup on the guarded transaction's physical SQLite connection. */
+export function readBindingRegistryWriterVersionsSync<DB>(
+  db: Kysely<DB>,
+  sqlite: BunSqliteHandle,
+  migrationNames: readonly string[],
+): Readonly<Record<string, string>> {
+  if (migrationNames.length === 0) {
+    return {};
+  }
+  try {
+    const table = sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    );
+    try {
+      if (!table.get("binding_registry_migration_writers")) {
+        return {};
+      }
+    } finally {
+      table.finalize();
+    }
+    const query = registryWriterVersionsQuery(migrationNames).compile(db);
+    const statement = sqlite.prepare(query.sql);
+    try {
+      return Object.fromEntries(
+        statement.all(...query.parameters).map((row) => {
+          if (
+            typeof row !== "object" ||
+            row === null ||
+            !("migration_name" in row) ||
+            typeof row.migration_name !== "string" ||
+            !("writer_version" in row) ||
+            typeof row.writer_version !== "string"
+          ) {
+            throw new ActionableError("Invalid binding registry migration writer version");
+          }
+          return [row.migration_name, row.writer_version];
+        }),
+      );
+    } finally {
+      statement.finalize();
+    }
+  } catch (error) {
+    logger.warn("[Bindings] Cannot read registry migration writer versions", error);
+    return {};
+  }
+}
+
+/** Optional provenance must never replace the typed compatibility refusal with a lookup error. */
 export async function readBindingRegistryWriterVersions<DB>(
   db: Kysely<DB>,
   migrationNames: readonly string[],
@@ -157,10 +213,7 @@ export async function readBindingRegistryWriterVersions<DB>(
     if (!(await registryTableExists(db, "binding_registry_migration_writers"))) {
       return {};
     }
-    const result = await sql<{ migration_name: string; writer_version: string }>`
-      SELECT migration_name, writer_version FROM binding_registry_migration_writers
-      WHERE migration_name IN (${sql.join(migrationNames)})
-    `.execute(db);
+    const result = await registryWriterVersionsQuery(migrationNames).execute(db);
     return Object.fromEntries(result.rows.map((row) => [row.migration_name, row.writer_version]));
   } catch (error) {
     logger.warn("[Bindings] Cannot read registry migration writer versions", error);

@@ -112,6 +112,7 @@
             super.viewDidLayoutSubviews()
             syncAppearanceObservation()
             guard contentEnabled, let window = view.window else { return }
+            model.prototypeWindow = window
             // SwiftUI hit rects and anchors use window coordinates; keyboard overlap uses the
             // embedded content rectangle, which can end above the window bottom.
             let origin = window.convert(CGPoint.zero, to: window.screen.coordinateSpace)

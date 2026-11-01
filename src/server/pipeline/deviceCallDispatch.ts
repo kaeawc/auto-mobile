@@ -42,7 +42,10 @@ import {
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../../daemon/executionTracker";
 import { deviceActionClock } from "./deviceActionClock";
-import { assertToolSupportsDevicePlatform } from "../watchOsToolSupport";
+import {
+  assertRequestedPlatformSupported,
+  assertToolSupportsDevicePlatform,
+} from "../applePlatformToolSupport";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -131,6 +134,8 @@ export function deviceAwareHandlerArgs(
   context: ReturnType<typeof getToolSelectionContext>,
   name: string,
 ): Record<string, unknown> {
+  // Before resolution, which would replace a requested platform with the session's (#15886).
+  assertRequestedPlatformSupported(name, args);
   const routingSession =
     options.sessionlessDeviceRead &&
     context?.explicitObserveDeviceRead &&

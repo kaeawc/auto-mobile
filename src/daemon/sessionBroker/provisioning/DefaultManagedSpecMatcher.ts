@@ -56,6 +56,9 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
         return await this.matchesAndroid(device, spec);
       case "ios":
         return matchesIosSimulator(device, spec);
+      case "tvos":
+        // No binding spec describes an Apple TV yet, so one is never reused for a binding.
+        return "mismatch";
     }
   }
 

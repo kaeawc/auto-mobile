@@ -31,7 +31,7 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -143,7 +143,7 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
         return rows;
       }
     }
-    const manager = daemon("daemon-a", live, new InterleavingRepository(db, timer));
+    const manager = daemon("daemon-a", live, new InterleavingRepository({ db, timer }));
     interleaved.manager = manager;
 
     const summary = await manager.rehydratePersistedSessions(poolFor(manager));
@@ -177,7 +177,7 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
         return await super.upsertActiveSession(record, nowMs, options);
       }
     }
-    const a = daemon("daemon-a", live, new RacingRepository(db, timer));
+    const a = daemon("daemon-a", live, new RacingRepository({ db, timer }));
 
     const outcome = await a.getOrCreateSession(SESSION, poolFor(a), "android").then(
       () => undefined,

@@ -152,6 +152,8 @@
         }
 
         var safeInsets = UIEdgeInsets.zero
+        /// The content's actual window, including the embedded ProtoViewer host.
+        @ObservationIgnored weak var prototypeWindow: UIWindow?
         /// The prototype window's own (0, 0) on screen, in points; anchors are screen coordinates.
         var windowOrigin = CGPoint.zero
         /// The prototype window's size in points, for placing a sheet against the keyboard.

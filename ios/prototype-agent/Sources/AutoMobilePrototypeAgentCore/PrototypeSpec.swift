@@ -634,6 +634,11 @@ struct StyleWhen: Decodable {
     let style: Style
 }
 
+/// The image's pinch, pan and double-tap zoom bounds, validated by the shared contract.
+struct PrototypeImageZoomable: Decodable {
+    let maxScale: Double
+}
+
 struct PrototypeRouteEntry: Decodable, Sendable {
     let screen: String
     let params: [String: JSONValue]?
@@ -806,6 +811,7 @@ final class PrototypeNode: Decodable {
     let edgeEffect: String?
     let ios: IosNamespace?
     let contentScale: String?
+    let zoomable: PrototypeImageZoomable?
     let effect: IconEffect?
     let name: String?
     /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
@@ -936,7 +942,8 @@ final class PrototypeNode: Decodable {
         case scrollTransition, scrollLinked
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition, keyframes, animate
-        case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
+        case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, zoomable,
+             semantics
         case kind, selectionKey, openKey, list, detail, content, main
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -997,6 +1004,7 @@ final class PrototypeNode: Decodable {
         edgeEffect = try container.decodeIfPresent(String.self, forKey: .edgeEffect)
         ios = try container.decodeIfPresent(IosNamespace.self, forKey: .ios)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
+        zoomable = try container.decodeIfPresent(PrototypeImageZoomable.self, forKey: .zoomable)
         effect = try container.decodeIfPresent(IconEffect.self, forKey: .effect)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)

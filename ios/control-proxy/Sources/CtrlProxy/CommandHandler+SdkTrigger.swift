@@ -94,8 +94,8 @@ extension CommandHandler {
         return await sdkReply(route: route, body: body, timeoutMs: timeoutMs)
     }
 
-    /// `bridgeUnavailable` means the request was never sent. A request that was sent but got no
-    /// reply is `badReply`: the SDK may have acted, so the daemon must not retry it elsewhere.
+    /// Proven non-delivery and an SDK 503 are `bridgeUnavailable`. Ambiguous delivery is
+    /// `badReply`: the SDK may have acted, so the daemon must not retry it elsewhere.
     private func sdkReply(
         route: SdkRoute,
         body: Data,
@@ -104,8 +104,11 @@ extension CommandHandler {
         async -> Result<Data, SdkBridgeFailure>
     {
         guard let client = sdkHierarchyClient else { return .failure(.bridgeUnavailable) }
-        guard let reply = await client.sendObservationRequest(route, body: body, timeoutMs: timeoutMs) else {
-            return .failure(.badReply)
+        let reply: SdkBridgeReply
+        switch await client.sendObservationRequest(route, body: body, timeoutMs: timeoutMs) {
+        case let .reply(value): reply = value
+        case .notSent: return .failure(.bridgeUnavailable)
+        case .noReply: return .failure(.badReply)
         }
         switch reply.statusCode {
         case 200: return .success(reply.body)

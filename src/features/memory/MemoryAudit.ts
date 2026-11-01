@@ -57,7 +57,7 @@ export class MemoryAudit {
     this.baselineManager = new MemoryBaselineManager(db);
     this.resultStore = new MemoryAuditResultStore(
       device.deviceId,
-      new MemoryAuditResultRepository(db),
+      new MemoryAuditResultRepository({ db }),
     );
   }
 

@@ -371,6 +371,12 @@ export const DEVICES_ENV = {
     default: "temp dir",
     doc: "Derived-data directory for iOS CtrlProxy builds.",
   },
+  WATCH_RUNNER_XCTESTRUN: {
+    name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
+    kind: "path",
+    default: "discover or build the CtrlProxyWatch scheme",
+    doc: "Prebuilt watchOS simulator runner xctestrun used by startDevice.",
+  },
   CTRL_PROXY_IOS_CACHE_DIR: {
     name: "AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR",
     kind: "path",

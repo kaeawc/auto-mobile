@@ -145,7 +145,7 @@ scan_device() {
 }
 
 active_sessions() {
-  local dir dev entries=() jitter query_count=0 local_id
+  local dir dev entries=() jitter query_count=0 local_id tool
   if [[ -n "${FAKE_SWAP_SESSION_AFTER_QUERIES:-}" ]]; then
     [[ ! -f "${FAKE}/active-sessions.queries" ]] || query_count="$(< "${FAKE}/active-sessions.queries")"
     query_count=$((query_count + 1))
@@ -170,18 +170,16 @@ active_sessions() {
     if (($(< "${dir}/last_beat") - $(< "${dir}/last_tool") >= 8000)); then
       jitter=$((-${FAKE_ACTIVITY_JITTER_MS:-0}))
     fi
-    entries+=("$(jq -cn --arg id "${local_id}" --arg dev "${dev}" \
-      --argjson tool "$(($(< "${dir}/last_tool") + jitter))" --argjson beat "$(< "${dir}/last_beat")" \
-      --argjson idle "${idle_ms}" --arg kind "${FAKE_HOLDER_KIND:-stdio-proxy}" \
-      '{sessionId: $id, assignedDevice: $dev, platform: "android", lastToolActivityAt: $tool,
-        lastOwnerHeartbeatAt: $beat, idleReleaseAt: ($tool + $idle + 4000),
-        holderKind: $kind, activeExecutions: 0}')")
+    # Every field is a plain id, device, tool kind or integer, so printf builds the JSON without
+    # forking jq on every poll (#16140).
+    tool=$(($(< "${dir}/last_tool") + jitter))
+    entries+=("$(printf '{"sessionId":"%s","assignedDevice":"%s","platform":"android","lastToolActivityAt":%d,"lastOwnerHeartbeatAt":%d,"idleReleaseAt":%d,"holderKind":"%s","activeExecutions":0}' \
+      "${local_id}" "${dev}" "${tool}" "$(< "${dir}/last_beat")" "$((tool + idle_ms + 4000))" \
+      "${FAKE_HOLDER_KIND:-stdio-proxy}")")
   done
-  if ((${#entries[@]} == 0)); then
-    printf '%s\n' '{"activeSessions":0,"activeExecutions":0,"sessions":[]}'
-  else
-    printf '%s\n' "${entries[@]}" | jq -cs '{activeSessions: length, activeExecutions: 0, sessions: .}'
-  fi
+  local joined
+  joined="$(IFS=,; printf '%s' "${entries[*]-}")"
+  printf '{"activeSessions":%d,"activeExecutions":0,"sessions":[%s]}\n' "${#entries[@]}" "${joined}"
 }
 
 if [[ "$2" == "--daemon" ]]; then
@@ -258,6 +256,12 @@ fi
 printf '%s\n' "${*:2}" >> "${FAKE}/proxy.calls"
 printf '%s\n' "$$" > "${state}/proxy_pid"
 reply() {
+  # FAKE_NOTIFY_BEFORE_REPLY: a server notification and a reply to another id come first, as a
+  # real proxy may interleave them; the check must skip both and keep waiting for its own id.
+  if [[ "${FAKE_NOTIFY_BEFORE_REPLY:-0}" == 1 ]]; then
+    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info"}}'
+    printf '%s\n' '{"jsonrpc":"2.0","id":-1,"result":{"isError":true,"content":[]}}'
+  fi
   jq -cn --argjson id "$1" --argjson result "$2" '{jsonrpc: "2.0", id: $id, result: $result}'
 }
 # Bun on macOS never delivers stdin EOF for a named FIFO (#11073): model it by detecting one.
@@ -464,6 +468,12 @@ run_check() {
   [[ "${output}" == *"not an online adb device"* ]]
   [ ! -e "${EVIDENCE}/failed-scenarios.txt" ]
   [ ! -e "${FAKE}/daemon.calls" ]
+}
+
+@test "skips notifications and other ids while waiting for each reply (#16140)" {
+  FAKE_NOTIFY_BEFORE_REPLY=1 run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS idle"* ]]
 }
 
 @test "passes all scenarios against a daemon that keeps the release windows" {

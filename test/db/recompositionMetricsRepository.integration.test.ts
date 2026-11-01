@@ -31,7 +31,7 @@ describe("RecompositionMetricsRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new RecompositionMetricsRepository(() => db);
+    repo = new RecompositionMetricsRepository({ resolveDatabase: () => db });
   });
 
   afterEach(async () => {

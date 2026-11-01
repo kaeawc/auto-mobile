@@ -1,4 +1,5 @@
 import AutoMobileSDK
+import AutoMobileSdkWire
 import Foundation
 
 /// Runs the launch-requested SDK contract scenario once and always writes its manifest, so
@@ -36,10 +37,9 @@ enum SdkContractRunner {
             AutoMobileNetwork.shared.setCaptureHeaders(true)
             AutoMobileNetwork.shared.setCaptureBodies(true)
             try await runScenario(launch, server: server, into: &manifest)
-            // Fewer captured events than expected is a finding for the harness to attribute,
+            // Missing expected records are a finding for the harness to attribute,
             // not a fixture failure, so the run still completes.
-            let expectedCount = manifest.network.count + manifest.faults.count
-            let captured = await waitForCapture(tap, expectedCount: expectedCount)
+            let captured = await waitForCapture(tap, network: manifest.network, faults: manifest.faults)
             manifest.bundleId = captured.bundleId
             manifest.events = captured.events
             manifest.undecodableBatches = captured.undecodableBatches
@@ -69,7 +69,9 @@ enum SdkContractRunner {
         _ launch: SdkContractLaunch,
         server: SdkContractLoopbackServer,
         into manifest: inout SdkContractManifest
-    ) async throws {
+    )
+        async throws
+    {
         let runId = launch.runId
         switch launch.scenario {
         case networkScenario:
@@ -115,7 +117,9 @@ enum SdkContractRunner {
         seconds: Double,
         orThrow timeout: SdkContractError,
         fileManager: FileManager = .default
-    ) async throws {
+    )
+        async throws
+    {
         let documents = try fileManager.url(
             for: .documentDirectory,
             in: .userDomainMask,
@@ -134,38 +138,60 @@ enum SdkContractRunner {
 
     private static func waitForCapture(
         _ tap: SdkContractBatchTap,
-        expectedCount: Int
-    ) async
-        -> SdkContractBatchTap.Snapshot
+        network: [ExpectedNetworkEvent],
+        faults: [FaultCaseObservation]
+    )
+        async -> SdkContractBatchTap.Snapshot
     {
         let deadline = Date().addingTimeInterval(captureWaitSeconds)
         var snapshot = tap.snapshot()
-        while snapshot.events.count < expectedCount, Date() < deadline {
+        while !hasCapturedCases(snapshot, network: network, faults: faults), Date() < deadline {
             try? await Task.sleep(nanoseconds: capturePollNanoseconds)
             snapshot = tap.snapshot()
         }
         return snapshot
     }
 
+    /// Replayed envelopes and a WebSocket's extra sent frame cannot stand in for another case.
+    private static func hasCapturedCases(
+        _ snapshot: SdkContractBatchTap.Snapshot,
+        network: [ExpectedNetworkEvent],
+        faults: [FaultCaseObservation]
+    )
+        -> Bool
+    {
+        let records = snapshot.events.compactMap { envelope -> SdkNetworkRequestEvent? in
+            guard envelope.eventType == .networkRequest else { return nil }
+            return try? JSONDecoder().decode(SdkNetworkRequestEvent.self, from: envelope.payload)
+        }
+        return network.allSatisfy { expected in
+            records.contains { record in
+                if let requestId = expected.requestId {
+                    return record.requestId == requestId
+                }
+                return record.url == expected.url && record.method == expected.method
+                    && record.protocolName == expected.protocolName
+                    && record.direction?.rawValue == expected.direction
+                    && record.connectionId == expected.connectionId
+            }
+        } && faults.allSatisfy { expected in
+            records.contains { record in
+                if let requestId = expected.requestId {
+                    return record.requestId == requestId
+                }
+                let method = SdkContractFaultScenario.webSocketCases.contains(expected.caseName) ? "SEND" : "GET"
+                return record.url == expected.url && record.method == method
+                    && record.connectionId == expected.connectionId
+            }
+        }
+    }
+
     private static func withTimeout<T: Sendable>(
         seconds: UInt64,
         _ body: @escaping @Sendable () async throws -> T
-    ) async throws
-        -> T
+    )
+        async throws -> T
     {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await body()
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-                throw SdkContractError.timedOut(seconds: seconds)
-            }
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else {
-                throw SdkContractError.timedOut(seconds: seconds)
-            }
-            return result
-        }
+        try await withSdkTimeout(seconds: seconds, timeoutError: SdkContractError.timedOut(seconds: seconds), body)
     }
 }

@@ -37,6 +37,7 @@ import { BrokerTimingRecorder } from "./timingRecorder";
 import { BrokerResetRelease } from "./resetRelease";
 import { ResetReadiness } from "./resetReadiness";
 import { SessionBrokerFailureError } from "./devicePort";
+import { BindingRegistrySchemaUnsupportedError } from "./provisioning/BindingRegistrySchemaUnsupportedError";
 import { requestedDeviceProfile } from "./deviceProfile";
 import type { SessionBrokerOptions } from "./brokerOptions";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
@@ -258,9 +259,12 @@ export class SessionBroker {
     if (admitted) {
       return this.failAdmittedPreparation(config, failure);
     }
+    if (error instanceof BindingRegistrySchemaUnsupportedError) {
+      return failedResult(config, failure);
+    }
     // Retain pre-admission failures: a catalog change must not give replay a new acquisition.
     // An independently committed receipt wins; never overwrite an acquisition from a sibling
-    // caller. A persistence failure is an RPC error, not a claimed durable terminal result.
+    // caller. Schema refusals return without a receipt; other persistence failures remain RPC errors.
     const independentlyCommitted = await this.options.store.getRequest(config.requestId);
     if (
       independentlyCommitted?.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
@@ -275,16 +279,25 @@ export class SessionBroker {
       }
       return this.result(independentlyCommitted);
     }
-    const receipt = await this.options.store.recordPreAdmissionFailure(
-      {
-        requestId: config.requestId,
-        fingerprint,
-        parameters: config,
-        owner: this.options.owner,
-        export: exportIdentity,
-      },
-      failure,
-    );
+    let receipt: BrokerRequestRecord;
+    try {
+      receipt = await this.options.store.recordPreAdmissionFailure(
+        {
+          requestId: config.requestId,
+          fingerprint,
+          parameters: config,
+          owner: this.options.owner,
+          export: exportIdentity,
+        },
+        failure,
+      );
+    } catch (error) {
+      if (!(error instanceof BindingRegistrySchemaUnsupportedError)) {
+        throw error;
+      }
+      logger.warn(`Session request ${config.requestId} receipt refused: ${error.message}`, error);
+      return failedResult(config, failureFor(error));
+    }
     return this.result(receipt);
   }
 

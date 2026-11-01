@@ -15,7 +15,7 @@ describe("TestCoverageRepository", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1000000);
-    repo = new TestCoverageRepository(db, timer);
+    repo = new TestCoverageRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -460,7 +460,7 @@ describe("TestCoverageRepository", () => {
 
   describe("resolveConnection", () => {
     test("returns the bound executor for a repo constructed with a db", () => {
-      const bound = new TestCoverageRepository(db, timer);
+      const bound = new TestCoverageRepository({ db, timer });
       expect(bound.resolveConnection()).toBe(db);
     });
 
@@ -469,8 +469,8 @@ describe("TestCoverageRepository", () => {
       // guard (issue #3067) permits resolving it — the assertion is about
       // singleton identity, not the on-disk file.
       await withInMemorySingletonDatabase(() => {
-        const a = new TestCoverageRepository(undefined, timer);
-        const b = new TestCoverageRepository(undefined, timer);
+        const a = new TestCoverageRepository({ timer });
+        const b = new TestCoverageRepository({ timer });
         expect(a.resolveConnection()).toBe(b.resolveConnection());
       });
     });

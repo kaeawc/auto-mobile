@@ -1,5 +1,5 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class NavigationEventTests: XCTestCase {
     func testNavigationEventDefaultValues() {
@@ -75,14 +75,15 @@ final class SwiftUINavigationAdapterTests: XCTestCase {
     }
 
     func testStartAndStop() {
-        XCTAssertTrue(SwiftUINavigationAdapter.shared.isActive) // initialized by SDK
+        XCTAssertFalse(SwiftUINavigationAdapter.shared.isActive) // host opt-in required
         SwiftUINavigationAdapter.shared.stop()
         XCTAssertFalse(SwiftUINavigationAdapter.shared.isActive)
-        SwiftUINavigationAdapter.shared.start()
+        AutoMobileNavigation.shared.registerSwiftUI()
         XCTAssertTrue(SwiftUINavigationAdapter.shared.isActive)
     }
 
     func testTrackNavigationNotifiesListeners() {
+        AutoMobileNavigation.shared.registerSwiftUI()
         let listener = FakeNavigationListener()
         AutoMobileSDK.shared.addNavigationListener(listener)
 

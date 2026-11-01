@@ -910,7 +910,7 @@ export class SimCtlClient implements SimCtl {
     const result = await this.executeCommandArgs(["io", deviceId, "enumerate"], timeoutMs, signal);
     return parseSimulatorDisplays(result.stdout);
   }
-  screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+  screenshot(deviceId: string, display?: string, signal?: AbortSignal): Promise<Buffer> {
     return this.simCtlScreenshot.screenshot(deviceId, display, signal);
   }
 

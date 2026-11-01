@@ -15,6 +15,9 @@ import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
+import { observeWatch } from "../../../src/server/observeWatch";
 import {
   parseSimulatorDisplays,
   simulatorDeviceDisplays,
@@ -321,6 +324,40 @@ test("mkdtemp failure before abort remains a typed read failure", async () => {
   expect(h.calls).toEqual([]);
   expect(h.removed).toEqual([]);
   expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+for (const platform of ["tvos", "watchos"] as const) {
+  test(`${platform} observe uses the expected simctl screenshot display arguments`, async () => {
+    const h = captureHarness({ frame: png(3840, 2160) });
+    await observeWatch({ ...device, platform, displays: undefined }, {}, undefined, {
+      screenshots: {
+        capture: (target, display, signal) => h.simctl.screenshot(target.deviceId, display, signal),
+      },
+      timer: h.timer,
+      idGenerator: new CountingIdGenerator("observe"),
+      fileWriter: new FakeScreenshotFileWriter(),
+      pathProtection: new FakeScreenshotPathProtection(h.timer),
+      cacheDir: () => "/cache/screenshots",
+    });
+    const path = h.calls[0]!.at(-1)!;
+    expect(h.calls).toEqual([
+      [
+        "simctl",
+        "io",
+        udid,
+        "screenshot",
+        ...(platform === "watchos" ? ["--display=main"] : []),
+        path,
+      ],
+    ]);
+  });
+}
+
+test("simctl screenshot omits the display argument when none is supplied", async () => {
+  const frame = png(3840, 2160);
+  const h = captureHarness({ frame });
+  expect(await h.simctl.screenshot(udid)).toEqual(frame);
+  expect(h.calls).toEqual([["simctl", "io", udid, "screenshot", h.calls[0]!.at(-1)!]]);
 });
 
 test("simctl screenshot reads PNG bytes from an absolute private temp path and removes it", async () => {

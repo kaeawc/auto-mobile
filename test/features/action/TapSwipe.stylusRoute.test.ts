@@ -40,6 +40,18 @@ function observeScreen() {
   return observe;
 }
 
+describe("tapAt with an eraser pointer (#13105)", () => {
+  test("an eraser at full pressure takes a pointer route, never adb input stylus", async () => {
+    const route = new FakePointerInjector("uinput");
+    const { tap, adb } = tapAt(route, []);
+    const result = await tap.execute({ x: 4, y: 6, pointer: { toolType: "eraser" } });
+    expect(result.success).toBe(true);
+    const [request] = route.injected as PointerRequest[];
+    expect(request.features.toolType).toBe("eraser");
+    expect(adb.getExecutedCommands().some((c) => c.includes("input stylus"))).toBe(false);
+  });
+});
+
 describe("tapAt with a rich stylus pointer (#13099)", () => {
   test("pressure other than 1 takes the instrumentation route, not adb input stylus", async () => {
     const route = new FakePointerInjector("instrumentation");

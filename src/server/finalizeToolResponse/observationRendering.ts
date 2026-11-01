@@ -59,6 +59,8 @@ export function resolveObserveProjection(args?: Record<string, unknown>): "full"
  * because they require projection or provenance merging.
  */
 export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
+  "backend",
+  "fallbackReason",
   "activeWindow",
   "freshness",
   "screenSize",

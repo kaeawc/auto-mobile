@@ -18,6 +18,7 @@ import { logger } from "../../utils/logger";
  * `KEYCODE_SYSTEM_NAVIGATION_*` (280..283) and `KEYCODE_DPAD_CENTER` (23). Rotation goes through
  * the car service's `inject-rotary` command; its flags are unverified until the AAOS spike
  * (#14916) runs on an emulator, so a reply that looks like a failure is reported, not assumed ok.
+ * Nudges use `cmd car_service inject-key`; plain `input keyevent` does not move focus on AAOS.
  *
  * Watch crown scrolling (#14902) and car rotary focus are different interactions and share no
  * model here.
@@ -27,6 +28,7 @@ export const MAX_ROTARY_STEPS = 50;
 
 type RotaryAction =
   | { kind: "rotate"; clockwise: boolean }
+  | { kind: "car-key"; keyCode: number; label: string }
   | { kind: "key"; keyCode: number; label: string };
 
 /** Rotary buttons `pressButton` accepts, in the order its schema lists them. */
@@ -44,10 +46,10 @@ export type RotaryButton = (typeof ROTARY_BUTTONS)[number];
 const ROTARY_ACTIONS: Readonly<Record<RotaryButton, RotaryAction>> = {
   rotary_rotate_cw: { kind: "rotate", clockwise: true },
   rotary_rotate_ccw: { kind: "rotate", clockwise: false },
-  rotary_nudge_up: { kind: "key", keyCode: 280, label: "nudge up" },
-  rotary_nudge_down: { kind: "key", keyCode: 281, label: "nudge down" },
-  rotary_nudge_left: { kind: "key", keyCode: 282, label: "nudge left" },
-  rotary_nudge_right: { kind: "key", keyCode: 283, label: "nudge right" },
+  rotary_nudge_up: { kind: "car-key", keyCode: 280, label: "nudge up" },
+  rotary_nudge_down: { kind: "car-key", keyCode: 281, label: "nudge down" },
+  rotary_nudge_left: { kind: "car-key", keyCode: 282, label: "nudge left" },
+  rotary_nudge_right: { kind: "car-key", keyCode: 283, label: "nudge right" },
   rotary_select: { kind: "key", keyCode: 23, label: "select" },
 };
 
@@ -58,17 +60,21 @@ export function isRotaryButton(button: unknown): button is RotaryButton {
 /** The adb shell arguments one rotary press runs. Pure, so each action's command is testable. */
 export function rotaryCommand(button: RotaryButton, steps: number): string[] {
   const action = ROTARY_ACTIONS[button];
-  if (action.kind === "key") {
-    return ["input", "keyevent", String(action.keyCode)];
+  switch (action.kind) {
+    case "key":
+      return ["input", "keyevent", String(action.keyCode)];
+    case "car-key":
+      return ["cmd", "car_service", "inject-key", String(action.keyCode)];
+    case "rotate":
+      // One boolean per detent: `-c true,true,true` is three clockwise steps.
+      return [
+        "cmd",
+        "car_service",
+        "inject-rotary",
+        "-c",
+        Array.from({ length: steps }, () => String(action.clockwise)).join(","),
+      ];
   }
-  // One boolean per detent: `-c true,true,true` is three clockwise steps.
-  return [
-    "cmd",
-    "car_service",
-    "inject-rotary",
-    "-c",
-    Array.from({ length: steps }, () => String(action.clockwise)).join(","),
-  ];
 }
 
 /** Steps apply to rotation only; the key actions are single events. */
@@ -126,7 +132,7 @@ export class RotaryInput {
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
     const action = ROTARY_ACTIONS[button];
-    const keyCode = action.kind === "key" ? action.keyCode : -1;
+    const keyCode = action.kind !== "rotate" ? action.keyCode : -1;
     try {
       const result = await this.adb.execute(["shell", ...rotaryCommand(button, steps)], {
         noRetry: true,

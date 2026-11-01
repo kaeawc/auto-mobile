@@ -89,7 +89,7 @@ beforeEach(async () => {
   await addLivenessContract(db as Kysely<unknown>);
   await addLivenessWriterFence(db as Kysely<unknown>);
   await addActivitySequence(db as Kysely<unknown>);
-  const repository = new DeviceSessionRepository(db);
+  const repository = new DeviceSessionRepository({ db });
   const timer = new FakeTimer();
   manager = new SessionManager(timer, repository);
   const utils = new FakeDeviceUtils();

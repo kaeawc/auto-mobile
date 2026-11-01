@@ -46,7 +46,7 @@ describe("DeviceSessionRepository", () => {
     clearAutolockEnv();
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -1185,7 +1185,7 @@ describe("DeviceSessionRepository", () => {
         await super.markReleased(...args);
       }
     }
-    const delayed = new DelayedReleaseRepository(db, timer);
+    const delayed = new DelayedReleaseRepository({ db, timer });
     const sessionManager = new SessionManager(timer, delayed);
     try {
       await sessionManager.createSession("session-1", "emulator-5554", "android", {
@@ -1310,7 +1310,7 @@ describe("DeviceSessionRepository", () => {
         return await super.listRecoverableSessions(nowMs);
       }
     }
-    const sessionManager = new SessionManager(timer, new ClockRecordingRepository(db, timer));
+    const sessionManager = new SessionManager(timer, new ClockRecordingRepository({ db, timer }));
     try {
       const sessionClock = sessionManager.sessionNow();
       // A backward wall step: the session clock holds, the wall timer falls an hour behind.

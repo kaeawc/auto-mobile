@@ -14,5 +14,5 @@ runDeviceSessionPersistenceContract("FakeDeviceSessionPersistence", async () => 
 }));
 runDeviceSessionPersistenceContract("DeviceSessionRepository (SQLite)", async () => {
   const db = await createTestDatabase();
-  return { repository: new DeviceSessionRepository(db), dispose: () => db.destroy() };
+  return { repository: new DeviceSessionRepository({ db }), dispose: () => db.destroy() };
 });

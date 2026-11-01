@@ -7,6 +7,7 @@ import {
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 export interface ToolCallRecord {
   toolName: string;
@@ -37,10 +38,13 @@ export class ToolCallRepository {
   };
 
   /** `retentionMaxRows` lets tests observe the amortized sweep at a small cap. */
-  constructor(
-    db?: Kysely<Database>,
-    private readonly retentionMaxRows: number = TOOL_CALL_RETENTION_MAX_ROWS,
-  ) {
+  private readonly retentionMaxRows: number;
+
+  constructor({
+    db,
+    retentionMaxRows = TOOL_CALL_RETENTION_MAX_ROWS,
+  }: Pick<RepositoryDeps, "db"> & { retentionMaxRows?: number } = {}) {
+    this.retentionMaxRows = retentionMaxRows;
     this.db = db ?? null;
   }
 

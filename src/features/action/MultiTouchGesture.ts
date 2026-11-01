@@ -1,3 +1,4 @@
+import { rejectWatchAction } from "../watch/WatchActions";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { logger } from "../../utils/logger";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -127,6 +128,7 @@ export class MultiTouchGesture extends BaseVisualChange {
   }
 
   async execute(options: MultiTouchOptions, call: ActionCall = {}): Promise<MultiTouchResult> {
+    rejectWatchAction(this.device.platform, "multi-touch");
     const { progress, signal } = resolveActionCall(call);
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);

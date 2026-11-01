@@ -389,17 +389,24 @@ export class DevicePoolTargetDiscovery {
       const androidPresence = await this.callbacks.takeFreshPresenceDiscovery("android");
       return { capturedEntry, androidPresence, bootedDevices: androidPresence.devices };
     }
-    if (targetPlatform === "watchos") {
-      // A watch has no iOS liveness snapshot (#14908): one fresh watchOS listing must show it
-      // booted, for a pooled entry and a new one alike, before it is bound.
-      const discovery = await this.callbacks.takeFreshPresenceDiscovery("watchos");
+    if (targetPlatform === "watchos" || targetPlatform === "tvos") {
+      // Non-iOS Apple simulators need their own fresh listing, for a pooled entry and
+      // a new one alike, before binding; an iOS snapshot cannot confirm either platform.
+      const discovery = await this.callbacks.takeFreshPresenceDiscovery(targetPlatform);
       if (
-        !didSourceSucceedForDevice(discovery, "watchos", deviceId) ||
+        !didSourceSucceedForDevice(discovery, targetPlatform, deviceId) ||
         !discovery.devices.some((device) => device.deviceId === deviceId)
       ) {
         throw new ActionableError(unavailableMessage);
       }
-      return { capturedEntry, bootedDevices: discovery.devices };
+      return {
+        capturedEntry,
+        bootedDevices: discovery.devices,
+        iosLiveness:
+          targetPlatform === "tvos"
+            ? await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery })
+            : undefined,
+      };
     }
     if (capturedEntry) {
       return {

@@ -50,6 +50,7 @@ import {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { waitForEmulatorShutdownWithEscalation } from "../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
 import { exponentialBackoff } from "../utils/Backoff";
+import { stopWatchRunnerBeforeShutdown } from "../features/deviceLifecycle/teardown/shutdownPreparation";
 import {
   AndroidObserverShutdownState,
   stopIosCtrlProxyBeforeShutdown,
@@ -74,8 +75,12 @@ export function createKillDeviceResponse(
   alreadyStoppedMessage?: string,
 ) {
   if (alreadyStoppedMessage !== undefined) {
-    // A simulator, iPhone or Apple Watch, that is already shut down is the requested end state.
-    if (args.device.platform === "ios" || args.device.platform === "watchos") {
+    // A simulator that is already shut down is the requested end state.
+    if (
+      args.device.platform === "ios" ||
+      args.device.platform === "watchos" ||
+      args.device.platform === "tvos"
+    ) {
       return createStructuredToolResponse({
         message: `${args.device.platform} '${deviceDisplayName(args.device)}' already shut down`,
         udid: args.device.deviceId,
@@ -806,6 +811,7 @@ async function preparePlatformShutdown(
       dependencies.stopAndroidObservers,
       dependencies.daemonState,
     );
+    stopWatchRunnerBeforeShutdown(context.device, dependencies);
     return { ...target, androidObserverState };
   } catch (error) {
     clearFence();

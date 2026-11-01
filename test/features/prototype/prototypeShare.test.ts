@@ -103,14 +103,15 @@ describe("share contract corpus", () => {
     }
     const handlerSpec = {
       ...base,
+      requires: { platform: ["share", "notifications"] },
       root: { type: "spacer" },
-      platform: { on: { "test.tick": [call] } },
+      platform: { on: { "notifications.opened": [call] } },
     };
     expect(prototypeGateCapabilities(handlerSpec)).toContain("prototype_platform_share_v1");
     expect(
       validatePrototypeSpec(handlerSpec, {
         requiredCapabilities: prototypeGateCapabilities,
-        supportedCapabilities: ["prototype_platform_v1", "prototype_platform_test_v1"],
+        supportedCapabilities: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
       }),
     ).toEqual({
       success: false,

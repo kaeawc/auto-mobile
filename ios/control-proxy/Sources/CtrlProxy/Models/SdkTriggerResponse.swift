@@ -57,7 +57,7 @@ public struct SdkTriggerReply: Equatable, Sendable {
 
 /// Why an observation-bridge command did not produce a result (#5159).
 public enum SdkBridgeFailure: String, Error, Sendable {
-    /// No SDK in the foreground app or no registered bridge; the request was never sent.
+    /// The foreground app's SDK bridge is unreachable or not registered.
     case bridgeUnavailable = "bridge_unavailable"
     /// The app resigned active before the SDK could serve the request.
     case appNotActive = "app_not_active"
@@ -78,7 +78,7 @@ public enum SdkBridgeFailure: String, Error, Sendable {
     var message: String {
         switch self {
         case .bridgeUnavailable:
-            "The foreground app has no AutoMobile SDK observation bridge registered; nothing was sent."
+            "The foreground app's AutoMobile SDK observation bridge is unreachable or not registered."
         case .appNotActive: "The foreground app resigned active before the SDK could serve the request."
         case .invalidAction:
             "actionJson must be one JSON-encoded AutoMobileAction (for a web view: an "

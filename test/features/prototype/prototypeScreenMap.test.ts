@@ -19,6 +19,26 @@ const nav = (type: string, extra: Record<string, unknown> = {}) => [
 ];
 
 describe("buildPrototypeScreenMap", () => {
+  test("screen nodes carry the testTag of the node that draws them", () => {
+    const map = buildPrototypeScreenMap({
+      id: "tags",
+      root: {
+        type: "stack",
+        id: "nav",
+        start: "home",
+        screens: {
+          home: { type: "column", testTag: "screen.home", children: [] },
+          plain: { type: "text", text: "x" },
+        },
+      },
+    });
+    expect(map.nodes.map((n) => [n.id, n.testTag])).toEqual([
+      ["root", undefined],
+      ["stack:nav/home", "screen.home"],
+      ["stack:nav/plain", undefined],
+    ]);
+  });
+
   test("stack screens, start flag and push/pop/popToRoot/replace edges with button labels", () => {
     const map = buildPrototypeScreenMap(fixture("stack-navigation"));
     expect(map.nodes.map((n) => n.id)).toEqual([

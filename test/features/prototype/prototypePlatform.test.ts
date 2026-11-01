@@ -49,9 +49,9 @@ describe("notifications module contract", () => {
 
   test("events are opened, action, reply, dismissed and scheduledFired; only reply is sensitive", () => {
     expect(notifications.events).toEqual({
-      opened: { sensitive: false },
-      action: { sensitive: false },
-      reply: { sensitive: true },
+      opened: { sensitive: false, userInitiated: true },
+      action: { sensitive: false, userInitiated: true },
+      reply: { sensitive: true, userInitiated: true },
       dismissed: { sensitive: false },
       scheduledFired: { sensitive: false },
     });

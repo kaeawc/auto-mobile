@@ -10,7 +10,8 @@ export type StylusButton = "primary" | "secondary";
  * rounded or sent as a finger (#13099).
  */
 export interface PointerOption {
-  toolType: "stylus";
+  /** An eraser is the pen's rubber end; only a pointer route injects it (`adb input` cannot). */
+  toolType: "stylus" | "eraser";
   /** 0–1. Anything but 1 needs the instrumentation route. */
   pressure?: number;
   /** Radians from the surface normal (`AXIS_TILT`), 0 to PI/2. Android only. */
@@ -25,7 +26,8 @@ export interface PointerOption {
 export function pointerNeedsInstrumentation(pointer: PointerOption | undefined): boolean {
   return (
     pointer !== undefined &&
-    ((pointer.pressure !== undefined && pointer.pressure !== 1) ||
+    (pointer.toolType === "eraser" ||
+      (pointer.pressure !== undefined && pointer.pressure !== 1) ||
       pointer.tilt !== undefined ||
       pointer.orientation !== undefined ||
       (pointer.buttons?.length ?? 0) > 0)

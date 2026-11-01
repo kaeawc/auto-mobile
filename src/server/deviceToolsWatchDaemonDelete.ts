@@ -26,8 +26,19 @@ export async function deleteWatchAsDaemon(
   args: TeardownDeviceArgs,
   signal?: AbortSignal,
 ): Promise<TeardownToolResponse> {
+  const { target } = args;
+  if (target.platform !== "watchos") {
+    // Only a watch binding's journal routes here; anything else is not this path's to delete.
+    return createTeardownFailureResponse(args, "destroy", "watch_delete_failed", {
+      message: `deleteWatchAsDaemon was given a ${target.platform} target, not a watch.`,
+    });
+  }
   try {
-    return await deleteWatchDevice({ ...args, force: args.force ?? false }, DAEMON_STEPS, signal);
+    return await deleteWatchDevice(
+      { ...args, target: { ...target, platform: target.platform }, force: args.force ?? false },
+      DAEMON_STEPS,
+      signal,
+    );
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(

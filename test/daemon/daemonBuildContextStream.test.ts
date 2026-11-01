@@ -19,8 +19,8 @@ describe("daemon build-context stream wiring", () => {
     await harness.dispose();
   });
   function manager(): NavigationGraphManager {
-    return new NavigationGraphManager(new NavigationRepository(harness.db), {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+    return new NavigationGraphManager(new NavigationRepository({ db: harness.db }), {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer: new FakeTimer(),
     });
   }

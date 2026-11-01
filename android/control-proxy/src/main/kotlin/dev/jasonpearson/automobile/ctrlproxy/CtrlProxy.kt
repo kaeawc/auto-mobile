@@ -1409,6 +1409,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
+  private val displayTransitions =
+    DisplayTransitionRelay(
+      object : DisplayTransitionRelay.Host {
+        override fun launch(block: suspend () -> Unit) {
+          serviceScope.launch { block() }
+        }
+
+        override fun isPrototypeReady() = ::prototypeController.isInitialized
+
+        override suspend fun prototypeDisplayTransition(displayId: Int, removed: Boolean) {
+          prototypeController.onDisplayTransition(displayId, removed)
+        }
+
+        override fun isServerRunning() =
+          ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+        override suspend fun broadcast(frame: String) = webSocketServer.broadcast(frame)
+      },
+    )
+
   override fun onCreate() {
     super.onCreate()
     // Keep the production queue running from service creation, before any connection or request.
@@ -1446,19 +1466,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val displaySignal =
         DisplayRotationChangeSignal(
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
-          onTransition = { transition ->
-            serviceScope.launch {
-              if (::prototypeController.isInitialized) {
-                prototypeController.onDisplayTransition(
-                  transition.displayId,
-                  removed = transition.change == "removed",
-                )
-              }
-              if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-                webSocketServer.broadcast(displayTransitionFrame(transition))
-              }
-            }
-          },
+          onTransition = displayTransitions::onTransition,
         )
       rotationProvenance = RotationProvenanceTracker(displaySignal)
       deviceStateRegistration =

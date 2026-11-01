@@ -498,7 +498,11 @@ acquisition: the `files_only` diagnostic names the path, migrations, recorded wr
 versions and remedy, and a warning is logged once per process per registry path.
 Managed bindings are not enforced
 in files-only mode: this daemon can allocate a device held only by a managed binding,
-because allocation claim files alone decide ownership. The device-claims mirror skips
+because allocation claim files alone decide ownership. Outside files-only mode the
+`device_claims` table decides Android and iOS allocation (#11811 step d): a claim is an
+optimistic compare-and-set on the device's row (judge a foreign owner's liveness, then
+write only if the row is unchanged), so no allocation claim file is written for those
+platforms; watch and TV, and any claim no table can decide, keep the claim files. The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers
 requiring current registry evidence still fail with non-retryable
 `registry_schema_unsupported`; its payload includes recorded writer versions and the

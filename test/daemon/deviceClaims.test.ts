@@ -138,6 +138,43 @@ describe("the device_claims table", () => {
     expect(await claims.get("android", "emulator-5554")).toBeUndefined();
   });
 
+  describe("replaceIf: the atomic claim (#11811 step d)", () => {
+    const TAKER = { ...CLAIM, pid: 200, ownerToken: "token-b", claimedAtMs: 20, updatedAtMs: 20 };
+
+    test("claims a device no row names, and only once", async () => {
+      expect(await claims.replaceIf(undefined, CLAIM)).toBe(true);
+      expect(await claims.replaceIf(undefined, TAKER)).toBe(false);
+      expect(await claims.get("android", "emulator-5554")).toEqual(CLAIM);
+    });
+
+    test("takes over only the row it judged, never one that changed since", async () => {
+      await claims.upsert(CLAIM);
+      const stale = { pid: 999, ownerToken: "gone" };
+      expect(await claims.replaceIf(stale, TAKER)).toBe(false);
+      expect(await claims.get("android", "emulator-5554")).toEqual(CLAIM);
+      expect(await claims.replaceIf(OWNER, TAKER)).toBe(true);
+      expect(await claims.get("android", "emulator-5554")).toEqual(TAKER);
+    });
+
+    test("a row with the judged PID but another owner token is a different owner", async () => {
+      await claims.upsert(CLAIM);
+      expect(await claims.replaceIf({ pid: OWNER.pid, ownerToken: "restarted" }, TAKER)).toBe(
+        false,
+      );
+      expect(await claims.get("android", "emulator-5554")).toEqual(CLAIM);
+    });
+
+    test("two takers of the same judged row: exactly one wins", async () => {
+      await claims.upsert(CLAIM);
+      const other = { ...TAKER, pid: 300, ownerToken: "token-c" };
+      const results = await Promise.all([
+        claims.replaceIf(OWNER, TAKER),
+        claims.replaceIf(OWNER, other),
+      ]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+    });
+  });
+
   test("the schema refuses an unknown kind, platform or empty owner", async () => {
     await expect(
       claims.upsert({ ...CLAIM, kind: "lease" as DeviceClaim["kind"] }),
@@ -161,6 +198,113 @@ describe("the claims mirror", () => {
       generationOf: () => "boot-1:start-9",
     });
   }
+
+  describe("acquire: the table decides the claim (#11811 step d)", () => {
+    const ME = { pid: 100, ownerToken: "token-a" };
+    const PEER = { ...CLAIM, pid: 200, ownerToken: "token-b", processGenerationToken: undefined };
+    const live = async () => true;
+    const dead = async () => false;
+
+    test("claims a free device and records this owner", async () => {
+      const store = new FakeDeviceClaims();
+      const mirror = mirrorOver(() => store);
+      expect(await mirror.acquire("emulator-5554", ME, live)).toEqual({ outcome: "claimed" });
+      expect(await store.get("android", "emulator-5554")).toMatchObject({
+        pid: 100,
+        kind: "allocation",
+      });
+    });
+
+    test("a live foreign owner refuses it, naming that owner; nothing is written", async () => {
+      const store = new FakeDeviceClaims();
+      await store.upsert({ ...PEER });
+      const mirror = mirrorOver(() => store);
+      expect(await mirror.acquire("emulator-5554", ME, live)).toEqual({
+        outcome: "refused",
+        ownerPid: 200,
+      });
+      expect((await store.get("android", "emulator-5554"))?.pid).toBe(200);
+    });
+
+    test("a dead owner's row is taken over", async () => {
+      const store = new FakeDeviceClaims();
+      await store.upsert({ ...PEER });
+      const mirror = mirrorOver(() => store);
+      expect(await mirror.acquire("emulator-5554", ME, dead)).toEqual({ outcome: "claimed" });
+      expect((await store.get("android", "emulator-5554"))?.pid).toBe(100);
+    });
+
+    test("a row that changes while its owner is judged is not overwritten", async () => {
+      const store = new FakeDeviceClaims();
+      await store.upsert({ ...PEER });
+      const mirror = mirrorOver(() => store);
+      const racer = { ...PEER, pid: 300, ownerToken: "token-c", updatedAtMs: 99 };
+      const outcome = await mirror.acquire("emulator-5554", ME, async (row) => {
+        if (row.pid === 200) {
+          await store.upsert(racer);
+          return false;
+        }
+        return true;
+      });
+      expect(outcome).toEqual({ outcome: "refused", ownerPid: 300 });
+      expect((await store.get("android", "emulator-5554"))?.pid).toBe(300);
+    });
+
+    test("a row whose PID now belongs to another process is taken over without asking it", async () => {
+      const store = new FakeDeviceClaims();
+      await store.upsert({ ...PEER, processGenerationToken: "boot-0:start-1" });
+      const timer = new FakeTimer();
+      const mirror = new StoreDeviceClaimMirror({
+        platform: "android",
+        store: () => store,
+        timer,
+        generationOf: () => "boot-1:start-9",
+        generationVerdict: () => "different",
+      });
+      const judge = mock(live);
+      expect(await mirror.acquire("emulator-5554", ME, judge)).toEqual({ outcome: "claimed" });
+      expect(judge).not.toHaveBeenCalled();
+    });
+
+    test("this owner's own row is claimed again without judging it", async () => {
+      const store = new FakeDeviceClaims();
+      const mirror = mirrorOver(() => store);
+      await mirror.acquire("emulator-5554", ME, live);
+      const judge = mock(live);
+      expect(await mirror.acquire("emulator-5554", ME, judge)).toEqual({ outcome: "claimed" });
+      expect(judge).not.toHaveBeenCalled();
+    });
+
+    test("no registry, or a skipped one, leaves the claim to the files", async () => {
+      expect(await mirrorOver(() => undefined).acquire("emulator-5554", ME, live)).toEqual({
+        outcome: "unavailable",
+      });
+      const skipped = mirrorOver(() => new FakeDeviceClaims());
+      skipped.skip();
+      expect(await skipped.acquire("emulator-5554", ME, live)).toEqual({ outcome: "unavailable" });
+    });
+
+    test("a table that cannot be written leaves the claim to the files", async () => {
+      const store = new FakeDeviceClaims();
+      store.failWrites = 1;
+      expect(await mirrorOver(() => store).acquire("emulator-5554", ME, live)).toEqual({
+        outcome: "unavailable",
+      });
+    });
+
+    test("a re-opened registry writes an acquired claim back only while no other owner took it", async () => {
+      const first = new FakeDeviceClaims();
+      const mirror = mirrorOver(() => first);
+      await mirror.acquire("emulator-5554", ME, live);
+      await mirror.acquire("emulator-5556", ME, live);
+      const reopened = new FakeDeviceClaims();
+      await reopened.upsert({ ...PEER, deviceId: "emulator-5556", updatedAtMs: 1 });
+      mirror.reconcile(reopened);
+      await mirror.idle();
+      expect((await reopened.get("android", "emulator-5554"))?.pid).toBe(100);
+      expect((await reopened.get("android", "emulator-5556"))?.pid).toBe(200);
+    });
+  });
 
   test("a skipped hub cancels retries and never opens, reads, writes, or withdraws table rows", async () => {
     const timer = new FakeTimer();

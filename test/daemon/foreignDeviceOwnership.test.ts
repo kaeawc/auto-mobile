@@ -804,24 +804,19 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     const held = files.files.get(files.claimPath(DEVICE));
     return held ? `${held.pid}/${held.token}` : "none";
   };
-  const tableOwner = async (store: FakeDeviceClaims) => {
-    const row = await store.get("android", DEVICE);
-    return row ? `${row.pid}/${row.ownerToken}` : "none";
-  };
 
-  test("a won claim is mirrored with the token its claim file names, and a release withdraws it", async () => {
+  test("a won claim is decided by the table and writes no claim file; a release withdraws the row (#11811 d)", async () => {
     const files = new FakeOwnershipFiles();
     const store = new FakeDeviceClaims();
     const { ownership, mirror } = mirroredDaemon(files, store, SELF_PID);
 
     expect(await ownership.claim(DEVICE)).toBe(true);
     await mirror.idle();
-    expect(await tableOwner(store)).toBe(fileOwner(files));
+    expect(fileOwner(files)).toBe("none");
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
 
     ownership.release(DEVICE);
     await mirror.idle();
-    expect(fileOwner(files)).toBe("none");
     expect(store.rows.size).toBe(0);
   });
 
@@ -846,14 +841,12 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     const peer = mirroredDaemon(files, store, PEER_PID);
     const self = mirroredDaemon(files, store, SELF_PID);
     expect(await peer.ownership.claim(DEVICE)).toBe(true);
-    await peer.mirror.idle();
     files.alive.delete(PEER_PID);
 
     expect(await self.ownership.claim(DEVICE)).toBe(true);
-    await self.mirror.idle();
 
-    expect(await tableOwner(store)).toBe(fileOwner(files));
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+    expect(fileOwner(files)).toBe("none");
   });
 
   test("a daemon whose claim another took over never writes it back over the new owner's row", async () => {
@@ -861,51 +854,54 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     const store = new FakeDeviceClaims();
     const peer = mirroredDaemon(files, store, PEER_PID);
     const self = mirroredDaemon(files, store, SELF_PID);
-    store.failWrites = 1;
+    expect(await peer.ownership.claim(DEVICE)).toBe(true);
+    files.alive.delete(PEER_PID);
+    expect(await self.ownership.claim(DEVICE)).toBe(true);
+    files.alive.add(PEER_PID);
+
+    // The peer's registry reopens: it writes back only claims nobody else took.
+    peer.mirror.reconcile(store);
+    await peer.mirror.idle();
+
+    expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+  });
+
+  test("a busy table leaves the claim to the claim file, and a later claim moves it to the table", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      expect(await peer.ownership.claim(DEVICE)).toBe(true);
-      await peer.mirror.idle();
-      // Its table write failed and is waiting to be retried when the claim is taken over.
-      files.alive.delete(PEER_PID);
-      expect(await self.ownership.claim(DEVICE)).toBe(true);
-      await self.mirror.idle();
-      files.alive.add(PEER_PID);
-
-      peer.mirror.reconcile(store);
-      await peer.mirror.idle();
-
-      expect(await tableOwner(store)).toBe(fileOwner(files));
+      const files = new FakeOwnershipFiles();
+      const store = new FakeDeviceClaims();
+      store.failWrites = 2;
+      const { ownership, mirror } = mirroredDaemon(files, store, SELF_PID);
+      expect(await ownership.claim(DEVICE)).toBe(true);
+      await mirror.idle();
+      expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
+      // The next claim by the same daemon finds the table writable again.
+      expect(await ownership.claim(DEVICE)).toBe(true);
       expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
     } finally {
       warn.mockRestore();
     }
   });
 
-  test("a busy table never changes the claim's outcome", async () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const files = new FakeOwnershipFiles();
-      const store = new FakeDeviceClaims();
-      store.failWrites = 1;
-      const { ownership, mirror } = mirroredDaemon(files, store, SELF_PID);
-      expect(await ownership.claim(DEVICE)).toBe(true);
-      await mirror.idle();
-      expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
-      expect(store.rows.size).toBe(0);
-      // The next claim by the same daemon (already ours) catches the table up.
-      expect(await ownership.claim(DEVICE)).toBe(true);
-      await mirror.idle();
-      expect(await tableOwner(store)).toBe(fileOwner(files));
-    } finally {
-      warn.mockRestore();
-    }
+  test("a live daemon's pre-upgrade claim file is still honoured (#11811 d)", async () => {
+    const files = new FakeOwnershipFiles();
+    const store = new FakeDeviceClaims();
+    const legacy = new ForwardLeaseForeignDeviceOwnership(PEER_PID, files, new FakeOwnerProbe(), {
+      ownerSocketPath: () => undefined,
+      timer: new FakeTimer(),
+    });
+    expect(await legacy.claim(DEVICE)).toBe(true);
+    const self = mirroredDaemon(files, store, SELF_PID);
+
+    expect(await self.ownership.claim(DEVICE)).toBe(false);
+    expect(store.rows.size).toBe(0);
   });
 
-  // The table follows the file: after any interleaving of claims, releases and crashes by two
-  // daemons the row names exactly the owner the claim file does, or both are absent.
+  // The table decides: after any interleaving of claims, releases and crashes by two daemons, at
+  // most one live daemon holds the device, and a held device's row names its holder.
   test.each([1, 2, 3, 4, 5, 6, 7, 8])(
-    "claim, release and crash interleavings keep the table equal to the claim file (seed %i)",
+    "claim, release and crash interleavings never give one device two live holders (seed %i)",
     async (seed) => {
       const files = new FakeOwnershipFiles();
       const store = new FakeDeviceClaims();
@@ -913,23 +909,33 @@ describe("the host-wide claims mirror (#11811 b)", () => {
         mirroredDaemon(files, store, SELF_PID),
         mirroredDaemon(files, store, PEER_PID),
       ];
+      const pids = [SELF_PID, PEER_PID];
+      const holds = [false, false];
       const random = new SeededRandom(seed);
       for (let step = 0; step < 120; step++) {
         const index = random.next() < 0.5 ? 0 : 1;
         const daemon = daemons[index];
-        const pid = index === 0 ? SELF_PID : PEER_PID;
+        const pid = pids[index];
         const roll = random.next();
         if (roll < 0.45) {
           files.alive.add(pid);
-          await daemon.ownership.claim(DEVICE);
+          holds[index] = (await daemon.ownership.claim(DEVICE)) || holds[index];
         } else if (roll < 0.8) {
           daemon.ownership.release(DEVICE);
+          holds[index] = false;
         } else {
           // A crash: the process disappears without releasing anything.
           files.alive.delete(pid);
+          holds[index] = false;
         }
         await Promise.all(daemons.map((d) => d.mirror.idle()));
-        expect(`${step}:${await tableOwner(store)}`).toBe(`${step}:${fileOwner(files)}`);
+        const liveHolders = pids.filter((p, i) => holds[i] && files.alive.has(p));
+        expect(`${step}:${liveHolders.length <= 1}`).toBe(`${step}:true`);
+        if (liveHolders.length === 1) {
+          expect(`${step}:${(await store.get("android", DEVICE))?.pid}`).toBe(
+            `${step}:${liveHolders[0]}`,
+          );
+        }
       }
     },
   );
@@ -1126,12 +1132,12 @@ describe("reading the host-wide claims table (#11811 c)", () => {
     expect((await d.store.get("android", DEVICE))?.pid).toBe(SELF_PID);
   });
 
-  test("a claim already ours is not refused because the table is behind", async () => {
+  test("the table decides a claim this daemon held: a live owner's row over ours refuses (#11811 d)", async () => {
     const d = readingDaemon();
     expect(await d.ownership.claim(DEVICE)).toBe(true);
     await d.mirror.idle();
-    // A foreign row lands over ours (a delayed write); the file still names this daemon.
+    // Only a takeover writes another owner's row over ours, and that owner now holds the device.
     await d.store.upsert(d.row({ updatedAtMs: Date.now() + 1_000_000 }));
-    expect(await d.ownership.claim(DEVICE)).toBe(true);
+    expect(await d.ownership.claim(DEVICE)).toBe(false);
   });
 });

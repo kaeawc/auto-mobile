@@ -82,8 +82,8 @@ export interface ForeignDeviceOwnership {
    */
   release(deviceId: string): void;
   /**
-   * Mirror this daemon's claims into the host-wide `device_claims` table (#11811 step b). The claim
-   * files stay authoritative; the mirror never changes a claim's outcome.
+   * Attach the host-wide `device_claims` table: it decides this platform's claims, and a claim falls
+   * back to the claim files only when the table cannot decide (#11811 step d).
    */
   attachClaimMirror?(mirror: DeviceClaimMirror): void;
 }
@@ -364,7 +364,9 @@ export interface ForeignOwnershipOptions {
 /**
  * Reads two per-device lock files: the CtrlProxy forwarding lease (#10485) a daemon takes in its
  * coordination directory when it first talks to a device's CtrlProxy, and the allocation claim a
- * daemon takes while a session holds the device (#10709). The claim lives in a directory
+ * daemon takes while a session holds the device (#10709). With a claims table attached the table
+ * decides a claim instead and no claim file is written (#11811 step d); the files are still read,
+ * and written when no table can decide. The claim lives in a directory
  * scoped to the ADB server rather than to the coordination directory, so daemons with different
  * `AUTOMOBILE_COORDINATION_DIR` values on one adb server still see each other's claims (#10708).
  * A 0.0.84 daemon's claim in the coordination directory (#10707) is still read, never written.
@@ -525,11 +527,62 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
 
   async claim(deviceId: string): Promise<boolean> {
     const owner = this.claimOwner();
+    const decided = await this.claimInTable(deviceId, owner);
+    if (decided !== undefined) {
+      return decided;
+    }
     const outcome = await this.claimFile(deviceId, owner);
     if (outcome === "claimed") {
       this.claimMirror?.claimed(deviceId, owner, () => this.claimFileIsOurs(deviceId, owner));
     }
     return outcome !== "refused";
+  }
+
+  /**
+   * The host-wide table decides the claim, and no claim file is written (#11811 step d). A claim
+   * file or 0.0.84 claim a live foreign daemon still holds is honoured for one more release.
+   * Undefined when no table can decide (watch and TV have none; no registry; a failed write): the
+   * claim files decide, as before.
+   */
+  private async claimInTable(
+    deviceId: string,
+    owner: { pid: number; ownerToken: string; metadata?: string },
+  ): Promise<boolean | undefined> {
+    const acquire = this.claimMirror?.acquire?.bind(this.claimMirror);
+    if (!acquire) {
+      return undefined;
+    }
+    if ((await this.fileClaimOwner(deviceId)) !== undefined || this.hasUnreadableClaim(deviceId)) {
+      return false;
+    }
+    const decision = await acquire(deviceId, owner, async (row) => {
+      const live = await this.evaluateContent(
+        { pid: row.pid, metadata: row.metadata },
+        deviceId,
+        "claim",
+      );
+      return live !== undefined;
+    });
+    if (decision.outcome === "unavailable") {
+      return undefined;
+    }
+    if (decision.outcome === "refused") {
+      // Recovery's rollback must name the live owner the table holds.
+      this.owners.set(deviceId, decision.ownerPid);
+      return false;
+    }
+    return true;
+  }
+
+  /** The live foreign owner a claim file (this release's or a 0.0.84 one) names, if any. */
+  private async fileClaimOwner(deviceId: string): Promise<number | undefined> {
+    const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
+    const held = path === undefined ? undefined : this.source.read(path);
+    const fileOwner =
+      path !== undefined && held !== undefined && held.pid !== this.selfPid
+        ? await this.evaluateOwner(path, deviceId, "claim")
+        : undefined;
+    return fileOwner ?? (await this.legacyClaimOwner(deviceId));
   }
 
   /** Whether the claim file for `deviceId` still names this owner. */
@@ -613,13 +666,15 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   }
 
   release(deviceId: string): void {
+    const owner = { pid: this.selfPid, ownerToken: this.ownerToken };
+    // A table-decided claim has no file; the table row goes either way (#11811 step d).
+    this.claimMirror?.released(deviceId, owner);
     const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
     if (path === undefined) {
       return;
     }
     try {
-      this.source.release(path, { pid: this.selfPid, ownerToken: this.ownerToken });
-      this.claimMirror?.released(deviceId, { pid: this.selfPid, ownerToken: this.ownerToken });
+      this.source.release(path, owner);
     } catch (error) {
       // The claim lapses anyway once this daemon reports no session on the device.
       logger.warn(

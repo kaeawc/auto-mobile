@@ -355,6 +355,9 @@ describe("startup rehydration respects foreign device claims", () => {
     await store.upsert(foreign);
     const writes = mock(store.upsert.bind(store));
     store.upsert = writes;
+    // Step (d): the table decides a claim through its atomic write, not the mirror's upsert.
+    const claimWrites = mock(store.replaceIf.bind(store));
+    store.replaceIf = claimWrites;
     const files = new Map<string, LockContent>();
     if (options.file) {
       files.set(DEVICE_ID, { pid: DAEMON_B_PID, token: "b-token", metadata: foreign.metadata });
@@ -444,6 +447,7 @@ describe("startup rehydration respects foreign device claims", () => {
       foreign,
       files,
       writes,
+      claimWrites,
       claimed,
       opening,
       readStarted,
@@ -500,8 +504,8 @@ describe("startup rehydration respects foreign device claims", () => {
       await a.mirror.idle();
       expect(result).toMatchObject({ rehydrated: [SESSION], terminalized: [], skipped: [] });
       expect(a.pool.getDevice(DEVICE_ID)?.sessionId).toBe(SESSION);
-      expect(a.writes).toHaveBeenCalledTimes(1);
-      expect(a.claimed).toHaveBeenCalledTimes(1);
+      expect(a.claimWrites).toHaveBeenCalledTimes(1);
+      expect(a.writes).not.toHaveBeenCalled();
       expect(await a.store.get("android", DEVICE_ID)).toMatchObject({ pid: DAEMON_A_PID });
     });
   }

@@ -1,4 +1,6 @@
 import { z } from "zod/v4";
+import { resolveActionCall, type ActionCall } from "../../features/action/ActionCall";
+import type { ProgressCallback } from "../../features/action/BaseVisualChange";
 import { TapAnyElement } from "../../features/action/TapAnyElement";
 import { TapAtCoordinate } from "../../features/action/TapAtCoordinate";
 import { previewHierarchyHitTest } from "../../features/observe/HierarchyHitTest";
@@ -7,6 +9,7 @@ import { snapshotReferences } from "../../features/observe/SnapshotReferenceStor
 import { RecompositionTracker } from "../../features/performance/RecompositionTracker";
 import { isSessionlessDeviceRead } from "../../features/toolSelection/toolSelectionContext";
 import { isTruthyFlag } from "../../features/utility/elementProperties";
+import { watchTapAt } from "../../features/watch/WatchActions";
 import {
   ActionableError,
   BootedDevice,
@@ -125,9 +128,17 @@ function buildTapOnResultDetails(
   return details;
 }
 
-const defaultTapAtElementFactory: NonNullable<
+export const defaultTapAtElementFactory: NonNullable<
   InteractionToolDependencies["tapAtElementFactory"]
-> = (device) => new TapAtCoordinate(device);
+> = (device) => {
+  if (device.platform === "watchos") {
+    return {
+      execute: (options, progressOrCall?: ProgressCallback | ActionCall, signal?: AbortSignal) =>
+        watchTapAt(device.deviceId, options, resolveActionCall(progressOrCall, signal).signal),
+    };
+  }
+  return new TapAtCoordinate(device);
+};
 
 const defaultHitTestObservationFactory: NonNullable<
   InteractionToolDependencies["hitTestObservationFactory"]

@@ -33,9 +33,9 @@ const DEVICES: Record<NonIosApplePlatform, BootedDevice> = { watchos: watch, tvo
 
 describe("assertToolSupportsDevicePlatform", () => {
   test("rejects a watch for a tool that has not opted in, naming the tool and platform", () => {
-    expect(() => assertToolSupportsDevicePlatform("tapOn", watch)).toThrow(
+    expect(() => assertToolSupportsDevicePlatform("pinchOn", watch)).toThrow(
       new ActionableError(
-        "tapOn does not support watchOS yet. Target an Android or iOS device instead.",
+        "pinchOn does not support watchOS yet. Target an Android or iOS device instead.",
       ),
     );
   });
@@ -148,8 +148,8 @@ describe("assertRequestedPlatformSupported", () => {
     expect(() => assertRequestedPlatformSupported("tapOn", { platform: "tvos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("tapOn", "tvos")),
     );
-    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "watchos" })).toThrow(
-      new ActionableError(unsupportedPlatformToolMessage("tapOn", "watchos")),
+    expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),
     );
   });
 

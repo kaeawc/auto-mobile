@@ -1,3 +1,5 @@
+import { normalizeWatchHierarchy } from "../watch/WatchHierarchy";
+import { watchRunners } from "../watch/WatchRunnerRegistry";
 import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
@@ -377,6 +379,23 @@ export function createDeviceHierarchyCapture(
   device: BootedDevice,
   dependencies: DeviceHierarchyCaptureDependencies = {},
 ): HierarchyCapture {
+  if (device.platform === "watchos") {
+    const read = async (request: HierarchyCaptureRequest) =>
+      normalizeWatchHierarchy(
+        await watchRunners.require(device.deviceId).hierarchy(request.signal),
+      );
+    // Watch wire trees use the iOS bounds/attribute projection, without routing iOS commands.
+    return new DefaultHierarchyCapture(
+      "ios",
+      {
+        readCached: read,
+        readFresh: read,
+        projectVisible: (hierarchy) => hierarchy,
+      },
+      dependencies.timer,
+      dependencies.ids,
+    );
+  }
   const platform = requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy");
   const reader = new ViewHierarchyCaptureReader(
     {

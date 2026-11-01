@@ -1,3 +1,4 @@
+import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
 import * as path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
@@ -46,7 +47,7 @@ class FakeWatchScreenshotSource implements WatchScreenshotSource {
   }
 }
 
-function arrange(result?: Buffer | Error) {
+function arrange(result?: Buffer | Error, runner?: FakeWatchRunnerClient) {
   const timer = new FakeTimer();
   timer.setCurrentTime(NOW);
   const screenshots = new FakeWatchScreenshotSource(result);
@@ -55,6 +56,7 @@ function arrange(result?: Buffer | Error) {
   const observe = (args: ObserveArgs = {}, device: BootedDevice = watch, signal?: AbortSignal) =>
     observeWatch(device, args, signal, {
       screenshots,
+      runner,
       timer,
       idGenerator: new CountingIdGenerator("watch"),
       fileWriter: writer,
@@ -226,4 +228,26 @@ describe("observe on an Apple Watch simulator (#14910)", () => {
     expect(String(error)).toContain("simctl returned no readable PNG");
     expect(writer.written).toEqual([]);
   });
+});
+
+test("connected watch hierarchy keeps the screenshot and uses XCTest point dimensions", async () => {
+  const runner = new FakeWatchRunnerClient();
+  const { observe, screenshots } = arrange(undefined, runner);
+  const result = getStructuredPayload<import("../../src/models").ObserveResult>(await observe())!;
+  expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+  expect(result.viewHierarchy?.screenWidth).toBe(208);
+  expect(result.screenSize).toEqual({ width: 208, height: 248, units: "points" });
+  expect(result.screenshotImageSize).toEqual({ width: 416, height: 496 });
+  expect(result.screenshotPath).toBeDefined();
+  expect(result).not.toHaveProperty("hierarchyUnavailable");
+  expect(runner.commands).toEqual([{ type: "hierarchy" }]);
+  expect(screenshots.captures).toHaveLength(1);
+});
+
+test("a connected runner failure surfaces instead of becoming a screenshot-only success", async () => {
+  const runner = new FakeWatchRunnerClient();
+  runner.failure = new ActionableError("runner disconnected");
+  const { observe, screenshots } = arrange(undefined, runner);
+  await expect(observe()).rejects.toThrow("runner disconnected");
+  expect(screenshots.captures).toEqual([]);
 });

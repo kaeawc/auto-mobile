@@ -1,3 +1,4 @@
+import { rejectWatchAction } from "../watch/WatchActions";
 import type { ActionCall } from "./ActionCall";
 import {
   type AppendTextFailureSource,
@@ -176,6 +177,7 @@ export class InputText extends BaseVisualChange {
     options?: InputTextOptions,
     call?: ActionCall,
   ): Promise<SendTextResult & { method?: InputTextMode; retryable?: false }> {
+    rejectWatchAction(this.device.platform, "text input");
     const { imeAction, dismissKeyboard, mode, selector, signal } = inputTextArgs(options, call);
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");

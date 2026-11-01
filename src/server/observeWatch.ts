@@ -1,12 +1,10 @@
-/**
- * Screenshot-only `observe` for an Apple Watch simulator (#14910). The screen is captured with
- * `xcrun simctl io <udid> screenshot` and stored in the same retained screenshot cache as every
- * other observe capture. No CtrlProxy, hierarchy, element matching or observation resource runs:
- * the result carries the screenshot, the screen size read from the PNG header, and a
- * hierarchy-unavailable note, with every hierarchy-derived field absent rather than empty.
- */
+/** Watch simulator observation: a retained simctl screenshot, plus a connected runner's hierarchy. */
+import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
+import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
+import { watchRunners } from "../features/watch/WatchRunnerRegistry";
+import { normalizeWatchHierarchy } from "../features/watch/WatchHierarchy";
 import path from "path";
-import type { BootedDevice } from "../models";
 import type { DisplayRef } from "../models/DisplayPanel";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
@@ -47,6 +45,7 @@ export const simctlWatchScreenshotSource: WatchScreenshotSource = {
 
 export interface WatchObserveDependencies {
   screenshots?: WatchScreenshotSource;
+  runner?: WatchRunnerClient;
   idGenerator?: IdGenerator;
   timer?: Timer;
   fileWriter?: ScreenshotFileWriter;
@@ -91,16 +90,22 @@ function watchDisplay(device: BootedDevice): { ref: DisplayRef; captureKey: stri
 }
 
 /** Throws an ActionableError naming every observe option a watch cannot honour. */
-export function assertWatchObserveOptions(args: ObserveArgs, displayKey: string): void {
-  const refused = WATCH_UNSUPPORTED_OPTIONS.filter(([, isSet]) => isSet(args)).map(
-    ([name]) => name,
-  );
+export function assertWatchObserveOptions(
+  args: ObserveArgs,
+  displayKey: string,
+  hierarchyAvailable = false,
+): void {
+  const refused = WATCH_UNSUPPORTED_OPTIONS.filter(
+    ([name, isSet]) => isSet(args) && !(hierarchyAvailable && name === "project"),
+  ).map(([name]) => name);
   if (args.display !== undefined && args.display !== "active" && args.display !== displayKey) {
     refused.push(`display: "${args.display}"`);
   }
   if (refused.length > 0) {
     throw new ActionableError(
-      `observe on watchOS returns only a screenshot (the view hierarchy is not available yet) ` +
+      (hierarchyAvailable
+        ? "observe with the watchOS runner "
+        : "observe on watchOS returns only a screenshot (the view hierarchy is not available yet) ") +
         `and does not support: ${refused.join(", ")}. Remove these options and observe again.`,
     );
   }
@@ -130,15 +135,19 @@ async function captureWatchPng(
   return { png, ...size };
 }
 
-/** Screenshot-only observe for a watch: capture, retain, and describe what is missing. */
+/** Capture and retain a watch screenshot, adding hierarchy when a runner is connected. */
 export async function observeWatch(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
   dependencies: WatchObserveDependencies = {},
-): Promise<ObserveResponse<WatchObservation>> {
+): Promise<ObserveResponse<WatchObservation | ObserveResult>> {
   const display = watchDisplay(device);
-  assertWatchObserveOptions(args, display.ref.key);
+  const runner = dependencies.runner ?? watchRunners.get(device.deviceId);
+  assertWatchObserveOptions(args, display.ref.key, runner !== undefined);
+  const viewHierarchy = runner
+    ? normalizeWatchHierarchy(await runner.hierarchy(signal))
+    : undefined;
   const timer = dependencies.timer ?? defaultTimer;
   const idGenerator = dependencies.idGenerator ?? defaultIdGenerator;
   const protection = dependencies.pathProtection ?? screenshotPathProtection;
@@ -167,7 +176,7 @@ export async function observeWatch(
   } catch (error) {
     throw toActionableError(error, `Failed to store the watch simulator screenshot`);
   }
-  const observation: WatchObservation = {
+  const capture: Omit<WatchObservation, "hierarchyUnavailable"> = {
     observationId,
     deviceId: device.deviceId,
     display: display.ref,
@@ -181,7 +190,33 @@ export async function observeWatch(
     screenshotSource: "fresh",
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
-    hierarchyUnavailable: { platform: "watchos", message: WATCH_HIERARCHY_UNAVAILABLE_MESSAGE },
   };
-  return createObserveResponse(observation, args.includeScreenshotImage, { signal, protection });
+  return createObserveResponse(
+    watchObservationPayload(capture, viewHierarchy),
+    args.includeScreenshotImage,
+    { signal, protection },
+  );
+}
+
+function watchObservationPayload(
+  capture: Omit<WatchObservation, "hierarchyUnavailable">,
+  viewHierarchy?: ViewHierarchyResult,
+): WatchObservation | ObserveResult {
+  if (!viewHierarchy) {
+    return {
+      ...capture,
+      hierarchyUnavailable: { platform: "watchos", message: WATCH_HIERARCHY_UNAVAILABLE_MESSAGE },
+    };
+  }
+  return {
+    ...capture,
+    viewHierarchy,
+    elements: new ObserveElementsBuilder().build(viewHierarchy, "ios"),
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    screenSize: {
+      width: viewHierarchy.screenWidth!,
+      height: viewHierarchy.screenHeight!,
+      units: "points",
+    },
+  };
 }

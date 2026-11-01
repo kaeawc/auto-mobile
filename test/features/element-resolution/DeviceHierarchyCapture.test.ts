@@ -1,3 +1,5 @@
+import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
+import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
 import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { expect, test } from "bun:test";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
@@ -439,3 +441,22 @@ test.each(["device", "client-cache", undefined, "unknown"] as const)(
     expect(JSON.stringify(hierarchy)).not.toContain("client-cache");
   },
 );
+
+test("watch capture uses only its runner and the existing iOS hierarchy projection", async () => {
+  const client = new FakeWatchRunnerClient();
+  const unregister = watchRunners.register("capture-watch", client);
+  const timer = new FakeTimer();
+  try {
+    const capture = createDeviceHierarchyCapture(
+      { platform: "watchos", deviceId: "capture-watch", name: "Watch" },
+      { timer },
+    );
+    const snapshot = await capture.capture({ freshness: "fresh" });
+    expect(snapshot.hierarchy.screenWidth).toBe(208);
+    expect(snapshot.nodes.length).toBeGreaterThan(0);
+    expect(client.commands).toEqual([{ type: "hierarchy" }]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  } finally {
+    unregister();
+  }
+});

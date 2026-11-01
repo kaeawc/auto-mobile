@@ -55,16 +55,28 @@ never reuses a TV. Unlike watchOS,
   confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
   wipe launches nothing. `prototype: true` is refused before any agent preparation. A
   `terminateApp` whose process is already gone is a success with `wasRunning: false`.
-- **Screenshot-only observe.** `observe` on a watch (`src/server/observeWatch.ts`) captures with
-  `simctl io <udid> screenshot` through `SimCtlClient.screenshot`, writes the PNG into the shared
-  retained screenshot cache, and returns the screenshot with the PNG header's `screenSize` and a
-  `hierarchyUnavailable` note. No CtrlProxy, hierarchy, element matching, snapshot reference or
-  observation resource runs. Hierarchy fields are absent, not empty, so "no elements" is never
-  read as an empty screen; for the same reason the response finalizer neither projects a watch
-  observation to a skeleton nor makes it a session diff baseline. Options that need a hierarchy
-  or an Android/iOS pipeline (`waitFor`, `settled`, `raw`, `includeExtras`, `project`, `scope`,
-  `layer`, `skipBackStack`, `crop`, `screenshotOptions`, `screenshot: "none"`, another display)
-  are refused by name before any capture.
+- **Runner-backed watch observation and actions.** `observe` retains a simctl PNG. When an
+  explicitly registered watch runner is connected, it also returns the hierarchy normalized
+  through the iOS observation model; bounds and `screenSize` use XCTest points while
+  `screenshotImageSize` uses physical pixels. Without a runner it returns the screenshot,
+  physical `screenSize` and `hierarchyUnavailable`, with hierarchy fields absent. Advanced
+  observe options (`waitFor`, `settled`, `raw`, `includeExtras`, `scope`, `layer`,
+  `skipBackStack`, `crop`, `screenshotOptions`, `screenshot: "none"`, another display) are refused.
+  `project` uses the existing full/skeleton rendering when connected and is refused otherwise.
+  `tapOn` accepts an exact identifier or text, with optional index; an identifier is sent directly,
+  otherwise the node center is tapped. Only wholly on-screen nodes qualify. `tapAt` accepts
+  absolute XCTest points. `swipeOn` uses directional runner swipes and optionally searches for
+  exact text/identifier, bounded by `maxSwipes` (default 10, maximum 100). Runner swipes have no
+  host-controlled coordinates or duration. `pressButton` accepts home only. Other targeting,
+  timed gestures, long press, double tap, focus, pinch, multi-touch and text input fail before
+  runner commands.
+- **Explicit runner ownership.** `XcodebuildWatchRunnerLauncher` takes a prebuilt xctestrun,
+  watch UDID and reserved localhost port; it launches only the watch service test, forwards
+  `TEST_RUNNER_AM_PORT`, and registers the device after a successful watchOS handshake and
+  hierarchy read. Startup retries connection/readiness for a bounded budget. Process exit or
+  the returned stop handle closes the client and removes the registration. Provisioning does
+  not automatically launch a runner. The WebSocket client correlates request IDs and bounds
+  handshake plus command time with the injectable timer, refusing non-watchOS handshakes.
 - **Explicit resolution.** A watch session resolves through the pooled-session path (readiness
   setup and keep-awake are Android-only). A sessionless call reaches a watch only with
   `platform: "watchos"`: readiness then resolves a watch a fresh watchOS listing shows booted (by

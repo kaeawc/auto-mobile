@@ -1016,6 +1016,100 @@ describe("DeviceBootService", () => {
     });
   }
 
+  it("refuses requires.playStore for iOS before creating a simulator (#14302)", async () => {
+    let provisionCalls = 0;
+    const boot = new DeviceBootService({
+      deviceManager: new FakeDeviceUtils(),
+      deviceMatcher: new DefaultDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async () => {
+          provisionCalls++;
+          throw new Error("must not provision");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer: new FakeTimer(),
+    });
+    await expect(
+      boot.boot({
+        platform: "ios",
+        requires: { playStore: true },
+        createIfMissing: true,
+        preferRunning: false,
+      }),
+    ).rejects.toThrow(/requires\.playStore.*Android/);
+    expect(provisionCalls).toBe(0);
+  });
+
+  it("requires.playStore creates a Play Store AVD, reuses it, and never reuses a google_apis one (#14302)", async () => {
+    const devices = new FakeDeviceUtils();
+    const image = (tag: string) => ({
+      packageName: `system-images;android-34;${tag};x86_64`,
+      apiIdentifier: "34",
+      apiLevel: 34,
+      tag,
+      abi: "x86_64",
+      versionInfo: "",
+    });
+    const avd = new FakeAndroidAvdCreator([image("google_apis"), image("google_apis_playstore")]);
+    // An existing phone AVD without Play, as AvdConfigReader would list it.
+    const listed: DeviceInfo[] = [
+      {
+        name: "Existing_Pixel",
+        platform: "android",
+        isRunning: false,
+        apiLevel: 34,
+        osVersion: "14",
+        runtimeId: "system-images;android-34;google_apis;x86_64",
+      },
+    ];
+    devices.setDeviceImages("android", [...listed]);
+    const createAvd = avd.createAvd.bind(avd);
+    avd.createAvd = async (params) => {
+      const result = await createAvd(params);
+      listed.push({
+        name: params.name,
+        platform: "android",
+        isRunning: false,
+        apiLevel: 34,
+        osVersion: "14",
+        runtimeId: params.package,
+      });
+      devices.setDeviceImages("android", [...listed]);
+      return result;
+    };
+    const boot = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: new DefaultDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: new DefaultDeviceProvisioner({
+        iosCreator: () => undefined,
+        androidCreator: () => avd,
+        idGenerator: new CountingIdGenerator("uuid"),
+        architecture: "x64",
+      }),
+      matchingStrategy: "LATEST",
+      timer: new FakeTimer(),
+    });
+    const request = {
+      platform: "android" as const,
+      requires: { playStore: true },
+      createIfMissing: true,
+      preferRunning: false,
+    };
+
+    const first = await boot.boot(request);
+    expect(first.provisioned).toBe(true);
+    expect(avd.createCalls.map((call) => call.package)).toEqual([
+      "system-images;android-34;google_apis_playstore;x86_64",
+    ]);
+
+    const second = await boot.boot(request);
+    expect(second.provisioned).toBe(false);
+    expect(second.sourceImage?.name).toBe(first.device.name);
+  });
+
   it("creates a TV AVD for formFactor tv, reuses it, and keeps phone requests off it (#15881)", async () => {
     const devices = new FakeDeviceUtils();
     const avd = new FakeAndroidAvdCreator([

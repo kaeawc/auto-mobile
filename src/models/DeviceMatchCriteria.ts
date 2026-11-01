@@ -17,7 +17,8 @@ export interface DeviceMatchCriteria {
   maxOsVersion?: string;
   name?: string;
   formFactor?: FormFactor;
-  requires?: { panels?: number; posture?: Posture };
+  /** `playStore`: only a Play Store system image (#14302); root-dependent features then refuse. */
+  requires?: { panels?: number; posture?: Posture; playStore?: boolean };
   screenSize?: { width: number; height: number };
   deviceId?: string;
   preferRunning?: boolean;

@@ -124,6 +124,32 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
     }
 
+    func home() throws {
+        try performGesture { XCUIDevice.shared.press(.home) }
+    }
+
+    func rotateCrown(delta: Double, velocity: Double) throws {
+        try performGesture {
+            let identifier = "ctrlproxy-crown"
+            let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+            guard element.exists else {
+                throw WatchCommandError.commandFailed("No watchOS element with identifier '\(identifier)'")
+            }
+            // Crown movement needs view focus and a private selector with unboxed Double arguments.
+            element.tap()
+            let device = XCUIDevice.shared
+            let selector = NSSelectorFromString("rotateDigitalCrownByDelta:withVelocity:")
+            guard device.responds(to: selector) else {
+                throw WatchCommandError.unsupported("crown")
+            }
+            let rotate = unsafeBitCast(
+                device.method(for: selector),
+                to: (@convention(c) (AnyObject, Selector, Double, Double) -> Void).self
+            )
+            rotate(device, selector, delta, velocity)
+        }
+    }
+
     private func performGesture(_ gesture: () throws -> Void) throws {
         failureCoordinator.begin()
         let result = Result { try gesture() }

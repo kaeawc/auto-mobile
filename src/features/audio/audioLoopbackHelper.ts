@@ -5,6 +5,13 @@ import { AudioLoopbackHelperProvider } from "./AudioLoopbackHelperProvider";
 import { logger } from "../../utils/logger";
 import type { LoopbackHelperProcess } from "./loopbackHelperProcess";
 
+let defaultAudioLoopbackHelperProvider: AudioLoopbackHelperProvider | undefined;
+
+function sharedProvider(): AudioLoopbackHelperProvider {
+  defaultAudioLoopbackHelperProvider ??= new AudioLoopbackHelperProvider();
+  return defaultAudioLoopbackHelperProvider;
+}
+
 export interface AudioLoopbackHelperResolutionDeps {
   provider?: Pick<AudioLoopbackHelperProvider, "ensure">;
   platform?: NodeJS.Platform;
@@ -24,7 +31,7 @@ export async function audioLoopbackHelperPath(
     return undefined;
   }
   try {
-    const provider = deps.provider ?? AudioLoopbackHelperProvider.getInstance();
+    const provider = deps.provider ?? sharedProvider();
     return (await provider.ensure()) ?? undefined;
   } catch (error) {
     logger.warn("Unable to resolve the released audio-loopback helper", error);

@@ -52,8 +52,6 @@ export interface AudioLoopbackHelperProviderDeps {
  * Source builds are intentionally not part of this production resolution path.
  */
 export class AudioLoopbackHelperProvider {
-  private static instance: AudioLoopbackHelperProvider | null = null;
-
   private readonly downloader: FileDownloader;
   private readonly checksumCalculator: ChecksumCalculator;
   private readonly cacheDir: string;
@@ -83,15 +81,6 @@ export class AudioLoopbackHelperProvider {
     this.releaseUrlOverride = deps.releaseUrl;
     this.downloadTimeoutMs = deps.downloadTimeoutMs ?? AUDIO_LOOPBACK_HELPER_DOWNLOAD_TIMEOUT_MS;
     this.platform = deps.platform ?? process.platform;
-  }
-
-  static getInstance(): AudioLoopbackHelperProvider {
-    AudioLoopbackHelperProvider.instance ??= new AudioLoopbackHelperProvider();
-    return AudioLoopbackHelperProvider.instance;
-  }
-
-  static resetInstances(): void {
-    AudioLoopbackHelperProvider.instance = null;
   }
 
   async ensure(): Promise<string | null | undefined> {

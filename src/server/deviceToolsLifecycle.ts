@@ -25,7 +25,7 @@ import {
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isTeardownFailure } from "../features/deviceLifecycle/provisioning/provisioning";
-import { forgetFixturesOfDestroyedAvd } from "../daemon/deviceSnapshotManager";
+import { forgetFixturesOfDestroyedAvd } from "../daemon/snapshotDeletion";
 import { hasSimctlTimeoutCause } from "../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import {
   BootConcurrencyGate,

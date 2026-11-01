@@ -146,8 +146,8 @@ recorded. When `AUTOMOBILE_EMULATOR_ARGS` redirects the userdata image with
 
 Every restore of a fixture checks those inputs first, settings-only restores
 included. If any changed, the restore is refused, the device is left as it
-was, and the fixture is removed. Its in-AVD snapshot is deleted then, or once
-its emulator next runs:
+was, and the fixture is removed. Its in-AVD snapshot is deleted then, or, if
+that fails, the next time a snapshot is captured on that emulator:
 
 ```json
 {
@@ -188,10 +188,11 @@ Delete any snapshot, fixture or not, by name:
 }
 ```
 
-The result has `deleted: true` once the snapshot and its data are gone. A VM
-snapshot whose emulator is not running returns `deleted: false` with
-`pendingReclaim: true`: its in-AVD snapshot is deleted the next time that
-emulator runs.
+Run it on the snapshot's own device, as for a restore: a snapshot of another
+device or AVD is refused. The result has `deleted: true` once the snapshot and
+its data are gone. A VM snapshot whose in-AVD payload cannot be deleted now
+returns `deleted: false` with `pendingReclaim: true`. Delete it again, or
+capture any snapshot on that emulator, to finish it.
 
 ### Archive size, eviction, and reclaim
 

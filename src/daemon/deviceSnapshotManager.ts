@@ -376,7 +376,7 @@ function getSnapshotPathOptions(context: {
   return undefined;
 }
 
-async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDependencies> {
+export async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDependencies> {
   if (!moduleDependencies) {
     moduleDependencies = {
       snapshotRepository: new DeviceSnapshotRepository(),
@@ -920,7 +920,7 @@ async function importLegacySnapshot(
   }
 }
 
-async function hydrateLegacySnapshot(
+export async function hydrateLegacySnapshot(
   snapshotName: string,
   snapshotStore: DeviceSnapshotStorePort,
   snapshotRepository: DeviceSnapshotRepositoryPort,
@@ -1167,7 +1167,7 @@ async function importLegacySnapshotArchive(
   return importedFlat || importedScoped;
 }
 
-async function notifySnapshotResources(): Promise<void> {
+export async function notifySnapshotResources(): Promise<void> {
   await notifyResourcesUpdated([DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE]);
 }
 
@@ -1316,7 +1316,7 @@ function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord):
  * synchronously in the same job, so a capture or restore that starts afterwards
  * queues behind this task instead of overlapping it.
  */
-async function withExclusiveSnapshotRecord<T>(
+export async function withExclusiveSnapshotRecord<T>(
   record: DeviceSnapshotRecord,
   task: () => Promise<T>,
 ): Promise<T | typeof SNAPSHOT_RECORD_SUPERSEDED> {
@@ -1357,59 +1357,12 @@ async function removeInvalidatedFixture(
   throw new SnapshotFixtureRefusedError(
     error.code,
     error.snapshotName,
-    `${error.message} ${removed ? "It was removed." : "Its removal is pending until its emulator runs."}`,
+    `${error.message} ${removed ? "It was removed." : "Its in-AVD snapshot could not be reclaimed now and is pending."}`,
     error.reasons,
   );
 }
 
-/** Delete a snapshot by name (#14065): its row, archive data and, for a VM snapshot, in-AVD payload. */
-export async function deleteDeviceSnapshot(
-  device: BootedDevice,
-  args: { snapshotName: string; vmSnapshotTimeoutMs?: number },
-): Promise<{ snapshotName: string; deleted: boolean; pendingReclaim?: true }> {
-  assertSafeSnapshotName(args.snapshotName);
-  const { snapshotRepository } = await getDeviceSnapshotDependencies();
-  const record = await snapshotRepository.getSnapshot(args.snapshotName);
-  if (!record) {
-    throw new ActionableError(`Snapshot '${args.snapshotName}' not found`);
-  }
-  assertSnapshotMatchesDevice(record, device);
-  const timeoutMs =
-    args.vmSnapshotTimeoutMs ?? (await getDeviceSnapshotConfig()).vmSnapshotTimeoutMs;
-  if (await deleteDeviceSnapshotRecord(record, timeoutMs)) {
-    await notifySnapshotResources();
-    return { snapshotName: record.snapshotName, deleted: true };
-  }
-  if ((await snapshotRepository.getSnapshot(record.snapshotName))?.pendingReclaim) {
-    return { snapshotName: record.snapshotName, deleted: false, pendingReclaim: true };
-  }
-  throw new ActionableError(
-    `Snapshot '${record.snapshotName}' is in use by another snapshot operation; retry the delete`,
-  );
-}
-
-/** Forget a destroyed AVD's fixtures (#14065); their payloads went with it, so no emulator is asked. */
-export async function forgetFixturesOfDestroyedAvd(avdName: string): Promise<string[]> {
-  const { snapshotRepository } = await getDeviceSnapshotDependencies();
-  const fixtures = (await snapshotRepository.listSnapshots({ snapshotType: "vm" })).filter(
-    (record) => record.deviceName === avdName && record.manifest.fixture !== undefined,
-  );
-  const removed: string[] = [];
-  for (const record of fixtures) {
-    const outcome = await withExclusiveSnapshotRecord(record, () =>
-      removeSnapshotArchiveAndRowAfterRecovery(record),
-    );
-    if (outcome === true) {
-      removed.push(record.snapshotName);
-    }
-  }
-  if (removed.length > 0) {
-    await notifySnapshotResources();
-  }
-  return removed;
-}
-
-async function deleteDeviceSnapshotRecord(
+export async function deleteDeviceSnapshotRecord(
   record: DeviceSnapshotRecord,
   vmSnapshotTimeoutMs: number,
 ): Promise<boolean> {
@@ -1428,7 +1381,7 @@ async function deleteDeviceSnapshotRecord(
 }
 
 /** Called under the name lock, after any emulator-owned payload has been reclaimed. */
-async function removeSnapshotArchiveAndRowAfterRecovery(
+export async function removeSnapshotArchiveAndRowAfterRecovery(
   record: DeviceSnapshotRecord,
 ): Promise<boolean> {
   const { snapshotStore } = await getDeviceSnapshotDependencies();

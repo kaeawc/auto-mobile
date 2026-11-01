@@ -51799,9 +51799,73 @@
               "description": "Root fixture: 'rooted-detectable' plants inert su/busybox stubs and sets SELinux permissive so root-detection checks trip (Android, non-Play image, needs a writable /system); 'unset' restores."
             },
             "integrityState": {
-              "type": "string",
-              "const": "unset",
-              "description": "Integrity-signal state. Only 'unset' (clear) is available until an integrity injector lands."
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["maximally-detectable", "minimally-detectable", "unset"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "preset": {
+                      "type": "string",
+                      "enum": ["maximally-detectable", "minimally-detectable"]
+                    },
+                    "signals": {
+                      "type": "object",
+                      "properties": {
+                        "su-binary": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "superuser-apk": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "selinux-permissive": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "debuggable-build": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "insecure-build": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "test-keys": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "missing-otacerts": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "qemu-props": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "emulator-hardware": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "qemu-pipe": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        },
+                        "emulator-build-fields": {
+                          "type": "string",
+                          "enum": ["on", "off"]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Integrity signals (Android): maximally-detectable enables su-binary, superuser-apk and selinux-permissive; minimally-detectable disables them. Or { preset?, signals?: { <signal-id>: 'on' | 'off' } }, with at least one field and signals overriding the preset. Needs root and writable /system for files. Image-fixed signals and missing-otacerts report unsupported. Results include per-signal status and post-apply active readings. 'unset' restores prior state; existing image/rootState files are never removed."
             },
             "faults": {
               "type": "object",

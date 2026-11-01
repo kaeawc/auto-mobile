@@ -1,10 +1,12 @@
 import { buildSimulatorProvisioningCatalogEntries } from "../../src/server/simulatorProvisioningCatalog";
 import { describe, expect, test } from "bun:test";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ActionableError } from "../../src/models";
 import { AppleTvSimulatorInventory } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorInventory";
 import {
   AppleTvSimulatorProvisioner,
   type AppleTvProvisionRequest,
+  type AppleTvSimulatorCreator,
 } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
 import {
   FakeAppleTvProvisionSimctl,
@@ -282,6 +284,39 @@ describe("AppleTvSimulatorProvisioner", () => {
       deleted: false,
       error: "simctl delete: device is busy",
     });
+  });
+
+  test("discardCreated deletes after the provision request signal has aborted", async () => {
+    const { simctl, provisioner } = arrange([]);
+    const controller = new AbortController();
+    const deleteSimulator = simctl.deleteSimulator.bind(simctl);
+    const cleanupSignals: (AbortSignal | undefined)[] = [];
+    const creator: AppleTvSimulatorCreator = {
+      createSimulator: simctl.createSimulator.bind(simctl),
+      deleteSimulator: async (udid, options) => {
+        const signal = options?.signal ?? getAbortSignal();
+        cleanupSignals.push(signal);
+        signal?.throwIfAborted();
+        await deleteSimulator(udid);
+      },
+    };
+    const signalAware = new AppleTvSimulatorProvisioner(
+      new AppleTvSimulatorInventory(simctl, "arm64"),
+      creator,
+    );
+    await runWithAbortSignal(controller.signal, async () => {
+      const { tv } = await signalAware.provision(request(), {
+        allowCreate: true,
+        signal: controller.signal,
+      });
+      controller.abort(new Error("provision cancelled after create"));
+      expect(await signalAware.discardCreated(tv)).toEqual({ deleted: true });
+      expect(simctl.commands.at(-1)).toBe(`delete ${tv.deviceId}`);
+      expect(await provisioner.find(tv.deviceId)).toBeUndefined();
+    });
+    expect(cleanupSignals[0]).toBeDefined();
+    expect(cleanupSignals[0]).not.toBe(controller.signal);
+    expect(cleanupSignals[0]?.aborted).toBe(false);
   });
 
   test("find returns a listed tv by UDID and nothing for an unknown one", async () => {

@@ -86,7 +86,8 @@ export class AppleTvSimulatorProvisioner {
    */
   async discardCreated(tv: ListedAppleTv): Promise<AppleTvDiscardResult> {
     try {
-      await this.creator.deleteSimulator(tv.deviceId);
+      // Cleanup must outlive cancellation of the provision request.
+      await this.creator.deleteSimulator(tv.deviceId, { signal: AbortSignal.timeout(30_000) });
       return { deleted: true };
     } catch (error) {
       logger.warn(

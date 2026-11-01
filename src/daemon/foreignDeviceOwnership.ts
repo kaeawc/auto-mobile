@@ -323,6 +323,36 @@ export const watchDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   claimPath: (udid) => watchDeviceAllocationClaimPath(udid),
 };
 
+/**
+ * The scope Apple TV simulator claims live under. Like an iOS simulator, a TV
+ * belongs to the user's CoreSimulator set, so every daemon on the host contends for one claim per
+ * UDID; TVs keep their own namespace so a TV claim is never read as an iOS one.
+ */
+export const TV_SIMULATOR_CLAIM_SCOPE = "tv-simulators";
+
+/** Where an Apple TV simulator's allocation claim lives, keyed by its UDID. */
+export function tvDeviceAllocationClaimPath(
+  udid: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(
+      TV_SIMULATOR_CLAIM_SCOPE,
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
+    ctrlProxyForwardLeaseFileName(udid),
+  );
+}
+
+/** The TV file source: only the allocation claim, as for iOS simulators. */
+export const tvDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
+  ...iosDeviceOwnershipFileSource,
+  claimPath: (udid) => tvDeviceAllocationClaimPath(udid),
+};
+
 /** The clock a foreign-ownership reader runs on, and its CtrlProxy forward evidence. */
 export interface ForeignOwnershipOptions {
   /** This daemon's own control socket path (defaults to the CtrlProxy forward-lease socket). */

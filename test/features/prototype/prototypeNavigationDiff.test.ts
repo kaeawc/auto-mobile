@@ -138,6 +138,39 @@ describe("diffPrototypeNavigation", () => {
     expect(result.unmatchedPrototypeScreens.some((s) => s.id === "root")).toBe(false);
   });
 
+  test("names that end in a suffix word keep their full form, and keys keep their slashes", () => {
+    const stack = {
+      id: "words",
+      root: {
+        type: "stack",
+        id: "nav",
+        start: "Overview",
+        screens: {
+          Overview: { type: "text", text: "o" },
+          Preview: { type: "text", text: "p" },
+          "account/profile": { type: "text", text: "a" },
+        },
+      },
+    };
+    const real: ExportedGraph = {
+      ...graph(),
+      nodes: ["OverviewActivity", "PreviewScreen", "Profile", "account/profile"].map(
+        (screenName) => ({ screenName, firstSeenAt: 1, lastSeenAt: 1, visitCount: 1 }),
+      ),
+      edges: [],
+    };
+    const result = diffPrototypeNavigation(
+      buildPrototypeScreenMap(stack),
+      realNavigationGraphFrom(real),
+    );
+    expect(result.matched).toEqual([
+      { prototype: "stack:nav/Overview", real: "OverviewActivity", by: "name" },
+      { prototype: "stack:nav/Preview", real: "PreviewScreen", by: "name" },
+      { prototype: "stack:nav/account/profile", real: "account/profile", by: "name" },
+    ]);
+    expect(result.unmatchedRealScreens).toEqual(["Profile"]);
+  });
+
   test("non-Latin names keep their letters, and an empty name never matches", () => {
     const pager = (labels: string[]) => ({
       id: "tabs",

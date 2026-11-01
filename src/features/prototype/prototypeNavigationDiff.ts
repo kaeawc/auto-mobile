@@ -55,13 +55,21 @@ export interface PrototypeNavigationDiff {
 const NAME_SUFFIX = /(screen|activity|fragment|page|viewcontroller|controller|view)$/;
 
 /**
- * Lower-case letters and digits of any script, without a trailing platform suffix:
- * `DetailActivity` -> `detail`, `设置页` stays `设置页`.
+ * The forms a name is compared in: its lower-case letters and digits of any script, and that
+ * without a trailing platform suffix. `DetailActivity` -> `detailactivity`, `detail`;
+ * `Overview` -> `overview`, `over`, so it still meets `OverviewActivity` on `overview`. A name with
+ * no letters or digits has no forms and never matches.
  */
-const normalizeName = (name: string): string => {
+const nameForms = (name: string): string[] => {
   const compact = name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
   const stripped = compact.replace(NAME_SUFFIX, "");
-  return stripped === "" ? compact : stripped;
+  return [compact, stripped].filter((form) => form !== "");
+};
+
+/** The authored stack screen key, read back from the node's `...screens["<key>"]` path. */
+const stackScreenKey = (path: string): string | undefined => {
+  const quoted = /\.screens\[("(?:[^"\\]|\\.)*")\]$/.exec(path)?.[1];
+  return quoted === undefined ? undefined : (JSON.parse(quoted) as string);
 };
 
 /** Authored names a screen goes by: its stack screen key, tab label or sheet/dialog id. */
@@ -70,8 +78,9 @@ function screenNames(node: PrototypeScreenMapNode): string[] {
   if (node.label) {
     names.push(node.label);
   }
-  if (node.kind === "stackScreen") {
-    names.push(node.id.slice(node.id.lastIndexOf("/") + 1));
+  const key = node.kind === "stackScreen" ? stackScreenKey(node.path) : undefined;
+  if (key !== undefined) {
+    names.push(key);
   } else if (node.kind === "sheet" || node.kind === "dialog") {
     const id = node.id.slice(node.id.indexOf(":") + 1);
     // An unnamed sheet or dialog is keyed by its spec path, which is not a name.
@@ -96,13 +105,8 @@ function matchScreen(
   if (node.testTag && real.screens.includes(node.testTag)) {
     return { real: node.testTag, by: "identifier" };
   }
-  // A name with no letters or digits left says nothing, so it never matches.
-  const wanted = new Set(
-    screenNames(node)
-      .map(normalizeName)
-      .filter((name) => name !== ""),
-  );
-  const byName = real.screens.find((screen) => wanted.has(normalizeName(screen)));
+  const wanted = new Set(screenNames(node).flatMap(nameForms));
+  const byName = real.screens.find((screen) => nameForms(screen).some((form) => wanted.has(form)));
   return byName === undefined ? undefined : { real: byName, by: "name" };
 }
 

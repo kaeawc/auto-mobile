@@ -1410,8 +1410,10 @@ word. `visibleWhen` alternatives and sheet or dialog opening by state are not re
 graph when given `prototypeSpec` or `prototypeSpecPath`, and returns `prototypeDiff`. A prototype screen
 matches a real screen through, in order: an explicit `screenMapping` (or `screenMappingPath`) entry from
 prototype screen id to real screen name; its `testTag` equal to the real screen name; or its stack
-screen key, tab label or sheet/dialog id equal to the real name ignoring case, punctuation and a
-trailing `Screen`, `Activity`, `Fragment`, `Page`, `View` or `Controller`. A mapped screen never falls
+screen key (whole, slashes included), tab label or sheet/dialog id equal to the real name ignoring
+case and punctuation, with or without a trailing `Screen`, `Activity`, `Fragment`, `Page`, `View` or
+`Controller` on either side, so `Overview` still meets `OverviewActivity`. Letters of any script count;
+a name with none never matches. A mapped screen never falls
 back to the other rules, and a mapping to a name the graph lacks reports `mappedScreenMissing`. The root
 is a destination only when the mapping names it. The result lists `matched` screens,
 `unmatchedPrototypeScreens`, `unmatchedRealScreens`, `observedTransitions`, `unobservedTransitions`

@@ -9,6 +9,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { awaitWhileRequestIsLive } from "../utils/toolUtils";
+import { runWithDeviceExecutionBinding } from "../utils/deviceExecutionBinding";
 
 export interface DisplayInventoryProvider {
   hydrate(device: BootedDevice, identityToken: string, signal?: AbortSignal): Promise<BootedDevice>;
@@ -128,7 +129,8 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       await Promise.resolve();
       const source = device.platform === "android" ? this.androidSource : this.iosSource;
       // The shared read has its own bounded source timeout, not a caller's signal.
-      const result = await source.read(device);
+      // Shared inventory reads may outlive their caller and must not bind its execution.
+      const result = await runWithDeviceExecutionBinding(undefined, () => source.read(device));
       // Record even when invalidation replaced the entry: an orphaned entry is only seen by the
       // callers already awaiting it, which use it as their last-read fallback.
       this.recordRead(entry, result);

@@ -13,12 +13,13 @@ export class TvosRunnerArtifacts {
   private readonly builds = new SingleFlight<string, string>();
   constructor(
     private readonly dependencies: {
-      builder: Pick<IosCtrlProxyBuilder, "getXctestrunPath"> & {
-        getConfig(): Pick<
-          ReturnType<IosCtrlProxyBuilder["getConfig"]>,
-          "projectRoot" | "derivedDataPath"
-        >;
-      };
+      builder: Pick<IosCtrlProxyBuilder, "getXctestrunPath"> &
+        Partial<Pick<IosCtrlProxyBuilder, "runExclusiveOnDerivedData">> & {
+          getConfig(): Pick<
+            ReturnType<IosCtrlProxyBuilder["getConfig"]>,
+            "projectRoot" | "derivedDataPath"
+          >;
+        };
       xcodebuild?: Pick<Xcodebuild, "executeCommand">;
       override?: () => string | undefined;
       access?: (file: string) => Promise<unknown>;
@@ -45,42 +46,48 @@ export class TvosRunnerArtifacts {
       paths.derivedDataPath,
       async (buildSignal) =>
         await runWithAbortSignal(buildSignal, async () => {
-          const projectPath = join(
-            paths.projectRoot,
-            "ios",
-            "control-proxy",
-            "CtrlProxy.xcodeproj",
-          );
-          try {
-            await (this.dependencies.access ?? access)(projectPath);
-          } catch (cause) {
-            throw new ActionableError(
-              `Tvos runner project is unavailable; set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner xctestrun. The published package does not include the tvos project.`,
-              { cause },
+          const build = async () => {
+            buildSignal?.throwIfAborted();
+            const projectPath = join(
+              paths.projectRoot,
+              "ios",
+              "control-proxy",
+              "CtrlProxy.xcodeproj",
             );
-          }
-          await (this.dependencies.xcodebuild ?? new XcodebuildClient()).executeCommand(
-            [
-              "build-for-testing",
-              "-project",
-              projectPath,
-              "-scheme",
-              "AutoMobileTVTest",
-              "-destination",
-              "generic/platform=tvOS Simulator",
-              "-derivedDataPath",
-              paths.derivedDataPath,
-              "CODE_SIGNING_ALLOWED=NO",
-            ],
-            { signal: buildSignal, timeoutMs: 120_000 },
-          );
-          const built = await builder.getXctestrunPath("tvSimulator");
-          if (!built) {
-            throw new ActionableError(
-              `No appletvsimulator xctestrun found in ${paths.derivedDataPath}/Build/Products after building AutoMobileTVTest; set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner.`,
+            try {
+              await (this.dependencies.access ?? access)(projectPath);
+            } catch (cause) {
+              throw new ActionableError(
+                `Tvos runner project is unavailable; set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner xctestrun. The published package does not include the tvos project.`,
+                { cause },
+              );
+            }
+            await (this.dependencies.xcodebuild ?? new XcodebuildClient()).executeCommand(
+              [
+                "build-for-testing",
+                "-project",
+                projectPath,
+                "-scheme",
+                "AutoMobileTVTest",
+                "-destination",
+                "generic/platform=tvOS Simulator",
+                "-derivedDataPath",
+                paths.derivedDataPath,
+                "CODE_SIGNING_ALLOWED=NO",
+              ],
+              { signal: buildSignal, timeoutMs: 120_000 },
             );
-          }
-          return built;
+            const built = await builder.getXctestrunPath("tvSimulator");
+            if (!built) {
+              throw new ActionableError(
+                `No appletvsimulator xctestrun found in ${paths.derivedDataPath}/Build/Products after building AutoMobileTVTest; set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner.`,
+              );
+            }
+            return built;
+          };
+          return builder.runExclusiveOnDerivedData
+            ? await builder.runExclusiveOnDerivedData(build)
+            : await build();
         }),
       signal,
       { cancelWhenAllWaitersAbort: true },

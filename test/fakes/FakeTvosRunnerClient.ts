@@ -15,6 +15,9 @@ export class FakeTvosRunnerClient implements TvosRunnerClient {
     }
     this.tree = tree;
   }
+  isUsable(): boolean {
+    return !this.closed && !this.failure;
+  }
   async request(
     command: TvosCommand,
     signal?: AbortSignal,

@@ -54,7 +54,7 @@ export class TvosRunnerLifecycle {
     if (sessions) {
       this.observeSessions(sessions);
     }
-    if (tvosRunners.get(deviceId)) {
+    if (tvosRunners.get(deviceId)?.isUsable()) {
       return {};
     }
     this.stop(deviceId);
@@ -166,7 +166,8 @@ export class TvosRunnerLifecycle {
 type TvosRunnerBuilder = Pick<
   IosCtrlProxyBuilder,
   "getXctestrunPath" | "getConfig" | "writeRunnerEnvironment"
->;
+> &
+  Partial<Pick<IosCtrlProxyBuilder, "runExclusiveOnDerivedData">>;
 let defaultBuilderFactory: (() => TvosRunnerBuilder) | undefined;
 
 /** The server composition root supplies the process builder without eager artifact work. */
@@ -189,6 +190,12 @@ export function getTvosRunnerLifecycle(): TvosRunnerLifecycle {
         builder: {
           getXctestrunPath: (platform) => getDefaultBuilder().getXctestrunPath(platform),
           getConfig: () => getDefaultBuilder().getConfig(),
+          runExclusiveOnDerivedData: (task) => {
+            const builder = getDefaultBuilder();
+            return builder.runExclusiveOnDerivedData
+              ? builder.runExclusiveOnDerivedData(task)
+              : task();
+          },
         },
       }),
       launcher: new XcodebuildTvosRunnerLauncher({

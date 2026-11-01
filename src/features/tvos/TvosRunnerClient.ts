@@ -21,6 +21,8 @@ export type TvosCommand =
   | { type: "request_press_button"; action: TVRemoteButton };
 
 export interface TvosRunnerClient {
+  /** Registered clients remain reusable until a permanent connection failure or close. */
+  isUsable(): boolean;
   request(
     command: TvosCommand,
     signal?: AbortSignal,
@@ -96,6 +98,10 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
     this.socket.onFailure((error) =>
       this.fail(toActionableError(error, "Tvos runner connection failed")),
     );
+  }
+
+  isUsable(): boolean {
+    return this.failure === undefined;
   }
 
   private fail(error: ActionableError): void {

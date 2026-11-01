@@ -1,3 +1,9 @@
+import { XcodebuildTvosRunnerLauncher } from "../../src/features/tvos/TvosRunnerLauncher";
+import { WebSocketTvosRunnerClient } from "../../src/features/tvos/TvosRunnerClient";
+import { FakeWatchSocket } from "../fakes/FakeWatchSocket";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import connected from "../fixtures/tvos-xcuitest/tvos-runner-connected.json";
+import hierarchy from "../fixtures/tvos-xcuitest/tvos-runner-hierarchy-focus-b01.json";
 import { TvosRunnerLifecycle } from "../../src/features/tvos/TvosRunnerLifecycle";
 import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
 import { FakeTvosRunnerLauncher } from "../fakes/FakeTvosRunnerLauncher";
@@ -198,6 +204,68 @@ describe("provisionDevice on an Apple TV simulator", () => {
     ).toBe("booted");
     expect(simctl.commands).toEqual([`boot ${tv.udid} 360000`]);
     expect(runnerCalls).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("repeat startDevice replaces a disconnected socket and stops its live process", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { timer, releasedPorts } = await arrange([tv]);
+    const children: FakeChildProcess[] = [];
+    const sockets: FakeWatchSocket[] = [];
+    tvosRunner = new TvosRunnerLifecycle({
+      artifacts: { resolve: async () => "/products/TV.xctestrun" },
+      launcher: new XcodebuildTvosRunnerLauncher({
+        timer,
+        writeRunnerEnvironment: async (file) => file,
+        xcodebuild: {
+          startStreaming: async () => {
+            const child = new FakeChildProcess(timer);
+            children.push(child);
+            return child;
+          },
+        },
+        connect: (url) => {
+          const socket = new FakeWatchSocket();
+          sockets.push(socket);
+          const send = socket.send.bind(socket);
+          socket.send = (message) => {
+            send(message);
+            socket.receive({ ...hierarchy, requestId: socket.sent.at(-1)!.requestId });
+          };
+          const client = new WebSocketTvosRunnerClient(url, { factory: () => socket, timer });
+          socket.receive(connected);
+          return client;
+        },
+      }),
+      ports: {
+        allocate: () => 9012,
+        release: (id) => {
+          releasedPorts.push(id);
+        },
+      },
+    });
+    const start = () =>
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      });
+    expect(toolJson(await start())).toMatchObject({ isReady: true });
+    const firstClient = tvosRunners.require(tv.udid);
+    sockets[0]!.disconnect();
+    expect(children[0]!.killed).toBe(false);
+    expect(toolJson(await start())).toMatchObject({ isReady: true });
+    expect(children).toHaveLength(2);
+    expect(children[0]!.killed).toBe(true);
+    expect(sockets[0]!.closed).toBe(true);
+    expect(children[1]!.killed).toBe(false);
+    expect(releasedPorts).toEqual([tv.udid]);
+    expect(tvosRunners.require(tv.udid)).not.toBe(firstClient);
+    expect((await tvosRunners.require(tv.udid).hierarchy()).packageName).toBe(
+      hierarchy.data.packageName,
+    );
+    await start();
+    expect(children).toHaveLength(2);
     expect(timer.getSleepHistory()).toEqual([]);
   });
 

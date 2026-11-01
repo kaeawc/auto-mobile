@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDeviceConditionCall,
   registerDeviceConditionFeatureFlags,
@@ -84,6 +84,64 @@ describe("handleDeviceConditionCall (#14050)", () => {
     );
     expect(toolStructured(response).success).toBe(false);
     expect(toolText(response)).toMatch(/no lifecycle owner|needs a session/);
+  });
+
+  test.each([undefined, ""])(
+    "refuses rooted-detectable with sessionUuid=%j before applying anything",
+    async (sessionUuid) => {
+      const registry = freshRegistry();
+      const apply = spyOn(registry, "apply");
+      const response = await handleDeviceConditionCall(
+        device,
+        { deviceCondition: { rootState: "rooted-detectable" }, sessionUuid },
+        { featureFlags: flagOn, registry },
+      );
+      expect(apply).not.toHaveBeenCalled();
+      expect(toolStructured(response).success).toBe(false);
+      expect(toolText(response)).toMatch(/rootState needs a session \(sessionUuid\)/);
+      expect(toolText(response)).toMatch(/restored when the session ends/);
+      expect(toolText(response)).toMatch(/sessionless.*unset.*clear/);
+    },
+  );
+
+  test.each([{ rootState: "unset" } as const, { reset: true } as const])(
+    "allows sessionless cleanup %j to reach the registry",
+    async (deviceCondition) => {
+      const registry = freshRegistry();
+      const apply = spyOn(registry, "apply");
+      const response = await handleDeviceConditionCall(
+        device,
+        { deviceCondition },
+        { featureFlags: flagOn, registry },
+      );
+      expect(toolStructured(response).success).toBe(true);
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(apply).toHaveBeenCalledWith(
+        { deviceId: device.deviceId, sessionUuid: undefined, device },
+        deviceCondition,
+      );
+    },
+  );
+
+  test("applies session-owned rooted-detectable through the registry", async () => {
+    const registry = new DeviceConditionRegistry(() => ({
+      key: "rootState",
+      apply: async () => ({ status: "applied" }),
+      isClean: async () => true,
+    }));
+    const apply = spyOn(registry, "apply");
+    const deviceCondition = { rootState: "rooted-detectable" } as const;
+    const response = await handleDeviceConditionCall(
+      device,
+      { deviceCondition, sessionUuid: "s" },
+      { featureFlags: flagOn, registry },
+    );
+    expect(toolStructured(response).success).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith(
+      { deviceId: device.deviceId, sessionUuid: "s", device },
+      deviceCondition,
+    );
   });
 
   test("applies a reset and reports the structured deviceCondition result", async () => {

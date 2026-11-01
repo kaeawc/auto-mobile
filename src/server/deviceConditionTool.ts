@@ -7,6 +7,7 @@ import {
 } from "../features/deviceCondition/DeviceConditionRegistry";
 import {
   DEVICE_CONDITION_SCHEMA_VERSION,
+  DEVICE_CONDITION_UNSET,
   type DeviceConditionInput,
 } from "../features/deviceCondition/DeviceConditionTypes";
 import { attestationCeilingRefusal } from "../features/deviceCondition/attestationCeiling";
@@ -100,6 +101,13 @@ function deviceConditionRefusal(
   }
   if (input.expiresInSeconds !== undefined && !args.sessionUuid) {
     return "deviceCondition.expiresInSeconds needs a session to enforce the lease; there is no lifecycle owner in direct mode.";
+  }
+  if (
+    input.rootState !== undefined &&
+    input.rootState !== DEVICE_CONDITION_UNSET &&
+    !args.sessionUuid
+  ) {
+    return 'deviceCondition.rootState needs a session (sessionUuid) so the fixture is restored when the session ends; sessionless rootState: "unset" still clears one.';
   }
   return undefined;
 }

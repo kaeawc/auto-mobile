@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   handleDeviceConditionCall,
   registerDeviceConditionFeatureFlags,
@@ -22,6 +22,8 @@ function freshRegistry() {
 }
 
 describe("handleDeviceConditionCall (#14050)", () => {
+  afterEach(() => mock.restore());
+
   test("refuses when the feature flag is off", async () => {
     const response = await handleDeviceConditionCall(
       device,

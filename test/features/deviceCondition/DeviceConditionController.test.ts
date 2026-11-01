@@ -204,3 +204,25 @@ describe("DeviceConditionController (#14050)", () => {
     expect(report.verifiedClean).toBe(true);
   });
 });
+
+test("controller forwards per-signal outcomes without changing the top-level contract", async () => {
+  const signals = [
+    {
+      id: "su-binary" as const,
+      requested: "on" as const,
+      status: "unsupported" as const,
+      detail: "root refused",
+    },
+  ];
+  const injector: DeviceConditionInjector = {
+    key: "integrityState",
+    apply: async () => ({ status: "unchanged", signals }),
+    isClean: async () => true,
+  };
+  const result = await new DeviceConditionController(() => injector).apply({
+    integrityState: "maximally-detectable",
+  });
+  expect(result.changes).toEqual([{ key: "integrityState", status: "unchanged", signals }]);
+  expect(result.active).toEqual([]);
+  expect(result.success).toBe(true);
+});

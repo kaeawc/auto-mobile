@@ -1,7 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { DeviceConditionRegistry } from "../../../src/features/deviceCondition/DeviceConditionRegistry";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import {
+  DeviceConditionRegistry,
+  createDefaultInjectorResolver,
+} from "../../../src/features/deviceCondition/DeviceConditionRegistry";
 import type {
   DeviceConditionApplyOutcome,
   DeviceConditionInjector,
@@ -139,3 +143,60 @@ describe("DeviceConditionRegistry (#14050)", () => {
     expect(await registry.restore({ deviceId: "never-touched" })).toBe(true);
   });
 });
+
+for (const cleanup of ["explicit", "release", "expiry"] as const) {
+  test(`default resolver applies integrity params and restores on ${cleanup}`, async () => {
+    const adb = new FakeAdbExecutor();
+    let permissive = false;
+    const commands: string[] = [];
+    adb.execute = async (args) => {
+      commands.push(args.join(" "));
+      if (args[1] === "setenforce") {
+        permissive = args[2] === "0";
+      }
+      const stdout = args[1] === "getenforce" ? (permissive ? "Permissive" : "Enforcing") : "";
+      return {
+        stdout,
+        stderr: "",
+        toString: () => stdout,
+        trim: () => stdout.trim(),
+        includes: (s) => stdout.includes(s),
+      };
+    };
+    const timer = new FakeTimer();
+    const registry = new DeviceConditionRegistry(
+      createDefaultInjectorResolver({ create: () => adb }),
+      timer,
+    );
+    const device = {
+      name: "integrity",
+      deviceId: "fake-integrity-registry",
+      platform: "android" as const,
+    };
+    const ownerWithDevice = { device, deviceId: device.deviceId, sessionUuid: "integrity-session" };
+    const result = await registry.apply(ownerWithDevice, {
+      integrityState: { signals: { "selinux-permissive": "on" } },
+      expiresInSeconds: 1,
+    });
+    expect(result.changes[0]?.signals).toEqual([
+      { id: "selinux-permissive", requested: "on", status: "applied", active: true },
+    ]);
+    expect(permissive).toBe(true);
+    expect(registry.hasActiveConditions(ownerWithDevice)).toBe(true);
+    if (cleanup === "explicit") {
+      expect(
+        (await registry.apply(ownerWithDevice, { integrityState: "unset" })).changes[0]?.status,
+      ).toBe("cleared");
+    } else if (cleanup === "release") {
+      expect(await registry.restoreSession(ownerWithDevice.sessionUuid)).toEqual([true]);
+    } else {
+      timer.advanceTime(1000);
+      for (let i = 0; i < 100; i++) {
+        await Promise.resolve();
+      }
+    }
+    expect(permissive).toBe(false);
+    expect(registry.hasActiveConditions(ownerWithDevice)).toBe(false);
+    expect(commands).toContain("shell setenforce 1");
+  });
+}

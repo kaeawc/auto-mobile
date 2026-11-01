@@ -1,3 +1,8 @@
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { resolveIntegrityStateInjector } from "./integrityStateInjector";
 import type { BootedDevice } from "../../models";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
@@ -220,24 +225,36 @@ export class DeviceConditionRegistry {
  * (#14063), process-lifecycle fault injectors (#14068) and storage fault injectors
  * (#14066), permission and package-state fault injectors (#14069) and process fault injectors
  * (#14068), app-file corruption (#14066) and clock skew (#14069) on an Android device, and the
- * iOS refusals (#14073). The integrity injector (#14062) adds its key here as it lands.
+ * iOS refusals (#14073), plus per-signal integrity presets (#16246).
  * Returns undefined for a key with no injector, which the controller reports as
  * `unsupported` rather than silently dropping.
  */
-const defaultInjectorResolver: DeviceConditionInjectorResolver = (owner, key) =>
-  owner.device
-    ? (resolveIosRefusalInjector(owner.device, key) ??
-      resolveRootStateInjector(owner.device, key) ??
-      resolvePowerFaultInjector(owner.device, key) ??
-      resolveLifecycleFaultInjector(owner.device, key) ??
-      resolveStorageFaultInjector(owner.device, key) ??
-      resolvePermissionFaultInjector(owner.device, key) ??
-      resolvePackageFaultInjector(owner.device, key) ??
-      resolveProcessFaultInjector(owner.device, key) ??
-      resolveAppFileFaultInjector(owner.device, key) ??
-      resolveClockFaultInjector(owner.device, key) ??
-      resolveVehicleStateInjector(owner.device, key))
-    : undefined;
+export function createDefaultInjectorResolver(
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+): DeviceConditionInjectorResolver {
+  // Factory-local caches keep injected adb clients separate from the production instances.
+  const rootCache = new Map<string, DeviceConditionInjector>();
+  const integrityCache = new Map<string, DeviceConditionInjector>();
+  const resolveFixture = (device: BootedDevice, key: DeviceConditionKey) =>
+    resolveIosRefusalInjector(device, key) ??
+    resolveRootStateInjector(device, key, adbFactory, rootCache) ??
+    resolveIntegrityStateInjector(device, key, adbFactory, integrityCache);
+  return (owner, key) =>
+    owner.device
+      ? (resolveFixture(owner.device, key) ??
+        resolvePowerFaultInjector(owner.device, key, { adbFactory }) ??
+        resolveLifecycleFaultInjector(owner.device, key, { adbFactory }) ??
+        resolveStorageFaultInjector(owner.device, key, { adbFactory }) ??
+        resolvePermissionFaultInjector(owner.device, key, { adbFactory }) ??
+        resolvePackageFaultInjector(owner.device, key, { adbFactory }) ??
+        resolveProcessFaultInjector(owner.device, key, { adbFactory }) ??
+        resolveAppFileFaultInjector(owner.device, key, { adbFactory }) ??
+        resolveClockFaultInjector(owner.device, key, { adbFactory }) ??
+        resolveVehicleStateInjector(owner.device, key, { adbFactory }))
+      : undefined;
+}
+
+const defaultInjectorResolver = createDefaultInjectorResolver();
 
 /**
  * Process-wide registry for the `deviceCondition` surface. It lives in the feature

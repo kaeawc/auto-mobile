@@ -75,13 +75,13 @@ async function remountSystem(adb: AdbExecutor, signal?: AbortSignal): Promise<vo
   }
 }
 
-async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+export async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
   await adbCommand(adb, ["root"], signal);
   await adbCommand(adb, ["wait-for-device"], signal);
   await remountSystem(adb, signal);
 }
 
-async function plantArtifacts(
+export async function plantArtifacts(
   adb: AdbExecutor,
   paths: readonly string[],
   planted: Set<string>,
@@ -102,7 +102,7 @@ async function plantArtifacts(
  * partial listing. A read that genuinely fails (transport error) throws instead of reading as
  * "none exist".
  */
-async function listExisting(
+export async function listExisting(
   adb: AdbExecutor,
   paths: readonly string[],
   signal?: AbortSignal,

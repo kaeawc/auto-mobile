@@ -166,6 +166,7 @@ export class TapPointPlanner {
     hierarchy: ViewHierarchyResult,
     element: Element,
     point: { x: number; y: number },
+    bounds: ElementBounds = element.bounds,
   ): PrototypeBarTapDecision {
     if (this.deps.device.platform !== "android" && this.deps.device.platform !== "ios") {
       return { kind: "proceed", point };
@@ -174,7 +175,7 @@ export class TapPointPlanner {
     return resolvePrototypeTapUnderSystemBar({
       hierarchy,
       ownedByPrototype: isOwnPrototypeNode(hierarchy, owner),
-      bounds: element.bounds,
+      bounds,
       point,
       warnIfUnknown: this.deps.device.platform === "ios",
     });
@@ -572,7 +573,12 @@ export class TapPointPlanner {
         "Target is covered by the soft keyboard and a host dismiss control; dismiss the keyboard first.",
       );
     }
-    const barDecision = this.prototypeBarTapDecision(viewHierarchy, tapElement, clearPoint);
+    const barDecision = this.prototypeBarTapDecision(
+      viewHierarchy,
+      tapElement,
+      clearPoint,
+      visibleBounds,
+    );
     if (barDecision.kind === "refuse") {
       throw new ActionableError(
         `Cannot tap (${clearPoint.x}, ${clearPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +

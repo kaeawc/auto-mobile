@@ -335,6 +335,14 @@ describe("iOS prototype status-bar taps (#16175)", () => {
     });
   });
 
+  test("the planner refuses a control whose clipped viewport is wholly under the status bar", () => {
+    const { hierarchy, control, planner } = iosCapture(0, 200);
+    const clippedBounds = { left: 100, top: 0, right: 200, bottom: 50 };
+    expect(
+      planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 20 }, clippedBounds),
+    ).toEqual({ kind: "refuse", bar: "status bar" });
+  });
+
   test("the planner moves a partially covered control into its reachable part", () => {
     const { hierarchy, control, planner } = iosCapture(40, 70);
     expect(planner.prototypeBarTapDecision(hierarchy, control, { x: 150, y: 55 })).toEqual({

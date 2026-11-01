@@ -1,4 +1,8 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
+import {
+  isPlayStoreSystemImageTag,
+  parseAndroidSystemImageRuntime,
+} from "./android-cmdline-tools/AndroidSystemImageRuntime";
 import type { DeviceDisplays, DisplayPanel } from "../models/DisplayPanel";
 import { displayInventoryOutcome, type DisplayInventoryOutcome } from "../models/DeviceInfo";
 import type {
@@ -235,17 +239,31 @@ export function matchesDeviceCriteria(
     screenWidth?: number;
     screenHeight?: number;
     isRunning?: boolean;
+    runtimeId?: string;
   },
   criteria: DeviceMatchCriteria,
 ): boolean {
   return (
     matchesPlatform(item, criteria) &&
+    matchesPlayStore(item, criteria) &&
     matchesVersionRange(item, criteria) &&
     matchesName(item, criteria) &&
     matchesFormFactor(item, criteria) &&
     matchesRequiredDisplays(item, criteria) &&
     matchesScreenSize(item, criteria)
   );
+}
+
+/**
+ * `requires.playStore` (#14302) holds only for a device built from a Play Store system image; a
+ * device whose image is unknown (a physical device, an unenriched AVD) cannot show it.
+ */
+function matchesPlayStore(item: { runtimeId?: string }, criteria: DeviceMatchCriteria): boolean {
+  if (criteria.requires?.playStore !== true) {
+    return true;
+  }
+  const tag = item.runtimeId ? parseAndroidSystemImageRuntime(item.runtimeId)?.tag : undefined;
+  return tag !== undefined && isPlayStoreSystemImageTag(tag);
 }
 
 function matchesRequiredDisplays(

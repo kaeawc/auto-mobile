@@ -1,4 +1,5 @@
 import type { DeviceInfo } from "../models";
+import { isPlayStoreSystemImageTag } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { enrichDeviceInfoList } from "../utils/android-cmdline-tools/avdDeviceInfoEnrichment";
 import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
 import { isIosDuoDeviceType } from "../utils/ios-cmdline-tools/iosDeviceType";
@@ -327,7 +328,8 @@ export async function resolveIosProvisioningSelection(
  * run `changeLocalization` on the API levels that require it.
  *
  * `google_apis` is preferred over `default` because it is rootable AND carries
- * the Google APIs some flows expect.
+ * the Google APIs some flows expect. A request with `requires.playStore` (#14302)
+ * selects only Play Store images instead (see {@link playStoreImagesOrThrow}).
  */
 const ANDROID_TAG_PREFERENCE = ["google_apis", "default", "google_apis_playstore"];
 
@@ -571,6 +573,20 @@ function handheldImagesOrThrow(
   return handheld;
 }
 
+/** `requires.playStore` (#14302): only Play Store images, or a refusal naming the image to install. */
+function playStoreImagesOrThrow(images: SystemImage[]): SystemImage[] {
+  const play = images.filter((image) => isPlayStoreSystemImageTag(image.tag));
+  if (play.length === 0) {
+    throw new ActionableError(
+      "requires.playStore needs a Google Play system image, and none is installed for this request: " +
+        `${describeInstalled(images)}. ` +
+        "Install one with 'sdkmanager \"system-images;android-<api>;google_apis_playstore;<abi>\"'. " +
+        "Play Store images refuse adb root, so root-dependent features will report that they need a non-Play image.",
+    );
+  }
+  return play;
+}
+
 /** Shared installation wording for selected and exact Android TV provisioning. */
 export function androidTvImageInstallGuidance(packageName: string): string {
   return (
@@ -637,7 +653,7 @@ function automotiveImagesOrThrow(
  */
 export function pickAndroidSystemImage(
   images: SystemImage[],
-  criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion" | "formFactor">,
+  criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion" | "formFactor" | "requires">,
   architecture: string,
 ): SystemImage {
   const family = androidImageFamilyFor(criteria.formFactor);
@@ -680,8 +696,11 @@ export function pickAndroidSystemImage(
         : handheldImagesOrThrow(images, inRange, bounds);
 
   const preferences = preferredAbis(architecture);
-  const runnable = familyImages.filter((image) => preferences.includes(image.abi));
-  const candidates = runnable.length > 0 ? runnable : familyImages;
+  const allowed = criteria.requires?.playStore
+    ? playStoreImagesOrThrow(familyImages)
+    : familyImages;
+  const runnable = allowed.filter((image) => preferences.includes(image.abi));
+  const candidates = runnable.length > 0 ? runnable : allowed;
 
   // Precedence is major API > ABI > tag > minor > packageName; keep capability
   // and rootability preferences ahead of point-release freshness.

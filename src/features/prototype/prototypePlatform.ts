@@ -295,15 +295,24 @@ function ownUses(object: Raw, path: string, context: ScanContext, uses: Prototyp
   }
 }
 
+/** Whether a member starts a timer or a deferred non-gesture handler. */
+function isDeferredMember(object: Raw, key: string): boolean {
+  return (
+    object.type === "startTimer" ||
+    (key.startsWith("on") &&
+      !USER_GESTURE_KEYS.has(key) &&
+      key !== "onSuccess" &&
+      key !== "onError")
+  );
+}
+
 /** Gesture provenance for a node handler, nested UI owner or action continuation. */
 function memberContext(object: Raw, key: string, context: ScanContext): ScanContext {
   const node =
     typeof object.type === "string" &&
     Object.hasOwn(contract.definitions.node.variants, object.type);
   const gesture = USER_GESTURE_KEYS.has(key);
-  const deferred =
-    object.type === "startTimer" ||
-    (key.startsWith("on") && !gesture && key !== "onSuccess" && key !== "onError");
+  const deferred = isDeferredMember(object, key);
   // Nested UI owners can start gestures, but lifecycle and timer chains cannot regain one.
   // Request completion handlers retain the enclosing chain's provenance.
   return {

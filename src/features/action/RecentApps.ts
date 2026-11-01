@@ -7,7 +7,11 @@ import {
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { ActionableError, BootedDevice, RecentAppsResult, ObserveResult } from "../../models";
-import { PressButton } from "./PressButton";
+import {
+  PressButton,
+  acceptVerifiedAlreadyOpenSwitcher,
+  isVerifiedAlreadyOpenSwitcher,
+} from "./PressButton";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -71,7 +75,10 @@ export class RecentApps extends BaseVisualChange {
           const { recentAppsRoute, ...reply } = await perf.track("iOSRecentApps", () =>
             this.executeIosRecentApps(signal),
           );
-          verifiedAlreadyOpen = reply.success && recentAppsRoute === "already-open";
+          verifiedAlreadyOpen = isVerifiedAlreadyOpenSwitcher({
+            success: reply.success,
+            recentAppsRoute,
+          });
           return reply;
         },
         {
@@ -85,10 +92,7 @@ export class RecentApps extends BaseVisualChange {
         },
       );
       // The runner verified the switcher is already open; this no-op needs no visual change.
-      if (verifiedAlreadyOpen && result.error === "No visual change observed") {
-        result.success = true;
-        delete result.error;
-      }
+      acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
       return result;
     }
 

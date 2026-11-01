@@ -1,0 +1,45 @@
+{
+  "spec": {
+    "id": "sensitive-flow",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "pasteButton",
+          "into": "/data/code"
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/submit",
+              "via": "device"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Pasted: {data:/code}",
+          "visibleWhen": {
+            "data": "/code",
+            "notEquals": ""
+          }
+        }
+      ]
+    }
+  },
+  "sinkOnly": true,
+  "options": {
+    "library": false
+  }
+}

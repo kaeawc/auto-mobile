@@ -142,7 +142,11 @@ export class AudioLoopbackHelperProvider {
   private async isHelperExecutable(size: number): Promise<boolean> {
     try {
       const stats = await fs.stat(this.helperPath);
-      return !(!stats.isFile() || stats.size !== size || (stats.mode & 0o111) === 0);
+      return !(
+        !stats.isFile() ||
+        stats.size !== size ||
+        (process.platform !== "win32" && (stats.mode & 0o111) === 0)
+      );
     } catch (error) {
       // A removed cache entry is expected and can be downloaded again.
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {

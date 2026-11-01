@@ -5,6 +5,7 @@ import * as archiveExtraction from "./archiveExtractionBoundary";
 import { ALLOWED_IMPORTERS, findChildProcessImports } from "./childProcessImportBoundary";
 import * as daemonLauncher from "./daemonLauncherBoundary";
 import { findViolationsInSource as findHostShellCalls } from "./hostShellBoundary";
+import * as sdkManager from "./sdkManagerExecutionBoundary";
 import * as iosCtrlProxy from "./iosCtrlProxyProcessBoundary";
 import { findDirectEmulatorCalls } from "./androidEmulatorBoundary";
 import { findDirectFfmpegCalls } from "./ffmpegBoundary";
@@ -283,6 +284,24 @@ export const BOUNDARY_ROWS: readonly BoundaryRow[] = [
     // The detector answers per file, so the hit marks the file rather than a call site.
     detect: (source) =>
       archiveExtraction.directlyExtractsTar(source)
+        ? [{ line: 1, column: 1, endLine: 1, text: "" }]
+        : [],
+  },
+  {
+    id: "sdkmanager-execution",
+    owner: sdkManager.OWNER,
+    skipPrefixes: [],
+    skipFiles: [...sdkManager.EXCEPTIONS.keys()],
+    scope: "tree",
+    report: "file-messages",
+    failureHeader: `error: sdkmanager execution must use ${sdkManager.OWNER}:`,
+    fileMessage: (file) =>
+      `${file} directly executes sdkmanager; route it through ${sdkManager.OWNER} instead.`,
+    successMessage: "sdkmanager-execution-boundary: no direct production sdkmanager invocations.",
+    minTreeFiles: 100,
+    // The detector answers per file, so the hit marks the file rather than a call site.
+    detect: (source) =>
+      sdkManager.directlyExecutesSdkManager(source)
         ? [{ line: 1, column: 1, endLine: 1, text: "" }]
         : [],
   },

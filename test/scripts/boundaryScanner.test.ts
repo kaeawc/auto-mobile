@@ -374,6 +374,43 @@ describe("host-shell row (#13219)", () => {
   });
 });
 
+describe("sdkmanager-execution row (#13219)", () => {
+  const treeFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+  const execute = 'import { spawn } from "node:child_process"; spawn("sdkmanager", ["--list"]);';
+
+  test("flags a file that executes sdkmanager once and skips the owner", () => {
+    const owner = treeFile("src/utils/android-cmdline-tools/SdkManagerClient.ts", execute);
+    const other = treeFile("src/y.ts", `${execute}\n${execute}`);
+    const avd = treeFile(
+      "src/z.ts",
+      'import { spawn } from "node:child_process"; spawn("avdmanager", []);',
+    );
+
+    expect(scan("sdkmanager-execution", [owner, other, avd]).map(({ file }) => file)).toEqual([
+      "src/y.ts",
+    ]);
+  });
+
+  test("keeps the checker's failure lines, success message and tree guard byte for byte", () => {
+    const violation = { file: "src/y.ts", line: 1, column: 1, text: "" };
+
+    expect(renderBoundaryResult(row("sdkmanager-execution"), [violation]).stderr).toBe(
+      "error: sdkmanager execution must use src/utils/android-cmdline-tools/SdkManagerClient.ts:\n" +
+        "src/y.ts directly executes sdkmanager; route it through src/utils/android-cmdline-tools/SdkManagerClient.ts instead.\n",
+    );
+    expect(renderBoundaryResult(row("sdkmanager-execution"), []).stdout).toBe(
+      "sdkmanager-execution-boundary: no direct production sdkmanager invocations.\n",
+    );
+    expect(treeTooSmallMessage(row("sdkmanager-execution"), 7)).toBe(
+      "error: sdkmanager-execution-boundary scanned only 7 files under src; expected the full source tree.",
+    );
+  });
+});
+
 describe("daemon-launcher row (#13219)", () => {
   const treeFile = (path: string, source: string) => ({
     path,

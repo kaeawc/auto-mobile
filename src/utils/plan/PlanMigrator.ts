@@ -337,8 +337,18 @@ const migrateTapParams = (
   let changed = false;
 
   if (!mergedParams.action) {
-    mergedParams.action = "tap";
-    recordWarning(warnings, "Defaulted tapOn.action to tap.", stepIndex);
+    const hasDuration =
+      typeof mergedParams.duration === "number" &&
+      Number.isFinite(mergedParams.duration) &&
+      mergedParams.duration > 0;
+    mergedParams.action = hasDuration ? "longPress" : "tap";
+    recordWarning(
+      warnings,
+      hasDuration
+        ? "Defaulted tapOn.action to longPress because duration is set."
+        : "Defaulted tapOn.action to tap.",
+      stepIndex,
+    );
     changed = true;
   }
   if (mergedParams.elementId === undefined && typeof mergedParams.id === "string") {

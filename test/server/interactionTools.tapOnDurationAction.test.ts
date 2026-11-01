@@ -4,6 +4,7 @@ import type { BootedDevice, TapOnElementOptions } from "../../src/models";
 import type { InteractionToolDependencies } from "../../src/server/interactionTools/dependencies";
 import { tapOnHandler } from "../../src/server/interactionTools/tapHandlers";
 import { tapOnSchema } from "../../src/server/interactionTools/tapSchemas";
+import { migratePlan } from "../../src/utils/plan/PlanMigrator";
 
 describe.each(["android", "ios"] as const)("tapOn duration action on %s", (platform) => {
   const device: BootedDevice = { deviceId: "fake", name: "fake", platform };
@@ -57,5 +58,20 @@ describe.each(["android", "ios"] as const)("tapOn duration action on %s", (platf
     );
     expect(factory).not.toHaveBeenCalled();
     expect(received).toHaveLength(0);
+  });
+
+  test("a migrated duration-only plan step reaches the factory as longPress", async () => {
+    const { plan } = migratePlan({
+      name: "Duration-only press",
+      steps: [{ tool: "tapOn", params: { selector: { text: "Target" }, duration: 750 } }],
+    });
+    const args = tapOnSchema.parse(plan.steps[0].params);
+
+    await tapOnHandler(device, args, { deps });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(received).toHaveLength(1);
+    expect(received[0].action).toBe("longPress");
+    expect(received[0].duration).toBe(750);
   });
 });

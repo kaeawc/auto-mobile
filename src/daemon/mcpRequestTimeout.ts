@@ -649,13 +649,13 @@ function resolveLongPressBudgetMs(
   );
 }
 
-/** tapOn extends its existing 30 s non-press allowance only for an explicit positive duration. */
+/** tapOn extends its 30 s non-press allowance for a positive duration with longPress or omitted action. */
 function resolveTapOnLongPressBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call" || request.params?.name !== "tapOn") {
     return undefined;
   }
   const args = asRecord(request.params?.arguments);
-  if (args?.action !== "longPress") {
+  if (!args || (args.action !== undefined && args.action !== "longPress")) {
     return undefined;
   }
   const duration = positiveFiniteNumber(args.duration);

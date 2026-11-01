@@ -11,6 +11,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
 import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeCameraPreviewNode
 import dev.jasonpearson.automobile.protocol.PrototypeCancelTimerAction
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
 import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
@@ -734,7 +735,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
-    // Contract only (#14253, #14239): no renderer draws a video player or cast button yet.
+    // Contract only (#14253, #14239, #14202): no renderer draws these media nodes yet.
     is PrototypeVideoPlayerNode ->
       copy(
         semantics = semantics,
@@ -755,6 +756,15 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     // Contract only (#14309): no renderer draws a map yet.
     is PrototypeMapNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    is PrototypeCameraPreviewNode ->
       copy(
         semantics = semantics,
         onAppear = onAppear,

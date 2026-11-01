@@ -197,7 +197,12 @@ export class FakeImageUtils implements ImageUtils {
     return this.resizeResult;
   }
 
-  async crop(buffer: Buffer, width: number, height: number, x = 0, y = 0): Promise<Buffer> {
+  async crop(
+    buffer: Buffer,
+    width: number,
+    height: number,
+    { x = 0, y = 0 }: { x?: number; y?: number } = {},
+  ): Promise<Buffer> {
     this.recordCall("crop", { bufferLength: buffer.length, width, height, x, y });
     if (this.shouldThrowOnCrop) {
       throw new Error("Simulated error in crop");

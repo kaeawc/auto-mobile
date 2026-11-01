@@ -108,8 +108,7 @@ interface AppDatabaseClient {
     appId: string,
     databasePath: string,
     table: string,
-    limit: number,
-    offset: number,
+    options: { limit: number; offset: number },
   ): Promise<TableDataResult>;
   getTableStructure(
     appId: string,
@@ -156,9 +155,9 @@ function createDatabaseClient(
       listDatabases: async (appId) => iosStorageRequest(() => client.listDatabasesForIos(appId)),
       listTables: async (appId, databasePath) =>
         iosStorageRequest(() => client.listTablesForIos(appId, databasePath)),
-      getTableData: async (_appId, databasePath, table, limit, offset) =>
+      getTableData: async (_appId, databasePath, table, { limit, offset }) =>
         iosStorageRequest(() =>
-          client.getTableDataForIos(_appId, databasePath, table, { limit, offset }),
+          client.getTableDataForIos(_appId, databasePath, table, { page: { limit, offset } }),
         ),
       getTableStructure: async (appId, databasePath, table) =>
         iosStorageRequest(() => client.getTableStructureForIos(appId, databasePath, table)),
@@ -425,7 +424,7 @@ async function getTableDataResource(
     }
 
     const inspector = createDatabaseClient(device, context, iosClient);
-    const data = await inspector.getTableData(appId, decodedPath, decodedTable, limit, offset);
+    const data = await inspector.getTableData(appId, decodedPath, decodedTable, { limit, offset });
     const lastUpdated = new Date().toISOString();
 
     return {

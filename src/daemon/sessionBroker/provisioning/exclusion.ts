@@ -46,6 +46,7 @@ export interface BindingRegistryDegradation {
   mode: "files_only";
   dbPath: string;
   unknownMigrations: readonly string[];
+  writerVersions?: Readonly<Record<string, string>>;
   remedy: string;
 }
 
@@ -244,6 +245,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
           mode: "files_only",
           dbPath: error.dbPath,
           unknownMigrations: error.unknownMigrations,
+          writerVersions: error.writerVersions,
           remedy: error.remedy,
         };
         this.snapshot = { kind: "files_only", loadedAtMs: this.timer.now(), diagnostic };

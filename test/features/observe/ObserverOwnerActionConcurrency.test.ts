@@ -172,12 +172,11 @@ test.each(ownerCommands)(
                   { signal: owner.signal },
                 )
               : command === ownerCommands[4]
-                ? new InputKey(device, factory, undefined, timer).press(
+                ? new InputKey(device, { adbFactory: factory, timer }).press(
                     "enter",
                     undefined,
                     undefined,
-                    [],
-                    { signal: owner.signal },
+                    { modifiers: [], signal: owner.signal },
                   )
                 : adb.executeCommand(command, { signal: owner.signal });
       await adb.started;
@@ -193,7 +192,7 @@ test.each(ownerCommands)(
           screenshotStateStore: new FakeScreenshotStateStore(timer),
           hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
         },
-        timer,
+        { timer },
       );
       const observation = screen.execute({
         observerMode: true,

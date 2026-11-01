@@ -359,13 +359,10 @@ export class IosLaunchProcess {
     perf: PerformanceTracker,
   ) {
     const retargetAbortController = new AbortController();
-    const retarget = ctrlProxyClient.requestLaunchApp(
-      bundleId,
-      undefined,
-      perf,
-      false,
-      retargetAbortController.signal,
-    );
+    const retarget = ctrlProxyClient.requestLaunchApp(bundleId, undefined, perf, {
+      coldBoot: false,
+      signal: retargetAbortController.signal,
+    });
     return { retargetAbortController, retarget };
   }
 

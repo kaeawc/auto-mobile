@@ -64,10 +64,11 @@ extension CommandHandler {
         if let json = request.actionJson, let body = json.data(using: .utf8),
            (try? JSONDecoder().decode(AutoMobileAction.self, from: body)) != nil
         {
-            outcome = await bridgeReply(route: .observationAction, body: body).flatMap { data in
-                Result { try JSONDecoder().decode(AutoMobileActionResult.self, from: data) }
-                    .mapError { _ in SdkBridgeFailure.badReply }
-            }
+            outcome = await bridgeReply(route: .observationAction, body: body, timeoutMs: request.timeoutMs)
+                .flatMap { data in
+                    Result { try JSONDecoder().decode(AutoMobileActionResult.self, from: data) }
+                        .mapError { _ in SdkBridgeFailure.badReply }
+                }
         } else {
             outcome = .failure(.invalidAction)
         }
@@ -78,21 +79,36 @@ extension CommandHandler {
 
     /// Sends one observation-bridge request to the tracked foreground app's SDK, only when its
     /// `/health` reports a registered bridge, and maps the SDK's status codes to typed failures.
-    private func bridgeReply(route: SdkRoute, body: Data) async -> Result<Data, SdkBridgeFailure> {
+    private func bridgeReply(
+        route: SdkRoute,
+        body: Data,
+        timeoutMs: Double? = nil
+    )
+        async -> Result<Data, SdkBridgeFailure>
+    {
         guard let info = await sdkServerInfoForTrackedForegroundApp(),
               info.observationBridge?.available == true
         else {
             return .failure(.bridgeUnavailable)
         }
-        return await sdkReply(route: route, body: body)
+        return await sdkReply(route: route, body: body, timeoutMs: timeoutMs)
     }
 
-    /// `bridgeUnavailable` means the request was never sent. A request that was sent but got no
-    /// reply is `badReply`: the SDK may have acted, so the daemon must not retry it elsewhere.
-    private func sdkReply(route: SdkRoute, body: Data) async -> Result<Data, SdkBridgeFailure> {
+    /// Proven non-delivery and an SDK 503 are `bridgeUnavailable`. Ambiguous delivery is
+    /// `badReply`: the SDK may have acted, so the daemon must not retry it elsewhere.
+    private func sdkReply(
+        route: SdkRoute,
+        body: Data,
+        timeoutMs: Double? = nil
+    )
+        async -> Result<Data, SdkBridgeFailure>
+    {
         guard let client = sdkHierarchyClient else { return .failure(.bridgeUnavailable) }
-        guard let reply = await client.sendObservationRequest(route, body: body) else {
-            return .failure(.badReply)
+        let reply: SdkBridgeReply
+        switch await client.sendObservationRequest(route, body: body, timeoutMs: timeoutMs) {
+        case let .reply(value): reply = value
+        case .notSent: return .failure(.bridgeUnavailable)
+        case .noReply: return .failure(.badReply)
         }
         switch reply.statusCode {
         case 200: return .success(reply.body)

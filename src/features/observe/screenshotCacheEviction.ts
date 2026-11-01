@@ -72,8 +72,10 @@ export function newestScreenshotPathKeys(
   files: readonly ScreenshotCacheFile[],
   keepPerDevice: number,
   touched: (file: ScreenshotCacheFile) => number,
-  incomingDevice?: string,
-  key: (path: string) => string = screenshotPathKey,
+  {
+    incomingDevice,
+    key = screenshotPathKey,
+  }: { incomingDevice?: string; key?: (path: string) => string } = {},
 ): Set<string> {
   const counts = new Map<string, number>();
   if (incomingDevice) {
@@ -119,8 +121,11 @@ export function selectScreenshotsToEvict(
   files: ScreenshotCacheFile[],
   maxSizeBytes: number,
   minAgeMs: number,
-  nowMs: number,
-  { isReferenced = () => false, isProtected = () => false }: ScreenshotEvictionGuards = {},
+  {
+    nowMs,
+    isReferenced = () => false,
+    isProtected = () => false,
+  }: ScreenshotEvictionGuards & { nowMs: number },
 ): ScreenshotEvictionPlan {
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total <= maxSizeBytes) {

@@ -1,5 +1,22 @@
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
+import {
+  createDisplayInventoryProvider,
+  type DisplayInventoryProvider,
+} from "../../src/devices/DisplayInventoryProvider";
+import { AdmittingAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { createExecResult } from "../../src/utils/execResult";
+import {
+  ambientDeviceExecutionBinding,
+  runWithDeviceExecutionBinding,
+} from "../../src/utils/deviceExecutionBinding";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import {
   AndroidAvdIdentityConflictError,
   AndroidAvdIdentityUnresolvedError,
@@ -69,7 +86,7 @@ function service(
     | "invalidateAndroidDeviceList"
     | "assertExplicitDeviceNotForeignOwned"
   >,
-  displayInventory?: FakeDisplayInventoryProvider,
+  displayInventory?: DisplayInventoryProvider,
 ): DeviceBootService {
   return new DeviceBootService({
     deviceManager,
@@ -88,6 +105,34 @@ function service(
     invalidateAndroidDeviceList: () => {},
     ...lifecycleOptions,
   });
+}
+
+function singlePanelInventory(timer: FakeTimer) {
+  const adb = new FakeAdbExecutor();
+  for (const [command, fixture] of [
+    ["dumpsys SurfaceFlinger --display-id", "phone-surfaceflinger.txt"],
+    ["dumpsys display", "phone-display-device-info.txt"],
+    ["cmd device_state print-states", "phone-states.txt"],
+  ]) {
+    adb.setCommandResponse(
+      command,
+      createExecResult(
+        readFileSync(join(import.meta.dir, "../fixtures/android-display", fixture), "utf8"),
+        "",
+      ),
+    );
+  }
+  const delegate = new FakeAdbClientFactory(adb);
+  const admitted: string[] = [];
+  const inventory = createDisplayInventoryProvider(
+    new AdmittingAdbClientFactory(delegate, {
+      admissionGate: { assertDeviceActionable: (id) => void admitted.push(id) },
+      executionBinding: ambientDeviceExecutionBinding,
+    }),
+    { readDeviceDisplays: async () => undefined },
+    timer,
+  );
+  return { inventory, delegate, admitted };
 }
 
 describe("DeviceBootService", () => {
@@ -178,6 +223,114 @@ describe("DeviceBootService", () => {
     expect(result.source).toBe("cold-boot");
     expect(result.device.name).toBe(image.name);
     expect(checked).toEqual([image.name]);
+  });
+
+  it("keeps provisioning alive when an unrelated display-discovery candidate is lost", async () => {
+    const devices = new FakeDeviceUtils();
+    const target: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const unrelated: BootedDevice = {
+      name: "Unrelated",
+      platform: "android",
+      deviceId: "emulator-5560",
+    };
+    devices.setBootedDevices("android", [target, unrelated]);
+    const timer = new FakeTimer();
+    const { inventory, delegate, admitted } = singlePanelInventory(timer);
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["provisioning"]));
+    const execution = tracker.startExecution("provisionDevice");
+    const recorded = new FakeDeviceExecutionBinding();
+    const binding = {
+      bindDeviceExecution: (id: string) => {
+        recorded.bindDeviceExecution(id);
+        tracker.bindDeviceExecution(execution.id, id);
+      },
+    };
+    const boot = service(
+      devices,
+      new DefaultDeviceMatcher(),
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      inventory,
+    );
+    try {
+      await runWithDeviceExecutionBinding(binding, async () => {
+        // Stand in for the target's own admission, independently of candidate discovery.
+        ambientDeviceExecutionBinding.bindDeviceExecution(target.deviceId);
+        const result = await boot.boot({
+          platform: "android",
+          name: target.name,
+          matchExactName: true,
+          requires: { panels: 1 },
+          signal: execution.abortController.signal,
+        });
+        expect(result.device.deviceId).toBe(target.deviceId);
+        expect(delegate.getCalls().map(({ device }) => device?.deviceId)).toEqual([
+          target.deviceId,
+          unrelated.deviceId,
+        ]);
+        expect(admitted).toEqual([target.deviceId, unrelated.deviceId]);
+        expect(recorded.deviceIds).toEqual([target.deviceId]);
+        expect(tracker.getActiveDeviceExecutionCount(target.deviceId)).toBe(1);
+        expect(tracker.getActiveDeviceExecutionCount(unrelated.deviceId)).toBe(0);
+        expect(
+          await tracker.cancelDeviceExecutions(
+            unrelated.deviceId,
+            `device-disconnected:${unrelated.deviceId}`,
+          ),
+        ).toBe(0);
+        expect(execution.abortController.signal.aborted).toBe(false);
+        // The ambient binding is restored after discovery, and target loss still cancels.
+        ambientDeviceExecutionBinding.bindDeviceExecution(target.deviceId);
+        expect(recorded.deviceIds).toEqual([target.deviceId, target.deviceId]);
+        expect(
+          await tracker.cancelDeviceExecutions(
+            target.deviceId,
+            `device-disconnected:${target.deviceId}`,
+          ),
+        ).toBe(1);
+        expect(execution.abortController.signal.aborted).toBe(true);
+      });
+    } finally {
+      tracker.endExecution(execution.id);
+    }
+  });
+
+  it("still binds an explicitly requested device during display enrichment", async () => {
+    const devices = new FakeDeviceUtils();
+    const target: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [target]);
+    const timer = new FakeTimer();
+    const { inventory, admitted } = singlePanelInventory(timer);
+    const binding = new FakeDeviceExecutionBinding();
+    const boot = service(
+      devices,
+      new DefaultDeviceMatcher(),
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      inventory,
+    );
+    const result = await runWithDeviceExecutionBinding(binding, () =>
+      boot.boot({
+        platform: "android",
+        deviceId: target.deviceId,
+        requires: { panels: 1 },
+      }),
+    );
+    expect(result.device.deviceId).toBe(target.deviceId);
+    expect(binding.deviceIds).toEqual([target.deviceId]);
+    expect(admitted).toEqual([target.deviceId]);
   });
 
   it("hydrates a running foldable before matching panel requirements", async () => {
@@ -547,7 +700,7 @@ describe("DeviceBootService", () => {
     timer.enableAutoAdvance();
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.waitForDeviceReady = async (_device, _timeout, _handle, signal) => {
+    devices.waitForDeviceReady = async (_device, _timeout, _handle, { signal } = {}) => {
       return new Promise((_resolve, reject) => {
         signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
       });
@@ -1619,7 +1772,7 @@ describe("DeviceBootService", () => {
     timer.enableAutoAdvance();
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.waitForDeviceReady = async (_device, _timeoutMs, _handle, signal) => {
+    devices.waitForDeviceReady = async (_device, _timeoutMs, _handle, { signal } = {}) => {
       await new Promise<never>((_resolve, reject) => {
         signal?.addEventListener(
           "abort",
@@ -2500,13 +2653,13 @@ describe("DeviceBootService", () => {
         signalOwnerReadiness = resolve;
       });
       let ownerReadinessActive = false;
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           ownerReadinessActive = true;
           signalOwnerReadiness();
           await ownerReadinessGate;
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
       const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
       let signalFreshDiscovery!: () => void;
@@ -2577,12 +2730,12 @@ describe("DeviceBootService", () => {
       const ownerReadinessStarted = new Promise<void>((resolve) => {
         signalOwnerReadiness = resolve;
       });
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           signalOwnerReadiness();
           await ownerReadinessGate;
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
 
       const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
@@ -2693,12 +2846,12 @@ describe("DeviceBootService", () => {
       const ownerReadinessStarted = new Promise<void>((resolve) => {
         signalOwnerReadiness = resolve;
       });
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           signalOwnerReadiness();
           await ownerReadinessGate;
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
 
       const owner = ownerBootService.boot({ platform: "android", deviceId: image.name });
@@ -2756,7 +2909,7 @@ describe("DeviceBootService", () => {
       });
       let ownerReadinessActive = false;
       const originalWaitForDeviceReady = devices.waitForDeviceReady.bind(devices);
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           ownerReadinessActive = true;
           signalOwnerReadiness();
@@ -2766,7 +2919,7 @@ describe("DeviceBootService", () => {
           devices.setMockChildProcess(image.name, null);
           throw new Error("owner boot failed");
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
       const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
       let signalFreshDiscovery!: () => void;
@@ -2958,7 +3111,7 @@ describe("DeviceBootService", () => {
       let failOwnerBoot = false;
       let gated = false;
       const originalWaitForDeviceReady = devices.waitForDeviceReady.bind(devices);
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle && !gated) {
           gated = true;
           ownerReadinessStarted.resolve();
@@ -2968,7 +3121,7 @@ describe("DeviceBootService", () => {
             throw new Error("owner boot failed");
           }
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
       const newService = (lifecycleOptions?: Parameters<typeof service>[5]) =>
         service(devices, matcher, undefined, timer, lifecycleCoordinator, lifecycleOptions);

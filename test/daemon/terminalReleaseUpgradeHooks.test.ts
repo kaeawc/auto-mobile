@@ -56,7 +56,7 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
     registerPerformanceMonitorSessionCleanup(manager, {
       monitor: () => ({ stopMonitoring: (deviceId) => perfStops.push(deviceId) }),
     });
-    manager.onSessionRelease((sessionId, _deviceId, reason, _snapshot, options) => {
+    manager.onSessionRelease((sessionId, _deviceId, reason, options) => {
       notifications.push(`${sessionId}:${reason}${options.upgradeOnly ? ":upgrade" : ""}`);
     });
   });
@@ -160,7 +160,10 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+        deviceSessionRepository: new DeviceSessionRepository({
+          db: await createTestDatabase(),
+          timer,
+        }),
       },
     );
   });

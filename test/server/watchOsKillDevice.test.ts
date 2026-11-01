@@ -3,6 +3,10 @@ import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { killDeviceSchema, resolveKillDeviceStableTarget } from "../../src/server/deviceTools";
 import { toolJson } from "../helpers/toolResponse";
 import { BASE, restartStopHarness } from "../helpers/restartStopHarness";
+import { setDeviceToolsDependencies } from "../../src/server/deviceTools";
+import { WatchRunnerLifecycle } from "../../src/features/watch/WatchRunnerLifecycle";
+import { FakeWatchRunnerLauncher } from "../fakes/FakeWatchRunnerLauncher";
+import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
 
 // killDevice stops an Apple Watch simulator a session holds, with the same holder checks as any
 // other device, and releases that session (#14908).
@@ -27,6 +31,15 @@ describe("killDevice on an Apple Watch simulator", () => {
 
   test("the holder stops the watch through the platform kill and its session is released", async () => {
     const f = await fixture("watchos", false, false, "owner-conn", false);
+    const launcher = new FakeWatchRunnerLauncher();
+    const owner = new WatchRunnerLifecycle({
+      artifacts: { resolve: async () => "/watch.xctestrun" },
+      launcher,
+      ports: { allocate: () => 9012, release: () => {} },
+    });
+    setDeviceToolsDependencies({ watchRunnerLifecycleFactory: () => owner });
+    await owner.ensure({ deviceId: f.device.deviceId, ownerSession: BASE, sessions: f.sessions });
+    f.manager.beforeKill = () => expect(watchRunners.get(f.device.deviceId)).toBeUndefined();
     expect(f.pool.getDevice(f.device.deviceId)).toMatchObject({
       platform: "watchos",
       sessionId: BASE,
@@ -41,6 +54,8 @@ describe("killDevice on an Apple Watch simulator", () => {
     expect(f.manager.killedTargets).toEqual([f.device]);
     expect(f.sessions.hasSession(BASE)).toBe(false);
     expect(f.pool.getDevice(f.device.deviceId)).toBeNull();
+    owner.stopAll();
+    expect(launcher.stops).toBe(1);
   });
 
   test("a caller that does not hold the watch is refused before any platform kill", async () => {

@@ -679,7 +679,10 @@ function markAppRowsCoveredByApplicationWindow(
     coverIndex ??= applicationWindowCoverIndex(hierarchy);
     if (
       bounds &&
-      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "touch", coverIndex)
+      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, {
+        ownWindows: "touch",
+        index: coverIndex,
+      })
     ) {
       acc.affordances.clear();
       acc.occluded = true;
@@ -709,7 +712,7 @@ function markIosRowsRefusedByTap(
     if (!target || isImeKeyEntry(target) || acc.provenance?.keyboardPackage) {
       continue;
     }
-    if (iosRowRefusedByTap(acc, nodes, target, viewport, context)) {
+    if (iosRowRefusedByTap(acc, nodes, target, { screen: viewport, context })) {
       acc.affordances.clear();
       acc.occluded = true;
     }
@@ -720,8 +723,10 @@ function iosRowRefusedByTap(
   acc: SkeletonAccumulator,
   nodes: readonly SearchableEntry[],
   target: SearchableEntry,
-  screen: ObserveResult["screenSize"] | undefined,
-  context: IosVisibleTapContext | undefined,
+  {
+    screen,
+    context,
+  }: { screen?: ObserveResult["screenSize"]; context?: IosVisibleTapContext } = {},
 ): boolean {
   const [left, top, right, bottom] = acc.bounds;
   const screenBounds = visibleTapBounds({ left, top, right, bottom }, screen);
@@ -785,13 +790,11 @@ export function projectSkeleton(
   const occluder = ime ? getImeOccluder(elements) : undefined;
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
-  markAppRowsCoveredByIme(
-    kept,
-    coveringImeOccluder(ime, occluder, iosIme),
-    occluder,
-    viewport,
-    options?.ios,
-  );
+  markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme), {
+    measured: occluder,
+    screen: viewport,
+    ios: options?.ios,
+  });
   if (options?.ios) {
     markIosRowsRefusedByTap(kept, elements, viewport, options.iosHierarchy);
   }

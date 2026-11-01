@@ -8,7 +8,7 @@ import { adbServerScope } from "../../daemon/foreignDeviceOwnership";
 import { getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
 import { FileHostBootAdmissionRegistry } from "./FileHostBootAdmissionRegistry";
 import { ActionableError } from "../../models/ActionableError";
-import { isAndroidOrIosPlatform, type Platform } from "../../models/Platform";
+import type { Platform } from "../../models/Platform";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
@@ -174,6 +174,20 @@ export function createBootAdmissionGates(
   };
 }
 
+/** The read-only half of a gate: would one more cold boot be refused now. */
+export interface BootCapacityAsserter {
+  assertCapacityAvailable(options: { signal?: AbortSignal }): Promise<void>;
+}
+
+/**
+ * The gate whose ledger a boot of `platform` takes a slot in. Apple Watch and Apple TV simulators
+ * are simulators: the iOS gate already counts every Booted simulator whatever its runtime, so their
+ * boots are admitted against that same limit rather than bypassing it.
+ */
+export function bootGatePlatform(platform: Platform): "android" | "ios" {
+  return platform === "android" ? "android" : "ios";
+}
+
 /**
  * Read-only check that one more cold boot of `platform` fits right now; throws the typed retryable
  * `BootCapacityExhaustedError` at the limit. A platform whose boots are not gated always passes.
@@ -181,13 +195,9 @@ export function createBootAdmissionGates(
 export async function assertBootCapacityAvailable(
   platform: Platform,
   options: { signal?: AbortSignal } = {},
-  gates: Pick<SharedBootAdmissionGates, "android" | "ios"> = getSharedBootAdmissionGates(),
+  gates: Partial<Record<"android" | "ios", BootCapacityAsserter>> = getSharedBootAdmissionGates(),
 ): Promise<void> {
-  // Only Android and iOS boots are gated; like reserveBootCapacity, an ungated platform passes.
-  if (!isAndroidOrIosPlatform(platform)) {
-    return;
-  }
-  await gates[platform]?.assertCapacityAvailable(options);
+  await gates[bootGatePlatform(platform)]?.assertCapacityAvailable(options);
 }
 
 /** Reserve against the very same ledger that ordinary platform boots consult. */
@@ -198,7 +208,7 @@ export async function reserveBootCapacity(
 ): Promise<BootSlotReservation> {
   options.signal?.throwIfAborted();
   return (
-    (await gates[platform]?.reserveBoot(options)) ?? {
+    (await gates[bootGatePlatform(platform)]?.reserveBoot(options)) ?? {
       run: (operation) => operation(),
       release: () => {},
       markReplacedDeviceGone: () => {},

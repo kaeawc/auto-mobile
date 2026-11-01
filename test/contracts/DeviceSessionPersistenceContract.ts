@@ -108,7 +108,7 @@ export function runDeviceSessionPersistenceContract(
     test("markReleased records status, time and reason, and re-upserting revives the row", () =>
       withRepository(async (repository) => {
         await repository.upsertActiveSession(record());
-        await repository.markReleased("s1", "released", 5_000, "explicit");
+        await repository.markReleased("s1", "released", 5_000, { reason: "explicit" });
         expect(await view(repository, "s1")).toMatchObject({
           status: "released",
           releasedAtMs: 5_000,
@@ -124,7 +124,7 @@ export function runDeviceSessionPersistenceContract(
 
     test("markReleased never creates a row for an unknown session", () =>
       withRepository(async (repository) => {
-        await repository.markReleased("ghost", "released", 5_000, "explicit");
+        await repository.markReleased("ghost", "released", 5_000, { reason: "explicit" });
         expect(await repository.getSession("ghost")).toBeUndefined();
       }));
 
@@ -139,8 +139,11 @@ export function runDeviceSessionPersistenceContract(
           await repository.upsertActiveSession(
             record({ sessionUuid: uuid, expiresAtMs: options.expiresAtMs }),
           );
-          await repository.markReleased(uuid, "released", options.releasedAt, options.reason);
-          await repository.markReleased(uuid, "expired", 50_000, "expired", {
+          await repository.markReleased(uuid, "released", options.releasedAt, {
+            reason: options.reason,
+          });
+          await repository.markReleased(uuid, "expired", 50_000, {
+            reason: "expired",
             onlyIfRestartRecoveryHandoff: handoff,
           });
           return view(repository, uuid);
@@ -201,7 +204,7 @@ export function runDeviceSessionPersistenceContract(
         await expect(repository.recordActivity("missing", update)).rejects.toBeInstanceOf(
           DeviceSessionNotActiveError,
         );
-        await repository.markReleased("s1", "released", 4_000, "explicit");
+        await repository.markReleased("s1", "released", 4_000, { reason: "explicit" });
         await expect(repository.recordActivity("s1", update)).rejects.toBeInstanceOf(
           DeviceSessionNotActiveError,
         );

@@ -12,6 +12,16 @@ import { type DeviceToolsDependencies } from "../core/dependencies";
 import { type TeardownContext, type TeardownResolvedTarget } from "./teardownContracts";
 import { runWithinShutdownDeadline } from "../core/deadlines";
 import { type TeardownDeviceArgs } from "../core/contracts";
+import { getWatchRunnerLifecycle } from "../../watch/WatchRunnerLifecycle";
+
+export function stopWatchRunnerBeforeShutdown(
+  device: BootedDevice,
+  dependencies: DeviceToolsDependencies,
+): void {
+  if (device.platform === "watchos") {
+    (dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(device.deviceId);
+  }
+}
 
 export async function notifyResourcesAfterShutdown(
   dependencies: DeviceToolsDependencies,
@@ -32,8 +42,8 @@ export async function stopSegmentedVideoRecordingsBeforeDestroy(
     context.deadlineDevice,
     context.dependencies.timer,
     context.deadlineMs,
-    "segmented video recording teardown did not complete",
     {
+      detail: "segmented video recording teardown did not complete",
       requestAbortSignal: context.requestAbortSignal,
       operation: async () =>
         await deviceLifecycleServerHost.stopSegmentedVideoRecordingsForDevice(target.device),
@@ -51,7 +61,11 @@ export async function evictTeardownManagers(
   runtimeId?: string,
 ): Promise<void> {
   const { platform, stableId } = context.args.target;
-  if (platform === "ios") {
+  if (platform === "watchos") {
+    (context.dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(
+      runtimeId ?? stableId,
+    );
+  } else if (platform === "ios") {
     if (runtimeId) {
       await IOSCtrlProxyManager.evict(runtimeId, context.dependencies.timer, context.deadlineMs);
     } else {
@@ -129,17 +143,12 @@ export async function stopVideoRecordingBeforeShutdown(
   context: ShutdownDeadlineContext,
 ): Promise<void> {
   try {
-    await runWithinShutdownDeadline(
-      context.device,
-      context.timer,
-      context.deadlineMs,
-      "video recording teardown did not complete",
-      {
-        requestAbortSignal: context.requestAbortSignal,
-        operation: async () => await deviceLifecycleServerHost.stopVideoRecording(recordingId),
-        timeoutMs: context.timeoutMs,
-      },
-    );
+    await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, {
+      detail: "video recording teardown did not complete",
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async () => await deviceLifecycleServerHost.stopVideoRecording(recordingId),
+      timeoutMs: context.timeoutMs,
+    });
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
       throw error;
@@ -154,18 +163,13 @@ export async function stopVideoRecordingsBeforeShutdown(
 ): Promise<void> {
   perf.startOperation("stopRecordings");
   try {
-    await runWithinShutdownDeadline(
-      context.device,
-      context.timer,
-      context.deadlineMs,
-      "segmented video recording teardown did not complete",
-      {
-        requestAbortSignal: context.requestAbortSignal,
-        operation: async () =>
-          await deviceLifecycleServerHost.stopSegmentedVideoRecordingsForDevice(context.device),
-        timeoutMs: context.timeoutMs,
-      },
-    );
+    await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, {
+      detail: "segmented video recording teardown did not complete",
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async () =>
+        await deviceLifecycleServerHost.stopSegmentedVideoRecordingsForDevice(context.device),
+      timeoutMs: context.timeoutMs,
+    });
     const platform = context.device.platform;
     // Video recording does not support watchOS yet, so a watch has no active recordings to stop.
     if (!isAndroidOrIosPlatform(platform)) {
@@ -175,8 +179,8 @@ export async function stopVideoRecordingsBeforeShutdown(
       context.device,
       context.timer,
       context.deadlineMs,
-      "recording discovery did not complete",
       {
+        detail: "recording discovery did not complete",
         requestAbortSignal: context.requestAbortSignal,
         operation: async () =>
           await deviceLifecycleServerHost.listActiveVideoRecordings({
@@ -198,8 +202,10 @@ export async function rebuildSameIdReplacement(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
   replacement: BootedDevice,
-  devicePool: DevicePool,
-  stopPerformanceMonitoring: (deviceId: string) => void,
+  {
+    devicePool,
+    stopPerformanceMonitoring,
+  }: { devicePool: DevicePool; stopPerformanceMonitoring: (deviceId: string) => void },
 ): Promise<void> {
   const rebuilt = await devicePool.replaceDeviceForShutdown(
     expectedPooledDevice,

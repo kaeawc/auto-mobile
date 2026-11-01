@@ -72,7 +72,11 @@ export class DragPath extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: DragPathDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.androidClientOverride = dependencies.androidClient;
     this.iosClientOverride = dependencies.iosClient;
     this.idGenerator = dependencies.idGenerator ?? new NodeIdGenerator();
@@ -112,8 +116,8 @@ export class DragPath extends BaseVisualChange {
           this.device,
           options.display,
           this.observeScreen,
-          this.adb,
           {
+            adb: this.adb,
             lastRenderedObservation: this.lastRenderedObservation,
             signal,
             transitions: this.displayTransitionReader,
@@ -329,8 +333,7 @@ export class DragPath extends BaseVisualChange {
     const result = await this.iosClient.requestPathGesture(
       timeline,
       resolveGestureCtrlProxyTimeoutMs(plan.totalMs),
-      observation.viewHierarchy?.frameContext,
-      call.signal,
+      { frameContext: observation.viewHierarchy?.frameContext, signal: call.signal },
     );
     if (!result.success) {
       const note =

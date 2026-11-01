@@ -43,7 +43,7 @@ describe("a control call on a cli-idle session inside its stall-forgiven idle wi
       async (sessionId, reason) => {
         await sessionManager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     expect(sessionManager.adoptCliLivenessPolicy(SESSION, CLI_IDLE_MS)).toBe(true);

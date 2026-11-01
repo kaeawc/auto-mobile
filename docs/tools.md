@@ -117,6 +117,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                       |
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                     |
 | 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                  |
+| ⌚ <code>rotateCrown</code>                 | watchOS: rotate the Digital Crown by a signed delta with optional velocity           |
 | 🌍 <code>openLink</code>                    | Open URL in browser                                                                  |
 | 🏠 <code>homeScreen</code>                  | Go to home screen                                                                    |
 | 🕘 <code>recentApps</code>                  | Open recent apps                                                                     |
@@ -209,8 +210,16 @@ virtual loopback device the default input) or the AVD audio settings. The `messa
 | `pointer` shape                                                                                                      | Route                     | Needs                           |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------- |
 | `{ toolType: "stylus" }`, `pressure` omitted or `1` (`tapAt`, `swipeAt`)                                             | `adb shell input stylus`  | Android 12+ (API 31)            |
-| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
-| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
+| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
+| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
+
+On an emulator or userdebug build whose `adb shell` already runs as root (after `adb root`) and has the `uinput` tool, a stylus
+stroke with `pressure` and a `dragPath` also work without `stylus_input_v1`, through a virtual pen; `tilt`,
+`orientation` and `buttons` still need the runner, and each stroke starts about 4 seconds later while the pen attaches.
+
+`pointer: { toolType: "eraser" }` touches with the pen's eraser end (apps see `TOOL_TYPE_ERASER`) on `tapAt`, `swipeAt` and
+`dragPath`, with optional `pressure`. It needs that same root `adb shell` with the `uinput` tool, and is refused before any
+input everywhere else; `tilt`, `orientation` and `buttons` are refused with an eraser.
 
 `dragPath` points also take `pressure` and `tilt` (they need `pointer`), interpolated between points; `holdMs` and
 `releaseHoldMs` become holds at the first and last point. A device or runner that cannot honour the request is refused before
@@ -232,7 +241,8 @@ Hover enter, move and exit over `points` with no contact (Android only; the reas
 | `stylus` (default) | `ACTION_HOVER_*` with `TOOL_TYPE_STYLUS`, `SOURCE_STYLUS` and an `AXIS_DISTANCE` value    |
 | `mouse`            | `ACTION_HOVER_*` with `TOOL_TYPE_MOUSE` and `SOURCE_MOUSE`; no distance; desktop-style UI |
 
-It needs the `hover_input_v1` runner capability. A device or runner without it, and iOS, are refused before
+It needs the `hover_input_v1` runner capability, or, for a `stylus` hover, an `adb shell` that already runs as
+root with a writable `/dev/uinput` (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
 anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
 advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
 [stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
@@ -240,7 +250,7 @@ are the documented intent and still need on-device confirmation (#13082).
 
 ### prototype
 
-Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md).
+Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md). Camera and media support per runtime: [camera and media guide](design-docs/prototype-camera-media.md).
 
 #### Watch-sized mockups
 

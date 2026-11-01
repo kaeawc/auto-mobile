@@ -181,11 +181,13 @@ export class MissingDeviceLiveness {
     assignmentLockHeld: boolean,
     refreshGeneration: number,
     bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
     {
+      bootedPlatforms,
       succeededPlatforms,
       succeededSources,
-    }: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources">,
+    }: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources"> & {
+      bootedPlatforms: Set<Platform>;
+    },
   ): Promise<number | undefined> {
     const removeMissingDevices = async () => {
       if (refreshGeneration !== this.pool.getRefreshGeneration()) {
@@ -237,8 +239,7 @@ export class MissingDeviceLiveness {
     device: PooledDevice,
     deferRecovery: boolean,
     assignmentLockHeld: boolean,
-    idleEviction: boolean,
-    snapshot?: BootedDeviceDiscovery,
+    { idleEviction, snapshot }: { idleEviction: boolean; snapshot?: BootedDeviceDiscovery },
   ): Promise<boolean> {
     if (!this.shouldValidatePooledDevicePresence(device)) {
       return true;
@@ -466,8 +467,7 @@ export class MissingDeviceLiveness {
       device,
       attemptDeviceLossRecovery,
       correlatedIncidentId,
-      identityObservation,
-      lockPoolRemoval,
+      { identityObservation, lockPoolRemoval },
     );
   }
 
@@ -475,8 +475,10 @@ export class MissingDeviceLiveness {
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
     correlatedIncidentId: string | undefined,
-    identityObservation: IdentityObservation | undefined,
-    lockPoolRemoval: boolean | undefined,
+    {
+      identityObservation,
+      lockPoolRemoval,
+    }: { identityObservation?: IdentityObservation; lockPoolRemoval?: boolean } = {},
   ): Promise<void> {
     this.prepareEvictedDeviceForRemoval(device, lockPoolRemoval);
     if (attemptDeviceLossRecovery && this.pool.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -617,7 +619,10 @@ export class MissingDeviceLiveness {
   }
 }
 
-/** Each platform's cache bypass; the watch listing has no cache, so it reads fresh as is (#14908). */
+/**
+ * Each platform's cache bypass. The watch listing has no cache, so it reads fresh as is (#14908);
+ * Apple TV simulators are not discovered yet, so there is no listing to bypass.
+ */
 function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions {
   switch (platform) {
     case "android":
@@ -625,6 +630,7 @@ function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions 
     case "ios":
       return { bypassIosDeviceListCache: true };
     case "watchos":
+    case "tvos":
       return {};
   }
 }

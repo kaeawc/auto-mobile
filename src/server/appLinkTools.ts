@@ -142,11 +142,10 @@ const SET_APP_LINKS_DESCRIPTION =
   "getDeepLinks.";
 
 export function registerAppLinkTools(deps: SetAppLinksToolDependencies = {}): void {
-  ToolRegistry.registerDeviceAware(
-    "setAppLinks",
-    SET_APP_LINKS_DESCRIPTION,
-    setAppLinksSchema,
-    createSetAppLinksHandler(deps),
-    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setAppLinksResultSchema },
-  );
+  ToolRegistry.registerDeviceAware("setAppLinks", SET_APP_LINKS_DESCRIPTION, setAppLinksSchema, {
+    handler: createSetAppLinksHandler(deps),
+    ...PLAN_RELEVANT,
+    defaultEnabled: false,
+    outputSchema: setAppLinksResultSchema,
+  });
 }

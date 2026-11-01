@@ -360,8 +360,7 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "tap-forward", platform: "ios", name: "iPhone" },
       8765,
-      (url) => new FakeWebSocket(url, "none", 0, h.timer),
-      h.timer,
+      { wsFactory: (url) => new FakeWebSocket(url, "none", 0, h.timer), timer: h.timer },
     );
     const signal = new AbortController().signal;
     const onDispatch = () => {};
@@ -393,7 +392,8 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
 
 describe("iOS requestAction dispatch tracking (#9971)", () => {
   const act = (h: ReturnType<typeof createIosDelegateHarness>, onDispatch: () => void) =>
-    new CtrlProxyVoiceOver(h.context).requestAction("activate", "com.app:id/go", undefined, 50, {
+    new CtrlProxyVoiceOver(h.context).requestAction("activate", "com.app:id/go", undefined, {
+      timeoutMs: 50,
       onDispatch,
     });
 

@@ -211,8 +211,7 @@ export class McpExecution {
       },
       executionKey,
       fn,
-      idleCloseKey,
-      chainWait,
+      { idleCloseKey, chainWait },
     );
   }
   /**
@@ -225,8 +224,10 @@ export class McpExecution {
     initialRoute: McpForwardRoute,
     request: DaemonRequest,
     socketSessionId: string,
-    fn: (route: McpForwardRoute) => Promise<T>,
-    chainWait?: McpForwardChainWait,
+    {
+      fn,
+      chainWait,
+    }: { fn: (route: McpForwardRoute) => Promise<T>; chainWait?: McpForwardChainWait },
   ): Promise<T> {
     // Inventory reads share discovery rather than holding a global serial queue.
     // Distinct-key flights run discovery in parallel without a concurrency limit (known limitation).
@@ -369,17 +370,12 @@ export class McpExecution {
         context.deadline,
         "waiting in queues and preparing the MCP client",
       );
-      return await this.callbacks.handleIdeRequest(
-        mcpClient,
-        context.request,
-        forwardRemainingMs,
-        context.socketSessionId,
-        {
-          deadline: context.deadline,
-          originalTimeoutMs: context.totalTimeoutMs,
-          signal: context.signal,
-        },
-      );
+      return await this.callbacks.handleIdeRequest(mcpClient, context.request, forwardRemainingMs, {
+        socketSessionId: context.socketSessionId,
+        deadline: context.deadline,
+        originalTimeoutMs: context.totalTimeoutMs,
+        signal: context.signal,
+      });
     } finally {
       // A close failure must never replace the forward's own answer.
       await Promise.resolve()
@@ -473,8 +469,12 @@ export class McpExecution {
     mcpClient: ForwardMcpClient,
     request: DaemonRequest,
     timeoutMs: number,
-    socketSessionId: string,
-    { deadline, originalTimeoutMs, signal }: IdeForwardWindow,
+    {
+      socketSessionId,
+      deadline,
+      originalTimeoutMs,
+      signal,
+    }: IdeForwardWindow & { socketSessionId: string },
   ): Promise<any> {
     signal?.throwIfAborted();
     const requestOptions = this.callbacks.mcpRequestOptions(timeoutMs, signal);
@@ -647,11 +647,11 @@ export class McpExecution {
       return await callTool();
     }
     const deviceId = this.callbacks.frameDeviceId(request);
-    this.callbacks.traceFrame("callTool_entered", request.id, deviceId);
+    this.callbacks.traceFrame("callTool_entered", request.id, { deviceId });
     try {
       return await callTool();
     } finally {
-      this.callbacks.traceFrame("callTool_settled", request.id, deviceId);
+      this.callbacks.traceFrame("callTool_settled", request.id, { deviceId });
     }
   }
   /**

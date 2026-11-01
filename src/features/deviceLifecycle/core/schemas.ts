@@ -20,6 +20,8 @@ import {
   androidProvisionDeviceSpecFields,
   iosProvisionDeviceSpecSchema,
   refineAndroidSpec,
+  watchProvisionDeviceSpecSchema,
+  appleTvProvisionDeviceSpecSchema,
 } from "../../../utils/provisionDeviceSpecSchemas";
 import { NON_EMULATABLE_CAPABILITY_IDS, OEM_PERSONA_IDS } from "../../utility/OemPersonas";
 
@@ -248,7 +250,7 @@ export type WatchStartDeviceArgs = z.output<typeof watchStartDeviceParametersSch
 export const startDeviceRegistrationSchema = z.preprocess(
   mergeLegacyStartDevicePayload,
   startDeviceParametersSchema
-    .extend({ platform: z.enum(["android", "ios", "watchos"]) })
+    .extend({ platform: z.enum(["android", "ios", "watchos", "tvos"]) })
     .superRefine(refineStartDeviceParameters),
 );
 
@@ -426,12 +428,23 @@ const watchProvisionDevice = z
       .min(1)
       .optional()
       .describe("Exact watch simulator UDID; a UDID that names no watch is refused, not created"),
-    spec: z
-      .object({
-        runtime: z.string().min(1).describe("watchOS CoreSimulator runtime identifier"),
-        deviceType: z.string().min(1).describe("Apple Watch CoreSimulator device-type identifier"),
-      })
-      .strict(),
+    spec: watchProvisionDeviceSpecSchema,
+  })
+  .strict();
+
+/** An exact Apple TV simulator (#15889): adopted when it matches, else created with simctl. */
+const appleTvProvisionDevice = z
+  .object({
+    platform: z.literal("tvos"),
+    name: z.string().min(1).describe("Exact Apple TV simulator name"),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Exact Apple TV simulator UDID; a UDID that names no Apple TV is refused, not created",
+      ),
+    spec: appleTvProvisionDeviceSpecSchema,
   })
   .strict();
 
@@ -549,10 +562,36 @@ function refineWatchProvisionOptions(
   }
 }
 
+/** The options an Apple TV cannot honour: resources and tool grants need the automation runner. */
+function refineAppleTvProvisionOptions(
+  args: ProvisionDeviceRefinable,
+  context: z.RefinementCtx,
+): void {
+  if (args.device.platform !== "tvos") {
+    return;
+  }
+  for (const field of ["resources", "enableTools"] as const) {
+    if (args[field] !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `${field} is not supported on tvOS.`,
+      });
+    }
+  }
+  if (args.readiness === "automation") {
+    context.addIssue({
+      code: "custom",
+      path: ["readiness"],
+      message: 'tvOS has no automation runner; pass readiness "none" or omit it.',
+    });
+  }
+}
+
 /**
- * provisionDevice as registered: the Android and iOS request, or an exact Apple Watch simulator
- * (#15882). It stays a plain object so the ingress can see which keys it declares. Its
- * `readiness` has no default, so a watch request that omits it means "none"; the Android and iOS
+ * provisionDevice as registered: the Android and iOS request, or an exact Apple Watch or Apple TV
+ * simulator. It stays a plain object so the ingress can see which keys it declares. Its
+ * `readiness` has no default, so a watchOS or tvOS request that omits it means "none"; the Android and iOS
  * handler re-parses its request with {@link provisionDeviceSchema}, which applies "automation".
  */
 export const provisionDeviceRegistrationSchema = z
@@ -563,6 +602,7 @@ export const provisionDeviceRegistrationSchema = z
         androidProvisionDevice,
         iosProvisionDevice,
         watchProvisionDevice,
+        appleTvProvisionDevice,
       ]),
     ),
     ...provisionDeviceOptionFields,
@@ -570,14 +610,20 @@ export const provisionDeviceRegistrationSchema = z
       .enum(["automation", "none"])
       .optional()
       .describe(
-        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS has no runner and takes only "none" (its default)',
+        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS and tvOS have no runner and take only "none" (their default)',
       ),
   })
   .strict()
   .superRefine(refineProvisionDeviceOptions)
-  .superRefine(refineWatchProvisionOptions);
+  .superRefine(refineWatchProvisionOptions)
+  .superRefine(refineAppleTvProvisionOptions);
 
 /** A registered provisionDevice request that names an Apple Watch simulator. */
 export type WatchProvisionDeviceRequest = z.output<typeof provisionDeviceRegistrationSchema> & {
   device: z.output<typeof watchProvisionDevice>;
+};
+
+/** A registered provisionDevice request naming an Apple TV simulator. */
+export type AppleTvProvisionDeviceRequest = z.output<typeof provisionDeviceRegistrationSchema> & {
+  device: z.output<typeof appleTvProvisionDevice>;
 };

@@ -20,8 +20,7 @@ function harness() {
   const exec: NonNullable<ConstructorParameters<typeof SimCtlClient>[1]> = async (
     _file,
     args,
-    _buffer,
-    signal,
+    { signal } = {},
   ) => {
     const command = args[1]!;
     if (command === "create") {

@@ -25,14 +25,25 @@ export async function readExpectedIosResetTarget(
   simctl: Pick<SimCtl, "readSimulatorTarget">,
   udid: string,
   profile: IosResetProfile,
-  { state: expectedState, action }: { state: "Booted" | "Shutdown"; action: string },
-  options?: { signal?: AbortSignal; timeoutMs: number },
+  {
+    state: expectedState,
+    action,
+    timeoutMs,
+    signal,
+  }: {
+    state: "Booted" | "Shutdown";
+    action: string;
+    /** Bounds the inventory read; omitted reads use the simctl default. */
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<void> {
   let target;
   try {
-    target = options
-      ? await simctl.readSimulatorTarget(udid, options.timeoutMs, options.signal)
-      : await simctl.readSimulatorTarget(udid);
+    target =
+      timeoutMs !== undefined
+        ? await simctl.readSimulatorTarget(udid, timeoutMs, signal)
+        : await simctl.readSimulatorTarget(udid);
   } catch (error) {
     throw toActionableError(error, `Cannot ${action}: fresh iOS simulator inventory failed`);
   }

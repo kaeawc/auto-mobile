@@ -179,10 +179,10 @@ private actor WebViewSdkFake: SdkHierarchyFetching {
         self.reply = reply
     }
 
-    func sendObservationRequest(_ route: SdkRoute, body: Data) async -> SdkBridgeReply? {
+    func sendObservationRequest(_ route: SdkRoute, body: Data, timeoutMs _: Double?) async -> SdkBridgeRequestResult {
         routes.append(route)
         bodies.append(body)
-        return reply
+        return reply.map { .reply($0) } ?? .noReply
     }
 
     func fetchHierarchy() async -> SdkViewHierarchy? { nil }

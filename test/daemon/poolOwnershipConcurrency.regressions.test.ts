@@ -38,7 +38,7 @@ async function createPoolWorld(): Promise<PoolWorld> {
   const timer = new FakeTimer();
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const releases: PoolWorld["releases"] = [];
-  manager.onSessionRelease((sessionId, _deviceId, reason, _snapshot, options) => {
+  manager.onSessionRelease((sessionId, _deviceId, reason, options) => {
     releases.push({ sessionId, reason, upgradeOnly: options?.upgradeOnly === true });
   });
   const deviceManager = new FakeDeviceManager();
@@ -303,7 +303,7 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
       const timer = new FakeTimer();
       const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const full: string[] = [];
-      manager.onSessionRelease((_id, _deviceId, reason, _snapshot, options) => {
+      manager.onSessionRelease((_id, _deviceId, reason, options) => {
         if (!options?.upgradeOnly) {
           full.push(reason);
         }

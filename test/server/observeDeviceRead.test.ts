@@ -485,7 +485,7 @@ describe("session-free observe device read", () => {
     const events: string[] = [];
     const navigationRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const record = spyOn(navigationRecorder, "record").mockImplementation(
-      (_name, _args, _device, routedSessionUuid) => {
+      (_name, _args, _device, { sessionUuid: routedSessionUuid }) => {
         expect(routedSessionUuid).toBe(sessionUuid);
         events.push("navigation");
       },
@@ -765,7 +765,7 @@ describe("session-free observe device read", () => {
               },
               deviceReadOnly: true,
             },
-            timer,
+            { timer },
           ),
       });
       const response = await callDeviceRead({
@@ -854,7 +854,7 @@ describe("session-free observe device read", () => {
           stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
         },
       },
-      timer,
+      { timer },
     );
     let perfAttachments = 0;
     Reflect.set(screen, "attachPerfSnapshot", async () => {
@@ -975,7 +975,7 @@ describe("session-free observe device read", () => {
             getActivityHash: async () => "",
           },
         },
-        timer,
+        { timer },
       );
     const wrong = await makeScreen("inner").executeDeviceRead();
     expect(wrong.screenshotPath).toBeUndefined();

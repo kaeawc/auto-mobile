@@ -54,17 +54,19 @@ export const createSetSensorHandler =
       sessionManager,
       args.sessionUuid,
       device.deviceId,
-      (owner) =>
-        setEmulatorSensor(
-          device,
-          { sensor: args.sensor, value: args.value, reset: args.reset },
-          {
-            console: consoleFor(device),
-            registry: deps.registry ?? defaultEmulatorSensorRestoreRegistry,
-            owner,
-            signal,
-          },
-        ),
+      {
+        mutation: (owner) =>
+          setEmulatorSensor(
+            device,
+            { sensor: args.sensor, value: args.value, reset: args.reset },
+            {
+              console: consoleFor(device),
+              registry: deps.registry ?? defaultEmulatorSensorRestoreRegistry,
+              owner,
+              signal,
+            },
+          ),
+      },
     );
     return createStructuredToolResponse({ success: true, ...result });
   };

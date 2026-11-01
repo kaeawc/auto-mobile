@@ -74,7 +74,10 @@ describe("Daemon startup stage list", () => {
       { port: 3171 },
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+        deviceSessionRepository: new DeviceSessionRepository({
+          db: await createTestDatabase(),
+          timer,
+        }),
         idGenerator: new FakeIdGenerator(),
         processBirthTime: () => 0,
         processGenerationToken: () => "memory-generation",

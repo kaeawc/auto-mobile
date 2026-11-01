@@ -74,7 +74,7 @@ const start = async (
   ids = new CountingIdGenerator("recording"),
   factory: (device: BootedDevice) => FakeRecorder = () => recorder,
 ) => {
-  const pending = startDeviceGestureRecording(device, timer, ids, factory);
+  const pending = startDeviceGestureRecording(device, timer, ids, { recorderFactory: factory });
   await Promise.resolve();
   recorder.startGate.resolve();
   return { result: await pending, ids };
@@ -146,7 +146,8 @@ describe("deviceGestureRecordingManager ownership", () => {
         recorder.steps = [capturedStep];
         const ids = new CountingIdGenerator("equivalent");
         const baseSessionUuid = (uuid: string) => uuid.split(":")[0];
-        const pending = startDeviceGestureRecording(device, timer, ids, () => recorder, {
+        const pending = startDeviceGestureRecording(device, timer, ids, {
+          recorderFactory: () => recorder,
           ownerSessionUuid: owner,
           baseSessionUuid,
         });
@@ -156,15 +157,13 @@ describe("deviceGestureRecordingManager ownership", () => {
           await pending;
         }
         try {
-          const joined = startDeviceGestureRecording(
-            device,
-            timer,
-            ids,
-            () => {
+          const joined = startDeviceGestureRecording(device, timer, ids, {
+            recorderFactory: () => {
               throw new Error("joining must reuse the recorder");
             },
-            { ownerSessionUuid: caller, baseSessionUuid },
-          );
+            ownerSessionUuid: caller,
+            baseSessionUuid,
+          });
           if (!admitted) {
             await expect(joined).rejects.toThrow("another session");
           }
@@ -190,12 +189,9 @@ describe("deviceGestureRecordingManager ownership", () => {
       const timer = new FakeTimer();
       const recorder = new FakeRecorder();
       recorder.steps = [capturedStep];
-      const pending = startDeviceGestureRecording(
-        device,
-        timer,
-        new CountingIdGenerator("adopt"),
-        () => recorder,
-      );
+      const pending = startDeviceGestureRecording(device, timer, new CountingIdGenerator("adopt"), {
+        recorderFactory: () => recorder,
+      });
       await Promise.resolve();
       if (phase !== "starting") {
         recorder.startGate.resolve();
@@ -242,8 +238,7 @@ describe("deviceGestureRecordingManager ownership", () => {
       device,
       timer,
       new CountingIdGenerator("recording"),
-      () => recorder,
-      { ownerSessionUuid: "session-a" },
+      { recorderFactory: () => recorder, ownerSessionUuid: "session-a" },
     );
     await Promise.resolve();
     recorder.startGate.resolve();
@@ -267,8 +262,7 @@ describe("deviceGestureRecordingManager retained plan (#10958)", () => {
       device,
       timer,
       new CountingIdGenerator("recording"),
-      () => recorder,
-      { ownerSessionUuid: "session-a" },
+      { recorderFactory: () => recorder, ownerSessionUuid: "session-a" },
     );
     await Promise.resolve();
     recorder.startGate.resolve();
@@ -289,8 +283,7 @@ describe("deviceGestureRecordingManager retained plan (#10958)", () => {
       device,
       timer,
       new CountingIdGenerator("recording"),
-      () => recorder,
-      { ownerSessionUuid: "plan-base:pixel" },
+      { recorderFactory: () => recorder, ownerSessionUuid: "plan-base:pixel" },
     );
     await Promise.resolve();
     recorder.startGate.resolve();
@@ -330,12 +323,14 @@ describe("deviceGestureRecordingManager startup reservation", () => {
         factories += 1;
         return recorder;
       };
-      const first = startDeviceGestureRecording(device, timer, ids, factory, {
+      const first = startDeviceGestureRecording(device, timer, ids, {
+        recorderFactory: factory,
         ownerSessionUuid: owner,
       });
       const checkRefusal = async () => {
         try {
-          await startDeviceGestureRecording(device, timer, ids, factory, {
+          await startDeviceGestureRecording(device, timer, ids, {
+            recorderFactory: factory,
             ownerSessionUuid: stranger,
           });
           throw new Error("expected an ownership refusal");
@@ -350,17 +345,22 @@ describe("deviceGestureRecordingManager startup reservation", () => {
         expect(recorder.stopCount).toBe(0);
       };
       await checkRefusal();
-      const sameOwner = startDeviceGestureRecording(device, timer, ids, factory, {
+      const sameOwner = startDeviceGestureRecording(device, timer, ids, {
+        recorderFactory: factory,
         ownerSessionUuid: owner,
       });
       recorder.startGate.resolve();
       expect(await sameOwner).toEqual(await first);
       await checkRefusal();
       expect(
-        await startDeviceGestureRecording(device, timer, ids, factory, { ownerSessionUuid: owner }),
+        await startDeviceGestureRecording(device, timer, ids, {
+          recorderFactory: factory,
+          ownerSessionUuid: owner,
+        }),
       ).toEqual(await first);
       await expect(
-        startDeviceGestureRecording(otherDevice, timer, ids, factory, {
+        startDeviceGestureRecording(otherDevice, timer, ids, {
+          recorderFactory: factory,
           ownerSessionUuid: stranger,
         }),
       ).rejects.toThrow("Recording already active on device");
@@ -378,11 +378,11 @@ describe("deviceGestureRecordingManager startup reservation", () => {
       return recorder;
     };
 
-    const first = startDeviceGestureRecording(device, timer, ids, factory);
-    const second = startDeviceGestureRecording(device, timer, ids, factory);
-    await expect(startDeviceGestureRecording(otherDevice, timer, ids, factory)).rejects.toThrow(
-      "Recording already active on device emulator-5554",
-    );
+    const first = startDeviceGestureRecording(device, timer, ids, { recorderFactory: factory });
+    const second = startDeviceGestureRecording(device, timer, ids, { recorderFactory: factory });
+    await expect(
+      startDeviceGestureRecording(otherDevice, timer, ids, { recorderFactory: factory }),
+    ).rejects.toThrow("Recording already active on device emulator-5554");
     await Promise.resolve();
     expect(constructed).toBe(1);
     expect(recorder.startCount).toBe(1);
@@ -401,9 +401,13 @@ describe("deviceGestureRecordingManager startup reservation", () => {
     const timer = new FakeTimer();
     const ids = new CountingIdGenerator("recording");
     const failed = new FakeRecorder();
-    const first = startDeviceGestureRecording(device, timer, ids, () => failed);
-    const joined = startDeviceGestureRecording(device, timer, ids, () => {
-      throw new Error("second recorder must not be constructed");
+    const first = startDeviceGestureRecording(device, timer, ids, {
+      recorderFactory: () => failed,
+    });
+    const joined = startDeviceGestureRecording(device, timer, ids, {
+      recorderFactory: () => {
+        throw new Error("second recorder must not be constructed");
+      },
     });
     const failures = Promise.allSettled([first, joined]);
     await Promise.resolve();
@@ -423,7 +427,9 @@ describe("deviceGestureRecordingManager startup reservation", () => {
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
 
     const next = new FakeRecorder();
-    const retry = startDeviceGestureRecording(otherDevice, timer, ids, () => next);
+    const retry = startDeviceGestureRecording(otherDevice, timer, ids, {
+      recorderFactory: () => next,
+    });
     next.startGate.resolve();
     expect((await retry).deviceId).toBe(otherDevice.deviceId);
     await expect(stopDeviceGestureRecording(undefined, undefined, timer)).rejects.toThrow(
@@ -467,9 +473,11 @@ describe("deviceGestureRecordingManager stopping reservation", () => {
 
     const replacement = new FakeRecorder();
     let factoryCalls = 0;
-    const next = startDeviceGestureRecording(device, timer, ids, () => {
-      factoryCalls++;
-      return replacement;
+    const next = startDeviceGestureRecording(device, timer, ids, {
+      recorderFactory: () => {
+        factoryCalls++;
+        return replacement;
+      },
     });
     await Promise.resolve();
     replacement.startGate.resolve();
@@ -500,7 +508,9 @@ describe("deviceGestureRecordingManager stopping reservation", () => {
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
 
     const replacement = new FakeRecorder();
-    const next = startDeviceGestureRecording(device, timer, ids, () => replacement);
+    const next = startDeviceGestureRecording(device, timer, ids, {
+      recorderFactory: () => replacement,
+    });
     await Promise.resolve();
     replacement.startGate.resolve();
     expect((await next).recordingId).not.toBe(started.recordingId);
@@ -608,9 +618,11 @@ describe("deviceGestureRecordingManager stopping reservation", () => {
     expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
     const nextRecorder = new FakeRecorder();
     let factoryCalls = 0;
-    const starting = startDeviceGestureRecording(device, timer, ids, () => {
-      factoryCalls++;
-      return nextRecorder;
+    const starting = startDeviceGestureRecording(device, timer, ids, {
+      recorderFactory: () => {
+        factoryCalls++;
+        return nextRecorder;
+      },
     });
     await Promise.resolve();
     expect(factoryCalls).toBe(0);
@@ -661,12 +673,9 @@ async function startDualTrack() {
   timer.advanceTime(10_000);
   const gestures = new RecordingGestures();
   const a11y = new RecordingA11y();
-  await startDeviceGestureRecording(
-    device,
-    timer,
-    new CountingIdGenerator("touch-health"),
-    () => new DualTrackRecorder(device, gestures, a11y, timer),
-  );
+  await startDeviceGestureRecording(device, timer, new CountingIdGenerator("touch-health"), {
+    recorderFactory: () => new DualTrackRecorder(device, gestures, a11y, { timer }),
+  });
   return { timer, gestures, a11y };
 }
 
@@ -762,13 +771,10 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
     timer.advanceTime(10_000);
     const gestures = new RecordingGestures();
     const tracker = geometryTracker(timer, 1);
-    await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator("geometry"),
-      () =>
-        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
-    );
+    await startDeviceGestureRecording(device, timer, new CountingIdGenerator("geometry"), {
+      recorderFactory: () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer, geometry: tracker }),
+    });
     gestures.onGesture?.({
       type: "tap",
       arrivedAt: timer.now(),
@@ -791,13 +797,10 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
     timer.advanceTime(10_000);
     const gestures = new RecordingGestures();
     const tracker = geometryTracker(timer, 1);
-    await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator("geometry-label"),
-      () =>
-        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
-    );
+    await startDeviceGestureRecording(device, timer, new CountingIdGenerator("geometry-label"), {
+      recorderFactory: () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer, geometry: tracker }),
+    });
     tracker.handleTransition({ change: "changed", displayId: 0, rotation: 1 });
     timer.advanceTime(100);
     gestures.onGesture?.({
@@ -819,13 +822,10 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
     timer.advanceTime(10_000);
     const gestures = new RecordingGestures();
     const tracker = geometryTracker(timer, 0);
-    await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator("geometry-clean"),
-      () =>
-        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
-    );
+    await startDeviceGestureRecording(device, timer, new CountingIdGenerator("geometry-clean"), {
+      recorderFactory: () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer, geometry: tracker }),
+    });
     timer.advanceTime(5_000);
     gestures.onGesture?.({
       type: "tap",
@@ -846,12 +846,10 @@ describe("deviceGestureRecordingManager stylus export (#13084)", () => {
     const timer = new FakeTimer();
     timer.advanceTime(10_000);
     const gestures = new RecordingGestures();
-    await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator(planName),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer),
-    );
+    await startDeviceGestureRecording(device, timer, new CountingIdGenerator(planName), {
+      recorderFactory: () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer }),
+    });
     for (const event of events) {
       gestures.onGesture?.({ ...event, arrivedAt: timer.now() });
     }
@@ -870,22 +868,23 @@ describe("deviceGestureRecordingManager stylus export (#13084)", () => {
   });
 
   test("a recording where every pen gesture was skipped says why instead of reporting nothing", async () => {
-    const attempt = recordPenGestures("pen-eraser-only", [
-      { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
+    const attempt = recordPenGestures("pen-unplaced-only", [
+      { type: "tap", arrivedAt: 0, toolType: "stylus" },
     ]);
 
     await expect(attempt).rejects.toBeInstanceOf(NoUserInputCapturedError);
-    await expect(attempt).rejects.toThrow("eraser");
+    await expect(attempt).rejects.toThrow("without a known position");
   });
 
-  test("an eraser gesture is left out and the result says so", async () => {
+  test("an eraser gesture exports as an eraser step and says where it can replay (#13105)", async () => {
     const result = await recordPenGestures("pen-eraser", [
       { type: "tap", arrivedAt: 0, screenX: 40, screenY: 80, toolType: "stylus" },
       { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
     ]);
 
-    expect(result.stepCount).toBe(1);
+    expect(result.stepCount).toBe(2);
+    expect(result.planContent).toMatch(/pointer:\s+toolType: eraser/);
     expect(result.error).toStartWith("Warning:");
-    expect(result.error).toContain("eraser");
+    expect(result.error).toContain("root adb shell");
   });
 });

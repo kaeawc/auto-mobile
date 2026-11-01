@@ -2,18 +2,37 @@ import type { DeviceInfo } from "../../../models/index";
 import { isAndroidEmulatorSerial } from "../../../utils/androidSerial";
 import { AndroidEmulatorUnavailableError } from "../../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import type { WatchSimulatorInventory } from "../../../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type { PlatformDeviceManager } from "../../../devices/deviceUtils";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { type BindingInventory, type BindingInventorySnapshot } from "./reconciler";
 import type { BindingPlatform } from "../registry/bindingRegistry";
 
+/** The Apple Watch simulator listing; the iOS simulator listing never includes watches. */
+export type WatchBindingInventorySource = Pick<WatchSimulatorInventory, "listWatchSimulators">;
+
 /** Configured devices (AVDs, simulators) of one platform; a failed listing is incomplete. */
 export class DeviceManagerBindingInventory implements BindingInventory {
+  /**
+   * `watches` is the host's watch listing. It is absent where simulators cannot exist (not
+   * macOS), and watchos then reports its toolchain as not installed.
+   */
   constructor(
     private readonly deviceManager: Pick<PlatformDeviceManager, "listDeviceImages"> &
       Partial<Pick<PlatformDeviceManager, "getBootedDevicesDetailed">>,
+    private readonly watches?: WatchBindingInventorySource,
   ) {}
+
+  private async listImages(platform: BindingPlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
+    if (platform !== "watchos") {
+      return await this.deviceManager.listDeviceImages(platform, signal);
+    }
+    if (!this.watches) {
+      throw new SimctlUnavailableError("Apple Watch simulators are listed only on macOS hosts.");
+    }
+    return await this.watches.listWatchSimulators(signal);
+  }
 
   async runtimeDeviceId(
     device: DeviceInfo,
@@ -63,13 +82,13 @@ export class DeviceManagerBindingInventory implements BindingInventory {
     options: { signal?: AbortSignal },
   ): Promise<BindingInventorySnapshot> {
     try {
-      const devices = await this.deviceManager.listDeviceImages(platform, options.signal);
+      const devices = await this.listImages(platform, options.signal);
       return { complete: true, devices };
     } catch (error) {
       options.signal?.throwIfAborted();
       if (
         (platform === "android" && error instanceof AndroidEmulatorUnavailableError) ||
-        (platform === "ios" && error instanceof SimctlUnavailableError)
+        (platform !== "android" && error instanceof SimctlUnavailableError)
       ) {
         // An optional platform's lister is expected to be absent on single-platform hosts.
         logger.debug(`[Bindings] ${platform} toolchain not installed: ${errorMessage(error)}`);

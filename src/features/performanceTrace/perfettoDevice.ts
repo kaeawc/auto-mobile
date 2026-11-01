@@ -45,8 +45,7 @@ export async function startPerfettoRecorder(
   adb: PerfettoAdb,
   deviceId: string,
   config: string,
-  remotePath: string,
-  signal?: AbortSignal,
+  { remotePath, signal }: { remotePath: string; signal?: AbortSignal },
 ): Promise<number> {
   const encoded = Buffer.from(config).toString("base64");
   const started = await adb.execute(
@@ -67,8 +66,7 @@ export async function stopPerfettoRecorder(
   adb: PerfettoAdb,
   timer: Pick<Timer, "sleep">,
   pid: number,
-  warnings: string[],
-  { poll = {}, signal }: PerfettoWaitOptions = {},
+  { warnings, poll = {}, signal }: PerfettoWaitOptions & { warnings: string[] },
 ): Promise<void> {
   const options = { timeoutMs: ADB_TIMEOUT_MS, noRetry: true, signal };
   // Exits 0 either way: an already-finished recorder (its duration elapsed) is not an error.
@@ -137,8 +135,7 @@ export async function awaitFlushedDeviceFile(
   adb: PerfettoAdb,
   timer: Pick<Timer, "sleep">,
   remotePath: string,
-  logTag: string,
-  { poll = {}, signal }: PerfettoWaitOptions = {},
+  { logTag, poll = {}, signal }: PerfettoWaitOptions & { logTag: string },
 ): Promise<void> {
   const attempts = poll.flushPollAttempts ?? 40;
   let previous = 0;

@@ -48,6 +48,8 @@ import {
   toolText,
 } from "../helpers/toolResponse";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
+import { prototypePlatformCall } from "../../src/features/prototype/prototypePlatform";
+import { prototypeRequiredCapabilities } from "../../src/features/prototype/prototypeCapabilityGates";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };
 const spec = {
@@ -332,6 +334,131 @@ describe("prototype MCP tool", () => {
     const { payload } = await call({ action: "show", spec });
     expect(payload.success).toBe(false);
     expect(payload.warning).toBeUndefined();
+  });
+
+  describe("sensitive show warnings", () => {
+    const sensitiveSpec = {
+      ...spec,
+      requires: { platform: ["clipboard"] },
+      root: {
+        type: "column",
+        children: [
+          { type: "pasteButton", into: "/data/code" },
+          {
+            type: "button",
+            label: "Send",
+            onTap: [
+              {
+                type: "request",
+                url: "https://example.com/submit",
+                via: "device",
+                query: { q: { data: "/code" } },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    beforeEach(() => {
+      client.setSupportedCommands([
+        PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+        ...prototypeRequiredCapabilities(sensitiveSpec, "android").map((gate) => gate.capability),
+      ]);
+    });
+
+    test.each([false, true])(
+      "a sensitive request query warns on show (component: %p)",
+      async (component) => {
+        expect(prototypePlatformCall("clipboard.paste")?.definition.sensitive).toBe(true);
+        const input = component
+          ? {
+              ...sensitiveSpec,
+              components: { send: { root: sensitiveSpec.root.children[1] } },
+              root: {
+                ...sensitiveSpec.root,
+                children: [sensitiveSpec.root.children[0], { type: "use", component: "send" }],
+              },
+            }
+          : sensitiveSpec;
+        const { payload } = await call({ action: "show", spec: input });
+        expect(payload.success).toBe(true);
+        expect(payload.warning).toContain("root.children[1].onTap[0].query.q");
+        expect(payload.warning).toContain("Sensitive value cannot be bound into a request");
+        expect(payload.warning).toContain("this is a warning only and does not block the show.");
+      },
+    );
+
+    test("show warns when sensitive sink analysis stopped at the expanded-byte budget", async () => {
+      const input = {
+        ...sensitiveSpec,
+        root: {
+          ...sensitiveSpec.root,
+          children: [
+            sensitiveSpec.root.children[0],
+            {
+              type: "column",
+              repeat: { items: Array.from({ length: 128 }, () => ({})), as: "row" },
+              children: [
+                {
+                  type: "button",
+                  label: "Send",
+                  onTap: [
+                    {
+                      type: "request",
+                      url: "https://example.com/submit",
+                      via: "device",
+                      query: {
+                        a: "界".repeat(4096),
+                        b: "界".repeat(4096),
+                        q: "界".repeat(4096),
+                        z: { data: "/code" },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+      const { payload } = await call({ action: "show", spec: input });
+      expect(payload.success).toBe(true);
+      expect(payload.warning).toBe(
+        "root.children[1].children[0].onTap[0].query.q: sensitive sink analysis stopped at the 4194304 expanded-byte budget at this path, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.",
+      );
+    });
+
+    test("a sensitive result used only as text has no sensitive warning", async () => {
+      const { payload } = await call({
+        action: "show",
+        spec: {
+          ...sensitiveSpec,
+          root: {
+            ...sensitiveSpec.root,
+            children: [sensitiveSpec.root.children[0], { type: "text", text: "{data:/code}" }],
+          },
+        },
+      });
+      expect(payload.success).toBe(true);
+      expect(payload.warning).toBeUndefined();
+    });
+
+    test("a refused sensitive show has no sensitive warning", async () => {
+      client.setPrototypeResult({ success: false, error: "rejected" });
+      const { payload } = await call({ action: "show", spec: sensitiveSpec });
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain("rejected");
+      expect(payload.warning).toBeUndefined();
+      expect(client.getPrototypeHistory()).toHaveLength(1);
+    });
+
+    test("a sensitive show that fails validation has no sensitive warning", async () => {
+      const { payload } = await call({ action: "show", spec: { ...sensitiveSpec, id: "" } });
+      expect(payload.success).toBe(false);
+      expect(payload.warning).toBeUndefined();
+      expect(client.getPrototypeHistory()).toEqual([]);
+    });
   });
 
   test.each([true, false])("reset %p is forwarded only as the caller wrote it", async (reset) => {
@@ -855,8 +982,8 @@ describe("prototype MCP tool", () => {
     const oldStore = new InMemoryPrototypeStatusStore(timer);
     const newStore = new InMemoryPrototypeStatusStore(timer);
     const scope = { deviceId: device.deviceId, sessionUuid: "one" };
-    oldStore.record(scope, "show", { id: "old" }, { success: true });
-    newStore.record(scope, "show", { id: "new" }, { success: true });
+    oldStore.record(scope, "show", { id: "old" }, { result: { success: true } });
+    newStore.record(scope, "show", { id: "new" }, { result: { success: true } });
     const unsubscribeOld = registerPrototypeTools({ clientFactory: () => client, store: oldStore });
     unsubscribe = registerPrototypeTools({ clientFactory: () => client, store: newStore });
     // A stale disposer must not detach the replacement's listeners.

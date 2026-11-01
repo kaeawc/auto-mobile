@@ -94,14 +94,16 @@ export class PlanDeviceTrackExecutor {
           step,
           planIndex,
           {
-            platform,
-            deviceId: this.context.resolveTrackDeviceId(device, sessionUuid),
-            sessionUuid,
-            signal,
-            logPrefix: `[PARALLEL_EXEC][${device}]`,
-            debugLog: true,
+            context: {
+              platform,
+              deviceId: this.context.resolveTrackDeviceId(device, sessionUuid),
+              sessionUuid,
+              signal,
+              logPrefix: `[PARALLEL_EXEC][${device}]`,
+              debugLog: true,
+            },
+            allParticipants: participants,
           },
-          participants,
         );
 
         this.recordTrackDiagnostics({
@@ -203,8 +205,10 @@ export class PlanDeviceTrackExecutor {
     device: string,
     step: PlanStep,
     planIndex: number,
-    context: StepExecutionContext,
-    allParticipants: ParticipantFailureTracker | undefined,
+    {
+      context,
+      allParticipants,
+    }: { context: StepExecutionContext; allParticipants?: ParticipantFailureTracker },
   ): Promise<{ result: StepExecutionResult; participantFailure?: ParticipantFailedError }> {
     // Only coordination steps can wait on another track, so every other step keeps the plan's
     // own signal untouched.
@@ -244,12 +248,14 @@ export class PlanDeviceTrackExecutor {
     steps: ExecutePlanStepDebugInfo[],
     planIndex: number,
     tool: string,
-    status: ExecutePlanStepDebugInfo["status"],
-    startedAt: number,
+    {
+      stepStatus,
+      startedAt,
+    }: { stepStatus: ExecutePlanStepDebugInfo["status"]; startedAt: number },
   ): void {
     steps.push({
       step: `Execute step ${planIndex + 1}: ${tool}`,
-      status,
+      status: stepStatus,
       durationMs: this.context.timer.now() - startedAt,
     });
   }
@@ -277,7 +283,10 @@ export class PlanDeviceTrackExecutor {
       toolResults.add(planIndex, step.tool, stepResult.toolPayload, device);
     }
 
-    this.recordTrackStep(steps, planIndex, step.tool, stepResult.status, stepStartTime);
+    this.recordTrackStep(steps, planIndex, step.tool, {
+      stepStatus: stepResult.status,
+      startedAt: stepStartTime,
+    });
   }
 }
 

@@ -1,36 +1,41 @@
+import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import { z } from "zod/v4";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
 import {
-  bindUndoneIfUndelivered,
   getDeviceToolsDependencies,
   initializedDevicePool,
   mergeLegacyStartDevicePayload,
   reserveStableDeviceLifecycle,
-  runOperationWithinDeadline,
   watchStartDeviceSchema,
   type DeviceToolsDependencies,
   type WatchStartDeviceArgs,
   type WatchStartDeviceRequest,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
-import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
+import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { ActionableError } from "../models";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import {
+  WatchSimulatorInventory,
+  type WatchSimulatorSimctl,
+} from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import {
   WatchSimulatorLifecycle,
   type ListedWatch,
+  type WatchLifecycleSimctl,
   type WatchBootResult,
 } from "../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import type { bindBootedDeviceSession } from "./deviceToolsStartDevice";
+import { stripInternalToolParams } from "./internalToolParams";
 import {
-  internalMcpSessionId,
-  internalOneShotCli,
-  stripInternalToolParams,
-} from "./internalToolParams";
+  getWatchRunnerLifecycle,
+  type WatchRunnerLifecycle,
+} from "../features/watch/WatchRunnerLifecycle";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 
 /** startDevice's session binder, passed in so this module does not import its file at runtime. */
 export type BindBootedSession = typeof bindBootedDeviceSession;
@@ -43,9 +48,9 @@ export function isWatchStartRequest(rawArgs: object): rawArgs is WatchStartDevic
 
 /**
  * startDevice for an Apple Watch simulator (#14908): resolve the exact watch, boot it (or adopt it
- * already booted) under its stable lifecycle lease, then bind a session through the same binder
- * Android and iOS use, at readiness `booted`. A watch has no automation runner, so no CtrlProxy,
- * runner cleanup, keyboard, biometric or prototype step runs.
+ * already booted) under its stable lifecycle lease, then prepare its watch runner before binding
+ * a session at readiness `booted` and attaching runner ownership to it;
+ * unavailable automation leaves the booted session usable for screenshot-only observation.
  */
 export async function startWatchDevice(
   rawArgs: object,
@@ -59,35 +64,89 @@ export async function startWatchDevice(
     rawArgs,
     startedAtMs + (args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS),
     signal,
-    "startDevice",
-    async (deadlineMs, requestSignal, stage) =>
-      await runWithAbortSignal(requestSignal, async () => {
-        const lifecycle = (deps.watchSimulatorLifecycleFactory ?? defaultWatchLifecycle)();
-        stage.current = "resolving the Apple Watch simulator";
-        const watch = await lifecycle.findWatch(
-          { deviceId: args.deviceId, name: args.name },
-          requestSignal,
-        );
-        stage.current = "waiting for the device lifecycle lease";
-        const lease = await reserveWatchLifecycle(watch, deps, deadlineMs, requestSignal);
-        try {
-          stage.current = "booting the Apple Watch simulator";
-          const boot = await lifecycle.boot(watch, {
-            timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
-          });
-          stage.current = "binding the device session";
-          const sessionId = await bindWatchSession(
-            { watch, boot, rawArgs, operation: "startDevice" },
-            bindSession,
-            deps.timer,
-            deadlineMs,
+    {
+      operationName: "startDevice",
+      operation: async (deadlineMs, requestSignal, stage) =>
+        await runWithAbortSignal(requestSignal, async () => {
+          const lifecycle = (deps.watchSimulatorLifecycleFactory ?? defaultWatchLifecycle)();
+          stage.current = "resolving the Apple Watch simulator";
+          const watch = await lifecycle.findWatch(
+            { deviceId: args.deviceId, name: args.name },
             requestSignal,
           );
-          return watchStartResponse(watch, boot, sessionId, deps.timer.now() - startedAtMs);
-        } finally {
-          lease.release();
-        }
-      }),
+          stage.current = "waiting for the device lifecycle lease";
+          const lease = await reserveWatchLifecycle(watch, deps, deadlineMs, requestSignal);
+          let stopLaunchedRunner: (() => void) | undefined;
+          let completed = false;
+          try {
+            const lifecycleSignal =
+              combineAbortSignals(requestSignal, lease.signal) ?? lease.signal;
+            stage.current = "booting the Apple Watch simulator";
+            const boot = await lifecycle.boot(watch, {
+              timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
+            });
+            stage.current = "starting the Apple Watch automation runner";
+            let runnerUnavailable: string | undefined;
+            let runner: Pick<WatchRunnerLifecycle, "start" | "attach" | "stop"> | undefined;
+            const sessions = deps.daemonState.isInitialized()
+              ? deps.daemonState.getSessionManager()
+              : undefined;
+            try {
+              if (!sessions) {
+                throw new ActionableError(
+                  "Watch runner ownership requires a daemon-managed session; start the daemon and retry startDevice.",
+                );
+              }
+              runner = (deps.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)();
+              const started = await runner.start({
+                deviceId: watch.deviceId,
+                sessions,
+                signal: lifecycleSignal,
+              });
+              runnerUnavailable = started.runnerUnavailable;
+              stopLaunchedRunner = started.stop;
+            } catch (error) {
+              runnerUnavailable = errorMessage(error);
+              logger.warn(
+                `[WatchRunner] Runner unavailable for ${watch.deviceId}: ${runnerUnavailable}`,
+                error,
+              );
+            }
+            lifecycleSignal.throwIfAborted();
+            stage.current = "binding the device session";
+            const sessionId = await bindWatchSession(
+              { watch, boot, rawArgs, operation: "startDevice" },
+              bindSession,
+              deps.timer,
+              { deadlineMs, signal: lifecycleSignal },
+            );
+            if (runner && sessions) {
+              const attachError = runner.attach({
+                deviceId: watch.deviceId,
+                ownerSession: sessionId,
+                sessions,
+              });
+              if (attachError) {
+                throw new ActionableError(
+                  "The watch session ended before the watch runner started; retry startDevice.",
+                );
+              }
+            }
+            lifecycleSignal.throwIfAborted();
+            const response = watchStartResponse(watch, boot, sessionId, {
+              elapsedMs: deps.timer.now() - startedAtMs,
+              runnerUnavailable,
+            });
+            completed = true;
+            return response;
+          } finally {
+            if (!completed) {
+              stopLaunchedRunner?.();
+            }
+            lease.release();
+          }
+        }),
+    },
   );
 }
 
@@ -97,35 +156,16 @@ export async function startWatchDevice(
  * session's UUID, so the session it minted (and its claim) is released again (#11565).
  */
 export async function bindWatchSession(
-  {
-    watch,
-    boot,
-    rawArgs,
-    operation,
-  }: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object; operation: string },
+  args: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object; operation: string },
   bindSession: BindBootedSession,
   timer: DeviceToolsDependencies["timer"],
-  deadlineMs: number,
-  signal: AbortSignal,
+  options: { deadlineMs: number; signal: AbortSignal },
 ): Promise<string> {
-  return await runOperationWithinDeadline(
+  return await bindBootedSimulatorSession(
+    { ...args, device: args.watch },
+    bindSession,
     timer,
-    deadlineMs,
-    signal,
-    bindUndoneIfUndelivered(
-      async (receipt, bindSignal) =>
-        await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
-          achievedReadiness: "booted",
-          receipt,
-          signal: bindSignal,
-        }),
-    ),
-    {
-      timeoutError: () =>
-        new ActionableError(
-          `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
-        ),
-    },
+    options,
   );
 }
 
@@ -139,25 +179,20 @@ async function reserveWatchLifecycle(
     { platform: "watchos", stableId: watch.deviceId },
     { name: watch.name, platform: "watchos", deviceId: watch.deviceId },
     deps.timer,
-    deadlineMs,
-    { requestAbortSignal: signal, operation: "start", coordinator: deps.lifecycleCoordinator },
+    {
+      deadlineMs,
+      requestAbortSignal: signal,
+      operation: "start",
+      coordinator: deps.lifecycleCoordinator,
+    },
   );
-}
-
-/** The caller identity the shared binder reads; a watch start carries nothing else. */
-function sessionArgs(rawArgs: object) {
-  return {
-    __mcpSessionId: internalMcpSessionId(rawArgs),
-    __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-    ...(internalOneShotCli(rawArgs) ? { __oneShotCli: true } : {}),
-  };
 }
 
 function watchStartResponse(
   watch: ListedWatch,
   boot: WatchBootResult,
   sessionId: string,
-  elapsedMs: number,
+  { elapsedMs, runnerUnavailable }: { elapsedMs: number; runnerUnavailable?: string },
 ) {
   const description = describeDevice({
     kind: "booted",
@@ -168,7 +203,9 @@ function watchStartResponse(
   });
   const how = boot.acquisition === "cold-boot" ? "started by this call" : "already booted";
   return createStructuredToolResponse({
-    message: `watchos '${boot.device.name}' is booted (${how})`,
+    message:
+      `watchos '${boot.device.name}' is booted (${how})` +
+      (runnerUnavailable ? `; watch runner unavailable: ${runnerUnavailable}` : ""),
     ...projectBootedDevice(description),
     isReady: true,
     acquisition: boot.acquisition,
@@ -201,6 +238,14 @@ function parseWatchStartArgs(rawArgs: object): WatchStartDeviceArgs {
 }
 
 export function defaultWatchLifecycle(): WatchSimulatorLifecycle {
-  const simctl = new SimCtlClient();
-  return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl));
+  return watchLifecycleOver(new SimCtlClient());
+}
+
+/** The watch lifecycle over `simctl`; a cold watch boot is admitted like an iPhone boot. */
+export function watchLifecycleOver(
+  simctl: WatchLifecycleSimctl & WatchSimulatorSimctl,
+): WatchSimulatorLifecycle {
+  return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl), {
+    run: (request, boot) => bootAdmissionServices.iosBootInstrumentation().run(request, boot),
+  });
 }

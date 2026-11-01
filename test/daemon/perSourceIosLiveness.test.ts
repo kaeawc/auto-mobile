@@ -105,7 +105,6 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
         options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
       ),
       bootedEmulator(),
-      undefined,
       {
         physicalIosDevices: {
           listConnectedDevices: async () =>
@@ -179,7 +178,6 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
       null,
       new FakeBootedSimctl([SIMULATOR]),
       bootedEmulator(),
-      undefined,
       {
         physicalIosDevices: {
           listConnectedDevices: async () => ({
@@ -335,7 +333,6 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
         null,
         new FakeBootedSimctl([SIMULATOR]),
         bootedEmulator(),
-        undefined,
         { physicalIosDevices: lister },
       );
       expect((await lister.listConnectedDevices()).complete).toBe(true);

@@ -66,16 +66,14 @@ export interface ProxyCollaboratorsPort {
     status: DaemonStatus,
     runningVersion: string,
     runningBase: string,
-    clientBase: string,
-    sameRelease: boolean,
+    options: { clientBase: string; sameRelease: boolean },
   ): void;
   assertVersionRestartCooldownExpired(status: DaemonStatus, runningVersion: string): void;
   versionMismatchError(
     runningVersion: string,
     reason: VersionMismatchReason,
     detail: string,
-    retryAfterMs?: number,
-    daemonBuild?: BuildIdentity,
+    options?: { retryAfterMs?: number; daemonBuild?: BuildIdentity },
   ): DaemonVersionMismatchError;
   ensureBuildMatches(reconciliationDeadline?: number, observedStatus?: DaemonStatus): Promise<void>;
   finishBuildRestart(
@@ -372,18 +370,12 @@ export class ProxyCollaborators {
       verifyRestartedVersion: () => this.port.verifyRestartedVersion(),
       requiresVersionRestart: (status, runningVersion) =>
         this.port.requiresVersionRestart(status, runningVersion),
-      assertNewerClientVersion: (status, runningVersion, runningBase, clientBase, sameRelease) =>
-        this.port.assertNewerClientVersion(
-          status,
-          runningVersion,
-          runningBase,
-          clientBase,
-          sameRelease,
-        ),
+      assertNewerClientVersion: (status, runningVersion, runningBase, versions) =>
+        this.port.assertNewerClientVersion(status, runningVersion, runningBase, versions),
       assertVersionRestartCooldownExpired: (status, runningVersion) =>
         this.port.assertVersionRestartCooldownExpired(status, runningVersion),
-      versionMismatchError: (runningVersion, reason, detail, retryAfterMs, daemonBuild) =>
-        this.port.versionMismatchError(runningVersion, reason, detail, retryAfterMs, daemonBuild),
+      versionMismatchError: (runningVersion, reason, detail, options) =>
+        this.port.versionMismatchError(runningVersion, reason, detail, options),
 
       ensureBuildMatches: (reconciliationDeadline, observedStatus) =>
         this.port.ensureBuildMatches(reconciliationDeadline, observedStatus),

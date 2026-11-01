@@ -215,7 +215,8 @@ test("single-use openLink dispatches once and preserves unknown dispatch in the 
     },
     { timer, retryExecutor: new DefaultRetryExecutor(timer) },
   );
-  interactionDeps.openUrlFactory = () => new UnobservedOpenURL(device, adb, null, null, timer);
+  interactionDeps.openUrlFactory = () =>
+    new UnobservedOpenURL(device, { adb, simctl: null, devicectl: null, timer });
   const url = "myapp://sign-in?token=single-use";
   const error = await handler("openLink")(device, { url }).then(
     () => undefined,
@@ -275,7 +276,7 @@ test.each(devices)("real commands receive pre-aborted requests on %s", async (ta
       timer,
     });
   interactionDeps.openUrlFactory = () =>
-    new UnobservedOpenURL(target, adb, simctl, launcher, timer);
+    new UnobservedOpenURL(target, { adb, simctl, devicectl: launcher, timer });
   let gestures = 0;
   setSystemTrayDependencies({
     timer,
@@ -356,7 +357,12 @@ test("openLink does not launch after physical iOS URL availability resolution ab
   });
   restores.push(() => availability.mockRestore());
   interactionDeps.openUrlFactory = () =>
-    new UnobservedOpenURL(target, new FakeAdbExecutor(), null, launcher, timer);
+    new UnobservedOpenURL(target, {
+      adb: new FakeAdbExecutor(),
+      simctl: null,
+      devicectl: launcher,
+      timer,
+    });
   await expect(
     handler("openLink")(target, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");
@@ -377,14 +383,18 @@ test("openLink chooser cancels during handler metadata resolution before any cho
     },
   });
   interactionDeps.openLinkChooserFactory = () =>
-    new UnobservedChooser(
-      device,
-      null,
-      (signal) => {
+    new UnobservedChooser(device, {
+      adb: null,
+      deepLinkManagerFactory: (signal) => {
         expect(signal).toBe(controller.signal);
         const manager = new DeepLinkManager(device, adb, {
           chooserMetadata: {
-            getActivityLabel: async (_device, _package, _url, _adb, metadataSignal) => {
+            getActivityLabel: async (
+              _device,
+              _package,
+              _url,
+              { adb: _adb, signal: metadataSignal },
+            ) => {
               expect(metadataSignal).toBe(signal);
               controller.abort();
               return { kind: "none" };
@@ -407,7 +417,7 @@ test("openLink chooser cancels during handler metadata resolution before any cho
         return manager;
       },
       timer,
-    );
+    });
   await expect(
     handler("openLink")(
       device,
@@ -449,7 +459,12 @@ test("openLink cancels iOS foreground confirmation without waiting or rolling ba
   const simctl = new FakeSimctl();
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
-  const open = new UnobservedOpenURL(target, new FakeAdbExecutor(), simctl, null, timer);
+  const open = new UnobservedOpenURL(target, {
+    adb: new FakeAdbExecutor(),
+    simctl,
+    devicectl: null,
+    timer,
+  });
   open.observeScreen = observe;
   interactionDeps.openUrlFactory = () => open;
   const controller = new AbortController();

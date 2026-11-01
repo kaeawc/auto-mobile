@@ -36,7 +36,7 @@ describe("app ID device-shell boundaries", () => {
     "launchApp keeps %s inside one device-shell word",
     async (_label, appId, quoted) => {
       const adb = new FakeAdbExecutor();
-      const launch = new LaunchApp(device, adb);
+      const launch = new LaunchApp(device, { adb });
       const perf = new NoOpPerformanceTracker();
 
       await launch.performLaunch(appId, undefined, 0, { perf });

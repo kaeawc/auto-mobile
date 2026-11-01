@@ -1772,7 +1772,7 @@ internal constructor(
         element.actions?.any { it !in NodeFieldNames.baselineAccessibilityActions } == true
       else !element.actions.isNullOrEmpty()) ||
       (if (pruneBaselineWrappers)
-        element.extras?.keys?.any { !VolatileExtras.isNeverShipped(it) } == true
+        element.extras?.any { (key, value) -> !VolatileExtras.isPruningNoise(key, value) } == true
       else !element.extras.isNullOrEmpty())
   }
 

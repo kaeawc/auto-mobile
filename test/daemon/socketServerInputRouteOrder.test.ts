@@ -24,8 +24,13 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     createFakeDaemonState(),
     new FakeTimer(),
   ).testHooks.input;
-  server.resolveInputTargetDevice = async (_platform, _deviceId, _session, action, options) => {
-    events.push(`resolve:${action}:${options?.bypassAndroidDeviceListCache === true}`);
+  server.resolveInputTargetDevice = async (
+    _platform,
+    _deviceId,
+    _session,
+    { action, bypassAndroidDeviceListCache },
+  ) => {
+    events.push(`resolve:${action}:${bypassAndroidDeviceListCache === true}`);
 
     return androidDevice;
   };
@@ -47,7 +52,7 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     }
     return 1000;
   };
-  server.dispatchFencedInput = async (gesture, _signal, _timeout, _send, onDispatch) => {
+  server.dispatchFencedInput = async (gesture, _signal, _timeout, { send: _send, onDispatch }) => {
     events.push(`dispatch:${gesture}`);
     onDispatch?.();
     return { success: true } as never;
@@ -62,7 +67,12 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     typeTextOptions.dispatching?.();
     return { success: true };
   };
-  server.liftingStrokeOnSessionRefusal = async (kind, _session, _device, _id, run) => {
+  server.liftingStrokeOnSessionRefusal = async (
+    kind,
+    _session,
+    _device,
+    { gestureId: _id, run },
+  ) => {
     events.push(`lift:${kind}`);
     return await run();
   };
@@ -117,9 +127,13 @@ async function drive(route: Route, options: Parameters<typeof harness>[0] = {}) 
   const { server, events } = harness(options);
   const press = PressButton.prototype;
   const originalPress = press.press;
-  press.press = async function (this: PressButton, ...args: unknown[]) {
+  press.press = async function (
+    this: PressButton,
+    _button: string,
+    options: { onDispatch?: () => void } = {},
+  ) {
     events.push("dispatch:pressButton");
-    (args[4] as (() => void) | undefined)?.();
+    options.onDispatch?.();
     return { success: true } as never;
   } as never;
   const request = { id: "1", type: "mcp_request", method: route.method, params: route.params };

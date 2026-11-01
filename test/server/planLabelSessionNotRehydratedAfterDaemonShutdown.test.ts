@@ -59,7 +59,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
     for (const sessionId of sessionManager.getAllKnownSessionIds()) {
       const deviceId = sessionManager.getSession(sessionId)?.assignedDevice ?? null;
       void cancelAndReleaseSession(sessionId, "daemon-shutdown", () =>
-        releaseSessionAndDevice(sessionManager, pool, deviceId, sessionId, {
+        releaseSessionAndDevice({ manager: sessionManager, pool }, deviceId, sessionId, {
           reason: "daemon-shutdown",
         }),
       );
@@ -75,7 +75,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
       if (labelDeviceRestarting && labelDevice) {
         // Label B's device went away for a restart first: its session waits out that handoff.
         const reason = deviceRestartReleaseReason(labelDevice);
-        await releaseSessionAndDevice(sessionManager, pool, labelDevice, LABEL_B, {
+        await releaseSessionAndDevice({ manager: sessionManager, pool }, labelDevice, LABEL_B, {
           reason,
         });
       }
@@ -158,11 +158,16 @@ describe("daemon shutdown while a multi-device plan runs", () => {
       () => false,
       async (sessionId, reason) => {
         const deviceId = sessionManager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(sessionManager, restarted.pool, deviceId, sessionId, {
-          reason,
-        });
+        await releaseSessionAndDevice(
+          { manager: sessionManager, pool: restarted.pool },
+          deviceId,
+          sessionId,
+          {
+            reason,
+          },
+        );
       },
-      hunt.timer,
+      { timer: hunt.timer },
     );
     monitor.start();
 

@@ -1,4 +1,3 @@
-import { resolveRotateCall } from "../../../src/features/action/ActionCall";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { createExecResult as makeExecResult } from "../../../src/utils/execResult";
 import { withEpilogueWarning } from "../../../src/utils/bestEffortEpilogue";
@@ -100,10 +99,14 @@ describe("Rotate", () => {
     );
 
     // Instantiate Rotate with fake ADB and every collaborator faked to avoid real device operations
-    rotate = new Rotate(mockDevice, fakeAdb, fakeTimer, undefined, {
-      awaitIdle: fakeAwaitIdle,
-      observeScreen: fakeObserveScreen,
-      window: fakeWindow,
+    rotate = new Rotate(mockDevice, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      collaborators: {
+        awaitIdle: fakeAwaitIdle,
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+      },
     });
   });
 
@@ -204,8 +207,12 @@ describe("Rotate", () => {
     ]) {
       test(`uses timeout ${expectedTimeoutMs} with ${remainingMs} ms remaining`, async () => {
         fakeTimer.advanceTime(7000);
-        const budgetedRotate = new Rotate(mockDevice, fakeAdb, fakeTimer, {
-          deadlineMs: fakeTimer.now() + remainingMs,
+        const budgetedRotate = new Rotate(mockDevice, {
+          adb: fakeAdb,
+          timer: fakeTimer,
+          options: {
+            deadlineMs: fakeTimer.now() + remainingMs,
+          },
         });
         const signal = new AbortController().signal;
         fakeAdb.setCommandResponse(
@@ -225,8 +232,12 @@ describe("Rotate", () => {
 
     test("recomputes remaining budget on every settle-wait attempt", async () => {
       fakeTimer.advanceTime(7000);
-      const budgetedRotate = new Rotate(mockDevice, fakeAdb, fakeTimer, {
-        deadlineMs: fakeTimer.now() + 3000,
+      const budgetedRotate = new Rotate(mockDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        options: {
+          deadlineMs: fakeTimer.now() + 3000,
+        },
       });
       const signal = new AbortController().signal;
       fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
@@ -448,17 +459,21 @@ describe("Rotate", () => {
         ]);
         if (mode === "session") {
           let original: RotationRestoreState | undefined;
-          rotate = new Rotate(mockDevice, fakeAdb, fakeTimer, {
-            sessionRotation: async (mutation) =>
-              mutation({
-                get: () => original,
-                record: (state) => {
-                  original ??= state;
-                },
-                clear: () => {
-                  original = undefined;
-                },
-              }),
+          rotate = new Rotate(mockDevice, {
+            adb: fakeAdb,
+            timer: fakeTimer,
+            options: {
+              sessionRotation: async (mutation) =>
+                mutation({
+                  get: () => original,
+                  record: (state) => {
+                    original ??= state;
+                  },
+                  clear: () => {
+                    original = undefined;
+                  },
+                }),
+            },
           });
           Object.assign(rotate, {
             awaitIdle: fakeAwaitIdle,
@@ -586,17 +601,21 @@ describe("Rotate", () => {
       let original:
         | { accelerometerRotation: 0 | 1 | null; userRotation: number | null }
         | undefined;
-      rotate = new Rotate(mockDevice, fakeAdb, fakeTimer, {
-        sessionRotation: async (mutation) =>
-          mutation({
-            get: () => original,
-            record: (state) => {
-              original ??= state;
-            },
-            clear: () => {
-              original = undefined;
-            },
-          }),
+      rotate = new Rotate(mockDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        options: {
+          sessionRotation: async (mutation) =>
+            mutation({
+              get: () => original,
+              record: (state) => {
+                original ??= state;
+              },
+              clear: () => {
+                original = undefined;
+              },
+            }),
+        },
       });
       Object.assign(rotate, {
         awaitIdle: fakeAwaitIdle,
@@ -2015,16 +2034,24 @@ describe("Rotate", () => {
         }
       }
       const gatedAwaitIdle = new GatedAwaitIdle();
-      rotate = new Rotate(mockDevice, fakeAdb, fakeTimer, undefined, {
-        observeScreen: fakeObserveScreen,
-        awaitIdle: gatedAwaitIdle,
-        window: fakeWindow,
+      rotate = new Rotate(mockDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        collaborators: {
+          observeScreen: fakeObserveScreen,
+          awaitIdle: gatedAwaitIdle,
+          window: fakeWindow,
+        },
       });
 
-      const secondRotate = new Rotate(mockDevice, fakeAdb, fakeTimer, undefined, {
-        observeScreen: fakeObserveScreen,
-        awaitIdle: gatedAwaitIdle,
-        window: fakeWindow,
+      const secondRotate = new Rotate(mockDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        collaborators: {
+          observeScreen: fakeObserveScreen,
+          awaitIdle: gatedAwaitIdle,
+          window: fakeWindow,
+        },
       });
 
       const firstCall = rotate.execute("landscape");
@@ -2273,10 +2300,14 @@ describe("Rotate", () => {
         createObserveResult(),
         { ...createObserveResult(), rotation: 1, screenSize: { width: 874, height: 402 } },
       ]);
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
-        observeScreen: fakeObserveScreen,
-        awaitIdle: fakeAwaitIdle,
-        window: fakeWindow,
+      const iosRotate = new Rotate(iosDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        collaborators: {
+          observeScreen: fakeObserveScreen,
+          awaitIdle: fakeAwaitIdle,
+          window: fakeWindow,
+        },
       });
 
       try {
@@ -2301,7 +2332,7 @@ describe("Rotate", () => {
         rotationPerformed: false,
         error: "Rotation is not supported on this display (the screen size did not change)",
       });
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      const iosRotate = new Rotate(iosDevice, { adb: fakeAdb, timer: fakeTimer });
       Object.assign(iosRotate, {
         observeScreen: fakeObserveScreen,
         window: fakeWindow,
@@ -2327,7 +2358,7 @@ describe("Rotate", () => {
         value: 1,
         rotationPerformed: true,
       });
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      const iosRotate = new Rotate(iosDevice, { adb: fakeAdb, timer: fakeTimer });
       Object.assign(iosRotate, {
         observeScreen: fakeObserveScreen,
         window: fakeWindow,
@@ -2348,7 +2379,7 @@ describe("Rotate", () => {
         ...createObserveResult(),
         viewHierarchy: { hierarchy: {} },
       }));
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      const iosRotate = new Rotate(iosDevice, { adb: fakeAdb, timer: fakeTimer });
       Object.assign(iosRotate, {
         observeScreen: fakeObserveScreen,
         window: fakeWindow,
@@ -2370,10 +2401,14 @@ describe("Rotate", () => {
     });
 
     test("should use CtrlProxy to rotate to portrait on iOS", async () => {
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
-        observeScreen: fakeObserveScreen,
-        awaitIdle: fakeAwaitIdle,
-        window: fakeWindow,
+      const iosRotate = new Rotate(iosDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        collaborators: {
+          observeScreen: fakeObserveScreen,
+          awaitIdle: fakeAwaitIdle,
+          window: fakeWindow,
+        },
       });
 
       try {
@@ -2389,10 +2424,14 @@ describe("Rotate", () => {
 
     test("should throw when iOS rotate fails", async () => {
       fakeIOSCtrlProxy.setFailureMode("rotate", new Error("Rotation not supported"));
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
-        observeScreen: fakeObserveScreen,
-        awaitIdle: fakeAwaitIdle,
-        window: fakeWindow,
+      const iosRotate = new Rotate(iosDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        collaborators: {
+          observeScreen: fakeObserveScreen,
+          awaitIdle: fakeAwaitIdle,
+          window: fakeWindow,
+        },
       });
 
       try {
@@ -2403,10 +2442,14 @@ describe("Rotate", () => {
     });
 
     test("should not call ADB for iOS rotation", async () => {
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
-        observeScreen: fakeObserveScreen,
-        awaitIdle: fakeAwaitIdle,
-        window: fakeWindow,
+      const iosRotate = new Rotate(iosDevice, {
+        adb: fakeAdb,
+        timer: fakeTimer,
+        collaborators: {
+          observeScreen: fakeObserveScreen,
+          awaitIdle: fakeAwaitIdle,
+          window: fakeWindow,
+        },
       });
 
       try {
@@ -2429,22 +2472,9 @@ beforeEach(() => {
   outputSchemaSpy = spyOn(Rotate.prototype, "execute").mockImplementation(async function (
     this: Rotate,
     orientation: "portrait" | "landscape",
-    progressOrCall?:
-      | import("../../../src/features/action/BaseVisualChange").ProgressCallback
-      | import("../../../src/features/action/ActionCall").RotateCall,
-    lockOrientation?: boolean,
-    signal?: AbortSignal,
-    display?: number,
+    call?: import("../../../src/features/action/ActionCall").RotateCall,
   ) {
-    const call = resolveRotateCall(progressOrCall, lockOrientation, signal, display);
-    const result = await executeForOutputSchema.call(
-      this,
-      orientation,
-      call.progress,
-      call.lockOrientation,
-      call.signal,
-      call.display,
-    );
+    const result = await executeForOutputSchema.call(this, orientation, call);
     expect(
       rotateResultSchema.parse({ ...result, message: formatRotateMessage(result) }),
     ).toBeDefined();

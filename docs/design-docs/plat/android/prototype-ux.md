@@ -289,6 +289,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | bottomSheet     | material | material | —     |
 | box             | neutral  | neutral  | —     |
 | button          | native   | material | —     |
+| cameraPreview   | material | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
 | castButton      | material | material | —     |
@@ -1042,6 +1043,9 @@ The wire protocol has no host opt-in channel. The existing host gate `AUTOMOBILE
 
 ### Device media items (#14192, contract only)
 
+Which camera, media-library, scanner and microphone routes work on each emulator, simulator and
+device, and how to seed them, is in the [camera and media guide](../../prototype-camera-media.md).
+
 Camera, picker and recorder producers write a media item (or an array of them) to an `into`
 pointer in `/data`, under the rules of `applyPrototypeDataWrite` and with no nulls. The device
 mints its ids with the reserved `media:` prefix and keeps the bytes in its own store, so an `image`
@@ -1398,9 +1402,24 @@ Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the s
 `pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
 `bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
 the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
-and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
-`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
-state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
+and its spec path. A screen node carries the `testTag` of the node that draws it. A `pop` targets
+`back` (the previous screen is runtime state), and `setPage` with `next` or `prev` keeps the authored
+word. `visibleWhen` alternatives and sheet or dialog opening by state are not resolved.
+
+`getNavigationGraph` (debug-gated with the rest of that tool) diffs the map against the app's recorded
+graph when given `prototypeSpec` or `prototypeSpecPath`, and returns `prototypeDiff`. A prototype screen
+matches a real screen through, in order: an explicit `screenMapping` (or `screenMappingPath`) entry from
+prototype screen id to real screen name; its `testTag` equal to the real screen name; or its stack
+screen key (whole, slashes included), tab label or sheet/dialog id equal to the real name ignoring
+case and punctuation, with or without a trailing `Screen`, `Activity`, `Fragment`, `Page`, `View` or
+`Controller` on either side, so `Overview` still meets `OverviewActivity`. Letters of any script count;
+a name with none never matches. A mapped screen never falls
+back to the other rules, and a mapping to a name the graph lacks reports `mappedScreenMissing`. The root
+is a destination only when the mapping names it. The result lists `matched` screens,
+`unmatchedPrototypeScreens`, `unmatchedRealScreens`, `observedTransitions`, `unobservedTransitions`
+(`unmatchedScreen`, `dynamicTarget` for `back` and `next`/`prev`, or `notObserved`) and
+`ignoredMappings` (keys naming no prototype screen). The live cross-check against `screen_changed`
+events from an explored prototype is not built.
 
 ### Route contract
 
@@ -1505,8 +1524,10 @@ uses the default visibility animation; wrap the stack in a box to give that a cu
   directly.
 
 Android draws scale and rotation with a `graphicsLayer`, animates with `animateFloatAsState` and
-`animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
-yet and does not advertise the capability (#14684), so the host refuses these fields there.
+`animateColorAsState`, and zooms with `transformable`. The iOS agent supports and advertises
+`prototype_motion_v2`: `animate`, style `scale`/`rotation`, `slideStart`/`slideEnd`/`scale`
+transitions, and `image.zoomable`. Motion v3 requirements are detected, but iOS does not advertise
+`prototype_motion_v3`, so the host refuses motion v3 features until iOS advertises that capability.
 
 ### Transition choreography (#15247, `prototype_choreography_v1`, not device-verified)
 
@@ -2385,11 +2406,34 @@ calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setSh
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
 `maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes
 `preview`, the id of the viewfinder it acts on, needs `camera` in `requires.permissions` and is
-`sensitive`; the viewfinder node itself is a separate slice. Recording also needs
-`prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
+`sensitive`. Recording also needs `prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
 `/platform/camera/status` state report `starting`, `ready`, `capturing`, `recording`, `unavailable`,
 `permission_denied` or `error`; `/platform/camera/flashAvailable`, `recordingMs` and `source`
 (`camera` or `injected`, the fake frame source on a Simulator) complete the state.
+
+The `cameraPreview` node is that viewfinder; a story-capture screen pairs it with ordinary buttons:
+
+```json
+{
+  "type": "cameraPreview",
+  "lensKey": "lens",
+  "flashKey": "flash",
+  "zoomKey": "zoom",
+  "aspectRatio": "4:3",
+  "contentScale": "crop",
+  "tapToFocus": true,
+  "pinchToZoom": true,
+  "mode": "photo"
+}
+```
+
+- A spec has at most one `cameraPreview`. It needs an `id` that is a state key, which `camera.*`
+  calls name as their literal `preview` (`platform-camera-live.json` is the full story-capture spec).
+- It needs `camera` in `requires.platform` and in `requires.permissions`.
+- `lensKey` and `flashKey` name declared string state keys (`back` or `front`; `off`, `on`, `auto`
+  or `torch`) and `zoomKey` a declared number key (0-1), so `setState` and a slider drive them.
+- Optional: `aspectRatio` (`4:3`, `16:9`, `1:1`), `contentScale` (`fit`, `crop`, `fill`),
+  `tapToFocus`, `pinchToZoom` and `mode` (`photo` or `video`). No renderer draws it yet.
 
 **Per-call capabilities.** A `platformModules` call may name a `capability` it needs on top of its
 module's, named `prototype_platform_<module>_<op>_vN`. The host, Kotlin and Swift validators add it to

@@ -15,11 +15,11 @@ emulator's own audio forwarder:
 | `injectAudio(stream AudioPacket) returns (Empty)`       | client stream | host to guest microphone |
 | `streamAudio(AudioFormat) returns (stream AudioPacket)` | server stream | guest output to host     |
 
-Each emulator has its own gRPC port, so two emulators cannot hear each other's audio. Nothing
-touches a host audio stack, so this works the same on a laptop, a Linux CI host with no
-`/dev/snd` and no PulseAudio/PipeWire, and inside a container. Host-mic passthrough
-(`-allow-host-audio`) is not used. A per-emulator PulseAudio/PipeWire sink is a fallback that
-is only worth building if some supported environment cannot reach the gRPC port.
+Each emulator has its own gRPC port, so two emulators cannot hear each other's audio. The emulator's
+forwarder can still depend on host microphone voice initialization; guest recording alone does not
+prove that voice is healthy. Host-mic passthrough (`-allow-host-audio`) is not used. A per-emulator
+PulseAudio/PipeWire sink is a fallback that is only worth building if some supported environment
+cannot reach the gRPC port.
 
 ## Wire contract
 
@@ -56,9 +56,32 @@ is only worth building if some supported environment cannot reach the gRPC port.
   restart also loses the lease. No broadcast waits for PCM reads or joins the reader thread.
 - The host requires `running` from start and every status poll (100 ms by default) throughout
   a three-second settle window, within an eight-second total deadline. Any other answer
-  immediately refuses injection with `audio_guest_capture_unavailable`. Each broadcast uses
+  immediately refuses injection with `audio_guest_capture_unavailable`. Before guest capture and
+  again before opening the gRPC session, injection also refuses captured host microphone failures
+  with `audio_host_microphone_unavailable`, and a repeat injection in the same serial + discovered
+  endpoint PID incarnation with `audio_repeat_injection_unsafe`. Both host safety errors carry
+  `retryable: false` and a remedy to grant macOS Microphone permission to the emulator's host app
+  (System Settings > Privacy and Security > Microphone) or restart the emulator. Permission alone
+  does not clear repeat history: a serial with a new PID starts with no repeat history. The host-voice
+  check also runs after authorization, immediately before the stream opens. No reliable
+  positive host-voice success line is known, so repeats remain refused even after successful guest
+  capture or a completed injection. Each broadcast uses
   no retries and at most two seconds of the remaining deadline. A missing receiver requires
   reinstalling CtrlProxy. Refusals include at most 2048 characters of the broadcast reply.
+- The launcher indexes its existing redacted output snapshots by PID and serial for the process
+  lifetime, including stdout and stderr after startup. The index holds at most 64 sources (oldest
+  evicted) and removes a source on exit or close. Existing snapshots retain at most 50 lines /
+  16,384 characters; audio lookups additionally cap the tail at 16 KiB of UTF-8. No extra log file
+  is written. Host microphone failure (`Failed to create voice virtio-snd-mic0`,
+  `Could not initialize record`, or `kAudioHardwareIllegalOperation`) is latched per incarnation
+  at ingestion before tail trimming and stays refused until exit or source eviction.
+  Emulators launched outside AutoMobile have no captured tail, so only the repeat rule applies.
+- Injection history is local to the audio service lifetime and retains at most 128 serial + PID
+  entries, evicting the oldest at capacity. An attempt is counted immediately before `injectAudio`,
+  including attempts whose RPC fails, because it may already have opened a stream. Source or guest
+  capture failures before that point do not count. Observing a new PID clears that serial's old PID
+  history and permits a first injection; stopping an
+  injection does not clear history. Service restarts and capacity eviction forget older history.
 - Failure after start attempts best-effort stop with a separate two-second cleanup budget.
   Close runs once and accepts `stopped` or `absent`. Before cleanup the host verifies the
   emulator PID still matches its starting incarnation; otherwise it skips cleanup. Ownership
@@ -71,6 +94,11 @@ is only worth building if some supported environment cannot reach the gRPC port.
   ignores it on later packets.
 - `MODE_UNSPECIFIED` lets the emulator pull audio as the guest consumes it (about a 300 ms
   buffer), so HTTP/2 flow control paces the writer. The client never sleeps between packets.
+- The emulator refuses a stream as soon as it opens (bad credentials, an issuer off its allowlist,
+  a busy microphone) with a trailers-only response, whose `grpc-status` is in the initial
+  headers. The request side stays open, so the call status does not settle; `injectAudio` races
+  those headers, the call status and a 200 ms window before streaming, so a refusal fails the start
+  instead of surfacing only at stop. A stream with no headers inside the window counts as accepted.
 - `loop`, `startDelayMs` and `maxDurationMs` are client-side. `stop()` cancels the stream
   (RST_STREAM CANCEL) rather than half-closing it, because a write can be blocked on
   back-pressure. It is idempotent and resolves with the frames sent.
@@ -157,20 +185,26 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   - `grpc.token` (present when launched with `-grpc-use-token`): `authorization: Bearer <token>`.
   - `grpc.jwks` and `grpc.jwk_active`: the client writes a public ES512 (P-521) JWK to
     `<grpc.jwks>/<kid>.jwk`, waits up to 1 s for the emulator to list that `kid` in
-    `grpc.jwk_active`, then signs a token per call with `aud: [<method path>]`, `iss`, `iat`
-    and a 15-minute `exp`. The key file is removed on close; the emulator also deletes the
-    directory on exit.
+    `grpc.jwk_active`, then signs a token per call with `aud: [<method path>]`, `iat`, a
+    15-minute `exp`, and `iss: "android-studio"`. The JOSE header is `{alg, kid}` with no `typ`:
+    the emulator refuses any token that sets `typ` (`INVALID_ARGUMENT`, "token has type header
+    set, but validator not"). Its default allowlist (`lib/emulator_access.json`) only admits the
+    issuers `android-studio`, `icebox` and `gradle-utp-emulator-control`, and only
+    `android-studio` may call the audio RPCs; any other issuer gets `PERMISSION_DENIED` even with
+    a valid signature. The key file is removed on close; the emulator also deletes the directory
+    on exit.
   - Neither: no `authorization` header.
 
 ## Errors
 
-| Emulator outcome                                                             | Code                          | Meaning                                                             |
-| ---------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------- |
-| `FAILED_PRECONDITION` on `injectAudio`                                       | `audio_injection_busy`        | Another injection holds this emulator's microphone. Stop it first.  |
-| `UNIMPLEMENTED` or `UNAVAILABLE` (incl. connection refused) on `injectAudio` | `audio_injection_unsupported` | No usable gRPC audio endpoint: old build, gRPC off, or `-no-audio`. |
-| `UNIMPLEMENTED` or `UNAVAILABLE` on `streamAudio` with no audio received     | `audio_capture_unsupported`   | Same, for capture.                                                  |
-| Any other non-OK status                                                      | `audio_grpc_failed`           | Carries the gRPC code and message.                                  |
-| JWK never loaded                                                             | actionable error              | Restart the emulator or launch it with `-grpc-use-token`.           |
+| Emulator outcome                                                             | Code                          | Meaning                                                                         |
+| ---------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------- |
+| `FAILED_PRECONDITION` on `injectAudio`                                       | `audio_injection_busy`        | Another injection holds this emulator's microphone. Stop it first.              |
+| `UNIMPLEMENTED` or `UNAVAILABLE` (incl. connection refused) on `injectAudio` | `audio_injection_unsupported` | No usable gRPC audio endpoint: old build, gRPC off, or `-no-audio`.             |
+| `UNIMPLEMENTED` or `UNAVAILABLE` on `streamAudio` with no audio received     | `audio_capture_unsupported`   | Same, for capture.                                                              |
+| `UNAUTHENTICATED`, `PERMISSION_DENIED`, or `INVALID_ARGUMENT` about the JWT  | `audio_grpc_auth_rejected`    | Credentials refused; relaunch with `-grpc-use-token` or plain JWT-less `-grpc`. |
+| Any other non-OK status                                                      | `audio_grpc_failed`           | Carries the gRPC code and message.                                              |
+| JWK never loaded                                                             | actionable error              | Restart the emulator or launch it with `-grpc-use-token`.                       |
 
 A client-cancelled call (`CANCELLED`) is the normal end of `stop()` and of capture, not a failure.
 
@@ -181,4 +215,3 @@ These need a real emulator (#13634):
 - The minimum emulator version that ships both RPCs, and whether every CI image meets it.
 - Whether `injectAudio` fails loudly or silently no-ops on an emulator launched with
   `-no-audio`.
-- Whether the JWT flow above is accepted as-is by the emulator builds CI uses.

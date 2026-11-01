@@ -1,6 +1,7 @@
 import { sql, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, MemoryBaseline } from "./types";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /** Inputs for the memory baseline upsert (EMA applied in SQL on conflict). */
 export interface MemoryBaselineUpsert {
@@ -20,7 +21,7 @@ export interface MemoryBaselineUpsert {
 export class MemoryBaselineRepository {
   private readonly injectedDb: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.injectedDb = db ?? null;
   }
 

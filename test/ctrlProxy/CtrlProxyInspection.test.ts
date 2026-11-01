@@ -65,7 +65,9 @@ for (const [sha, status] of [
 ] as const) {
   test(`inspectCompatibility reports ${status} using only reads`, async () => {
     installed(sha);
-    const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, new FakeTimer());
+    const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, {
+      timer: new FakeTimer(),
+    });
     const reading = await manager.inspectCompatibility();
     expect(reading.status).toBe(status);
     expect(reading.installedSha256).toBe(sha);
@@ -201,13 +203,10 @@ test("local override inspection never populates or clears the shared checksum ca
   const cache = Reflect.get(AndroidCtrlProxyManager, "apkOverrideChecksums");
   const before = Array.from(cache.entries());
   try {
-    const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-      device,
-      adb,
-      new FakeTimer(),
-      undefined,
-      calculator,
-    );
+    const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, {
+      timer: new FakeTimer(),
+      checksumCalculator: calculator,
+    });
     expect((await manager.inspectCompatibility()).status).toBe("compatible");
     expect(calculator.computedFiles).toEqual(["/fake/status-only.apk"]);
     expect(Array.from(cache.entries())).toEqual(before);

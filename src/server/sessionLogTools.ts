@@ -14,16 +14,20 @@ export function registerSessionLogTools(
     "Reset explicitly named app-container log files (and their rotated `<path>.N` siblings) " +
       "on the session's device, reporting a per-path outcome.",
     resetAppLogsSchema,
-    async (device: BootedDevice, args: ResetAppLogsArgs, _progress, signal) => {
-      const result = await service().resetAppLogs({
-        device,
-        appId: args.appId,
-        container: args.container ?? "documents",
-        paths: args.paths,
-        signal,
-      });
-      return createStructuredToolResponse(result);
+    {
+      handler: async (device: BootedDevice, args: ResetAppLogsArgs, _progress, signal) => {
+        const result = await service().resetAppLogs({
+          device,
+          appId: args.appId,
+          container: args.container ?? "documents",
+          paths: args.paths,
+          signal,
+        });
+        return createStructuredToolResponse(result);
+      },
+      ...PLAN_RELEVANT,
+      defaultEnabled: false,
+      outputSchema: resetAppLogsResultSchema,
     },
-    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: resetAppLogsResultSchema },
   );
 }

@@ -1,5 +1,6 @@
 import type { Kysely, Transaction } from "kysely";
 import type { BindingRegistryDatabase } from "./registry/sqliteBindingRegistry";
+import type { BrokerResourceRecord } from "./store";
 
 /** Failed receipts occupy a session only while their exact resource is still owned and live. */
 export async function countSessionAdmissions(
@@ -33,4 +34,16 @@ export async function countSessionAdmissions(
     )
     .executeTakeFirstOrThrow();
   return row.count;
+}
+
+/** Non-destroyed resources in admission-selection shape; the caller decides compatibility. */
+export function occupiedResources(resources: readonly BrokerResourceRecord[]) {
+  return resources
+    .filter((resource) => resource.state !== "destroyed")
+    .map((resource) => ({
+      id: resource.resourceId,
+      state: resource.state as Exclude<BrokerResourceRecord["state"], "destroyed">,
+      idleOrder: resource.idleOrder,
+      compatible: false,
+    }));
 }

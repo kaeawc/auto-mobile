@@ -163,7 +163,14 @@ const isSystemUrlScheme = (url: string): boolean => {
   return match ? SYSTEM_URL_HANDLERS.has(match[1].toLowerCase()) : false;
 };
 
+/** Optional collaborators for {@link OpenURL} (injected for testing). */
 export interface OpenURLOptions {
+  /** ADB executor for the Android path. */
+  adb?: AdbExecutor | null;
+  /** SimCtlClient for the iOS simulator path. */
+  simctl?: Pick<SimCtlClient, "executeCommandArgs"> | null;
+  /** DeviceUrlLauncher for the iOS physical-device path. */
+  devicectl?: DeviceUrlLauncher | null;
   timer?: Timer;
   iosOpenUrlBackend?: IosOpenUrlBackend;
 }
@@ -173,22 +180,18 @@ export class OpenURL extends BaseVisualChange {
   private readonly devicectl: DeviceUrlLauncher | null;
   private readonly iosOpenUrlBackend?: IosOpenUrlBackend;
 
-  /**
-   * @param device - The target device
-   * @param adb - Optional ADB executor (for testing)
-   * @param simctl - Optional SimCtlClient for the iOS simulator path (for testing)
-   * @param devicectl - Optional DeviceUrlLauncher for the iOS physical-device path (for testing)
-   */
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    simctl: Pick<SimCtlClient, "executeCommandArgs"> | null = null,
-    devicectl: DeviceUrlLauncher | null = null,
-    timerOrOptions: Timer | OpenURLOptions = defaultTimer,
+    {
+      adb = null,
+      simctl = null,
+      devicectl = null,
+      timer = defaultTimer,
+      iosOpenUrlBackend,
+    }: OpenURLOptions = {},
   ) {
-    const options = "now" in timerOrOptions ? { timer: timerOrOptions } : timerOrOptions;
-    super(device, adb, options.timer ?? defaultTimer);
-    this.iosOpenUrlBackend = options.iosOpenUrlBackend;
+    super(device, { adb, timer });
+    this.iosOpenUrlBackend = iosOpenUrlBackend;
     this.device = device;
     this.simctl = simctl;
     this.devicectl = devicectl;
@@ -250,7 +253,7 @@ export class OpenURL extends BaseVisualChange {
 
       try {
         // Use LaunchApp to properly launch the application
-        const launchApp = new LaunchApp(this.device, this.adb);
+        const launchApp = new LaunchApp(this.device, { adb: this.adb });
         throwIfAborted(signal);
         const launchResult = await awaitWhileRequestIsLive(
           perf.track("launchApp", () =>

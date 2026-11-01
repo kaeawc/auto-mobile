@@ -68,7 +68,7 @@ export class RecompositionTracker {
 
   constructor(timer: Timer = defaultTimer, database: () => Kysely<Database> = getDatabase) {
     this.timer = timer;
-    this.repository = new RecompositionMetricsRepository(database);
+    this.repository = new RecompositionMetricsRepository({ resolveDatabase: database });
   }
 
   static getInstance(): RecompositionTracker {

@@ -73,12 +73,9 @@ describe("deleteDevice: iOS deletes are bounded and queue the rest (#15308)", ()
     };
     const { executeDeleteDevice } = createLifecycleHandlers({ iosDeleteGate: gate });
     const run = (id: string, signal?: AbortSignal) =>
-      executeDeleteDevice(
-        args(id, android ? "android" : "ios"),
-        { timer } as never,
-        signal,
-        service as never,
-      );
+      executeDeleteDevice(args(id, android ? "android" : "ios"), { timer } as never, signal, {
+        teardownService: service as never,
+      });
     return {
       run,
       peak: () => peak,

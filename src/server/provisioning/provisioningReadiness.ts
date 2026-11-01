@@ -81,8 +81,7 @@ export async function applyProvisionDeviceResources(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   device: BootedDevice,
-  deadlineMs: number,
-  signal?: AbortSignal,
+  { deadlineMs, signal }: { deadlineMs: number; signal?: AbortSignal },
 ): Promise<DeviceResourceConfigurationResult | undefined> {
   if (!args.resources) {
     return undefined;
@@ -174,26 +173,24 @@ export async function reserveProvisionDeviceReadiness(
   // readiness that follows resets the shared per-device CtrlProxy manager and
   // rewrites resource settings. Prove this client owns the device first, the
   // same way `reserveInitialDeviceForReadiness` does for startDevice.
-  return await devicePool.reserveDeviceForReadiness(
-    boot.device.deviceId,
-    boot.device,
-    boot.sourceImage?.name ?? boot.device.name,
-    undefined,
-    { autolockClient: readinessReservationOwner(args) },
-  );
+  return await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+    stableRuntimeName: boot.sourceImage?.name ?? boot.device.name,
+    autolockClient: readinessReservationOwner(args),
+  });
 }
 
 export async function ensureProvisionDeviceReadiness(
   ctx: ProvisioningContext,
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
-  device: BootedDevice,
   {
+    device,
     requestedIdentity,
     totalDeadlineMs,
     perf,
     signal,
   }: {
+    device: BootedDevice;
     requestedIdentity: string;
     totalDeadlineMs: number;
     perf: ReturnType<typeof createPerformanceTracker>;
@@ -219,16 +216,19 @@ export function buildProvisionDeviceResult(
   args: ProvisionDeviceArgs,
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
   createdByRequest: boolean,
-  perf: ReturnType<typeof createPerformanceTracker>,
-  booted:
-    | {
-        device: BootedDevice;
-        sessionId: string;
-        sourceImage?: DeviceInfo;
-        resources?: DeviceResourceConfigurationResult;
-        manufacturerProfile?: Record<string, unknown>;
-      }
-    | undefined,
+  {
+    perf,
+    booted,
+  }: {
+    perf: ReturnType<typeof createPerformanceTracker>;
+    booted?: {
+      device: BootedDevice;
+      sessionId: string;
+      sourceImage?: DeviceInfo;
+      resources?: DeviceResourceConfigurationResult;
+      manufacturerProfile?: Record<string, unknown>;
+    };
+  },
 ): Record<string, unknown> {
   const pooled = booted
     ? (initializedDevicePool()?.getDevice(booted.device.deviceId) ?? undefined)

@@ -74,13 +74,10 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     renderActionPayload(state);
   }
   let sanitizedPayload = artifactRenderedPayload(state, hasStructured, serialization);
-  sanitizedPayload = boundRenderedPayload(
-    ctx,
-    payload,
-    sanitizedPayload,
+  sanitizedPayload = boundRenderedPayload(ctx, payload, sanitizedPayload, {
     hasStructured,
     serialization,
-  );
+  });
 
   // Artifacts retain complete metadata. Compact only the residue delivered inline,
   // and preserve the original envelope when compaction has nothing to remove.
@@ -149,13 +146,10 @@ function finalizePlainToolResponse<T>(
   ctx: FinalizeToolResponseContext,
   serialization: ToolResponseSerialization,
 ): T {
-  const bounded = boundRenderedPayload(
-    ctx,
-    envelopeView.payload,
-    undefined,
-    envelopeView.hasStructured,
+  const bounded = boundRenderedPayload(ctx, envelopeView.payload, undefined, {
+    hasStructured: envelopeView.hasStructured,
     serialization,
-  );
+  });
   if (!bounded) {
     return response;
   }

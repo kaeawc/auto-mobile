@@ -51,10 +51,9 @@ export async function linkRequestExport(
   db: Kysely<BindingRegistryDatabase>,
   now: number,
   requestId: string,
-  fingerprint: string,
-  identity: BrokerExportIdentity,
+  { fingerprint, identity }: { fingerprint: string; identity: BrokerExportIdentity },
 ): Promise<void> {
-  await db.transaction().execute(async (trx) => {
+  const write = async (trx: Kysely<BindingRegistryDatabase>) => {
     const request = await trx
       .selectFrom("session_broker_requests")
       .select("fingerprint")
@@ -64,11 +63,12 @@ export async function linkRequestExport(
       throw new SessionExportIdentityMismatchError();
     }
     await linkExport(trx, requestId, identity, now);
-  });
+  };
+  await (db.isTransaction ? write(db) : db.transaction().execute(write));
 }
 
 export async function linkExport(
-  trx: Transaction<BindingRegistryDatabase>,
+  trx: Kysely<BindingRegistryDatabase>,
   requestId: string,
   identity: BrokerExportIdentity | undefined,
   now: number,
@@ -117,8 +117,7 @@ export async function pruneTerminalRequests(
   db: Kysely<BindingRegistryDatabase>,
   clock: Pick<Timer, "now">,
   retentionMs: number,
-  limit: number,
-  exportRetentionMs = EXPORT_RETENTION_MS,
+  { limit, exportRetentionMs = EXPORT_RETENTION_MS }: { limit: number; exportRetentionMs?: number },
 ): Promise<number> {
   if (
     !Number.isFinite(retentionMs) ||
@@ -130,7 +129,7 @@ export async function pruneTerminalRequests(
   ) {
     throw new ActionableError("Receipt retention needs a non-negative window and a positive limit");
   }
-  return db.transaction().execute(async (trx) => {
+  const write = async (trx: Kysely<BindingRegistryDatabase>) => {
     const now = clock.now();
     await trx
       .updateTable("session_broker_requests")
@@ -190,7 +189,8 @@ export async function pruneTerminalRequests(
     await trx.deleteFrom("session_broker_requests").where("request_id", "in", ids).execute();
     await deleteUnreferencedTombstones(trx);
     return ids.length;
-  });
+  };
+  return db.isTransaction ? write(db) : db.transaction().execute(write);
 }
 
 /** Only receipts name destroyed resources; exports reference requests, not resources. */

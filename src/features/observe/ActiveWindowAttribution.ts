@@ -387,8 +387,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       result,
       activeWindow,
       backStackAttribution,
-      bootstrapAttribution,
-      { signal, readOnly },
+      { bootstrapAttribution, signal, readOnly },
     );
     result.activeWindow = confirmedWindow;
     // The recapture replaced the tree AFTER the focused-SystemUI check ran. A
@@ -795,8 +794,10 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
     result: ObserveResult,
     activeWindow: NonNullable<ObserveResult["activeWindow"]>,
     expected: { packageName: string; activityName: string },
-    bootstrapAttribution: boolean,
-    options: { signal?: AbortSignal; readOnly?: boolean } = {},
+    {
+      bootstrapAttribution,
+      ...options
+    }: { signal?: AbortSignal; readOnly?: boolean } & { bootstrapAttribution: boolean },
   ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
     const { signal, readOnly = false } = options;
     delete result.deviceLock;

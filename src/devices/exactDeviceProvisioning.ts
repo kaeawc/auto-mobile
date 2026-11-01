@@ -1,3 +1,4 @@
+import { enrichDeviceInfoList } from "../utils/android-cmdline-tools/avdDeviceInfoEnrichment";
 import type { SimulatorCreator } from "./SimulatorCreator";
 import type {
   ConfigurableDeviceResource,
@@ -554,11 +555,17 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     }
     return {
       created: true,
-      device: {
-        name: request.name,
-        platform: "android",
-        isRunning: false,
-      },
+      device: (
+        await enrichDeviceInfoList(this.dependencies.androidConfigReader, [
+          {
+            name: request.name,
+            platform: "android",
+            isRunning: false,
+            deviceType: spec.deviceType,
+            runtimeId: spec.runtime,
+          },
+        ])
+      )[0],
       resolvedSpec: this.withResolvedDisplayCutout(spec, displayCutout),
     };
   }

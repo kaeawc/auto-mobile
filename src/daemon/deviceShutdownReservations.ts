@@ -100,13 +100,23 @@ export class DeviceShutdownReservations {
    * session; session ownership is transferred only after readiness succeeds.
    * Android recovery exclusion defaults off because recovery handoffs reserve
    * their target while ownership transfer is still in flight.
+   *
+   * @param deviceId - The device to reserve
+   * @param expectedIdentity - The identity readiness verifies
+   * @param options.stableRuntimeName - Name bridging a serial change (defaults to the expected name)
+   * @param options.verifiedAndroidAvdName - AVD name already verified for this device
+   * @param options.autolockClient - The reserving client
+   * @param options.enforceAndroidRecoveryExclusion - Refuse a device an Android recovery targets
    */
   async reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    stableRuntimeName = expectedIdentity.name,
-    verifiedAndroidAvdName?: string,
-    { autolockClient, enforceAndroidRecoveryExclusion = false }: ReadinessReservationOptions = {},
+    {
+      stableRuntimeName = expectedIdentity.name,
+      verifiedAndroidAvdName,
+      autolockClient,
+      enforceAndroidRecoveryExclusion = false,
+    }: ReadinessReservationOptions = {},
   ): Promise<DeviceReadinessReservation> {
     // The stable-name reservation exists to bridge an Android emulator changing
     // serials across a reboot. iOS UDIDs are stable, so a name reservation there
@@ -238,8 +248,7 @@ export class DeviceShutdownReservations {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
-    assertHolder?: () => void,
-    options?: { fenceUnpooled?: boolean },
+    { assertHolder, ...options }: { assertHolder?: () => void; fenceUnpooled?: boolean } = {},
   ): Promise<ShutdownDeviceReservation | undefined> {
     if (abortSignal?.aborted) {
       throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
@@ -251,8 +260,7 @@ export class DeviceShutdownReservations {
       deviceId,
       identity,
       abortSignal,
-      autolockClient,
-      { recoveryRouteLease, assertHolder, ...options },
+      { autolockClient, recoveryRouteLease, assertHolder, ...options },
     );
     if (!expectedDevice) {
       identity.releaseSession?.();
@@ -287,8 +295,10 @@ export class DeviceShutdownReservations {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
-    autolockClient: AutolockClient | undefined,
-    options: ShutdownReservationAttempt,
+    {
+      autolockClient,
+      ...options
+    }: ShutdownReservationAttempt & { autolockClient?: AutolockClient },
   ): Promise<PooledDevice | undefined> {
     const { recoveryRouteLease } = options;
     const releaseSessionOnAbort = () => identity.releaseSession?.();
@@ -298,8 +308,7 @@ export class DeviceShutdownReservations {
         deviceId,
         identity,
         abortSignal,
-        autolockClient,
-        options,
+        { autolockClient, ...options },
       );
       if (abortSignal?.aborted) {
         if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
@@ -323,8 +332,10 @@ export class DeviceShutdownReservations {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
-    autolockClient: AutolockClient | undefined,
-    options: ShutdownReservationAttempt,
+    {
+      autolockClient,
+      ...options
+    }: ShutdownReservationAttempt & { autolockClient?: AutolockClient },
   ): Promise<{ expectedDevice?: PooledDevice; unpooledFenceToken?: symbol }> {
     const { recoveryRouteLease } = options;
     return await this.pool.withAssignmentLock(() => {

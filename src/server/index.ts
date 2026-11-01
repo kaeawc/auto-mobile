@@ -1,3 +1,5 @@
+import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
+import { registerWatchRunnerBuilder } from "../features/watch/WatchRunnerLifecycle";
 import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer, ServerCapabilities } from "@modelcontextprotocol/server";
@@ -204,6 +206,7 @@ let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefi
  * by exact tool name.
  */
 export function registerMcpTools(daemonMode: boolean): void {
+  registerWatchRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
   installDefaultProvisionedDeviceTransportFence();
   // Re-registering rebuilds every definition and drops the tool-schema cache, which a
   // stateless endpoint (one createMcpServer per request) would pay on every tools/list.
@@ -444,8 +447,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       version: getMcpServerVersion(),
     },
     sdkServerCapabilities(options.era),
-    options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
-    modernRequestState(options),
+    {
+      cacheHints: options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
+      requestState: modernRequestState(options),
+    },
   );
   startupBenchmark.endPhase("sdkInitialization");
 

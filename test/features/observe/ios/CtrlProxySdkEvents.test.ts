@@ -15,7 +15,12 @@ function createHarness(available: boolean | undefined) {
     invalidateSdkCapabilities: () => {},
   });
   const state = { available, polls: 0, navigationOnPoll: 0, logDemand: false };
-  screenIdentity.rememberSdkScreenIdentity("navigation", appId, { destination: "Home" }, 100, 1);
+  screenIdentity.rememberSdkScreenIdentity(
+    "navigation",
+    appId,
+    { destination: "Home" },
+    { timestamp: 100, sequenceNumber: 1 },
+  );
   const ingestor = new FakeIosSdkEventIngestor();
   const events = new CtrlProxySdkEvents({
     timer,
@@ -36,8 +41,7 @@ function createHarness(available: boolean | undefined) {
           "navigation",
           appId,
           { destination: "Details" },
-          200,
-          2,
+          { timestamp: 200, sequenceNumber: 2 },
         );
         rememberedApplicationIds.add(appId);
       }

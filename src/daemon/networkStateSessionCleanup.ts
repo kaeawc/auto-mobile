@@ -141,7 +141,7 @@ export function registerNetworkStateSessionCleanup(
       },
     );
   };
-  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     cleanup(sessionId, deviceId, releaseOptions);
   });
   manager.onSessionDeviceUnbound(cleanup);

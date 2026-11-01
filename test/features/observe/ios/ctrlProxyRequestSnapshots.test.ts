@@ -166,10 +166,12 @@ async function withClient(
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "snapshot-device", platform: "ios", name: "fixture" },
     8765,
-    () => {
-      throw new Error("snapshot must never open a socket");
+    {
+      wsFactory: () => {
+        throw new Error("snapshot must never open a socket");
+      },
+      timer: h.context.timer,
     },
-    h.context.timer,
   );
   client.getSdkCapabilityTestHooks().sdkCapabilityGate = async () => null;
   client.sendMessage = (data) => {
@@ -367,7 +369,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
           { x: 40.75, y: 80.5, offsetMs: 700 },
         ],
         5000,
-        "frame-42",
+        { frameContext: "frame-42" },
       ),
   },
   {
@@ -397,7 +399,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_append_text",
     builder: "CtrlProxyText.requestAppendText",
     invoke: (h) =>
-      new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, "frame-context"),
+      new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_clear_text",
@@ -436,13 +440,17 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_press_home",
     builder: "CtrlProxyNavigation.requestPressHome",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestPressHome(5000, undefined, "frame-context"),
+      new CtrlProxyNavigation(h.context).requestPressHome(5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_press_back",
     builder: "CtrlProxyNavigation.requestPressBack",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestPressBack(5000, undefined, "frame-context"),
+      new CtrlProxyNavigation(h.context).requestPressBack(5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_shake",
@@ -453,7 +461,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_recent_apps",
     builder: "CtrlProxyNavigation.requestRecentApps",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestRecentApps(5000, undefined, "frame-context"),
+      new CtrlProxyNavigation(h.context).requestRecentApps(5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_action",
@@ -479,12 +489,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_launch_app",
     builder: "CtrlProxyNavigation.requestLaunchApp",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestLaunchApp(
-        "com.example.app",
-        10000,
-        undefined,
-        true,
-      ),
+      new CtrlProxyNavigation(h.context).requestLaunchApp("com.example.app", 10000, undefined, {
+        coldBoot: true,
+      }),
   },
   {
     name: "request_rotate",
@@ -894,13 +901,9 @@ describe("iOS integer millisecond request boundary", () => {
         name: "action",
         builder: "action",
         invoke: (h) =>
-          new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
-            "Row",
-            "long_press",
-            5000,
-            undefined,
-            { duration: 250.5 },
-          ),
+          new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Row", "long_press", 5000, {
+            duration: 250.5,
+          }),
       },
       {
         name: "drag",

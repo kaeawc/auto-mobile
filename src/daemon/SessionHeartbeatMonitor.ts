@@ -126,6 +126,8 @@ const STALE_REASON_DESCRIPTION: Record<SessionHeartbeatReleaseReason, string> = 
 };
 
 export interface SessionHeartbeatMonitorConfig {
+  /** Clock for scans, grace windows and stall detection. Default: the shared system timer. */
+  timer?: Timer;
   /** How often to scan for stale sessions. Default: 2s (see `./wire/sessionLivenessWindows`). */
   checkIntervalMs?: number;
   /** Grace period before default-heartbeat sessions that never sent a heartbeat are reaped. Default: 5s. */
@@ -238,6 +240,14 @@ export class SessionHeartbeatMonitor {
    */
   private heartbeatsRefusedSince = new Map<Session, number>();
 
+  private readonly timer: Timer;
+
+  /**
+   * @param sessions - The sessions the monitor judges
+   * @param executions - In-flight execution probe for the unsettled-execution veto
+   * @param reap - Releases a stale session
+   * @param config - Clock, scan cadence, grace and stall settings
+   */
   constructor(
     private readonly sessions: HeartbeatSessionSource,
     executions: SessionExecutionProbeInput,
@@ -245,9 +255,9 @@ export class SessionHeartbeatMonitor {
       sessionId: string,
       reason: SessionHeartbeatReleaseReason,
     ) => Promise<void>,
-    private readonly timer: Timer = defaultTimer,
-    config: SessionHeartbeatMonitorConfig = {},
+    { timer = defaultTimer, ...config }: SessionHeartbeatMonitorConfig = {},
   ) {
+    this.timer = timer;
     this.checkIntervalMs = config.checkIntervalMs ?? getSessionHeartbeatCheckIntervalMs();
     this.graceMs =
       config.graceMs ??

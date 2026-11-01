@@ -363,7 +363,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
     if (samePanelAndGeometry(current, previous, platform === "ios")) {
       return false;
     }
-    this.notifyObservedTransition(deviceId, current, previous, platform, sameObservation);
+    this.notifyObservedTransition(deviceId, current, previous, { platform, sameObservation });
     this.panelRevisions.set(deviceId, this.revision(deviceId));
     if (previous.key !== current.key || previous.role !== current.role) {
       this.emitPanel(deviceId, current);
@@ -388,8 +388,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
     deviceId: string,
     current: PanelGeometry,
     previous: PanelGeometry,
-    platform: "ios" | "android",
-    sameObservation: boolean,
+    { platform, sameObservation }: { platform: "ios" | "android"; sameObservation: boolean },
   ): void {
     if (
       platform === "ios" &&

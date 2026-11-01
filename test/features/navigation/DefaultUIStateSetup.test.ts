@@ -136,7 +136,7 @@ function makeSetup(observeScreenProvider?: () => ObserveScreenLike): DefaultUISt
   // immediately — keeps these unit tests fast (<100ms) and non-flaky.
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const setup = new DefaultUIStateSetup(device, fakeAdb, observeScreenProvider, timer);
+  const setup = new DefaultUIStateSetup(device, fakeAdb, observeScreenProvider, { timer });
   fakeAdbBySetup.set(setup, fake);
   return setup;
 }
@@ -402,7 +402,7 @@ describe("DefaultUIStateSetup", () => {
       const fakeAdb = new FakeAdbClient();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const setup = new DefaultUIStateSetup(iosDevice, fakeAdb, emptyModalObserve, timer);
+      const setup = new DefaultUIStateSetup(iosDevice, fakeAdb, emptyModalObserve, { timer });
       let backArgs: Record<string, unknown> | undefined;
       ToolRegistry.register(
         "pressButton",
@@ -531,7 +531,7 @@ describe("DefaultUIStateSetup", () => {
                 return observation === "healthy" ? emptyModalHierarchy() : bottomSheetHierarchy(42);
               },
             }),
-            timer,
+            { timer },
           );
           if (path.swipe) {
             ToolRegistry.register("swipeOn", "swipeOn", z.object({}).passthrough(), async () => {

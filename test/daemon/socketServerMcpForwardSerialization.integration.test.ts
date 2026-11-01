@@ -432,7 +432,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
           }),
         }),
       });
-    const client = new DaemonClient(socketPath, 1_000, undefined, {}, { clientIdentity: null });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
 
     try {
       const result = await client.callTool("listDevices", { platform: "android" });
@@ -485,7 +488,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           await adb.getBootedAndroidDevices({ throwOnMissingAdb: true, signal }),
         listAvds: async () => [{ name: "Pixel_9", platform: "android", isRunning: false }],
       });
-      const manager = new MultiPlatformDeviceManager(adb, new UnusedSimCtl(), emulator, undefined, {
+      const manager = new MultiPlatformDeviceManager(adb, new UnusedSimCtl(), emulator, {
         timer: inventoryTimer,
       });
       server.mcpClientFactory = async () =>
@@ -503,7 +506,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
       const clients = Array.from(
         { length: 8 },
-        () => new DaemonClient(socketPath, 1_000, undefined, {}, { clientIdentity: null }),
+        () =>
+          new DaemonClient(socketPath, 1_000, undefined, {
+            recoveryOptions: {},
+            clientIdentity: null,
+          }),
       );
       try {
         await Promise.all(clients.map(async (client) => await client.connect()));
@@ -537,7 +544,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
   test("releases socket-scoped device-pool bindings when a client disconnects", async () => {
     server.mcpClientFactory = async () => new StubMcpClient({});
-    const client = new DaemonClient(socketPath, 1_000, undefined, {}, { clientIdentity: null });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
 
     await client.callTool("listDevices", { platform: "android" });
     await client.close();
@@ -572,7 +582,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
           isError: true,
         }),
       });
-    const client = new DaemonClient(socketPath, 1_000, undefined, {}, { clientIdentity: null });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
 
     try {
       const result = await client.callTool("getDeviceState", { sessionUuid });

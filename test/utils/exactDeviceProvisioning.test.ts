@@ -1,3 +1,4 @@
+import { tvConfigReader } from "../fixtures/android-tv-avd";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -311,7 +312,11 @@ describe("DefaultExactDeviceProvisioner", () => {
     expect(creationStarted).toBe(true);
     expect(result).toEqual({
       created: true,
-      device: androidImage("phone-api-36-a"),
+      device: {
+        ...androidImage("phone-api-36-a"),
+        deviceType: ANDROID_SPEC.deviceType,
+        runtimeId: ANDROID_SPEC.runtime,
+      },
       resolvedSpec: { ...ANDROID_SPEC, displayCutout: "hole_punch" },
     });
     expect(calls).toEqual([
@@ -1170,4 +1175,40 @@ test("exact creation with default none and no resources has no host effects", as
     ).created,
   ).toBe(true);
   expect(host.calls).toEqual([]);
+});
+
+test("exact Android creation returns configured metadata without booting", async () => {
+  const { reader, reads } = tvConfigReader();
+  const provisioner = new DefaultExactDeviceProvisioner({
+    listDeviceImages: async () => [],
+    isCreationAllowed: () => true,
+    avdManager: { createAvd: async () => ({ success: true, message: "created" }) },
+    androidConfigReader: reader,
+    androidConfigWriter: { setMemoryMb: async () => {} },
+    iosSimulator: {} as ExactIosSimulatorClient,
+  });
+  const result = await provisioner.provision({
+    platform: "android",
+    name: "tv",
+    spec: { runtime: "system-images;android-36;android-tv;arm64-v8a", deviceType: "tv_1080p" },
+  });
+  expect(result.device).toMatchObject({
+    deviceType: "tv_1080p",
+    apiLevel: 36,
+    osVersion: "16",
+    screenWidth: 1920,
+    screenHeight: 1080,
+    screenDensity: 320,
+    isRunning: false,
+  });
+  expect(reads).toContain(
+    join(
+      "/fixture/sdk",
+      "system-images",
+      "android-36",
+      "android-tv",
+      "arm64-v8a",
+      "source.properties",
+    ),
+  );
 });

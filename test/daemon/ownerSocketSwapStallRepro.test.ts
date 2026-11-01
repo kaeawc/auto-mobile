@@ -53,7 +53,7 @@ async function setUp(activeControl = false) {
     releases.push({ at: manager.sessionNow(), reason }),
   );
   const release = async (session: Session, reason: SessionReleaseReason) => {
-    await releaseSessionAndDevice(manager, pool, session.assignedDevice, ID, {
+    await releaseSessionAndDevice({ manager, pool }, session.assignedDevice, ID, {
       reason,
       release: () =>
         manager.releaseSession(ID, reason, {
@@ -121,8 +121,7 @@ async function setUp(activeControl = false) {
         await release(current, reason);
       }
     },
-    timer,
-    { checkIntervalMs: SCAN, heartbeatTimeoutMs: LEASE },
+    { timer, checkIntervalMs: SCAN, heartbeatTimeoutMs: LEASE },
   );
   const control = activeControl ? tracker.startExecution("tapOn", undefined, ID) : undefined;
   const settle = (ms: number) =>

@@ -91,8 +91,7 @@ export interface SessionAdmissionHost {
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
-    requireIssuedSession: boolean,
-    acquisition: ResolvedSessionAcquisition,
+    acquisition: ResolvedSessionAcquisition & { requireIssuedSession: boolean },
   ): Promise<Session>;
   preFenceIdleReleaseReason(
     sessionId: string,
@@ -271,13 +270,12 @@ export class SessionAdmission {
       });
     }
 
-    return await this.host.startOrJoinUnseenAssignment(
-      sessionId,
-      devicePool,
-      platform,
+    return await this.host.startOrJoinUnseenAssignment(sessionId, devicePool, platform, {
       requireIssuedSession,
-      { access, requestDeadlineMs, signal },
-    );
+      access,
+      requestDeadlineMs,
+      signal,
+    });
   }
 
   /**

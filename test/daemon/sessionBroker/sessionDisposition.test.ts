@@ -105,7 +105,7 @@ describe("broker session disposition", () => {
   test("real device-restart persistence stays recoverable until its window ends", async () => {
     const db = await createTestDatabase();
     const ports = rig();
-    const repository = new DeviceSessionRepository(db, ports.timer);
+    const repository = new DeviceSessionRepository({ db, timer: ports.timer });
     try {
       await repository.upsertActiveSession({
         sessionUuid: "handoff",
@@ -120,12 +120,9 @@ describe("broker session disposition", () => {
         heartbeatTimeoutMs: 60_000,
         hasReceivedHeartbeat: true,
       });
-      await repository.markReleased(
-        "handoff",
-        "released",
-        1000,
-        deviceRestartReleaseReason("Pixel_8_API_35"),
-      );
+      await repository.markReleased("handoff", "released", 1000, {
+        reason: deviceRestartReleaseReason("Pixel_8_API_35"),
+      });
       const dependencies = { ...ports, getSession: (uuid: string) => repository.getSession(uuid) };
       expect(await sessionDisposition("handoff", dependencies)).toBe("recoverable-handoff");
       ports.timer.setCurrentTime(1000 + DEFAULT_DEVICE_READY_TIMEOUT_MS);

@@ -1,3 +1,5 @@
+import { normalizeWatchHierarchy } from "../watch/WatchHierarchy";
+import { watchRunners } from "../watch/WatchRunnerRegistry";
 import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
@@ -58,8 +60,7 @@ export interface HierarchySyncClient {
     perf: PerformanceTracker,
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
-    timeoutMs: number,
-    options?: HierarchySyncRequestOptions,
+    options: HierarchySyncRequestOptions & { timeoutMs: number },
   ): Promise<SyncedHierarchy | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
   connectForObservationRead?(): Promise<boolean>;
@@ -68,8 +69,7 @@ export interface HierarchySyncClient {
     perf: PerformanceTracker,
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
-    timeoutMs: number,
-    display?: number | ObserverHierarchyRequestOptions,
+    options: { timeoutMs: number; display?: number | ObserverHierarchyRequestOptions },
   ): Promise<SyncedHierarchy | null>;
 }
 
@@ -113,25 +113,22 @@ async function requestSyncHierarchy(
   options: { timeoutMs: number; deviceId: string; owned: boolean },
 ): Promise<NonNullable<Awaited<ReturnType<HierarchySyncClient["requestHierarchySync"]>>>> {
   const diagnostics: HierarchySyncDiagnostics = {};
-  const args = [
-    new NoOpPerformanceTracker(),
-    request.searchRaw === true,
-    request.signal,
-    options.timeoutMs,
-  ] as const;
+  const args = [new NoOpPerformanceTracker(), request.searchRaw === true, request.signal] as const;
+  const { timeoutMs } = options;
   let synced: Awaited<ReturnType<HierarchySyncClient["requestHierarchySync"]>>;
   if (request.observerMode) {
     if (!client.requestHierarchySyncForObserver) {
       throw new ActionableError("Observer hierarchy read is unavailable for this client");
     }
-    synced = await client.requestHierarchySyncForObserver(
-      ...args,
-      request.preserveDisplayState
+    synced = await client.requestHierarchySyncForObserver(...args, {
+      timeoutMs,
+      display: request.preserveDisplayState
         ? { displayId: request.displayId, preserveDisplayState: true }
         : request.displayId,
-    );
+    });
   } else {
     synced = await client.requestHierarchySync(...args, {
+      timeoutMs,
       diagnostics,
       displayId: request.displayId,
     });
@@ -382,13 +379,30 @@ export function createDeviceHierarchyCapture(
   device: BootedDevice,
   dependencies: DeviceHierarchyCaptureDependencies = {},
 ): HierarchyCapture {
+  if (device.platform === "watchos") {
+    const read = async (request: HierarchyCaptureRequest) =>
+      normalizeWatchHierarchy(
+        await watchRunners.require(device.deviceId).hierarchy(request.signal),
+      );
+    // Watch wire trees use the iOS bounds/attribute projection, without routing iOS commands.
+    return new DefaultHierarchyCapture(
+      "ios",
+      {
+        readCached: read,
+        readFresh: read,
+        projectVisible: (hierarchy) => hierarchy,
+      },
+      dependencies.timer,
+      dependencies.ids,
+    );
+  }
   const platform = requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy");
   const reader = new ViewHierarchyCaptureReader(
     {
       getViewHierarchy: (queryOptions, request) => {
         const hierarchy: ViewHierarchyRequestReader =
           dependencies.viewHierarchy ??
-          new ViewHierarchy(device, dependencies.adbFactory, null, dependencies.timer);
+          new ViewHierarchy(device, dependencies.adbFactory, null, { timer: dependencies.timer });
         return hierarchy.getViewHierarchy(queryOptions, request);
       },
       filterOffscreenNodes,

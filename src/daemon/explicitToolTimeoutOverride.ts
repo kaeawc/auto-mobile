@@ -26,15 +26,13 @@ export function resolveExplicitToolTimeoutOverrideMs(
       return readOptionalEnvPositiveInteger(
         ENV.OPEN_LINK_MCP_TIMEOUT_MS.name,
         ENV.OPEN_LINK_MCP_TIMEOUT_MS.legacyName,
-        {},
-        env,
+        { env },
       );
     case "observe":
       return readOptionalEnvPositiveInteger(
         ENV.OBSERVE_MCP_TIMEOUT_MS.name,
         ENV.OBSERVE_MCP_TIMEOUT_MS.legacyName,
-        {},
-        env,
+        { env },
       );
     default:
       return undefined;

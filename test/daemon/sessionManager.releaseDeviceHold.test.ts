@@ -87,11 +87,11 @@ describe("session release device ownership hold", () => {
     const { manager, writes, timer, session } = await harness();
     manager.setReleaseDeviceHold(() => ({ skipDeviceWrites: true }));
     const options: boolean[] = [];
-    manager.onSessionRelease((_id, _device, _reason, _snapshot, releaseOptions) => {
+    manager.onSessionRelease((_id, _device, _reason, releaseOptions) => {
       options.push(releaseOptions.deviceIdentityReplaced === true);
     });
     const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
-    state.startSimulation(DEVICE, "timeout", 30, null, SESSION);
+    state.startSimulation(DEVICE, "timeout", 30, { limit: null, ownerSessionUuid: SESSION });
     registerNetworkStateSessionCleanup(manager, {
       state: () => state,
       pusher: {
@@ -224,7 +224,7 @@ describe("session release device ownership hold", () => {
       return original(...args);
     };
     const options: boolean[] = [];
-    manager.onSessionRelease((_id, _device, _reason, _snapshot, releaseOptions) => {
+    manager.onSessionRelease((_id, _device, _reason, releaseOptions) => {
       options.push(releaseOptions.deviceIdentityReplaced === true);
     });
     const release = manager.releaseSession(SESSION, "explicit-release", {

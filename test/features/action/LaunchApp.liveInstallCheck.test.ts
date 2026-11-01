@@ -42,14 +42,19 @@ describe("LaunchApp live install confirmation (#9976)", () => {
     });
 
   const createLaunchApp = (cachedApps: string[], appId: string = packageName): LaunchApp => {
-    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
-        installedApps: cachedApps,
-      }),
-      installedAppsCacheStaleMarker: {
-        markDeviceStale: async (id) => {
-          staled.push(id);
-          await staleStore.markDeviceStale(id);
+    const action = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
+          installedApps: cachedApps,
+        }),
+        installedAppsCacheStaleMarker: {
+          markDeviceStale: async (id) => {
+            staled.push(id);
+            await staleStore.markDeviceStale(id);
+          },
         },
       },
     });

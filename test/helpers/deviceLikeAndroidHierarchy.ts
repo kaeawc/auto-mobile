@@ -129,12 +129,9 @@ export async function deviceLikeAndroidHierarchy(
       return result;
     },
   };
-  const viewHierarchy = new ViewHierarchy(
-    device,
-    new FakeAdbClientFactory(adb),
-    client as never,
+  const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), client as never, {
     timer,
-  );
+  });
   return {
     timer,
     device,

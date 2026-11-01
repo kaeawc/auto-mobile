@@ -472,13 +472,10 @@ describe("UnixSocketServer input/typeText", () => {
       error: imeActionFailedAfterTextEntered("done", "enter key unavailable"),
       charsSent: 2,
     });
-    expect(requestImeAction).toHaveBeenCalledWith(
-      "done",
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000, undefined, {
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("append reports full progress when submit throws after all text lands", async () => {
@@ -508,13 +505,10 @@ describe("UnixSocketServer input/typeText", () => {
       error: imeActionFailedAfterTextEntered("done", "CtrlProxy send failed"),
       charsSent: 2,
     });
-    expect(requestImeAction).toHaveBeenCalledWith(
-      "done",
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000, undefined, {
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("append preserves full progress when submit reaches the shared deadline", async () => {
@@ -551,13 +545,10 @@ describe("UnixSocketServer input/typeText", () => {
     );
 
     await flushMicrotasks();
-    expect(requestImeAction).toHaveBeenCalledWith(
-      "done",
-      100,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestImeAction).toHaveBeenCalledWith("done", 100, undefined, {
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
     fakeTimer.advanceTime(100);
     await flushMicrotasks();
 
@@ -1241,8 +1232,9 @@ describe("UnixSocketServer input/typeText", () => {
       return {
         appendText: async (
           text: string,
-          _timeoutMs: number,
-          beforeKeyEvent?: () => Promise<{ success: boolean; error?: string }>,
+          {
+            beforeKeyEvents: beforeKeyEvent,
+          }: { beforeKeyEvents?: () => Promise<{ success: boolean; error?: string }> } = {},
         ) => {
           helperCalls++;
           validatorsReceived.push(beforeKeyEvent);
@@ -1315,12 +1307,15 @@ describe("UnixSocketServer input/typeText", () => {
         // with zero characters sent, tagged as the RUNNER's verdict.
         appendText: async (
           text: string,
-          _timeoutMs: number,
-          beforeKeyEvent?: () => Promise<{
-            success: boolean;
-            error?: string;
-            failureSource?: "runner" | "helper";
-          }>,
+          {
+            beforeKeyEvents: beforeKeyEvent,
+          }: {
+            beforeKeyEvents?: () => Promise<{
+              success: boolean;
+              error?: string;
+              failureSource?: "runner" | "helper";
+            }>;
+          } = {},
         ) => {
           if (beforeKeyEvent) {
             const validation = await beforeKeyEvent();
@@ -1393,8 +1388,9 @@ describe("UnixSocketServer input/typeText", () => {
       return {
         appendText: async (
           text: string,
-          _timeoutMs: number,
-          beforeKeyEvent?: () => Promise<{ success: boolean; error?: string }>,
+          {
+            beforeKeyEvents: beforeKeyEvent,
+          }: { beforeKeyEvents?: () => Promise<{ success: boolean; error?: string }> } = {},
         ) => {
           helperCalls++;
           validatorsReceived.push(beforeKeyEvent);
@@ -1565,13 +1561,10 @@ describe("UnixSocketServer input/typeText", () => {
       abortSignal: expect.any(AbortSignal),
       onDispatch: expect.any(Function),
     });
-    expect(requestImeAction).toHaveBeenCalledWith(
-      "done",
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000, undefined, {
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("accepts iOS append mode and uses the CtrlProxy append primitive", async () => {
@@ -1620,7 +1613,8 @@ describe("UnixSocketServer input/typeText", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(requestAppendText).toHaveBeenCalledWith("a", 30_000, undefined, "ios:7", {
+    expect(requestAppendText).toHaveBeenCalledWith("a", 30_000, undefined, {
+      frameContext: "ios:7",
       abortSignal: expect.any(AbortSignal),
       onDispatch: expect.any(Function),
     });
@@ -1998,13 +1992,10 @@ describe("UnixSocketServer input/typeText", () => {
       abortSignal: expect.any(AbortSignal),
       onDispatch: expect.any(Function),
     });
-    expect(requestImeAction).toHaveBeenCalledWith(
-      "done",
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000, undefined, {
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("charges the submit IME action against the remaining shared budget", async () => {
@@ -2054,13 +2045,10 @@ describe("UnixSocketServer input/typeText", () => {
       abortSignal: expect.any(AbortSignal),
       onDispatch: expect.any(Function),
     });
-    expect(requestImeAction).toHaveBeenCalledWith(
-      "done",
-      60,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestImeAction).toHaveBeenCalledWith("done", 60, undefined, {
+      abortSignal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("rejects missing, empty, and non-string text with actionable errors", async () => {

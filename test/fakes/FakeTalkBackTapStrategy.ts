@@ -106,8 +106,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     deviceId: string,
     element: Element,
     _driver: TalkBackNavigationDriver,
-    _fence?: DisplayFence,
-    signal?: AbortSignal,
+    { fence: _fence, signal }: { fence?: DisplayFence; signal?: AbortSignal } = {},
   ): Promise<TalkBackTapResult> {
     this.tapCalls.push({ deviceId, element, signal });
 
@@ -135,7 +134,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     { x, y }: Point,
     action: TalkBackFallbackAction,
     durationMs: number,
-    _driver: TalkBackNavigationDriver,
+    { driver: _driver }: { driver: TalkBackNavigationDriver },
   ): Promise<TalkBackTapResult> {
     this.fallbackCalls.push({ x, y, action, durationMs });
 
@@ -159,7 +158,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     { x, y }: Point,
     durationMs: number,
     element: Element,
-    _driver: TalkBackNavigationDriver,
+    { driver: _driver }: { driver: TalkBackNavigationDriver },
   ): Promise<TalkBackTapResult> {
     this.longPressCalls.push({ x, y, durationMs, element });
 

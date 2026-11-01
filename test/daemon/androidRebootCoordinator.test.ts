@@ -85,8 +85,10 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
     _avdName: string,
     _recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
-    _replacementHandoffOwner: symbol,
-    lateShutdownSettled?: Promise<unknown>,
+    {
+      replacementHandoffOwner: _replacementHandoffOwner,
+      lateShutdownSettled,
+    }: { replacementHandoffOwner: symbol; lateShutdownSettled?: Promise<unknown> },
   ): void {
     this.calls.push("finish");
     this.finishes.push({ retainRecoveryImage, lateShutdownSettled });
@@ -222,8 +224,7 @@ async function run(
     oldDevice,
     "incident",
     options,
-    new AbortController().signal,
-    () => {},
+    { signal: new AbortController().signal, retainLeaseUntil: () => {} },
   );
 }
 
@@ -256,8 +257,7 @@ describe("AndroidRebootCoordinator", () => {
       oldDevice,
       "incident",
       {},
-      signal,
-      () => {},
+      { signal, retainLeaseUntil: () => {} },
     );
     expect(port.stopSignals.length).toBe(1);
     expect(port.stopSignals[0]).toBe(signal);
@@ -274,8 +274,7 @@ describe("AndroidRebootCoordinator", () => {
         oldDevice,
         "incident",
         {},
-        controller.signal,
-        () => {},
+        { signal: controller.signal, retainLeaseUntil: () => {} },
       ),
     ).toBe(false);
     expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
@@ -294,8 +293,7 @@ describe("AndroidRebootCoordinator", () => {
         oldDevice,
         "incident",
         {},
-        controller.signal,
-        () => {},
+        { signal: controller.signal, retainLeaseUntil: () => {} },
       ),
     ).toBe(false);
     expect(port.stoppedProcesses).toEqual([spawned]);
@@ -316,9 +314,11 @@ describe("AndroidRebootCoordinator", () => {
           oldDevice,
           "incident",
           {},
-          controller.signal,
-          (settlement) => {
-            leaseSettlements.push(settlement);
+          {
+            signal: controller.signal,
+            retainLeaseUntil: (settlement) => {
+              leaseSettlements.push(settlement);
+            },
           },
         );
       return { ...harnessed, spawned, exited, leaseSettlements, cancelledRun };
@@ -424,8 +424,7 @@ describe("AndroidRebootCoordinator", () => {
         oldDevice,
         "incident",
         {},
-        controller.signal,
-        () => {},
+        { signal: controller.signal, retainLeaseUntil: () => {} },
       );
       if (cleanupFails) {
         await expect(result).rejects.toBe(failure);

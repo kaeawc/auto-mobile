@@ -1,4 +1,6 @@
 import type { DeviceClaimMirror } from "./deviceClaims";
+import { adbServerScope } from "../utils/adbServerScope";
+export { adbServerScope } from "../utils/adbServerScope";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { closeSync, linkSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -38,7 +40,6 @@ import {
   DaemonDeviceLeaseOwnerProbe,
   DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
 } from "./client/deviceLeaseOwnerQuery";
-import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 /**
  * Whether another live AutoMobile process drives a device this pool can see. Multi-device
@@ -154,42 +155,6 @@ export const DEVICE_OWNER_UNANSWERED_MIN_SAMPLES =
 
 /** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
-
-const DEFAULT_ADB_SERVER_HOST = "localhost";
-const DEFAULT_ADB_SERVER_PORT = "5037";
-const LOOPBACK_ADB_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-
-/** A file-name-safe key for one ADB server endpoint; loopback spellings share one key. */
-function tcpServerScope(host: string, port: string): string {
-  const canonicalHost = LOOPBACK_ADB_HOSTS.has(host.toLowerCase())
-    ? DEFAULT_ADB_SERVER_HOST
-    : host.toLowerCase();
-  return `tcp-${canonicalHost}-${port}`.replace(/[^A-Za-z0-9.-]/g, "_");
-}
-
-/**
- * Identifies the ADB server this process's `adb` talks to, from the variables adb itself reads:
- * `ADB_SERVER_SOCKET` (`tcp:<port>`, `tcp:<host>:<port>`, or another socket spec), else
- * `ANDROID_ADB_SERVER_ADDRESS` and `ANDROID_ADB_SERVER_PORT` (default `localhost:5037`).
- * Daemons sharing a server see the same devices, so they must share its claims (#10708).
- */
-export function adbServerScope(env: NodeJS.ProcessEnv = process.env): string {
-  const socket = readEnvRaw(AMBIENT_ENV.ADB_SERVER_SOCKET, env)?.trim();
-  if (socket) {
-    if (socket.startsWith("tcp:")) {
-      const endpoint = socket.slice("tcp:".length);
-      const separator = endpoint.lastIndexOf(":");
-      return separator < 0
-        ? tcpServerScope(DEFAULT_ADB_SERVER_HOST, endpoint)
-        : tcpServerScope(endpoint.slice(0, separator), endpoint.slice(separator + 1));
-    }
-    return `socket-${Buffer.from(socket).toString("base64url")}`;
-  }
-  return tcpServerScope(
-    readEnvRaw(AMBIENT_ENV.ANDROID_ADB_SERVER_ADDRESS, env)?.trim() || DEFAULT_ADB_SERVER_HOST,
-    readEnvRaw(AMBIENT_ENV.ANDROID_ADB_SERVER_PORT, env)?.trim() || DEFAULT_ADB_SERVER_PORT,
-  );
-}
 
 /**
  * Where a device's allocation claim lives. It is keyed by the ADB server, not by
@@ -358,8 +323,40 @@ export const watchDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   claimPath: (udid) => watchDeviceAllocationClaimPath(udid),
 };
 
+/**
+ * The scope Apple TV simulator claims live under. Like an iOS simulator, a TV
+ * belongs to the user's CoreSimulator set, so every daemon on the host contends for one claim per
+ * UDID; TVs keep their own namespace so a TV claim is never read as an iOS one.
+ */
+export const TV_SIMULATOR_CLAIM_SCOPE = "tv-simulators";
+
+/** Where an Apple TV simulator's allocation claim lives, keyed by its UDID. */
+export function tvDeviceAllocationClaimPath(
+  udid: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(
+      TV_SIMULATOR_CLAIM_SCOPE,
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
+    ctrlProxyForwardLeaseFileName(udid),
+  );
+}
+
+/** The TV file source: only the allocation claim, as for iOS simulators. */
+export const tvDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
+  ...iosDeviceOwnershipFileSource,
+  claimPath: (udid) => tvDeviceAllocationClaimPath(udid),
+};
+
 /** The clock a foreign-ownership reader runs on, and its CtrlProxy forward evidence. */
-export interface ForeignOwnershipTiming {
+export interface ForeignOwnershipOptions {
+  /** This daemon's own control socket path (defaults to the CtrlProxy forward-lease socket). */
+  ownerSocketPath?: () => string | undefined;
   timer?: Timer;
   forwardEvidence?: ForeignCtrlProxyForwardEvidence;
 }
@@ -394,16 +391,28 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private readonly timer: Timer;
   private readonly forwardEvidence: ForeignCtrlProxyForwardEvidence | undefined;
 
+  private readonly ownerSocketPath: () => string | undefined;
+
+  /**
+   * @param selfPid - This daemon's PID
+   * @param source - Lease and claim file source
+   * @param probe - Asks a recorded owner over its control socket
+   * @param options.ownerSocketPath - This daemon's own control socket path
+   * @param options.timer - Clock for refresh deadlines and the unanswered lapse
+   * @param options.forwardEvidence - Unrecorded CtrlProxy forward evidence
+   */
   constructor(
     private readonly selfPid: number = process.pid,
     private readonly source: DeviceOwnershipFileSource = defaultDeviceOwnershipFileSource,
     private readonly probe: ForwardLeaseOwnerProbe &
       Partial<ForwardLeaseRelinquishProbe> = new DaemonDeviceLeaseOwnerProbe(),
-    private readonly ownerSocketPath: () =>
-      | string
-      | undefined = getCtrlProxyForwardLeaseOwnerSocketPath,
-    { timer = defaultTimer, forwardEvidence }: ForeignOwnershipTiming = {},
+    {
+      ownerSocketPath = getCtrlProxyForwardLeaseOwnerSocketPath,
+      timer = defaultTimer,
+      forwardEvidence,
+    }: ForeignOwnershipOptions = {},
   ) {
+    this.ownerSocketPath = ownerSocketPath;
     this.timer = timer;
     this.forwardEvidence = forwardEvidence;
   }
@@ -769,7 +778,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     const startingUp =
       kind === "claim" &&
       this.timer.now() - metadata.acquiredAt < DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS;
-    if (!ownerStillHolds(report, pid, kind, deviceId, startingUp)) {
+    if (!ownerStillHolds(report, pid, kind, { deviceId, startingUp })) {
       return undefined;
     }
     return ownerReportsNoUse(report) ? { pid, idleSocketPath: metadata.socketPath } : { pid };
@@ -877,8 +886,7 @@ function ownerStillHolds(
   report: ForwardLeaseOwnerReport,
   pid: number,
   kind: "lease" | "claim",
-  deviceId: string,
-  startingUp: boolean,
+  { deviceId, startingUp }: { deviceId: string; startingUp: boolean },
 ): boolean {
   switch (report.kind) {
     case "unreachable":

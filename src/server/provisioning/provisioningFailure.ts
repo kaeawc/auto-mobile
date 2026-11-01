@@ -33,8 +33,8 @@ export async function rethrowFailedProvisionDeviceLifecycle(
   ctx: ProvisioningContext,
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
-  deviceManager: PlatformDeviceManager,
   {
+    deviceManager,
     provisioned,
     createdAvdNeverLaunched,
     creationStarted,
@@ -47,6 +47,7 @@ export async function rethrowFailedProvisionDeviceLifecycle(
     recordLifecycle,
     observedRuntimeDevice,
   }: {
+    deviceManager: PlatformDeviceManager;
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     createdAvdNeverLaunched?: boolean;
     creationStarted: boolean;
@@ -128,7 +129,8 @@ export async function rethrowFailedProvisionDeviceLifecycle(
     reason: provisionDeviceLifecycleReason(provisionFailure),
     cleanup: { status: "in_progress", reason: "readiness_timeout" },
   });
-  throw await cleanupFailedProvisionDevice(ctx, deps, createdDevice, provisionFailure, {
+  throw await cleanupFailedProvisionDevice(ctx, deps, createdDevice, {
+    provisionFailure,
     createdNeverLaunched: createdAvdNeverLaunched,
     lifecycleLease: takeLifecycleLease(),
     pendingMutationSettlement: pendingMutationSettlement,
@@ -210,8 +212,7 @@ async function deleteUndeliveredCreatedDevice(
     ctx,
     getDeviceToolsDependencies(),
     createdDevice,
-    provisionFailure,
-    { lifecycleLease, recordLifecycle, lifecycleDevice },
+    { provisionFailure, lifecycleLease, recordLifecycle, lifecycleDevice },
   );
   logger.info(
     `[DeviceTools] provisionDevice rollback of created ${createdDevice.platform} device ` +

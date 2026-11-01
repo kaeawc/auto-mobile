@@ -1,7 +1,6 @@
-import {
-  IosRunnerArtifactVerifier,
-  type IOSCtrlProxyBundleMetadata,
-} from "./IosRunnerArtifactVerifier";
+import { Mutex } from "async-mutex";
+import { IosRunnerArtifactVerifier } from "./IosRunnerArtifactVerifier";
+import { extractIosCtrlProxyBundle } from "./IosCtrlProxyBundleExtraction";
 import { errorMessage } from "../utils/describeUnknownError";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { SingleFlight } from "../utils/cache/SingleFlight";
@@ -15,7 +14,6 @@ import {
   assertHttpsAssetUrl,
   isExplicitPin,
   isPinnedVersionKnown,
-  resolveAssetVersion,
   resolveIpaUrl,
   resolvePinnedVersion,
   type RunnerSha256Target,
@@ -190,6 +188,7 @@ export class IosCtrlProxyBuilder {
    */
   private buildInFlight: Promise<CtrlProxyIosBuildResult> | null = null;
   private buildWaiters = 0;
+  private readonly derivedDataLock = new Mutex();
   private readonly buildFlights = new SingleFlight<"build", CtrlProxyIosBuildResult>();
   // Settles when the latest flight has wound down, so a flight started after every
   // waiter abandoned its predecessor never overlaps that one's remaining work.
@@ -343,7 +342,9 @@ export class IosCtrlProxyBuilder {
   /**
    * Get the .xctestrun file path
    */
-  public async getXctestrunPath(platform?: IOSCtrlProxyPlatform): Promise<string | null> {
+  public async getXctestrunPath(
+    platform?: IOSCtrlProxyPlatform | "watchSimulator",
+  ): Promise<string | null> {
     // Local discovery/prefetch follows the simulator default of build-product paths.
     platform ??= this.isLocalBuildMode() ? "simulator" : undefined;
     const cacheKey = platform || "any";
@@ -372,13 +373,18 @@ export class IosCtrlProxyBuilder {
         return null;
       }
 
-      // An empty filter preserves platform-agnostic discovery in release mode.
+      // The release-mode default remains iOS-only even when local watch products share this dir.
       const platformFilter = {
         device: "iphoneos",
         simulator: "iphonesimulator",
+        watchSimulator: "watchsimulator",
         any: "",
       }[cacheKey];
-      const candidates = xctestrunFiles.filter((file) => file.includes(platformFilter));
+      const candidates = xctestrunFiles.filter(
+        (file) =>
+          file.includes(platformFilter) &&
+          (platform === "watchSimulator" || !file.includes("watchsimulator")),
+      );
 
       if (candidates.length === 0) {
         return null;
@@ -768,19 +774,26 @@ export class IosCtrlProxyBuilder {
     return IosCtrlProxyBuilder.prefetcher.getError();
   }
 
+  /** Serializes shared derived-data mutations; callers must not acquire it recursively. */
+  public async runExclusiveOnDerivedData<T>(task: () => Promise<T>): Promise<T> {
+    return this.derivedDataLock.runExclusive(task);
+  }
+
   /**
    * Clean up build artifacts
    */
   public async cleanBuildArtifacts(): Promise<void> {
-    try {
-      await fs.rm(this.config.derivedDataPath, { recursive: true, force: true });
-      this.cachedBuildProductsPath.clear();
-      this.cachedXctestrunPath.clear();
-      this.artifactVerifier.clearAppBundleHashes();
-      logger.info("[IOSCtrlProxyBuilder] Build artifacts cleaned up");
-    } catch (error) {
-      logger.warn("[IOSCtrlProxyBuilder] Failed to clean build artifacts:", error);
-    }
+    await this.runExclusiveOnDerivedData(async () => {
+      try {
+        await fs.rm(this.config.derivedDataPath, { recursive: true, force: true });
+        this.cachedBuildProductsPath.clear();
+        this.cachedXctestrunPath.clear();
+        this.artifactVerifier.clearAppBundleHashes();
+        logger.info("[IOSCtrlProxyBuilder] Build artifacts cleaned up");
+      } catch (error) {
+        logger.warn("[IOSCtrlProxyBuilder] Failed to clean build artifacts:", error);
+      }
+    });
   }
 
   /**
@@ -938,43 +951,13 @@ export class IosCtrlProxyBuilder {
   }
 
   private async extractBundle(bundlePath: string, localOverridePath: string | null): Promise<void> {
-    // A re-extract replaces the runner binary, so drop any local-build-mode pin
-    // (#5561) BEFORE re-extraction — the post-extract verify a few lines down
-    // re-derives it. Clearing here (not after extract) is essential: the pin is
-    // set inside verifyExtractedArtifacts() below, so clearing post-extract would
-    // erase the fresh pin and make the next pre-launch wrongly store-and-trust.
-    this.artifactVerifier.clearLocalRunnerPins();
-    // Fail closed before wiping/repopulating the tree if it is owned by another
-    // uid — extracting into a directory we do not own reopens the TOCTOU window
-    // this hardening closes (issue #4759).
-    await this.artifactVerifier.assertDerivedDataDirOwnedByCurrentUid();
-    // The extracted tree is about to be replaced. A later failure must not leave
-    // the previous release's metadata describing a different runner on disk.
-    await fs.rm(this.artifactVerifier.getMetadataPath(), { force: true });
-    await this.downloader.extractBundle(bundlePath, this.config.derivedDataPath);
-    // Authoritatively restrict the extraction tree to owner-only (0o700),
-    // independent of the downloader implementation: the runner is launched from
-    // here, so other uids must not be able to read or swap its binaries (#4759).
-    await ensureSecureDir(this.config.derivedDataPath);
-    await this.normalizeExtractedBundle();
-    await this.artifactVerifier.verifyExtractedArtifacts();
-
-    const appHashes = await this.artifactVerifier.computeAppHashes();
-    const checksum = this.artifactVerifier.getExpectedChecksum();
-    const metadata: IOSCtrlProxyBundleMetadata = {
-      checksum: checksum || null,
-      version: localOverridePath
-        ? checksum
-          ? `local-override:${checksum.slice(0, 12)}`
-          : `local-override:${path.basename(localOverridePath)}`
-        : resolveAssetVersion(resolvePinnedVersion()),
-      extractedAt: new Date().toISOString(),
-      appHashes,
-    };
-    await fs.writeFile(
-      this.artifactVerifier.getMetadataPath(),
-      JSON.stringify(metadata, null, 2),
-      "utf-8",
+    await this.runExclusiveOnDerivedData(() =>
+      extractIosCtrlProxyBundle(bundlePath, localOverridePath, {
+        derivedDataPath: this.config.derivedDataPath,
+        downloader: this.downloader,
+        artifactVerifier: this.artifactVerifier,
+        normalizeExtractedBundle: () => this.normalizeExtractedBundle(),
+      }),
     );
   }
 

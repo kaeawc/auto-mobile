@@ -125,13 +125,10 @@ describe("launched daemon identity readiness", () => {
   test("keeps polling past the predecessor until the child answers", async () => {
     const { readiness, client, timer } = harness();
     client.response = { pid: 100, startedAt: 10, version: "old" };
-    const pending = readiness.waitForReady(
-      1000,
-      new AbortController().signal,
-      undefined,
-      undefined,
-      { pid: 200 },
-    );
+    const pending = readiness.waitForReady(1000, {
+      signal: new AbortController().signal,
+      launchedProcess: { pid: 200 },
+    });
     for (let turn = 0; turn < 30; turn++) {
       await Promise.resolve();
     }

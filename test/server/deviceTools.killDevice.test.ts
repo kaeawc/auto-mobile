@@ -1,3 +1,5 @@
+import { createHostEmulatorProcessStopper } from "../../src/devices/hostEmulatorProcessStopper";
+import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { shutdownDevice } from "../../src/server/deviceToolsShutdown";
 import { getDeviceToolsDependencies } from "../../src/features/deviceLifecycle/deviceLifecycleCore";
@@ -846,11 +848,8 @@ describe("killDevice handler", () => {
    */
   const callKillDeviceAsItsHolder = () => {
     const tool = ToolRegistry.getRegisteredTool("killDevice")!;
-    ToolRegistry.register(
-      "killDevice",
-      tool.description,
-      tool.schema,
-      (args, progress, signal) => {
+    ToolRegistry.register("killDevice", tool.description, tool.schema, {
+      handler: (args, progress, signal) => {
         const deviceId = (args as { device?: { deviceId?: string } }).device?.deviceId;
         const holder =
           deviceId && DaemonState.getInstance().isInitialized()
@@ -858,8 +857,9 @@ describe("killDevice handler", () => {
             : null;
         return tool.handler(holder ? { ...args, sessionUuid: holder } : args, progress, signal);
       },
-      { defaultEnabled: true, transportRecovery: "connect" },
-    );
+      defaultEnabled: true,
+      transportRecovery: "connect",
+    });
   };
 
   const cleanup = () => {
@@ -1205,8 +1205,11 @@ describe("killDevice handler", () => {
         unknownEmulator,
         { avdName: "Pixel_8_Old", incarnation: entry.incarnation },
         pool,
-        async () => undefined,
-        { budget: { timer: new FakeTimer(), deadlineMs: 30_000 }, force: false },
+        {
+          resolveRunningAvdName: async () => undefined,
+          budget: { timer: new FakeTimer(), deadlineMs: 30_000 },
+          force: false,
+        },
       );
       expect(confirmation.kind).toBe("refusal");
       if (confirmation.kind !== "refusal") {
@@ -1395,10 +1398,8 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });
 
-    // The probe borrows the kill's deadline. When that deadline is already spent
-    // by the time verification runs, there is no budget to probe with and no way
-    // to identify the target, so the refusal is immediate and the console is
-    // never contacted (#6863 review).
+    // The platform-resolution bound catches the spent deadline first, still
+    // refusing before any probe or kill (#16169).
     test("refuses without probing when the kill deadline is already spent", async () => {
       manager = new SuccessfulKillDeviceManager();
       const timer = new DeadlineSpendingFakeTimer();
@@ -1408,7 +1409,7 @@ describe("killDevice handler", () => {
       timer.spendDeadlineOnNextRead();
 
       await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
-        /did not answer/,
+        /to resolve platform/,
       );
       expect(runtimeAvdNameProbes).toEqual([]);
       expect(manager.killedDeviceIds).toEqual([]);
@@ -3852,18 +3853,14 @@ describe("killDevice handler", () => {
     });
     let socketCreations = 0;
     const iosManager = new FakeIOSCtrlProxyManager(timer);
-    const client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      (url) => {
+    const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: (url) => {
         socketCreations++;
         return new FakeWebSocket(url, "none", 0, timer);
       },
       timer,
-      {
-        serviceManagerFactory: () => iosManager,
-      },
-    );
+      serviceManagerFactory: () => iosManager,
+    });
     IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       stop: async () => {},
@@ -5543,6 +5540,83 @@ describe("killDevice handler", () => {
 
     expect("error" in outcome).toBe(true);
     expect(String((outcome as { error: unknown }).error)).toContain("attached to adb");
+    expect(adb.getExecutedArgv().filter((args) => args.includes("kill"))).toEqual([]);
+    expect(pool.getDevice(image.deviceId!)).toBe(pooled);
+    expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBe(sessionUuid);
+    expect(registry.getByUuid(sessionUuid!)).toBeDefined();
+  });
+
+  test("persistent unreadable shutdown snapshots preserve the pool entry and session", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const executor = new FakeHostCommandExecutor();
+    let reads = 0;
+    executor.executeCommand = async () => {
+      reads++;
+      throw Object.assign(new Error("ps timed out"), {
+        killed: true,
+        signal: "SIGTERM",
+        code: null,
+      });
+    };
+    const stopper = createHostEmulatorProcessStopper({ executor, timer, platform: "darwin" });
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([]);
+    adb.setDeviceStates([]);
+    const offlineManager = new RealAndroidClientKillDeviceManager(
+      new AndroidEmulatorClient({ timer, adbFactory: new FakeAdbClientFactory(adb) }),
+    );
+    manager = offlineManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => offlineManager,
+      androidEmulatorProcessStopper: stopper,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    offlineManager.setDeviceImages("android", [image]);
+    const { pool, registry } = createRegistryWiredDevicePool(
+      sessionManager,
+      timer,
+      new FakeInstalledAppsRepository(),
+      offlineManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const pooled = pool.getDevice(image.deviceId!);
+    expect(pooled).not.toBeNull();
+    const sessionUuid = registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid;
+    expect(sessionUuid).toBeDefined();
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const outcome = await tool
+      .handler({ device: { name: image.name, platform: "android", deviceId: image.deviceId! } })
+      .then(
+        (response) => ({ response }),
+        (error: unknown) => ({ error }),
+      );
+
+    expect("error" in outcome).toBe(true);
+    expect(String((outcome as { error: unknown }).error)).toContain(
+      "host process table could not be read",
+    );
+    expect(reads).toBeGreaterThanOrEqual(2);
+    expect(reads).toBeLessThanOrEqual(4);
     expect(adb.getExecutedArgv().filter((args) => args.includes("kill"))).toEqual([]);
     expect(pool.getDevice(image.deviceId!)).toBe(pooled);
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBe(sessionUuid);

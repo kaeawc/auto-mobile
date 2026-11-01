@@ -25,7 +25,7 @@ describe("tool-selection-profile provenance — real daemon-restart durability",
       const dir = before.dir;
       try {
         const dbBefore = before.module.getDatabase() as Kysely<Database>;
-        const repoBefore = new ToolSelectionProfileProvenanceRepository(dbBefore);
+        const repoBefore = new ToolSelectionProfileProvenanceRepository({ db: dbBefore });
         const registryBefore = new PersistentToolSelectionProfileRegistry(repoBefore);
 
         // Write-through directly on the repository (not the fire-and-forget
@@ -51,7 +51,7 @@ describe("tool-selection-profile provenance — real daemon-restart durability",
         expect(after.getDatabasePath().startsWith(dir)).toBe(true);
 
         const dbAfter = after.getDatabase() as Kysely<Database>;
-        const repoAfter = new ToolSelectionProfileProvenanceRepository(dbAfter);
+        const repoAfter = new ToolSelectionProfileProvenanceRepository({ db: dbAfter });
         const registryAfter = new PersistentToolSelectionProfileRegistry(repoAfter);
 
         // Before load(): a fresh in-memory registry recognizes nothing yet.

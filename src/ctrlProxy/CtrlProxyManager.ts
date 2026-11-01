@@ -53,7 +53,10 @@ import { accessibilityDetector } from "./accessibility/AccessibilityDetector";
 import type { AccessibilityDetector } from "./accessibility/interfaces/AccessibilityDetector";
 import { AndroidCtrlProxyAccessibility } from "./AndroidCtrlProxyAccessibility";
 import { AndroidCtrlProxyApkInstaller } from "./AndroidCtrlProxyApkInstaller";
-import { AndroidCtrlProxyCompatibility } from "./AndroidCtrlProxyCompatibility";
+import {
+  AndroidCtrlProxyCompatibility,
+  type ApkInstallFlags,
+} from "./AndroidCtrlProxyCompatibility";
 import type {
   AccessibilityVersionCheckOptions,
   AccessibilityVersionCheckResult,
@@ -156,14 +159,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       uninstallLegacyPackageIfPresent: (guardOwnership) =>
         this.uninstallLegacyPackageIfPresent(guardOwnership),
       downloadApk: () => this.downloadApk(),
-      installDownloadedApk: (apkPath, result, isInstalled, needsReinstallDueToUnknownSha, perf) =>
-        this.installDownloadedApk(
-          apkPath,
-          result,
-          isInstalled,
-          needsReinstallDueToUnknownSha,
-          perf,
-        ),
+      installDownloadedApk: (apkPath, result, isInstalled, flags) =>
+        this.installDownloadedApk(apkPath, result, isInstalled, flags),
       statusInspectionDeviceError: (error) => this.statusInspectionDeviceError(error),
       cleanupApk: (apkPath) => this.cleanupApk(apkPath),
       createKnownPinMismatchError: (expectedSha, installedSha) =>
@@ -175,7 +172,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         AndroidCtrlProxyManager.consumeCompletedPrefetchedApk(destinationPath),
       clearAvailabilityCache: () => this.clearAvailabilityCache(),
       executeApkStage: (command, stage) => this.executeApkStage(command, stage),
-      grantLocalNetworkAfterInstall: () => this.grantLocalNetworkAfterInstall(),
+      grantPostInstallPermissions: () => this.grantPostInstallPermissions(),
       install: (apkPath) => this.install(apkPath),
       enable: () => this.enable(),
       get savedPrototypes() {
@@ -215,6 +212,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         return manager.timer;
       },
       executeApkStage: (command, stage) => this.executeApkStage(command, stage),
+      grantPostInstallPermissions: () => this.grantPostInstallPermissions(),
       grantLocalNetworkAfterInstall: () => this.grantLocalNetworkAfterInstall(),
       statusInspectionDeviceError: (error) => this.statusInspectionDeviceError(error),
       getApiLevel: () => this.getApiLevel(),
@@ -303,9 +301,15 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private constructor(
     device: BootedDevice,
     adb: AdbExecutor,
-    timer: Timer = defaultTimer,
-    fileDownloader: FileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
-    checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
+    {
+      timer = defaultTimer,
+      fileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
+      checksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
+    }: {
+      timer?: Timer;
+      fileDownloader?: FileDownloader;
+      checksumCalculator?: ChecksumCalculator;
+    } = {},
   ) {
     this.device = device;
     this.adb = adb;
@@ -361,12 +365,18 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   public static createForTestingWithDeps(
     device: BootedDevice,
     adb: AdbExecutor,
-    timer: Timer = defaultTimer,
-    fileDownloader: FileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
-    checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
+    {
+      timer = defaultTimer,
+      fileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
+      checksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
+    }: {
+      timer?: Timer;
+      fileDownloader?: FileDownloader;
+      checksumCalculator?: ChecksumCalculator;
+    } = {},
   ): AndroidCtrlProxyManager {
     requireBootedDevice(device, "AndroidCtrlProxyManager.createForTestingWithDeps");
-    return new AndroidCtrlProxyManager(device, adb, timer, fileDownloader, checksumCalculator);
+    return new AndroidCtrlProxyManager(device, adb, { timer, fileDownloader, checksumCalculator });
   }
 
   /**
@@ -661,18 +671,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     apkPath: string,
     result: AccessibilityVersionCheckResult,
     isInstalled: boolean,
-    needsReinstallDueToUnknownSha: boolean,
-    perf: PerformanceTracker,
+    flags: ApkInstallFlags,
   ): Promise<AccessibilityVersionCheckResult> {
     await this.foreignForwardGuardContext.run(false, () => this.assertNotDrivenByOtherDaemon());
     return this.foreignForwardGuardContext.run(true, () =>
-      this.installDownloadedApkGuarded(
-        apkPath,
-        result,
-        isInstalled,
-        needsReinstallDueToUnknownSha,
-        perf,
-      ),
+      this.installDownloadedApkGuarded(apkPath, result, isInstalled, flags),
     );
   }
 
@@ -681,16 +684,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     apkPath: string,
     result: AccessibilityVersionCheckResult,
     isInstalled: boolean,
-    needsReinstallDueToUnknownSha: boolean,
-    perf: PerformanceTracker,
+    flags: ApkInstallFlags,
   ): Promise<AccessibilityVersionCheckResult> {
-    return this.compatibility.installDownloadedApkGuarded(
-      apkPath,
-      result,
-      isInstalled,
-      needsReinstallDueToUnknownSha,
-      perf,
-    );
+    return this.compatibility.installDownloadedApkGuarded(apkPath, result, isInstalled, flags);
   }
 
   /**
@@ -714,6 +710,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   async install(apkPath: string): Promise<void> {
     return this.apkInstaller.install(apkPath);
+  }
+
+  private async grantPostInstallPermissions(): Promise<void> {
+    return this.apkInstaller.grantPostInstallPermissions();
   }
 
   private async grantLocalNetworkAfterInstall(): Promise<void> {

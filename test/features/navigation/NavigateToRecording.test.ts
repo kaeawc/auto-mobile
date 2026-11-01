@@ -31,7 +31,7 @@ describe("NavigateTo replay through navigation recording", () => {
 
   beforeAll(async () => {
     harness = await installInMemoryNavManager();
-    repository = new NavigationRepository(harness.db);
+    repository = new NavigationRepository({ db: harness.db });
     const cache = spyOn(RealObserveScreen, "getRecentCachedResult").mockReturnValue(undefined);
     const deviceCache = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue(
       undefined,
@@ -66,17 +66,19 @@ describe("NavigateTo replay through navigation recording", () => {
         selector: z.object({ elementId: z.string().optional(), text: z.string().optional() }),
         action: z.string().optional(),
       }),
-      async (_device, args) => {
-        dispatchedArgs.push(args);
-        reportToolDispatched();
-        await navigate(
-          args.selector.elementId === "demo_index_back"
-            ? "HomeDestination"
-            : "DemoIndexDestination",
-        );
-        return { success: true };
+      {
+        handler: async (_device, args) => {
+          dispatchedArgs.push(args);
+          reportToolDispatched();
+          await navigate(
+            args.selector.elementId === "demo_index_back"
+              ? "HomeDestination"
+              : "DemoIndexDestination",
+          );
+          return { success: true };
+        },
+        recordsNavigation: true,
       },
-      { recordsNavigation: true },
     );
   });
 
@@ -84,11 +86,10 @@ describe("NavigateTo replay through navigation recording", () => {
     await repository.clearAppGraph(APP);
     timer = new FakeTimer();
     timer.setCurrentTime(100_000);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
-    );
+    });
     NavigationGraphManager.setInstanceForTesting(manager);
     dispatchedArgs = [];
     await navigate("HomeDestination");

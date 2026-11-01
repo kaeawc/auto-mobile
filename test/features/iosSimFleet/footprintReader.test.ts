@@ -225,8 +225,7 @@ describe("a slow top no longer fails the capacity sample (#15307)", () => {
       executor,
       timer,
       { totalMemoryBytes: () => 128 * 1024 ** 3, cpuCount: () => 16, loadAverage1m: () => 1 },
-      new FakeSimctl(),
-      new CachedFootprintReader(executor, timer),
+      { simctl: new FakeSimctl(), footprintReader: new CachedFootprintReader(executor, timer) },
     );
     const collector = new IosSimFleetCostCollector(
       { readHostSnapshot: (o) => source.readHostSnapshot(o), readInventory: async () => BOOTED },

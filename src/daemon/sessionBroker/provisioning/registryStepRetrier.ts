@@ -41,8 +41,7 @@ export class RegistryStepRetrier {
     what: string,
     deadline: number,
     step: () => Promise<T>,
-    stopWhen?: () => boolean,
-    schedule?: { fastRecovery: true },
+    { stopWhen, schedule }: { stopWhen?: () => boolean; schedule?: { fastRecovery: true } } = {},
   ): Promise<{ done: true; value: T } | { done: false }> {
     if (schedule?.fastRecovery) {
       return this.runRecovery(what, step);

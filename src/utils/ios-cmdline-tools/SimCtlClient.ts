@@ -16,6 +16,7 @@ import {
   launchEnvironment,
   SimCtl,
   execAsync,
+  type SimctlExecAsync,
   defaultSpawnProcess,
   splitCommandArgs,
   SimulatorList,
@@ -186,13 +187,7 @@ export class SimCtlClient implements SimCtl {
   private readonly deviceTypeProfiles: SimulatorDeviceTypeProfileSource;
   private readonly hostArchitecture = process.arch;
   device: BootedDevice | null;
-  execAsync: (
-    file: string,
-    args: string[],
-    maxBuffer?: number,
-    signal?: AbortSignal,
-    env?: NodeJS.ProcessEnv,
-  ) => Promise<ExecResult>;
+  execAsync: SimctlExecAsync;
   private timer: Timer;
   private platform: NodeJS.Platform;
   private readonly plist: PlistReader;
@@ -223,15 +218,7 @@ export class SimCtlClient implements SimCtl {
    */
   constructor(
     device: BootedDevice | null = null,
-    execAsyncFn:
-      | ((
-          file: string,
-          args: string[],
-          maxBuffer?: number,
-          signal?: AbortSignal,
-          env?: NodeJS.ProcessEnv,
-        ) => Promise<ExecResult>)
-      | null = null,
+    execAsyncFn: SimctlExecAsync | null = null,
     dependencies: SimCtlClientDependencies = {},
   ) {
     const {
@@ -373,8 +360,8 @@ export class SimCtlClient implements SimCtl {
       try {
         // Pass env only when set, so existing exec fakes see an unchanged call shape.
         return env === undefined
-          ? await this.execAsync("xcrun", localArgs, undefined, signal)
-          : await this.execAsync("xcrun", localArgs, undefined, signal, env);
+          ? await this.execAsync("xcrun", localArgs, { signal })
+          : await this.execAsync("xcrun", localArgs, { signal, env });
       } catch (error) {
         const tokenIndex = args.indexOf("--automobile-mutation-token");
         const token = tokenIndex >= 0 ? args[tokenIndex + 1] : undefined;
@@ -491,7 +478,7 @@ export class SimCtlClient implements SimCtl {
     const signal = options?.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
-    const probe = this.execAsync("xcrun", ["--find", "simctl"], undefined, signal);
+    const probe = this.execAsync("xcrun", ["--find", "simctl"], { signal });
     try {
       return await raceWithDeadline(
         probe.then(
@@ -597,12 +584,9 @@ export class SimCtlClient implements SimCtl {
     signal: AbortSignal | undefined,
     expectedOwnerToken?: object,
   ): Promise<void> {
-    return this.simCtlShutdown.shutdownSimulatorCoordinated(
-      udid,
-      timeoutMs,
-      signal,
+    return this.simCtlShutdown.shutdownSimulatorCoordinated(udid, timeoutMs, signal, {
       expectedOwnerToken,
-    );
+    });
   }
 
   killSimulator(
@@ -926,7 +910,7 @@ export class SimCtlClient implements SimCtl {
     const result = await this.executeCommandArgs(["io", deviceId, "enumerate"], timeoutMs, signal);
     return parseSimulatorDisplays(result.stdout);
   }
-  screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+  screenshot(deviceId: string, display?: string, signal?: AbortSignal): Promise<Buffer> {
     return this.simCtlScreenshot.screenshot(deviceId, display, signal);
   }
 
@@ -985,7 +969,7 @@ export class SimCtlClient implements SimCtl {
     // Direct `open`/`osascript` bypass the executeCommandArgv funnel, so give
     // them their own ambient leaves (see PerfContext).
     await trackAmbient("open -a Simulator", () =>
-      this.execAsync("open", ["-a", "Simulator"], undefined, signal),
+      this.execAsync("open", ["-a", "Simulator"], { signal }),
     );
     // The start presenter already limits this to one call per boot. `open -a`
     // presents the app; activating it again would steal focus a second time.
@@ -1047,7 +1031,7 @@ export class SimCtlClient implements SimCtl {
       // Direct launchctl (not a simctl subcommand), so it bypasses the
       // executeCommandArgv funnel; give it its own ambient leaf (see PerfContext).
       const result = await trackAmbient("launchctl managername", () =>
-        this.execAsync("launchctl", ["managername"], undefined, signal),
+        this.execAsync("launchctl", ["managername"], { signal }),
       );
       const managerName = (result.stdout || "").trim();
       // "Aqua" is the GUI login session manager; "System"/"Background" are not.

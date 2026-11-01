@@ -76,13 +76,11 @@ test("projection stamp takes precedence even in a selector without a device flag
 });
 
 test("observe identification projects an unstamped Duo tree with the device flag", () => {
-  const snapshot = identifyObservedHierarchy(
-    "ios",
-    issue8379SelectionHierarchy(),
-    "cached-ok",
-    new FakeTimer(),
-    { ids: new FakeIdGenerator(), iosMultiPanel: true },
-  );
+  const snapshot = identifyObservedHierarchy("ios", issue8379SelectionHierarchy(), "cached-ok", {
+    timer: new FakeTimer(),
+    ids: new FakeIdGenerator(),
+    iosMultiPanel: true,
+  });
   expect({
     width: snapshot.hierarchy.screenWidth,
     height: snapshot.hierarchy.screenHeight,

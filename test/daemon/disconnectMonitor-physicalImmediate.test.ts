@@ -34,29 +34,40 @@ describe("isPhysicalAndroidUsbSerial", () => {
 describe("selectImmediateDisconnectCandidates", () => {
   test("selects only absent, non-offline physical USB Android candidates", () => {
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), new Set()),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: new Set(),
+      }),
     ).toEqual(new Set([PHONE]));
   });
 
   test("selects nothing for a present or ADB-offline phone", () => {
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set([PHONE]), new Set()),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set([PHONE]), {
+        listedNonDeviceIds: new Set(),
+      }),
     ).toEqual(new Set());
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), new Set([PHONE])),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: new Set([PHONE]),
+      }),
     ).toEqual(new Set());
   });
 
   test("skips a phone whose adbd AutoMobile is restarting", () => {
     const restarting = { isRestarting: (id: string) => id === PHONE };
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), new Set(), restarting),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: new Set(),
+        transportRestarts: restarting,
+      }),
     ).toEqual(new Set());
   });
 
   test("selects nothing when the offline probe result is unknown", () => {
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), undefined),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: undefined,
+      }),
     ).toEqual(new Set());
   });
 });

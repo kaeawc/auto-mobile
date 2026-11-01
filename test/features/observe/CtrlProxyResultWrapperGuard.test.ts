@@ -146,13 +146,11 @@ describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#1047
   test.each(iosCases)("iOS %s rejects with the guard error", async (_name, call) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    ios = IOSCtrlProxyClient.createForTesting(
-      iosDevice,
-      8765,
-      (url) => defaultWebSocketFactory(url),
+    ios = IOSCtrlProxyClient.createForTesting(iosDevice, 8765, {
+      wsFactory: (url) => defaultWebSocketFactory(url),
       timer,
-      { serviceManagerFactory: () => createIosManager(timer) },
-    );
+      serviceManagerFactory: () => createIosManager(timer),
+    });
     await expect(call(ios)).rejects.toBeInstanceOf(RealCtrlProxyWebSocketInTestError);
   });
 });

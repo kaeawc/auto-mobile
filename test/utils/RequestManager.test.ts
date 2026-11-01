@@ -19,13 +19,13 @@ describe("RequestManager", () => {
   test("records when a request was last registered or settled (#10497)", async () => {
     expect(manager.getLastActivityAt()).toBeUndefined();
     fakeTimer.setCurrentTime(1_000);
-    const pending = manager.register("a", "hierarchy", 5_000, () => null);
+    const pending = manager.register("a", "hierarchy", 5_000, { timeoutErrorFactory: () => null });
     expect(manager.getLastActivityAt()).toBe(1_000);
     fakeTimer.setCurrentTime(3_000);
     manager.resolve("a", { ok: true });
     await pending;
     expect(manager.getLastActivityAt()).toBe(3_000);
-    const timedOut = manager.register("b", "hierarchy", 100, () => null);
+    const timedOut = manager.register("b", "hierarchy", 100, { timeoutErrorFactory: () => null });
     fakeTimer.advanceTime(100);
     await timedOut;
     expect(manager.getLastActivityAt()).toBe(3_100);
@@ -33,15 +33,12 @@ describe("RequestManager", () => {
 
   test("throwing response error factory rejects and clears the waiter", async () => {
     const failure = new Error("factory failed");
-    const promise = manager.register(
-      "throwing",
-      "prototype_result",
-      50,
-      () => null,
-      () => {
+    const promise = manager.register("throwing", "prototype_result", 50, {
+      timeoutErrorFactory: () => null,
+      responseErrorFactory: () => {
         throw failure;
       },
-    );
+    });
     expect(manager.resolveError("throwing", "device failed")).toBe(true);
     await expect(promise).rejects.toBe(failure);
     expect(manager.getPendingCount()).toBe(0);
@@ -66,9 +63,11 @@ describe("RequestManager", () => {
 
   test("should register and resolve requests", async () => {
     const id = manager.generateId("test");
-    const promise = manager.register<{ success: boolean }>(id, "test", 5000, () => ({
-      success: false,
-    }));
+    const promise = manager.register<{ success: boolean }>(id, "test", 5000, {
+      timeoutErrorFactory: () => ({
+        success: false,
+      }),
+    });
 
     expect(manager.isPending(id)).toBe(true);
     expect(manager.getPendingCount()).toBe(1);
@@ -86,12 +85,12 @@ describe("RequestManager", () => {
 
   test("should timeout requests after specified duration", async () => {
     const id = manager.generateId("test");
-    const promise = manager.register<{ success: boolean; error?: string }>(
-      id,
-      "test",
-      1000,
-      (_id, _type, timeoutMs) => ({ success: false, error: `Timeout after ${timeoutMs}ms` }),
-    );
+    const promise = manager.register<{ success: boolean; error?: string }>(id, "test", 1000, {
+      timeoutErrorFactory: (_id, _type, timeoutMs) => ({
+        success: false,
+        error: `Timeout after ${timeoutMs}ms`,
+      }),
+    });
 
     expect(manager.isPending(id)).toBe(true);
 
@@ -107,9 +106,11 @@ describe("RequestManager", () => {
 
   test("should cancel timeout when request is resolved", async () => {
     const id = manager.generateId("test");
-    const promise = manager.register<{ success: boolean }>(id, "test", 5000, () => ({
-      success: false,
-    }));
+    const promise = manager.register<{ success: boolean }>(id, "test", 5000, {
+      timeoutErrorFactory: () => ({
+        success: false,
+      }),
+    });
 
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 
@@ -128,15 +129,21 @@ describe("RequestManager", () => {
     const id2 = manager.generateId("screenshot");
     const id3 = manager.generateId("screenshot");
 
-    const promise1 = manager.register<{ id: string }>(id1, "screenshot", 5000, () => ({
-      id: "timeout",
-    }));
-    const promise2 = manager.register<{ id: string }>(id2, "screenshot", 5000, () => ({
-      id: "timeout",
-    }));
-    const promise3 = manager.register<{ id: string }>(id3, "screenshot", 5000, () => ({
-      id: "timeout",
-    }));
+    const promise1 = manager.register<{ id: string }>(id1, "screenshot", 5000, {
+      timeoutErrorFactory: () => ({
+        id: "timeout",
+      }),
+    });
+    const promise2 = manager.register<{ id: string }>(id2, "screenshot", 5000, {
+      timeoutErrorFactory: () => ({
+        id: "timeout",
+      }),
+    });
+    const promise3 = manager.register<{ id: string }>(id3, "screenshot", 5000, {
+      timeoutErrorFactory: () => ({
+        id: "timeout",
+      }),
+    });
 
     expect(manager.getPendingCount()).toBe(3);
 
@@ -159,9 +166,11 @@ describe("RequestManager", () => {
 
   test("should reject requests", async () => {
     const id = manager.generateId("test");
-    const promise = manager.register<{ success: boolean }>(id, "test", 5000, () => ({
-      success: false,
-    }));
+    const promise = manager.register<{ success: boolean }>(id, "test", 5000, {
+      timeoutErrorFactory: () => ({
+        success: false,
+      }),
+    });
 
     const rejected = manager.reject(id, new Error("Test error"));
     expect(rejected).toBe(true);
@@ -174,12 +183,16 @@ describe("RequestManager", () => {
     const id1 = manager.generateId("test1");
     const id2 = manager.generateId("test2");
 
-    const promise1 = manager.register<{ success: boolean }>(id1, "test1", 5000, () => ({
-      success: false,
-    }));
-    const promise2 = manager.register<{ success: boolean }>(id2, "test2", 5000, () => ({
-      success: false,
-    }));
+    const promise1 = manager.register<{ success: boolean }>(id1, "test1", 5000, {
+      timeoutErrorFactory: () => ({
+        success: false,
+      }),
+    });
+    const promise2 = manager.register<{ success: boolean }>(id2, "test2", 5000, {
+      timeoutErrorFactory: () => ({
+        success: false,
+      }),
+    });
 
     expect(manager.getPendingCount()).toBe(2);
 
@@ -195,8 +208,8 @@ describe("RequestManager", () => {
     const id1 = manager.generateId("test1");
     const id2 = manager.generateId("test2");
 
-    void manager.register(id1, "test1", 5000, () => ({}));
-    void manager.register(id2, "test2", 5000, () => ({}));
+    void manager.register(id1, "test1", 5000, { timeoutErrorFactory: () => ({}) });
+    void manager.register(id2, "test2", 5000, { timeoutErrorFactory: () => ({}) });
 
     const pendingIds = manager.getPendingIds();
     expect(pendingIds).toContain(id1);
@@ -210,8 +223,14 @@ describe("RequestManager", () => {
       id,
       "ios",
       5000,
-      () => ({ success: false }),
-      (error, totalTimeMs) => ({ success: false, wireText: error, totalTimeMs }),
+      {
+        timeoutErrorFactory: () => ({ success: false }),
+        responseErrorFactory: (error, totalTimeMs) => ({
+          success: false,
+          wireText: error,
+          totalTimeMs,
+        }),
+      },
     );
 
     const handled = manager.resolveError(id, "unknown command: frobnicate", 42);
@@ -231,8 +250,14 @@ describe("RequestManager", () => {
       id,
       "ios",
       5000,
-      () => ({ success: false }),
-      (error, totalTimeMs) => ({ success: false, wireText: error, totalTimeMs }),
+      {
+        timeoutErrorFactory: () => ({ success: false }),
+        responseErrorFactory: (error, totalTimeMs) => ({
+          success: false,
+          wireText: error,
+          totalTimeMs,
+        }),
+      },
     );
 
     manager.resolveError(id, "late reply");
@@ -248,7 +273,7 @@ describe("RequestManager", () => {
       id,
       "swipe",
       5000,
-      () => ({ success: false }),
+      { timeoutErrorFactory: () => ({ success: false }) },
     );
 
     manager.resolveError(id, "device offline", 7);
@@ -259,13 +284,10 @@ describe("RequestManager", () => {
 
   test("resolveError clears the pending timeout and removes the request", () => {
     const id = manager.generateId("test");
-    void manager.register(
-      id,
-      "test",
-      5000,
-      () => ({}),
-      (error, totalTimeMs) => ({ error, totalTimeMs }),
-    );
+    void manager.register(id, "test", 5000, {
+      timeoutErrorFactory: () => ({}),
+      responseErrorFactory: (error, totalTimeMs) => ({ error, totalTimeMs }),
+    });
 
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 

@@ -52,6 +52,12 @@ export interface DeviceDescription {
   architecture: string | null;
   osVersion: string | null;
   apiLevel: number | null;
+  /** Android guest hardware requested in config.ini; null when unknown. */
+  configuredRamMb?: number | null;
+  /** Android guest hardware from the last launch; null before a first launch or when unknown. */
+  effectiveRamMb?: number | null;
+  configuredCpuCores?: number | null;
+  effectiveCpuCores?: number | null;
   runtimeId: string | null;
   display: {
     width: number | null;

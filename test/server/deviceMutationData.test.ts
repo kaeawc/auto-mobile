@@ -90,7 +90,7 @@ function harness() {
   const journal = new FakeDeviceMutationJournal(new FakeTimer());
   const recording = new SessionDeviceMutationRecording(
     () => new SessionMutationRecorder(journal, SCOPE),
-    defaultReader,
+    { reader: defaultReader },
   );
   return { readers, reader, defaultReader, journal, recording };
 }
@@ -510,14 +510,16 @@ describe("data mutation prior recording", () => {
     const pending = Promise.withResolvers<KeyValueEntry[]>();
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, SCOPE),
-      new DataMutationPriorReader({
-        keyValuesFor: () => ({
-          getPreferenceEntries: () => {
-            controller.abort(new Error("cancelled"));
-            return pending.promise;
-          },
+      {
+        reader: new DataMutationPriorReader({
+          keyValuesFor: () => ({
+            getPreferenceEntries: () => {
+              controller.abort(new Error("cancelled"));
+              return pending.promise;
+            },
+          }),
         }),
-      }),
+      },
     );
     let acted = false;
     await expect(

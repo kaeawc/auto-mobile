@@ -9,6 +9,7 @@ import type {
 import { normalizeToolArgs } from "../utils/predictionUtils";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { nowIso } from "./nowIso";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 export type PredictionErrorType = "wrong_screen" | "missing_elements" | "unexpected_elements";
 
@@ -41,10 +42,10 @@ export interface TransitionKey {
 export class PredictionHistoryRepository {
   private db: Kysely<Database> | null;
 
-  constructor(
-    db?: Kysely<Database>,
-    private readonly timer: Timer = defaultTimer,
-  ) {
+  private readonly timer: Timer;
+
+  constructor({ db, timer = defaultTimer }: Pick<RepositoryDeps, "db" | "timer"> = {}) {
+    this.timer = timer;
     this.db = db ?? null;
   }
 

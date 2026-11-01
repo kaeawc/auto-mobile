@@ -63,7 +63,7 @@ async function observeAs(options: {
     {},
     {
       timer: new FakeTimer(),
-      deviceSessionRepository: new DeviceSessionRepository(db),
+      deviceSessionRepository: new DeviceSessionRepository({ db }),
       idGenerator: new CountingIdGenerator("device-session"),
     },
   );

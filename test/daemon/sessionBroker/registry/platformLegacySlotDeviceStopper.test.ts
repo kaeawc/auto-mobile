@@ -59,6 +59,16 @@ class FakePlatform {
 const signal = new AbortController().signal;
 const target = { platform: "android" as const, stableId: "amslot-old", name: "amslot-old" };
 
+test("a watch target is refused before any read: legacy slots never held watches", async () => {
+  const fake = new FakePlatform();
+  fake.complete = false;
+  await expect(
+    fake.port().inspect({ platform: "watchos", stableId: "W-1", name: "amslot-w" }, signal),
+  ).rejects.toThrow("legacy slots never held watches");
+  expect(fake.reads).toEqual([]);
+  expect(fake.stopped).toEqual([]);
+});
+
 test("Android shutdown reads states before the newer process table snapshot", async () => {
   const fake = new FakePlatform();
   fake.image.isRunning = false;

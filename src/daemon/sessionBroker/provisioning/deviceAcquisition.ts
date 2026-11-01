@@ -379,19 +379,41 @@ export class BrokerDeviceAcquisition {
     request: BrokerDeviceRequest,
     options: BindingPreparationOptions,
   ): Promise<BindingResultEntry> {
-    const result = await this.deps.reconcile(registry, {
-      key,
-      role: request.role,
-      platform: request.platform,
-      requestedSpec: request.requestedSpec as BindingRequestedSpec,
-      ...(request.priorDeviceHint ? { priorDeviceHint: request.priorDeviceHint } : {}),
-      deadlineMs: options.deadlineMs,
-      ...(options.createDeadlineMs === undefined
-        ? {}
-        : { createDeadlineMs: options.createDeadlineMs }),
-      signal: options.signal,
-      owner: this.deps.owner(),
-    });
+    let result: BindingReconcileResult;
+    try {
+      result = await this.deps.reconcile(registry, {
+        key,
+        role: request.role,
+        platform: request.platform,
+        requestedSpec: request.requestedSpec as BindingRequestedSpec,
+        ...(request.priorDeviceHint ? { priorDeviceHint: request.priorDeviceHint } : {}),
+        deadlineMs: options.deadlineMs,
+        ...(options.createDeadlineMs === undefined
+          ? {}
+          : { createDeadlineMs: options.createDeadlineMs }),
+        signal: options.signal,
+        owner: this.deps.owner(),
+      });
+    } catch (error) {
+      if (!(error instanceof BindingRegistrySchemaUnsupportedError)) {
+        throw error;
+      }
+      return {
+        bindingIndex: request.bindingIndex,
+        role: request.role,
+        platform: request.platform,
+        assignmentGeneration: null,
+        device: null,
+        sessionUuid: null,
+        requestedSpec: request.requestedSpec,
+        resolvedSpec: null,
+        specFingerprint: null,
+        disposition: null,
+        readiness: null,
+        lifecycle: null,
+        failure: acquisitionFailure(error.code, errorMessage(error), error.retryable),
+      };
+    }
     if (result.outcome === "failed") {
       return {
         bindingIndex: request.bindingIndex,
@@ -604,8 +626,7 @@ export class BrokerDeviceAcquisition {
           cleanup,
           this.backOutSessionReleases,
           () => this.deps.sessions.releaseSession(cleanup.sessionUuid),
-          "session release",
-          deadlineMs,
+          { step: "session release", deadlineMs },
         );
         if (this.closed) {
           return false;
@@ -633,8 +654,7 @@ export class BrokerDeviceAcquisition {
     cleanup: BindingBackOutCleanup,
     inFlight: WeakMap<BindingBackOutCleanup, Promise<T>>,
     start: () => Promise<T>,
-    step: string,
-    deadlineMs: number,
+    { step, deadlineMs }: { step: string; deadlineMs: number },
   ): Promise<T> {
     const remainingMs = deadlineMs - this.deps.timer.now();
     if (remainingMs <= 0) {
@@ -674,8 +694,7 @@ export class BrokerDeviceAcquisition {
         cleanup,
         this.backOutOwnerClears,
         () => registry.releaseExecution(cleanup.key, cleanup.sessionUuid),
-        "owner clear",
-        deadlineMs,
+        { step: "owner clear", deadlineMs },
       );
     if (this.backOutOwnerClears.has(cleanup)) {
       await clear();
@@ -686,8 +705,7 @@ export class BrokerDeviceAcquisition {
         cleanup,
         this.backOutOwnerReads,
         () => registry.getAssignment(cleanup.key),
-        "ownership read",
-        deadlineMs,
+        { step: "ownership read", deadlineMs },
       );
     if (this.backOutOwnerReads.has(cleanup)) {
       // An abandoned read may describe an older owner; consume it without using its result.

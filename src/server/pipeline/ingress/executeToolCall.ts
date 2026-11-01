@@ -245,8 +245,12 @@ function startExecution(input: {
     input.name,
     input.executionSessionId,
     input.executionSessionUuid,
-    input.sessionId,
-    untargetedDeviceCall ? input.implicitAutolockMcpSessionId : undefined,
+    {
+      transportSessionId: input.sessionId,
+      unresolvedAutolockMcpSessionId: untargetedDeviceCall
+        ? input.implicitAutolockMcpSessionId
+        : undefined,
+    },
   );
 }
 
@@ -319,13 +323,11 @@ async function runAdmittedCall(deps: ToolCallIngressDeps, call: AdmittedCall) {
       requestSignal: plan.requestSignal,
     });
     // #6869: a no-op for every tool but provisionDevice (guard inside).
-    result = await enrichProvisionDeviceResult(
-      name,
-      result,
-      acquiredSessionUuid,
-      options.sessionToolSelectionService,
-      { enableTools: call.requestedEnableTools, connectionProfileUuid: plan.connectionProfileUuid },
-    );
+    result = await enrichProvisionDeviceResult(name, result, acquiredSessionUuid, {
+      service: options.sessionToolSelectionService,
+      enableTools: call.requestedEnableTools,
+      connectionProfileUuid: plan.connectionProfileUuid,
+    });
     bindActiveDeviceResult(plan, result);
     await bindNamedSession(plan, { result, readOutsideBoundSession: call.readOutsideBoundSession });
     const response = applyOutputPolicy(result, {

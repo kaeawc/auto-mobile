@@ -33,7 +33,7 @@ describe("PrototypeEventCoordinator", () => {
     client.emitPrototypeEvent(tap);
     client.emitPrototypeEvent(dismissed);
 
-    coordinator.adopt(scope, "panel", client, [tap, dismissed], 0);
+    coordinator.adopt(scope, "panel", client, { replayed: [tap, dismissed], lastSequence: 0 });
 
     expect((await awaitEvent()).event?.sequence).toBe(1);
     expect((await awaitEvent({ kind: "dismissed" })).event?.sequence).toBe(2);
@@ -45,7 +45,9 @@ describe("PrototypeEventCoordinator", () => {
       event: ReturnType<typeof event>;
     }[] = [];
     coordinator = new PrototypeEventCoordinator(timer, store, {
-      recordPrototypeEvent: (origin, pushed) => recorded.push({ scope: origin, event: pushed }),
+      telemetry: {
+        recordPrototypeEvent: (origin, pushed) => recorded.push({ scope: origin, event: pushed }),
+      },
     });
     coordinator.show(scope, "panel", client);
     client.emitPrototypeEvent(event(1, "unknown"));
@@ -64,12 +66,14 @@ describe("PrototypeEventCoordinator", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       coordinator = new PrototypeEventCoordinator(timer, store, {
-        recordPrototypeEvent: () => {
-          throw new Error("telemetry unavailable");
+        telemetry: {
+          recordPrototypeEvent: () => {
+            throw new Error("telemetry unavailable");
+          },
         },
       });
       coordinator.show(scope, "panel", client);
-      store.record(scope, "show", { id: "panel" }, { success: true });
+      store.record(scope, "show", { id: "panel" }, { result: { success: true } });
       const waiting = awaitEvent();
       client.emitPrototypeEvent(event(1, "panel", "dismissed"));
       expect(store.status(scope).prototypes).toEqual([]);
@@ -121,9 +125,11 @@ describe("PrototypeEventCoordinator", () => {
   test("an event of an unknown kind advances the sequence without telemetry, status or delivery", async () => {
     const recorded: number[] = [];
     coordinator = new PrototypeEventCoordinator(timer, store, {
-      recordPrototypeEvent: (_origin, pushed) => recorded.push(pushed.sequence),
+      telemetry: {
+        recordPrototypeEvent: (_origin, pushed) => recorded.push(pushed.sequence),
+      },
     });
-    store.record(scope, "show", { id: "panel" }, { success: true });
+    store.record(scope, "show", { id: "panel" }, { result: { success: true } });
     coordinator.show(scope, "panel", client);
     const waiting = awaitEvent({ timeoutMs: 20 });
     client.emitPrototypeEvent({ ...event(1, "panel", "unknown"), state: {}, payload: null });
@@ -254,7 +260,7 @@ describe("PrototypeEventCoordinator", () => {
     "%s release settles waits as dismissed and drops buffers and subscriptions",
     async (release) => {
       coordinator.show(scope, "panel", client);
-      store.record(scope, "show", { id: "panel" }, { success: true });
+      store.record(scope, "show", { id: "panel" }, { result: { success: true } });
       const waiting = awaitEvent();
       if (release === "session") {
         coordinator.releaseSession(scope.sessionUuid);
@@ -274,7 +280,7 @@ describe("PrototypeEventCoordinator", () => {
   );
   test("terminal dismissed event removes shown status but remains deliverable and clears older events on consumption", async () => {
     coordinator.show(scope, "panel", client);
-    store.record(scope, "show", { id: "panel" }, { success: true });
+    store.record(scope, "show", { id: "panel" }, { result: { success: true } });
     client.emitPrototypeEvent(event(1));
     client.emitPrototypeEvent(event(2, "panel", "dismissed"));
     expect(store.status(scope).prototypes).toEqual([]);
@@ -361,8 +367,8 @@ describe("PrototypeEventCoordinator", () => {
     const coTenant = { ...scope, sessionUuid: "two" };
     coordinator.show(scope, "panel", client);
     coordinator.show(coTenant, "second", client);
-    store.record(scope, "show", { id: "panel" }, { success: true });
-    store.record(coTenant, "show", { id: "second" }, { success: true });
+    store.record(scope, "show", { id: "panel" }, { result: { success: true } });
+    store.record(coTenant, "show", { id: "second" }, { result: { success: true } });
     client.emitPrototypeEvent(event(1, "second"));
     const waiting = coordinator.awaitEvent(coTenant, "second", client, { afterSequence: 5 });
     coordinator.releaseSession("one");

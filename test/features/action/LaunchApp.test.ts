@@ -115,10 +115,15 @@ describe("LaunchApp", () => {
   };
 
   const configureSuccessfulClearAppData = () => {
-    launchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidClearAppData: () => ({
-        execute: async () => ({ success: true, packageName }),
-      }),
+    launchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidClearAppData: () => ({
+          execute: async () => ({ success: true, packageName }),
+        }),
+      },
     });
     launchApp.awaitIdle = fakeAwaitIdle;
     launchApp.observeScreen = fakeObserveScreen;
@@ -152,7 +157,7 @@ describe("LaunchApp", () => {
       layoutSeqSum: 1,
     });
 
-    launchApp = new LaunchApp(device, fakeAdb, null, fakeTimer);
+    launchApp = new LaunchApp(device, { adb: fakeAdb, simctl: null, timer: fakeTimer });
     launchApp.awaitIdle = fakeAwaitIdle;
     launchApp.observeScreen = fakeObserveScreen;
     launchApp.window = fakeWindow;
@@ -257,11 +262,16 @@ describe("LaunchApp", () => {
       fakeAdb.setCommandResponse("shell am start", createExecResult("Starting: Intent", ""));
       fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: expectedUser });
       fakeObserveScreen.setObserveResult(createObserveResult(packageName));
-      launchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-        installedAppsProvider: {
-          listInstalledApps: async () => ({ apps: [packageName], successful: true }),
+      launchApp = new LaunchApp(device, {
+        adb: fakeAdb,
+        simctl: null,
+        timer: fakeTimer,
+        dependencies: {
+          installedAppsProvider: {
+            listInstalledApps: async () => ({ apps: [packageName], successful: true }),
+          },
+          cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
         },
-        cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
       });
       launchApp.awaitIdle = fakeAwaitIdle;
       launchApp.observeScreen = fakeObserveScreen;
@@ -344,7 +354,10 @@ describe("LaunchApp", () => {
   });
 
   test("rejects an intent on iOS before invoking device commands (#14080)", async () => {
-    const iosLaunchApp = new LaunchApp({ ...device, platform: "ios" }, fakeAdb, null, fakeTimer);
+    const iosLaunchApp = new LaunchApp(
+      { ...device, platform: "ios" },
+      { adb: fakeAdb, simctl: null, timer: fakeTimer },
+    );
     await expect(
       iosLaunchApp.execute(packageName, {
         clearAppData: false,
@@ -392,14 +405,19 @@ describe("LaunchApp", () => {
       createExecResult("123:com.example.app/u0a123\n", ""),
     );
     const outer = new DefaultPerformanceTracker(fakeTimer);
-    const nestedLaunch = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector: {
-        detectTargetUserId: () => trackAmbient("adb shell cmd user", async () => 0),
+    const nestedLaunch = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        targetUserDetector: {
+          detectTargetUserId: () => trackAmbient("adb shell cmd user", async () => 0),
+        },
+        installedAppsProvider: {
+          listInstalledApps: async () => ({ apps: [packageName], successful: true }),
+        },
+        performanceTrackerFactory: () => new DefaultPerformanceTracker(fakeTimer),
       },
-      installedAppsProvider: {
-        listInstalledApps: async () => ({ apps: [packageName], successful: true }),
-      },
-      performanceTrackerFactory: () => new DefaultPerformanceTracker(fakeTimer),
     });
     nestedLaunch.awaitIdle = fakeAwaitIdle;
     nestedLaunch.observeScreen = fakeObserveScreen;
@@ -416,15 +434,20 @@ describe("LaunchApp", () => {
 
   test("gives Android launch exclusive priority over background performance sampling", async () => {
     const events: string[] = [];
-    const prioritizedLaunch = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      performanceSamplingCoordinator: {
-        async withDeviceSamplingPaused(deviceId, operation) {
-          events.push(`pause:${deviceId}`);
-          try {
-            return await operation();
-          } finally {
-            events.push(`resume:${deviceId}`);
-          }
+    const prioritizedLaunch = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        performanceSamplingCoordinator: {
+          async withDeviceSamplingPaused(deviceId, operation) {
+            events.push(`pause:${deviceId}`);
+            try {
+              return await operation();
+            } finally {
+              events.push(`resume:${deviceId}`);
+            }
+          },
         },
       },
     });
@@ -1441,32 +1464,37 @@ describe("LaunchApp", () => {
     const installedApps = Promise.withResolvers<{ apps: string[]; successful: boolean }>();
     const events: string[] = [];
     const receivedSignals: AbortSignal[] = [];
-    const cancellableLaunch = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector: {
-        async detectTargetUserId(_packageName, _userId, signal) {
-          if (signal) {
-            receivedSignals.push(signal);
-          }
-          controller.abort(deviceLoss);
-          return 0;
+    const cancellableLaunch = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        targetUserDetector: {
+          async detectTargetUserId(_packageName, _userId, signal) {
+            if (signal) {
+              receivedSignals.push(signal);
+            }
+            controller.abort(deviceLoss);
+            return 0;
+          },
         },
-      },
-      installedAppsProvider: {
-        async listInstalledApps(signal) {
-          if (signal) {
-            receivedSignals.push(signal);
-          }
-          return await installedApps.promise;
+        installedAppsProvider: {
+          async listInstalledApps(signal) {
+            if (signal) {
+              receivedSignals.push(signal);
+            }
+            return await installedApps.promise;
+          },
         },
-      },
-      performanceSamplingCoordinator: {
-        async withDeviceSamplingPaused(_deviceId, operation) {
-          events.push("paused");
-          try {
-            return await operation();
-          } finally {
-            events.push("resumed");
-          }
+        performanceSamplingCoordinator: {
+          async withDeviceSamplingPaused(_deviceId, operation) {
+            events.push("paused");
+            try {
+              return await operation();
+            } finally {
+              events.push("resumed");
+            }
+          },
         },
       },
     });
@@ -1499,26 +1527,31 @@ describe("LaunchApp", () => {
       `device-disconnected:${device.deviceId}`,
     );
     const events: string[] = [];
-    const cancellableLaunch = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector: {
-        async detectTargetUserId() {
-          controller.abort(deviceLoss);
-          return 0;
+    const cancellableLaunch = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        targetUserDetector: {
+          async detectTargetUserId() {
+            controller.abort(deviceLoss);
+            return 0;
+          },
         },
-      },
-      installedAppsProvider: {
-        async listInstalledApps() {
-          return await new Promise<never>(() => {});
+        installedAppsProvider: {
+          async listInstalledApps() {
+            return await new Promise<never>(() => {});
+          },
         },
-      },
-      performanceSamplingCoordinator: {
-        async withDeviceSamplingPaused(_deviceId, operation) {
-          events.push("paused");
-          try {
-            return await operation();
-          } finally {
-            events.push("resumed");
-          }
+        performanceSamplingCoordinator: {
+          async withDeviceSamplingPaused(_deviceId, operation) {
+            events.push("paused");
+            try {
+              return await operation();
+            } finally {
+              events.push("resumed");
+            }
+          },
         },
       },
     });
@@ -1548,13 +1581,18 @@ describe("LaunchApp", () => {
       `device-disconnected:${device.deviceId}`,
     );
     let clearCalls = 0;
-    const cancellableLaunch = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidClearAppData: () => ({
-        async execute() {
-          clearCalls += 1;
-          return { success: true, packageName };
-        },
-      }),
+    const cancellableLaunch = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidClearAppData: () => ({
+          async execute() {
+            clearCalls += 1;
+            return { success: true, packageName };
+          },
+        }),
+      },
     });
     cancellableLaunch.awaitIdle = fakeAwaitIdle;
     cancellableLaunch.observeScreen = fakeObserveScreen;
@@ -1665,8 +1703,13 @@ describe("LaunchApp", () => {
     const perf = new DefaultPerformanceTracker(fakeTimer);
     const trackSpy = spyOn(perf, "track");
     const executeSpy = spyOn(fakeAdb, "executeCommand");
-    const discoveryLaunch = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      performanceTrackerFactory: () => perf,
+    const discoveryLaunch = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        performanceTrackerFactory: () => perf,
+      },
     });
     discoveryLaunch.awaitIdle = fakeAwaitIdle;
     discoveryLaunch.observeScreen = fakeObserveScreen;
@@ -1724,7 +1767,10 @@ describe("LaunchApp", () => {
     };
     const getInstanceSpy = spyOnIosClientInstance(client);
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    const iosLaunchApp = new LaunchApp({ ...device, platform: "ios" }, fakeAdb, null, fakeTimer);
+    const iosLaunchApp = new LaunchApp(
+      { ...device, platform: "ios" },
+      { adb: fakeAdb, simctl: null, timer: fakeTimer },
+    );
     try {
       await iosLaunchApp.waitForIosHierarchyReady(5000);
       expect(warnSpy).toHaveBeenCalledWith(
@@ -1758,7 +1804,7 @@ describe("LaunchApp", () => {
     };
     const getInstanceSpy = spyOnIosClientInstance(client);
     const info = spyOn(logger, "info");
-    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, null, fakeTimer);
+    const iosLaunchApp = new LaunchApp(iosDevice, { adb: fakeAdb, simctl: null, timer: fakeTimer });
     try {
       await iosLaunchApp.waitForIosHierarchyReady(5_000, packageName);
       expect(info).toHaveBeenCalledWith(expect.stringContaining("iOS hierarchy ready via sync"));
@@ -1798,7 +1844,11 @@ describe("LaunchApp", () => {
         },
       };
       const getInstanceSpy = spyOnIosClientInstance(client);
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, null, fakeTimer);
+      const iosLaunchApp = new LaunchApp(iosDevice, {
+        adb: fakeAdb,
+        simctl: null,
+        timer: fakeTimer,
+      });
 
       try {
         const wait = iosLaunchApp.waitForIosHierarchyReady(5_000, packageName, controller.signal);
@@ -1837,7 +1887,7 @@ describe("LaunchApp", () => {
       },
     };
     const getInstanceSpy = spyOnIosClientInstance(client);
-    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, null, fakeTimer);
+    const iosLaunchApp = new LaunchApp(iosDevice, { adb: fakeAdb, simctl: null, timer: fakeTimer });
     const info = spyOn(logger, "info");
 
     try {
@@ -2459,28 +2509,33 @@ describe("LaunchApp", () => {
       userId: number | undefined;
     }> = [];
     const coldBootCalls: Array<{ packageName: string; options: unknown }> = [];
-    const lifecycleLaunchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidClearAppData: (clearDevice) => ({
-        execute: async (clearPackageName: string, userId?: number) => {
-          expect(hasStartedAppLaunch()).toBe(false);
-          clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
-          return { success: true, packageName: clearPackageName, userId };
-        },
-      }),
-      createAndroidColdBoot: () => ({
-        execute: async (coldBootPackageName: string, options?: unknown) => {
-          expect(hasStartedAppLaunch()).toBe(false);
-          coldBootCalls.push({ packageName: coldBootPackageName, options });
-          return {
-            success: true,
-            packageName: coldBootPackageName,
-            wasInstalled: true,
-            wasRunning: true,
-            wasForeground: false,
-            userId: 0,
-          };
-        },
-      }),
+    const lifecycleLaunchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidClearAppData: (clearDevice) => ({
+          execute: async (clearPackageName: string, userId?: number) => {
+            expect(hasStartedAppLaunch()).toBe(false);
+            clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
+            return { success: true, packageName: clearPackageName, userId };
+          },
+        }),
+        createAndroidColdBoot: () => ({
+          execute: async (coldBootPackageName: string, options?: unknown) => {
+            expect(hasStartedAppLaunch()).toBe(false);
+            coldBootCalls.push({ packageName: coldBootPackageName, options });
+            return {
+              success: true,
+              packageName: coldBootPackageName,
+              wasInstalled: true,
+              wasRunning: true,
+              wasForeground: false,
+              userId: 0,
+            };
+          },
+        }),
+      },
     });
     lifecycleLaunchApp.awaitIdle = fakeAwaitIdle;
     lifecycleLaunchApp.observeScreen = fakeObserveScreen;
@@ -2568,14 +2623,19 @@ describe("LaunchApp", () => {
       "shell dumpsys activity processes",
       createExecResult("123:com.example.app/u0a123\n", ""),
     );
-    const launchWithFailedClear = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidClearAppData: () => ({
-        execute: async () => ({
-          success: false,
-          packageName,
-          error: "Failed to clear application data: Failed",
+    const launchWithFailedClear = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidClearAppData: () => ({
+          execute: async () => ({
+            success: false,
+            packageName,
+            error: "Failed to clear application data: Failed",
+          }),
         }),
-      }),
+      },
     });
 
     const result = await launchWithFailedClear.execute(packageName, {
@@ -2596,14 +2656,19 @@ describe("LaunchApp", () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", createExecResult("0\n", ""));
-    const launchWithFailedClear = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidClearAppData: () => ({
-        execute: async () => ({
-          success: false,
-          packageName,
-          error: "Failed to clear application data: Failed",
+    const launchWithFailedClear = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidClearAppData: () => ({
+          execute: async () => ({
+            success: false,
+            packageName,
+            error: "Failed to clear application data: Failed",
+          }),
         }),
-      }),
+      },
     });
 
     const result = await launchWithFailedClear.execute(packageName, {
@@ -2630,14 +2695,19 @@ describe("LaunchApp", () => {
       packageName: string;
       userId: number | undefined;
     }> = [];
-    const lifecycleLaunchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidClearAppData: (clearDevice) => ({
-        execute: async (clearPackageName: string, userId?: number) => {
-          expect(hasStartedAppLaunch()).toBe(false);
-          clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
-          return { success: true, packageName: clearPackageName, userId };
-        },
-      }),
+    const lifecycleLaunchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidClearAppData: (clearDevice) => ({
+          execute: async (clearPackageName: string, userId?: number) => {
+            expect(hasStartedAppLaunch()).toBe(false);
+            clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
+            return { success: true, packageName: clearPackageName, userId };
+          },
+        }),
+      },
     });
     lifecycleLaunchApp.awaitIdle = fakeAwaitIdle;
     lifecycleLaunchApp.observeScreen = fakeObserveScreen;
@@ -2668,27 +2738,36 @@ describe("LaunchApp", () => {
     const clearCalls: string[] = [];
     const coldBootCalls: Array<{ device: BootedDevice; packageName: string; options: unknown }> =
       [];
-    const lifecycleLaunchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidClearAppData: () => ({
-        execute: async (clearPackageName: string) => {
-          clearCalls.push(clearPackageName);
-          return { success: true, packageName: clearPackageName };
-        },
-      }),
-      createAndroidColdBoot: (coldBootDevice) => ({
-        execute: async (coldBootPackageName: string, options?: unknown) => {
-          expect(hasStartedAppLaunch()).toBe(false);
-          coldBootCalls.push({ device: coldBootDevice, packageName: coldBootPackageName, options });
-          return {
-            success: true,
-            packageName: coldBootPackageName,
-            wasInstalled: true,
-            wasRunning: true,
-            wasForeground: false,
-            userId: 0,
-          };
-        },
-      }),
+    const lifecycleLaunchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidClearAppData: () => ({
+          execute: async (clearPackageName: string) => {
+            clearCalls.push(clearPackageName);
+            return { success: true, packageName: clearPackageName };
+          },
+        }),
+        createAndroidColdBoot: (coldBootDevice) => ({
+          execute: async (coldBootPackageName: string, options?: unknown) => {
+            expect(hasStartedAppLaunch()).toBe(false);
+            coldBootCalls.push({
+              device: coldBootDevice,
+              packageName: coldBootPackageName,
+              options,
+            });
+            return {
+              success: true,
+              packageName: coldBootPackageName,
+              wasInstalled: true,
+              wasRunning: true,
+              wasForeground: false,
+              userId: 0,
+            };
+          },
+        }),
+      },
     });
     lifecycleLaunchApp.awaitIdle = fakeAwaitIdle;
     lifecycleLaunchApp.observeScreen = fakeObserveScreen;
@@ -2721,10 +2800,15 @@ describe("LaunchApp", () => {
       "shell dumpsys activity processes",
       createExecResult("123:com.example.app/u0a123\n", ""),
     );
-    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      createAndroidColdBoot: () => ({
-        execute: async () => ({ success: false, error: "x", packageName }),
-      }),
+    const action = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        createAndroidColdBoot: () => ({
+          execute: async () => ({ success: false, error: "x", packageName }),
+        }),
+      },
     });
     action.awaitIdle = fakeAwaitIdle;
     action.observeScreen = fakeObserveScreen;
@@ -3085,12 +3169,17 @@ describe("LaunchApp", () => {
     fakeTimer.enableAutoAdvance();
     const previousPackageName = "com.example.previous";
     const invalidated: BootedDevice[] = [];
-    const staleLaunchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      cacheInvalidator: {
-        invalidate: (invalidatedDevice) => {
-          invalidated.push(invalidatedDevice);
+    const staleLaunchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        cacheInvalidator: {
+          invalidate: (invalidatedDevice) => {
+            invalidated.push(invalidatedDevice);
+          },
+          retireAppProcess: () => {},
         },
-        retireAppProcess: () => {},
       },
     });
     staleLaunchApp.awaitIdle = fakeAwaitIdle;
@@ -3144,9 +3233,14 @@ describe("LaunchApp", () => {
       installedApps: [],
     });
 
-    const parallelLaunchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector,
-      installedAppsProvider,
+    const parallelLaunchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        targetUserDetector,
+        installedAppsProvider,
+      },
     });
 
     const resultPromise = parallelLaunchApp.execute(packageName, {
@@ -3179,8 +3273,13 @@ describe("LaunchApp", () => {
       successful: false,
       error: new Error("adb package listing failed"),
     });
-    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      installedAppsProvider,
+    const action = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        installedAppsProvider,
+      },
     });
 
     await expect(
@@ -3201,12 +3300,17 @@ describe("LaunchApp", () => {
         1000,
         dispatched,
       );
-      const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-        targetUserDetector: new FakeTargetUserDetector(fakeTimer, { resolvedUserId: 0 }),
-        installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
-          successful: false,
-          error,
-        }),
+      const action = new LaunchApp(device, {
+        adb: fakeAdb,
+        simctl: null,
+        timer: fakeTimer,
+        dependencies: {
+          targetUserDetector: new FakeTargetUserDetector(fakeTimer, { resolvedUserId: 0 }),
+          installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
+            successful: false,
+            error,
+          }),
+        },
       });
 
       await expect(
@@ -3218,9 +3322,14 @@ describe("LaunchApp", () => {
 
   test("rejects an incomplete Android listing even when it contains the app", async () => {
     fakeTimer.enableAutoAdvance();
-    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      installedAppsProvider: {
-        listInstalledApps: async () => ({ apps: [packageName], successful: false }),
+    const action = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        installedAppsProvider: {
+          listInstalledApps: async () => ({ apps: [packageName], successful: false }),
+        },
       },
     });
 
@@ -3243,9 +3352,14 @@ describe("LaunchApp", () => {
       error: new Error("check installed failed"),
     });
 
-    const parallelLaunchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector,
-      installedAppsProvider,
+    const parallelLaunchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        targetUserDetector,
+        installedAppsProvider,
+      },
     });
 
     const resultPromise = parallelLaunchApp.execute(packageName, {
@@ -3278,10 +3392,15 @@ describe("LaunchApp", () => {
       error: new Error("check installed failed"),
     });
 
-    const perfLaunchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector,
-      installedAppsProvider,
-      performanceTrackerFactory: () => perfTracker,
+    const perfLaunchApp = new LaunchApp(device, {
+      adb: fakeAdb,
+      simctl: null,
+      timer: fakeTimer,
+      dependencies: {
+        targetUserDetector,
+        installedAppsProvider,
+        performanceTrackerFactory: () => perfTracker,
+      },
     });
 
     const resultPromise = perfLaunchApp.execute(packageName, {
@@ -3354,8 +3473,13 @@ describe("LaunchApp", () => {
       terminateApp: async () => {},
     };
 
-    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, fakeSimctl, fakeTimer, {
-      installedAppsProvider,
+    const iosLaunchApp = new LaunchApp(iosDevice, {
+      adb: fakeAdb,
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      dependencies: {
+        installedAppsProvider,
+      },
     });
     iosLaunchApp.awaitIdle = iosFakeAwaitIdle;
     iosLaunchApp.observeScreen = iosFakeObserveScreen;
@@ -3445,16 +3569,21 @@ describe("LaunchApp", () => {
         },
       };
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, fakeSimctl, fakeTimer, {
-        installedAppsProvider: installedApps,
-        clearAppDataFactory: () => {
-          calls.push("clearFactory");
-          return {
-            execute: async (id) => {
-              calls.push(`clear:${id}`);
-              return { success: true, packageName: id };
-            },
-          };
+      const iosLaunchApp = new LaunchApp(iosDevice, {
+        adb: fakeAdb,
+        simctl: fakeSimctl,
+        timer: fakeTimer,
+        dependencies: {
+          installedAppsProvider: installedApps,
+          clearAppDataFactory: () => {
+            calls.push("clearFactory");
+            return {
+              execute: async (id) => {
+                calls.push(`clear:${id}`);
+                return { success: true, packageName: id };
+              },
+            };
+          },
         },
       });
       iosLaunchApp.awaitIdle = new FakeAwaitIdle();
@@ -3717,8 +3846,13 @@ describe("LaunchApp", () => {
         installedApps: [userBundleId],
       });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, fakeSimctl, fakeTimer, {
-        installedAppsProvider: installedApps,
+      const iosLaunchApp = new LaunchApp(iosDevice, {
+        adb: fakeAdb,
+        simctl: fakeSimctl,
+        timer: fakeTimer,
+        dependencies: {
+          installedAppsProvider: installedApps,
+        },
       });
       iosLaunchApp.awaitIdle = new FakeAwaitIdle();
       iosLaunchApp.observeScreen = iosObserveScreen;
@@ -3818,7 +3952,12 @@ describe("LaunchApp", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const debug = spyOn(logger, "debug").mockImplementation(() => {});
       let receivedSignal: AbortSignal | undefined;
-      fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
+      fakeCtrlProxy.requestLaunchApp = async (
+        _bundleId,
+        _timeoutMs,
+        _perf,
+        { coldBoot: _coldBoot, signal } = {},
+      ) => {
         receivedSignal = signal;
         return await lateReply.promise;
       };
@@ -3873,7 +4012,12 @@ describe("LaunchApp", () => {
       });
       let receivedSignal: AbortSignal | undefined;
       let hierarchyWaits = 0;
-      fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
+      fakeCtrlProxy.requestLaunchApp = async (
+        _bundleId,
+        _timeoutMs,
+        _perf,
+        { coldBoot: _coldBoot, signal } = {},
+      ) => {
         receivedSignal = signal;
         return await new Promise((resolve, reject) => {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
@@ -3987,8 +4131,13 @@ describe("LaunchApp", () => {
         installedApps: [userBundleId],
       });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, fakeSimctl, fakeTimer, {
-        installedAppsProvider: installedApps,
+      const iosLaunchApp = new LaunchApp(iosDevice, {
+        adb: fakeAdb,
+        simctl: fakeSimctl,
+        timer: fakeTimer,
+        dependencies: {
+          installedAppsProvider: installedApps,
+        },
       });
       iosLaunchApp.awaitIdle = new FakeAwaitIdle();
       iosLaunchApp.observeScreen = iosObserveScreen;
@@ -4157,12 +4306,17 @@ describe("LaunchApp", () => {
       });
       const performanceTracker = new DefaultPerformanceTracker(fakeTimer);
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, fakeSimctl, fakeTimer, {
-        installedAppsProvider: installedApps,
-        cacheInvalidator: opts.cacheInvalidator,
-        deviceAppLauncher,
-        clearAppDataFactory: opts.useDefaultClearAppData ? undefined : clearAppDataFactory,
-        performanceTrackerFactory: () => performanceTracker,
+      const iosLaunchApp = new LaunchApp(iosDevice, {
+        adb: fakeAdb,
+        simctl: fakeSimctl,
+        timer: fakeTimer,
+        dependencies: {
+          installedAppsProvider: installedApps,
+          cacheInvalidator: opts.cacheInvalidator,
+          deviceAppLauncher,
+          clearAppDataFactory: opts.useDefaultClearAppData ? undefined : clearAppDataFactory,
+          performanceTrackerFactory: () => performanceTracker,
+        },
       });
       iosLaunchApp.awaitIdle = new FakeAwaitIdle();
       iosLaunchApp.observeScreen = iosObserveScreen;
@@ -4692,16 +4846,21 @@ describe("LaunchApp", () => {
       });
       const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [bundleId] });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, fakeSimctl, fakeTimer, {
-        installedAppsProvider: installedApps,
-        clearAppDataFactory: (device) => ({
-          execute: (id) =>
-            new SimulatorIosClearDataBackend(device.deviceId, {
-              simctl: fakeSimctl,
-              containerOwnership: simulatorOwnership,
-              rm: async () => {},
-            }).clearAppData(id),
-        }),
+      const iosLaunchApp = new LaunchApp(iosDevice, {
+        adb: fakeAdb,
+        simctl: fakeSimctl,
+        timer: fakeTimer,
+        dependencies: {
+          installedAppsProvider: installedApps,
+          clearAppDataFactory: (device) => ({
+            execute: (id) =>
+              new SimulatorIosClearDataBackend(device.deviceId, {
+                simctl: fakeSimctl,
+                containerOwnership: simulatorOwnership,
+                rm: async () => {},
+              }).clearAppData(id),
+          }),
+        },
       });
       iosLaunchApp.awaitIdle = new FakeAwaitIdle();
       iosLaunchApp.observeScreen = iosObserveScreen;

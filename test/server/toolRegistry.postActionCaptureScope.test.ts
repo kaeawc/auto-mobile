@@ -157,8 +157,6 @@ describe("ToolRegistry post-action capture scope", () => {
           const result = await registry.callInternal(
             "captureStep",
             { id, raw: true },
-            undefined,
-            undefined,
             targetDevice ? { targetDevice: device } : {},
           );
           expect(payload(result).observation).toMatchObject({

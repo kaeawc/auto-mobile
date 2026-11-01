@@ -2141,10 +2141,14 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     scenario = await LivenessScenario.start();
     await scenario.acquire();
     for (const uri of [WATCHED_RESOURCE, OTHER_RESOURCE]) {
-      ResourceRegistry.register(uri, uri, "scenario resource", "application/json", async () => ({
-        uri,
-        text: "{}",
-      }));
+      ResourceRegistry.register(uri, uri, {
+        description: "scenario resource",
+        mimeType: "application/json",
+        handler: async () => ({
+          uri,
+          text: "{}",
+        }),
+      });
     }
     try {
       const pushed: string[] = [];

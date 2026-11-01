@@ -48,7 +48,7 @@ describe("DB concurrency RMW audit", () => {
 
   test("stresses guarded get-or-create and increment paths through the real dialect mutex", async () => {
     const db = await openDb();
-    const navigation = new NavigationRepository(db);
+    const navigation = new NavigationRepository({ db });
     await navigation.getOrCreateApp("com.example.audit");
 
     const nodeResults = await runConcurrentSameKeyStress({
@@ -79,7 +79,7 @@ describe("DB concurrency RMW audit", () => {
 
     const timer = new FakeTimer();
     timer.setCurrentTime(3000);
-    const failures = new FailureAnalyticsRepository(db, timer);
+    const failures = new FailureAnalyticsRepository({ db, timer });
     await runConcurrentSameKeyStress({
       count: N,
       act: (index) =>
@@ -101,7 +101,7 @@ describe("DB concurrency RMW audit", () => {
     expect(failureGroups[0].unique_sessions).toBe(N);
     expect(failureOccurrences).toHaveLength(N);
 
-    const coverage = new TestCoverageRepository(db, timer);
+    const coverage = new TestCoverageRepository({ db, timer });
     const sessions = await runConcurrentSameKeyStress({
       count: N,
       act: () => coverage.getOrCreateSession("coverage-session", "com.example.audit"),
@@ -121,7 +121,7 @@ describe("DB concurrency RMW audit", () => {
     expect(nodeCoverage[0].visit_count).toBe(N);
     expect(coverageSession.total_nodes_visited).toBe(N);
 
-    const predictions = new PredictionHistoryRepository(db);
+    const predictions = new PredictionHistoryRepository({ db });
     const transition: TransitionKey = {
       appId: "com.example.audit",
       fromScreen: "Home",

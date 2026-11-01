@@ -56,7 +56,11 @@ describe("plan auto-release with other calls in flight (#11490)", () => {
     // The daemon's wiring of the session manager's own cut routine (daemon.ts), to show the
     // plan path is cut whether or not that routine is involved.
     manager.setActiveSessionExecutionChecker((id, query) =>
-      hasActiveSessionExecution(executionTracker, manager, pool, id, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager: manager, devicePool: pool },
+        id,
+        query,
+      ),
     );
     manager.setExpiryReleaseExecutionCanceller((id, cancellation, query, deviceId) => {
       void cancelExecutionsCutBySessionRelease(

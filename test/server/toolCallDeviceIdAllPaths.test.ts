@@ -220,13 +220,10 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
     z.object({}).passthrough(),
     async () => ({ success: true }),
   );
-  ToolRegistry.registerDeviceAware(
-    "readProbe",
-    "Read probe",
-    z.object({}).passthrough(),
-    async () => ({ success: true }),
-    { deviceReadOnly: true },
-  );
+  ToolRegistry.registerDeviceAware("readProbe", "Read probe", z.object({}).passthrough(), {
+    handler: async () => ({ success: true }),
+    deviceReadOnly: true,
+  });
   // The pool's own refresh listed devices while this daemon started.
   const listingsBeforeAnyCall = discovery.getBootedDevicesDetailedCalls().length;
   return {
@@ -248,7 +245,7 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
       if (ToolRegistry.getRegisteredTool(name)?.planOnly) {
         // A plan-only tool is no `tools/call`: it is reached as a plan step, an internal call
         // that runs on the plan's session (the holder's) or on none.
-        return ToolRegistry.callInternal(name, planArgs, undefined, undefined, {
+        return ToolRegistry.callInternal(name, planArgs, {
           forPlan: true,
           ...(caller === HOLDER_CONNECTION ? { sessionUuid: HOLDER } : {}),
         }).then(
@@ -506,16 +503,13 @@ describe("a failed adb listing never fails open (#11618)", () => {
   test("a read places the recovered address after the failed-listing window without readiness", async () => {
     d = await heldPhoneWhileAdbFails();
     const readDevices: string[] = [];
-    ToolRegistry.registerDeviceAware(
-      "readProbe",
-      "Read probe",
-      z.object({}).passthrough(),
-      async (device: BootedDevice) => {
+    ToolRegistry.registerDeviceAware("readProbe", "Read probe", z.object({}).passthrough(), {
+      handler: async (device: BootedDevice) => {
         readDevices.push(device.deviceId);
         return { success: true };
       },
-      { deviceReadOnly: true },
-    );
+      deviceReadOnly: true,
+    });
     const read = () => d!.call("readProbe", { platform: "android", deviceId: UNSEEN });
 
     expect(await read()).toContain(`Device ${UNSEEN} not found on android platform.`);

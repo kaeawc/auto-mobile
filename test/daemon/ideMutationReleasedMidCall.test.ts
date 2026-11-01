@@ -140,9 +140,11 @@ describe("idle release while the holder's device call is in flight", () => {
     // As daemon.ts wires the idle veto.
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(
-        executionTracker,
-        sessionManager,
-        { isSessionRecoveryInFlight: () => false },
+        {
+          tracker: executionTracker,
+          sessionManager,
+          devicePool: { isSessionRecoveryInFlight: () => false },
+        },
         sessionId,
         query,
       ),

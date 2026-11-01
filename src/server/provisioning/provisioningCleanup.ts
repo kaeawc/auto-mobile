@@ -172,14 +172,15 @@ function continueProvisionCleanupAfterMutationSettles(
   ctx: ProvisioningContext,
   deps: DeviceToolsDependencies,
   createdDevice: DeviceInfo,
-  provisionFailure: ProvisionDeviceError,
   {
+    provisionFailure,
     lifecycleLease,
     settlement,
     recordLifecycle,
     lifecycleDevice,
     collectDeferredCleanup,
   }: {
+    provisionFailure: ProvisionDeviceError;
     lifecycleLease: VirtualDeviceLifecycleLease;
     settlement: Promise<unknown>;
     recordLifecycle?: RecordProvisionDeviceLifecycle;
@@ -188,7 +189,8 @@ function continueProvisionCleanupAfterMutationSettles(
   },
 ): void {
   const finishCleanup = async (): Promise<void> => {
-    const final = await cleanupFailedProvisionDevice(ctx, deps, createdDevice, provisionFailure, {
+    const final = await cleanupFailedProvisionDevice(ctx, deps, createdDevice, {
+      provisionFailure,
       lifecycleLease: lifecycleLease,
       pendingMutationSettlement: undefined,
       recordLifecycle: recordLifecycle,
@@ -277,8 +279,8 @@ export async function cleanupFailedProvisionDevice(
   ctx: ProvisioningContext,
   deps: DeviceToolsDependencies,
   createdDevice: DeviceInfo,
-  provisionFailure: ProvisionDeviceError,
   {
+    provisionFailure,
     lifecycleLease,
     pendingMutationSettlement,
     recordLifecycle,
@@ -286,7 +288,7 @@ export async function cleanupFailedProvisionDevice(
     createdNeverLaunched,
     rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
     collectDeferredCleanup,
-  }: ProvisionCleanupOptions,
+  }: ProvisionCleanupOptions & { provisionFailure: ProvisionDeviceError },
 ): Promise<ProvisionDeviceRollbackError> {
   const stableId =
     createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
@@ -359,7 +361,8 @@ export async function cleanupFailedProvisionDevice(
             "cleanup was not attempted and lifecycle ownership remains until it settles.",
         ),
       );
-      continueProvisionCleanupAfterMutationSettles(ctx, deps, createdDevice, provisionFailure, {
+      continueProvisionCleanupAfterMutationSettles(ctx, deps, createdDevice, {
+        provisionFailure,
         lifecycleLease: lifecycleLease,
         settlement: pendingMutationSettlement,
         recordLifecycle: recordLifecycle,
@@ -385,7 +388,8 @@ export async function cleanupFailedProvisionDevice(
       platform: createdDevice.platform,
       stableId,
     });
-    const cleanup = ctx.executeDeleteDevice(cleanupArgs, deps, undefined, cleanupService, {
+    const cleanup = ctx.executeDeleteDevice(cleanupArgs, deps, undefined, {
+      teardownService: cleanupService,
       lifecycleLease,
       internal: createdNeverLaunched ? { unlaunchedCreatedAvd: { stableId } } : undefined,
     });

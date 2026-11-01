@@ -39,13 +39,10 @@ describe("device gesture recording ownership while its stop is in flight", () =>
         return { steps: [step], stepCount: 1 };
       },
     };
-    await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator("recording"),
-      () => recorder,
-      { ownerSessionUuid: "session-a" },
-    );
+    await startDeviceGestureRecording(device, timer, new CountingIdGenerator("recording"), {
+      recorderFactory: () => recorder,
+      ownerSessionUuid: "session-a",
+    });
     expect(isDeviceGestureRecordingOwnedBy("session-a", device.deviceId)).toBe(true);
 
     // session-a explicitly stops; the recorder is still tearing down its capture processes.
@@ -86,8 +83,7 @@ describe("releasing a session whose device gesture recording stop is in flight (
       device,
       timer,
       new CountingIdGenerator("recording"),
-      () => recorder,
-      { ownerSessionUuid: "session-a" },
+      { recorderFactory: () => recorder, ownerSessionUuid: "session-a" },
     );
     const stopping = stopDeviceGestureRecording(undefined, undefined, timer);
     await Promise.resolve();
@@ -117,11 +113,8 @@ describe("releasing a session whose device gesture recording stop is in flight (
     };
     registerRecordingSessionCleanup(manager, deps);
 
-    releaseCallbacks[0]?.(
-      "session-a",
-      device.deviceId,
-      "idle-timeout",
-      {
+    releaseCallbacks[0]?.("session-a", device.deviceId, "idle-timeout", {
+      snapshot: {
         sessionId: "session-a",
         deviceId: device.deviceId,
         releaseReason: "idle-timeout",
@@ -129,8 +122,7 @@ describe("releasing a session whose device gesture recording stop is in flight (
         terminal: false,
         heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
       },
-      {},
-    );
+    });
 
     expect(pending).toHaveLength(1);
     expect(pending[0].deviceId).toBe(device.deviceId);
@@ -165,15 +157,17 @@ describe("joining the owner's in-flight recording stop", () => {
       device,
       timer,
       new CountingIdGenerator("derived"),
-      () => ({
-        stepCount: 1,
-        start: async () => undefined,
-        stop: async () => {
-          await gate;
-          return { steps: [step], stepCount: 1 };
-        },
-      }),
-      { ownerSessionUuid: "base:pixel" },
+      {
+        recorderFactory: () => ({
+          stepCount: 1,
+          start: async () => undefined,
+          stop: async () => {
+            await gate;
+            return { steps: [step], stepCount: 1 };
+          },
+        }),
+        ownerSessionUuid: "base:pixel",
+      },
     );
     const stopped = stopDeviceGestureRecording(recordingId, undefined, timer);
     const base = (id: string) => id.split(":")[0];
@@ -199,12 +193,14 @@ describe("joining the owner's in-flight recording stop", () => {
       device,
       timer,
       new CountingIdGenerator("deadline"),
-      () => ({
-        stepCount: 0,
-        start: async () => undefined,
-        stop: () => new Promise<{ steps: PlanStep[]; stepCount: number }>(() => {}),
-      }),
-      { ownerSessionUuid: "owner" },
+      {
+        recorderFactory: () => ({
+          stepCount: 0,
+          start: async () => undefined,
+          stop: () => new Promise<{ steps: PlanStep[]; stepCount: number }>(() => {}),
+        }),
+        ownerSessionUuid: "owner",
+      },
     );
     const stopped = stopDeviceGestureRecording(recordingId);
     const joined = joinInFlightDeviceGestureRecordingStop(recordingId, "owner");

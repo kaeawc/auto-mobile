@@ -107,11 +107,15 @@ describe("HomeScreen", () => {
     window: WindowInterface = fakeWindow,
     globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">,
   ): HomeScreen =>
-    new HomeScreen(mockDevice, fakeAdb, fakeTimer, undefined, {
-      observeScreen: fakeObserveScreen,
-      window,
-      awaitIdle: fakeAwaitIdle,
-      globalActionClient,
+    new HomeScreen(mockDevice, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      collaborators: {
+        observeScreen: fakeObserveScreen,
+        window,
+        awaitIdle: fakeAwaitIdle,
+        globalActionClient,
+      },
     });
 
   const globalActionResult = (
@@ -177,10 +181,15 @@ describe("HomeScreen", () => {
       platform: "ios",
       deviceId: options?.simulator ? "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" : "ios-device",
     };
-    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl, {
-      observeScreen: fakeObserveScreen,
-      awaitIdle: fakeAwaitIdle,
-      window: fakeWindow,
+    const action = new HomeScreen(iosDevice, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      simctl: options?.simctl,
+      collaborators: {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      },
     });
 
     const client = new FakeIOSCtrlProxy(fakeTimer);
@@ -1033,7 +1042,7 @@ describe("HomeScreen", () => {
         expect(fakeTimer.getSleepHistory()).toEqual([2500, 100]);
         expect(fakeTimer.now()).toBe(2600);
         expect(dispatches).toBe(1);
-        expect(read.mock.calls[0]?.[3]).toBe(1500);
+        expect(read.mock.calls[0]?.[3]?.timeoutMs).toBe(1500);
       });
 
       test("allows a 1200ms successful launch without retry or backoff", async () => {
@@ -1260,7 +1269,7 @@ describe("HomeScreen", () => {
       });
 
       await action.executeIosHomeNavigation();
-      expect(readSpy.mock.calls[0]?.[3]).toBe(1500);
+      expect(readSpy.mock.calls[0]?.[3]?.timeoutMs).toBe(1500);
       expect(fakeTimer.now()).toBe(1200);
     });
 
@@ -1303,7 +1312,7 @@ describe("HomeScreen", () => {
         /SpringBoard.*com\.apple\.Maps/,
       );
       expect(fakeTimer.now()).toBe(500);
-      expect(readSpy.mock.calls.every((call) => (call[3] ?? 0) <= 500)).toBe(true);
+      expect(readSpy.mock.calls.every((call) => (call[3]?.timeoutMs ?? 0) <= 500)).toBe(true);
     });
 
     test("unknown initial foreground succeeds once SpringBoard appears", async () => {
@@ -1360,7 +1369,7 @@ describe("HomeScreen", () => {
       const press = spyOn(client, "requestPressHome");
 
       await action.executeIosHomeNavigation({ frameContext: "frame-7" });
-      expect(press.mock.calls[0]?.[2]).toBe("frame-7");
+      expect(press.mock.calls[0]?.[2]?.frameContext).toBe("frame-7");
     });
 
     test("physical iOS stops verification when the caller aborts during the foreground read", async () => {
@@ -1405,10 +1414,13 @@ describe("HomeScreen", () => {
       });
       fakeObserveScreen2.setObserveResult(() => createObserveResult());
 
-      const homeScreen2 = new HomeScreen(otherDevice, fakeAdb, undefined, undefined, {
-        observeScreen: fakeObserveScreen2,
-        window: fakeWindow2,
-        awaitIdle: fakeAwaitIdle2,
+      const homeScreen2 = new HomeScreen(otherDevice, {
+        adb: fakeAdb,
+        collaborators: {
+          observeScreen: fakeObserveScreen2,
+          window: fakeWindow2,
+          awaitIdle: fakeAwaitIdle2,
+        },
       });
 
       fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));

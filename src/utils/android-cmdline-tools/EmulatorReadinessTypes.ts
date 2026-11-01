@@ -103,8 +103,10 @@ export interface EmulatorReadinessHost {
   classifyEmulatorExitOutput(output: string): ActionableError | null;
 }
 
-/** Cancellation and post-readiness behaviour for one readiness wait. */
+/** Target, cancellation and post-readiness behaviour for one readiness wait. */
 export interface EmulatorReadyWait {
+  /** Adb device id to require when waiting for an already-running device. */
+  targetDeviceId?: string;
   signal?: AbortSignal;
   options?: AndroidEmulatorReadinessOptions;
 }
@@ -114,15 +116,12 @@ export interface EmulatorReadinessPoller {
     avdName: string,
     timeoutMs?: number,
     childProcess?: ChildProcess | null,
-    targetDeviceId?: string,
     wait?: EmulatorReadyWait,
   ): Promise<BootedDevice>;
   wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void>;
   detectOfflineFailure(
     deviceId: string | undefined,
     tracker: OfflineTracker,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    observedStates?: AdbDeviceState[],
+    options?: { timeoutMs?: number; signal?: AbortSignal; observedStates?: AdbDeviceState[] },
   ): Promise<ActionableError | null>;
 }

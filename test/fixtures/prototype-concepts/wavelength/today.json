@@ -138,7 +138,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -253,7 +254,7 @@
                                   "children": [
                                     {
                                       "type": "icon",
-                                      "name": "podcasts",
+                                      "name": "library_music",
                                       "contentDescription": "Show artwork"
                                     },
                                     {
@@ -314,7 +315,7 @@
                               "testTag": "latest_row",
                               "headline": "{ep.title}",
                               "supporting": "{ep.minutes} min · {ep.ago}",
-                              "leadingIcon": "podcasts",
+                              "leadingIcon": "library_music",
                               "onTap": [
                                 {
                                   "type": "setState",
@@ -709,7 +710,7 @@
             "items": [
               {
                 "label": "Library",
-                "icon": "podcasts"
+                "icon": "library_music"
               },
               {
                 "label": "Downloads",
@@ -816,7 +817,7 @@
                           "testTag": "episode_row",
                           "headline": "{ep.title}",
                           "supporting": "{ep.minutes} min · {ep.ago}",
-                          "leadingIcon": "podcasts",
+                          "leadingIcon": "library_music",
                           "onTap": [
                             {
                               "type": "setState",
@@ -943,7 +944,7 @@
                           "testTag": "episode_row",
                           "headline": "{ep.title}",
                           "supporting": "{ep.minutes} min · {ep.ago}",
-                          "leadingIcon": "podcasts",
+                          "leadingIcon": "library_music",
                           "onTap": [
                             {
                               "type": "setState",
@@ -1070,7 +1071,7 @@
                           "testTag": "episode_row",
                           "headline": "{ep.title}",
                           "supporting": "{ep.minutes} min · {ep.ago}",
-                          "leadingIcon": "podcasts",
+                          "leadingIcon": "library_music",
                           "onTap": [
                             {
                               "type": "setState",
@@ -1401,7 +1402,7 @@
                 "children": [
                   {
                     "type": "icon",
-                    "name": "podcasts",
+                    "name": "library_music",
                     "contentDescription": "Artwork",
                     "style": {
                       "color": "onPrimaryContainer"

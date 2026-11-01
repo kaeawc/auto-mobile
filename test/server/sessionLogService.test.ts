@@ -614,7 +614,7 @@ describe("SessionLogService (#7006)", () => {
         () => simctl,
         new MemoryFileSystem(),
         timer,
-        120_000,
+        { unifiedLogTimeoutMs: 120_000 },
       );
       const pending = provider.collectUnifiedLog(
         simulator,
@@ -776,13 +776,10 @@ for (const proven of [true, false]) {
       const fs = new MemoryFileSystem();
       const read = spyOn(fs, "readFileBuffer");
       const stat = spyOn(fs, "lstat");
-      const provider = new IosSimulatorSessionLogProvider(
-        () => simctl,
-        fs,
-        new FakeTimer(),
-        5_000,
-        clone.ownership,
-      );
+      const provider = new IosSimulatorSessionLogProvider(() => simctl, fs, new FakeTimer(), {
+        unifiedLogTimeoutMs: 5_000,
+        ownership: clone.ownership,
+      });
       fs.files.set(
         `${own}/${kind === "data" ? "Documents/" : ""}log.txt`,
         Buffer.from("clone log"),
@@ -852,7 +849,7 @@ for (const retain of ["head", "tail"] as const) {
       () => simctl,
       new MemoryFileSystem(),
       new FakeTimer(),
-      5000,
+      { unifiedLogTimeoutMs: 5000 },
     );
     const result = await provider.collectUnifiedLog(
       simulator,
@@ -878,12 +875,9 @@ test("simulator caller cancellation kills the streamed child and preserves reaso
   const child = new StreamingChildProcess();
   const timer = new FakeTimer();
   const simctl = new SimCtlClient(simulator, null, { timer, spawnProcess: () => child });
-  const provider = new IosSimulatorSessionLogProvider(
-    () => simctl,
-    new MemoryFileSystem(),
-    timer,
-    5000,
-  );
+  const provider = new IosSimulatorSessionLogProvider(() => simctl, new MemoryFileSystem(), timer, {
+    unifiedLogTimeoutMs: 5000,
+  });
   const controller = new AbortController();
   const reason = new Error("caller stopped log read");
   const pending = provider.collectUnifiedLog(
@@ -907,12 +901,9 @@ test("getLogs default 300s window reads newest lines from an oversized streamed 
     execResult(oversizedLog + "2026-10-25 17:53:10.000 I MobileSafari[15900:1] newest marker\n"),
   );
   const timer = new FakeTimer();
-  const provider = new IosSimulatorSessionLogProvider(
-    () => simctl,
-    new MemoryFileSystem(),
-    timer,
-    5000,
-  );
+  const provider = new IosSimulatorSessionLogProvider(() => simctl, new MemoryFileSystem(), timer, {
+    unifiedLogTimeoutMs: 5000,
+  });
   const result = await new GetLogs({
     clock: {
       now: () => timer.now(),
@@ -923,7 +914,7 @@ test("getLogs default 300s window reads newest lines from an oversized streamed 
       throw new Error("Android must not be used");
     },
     ios: () => ({
-      collect: (appId, lastSeconds, level, signal, processName) =>
+      collect: (appId, lastSeconds, level, { signal, processName } = {}) =>
         provider.collectUnifiedLog(
           simulator,
           appId,

@@ -82,8 +82,10 @@ export function createListSessionTools(deps: ListSessionToolsDeps) {
                 definition.name,
                 registeredTool?.defaultEnabled ?? true,
                 candidateRoutes,
-                options.sessionToolSelectionService,
-                connectionProfileUuid,
+                {
+                  sessionToolSelectionService: options.sessionToolSelectionService,
+                  connectionProfileUuid,
+                },
               ))
               ? definition
               : undefined;

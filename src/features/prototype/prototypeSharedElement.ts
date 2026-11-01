@@ -177,7 +177,7 @@ function addSharedNode(
   if (!Array.isArray(keys)) {
     return keys;
   }
-  const glassError = glassSharedKeysError(keys, group, at, pairs, glassKeys);
+  const glassError = glassSharedKeysError(keys, group, at, { pairs, glassKeys });
   if (glassError) {
     return glassError;
   }
@@ -209,8 +209,10 @@ function glassSharedKeysError(
   keys: string[],
   group: string | undefined,
   at: string,
-  pairs: Map<string, SharedOccurrence[]>,
-  glassKeys: Map<string, Set<string>>,
+  {
+    pairs,
+    glassKeys,
+  }: { pairs: Map<string, SharedOccurrence[]>; glassKeys: Map<string, Set<string>> },
 ): PrototypeValidationError | undefined {
   for (const key of keys) {
     const scopes = glassKeys.get(key);
@@ -325,8 +327,7 @@ export function prototypeSharedElementV2UnsupportedMessage(
     PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
     "shared element v2",
     "omit shared",
-    fields,
-    platform,
+    { fields, platform },
   );
 }
 
@@ -334,8 +335,7 @@ function unsupportedMessage(
   capability: string,
   feature: string,
   omit: string,
-  fields: readonly string[],
-  platform: "android" | "ios",
+  { fields, platform }: { fields: readonly string[]; platform: "android" | "ios" },
 ): string {
   const device = platform === "ios" ? "connected iOS prototype agent" : "connected CtrlProxy";
   const update =
@@ -354,8 +354,7 @@ export function prototypeReducedMotionUnsupportedMessage(
     PROTOTYPE_REDUCED_MOTION_CAPABILITY,
     "reduced motion",
     'use motion: "none" or "standard"',
-    fields,
-    platform,
+    { fields, platform },
   );
 }
 
@@ -367,7 +366,6 @@ export function prototypeSharedElementUnsupportedMessage(
     PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
     "the shared element",
     "omit sharedKey",
-    fields,
-    platform,
+    { fields, platform },
   );
 }

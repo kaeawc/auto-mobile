@@ -179,13 +179,24 @@ export async function heldDevicesUnidentifiedTransportCouldAlias(
   return held.sessions.length > 0 || held.managed ? held : undefined;
 }
 
-/** Unidentifiable control is refused only while it could alias a held Android device (#11596). */
+/**
+ * Unidentifiable control is refused only while it could alias a held Android device (#11596).
+ *
+ * @param pool - Device pool identity view
+ * @param device - The frame's target device
+ * @param action - The refused action's name, for the error
+ * @param ownership.heldBySession - Whether a session holds the target
+ * @param ownership.sessions - Sessions holding devices
+ * @param ownership.requesterSessionUuid - The requester's session
+ * @param ownership.requester - Lazily resolves the requester's session
+ * @param ownership.sessionManager - Resolves derived sessions to their holder
+ */
 export async function assertFrameTargetIdentityProven(
   pool: FrameDeviceIdentityPool | undefined,
   device: BootedDevice,
   action: string,
-  heldBySession: boolean,
   ownership: {
+    heldBySession: boolean;
     sessions: readonly FrameHeldSession[];
     requesterSessionUuid?: string;
     /** Input's existing autolock fallback is resolved only if a held device needs it. */
@@ -196,7 +207,7 @@ export async function assertFrameTargetIdentityProven(
   const held = await heldDevicesUnidentifiedTransportCouldAlias(
     pool,
     device,
-    heldBySession,
+    ownership.heldBySession,
     ownership.sessions,
   );
   if (!held) {
@@ -229,11 +240,9 @@ function frameAliasOwnershipError(
   if (managed?.entry) {
     return new DeviceAssignedToBindingError(action, deviceId, managed.entry);
   }
-  return new InputDeviceOwnedError(
-    action,
-    deviceId,
-    requesterSessionUuid,
-    "This transport cannot be told apart from a device another session holds; " +
+  return new InputDeviceOwnedError(action, deviceId, requesterSessionUuid, {
+    remedy:
+      "This transport cannot be told apart from a device another session holds; " +
       "address the device by its USB serial or emulator-NNNN id. Nothing was sent.",
-  );
+  });
 }

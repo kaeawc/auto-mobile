@@ -78,7 +78,7 @@ describe("Rotate on a display whose natural orientation is not portrait (#10103)
     adb.setCommandResponse("shell settings get system user_rotation", execResult("0"));
     // Auto-rotate locked: the call writes (or skips) user_rotation and nothing is restored.
     adb.setCommandResponse("shell settings get system accelerometer_rotation", execResult("0"));
-    rotate = new Rotate(device, adb, timer);
+    rotate = new Rotate(device, { adb, timer });
     rotate.awaitIdle = new FakeAwaitIdle();
     rotate.observeScreen = observeScreen;
     rotate.window = window;

@@ -1,23 +1,22 @@
-import { poolMatcher } from "./brokerPoolMatch";
+import { AvdSnapshotCleanupFence, trackPoolOperation } from "./avdSnapshotCleanupFence";
+import type { AvdSnapshotCleanupReport } from "./AvdSnapshotCleanup";
+import { SessionBrokerMaintenanceError } from "./SessionBrokerMaintenanceError";
+import { brokerAdmissionInput } from "./brokerAdmission";
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import {
   abortedByBrokerStop,
   failedResult,
+  failedPreparationResult,
   failureFor,
   preparationFailureError,
   sameProcess,
-  storedBrokerFailure,
-  unwrap,
+  brokerResult,
 } from "./brokerSupport";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { DestructionQueue, type SessionBrokerPoolDrainResult } from "./destructionQueue";
 import { IdlePoolExpiry } from "./idlePoolExpiry";
-import {
-  normalizeSessionDeviceRequirement,
-  resolveSessionDeviceProfile,
-} from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import {
@@ -38,9 +37,9 @@ import { BrokerTimingRecorder } from "./timingRecorder";
 import { BrokerResetRelease } from "./resetRelease";
 import { ResetReadiness } from "./resetReadiness";
 import { SessionBrokerFailureError } from "./devicePort";
-import { assertDeviceProfileEmulatable, requestedDeviceProfile } from "./deviceProfile";
+import { BindingRegistrySchemaUnsupportedError } from "./provisioning/BindingRegistrySchemaUnsupportedError";
+import { requestedDeviceProfile } from "./deviceProfile";
 import type { SessionBrokerOptions } from "./brokerOptions";
-import { nativeProfile } from "./profile";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import {
@@ -82,6 +81,12 @@ export class SessionBroker {
     { controller: AbortController; requestId: string }
   >();
   private stopping = false;
+  private readonly poolOperations = new Set<Promise<unknown>>();
+  private readonly snapshotCleanup = new AvdSnapshotCleanupFence({
+    isStopping: () => this.stopping,
+    preparations: () => this.preparationOwners.keys(),
+    poolOperations: () => this.poolOperations,
+  });
 
   private readonly cleanup: RecoveryCleanup;
   private readonly destructions: DestructionQueue;
@@ -132,15 +137,25 @@ export class SessionBroker {
     if (this.stopping) {
       throw new SessionBrokerStoppingError();
     }
-    return this.destructions.drainIdlePool();
+    if (this.snapshotCleanup.inProgress) {
+      throw new SessionBrokerMaintenanceError();
+    }
+    return trackPoolOperation(this.poolOperations, () => this.destructions.drainIdlePool());
+  }
+
+  /** Fence discovery/deletion behind admitted preparations and pool work, with no timeout escape. */
+  async cleanupAvdSnapshots(
+    operation: () => Promise<AvdSnapshotCleanupReport[]>,
+  ): Promise<AvdSnapshotCleanupReport[]> {
+    return this.snapshotCleanup.run(operation);
   }
 
   /** Idle-expiry pass (#14364); a stopping broker expires nothing and its successor restarts clocks. */
   async expireIdlePool(): Promise<SessionBrokerPoolDrainResult> {
-    if (this.stopping) {
+    if (this.stopping || this.snapshotCleanup.inProgress) {
       return { resources: [] };
     }
-    return this.idleExpiry.sweep();
+    return trackPoolOperation(this.poolOperations, () => this.idleExpiry.sweep());
   }
 
   prepare(
@@ -152,6 +167,9 @@ export class SessionBroker {
     if (this.stopping) {
       // Refuse before prepareOnce/failureFor: no terminal receipt prevents a successor retry.
       return Promise.reject(new SessionBrokerStoppingError());
+    }
+    if (this.snapshotCleanup.inProgress) {
+      return Promise.reject(new SessionBrokerMaintenanceError());
     }
     const controller = new AbortController();
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -185,9 +203,13 @@ export class SessionBroker {
           exportIdentity,
         });
       }
-      const input = await this.admissionInput(config, fingerprint, signal, exportIdentity);
+      const input = await brokerAdmissionInput(this.options, config, {
+        fingerprint,
+        signal,
+        exportIdentity,
+      });
       input.timingStartedAtMs = startedAtMs;
-      if (this.options.reuseCleanDevices && config.device.platform === "ios") {
+      if (this.options.reuseCleanDevices && config.device.platform !== "android") {
         input.resetReadiness = await this.resetReadiness.snapshot(input.matches);
       }
       const admission = await this.options.store.admit(input);
@@ -195,7 +217,7 @@ export class SessionBroker {
         return this.resultUnlessAborted(admission.request, signal);
       }
       admitted = true;
-      return await this.prepareAdmission(admission, input, config, livenessOwnerToken, signal);
+      return await this.prepareAdmission(admission, input, config, { livenessOwnerToken, signal });
     } catch (error) {
       if (error instanceof SessionExportIdentityMismatchError) {
         throw error;
@@ -213,7 +235,8 @@ export class SessionBroker {
         `Session request ${config.requestId} preparation failed: ${errorMessage(error)}`,
         error,
       );
-      return this.handlePreparationFailure(config, livenessOwnerToken, fingerprint, admitted, {
+      return this.handlePreparationFailure(config, livenessOwnerToken, fingerprint, {
+        admitted,
         error: preparationFailureError(error, signal),
         exportIdentity,
       });
@@ -226,16 +249,22 @@ export class SessionBroker {
     config: SessionConfig,
     livenessOwnerToken: string,
     fingerprint: string,
-    admitted: boolean,
-    { error, exportIdentity }: { error: unknown; exportIdentity?: BrokerExportIdentity },
+    {
+      admitted,
+      error,
+      exportIdentity,
+    }: { error: unknown; exportIdentity?: BrokerExportIdentity } & { admitted: boolean },
   ): Promise<SessionBrokerResult> {
     const failure = failureFor(error);
     if (admitted) {
       return this.failAdmittedPreparation(config, failure);
     }
+    if (error instanceof BindingRegistrySchemaUnsupportedError) {
+      return failedResult(config, failure);
+    }
     // Retain pre-admission failures: a catalog change must not give replay a new acquisition.
     // An independently committed receipt wins; never overwrite an acquisition from a sibling
-    // caller. A persistence failure is an RPC error, not a claimed durable terminal result.
+    // caller. Schema refusals return without a receipt; other persistence failures remain RPC errors.
     const independentlyCommitted = await this.options.store.getRequest(config.requestId);
     if (
       independentlyCommitted?.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
@@ -250,16 +279,25 @@ export class SessionBroker {
       }
       return this.result(independentlyCommitted);
     }
-    const receipt = await this.options.store.recordPreAdmissionFailure(
-      {
-        requestId: config.requestId,
-        fingerprint,
-        parameters: config,
-        owner: this.options.owner,
-        export: exportIdentity,
-      },
-      failure,
-    );
+    let receipt: BrokerRequestRecord;
+    try {
+      receipt = await this.options.store.recordPreAdmissionFailure(
+        {
+          requestId: config.requestId,
+          fingerprint,
+          parameters: config,
+          owner: this.options.owner,
+          export: exportIdentity,
+        },
+        failure,
+      );
+    } catch (error) {
+      if (!(error instanceof BindingRegistrySchemaUnsupportedError)) {
+        throw error;
+      }
+      logger.warn(`Session request ${config.requestId} receipt refused: ${error.message}`, error);
+      return failedResult(config, failureFor(error));
+    }
     return this.result(receipt);
   }
 
@@ -271,8 +309,7 @@ export class SessionBroker {
       config.requestId,
       this.options.owner,
       failure.message,
-      failure.code,
-      failure.retryable,
+      { errorCode: failure.code, retryable: failure.retryable },
     );
     if (ticket) {
       await this.tryCleanup(ticket);
@@ -285,22 +322,7 @@ export class SessionBroker {
     }
     await this.timing.recordFailedAcquisition(request);
     const result = await this.result(request);
-    return request.errorCode === SESSION_REQUEST_ABANDONED_CODE
-      ? result
-      : {
-          ...result,
-          failure: {
-            ...failure,
-            retryable: Boolean(result.failure?.retryable),
-            // The stored receipt owns retry guidance, so the first reply matches every replay.
-            ...(result.failure?.retryAfterMs !== undefined
-              ? { retryAfterMs: result.failure.retryAfterMs }
-              : {}),
-            ...(result.failure?.retryRequires
-              ? { retryRequires: result.failure.retryRequires }
-              : {}),
-          },
-        };
+    return failedPreparationResult(request, result, failure);
   }
 
   private finishPreparation(requestId: string): void {
@@ -348,39 +370,11 @@ export class SessionBroker {
     return this.resultUnlessAborted(previous, signal);
   }
 
-  private async admissionInput(
-    config: SessionConfig,
-    fingerprint: string,
-    signal: AbortSignal,
-    exportIdentity?: BrokerExportIdentity,
-  ): Promise<BrokerAdmissionInput> {
-    signal.throwIfAborted();
-    const catalog = await this.options.catalog(config.device.platform, signal);
-    const defaults = this.options.defaults(config.device.platform);
-    const capabilities = this.options.capabilities ?? {};
-    const requirement = unwrap(
-      normalizeSessionDeviceRequirement(config.device, defaults, catalog, capabilities),
-    );
-    assertDeviceProfileEmulatable(requestedDeviceProfile(config));
-    return {
-      requestId: config.requestId,
-      fingerprint,
-      parameters: config,
-      owner: this.options.owner,
-      export: exportIdentity,
-      limits: this.options.limits,
-      matches: poolMatcher(requirement, defaults),
-      resolveCreation: () =>
-        unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog, capabilities)),
-    };
-  }
-
   private async prepareAdmission(
     initial: BrokerAdmission,
     input: BrokerAdmissionInput,
     config: SessionConfig,
-    livenessOwnerToken: string,
-    signal: AbortSignal,
+    { livenessOwnerToken, signal }: { livenessOwnerToken: string; signal: AbortSignal },
   ): Promise<SessionBrokerResult> {
     const waited = await this.resetReadiness.continueAfterWait(
       initial,
@@ -437,7 +431,7 @@ export class SessionBroker {
       config.requestId,
       this.options.owner,
       prepared.sessionId,
-      prepared.timing,
+      { ...prepared.timing, profile: prepared.profile },
     );
     if (this.stopping) {
       try {
@@ -665,7 +659,7 @@ export class SessionBroker {
       request.requestId,
       this.options.owner,
       SESSION_OWNER_EXITED_MESSAGE,
-      SESSION_OWNER_EXITED_CODE,
+      { errorCode: SESSION_OWNER_EXITED_CODE },
     );
     logger.info(
       `Session ${sessionUuid} lost its execution owner; request ${request.requestId} is ` +
@@ -728,6 +722,7 @@ export class SessionBroker {
     await this.joinReleases();
     await this.cleanup.join();
     await this.destructions.joinAll();
+    await this.snapshotCleanup.join();
   }
 
   /**
@@ -993,38 +988,7 @@ export class SessionBroker {
 
   private async result(request: BrokerRequestRecord): Promise<SessionBrokerResult> {
     const resource = await this.requestResource(request);
-    return {
-      contractVersion: 1,
-      requestId: request.requestId,
-      outcome:
-        request.state === "active"
-          ? "ready"
-          : request.state === "failed"
-            ? "failed"
-            : request.state === "released"
-              ? "released"
-              : "pending",
-      sessionUuid: request.sessionId,
-      profile: resource ? nativeProfile(resource) : null,
-      cleanupPending: this.cleanupIsPending(request, resource),
-      ...(request.timing ? { timing: request.timing } : {}),
-      ...(request.error
-        ? { failure: storedBrokerFailure(request, this.cleanupIsPending(request, resource)) }
-        : {}),
-    };
-  }
-
-  private cleanupIsPending(
-    request: BrokerRequestRecord,
-    resource: BrokerResourceRecord | undefined,
-  ): boolean {
-    const durableCleanupPending =
-      resource?.requestId === request.requestId &&
-      ["destroying", "resetting", "unknown"].includes(resource.state);
-    const preparationPending =
-      request.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
-      this.hasPendingPreparation(request.requestId);
-    return Boolean(durableCleanupPending || preparationPending);
+    return brokerResult(request, resource, this.hasPendingPreparation(request.requestId));
   }
 
   private async resultUnlessAborted(

@@ -68,6 +68,7 @@ type InitializationState = Pick<
   | "foreignDeviceOwnership"
   | "iosForeignDeviceOwnership"
   | "watchForeignDeviceOwnership"
+  | "tvForeignDeviceOwnership"
   | "bindingExclusion"
   | "managedExecutionOwnership"
   | "daemonSessionId"
@@ -198,6 +199,7 @@ export class DevicePoolInitialization {
     foreignDeviceOwnership,
     iosForeignDeviceOwnership,
     watchForeignDeviceOwnership,
+    tvForeignDeviceOwnership,
     bindingExclusion,
     managedExecutionOwnership,
   }: DevicePoolDependencies): void {
@@ -214,6 +216,7 @@ export class DevicePoolInitialization {
     this.state.foreignDeviceOwnership = foreignDeviceOwnership;
     this.state.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
     this.state.watchForeignDeviceOwnership = watchForeignDeviceOwnership;
+    this.state.tvForeignDeviceOwnership = tvForeignDeviceOwnership;
     this.state.bindingExclusion = bindingExclusion;
     this.state.managedExecutionOwnership = managedExecutionOwnership;
     this.state.daemonSessionId = daemonSessionId;
@@ -295,13 +298,13 @@ export class DevicePoolInitialization {
     this.state.disconnectHandler = this.callbacks.createDisconnectHandler();
     this.state.releaseSessionForDisconnectedDevice =
       releaseSessionForDisconnectedDevice ??
-      (async (sessionId, _deviceId, releaseReason, shouldCommit, options) => {
+      (async (sessionId, _deviceId, releaseReason, { shouldCommit, releaseOptions } = {}) => {
         // The session manager re-evaluates the fence immediately before it
         // removes the session, after its setup/restoration awaits (#7031).
         const release = await this.state.sessionManager.releaseSessionUnlessSuperseded(
           sessionId,
           releaseReason,
-          { commitFence: shouldCommit, ...options },
+          { commitFence: shouldCommit, ...releaseOptions },
         );
         return !release.superseded;
       });
@@ -366,8 +369,7 @@ export class DevicePoolInitialization {
   ): Promise<void> {
     const { sessionId, assignedDevice } = session;
     await releaseSessionAndDevice(
-      this.state.sessionManager,
-      this.callbacks,
+      { manager: this.state.sessionManager, pool: this.callbacks },
       assignedDevice,
       sessionId,
       {

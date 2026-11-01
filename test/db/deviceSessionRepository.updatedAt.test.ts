@@ -27,7 +27,7 @@ describe("DeviceSessionRepository injected timestamp clock", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     timer.advanceTime(initialMs);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   function record(sessionUuid: string): DeviceSessionRecord {
@@ -80,7 +80,7 @@ describe("DeviceSessionRepository injected timestamp clock", () => {
     {
       name: "markReleased",
       mutate: (sessionUuid) =>
-        repo.markReleased(sessionUuid, "released", timer.now(), "explicit-release"),
+        repo.markReleased(sessionUuid, "released", timer.now(), { reason: "explicit-release" }),
     },
     {
       name: "markStaleActiveSessionsExpired",

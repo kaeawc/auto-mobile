@@ -70,8 +70,7 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
         port,
         verdict === "disabled" ? 0 : IDLE_MS,
         timer,
-        30_000,
-        generation,
+        { checkIntervalMs: 30_000, launcherGeneration: generation },
       );
       watchdog.start();
       watchdog.start();

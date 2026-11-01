@@ -26,7 +26,7 @@ test("allowExpired, commitFence, and expectedOwner never reach release listeners
   const manager = create();
   const session = await manager.createSession("s1", "emulator-5554", "android");
   const seen: SessionReleaseOptions[] = [];
-  manager.onSessionRelease((_id, _device, _reason, _snapshot, options) => {
+  manager.onSessionRelease((_id, _device, _reason, { snapshot: _snapshot, ...options }) => {
     seen.push(options);
   });
 

@@ -29,8 +29,16 @@ public protocol SdkHierarchyFetching: Sendable {
     func sendTrigger(_ body: Data) async -> SdkTriggerReply?
     /// Draw a highlight in the in-app SDK process.
     func addHighlight(id: String, shape: HighlightShape) async -> SdkHighlightOutcome
-    /// POST to an observation-bridge route (#5159); nil means the SDK was unreachable.
-    func sendObservationRequest(_ route: SdkRoute, body: Data) async -> SdkBridgeReply?
+    /// POST to an observation-bridge route, preserving whether delivery was possible.
+    func sendObservationRequest(_ route: SdkRoute, body: Data, timeoutMs: Double?) async -> SdkBridgeRequestResult
+}
+
+public enum SdkBridgeRequestResult: Sendable, Equatable {
+    case reply(SdkBridgeReply)
+    /// Endpoint resolution or connection establishment failed before sending.
+    case notSent
+    /// Delivery is possible, but no usable HTTP reply arrived.
+    case noReply
 }
 
 /// An SDK observation-bridge reply (#5159): the HTTP status and the raw JSON body.
@@ -101,5 +109,17 @@ extension SdkHierarchyFetching {
     /// Older implementations have no trigger bridge.
     public func sendTrigger(_: Data) async -> SdkTriggerReply? { nil }
     /// Older implementations have no observation bridge.
-    public func sendObservationRequest(_: SdkRoute, body _: Data) async -> SdkBridgeReply? { nil }
+    public func sendObservationRequest(
+        _: SdkRoute,
+        body _: Data,
+        timeoutMs _: Double?
+    )
+        async -> SdkBridgeRequestResult
+    {
+        .notSent
+    }
+
+    public func sendObservationRequest(_ route: SdkRoute, body: Data) async -> SdkBridgeRequestResult {
+        await sendObservationRequest(route, body: body, timeoutMs: nil)
+    }
 }

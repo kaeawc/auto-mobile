@@ -76,8 +76,10 @@ export class AndroidActionDispatcher {
     action: string,
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    options: AndroidActionRequestOptions = {},
+    {
+      perf = new NoOpPerformanceTracker(),
+      ...options
+    }: AndroidActionRequestOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
     const { selector, signal } = options;
     return this.dispatchActionRequest(
@@ -87,8 +89,7 @@ export class AndroidActionDispatcher {
           ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
         ),
       timeoutMs,
-      perf,
-      signal,
+      { perf, signal },
     );
   }
 
@@ -109,8 +110,7 @@ export class AndroidActionDispatcher {
           }),
         ),
       request.timeoutMs ?? 5000,
-      new NoOpPerformanceTracker(),
-      request.signal,
+      { perf: new NoOpPerformanceTracker(), signal: request.signal },
     );
   }
 
@@ -129,8 +129,7 @@ export class AndroidActionDispatcher {
           );
         },
         timeoutMs,
-        perf,
-        signal,
+        { perf, signal },
       );
     } finally {
       this.context.pendingFocusedInputClickIds.clear();
@@ -162,8 +161,13 @@ export class AndroidActionDispatcher {
       SendCommandOptions<T>,
       "responseType" | "messageType" | "timeoutMs" | "responseError" | "beforeSend" | "onDispatch"
     > & { timeoutError: (timeoutMs: number) => T },
-    cancellation?: { signal: AbortSignal | undefined; startTime: number },
-    perf?: PerformanceTracker,
+    {
+      cancellation,
+      perf,
+    }: {
+      cancellation?: { signal: AbortSignal | undefined; startTime: number };
+      perf?: PerformanceTracker;
+    } = {},
   ): Promise<T> {
     const dispatch = () =>
       sendCommand<T>(
@@ -208,8 +212,7 @@ export class AndroidActionDispatcher {
     action: string,
     serializeRequest: (requestId: string) => string,
     timeoutMs: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<A11yActionResult> {
     const startTime = this.context.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
@@ -271,8 +274,7 @@ export class AndroidActionDispatcher {
             acknowledged: true,
           }),
         },
-        { signal: combinedSignal, startTime },
-        perf,
+        { cancellation: { signal: combinedSignal, startTime }, perf },
       );
 
       const result = await perf.track("waitForAction", () => cancellableAction);
@@ -314,11 +316,13 @@ export class AndroidActionDispatcher {
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    {
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      signal,
+    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<A11yActionResult> {
-    return this.requestAction(action, selector.resourceId, timeoutMs, perf, { selector, signal });
+    return this.requestAction(action, selector.resourceId, timeoutMs, { perf, selector, signal });
   }
 
   async supportsNodeActionSelectors(
@@ -425,7 +429,7 @@ export class AndroidActionDispatcher {
             acknowledged: true,
           }),
         },
-        { signal: combinedSignal, startTime },
+        { cancellation: { signal: combinedSignal, startTime } },
       );
       checkCancellation();
       return { ...result, dispatched, acknowledged: result.acknowledged ?? true };

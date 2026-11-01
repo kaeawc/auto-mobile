@@ -33,7 +33,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -83,7 +83,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
   for (const reason of ["superseded", "allocation-rollback"] as const) {
     test(`a ${reason} row is refused up front and left untouched`, async () => {
       await seedRow();
-      await repo.markReleased(SESSION, "released", 2_000, reason);
+      await repo.markReleased(SESSION, "released", 2_000, { reason });
       const before = await repo.getSession(SESSION);
       const { manager, pool } = daemon();
 
@@ -102,7 +102,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
 
   test("naming a plan-auto-release UUID issues the session again on the real repository", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 2_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 2_000, { reason: PLAN_AUTO_RELEASE_REASON });
     const { manager, pool } = daemon();
 
     const session = await manager.getOrCreateSession(SESSION, pool, "android", {
@@ -134,7 +134,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
 
   test("a device taken between the plans surfaces the pool's typed refusal and hands the claim back", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 2_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 2_000, { reason: PLAN_AUTO_RELEASE_REASON });
     const busy = new ActionableError("Device emulator-5554 is in use by another session.");
     const { manager, pool } = daemon(async () => {
       throw busy;
@@ -160,7 +160,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
 
   test("a restart between the plans does not rehydrate the plan-auto-release row", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 2_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 2_000, { reason: PLAN_AUTO_RELEASE_REASON });
     const { manager, pool } = daemon();
 
     const summary = await manager.rehydratePersistedSessions(pool);
@@ -178,7 +178,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     await manager.createSession(SESSION, DEVICE, "android", { stableDeviceId: "Pixel_8_API_35" });
     await manager.releaseSession(SESSION, "explicit-release");
 
-    await repo.markReleased(SESSION, "released", 3_000, PLAN_AUTO_RELEASE_REASON);
+    await repo.markReleased(SESSION, "released", 3_000, { reason: PLAN_AUTO_RELEASE_REASON });
 
     expect((await repo.getSession(SESSION))?.release_reason).toBe("explicit-release");
   });

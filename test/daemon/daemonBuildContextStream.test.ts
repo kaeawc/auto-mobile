@@ -19,11 +19,10 @@ describe("daemon build-context stream wiring", () => {
     await harness.dispose();
   });
   function manager(): NavigationGraphManager {
-    return new NavigationGraphManager(
-      new NavigationRepository(harness.db),
-      new TestCoverageRepository(harness.db),
-      new FakeTimer(),
-    );
+    return new NavigationGraphManager(new NavigationRepository({ db: harness.db }), {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
+      timer: new FakeTimer(),
+    });
   }
   function wiring() {
     // Exercise only the stream bridge, without constructing/starting a resident daemon.

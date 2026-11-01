@@ -139,7 +139,11 @@ export class TerminateApp extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     options: TerminateAppOptions = {},
   ) {
-    super(device, adb, options.timer ?? defaultTimer, undefined, options);
+    super(device, {
+      adb,
+      timer: options.timer ?? defaultTimer,
+      displayFence: options,
+    });
     this.device = device;
     this.simctl = options.simctl ?? new SimCtlClient(device);
     this.deviceTerminator = options.deviceTerminator ?? new DeviceAppManager();

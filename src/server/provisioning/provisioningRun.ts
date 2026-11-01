@@ -108,8 +108,8 @@ async function reserveProvisionLifecycleLease(
         deviceId: args.device.name,
       },
       deps.timer,
-      totalDeadlineMs,
       {
+        deadlineMs: totalDeadlineMs,
         requestAbortSignal: signal,
         timeoutError: (detail) =>
           new ProvisionDeviceError(
@@ -125,13 +125,10 @@ async function reserveProvisionLifecycleLease(
     // (→ `simctl list`) before the provision/boot scopes, so its discovery
     // command would otherwise be missing from perfTiming (see PerfContext).
     return await runWithPerfTracker(ambientPerfFor(perf), async () => {
-      const existing = await reserveExistingIosProvisionDeviceLifecycle(
-        args,
-        deps,
-        deviceManager,
+      const existing = await reserveExistingIosProvisionDeviceLifecycle(args, deps, deviceManager, {
         totalDeadlineMs,
         signal,
-      );
+      });
       return (
         existing ??
         (await reserveIosSelectorProvisionDeviceLifecycle(args, deps, totalDeadlineMs, signal))
@@ -182,8 +179,8 @@ async function runProvisionDeviceLifecycle(
       args,
       deps.exactDeviceProvisionerFactory(deviceManager, deviceCreationGate),
       perf,
-      deps.timer,
       {
+        timer: deps.timer,
         totalDeadlineMs: totalDeadlineMs,
         markDeviceCreationStarted: () => {
           creationStarted = true;
@@ -208,7 +205,7 @@ async function runProvisionDeviceLifecycle(
         notifyResourcesChangedBestEffort();
       }
       perf.end();
-      return buildProvisionDeviceResult(args, provisioned, createdByRequest, perf, undefined);
+      return buildProvisionDeviceResult(args, provisioned, createdByRequest, { perf });
     }
     // Ambient scope (only under --debug-perf) so the emulator/simctl boot
     // commands attribute their time into this provisioning tree. Capture the
@@ -217,7 +214,8 @@ async function runProvisionDeviceLifecycle(
     const provisionedDevice = provisioned;
     const bootLifecycleLease = lifecycleLease;
     const booted = await runWithPerfTracker(ambientPerfFor(perf), () =>
-      bootExactProvisionedDevice(ctx, args, deps, deviceManager, {
+      bootExactProvisionedDevice(ctx, args, deps, {
+        deviceManager,
         deviceCreationGate,
         provisioned: provisionedDevice,
         perf: perf,
@@ -247,10 +245,11 @@ async function runProvisionDeviceLifecycle(
       notifyResourcesChangedBestEffort();
     }
     perf.end();
-    return buildProvisionDeviceResult(args, provisioned, createdByRequest, perf, booted);
+    return buildProvisionDeviceResult(args, provisioned, createdByRequest, { perf, booted });
   } catch (error) {
     perf.end();
-    return await rethrowFailedProvisionDeviceLifecycle(ctx, args, deps, deviceManager, {
+    return await rethrowFailedProvisionDeviceLifecycle(ctx, args, deps, {
+      deviceManager,
       provisioned,
       createdAvdNeverLaunched:
         args.device.platform === "android" &&

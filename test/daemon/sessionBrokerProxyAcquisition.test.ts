@@ -3,6 +3,7 @@ import { DAEMON_RECONNECT_OUTAGE_BUDGET_MS } from "../../src/daemon/wire/constan
 import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DaemonVersionMismatchError } from "../../src/daemon/proxy/DaemonVersionMismatchError";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "../../src/daemon/sessionBroker/timing";
+import { SessionBrokerMaintenanceError } from "../../src/daemon/sessionBroker/SessionBrokerMaintenanceError";
 import {
   acquireSessionThroughDaemon,
   DAEMON_PREPARE_SESSION_METHOD,
@@ -13,7 +14,7 @@ import {
 import type { SessionConfig } from "../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 const config: SessionConfig = {
   contractVersion: 1,
@@ -80,6 +81,35 @@ function rig(
 }
 
 describe("session broker proxy acquisition", () => {
+  test("a maintenance refusal retries identical prepare params without status polling", async () => {
+    const refusal = new SessionBrokerMaintenanceError();
+    let prepares = 0;
+    const { ports, calls, timer } = rig((method) => {
+      if (method === "daemon/capabilities") {
+        return { capabilities: ["session-broker/v1"] };
+      }
+      if (method === DAEMON_PREPARE_SESSION_METHOD && ++prepares === 1) {
+        throw refusal;
+      }
+      return ready;
+    }, false);
+
+    expect(
+      await settleByFakeEvents(timer, acquireSessionThroughDaemon(config, ports), {
+        description: "maintenance refusal retry",
+      }),
+    ).toEqual(ready);
+    const prepareCalls = calls.filter(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD);
+    expect(prepareCalls).toHaveLength(2);
+    expect(prepareCalls[0]?.params).toEqual({ config, livenessOwnerToken: "owner-1" });
+    expect(prepareCalls[1]?.params).toBe(prepareCalls[0]?.params);
+    expect(calls.filter(({ method }) => method === DAEMON_SESSION_REQUEST_STATUS_METHOD)).toEqual(
+      [],
+    );
+    expect(timer.now()).toBe(refusal.retryAfterMs);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("T4: lost prepare reply reconnects for status and returns stopping receipt without resending", async () => {
     const receipt: SessionBrokerResult = {
       ...ready,

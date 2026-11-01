@@ -30,6 +30,12 @@ export class PlatformLegacySlotDeviceStopper implements LegacySlotDeviceStopper 
     target: LegacySlotDeviceTarget,
     signal: AbortSignal,
   ): Promise<DeviceInfo | undefined> {
+    if (target.platform === "watchos") {
+      // Legacy slot rows predate watch bindings (their CHECK admitted only android and ios).
+      throw new ActionableError(
+        `Legacy slot retirement cannot confirm Apple Watch simulator '${target.stableId ?? target.name}'; legacy slots never held watches.`,
+      );
+    }
     const images = await this.manager.getDeviceImagesDetailed(target.platform, {
       signal,
       bypassIosDeviceListCache: true,

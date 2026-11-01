@@ -779,6 +779,14 @@ final class PrototypeAgent: NSObject {
         }
         var status = model.status()
         status["visible"] = viewerHosted || window?.isHidden == false
+        let prototypeWindow = viewerHosted ? model.prototypeWindow : window
+        let insets = prototypeWindow?.safeAreaInsets
+        status["safeAreaTop"] = prototypeStatusSafeAreaTop(
+            windowInsets: insets.map {
+                PrototypeSafeInsets(top: $0.top, left: $0.left, bottom: $0.bottom, right: $0.right)
+            },
+            statusBarHidden: prototypeWindow?.windowScene?.statusBarManager?.isStatusBarHidden ?? false
+        )
         if model.mode == .standalone {
             status["persistent"] = true
             status["droppedEvents"] = outbox.droppedEvents

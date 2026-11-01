@@ -176,11 +176,11 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
       async (sessionId, reason) => {
         reaped.push({ sessionId, reason });
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
           reason,
         });
       },
-      timer,
+      { timer },
     );
     monitor.start();
 

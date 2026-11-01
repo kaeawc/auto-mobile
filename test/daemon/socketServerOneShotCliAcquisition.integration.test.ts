@@ -75,7 +75,7 @@ async function createHarness(): Promise<Harness> {
   ]) {
     await migrate(db as Kysely<unknown>);
   }
-  const repository = new DeviceSessionRepository(db);
+  const repository = new DeviceSessionRepository({ db });
   const timer = new FakeTimer();
   const barrier = new FakeDbWriteBarrier();
   const manager = new SessionManager(timer, repository, { barrier: () => barrier });
@@ -149,7 +149,10 @@ function isCallToolResult(value: unknown): value is CallToolResult {
 }
 
 function connect(h: Harness): DaemonClient {
-  const client = new DaemonClient(h.socketPath, 5_000, undefined, {}, { clientIdentity: null });
+  const client = new DaemonClient(h.socketPath, 5_000, undefined, {
+    recoveryOptions: {},
+    clientIdentity: null,
+  });
   h.clients.push(client);
   return client;
 }

@@ -1549,6 +1549,8 @@ describe("finalizeToolResponse", () => {
       const withFreshness = (): ObserveResult => ({
         ...sameScreenObserve(),
         freshness,
+        backend: "xctest",
+        fallbackReason: "unavailable",
       });
 
       finalizeToolResponse(createStructuredToolResponse(withFreshness()), {
@@ -1574,6 +1576,12 @@ describe("finalizeToolResponse", () => {
       // Same shape/name a full-mode observation carries these fields under.
       expect(obsSc.activeWindow).toEqual({ ...requireValue(next.activeWindow) });
       expect(obsSc.freshness).toEqual(freshness);
+      expect(obsSc.backend).toBe("xctest");
+      expect(obsSc.fallbackReason).toBe("unavailable");
+      expect(observeDiffSchema.safeParse({ ...obsSc, backend: "invalid" }).success).toBe(false);
+      expect(observeDiffSchema.safeParse({ ...obsSc, fallbackReason: "invalid" }).success).toBe(
+        false,
+      );
 
       // Text mirror agrees.
       const parsed = JSON.parse(finalized.content[0].text);
@@ -1730,7 +1738,7 @@ describe("finalizeToolResponse", () => {
         return cached;
       });
       const capture = spyOn(fake, "captureScreenshot").mockImplementation(
-        async (_perf, _signal, observation) => {
+        async (_perf, { observation } = {}) => {
           if (!observation) {
             throw new Error("Expected the adopted observation");
           }
@@ -1738,7 +1746,7 @@ describe("finalizeToolResponse", () => {
           screenshots.updateForObservation(
             requireValue(observation.deviceId),
             observation.observationId,
-            "/fake/adopted.png",
+            { path: "/fake/adopted.png" },
           );
         },
       );
@@ -1752,7 +1760,7 @@ describe("finalizeToolResponse", () => {
         const adopted = response.structuredContent!.observation;
         expect(adopted.screenshotCaptureAttempted).toBe(true);
         expect(capture).toHaveBeenCalledTimes(1);
-        expect(capture.mock.calls[0][2]?.observationId).toBe(adopted.observationId);
+        expect(capture.mock.calls[0][1]?.observation?.observationId).toBe(adopted.observationId);
         expect(reads.mock.calls.every(([options]) => options?.skipScreenshot === true)).toBe(true);
         const finalized = finalizeToolResponse(response, {
           name: "tapOn",
@@ -1852,6 +1860,8 @@ describe("finalizeToolResponse", () => {
       const freshness = { actualTimestamp: 1000, ageMs: 5, isFresh: true };
       const withPassthroughMetadata = (): ObserveResult => ({
         ...sameScreenObserve(),
+        backend: "xctest",
+        fallbackReason: "unavailable",
         observationId: "passthrough-observation",
         deviceId: "emulator-5554",
         display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },

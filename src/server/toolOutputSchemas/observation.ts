@@ -373,6 +373,7 @@ export const observeDiffSchema = z
     changed: z.array(observeDiffNodeChangeSchema),
     fields: z.record(z.string(), layoutWarningsDiffFieldSchema).optional(),
     importedPrototypeContent: importedPrototypeContentSchema.optional(),
+    ...observationBackendFields,
   })
   .passthrough();
 requireObservationJoinKeysOnTheWire(observeDiffSchema);
@@ -454,11 +455,11 @@ export const observeResultSchema = z
         "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
       ),
     hierarchyUnavailable: z
-      .object({ platform: z.literal("watchos"), message: z.string() })
+      .object({ platform: z.union([z.literal("watchos"), z.literal("tvos")]), message: z.string() })
       .optional()
       .describe(
-        "Apple Watch simulator only: this observation is a screenshot with screenSize; the view " +
-          "hierarchy is not available on watchOS yet. viewHierarchy, skeleton, context, elements " +
+        "Apple Watch and Apple TV simulators: this observation is a screenshot with screenSize; the view " +
+          "hierarchy is not available on watchOS or tvOS yet. viewHierarchy, skeleton, context, elements " +
           "and the other element fields are absent, not empty: their absence does not mean an empty screen.",
       ),
     systemInsets: systemInsetsSchema.optional(),

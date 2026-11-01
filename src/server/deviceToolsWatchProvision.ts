@@ -62,51 +62,54 @@ export async function provisionWatchDevice(
     rawArgs,
     startedAtMs + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS),
     signal,
-    "provisionDevice",
-    async (deadlineMs, requestSignal, stage) =>
-      await runWithAbortSignal(requestSignal, async () => {
-        stage.current = "waiting for the device lifecycle lease";
-        const lease = await deps.lifecycleCoordinator.reserve(
-          { kind: "selector", platform: "watchos", selector: request.deviceId ?? request.name },
-          { operation: "provision", deadlineMs, signal: requestSignal },
-        );
-        try {
-          stage.current = "resolving or creating the Apple Watch simulator";
-          const provisioner = (deps.watchSimulatorProvisionerFactory ?? defaultWatchProvisioner)();
-          let resolved = await provisioner.provision(request, {
-            // provisionDevice is an explicit creation request, as on Android and iOS.
-            allowCreate: deps.deviceCreationGateFactory().isCreationAllowed(true),
-            signal: requestSignal,
-          });
-          await lease.bindCanonicalIdentity(
-            { platform: "watchos", stableId: resolved.watch.deviceId },
-            // After waiting on another lifecycle (a shutdown, say) the watch is read again, and
-            // that fresh snapshot is the one booted below.
-            async () => {
-              const again = await provisioner.provision(request, {
-                allowCreate: false,
-                signal: requestSignal,
-              });
-              resolved = { watch: again.watch, created: resolved.created };
-              return { platform: "watchos", stableId: again.watch.deviceId };
-            },
+    {
+      operationName: "provisionDevice",
+      operation: async (deadlineMs, requestSignal, stage) =>
+        await runWithAbortSignal(requestSignal, async () => {
+          stage.current = "waiting for the device lifecycle lease";
+          const lease = await deps.lifecycleCoordinator.reserve(
+            { kind: "selector", platform: "watchos", selector: request.deviceId ?? request.name },
+            { operation: "provision", deadlineMs, signal: requestSignal },
           );
-          const { watch, created } = resolved;
-          if (args.boot === false) {
-            return watchProvisionResponse(args, watch, created, undefined);
+          try {
+            stage.current = "resolving or creating the Apple Watch simulator";
+            const provisioner = (
+              deps.watchSimulatorProvisionerFactory ?? defaultWatchProvisioner
+            )();
+            let resolved = await provisioner.provision(request, {
+              // provisionDevice is an explicit creation request, as on Android and iOS.
+              allowCreate: deps.deviceCreationGateFactory().isCreationAllowed(true),
+              signal: requestSignal,
+            });
+            await lease.bindCanonicalIdentity(
+              { platform: "watchos", stableId: resolved.watch.deviceId },
+              // After waiting on another lifecycle (a shutdown, say) the watch is read again, and
+              // that fresh snapshot is the one booted below.
+              async () => {
+                const again = await provisioner.provision(request, {
+                  allowCreate: false,
+                  signal: requestSignal,
+                });
+                resolved = { watch: again.watch, created: resolved.created };
+                return { platform: "watchos", stableId: again.watch.deviceId };
+              },
+            );
+            const { watch, created } = resolved;
+            if (args.boot === false) {
+              return watchProvisionResponse(args, watch, created, undefined);
+            }
+            const booted = await bootAndBind(
+              { rawArgs, watch, created, provisioner, bindSession },
+              deps,
+              deadlineMs,
+              { signal: requestSignal, stage },
+            );
+            return watchProvisionResponse(args, watch, created, booted);
+          } finally {
+            lease.release();
           }
-          const booted = await bootAndBind(
-            { rawArgs, watch, created, provisioner, bindSession },
-            deps,
-            deadlineMs,
-            requestSignal,
-            stage,
-          );
-          return watchProvisionResponse(args, watch, created, booted);
-        } finally {
-          lease.release();
-        }
-      }),
+        }),
+    },
   );
 }
 
@@ -127,8 +130,7 @@ async function bootAndBind(
   },
   deps: DeviceToolsDependencies,
   deadlineMs: number,
-  signal: AbortSignal,
-  stage: { current: string },
+  { signal, stage }: { signal: AbortSignal; stage: { current: string } },
 ): Promise<{ boot: WatchBootResult; sessionId: string }> {
   try {
     stage.current = "booting the Apple Watch simulator";
@@ -141,8 +143,7 @@ async function bootAndBind(
       { watch, boot, rawArgs, operation: "provisionDevice" },
       bindSession,
       deps.timer,
-      deadlineMs,
-      signal,
+      { deadlineMs, signal },
     );
     return { boot, sessionId };
   } catch (error) {

@@ -106,20 +106,16 @@ describe("IOSCtrlProxyClient lazy build context", () => {
 
   function createClient(deviceId = simulatorId): IOSCtrlProxyClient {
     const device: BootedDevice = { deviceId, platform: "ios", name: "fake iOS device" };
-    const created = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      createSuccessWebSocketFactory(timer),
+    const created = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: createSuccessWebSocketFactory(timer),
       timer,
-      {
-        serviceManagerFactory: undefined,
-        bootedDeviceLister: undefined,
-        deviceConnectionLostNotifier: undefined,
-        sdkEventIngestor: undefined,
-        retryExecutor: undefined,
-        options: { iosSource: source, contentHashProvider: provider },
-      },
-    );
+      serviceManagerFactory: undefined,
+      bootedDeviceLister: undefined,
+      deviceConnectionLostNotifier: undefined,
+      sdkEventIngestor: undefined,
+      retryExecutor: undefined,
+      options: { iosSource: source, contentHashProvider: provider },
+    });
     // Suppress unrelated foreground monitoring/SDK probing; exercise the real
     // hierarchy hook and manager context without navigation DB writes or sockets.
     created["lastForegroundBundleId"] = appId;
@@ -627,10 +623,12 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     "rebind applies provenance to the current session (already resolved=%j)",
     async (alreadyResolved) => {
       const nextManager = NavigationGraphManager.createForTesting(
-        new NavigationRepository(harness.db),
-        new TestCoverageRepository(harness.db),
-        timer,
-        "session-B",
+        new NavigationRepository({ db: harness.db }),
+        {
+          testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
+          timer,
+          sessionUuid: "session-B",
+        },
       );
       const sessionManager = spyOn(
         NavigationGraphManager,

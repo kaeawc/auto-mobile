@@ -42,8 +42,7 @@ export async function executeAndroidInputText(
       adb,
       timer,
       `echo $$; exec ${apiLevel === null ? "" : "cmd "}${input}`,
-      textLength,
-      options,
+      { textLength, ...options },
     );
   }
   let pid: number | undefined;
@@ -88,7 +87,7 @@ export async function executeAndroidInputText(
         INPUT_TEXT_SETTLEMENT_MAX_MS,
         INPUT_TEXT_SETTLEMENT_BASE_MS + INPUT_TEXT_SETTLEMENT_PER_CHAR_MS * textLength,
       );
-      await settleGuestInput(adb, timer, pid, true, settlementMs);
+      await settleGuestInput(adb, timer, pid, { terminate: true, settlementMs });
     }
     // The caller's cancellation/timeout contract must survive best-effort cleanup.
     throw error;
@@ -107,8 +106,7 @@ async function executeUntilHostExit(
   adb: AndroidInputTextExecutor,
   timer: Timer,
   script: string,
-  textLength: number,
-  { signal, timeoutMs, ...options }: AdbExecuteOptions,
+  { textLength, signal, timeoutMs, ...options }: AdbExecuteOptions & { textLength: number },
 ): Promise<ExecResult> {
   signal?.throwIfAborted();
   const holdMs = hostWaitMs(textLength);
@@ -252,8 +250,7 @@ async function settleGuestInput(
   adb: AndroidInputTextExecutor,
   timer: Timer,
   pid: number,
-  terminate: boolean,
-  settlementMs: number,
+  { terminate, settlementMs }: { terminate: boolean; settlementMs: number },
 ): Promise<void> {
   const deadline = timer.now() + settlementMs;
   const controller = new AbortController();

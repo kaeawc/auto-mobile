@@ -33,7 +33,7 @@ describe("CriticalSectionCoordinator", () => {
         coordinator.registerExpectedDevices("abort-lock", 2);
         return kind === "barrier"
           ? coordinator.awaitBarrier("abort-lock", device, 2, { timeout: 120000, signal })
-          : coordinator.enterCriticalSection("abort-lock", device, 120000, undefined, signal);
+          : coordinator.enterCriticalSection("abort-lock", device, { timeout: 120000, signal });
       };
 
       for (const reasonMode of ["visible loss", "hidden loss", "hidden cancellation"] as const) {
@@ -151,7 +151,7 @@ describe("CriticalSectionCoordinator", () => {
       const reason = new Error("release raced cancellation");
       coordinator.registerExpectedDevices("race", 2);
       const a = coordinator
-        .enterCriticalSection("race", "A", 120000, undefined, controller.signal)
+        .enterCriticalSection("race", "A", { timeout: 120000, signal: controller.signal })
         .then(
           (release) => {
             release();
@@ -159,7 +159,7 @@ describe("CriticalSectionCoordinator", () => {
           },
           (error: unknown) => error,
         );
-      const b = coordinator.enterCriticalSection("race", "B", 120000);
+      const b = coordinator.enterCriticalSection("race", "B", { timeout: 120000 });
       controller.abort(reason);
       const release = await b;
       release();
@@ -174,7 +174,7 @@ describe("CriticalSectionCoordinator", () => {
       Object.defineProperty(controller.signal, "reason", { get: () => undefined });
       rememberDeviceLossAbort(controller.signal, loss);
       const pending = coordinator
-        .enterCriticalSection("hidden-mutex", "A", 120000, undefined, controller.signal)
+        .enterCriticalSection("hidden-mutex", "A", { timeout: 120000, signal: controller.signal })
         .then(
           () => "unexpected success",
           (error: unknown) => error,
@@ -195,7 +195,7 @@ describe("CriticalSectionCoordinator", () => {
       const reason = new Error("mutex cancelled");
       let error: unknown;
       const pending = coordinator
-        .enterCriticalSection("mutex", "A", 120000, undefined, controller.signal)
+        .enterCriticalSection("mutex", "A", { timeout: 120000, signal: controller.signal })
         .then(
           (release) => {
             release();
@@ -371,8 +371,8 @@ describe("CriticalSectionCoordinator", () => {
     coordinator.registerExpectedDevices(lockName, 3);
 
     // Only 2 devices arrive, one is missing
-    const promise1 = coordinator.enterCriticalSection(lockName, "device-1", 100); // 100ms timeout
-    const promise2 = coordinator.enterCriticalSection(lockName, "device-2", 100);
+    const promise1 = coordinator.enterCriticalSection(lockName, "device-1", { timeout: 100 }); // 100ms timeout
+    const promise2 = coordinator.enterCriticalSection(lockName, "device-2", { timeout: 100 });
 
     const allPromises = Promise.all([promise1, promise2]);
     fakeTimer.advanceTime(100);
@@ -418,12 +418,12 @@ describe("CriticalSectionCoordinator", () => {
     coordinator.registerExpectedDevices(lockName, 2);
 
     // First device arrives at barrier (waiting for second device)
-    const promise1 = coordinator.enterCriticalSection(lockName, "device-1", 100);
+    const promise1 = coordinator.enterCriticalSection(lockName, "device-1", { timeout: 100 });
 
     // Same device tries to arrive again before barrier passes
-    await expect(coordinator.enterCriticalSection(lockName, "device-1", 100)).rejects.toThrow(
-      /already arrived at barrier/,
-    );
+    await expect(
+      coordinator.enterCriticalSection(lockName, "device-1", { timeout: 100 }),
+    ).rejects.toThrow(/already arrived at barrier/);
 
     // Clean up: advance time to trigger timeout for the waiting device
     fakeTimer.advanceTime(100);
@@ -507,7 +507,7 @@ describe("CriticalSectionCoordinator", () => {
     coordinator.registerExpectedDevices(lockName, 3);
 
     // Start one device
-    const promise = coordinator.enterCriticalSection(lockName, "device-1", 200);
+    const promise = coordinator.enterCriticalSection(lockName, "device-1", { timeout: 200 });
 
     // Force cleanup (simulating error scenario) must reject parked devices
     // synchronously without waiting for their barrier timeout.
@@ -538,11 +538,15 @@ describe("CriticalSectionCoordinator", () => {
     // synchronously when the second device arrives, so no time advance is needed.
     await Promise.all([
       (async () => {
-        const release = await coordinator.enterCriticalSection(lockName, "device-1", 30000);
+        const release = await coordinator.enterCriticalSection(lockName, "device-1", {
+          timeout: 30000,
+        });
         release();
       })(),
       (async () => {
-        const release = await coordinator.enterCriticalSection(lockName, "device-2", 30000);
+        const release = await coordinator.enterCriticalSection(lockName, "device-2", {
+          timeout: 30000,
+        });
         release();
       })(),
     ]);
@@ -638,7 +642,7 @@ describe("CriticalSectionCoordinator", () => {
     await firstRound;
 
     // Reuse the registered lock before the previous round's cleanup delay.
-    const secondDevice = coordinator.enterCriticalSection(lockName, "device-3", 10000);
+    const secondDevice = coordinator.enterCriticalSection(lockName, "device-3", { timeout: 10000 });
     let secondDeviceSettled = false;
     const secondSettled = secondDevice.then(
       (release) => {
@@ -653,7 +657,7 @@ describe("CriticalSectionCoordinator", () => {
     fakeTimer.advanceTime(5001);
     expect(secondDeviceSettled).toBe(false);
 
-    const thirdDevice = coordinator.enterCriticalSection(lockName, "device-4", 10000);
+    const thirdDevice = coordinator.enterCriticalSection(lockName, "device-4", { timeout: 10000 });
     const release4 = await thirdDevice;
     release4();
     await secondSettled;
@@ -791,9 +795,15 @@ describe("CriticalSectionCoordinator", () => {
       coordinator.registerExpectedDevices("edit", 1, "session-A");
       coordinator.registerExpectedDevices("edit", 1, "session-B");
 
-      const releaseA = await coordinator.enterCriticalSection("edit", "A-d1", 30000, "session-A");
+      const releaseA = await coordinator.enterCriticalSection("edit", "A-d1", {
+        timeout: 30000,
+        namespace: "session-A",
+      });
       // Plan B can still acquire its own namespaced lock while A holds A's.
-      const releaseB = await coordinator.enterCriticalSection("edit", "B-d1", 30000, "session-B");
+      const releaseB = await coordinator.enterCriticalSection("edit", "B-d1", {
+        timeout: 30000,
+        namespace: "session-B",
+      });
 
       // Both acquired independently.
       expect(typeof releaseA).toBe("function");

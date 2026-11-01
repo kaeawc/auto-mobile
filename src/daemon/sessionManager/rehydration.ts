@@ -33,8 +33,7 @@ export interface SessionRehydrationHost {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    listed: DeviceSession | undefined,
-    recovery: PersistedSessionRecovery,
+    recovery: PersistedSessionRecovery & { listed?: DeviceSession },
   ): Promise<Session>;
   waitForSharedAssignment(
     sessionId: string,
@@ -83,7 +82,8 @@ export class SessionRehydration {
   ): Promise<Session> {
     const shared = this.host.newSharedAssignment(sessionId);
     const recoveryPromise = this.host
-      .recoverPersistedSession(sessionId, devicePool, persisted.platform, persisted, {
+      .recoverPersistedSession(sessionId, devicePool, persisted.platform, {
+        listed: persisted,
         initialOwnership: "awaiting-owner",
         shared,
       })

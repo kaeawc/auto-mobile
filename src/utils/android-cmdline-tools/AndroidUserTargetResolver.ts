@@ -144,13 +144,9 @@ export class AndroidUserTargetResolver {
     const candidates: AndroidUser[] = [];
     for (const user of runningUsers) {
       if (
-        await isPackageInstalledForUser(
-          this.adb,
-          request.packageName,
-          user.userId,
-          undefined,
-          request.signal,
-        )
+        await isPackageInstalledForUser(this.adb, request.packageName, user.userId, {
+          signal: request.signal,
+        })
       ) {
         candidates.push(user);
       }

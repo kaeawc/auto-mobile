@@ -26,34 +26,27 @@ describe("tool availability and per-connection selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "defaultOffTool",
-      "Default-off tool",
-      z.object({}),
-      async () => ({ content: [{ type: "text" as const, text: "default-off handler ran" }] }),
-      { defaultEnabled: false },
-    );
-    ToolRegistry.register(
-      "debugOnlyTool",
-      "Debug-only tool",
-      z.object({}),
-      async () => ({ content: [] }),
-      { debugOnly: true },
-    );
+    ToolRegistry.register("defaultOffTool", "Default-off tool", z.object({}), {
+      handler: async () => ({
+        content: [{ type: "text" as const, text: "default-off handler ran" }],
+      }),
+      defaultEnabled: false,
+    });
+    ToolRegistry.register("debugOnlyTool", "Debug-only tool", z.object({}), {
+      handler: async () => ({ content: [] }),
+      debugOnly: true,
+    });
     ToolRegistry.registerDeviceAware(
       "embeddedSdkOnlyTool",
       "Embedded-SDK-only tool",
       z.object({}),
-      async () => ({ content: [] }),
-      { embeddedSdkOnly: true },
+      { handler: async () => ({ content: [] }), embeddedSdkOnly: true },
     );
-    ToolRegistry.registerDeviceAware(
-      "barrier",
-      "Plan-only barrier",
-      z.object({}),
-      async () => ({ content: [] }),
-      { planOnly: true, planExecutable: true },
-    );
+    ToolRegistry.registerDeviceAware("barrier", "Plan-only barrier", z.object({}), {
+      handler: async () => ({ content: [] }),
+      planOnly: true,
+      planExecutable: true,
+    });
 
     const listedNames = (await fixture.client.listTools()).tools.map(({ name }) => name);
     expect(listedNames).not.toContain("defaultOffTool");

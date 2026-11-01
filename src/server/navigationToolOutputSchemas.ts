@@ -82,6 +82,52 @@ export const navigateToResultSchema = z
   .passthrough();
 
 /** Read failures throw; the graph is scoped to `requestedAppId`, else the observed app. */
+const screenActionOutputSchema = () => z.enum(["push", "replace", "pop", "popToRoot", "setPage"]);
+
+/** `getNavigationGraph`'s prototype diff (#14125); each field is its own schema instance. */
+const prototypeDiffOutputSchema = () =>
+  z.object({
+    matched: z.array(
+      z.object({
+        prototype: z.string(),
+        real: z.string(),
+        by: z.enum(["mapping", "identifier", "name"]),
+      }),
+    ),
+    unmatchedPrototypeScreens: z.array(
+      z.object({
+        id: z.string(),
+        kind: z.enum(["root", "stackScreen", "pagerPage", "sheet", "dialog"]),
+        path: z.string(),
+        reason: z.literal("mappedScreenMissing").optional(),
+      }),
+    ),
+    unmatchedRealScreens: z.array(z.string()),
+    observedTransitions: z.array(
+      z.object({
+        from: z.string(),
+        to: z.string(),
+        action: screenActionOutputSchema(),
+        real: z.object({ from: z.string(), to: z.string() }),
+      }),
+    ),
+    unobservedTransitions: z.array(
+      z.object({
+        from: z.string(),
+        to: z.string(),
+        action: screenActionOutputSchema(),
+        trigger: z.object({
+          path: z.string(),
+          testTag: z.string().optional(),
+          id: z.string().optional(),
+          label: z.string().optional(),
+        }),
+        reason: z.enum(["unmatchedScreen", "dynamicTarget", "notObserved"]),
+      }),
+    ),
+    ignoredMappings: z.array(z.string()),
+  });
+
 export const getNavigationGraphResultSchema = z
   .object({
     message: z.string(),
@@ -108,6 +154,11 @@ export const getNavigationGraphResultSchema = z
         })
         .passthrough(),
     ),
+    prototypeDiff: prototypeDiffOutputSchema()
+      .optional()
+      .describe(
+        "Only with prototypeSpec or prototypeSpecPath: the prototype compared with this graph",
+      ),
   })
   .passthrough();
 

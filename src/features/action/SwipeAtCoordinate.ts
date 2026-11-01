@@ -1,3 +1,4 @@
+import { unsupportedWatchAction } from "../watch/WatchActions";
 import {
   dispatchRichStylus,
   pointerNeedsInstrumentation,
@@ -148,7 +149,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SwipeAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
@@ -211,17 +216,12 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     }
     let target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     try {
-      target = await prepareTargetDisplayAction(
-        this.device,
-        display,
-        this.observeScreen,
-        this.adb,
-        {
-          lastRenderedObservation: this.lastRenderedObservation,
-          signal,
-          transitions: this.displayTransitionReader,
-        },
-      );
+      target = await prepareTargetDisplayAction(this.device, display, this.observeScreen, {
+        adb: this.adb,
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      });
     } catch (error) {
       if (
         error instanceof StaleDisplayError ||
@@ -438,6 +438,9 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     options: SwipeAtOptions,
     call: ActionCall & { recordingContext?: SwipeAtRecordingContext } = {},
   ): Promise<SwipeResult> {
+    if (this.device.platform === "watchos") {
+      unsupportedWatchAction("coordinate swipe; use swipeOn with a direction");
+    }
     const { progress, signal } = resolveActionCall(call);
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);

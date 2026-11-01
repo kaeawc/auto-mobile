@@ -12,6 +12,7 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { boundsEqual, intersectBounds } from "../../utils/bounds";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 
@@ -53,6 +54,8 @@ export interface FocusKeyPresser {
 }
 
 export interface FocusPathEntry {
+  /** Label of a contained node; the identity fields and bounds still describe the focused parent. */
+  descendantLabel?: string;
   text?: string;
   contentDesc?: string;
   resourceId?: string;
@@ -164,16 +167,51 @@ export function directionsToward(
   return best ? [best, ...rest] : ["down"];
 }
 
-function pathEntry(element: Element): FocusPathEntry {
+function pathEntry(element: Element, descendant?: Element): FocusPathEntry {
   const text = stringProp(element, "text");
   const contentDesc = stringProp(element, "content-desc");
   const resourceId = stringProp(element, "resource-id");
+  const descendantLabel =
+    descendant &&
+    (stringProp(descendant, "text") ||
+      stringProp(descendant, "content-desc") ||
+      stringProp(descendant, "resource-id"));
   return {
+    ...(descendantLabel ? { descendantLabel } : {}),
     ...(text ? { text } : {}),
     ...(contentDesc ? { contentDesc } : {}),
     ...(resourceId ? { resourceId } : {}),
     bounds: element.bounds,
   };
+}
+
+/** Match each contained node independently, preserving the focused container's identity. */
+function describeFocus(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): { focusedElement: FocusPathEntry | undefined; matches: boolean } {
+  const { focused } = screen;
+  // The observer supplies flattened nodes, so require full bounds containment, not overlap.
+  const contained = focused
+    ? screen.elements.filter((element) => {
+        if (element === focused) {
+          return false;
+        }
+        const intersection = intersectBounds(focused.bounds, element.bounds);
+        return intersection !== null && boundsEqual(intersection, element.bounds);
+      })
+    : [];
+  const matchingDescendant = contained.find((element) => elementMatchesTarget(element, target));
+  const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
+  const label =
+    matchingDescendant ??
+    contained.find(
+      (element) =>
+        stringProp(element, "text") ||
+        stringProp(element, "content-desc") ||
+        stringProp(element, "resource-id"),
+    );
+  return { focusedElement: focused ? pathEntry(focused, label) : undefined, matches };
 }
 
 function focusKey(element: Element | null): string {
@@ -255,15 +293,16 @@ export class FocusNavigate {
       throwIfAborted(signal);
       const screen = await this.observer.read(signal);
       const { focused } = screen;
+      const { focusedElement, matches } = describeFocus(screen, options.until);
       const key = focusKey(focused);
-      if (progress.observe(key) && focused) {
-        path.push(pathEntry(focused));
+      if (progress.observe(key) && focusedElement) {
+        path.push(focusedElement);
       }
       const { unchanged, blocked } = progress;
 
       const direction = options.direction ?? this.nextDirection(screen, options, blocked);
       const exhausted = options.direction ? unchanged >= FOCUS_NAVIGATE_STUCK_PRESSES : !direction;
-      const done = this.exitFor(options, focused, {
+      const done = this.exitFor(focusedElement, matches, {
         steps,
         stuck: exhausted ? Math.max(1, unchanged, blocked.size) : 0,
         maxSteps,
@@ -283,23 +322,23 @@ export class FocusNavigate {
   }
 
   private exitFor(
-    options: FocusNavigateOptions,
-    focused: Element | null,
+    focusedElement: FocusPathEntry | undefined,
+    matches: boolean,
     progress: { steps: number; stuck: number; maxSteps: number; path: FocusPathEntry[] },
   ): FocusNavigateResult | undefined {
     const { steps, stuck, maxSteps, path } = progress;
-    if (focused && elementMatchesTarget(focused, options.until)) {
-      return { success: true, status: "focused", steps, path, focusedElement: pathEntry(focused) };
+    if (matches) {
+      return { success: true, status: "focused", steps, path, focusedElement };
     }
     if (stuck > 0) {
       return this.stopped("stuck", steps, path, {
-        focused,
+        focusedElement,
         message: `Focus did not move after ${stuck} ${stuck === 1 ? "press" : "presses"}`,
       });
     }
     if (steps >= maxSteps) {
       return this.stopped("max_steps", steps, path, {
-        focused,
+        focusedElement,
         message: `Reached maxSteps (${maxSteps})`,
       });
     }
@@ -332,14 +371,14 @@ export class FocusNavigate {
     status: "stuck" | "max_steps",
     steps: number,
     path: FocusPathEntry[],
-    { focused, message }: { focused: Element | null; message: string },
+    { focusedElement, message }: { focusedElement: FocusPathEntry | undefined; message: string },
   ): FocusNavigateResult {
     return {
       success: false,
       status,
       steps,
       path,
-      ...(focused ? { focusedElement: pathEntry(focused) } : {}),
+      ...(focusedElement ? { focusedElement } : {}),
       message: `${message}; the target was not focused. Observe before retrying.`,
     };
   }

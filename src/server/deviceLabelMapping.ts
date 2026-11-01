@@ -199,8 +199,15 @@ export const registerDeviceLabelMap = async (
   baseSessionUuid: string,
   labels: string[],
   primaryLabel?: string,
-  sessionOptions: SessionOptions = {},
-  { execution, signal }: { execution?: SessionExecutionMetadata; signal?: AbortSignal } = {},
+  {
+    sessionOptions = {},
+    execution,
+    signal,
+  }: {
+    sessionOptions?: SessionOptions;
+    execution?: SessionExecutionMetadata;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<DeviceLabelMap> => {
   const devicePool = defaultDaemonContext.fullDevicePool();
   const sessionManager = defaultDaemonContext.sessionManager();
@@ -219,7 +226,8 @@ export const registerDeviceLabelMap = async (
   sessionManager.setDeviceLabels(baseSessionUuid, deviceLabelMap);
   // As an MCP task (#13088) the plan holds each label session alive until the task settles.
   holdTaskDeviceLeases(Object.values(deviceLabelMap));
-  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions, {
+  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, {
+    sessionOptions,
     execution,
     requireIssuedSession: false,
     signal,
@@ -232,7 +240,8 @@ export const registerDeviceLabelMap = async (
     sessionUuids: [...assignedSessions],
     signal,
     setup: (sessionUuid, setupSignal) =>
-      createToolExecutionContext(sessionUuid, sessionManager, devicePool, sessionOptions, {
+      createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
+        sessionOptions,
         execution,
         requireIssuedSession: false,
         signal: setupSignal,

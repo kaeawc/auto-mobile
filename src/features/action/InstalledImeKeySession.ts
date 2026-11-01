@@ -110,7 +110,7 @@ export class InstalledImeKeySession {
     let result: Awaited<ReturnType<typeof this.performTap>> | undefined;
     let failure: unknown;
     try {
-      result = await this.performTap(catalog, imeId, key, editorBefore, signal);
+      result = await this.performTap(catalog, imeId, key, { editorBefore, signal });
     } catch (error) {
       failure = error;
     }
@@ -195,8 +195,7 @@ export class InstalledImeKeySession {
     catalog: SessionImeCatalog,
     imeId: string,
     key: string,
-    editorBefore: FocusedEditorEvidence | null,
-    signal?: AbortSignal,
+    { editorBefore, signal }: { editorBefore: FocusedEditorEvidence | null; signal?: AbortSignal },
   ) {
     const { tap } = this.dependencies;
     signal?.throwIfAborted();

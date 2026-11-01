@@ -7,6 +7,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { runWithTargetDeviceExecutionBinding } from "../../utils/deviceExecutionBinding";
 import { remainingDoctorProbe } from "../deadline";
 import type { CheckResult, DoctorProbeOptions } from "../types";
 
@@ -49,9 +50,8 @@ export async function checkAndroidIntegritySignals(
     }
     const lines: string[] = [];
     for (const device of devices) {
-      const readings = await readIntegritySignals(
-        adbFactory.create(device),
-        remainingDoctorProbe(probe).signal,
+      const readings = await runWithTargetDeviceExecutionBinding(device.deviceId, undefined, () =>
+        readIntegritySignals(adbFactory.create(device), remainingDoctorProbe(probe).signal),
       );
       lines.push(
         `${device.deviceId} — ${describeFamily(readings, "root")}; ${describeFamily(readings, "emulator")}`,

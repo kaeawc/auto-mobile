@@ -6,6 +6,9 @@ vertical reels, a profile grid with a photo viewer, direct messages and a new-po
 `today.json` is the slice that runs on today's vocabulary: photos and videos are tinted
 placeholders and everything is literal `data`.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+The Reels tab uses `local_movies` (`film` on iOS) for video content.
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, stories, viewer, inbox, conversation, new-post and link screens.

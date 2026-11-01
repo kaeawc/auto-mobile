@@ -170,6 +170,7 @@ test("the liveness controller's port getSession calls stay within the retained e
 // findSession.
 const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "deviceLabelMapping.ts#releaseDeviceLabelSessions": 1,
+  "deviceToolsAppleTvStart.ts#reusableAnonymousSessionId": 1,
   "deviceToolsBootPreparation.ts#callerMayReuse": 1,
   "pipeline/deviceCallDispatch.ts#refuseControlCallBeforeAdmission": 1,
   "pipeline/ingress/executeToolCall.ts#foreignOwnedExplicitSessionUuid": 1,
@@ -293,7 +294,7 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionBroker/broker.ts#hasActiveSession": 1,
   "sessionBroker/broker.ts#ownedSessionRequest": 1,
   "sessionBroker/provisioning/executionReleaseContracts.ts#deviceOf": 1,
-  "sessionBroker/service.ts#recoverSessionMutationRecorder": 1,
+  "sessionBroker/service.ts#recordableSessionResource": 1,
   "sessionBroker/sessionDisposition.ts#sessionDisposition": 1,
   "sessionClockPersistence.ts#getSession": 1,
   "sessionForIngress.ts#sessionForIngress": 1,

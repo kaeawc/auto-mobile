@@ -185,16 +185,24 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private closed = false;
   private closing: Promise<void> | null = null;
 
+  /**
+   * @param socketPath - Unix socket path to listen on
+   * @param timer - Clock for socket timers
+   * @param deps - Injected stream collaborators (defaults to the daemon's)
+   * @param options.authenticator - Request authenticator
+   * @param options.admissionGate - Device admission gate
+   */
   constructor(
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     deps?: WebRtcStreamSocketServerDependencies,
-    // Observers may watch read-only (#10698); admission is still viewer-only for non-holders.
-    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
-      "webrtcStream",
-      { allowObserverSessions: true },
-    ),
-    admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
+    {
+      // Observers may watch read-only (#10698); admission is still viewer-only for non-holders.
+      authenticator = createDefaultStreamSocketAuthenticator("webrtcStream", {
+        allowObserverSessions: true,
+      }),
+      admissionGate = daemonDeviceAdmissionGate,
+    }: { authenticator?: StreamSocketAuthenticator; admissionGate?: DeviceAdmissionGate } = {},
   ) {
     super(socketPath, timer, "WebRtcStream");
     this.injectedDeps = deps;
@@ -753,8 +761,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       request.streamId,
       request.readiness ?? "publishing",
       request.timeoutMs,
-      request.leaseId,
-      sessionUuid,
+      { leaseId: request.leaseId, sessionUuid },
     );
     return {
       id: request.id,

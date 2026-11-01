@@ -106,7 +106,7 @@ test("cancelled Rotate sends the auto-rotate restore put through the real settin
   };
   h.adb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920", ""));
   h.adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
-  const rotate = new Rotate(h.device, h.adb, h.timer);
+  const rotate = new Rotate(h.device, { adb: h.adb, timer: h.timer });
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(() =>
     createObserveResultForTest({
@@ -154,7 +154,7 @@ const methods = [
   {
     operation: "get",
     invoke: (client: AndroidCtrlProxyClient, signal?: AbortSignal) =>
-      client.requestSettingsGet("secure", "key", 50, perf, signal),
+      client.requestSettingsGet("secure", "key", { timeoutMs: 50, perf, signal }),
     oldFrame: (requestId: string) =>
       serializeCtrlProxyRequest(
         ctrlProxyRequests.requestSettingsGet({ requestId, namespace: "secure", key: "key" }),
@@ -166,7 +166,12 @@ const methods = [
   {
     operation: "put",
     invoke: (client: AndroidCtrlProxyClient, signal?: AbortSignal) =>
-      client.requestSettingsPut("secure", "key", null, "string", { timeoutMs: 50, perf, signal }),
+      client.requestSettingsPut("secure", "key", null, {
+        valueType: "string",
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
     oldFrame: (requestId: string) =>
       serializeCtrlProxyRequest(
         ctrlProxyRequests.requestSettingsPut({

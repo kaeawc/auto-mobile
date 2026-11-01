@@ -378,6 +378,7 @@ describe("navigation tool session graph selection", () => {
           [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 500,
           [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
         },
+        { progress: undefined, signal: undefined },
       ]);
       expect(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM]).toBe(1500);
     } finally {
@@ -921,11 +922,10 @@ describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
 
   test("lists one transition and one edge count for N identical traversal rows", async () => {
     const db = await createTestDatabase();
-    const repository = new NavigationRepository(db);
-    const manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(db),
-    );
+    const repository = new NavigationRepository({ db });
+    const manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db }),
+    });
     await repository.getOrCreateApp(APP);
     const traversals = Array.from({ length: 10 }, (_, index) => ({
       app_id: APP,

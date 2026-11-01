@@ -118,8 +118,8 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
   spyOn(android, "requestGlobalAction").mockImplementation((_button, _timeout, _perf, options) =>
     send(options?.signal, options?.onDispatch),
   );
-  spyOn(ios, "requestPressBack").mockImplementation((_timeout, _perf, _context, signal, dispatch) =>
-    send(signal, dispatch),
+  spyOn(ios, "requestPressBack").mockImplementation((_timeout, _perf, options) =>
+    send(options?.signal, options?.onDispatch),
   );
   const adb = new FakeAdbExecutor();
   spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);

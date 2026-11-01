@@ -267,7 +267,7 @@ describe("setDeviceResources", () => {
     const readDirectory = (path: string) => plist.readDirectory(path);
     setDeviceToolsDependencies({
       deviceResourceControllerFactory: () =>
-        new DefaultDeviceResourceController(simctl, plist, timer, readDirectory),
+        new DefaultDeviceResourceController(simctl, { plist, timer, readDirectory }),
       deviceResourceObserverFactory: () =>
         new DefaultDeviceResourceObserver({ simctl, plist, timer, readDirectory }),
     });

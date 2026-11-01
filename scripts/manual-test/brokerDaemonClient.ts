@@ -1,4 +1,5 @@
 import "./harnessLogSink";
+import type { SessionBrokerPoolDrainResult } from "../../src/daemon/sessionBroker/broker";
 import type {
   SessionBrokerReleaseResult,
   SessionBrokerResult,
@@ -22,6 +23,7 @@ export interface BrokerDaemonClient {
   status(requestId: string, livenessOwnerToken: string): Promise<SessionBrokerResult | undefined>;
   abandon(requestId: string, livenessOwnerToken: string): Promise<SessionBrokerResult>;
   release(sessionUuid: string, livenessOwnerToken: string): Promise<SessionBrokerReleaseResult>;
+  drainPool(): Promise<SessionBrokerPoolDrainResult>;
   info(sessionUuid: string): Promise<unknown>;
   capabilities(): Promise<readonly string[]>;
 }
@@ -42,6 +44,15 @@ const responseSchema = z.object({
 const releaseSchema = z.object({
   sessionUuid: z.string(),
   outcome: z.enum(["released", "cleanup_pending", "unknown_session"]),
+});
+const drainSchema = z.object({
+  resources: z.array(
+    z.object({
+      resourceId: z.string(),
+      outcome: z.enum(["destroyed", "cleanup_pending"]),
+      cleanupPending: z.boolean(),
+    }),
+  ),
 });
 export function parseBrokerResult(value: unknown, requestId: string): SessionBrokerResult {
   // The product owns the profile schema; this adapter validates the broker envelope.
@@ -173,6 +184,8 @@ export function createFrameBrokerDaemonClient(options: {
       }
       return receipt;
     },
+    drainPool: async () =>
+      drainSchema.parse(await result("daemon/drainBrokerPool", {}, BROKER_CLEANUP_TIMEOUT_MS)),
     info: async (sessionId) => {
       const sessionSchema = z
         .object({

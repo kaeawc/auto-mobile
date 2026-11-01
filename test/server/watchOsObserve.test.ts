@@ -1,3 +1,6 @@
+import { registerInteractionTools } from "../../src/server/interactionTools";
+import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
+import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -77,7 +80,7 @@ describe("observe on an Apple Watch simulator through the registry", () => {
     cleanup();
   });
 
-  async function arrange() {
+  async function arrange(runner?: FakeWatchRunnerClient) {
     const connected = [iphone];
     const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     const timer = new FakeTimer();
@@ -140,25 +143,59 @@ describe("observe on an Apple Watch simulator through the registry", () => {
         throw new Error("the Android/iOS observe pipeline ran");
       },
       watch: {
+        runner,
         screenshots,
         fileWriter: writer,
         idGenerator: new CountingIdGenerator("watch-observe"),
         cacheDir: () => "/cache/screenshots",
       },
     });
-    ToolRegistry.register(
-      "setActiveDevice",
-      "Set active device",
-      setActiveDeviceSchema,
-      createSetActiveDeviceHandler({
+    ToolRegistry.register("setActiveDevice", "Set active device", setActiveDeviceSchema, {
+      handler: createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async () => {},
         legacyDeviceSelection: () => readiness,
       }),
-      { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
-    );
+      defaultEnabled: true,
+      ...SELECTS_ACTIVE_DEVICE,
+    });
     return { screenshots, writer, iosScreens };
   }
+
+  test("connected runner hierarchy survives the registry response finalizer", async () => {
+    const runner = new FakeWatchRunnerClient();
+    await arrange(runner);
+    const response = await call("observe", { platform: "watchos", deviceId: watch.deviceId });
+    const result = toolJson(response);
+    expect(JSON.stringify(result)).toContain("CtrlProxy Watch");
+    expect(result).not.toHaveProperty("hierarchyUnavailable");
+    expect(result.screenshotPath).toBeDefined();
+    expect(runner.commands).toEqual([{ type: "hierarchy" }]);
+    const full = toolJson(
+      await call("observe", { platform: "watchos", deviceId: watch.deviceId, project: "full" }),
+    );
+    expect(full.viewHierarchy).toBeDefined();
+    expect(JSON.stringify(full.viewHierarchy)).toContain("CtrlProxy Watch");
+  });
+
+  test("watch action tools dispatch through the registry to their bound runner", async () => {
+    await arrange();
+    const runner = new FakeWatchRunnerClient();
+    cleanups.push(watchRunners.register(watch.deviceId, runner));
+    registerInteractionTools();
+    const target = { platform: "watchos", deviceId: watch.deviceId };
+    await call("tapOn", { ...target, selector: { elementId: "ctrlproxy-crown" } });
+    await call("tapAt", { ...target, x: 10, y: 20 });
+    await call("swipeOn", { ...target, direction: "up" });
+    await call("pressButton", { ...target, button: "home" });
+    expect(runner.commands).toEqual([
+      { type: "hierarchy" },
+      { type: "tap", identifier: "ctrlproxy-crown" },
+      { type: "tap", x: 10, y: 20 },
+      { type: "swipe", direction: "up" },
+      { type: "home" },
+    ]);
+  });
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler({ __mcpSessionId: CONNECTION, ...args });

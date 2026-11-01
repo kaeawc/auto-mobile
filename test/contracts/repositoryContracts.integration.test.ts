@@ -36,7 +36,7 @@ runFeatureFlagRepositoryContract("FakeFeatureFlagRepository", async () => ({
 }));
 runFeatureFlagRepositoryContract("SqliteFeatureFlagRepository", async () => {
   const db = await createTestDatabase();
-  return { repository: new SqliteFeatureFlagRepository(db), dispose: () => db.destroy() };
+  return { repository: new SqliteFeatureFlagRepository({ db }), dispose: () => db.destroy() };
 });
 
 runSessionToolSelectionRepositoryContract("FakeToolSelectionRepository", async () => ({
@@ -45,7 +45,7 @@ runSessionToolSelectionRepositoryContract("FakeToolSelectionRepository", async (
 runSessionToolSelectionRepositoryContract("SqliteSessionToolSelectionRepository", async () => {
   const db = await createTestDatabase();
   return {
-    repository: new SqliteSessionToolSelectionRepository(() => db),
+    repository: new SqliteSessionToolSelectionRepository({ resolveDatabase: () => db }),
     dispose: () => db.destroy(),
   };
 });
@@ -127,7 +127,7 @@ runVideoRecordingRepositoryContract("FakeVideoRecordingRepository", async () => 
 }));
 runVideoRecordingRepositoryContract("VideoRecordingRepository (SQLite)", async () => {
   const db = await createTestDatabase();
-  return { repository: new VideoRecordingRepository(db), dispose: () => db.destroy() };
+  return { repository: new VideoRecordingRepository({ db }), dispose: () => db.destroy() };
 });
 
 const appearanceConfigs: { first: AppearanceConfig; second: AppearanceConfig } = {
@@ -156,5 +156,5 @@ runInstalledAppsStoreContract("FakeInstalledAppsRepository", async () => ({
 }));
 runInstalledAppsStoreContract("InstalledAppsRepository (SQLite)", async () => {
   const db = await createTestDatabase();
-  return { repository: new InstalledAppsRepository(db), dispose: () => db.destroy() };
+  return { repository: new InstalledAppsRepository({ db }), dispose: () => db.destroy() };
 });

@@ -337,7 +337,7 @@ export function appendFieldChanges(
   const baseRecord: Record<string, unknown> = baseline;
   const nextRecord: Record<string, unknown> = next;
   for (const field of scalarFields) {
-    appendScalarFieldChange(fields, field, baseRecord, nextRecord, cfg);
+    appendScalarFieldChange(fields, field, baseRecord, { nextRecord, cfg });
   }
   // Element mirror fields (#3052): compare/emit the `node`-subtree-stripped form
   // (the subtree is redundant with the node diff and unbounded in size), with a
@@ -359,8 +359,7 @@ function appendScalarFieldChange(
   fields: NonNullable<ObserveDiff["fields"]>,
   field: string,
   baseRecord: Record<string, unknown>,
-  nextRecord: Record<string, unknown>,
-  cfg?: DiffObserveConfig,
+  { nextRecord, cfg }: { nextRecord: Record<string, unknown>; cfg?: DiffObserveConfig },
 ): void {
   const equal =
     field === "layoutWarnings"

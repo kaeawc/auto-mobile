@@ -138,8 +138,7 @@ export interface PrototypeStatusStore {
     scope: PrototypeScope,
     action: PrototypeMutation,
     target: { id?: string; all?: true },
-    result: PrototypeResult,
-    details?: PrototypeRecordDetails,
+    options: { result: PrototypeResult; details?: PrototypeRecordDetails },
   ): PrototypeLastResult;
   readonly shownSpecs: PrototypeShownSpecs;
   recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
@@ -360,8 +359,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     scope: PrototypeScope,
     action: PrototypeMutation,
     target: { id?: string; all?: true },
-    result: PrototypeResult,
-    details: PrototypeRecordDetails = {},
+    { result, details = {} }: { result: PrototypeResult; details?: PrototypeRecordDetails },
   ): PrototypeLastResult {
     const { displayId } = details;
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
@@ -371,13 +369,10 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId
         : undefined;
-    const entry = this.createResult(
-      action,
-      target,
-      result,
-      displayId ?? shownDisplay,
-      details.chrome,
-    );
+    const entry = this.createResult(action, target, result, {
+      displayId: displayId ?? shownDisplay,
+      chrome: details.chrome,
+    });
     const presence = this.consumeShowDispatch(scope.deviceId, entry);
     if (!existing && !result.success) {
       return structuredClone(entry);
@@ -580,8 +575,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     action: PrototypeMutation,
     target: { id?: string; all?: true },
     result: PrototypeResult,
-    displayId?: number,
-    chrome?: PrototypeWindowChrome,
+    { displayId, chrome }: { displayId?: number; chrome?: PrototypeWindowChrome } = {},
   ): PrototypeLastResult {
     return {
       ...target,

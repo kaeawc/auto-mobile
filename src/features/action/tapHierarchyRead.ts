@@ -72,6 +72,7 @@ export async function readFreshPlatformHierarchy(
   const { device } = deps;
   const { signal, screenSize } = request;
   const effectiveTimeoutMs = Math.max(0, request.timeoutMs);
+  const deadline = deps.timer.now() + effectiveTimeoutMs;
   switch (device.platform) {
     case "android": {
       const rawHierarchy = await refreshAndroidViewHierarchy(
@@ -94,7 +95,9 @@ export async function readFreshPlatformHierarchy(
             signal,
             effectiveTimeoutMs,
           )
-        : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
+        : await client.requestHierarchySync(undefined, false, signal, {
+            timeoutMs: effectiveTimeoutMs,
+          });
       if (!synced?.hierarchy) {
         return null;
       }
@@ -110,8 +113,9 @@ export async function readFreshPlatformHierarchy(
       // web identity.
       await mergeIosSdkBridgeInto(
         prepared,
-        deps.sdkBridge ?? deviceIosSdkBridgeReader(device),
+        deps.sdkBridge ?? deviceIosSdkBridgeReader(device, deps.timer),
         signal,
+        Math.max(0, deadline - deps.timer.now()),
       );
       await mergeIosSdkWebInto(prepared, deps.sdkWeb ?? deviceIosSdkWebReader(device), signal);
       return prepared;

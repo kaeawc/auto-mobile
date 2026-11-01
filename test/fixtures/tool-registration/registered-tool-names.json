@@ -86,6 +86,7 @@
     "mediaSession",
     "windowMode",
     "rotaryScroll",
+    "rotateCrown",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -205,6 +206,7 @@
     "mediaSession",
     "windowMode",
     "rotaryScroll",
+    "rotateCrown",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -357,6 +359,7 @@
     "performanceTrace",
     "windowMode",
     "rotaryScroll",
+    "rotateCrown",
     "injectAudioInput",
     "stopAudioInput",
     "captureAudio"

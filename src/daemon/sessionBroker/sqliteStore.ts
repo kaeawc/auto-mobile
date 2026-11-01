@@ -1,7 +1,15 @@
-import { countSessionAdmissions } from "./sqliteAdmissions";
+import { activationHardware } from "./profile";
+import { sameProcess } from "./brokerSupport";
+import { countSessionAdmissions, occupiedResources } from "./sqliteAdmissions";
 import { completedAcquisitionTiming, pendingAcquisitionTiming } from "./timingRecorder";
 import { requestRecord, resourceRecord, readRequest, readResource } from "./sqliteRecords";
 import { SqliteBrokerTimingStore } from "./sqliteTimingStore";
+import {
+  isTerminalState,
+  ownsReadyBinding,
+  ownerIdentity,
+  requireValue,
+} from "./sqliteStoreHelpers";
 import type { SessionPreparationTiming } from "./devicePort";
 import { SessionRequestOwnerMismatchError } from "./SessionRequestOwnerMismatchError";
 import { SessionBrokerInvariantError } from "./SessionBrokerInvariantError";
@@ -51,61 +59,6 @@ import {
 
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
 
-function isTerminalState(state: BrokerRequestsTable["state"] | undefined): boolean {
-  return state === "released" || state === "failed";
-}
-
-function sameOwner(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
-  return (
-    left.daemonId === right.daemonId &&
-    left.pid === right.pid &&
-    left.processGenerationToken === right.processGenerationToken
-  );
-}
-
-function ownsReadyBinding(
-  binding: Selectable<BindingRegistryDatabase["slot_assignments"]> | undefined,
-  sessionId: string,
-  owner: BindingProcessIdentity,
-): boolean {
-  return Boolean(
-    binding?.stable_device_id &&
-    binding.state === "ready" &&
-    binding.exec_session_uuid === sessionId &&
-    binding.exec_owner_daemon_id === owner.daemonId &&
-    binding.exec_owner_pid === owner.pid &&
-    binding.exec_owner_process_token === (owner.processGenerationToken ?? null),
-  );
-}
-
-function ownerIdentity(owner: BindingProcessIdentity): BindingProcessIdentity {
-  return {
-    daemonId: owner.daemonId,
-    pid: owner.pid,
-    ...(owner.processGenerationToken === undefined
-      ? {}
-      : { processGenerationToken: owner.processGenerationToken }),
-  };
-}
-
-function requireValue<T>(value: T | undefined | null, message: string): T {
-  if (value === undefined || value === null) {
-    throw new SessionBrokerInvariantError(message);
-  }
-  return value;
-}
-
-function occupiedResources(resources: readonly BrokerResourceRecord[]) {
-  return resources
-    .filter((resource) => resource.state !== "destroyed")
-    .map((resource) => ({
-      id: resource.resourceId,
-      state: resource.state as Exclude<BrokerResourceRecord["state"], "destroyed">,
-      idleOrder: resource.idleOrder,
-      compatible: false,
-    }));
-}
-
 /**
  * Durable reservation and receipt layer of the host registry. Physical device ownership remains
  * in its assignment rows and native work remains in its journal. Every mutation uses that same
@@ -118,13 +71,29 @@ function occupiedResources(resources: readonly BrokerResourceRecord[]) {
 export class SqliteSessionBrokerStore {
   private readonly timingStore: SqliteBrokerTimingStore;
 
+  private readonly ids: IdGenerator;
+  private readonly clock: Pick<Timer, "now">;
+  private readonly write: <T>(
+    operation: (db: Kysely<BindingRegistryDatabase>) => Promise<T>,
+  ) => Promise<T>;
+
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     private readonly scopeKey: string,
     private readonly isOwnerLive: BindingExecOwnerLiveness,
-    private readonly ids: IdGenerator = defaultIdGenerator,
-    private readonly clock: Pick<Timer, "now"> = defaultTimer,
+    {
+      ids = defaultIdGenerator,
+      clock = defaultTimer,
+      write = (operation) => operation(db),
+    }: {
+      ids?: IdGenerator;
+      clock?: Pick<Timer, "now">;
+      write?: <T>(operation: (db: Kysely<BindingRegistryDatabase>) => Promise<T>) => Promise<T>;
+    } = {},
   ) {
+    this.ids = ids;
+    this.clock = clock;
+    this.write = write;
     this.timingStore = new SqliteBrokerTimingStore(db, clock);
   }
 
@@ -137,7 +106,9 @@ export class SqliteSessionBrokerStore {
     timing: SessionBrokerTiming,
     profile?: SessionDeviceProfile,
   ): Promise<void> {
-    return this.timingStore.recordTiming(requestId, timing, profile);
+    return this.write((db) =>
+      new SqliteBrokerTimingStore(db, this.clock).recordTiming(requestId, timing, profile),
+    );
   }
 
   timingSamples(sinceMs: number, untilMs: number, limit: number): Promise<BrokerTimingSample[]> {
@@ -152,7 +123,7 @@ export class SqliteSessionBrokerStore {
     prepareId: string,
     now = this.clock.now(),
   ): Promise<BrokerExportRecord | undefined> {
-    return acknowledgeExport(this.db, prepareId, now);
+    return this.write((db) => acknowledgeExport(db, prepareId, now));
   }
 
   linkRequestExport(
@@ -160,7 +131,9 @@ export class SqliteSessionBrokerStore {
     fingerprint: string,
     identity: BrokerExportIdentity,
   ): Promise<void> {
-    return linkRequestExport(this.db, this.clock.now(), requestId, fingerprint, identity);
+    return this.write((db) =>
+      linkRequestExport(db, this.clock.now(), requestId, { fingerprint, identity }),
+    );
   }
 
   async getSession(sessionId: string): Promise<BrokerRequestRecord | undefined> {
@@ -234,7 +207,17 @@ export class SqliteSessionBrokerStore {
     limit: number,
     exportRetentionMs?: number,
   ): Promise<number> {
-    return pruneTerminalRequests(this.db, this.clock, retentionMs, limit, exportRetentionMs);
+    return this.write((db) =>
+      pruneTerminalRequests(db, this.clock, retentionMs, { limit, exportRetentionMs }),
+    );
+  }
+
+  private writeTransaction<T>(
+    operation: (trx: Kysely<BindingRegistryDatabase>) => Promise<T>,
+  ): Promise<T> {
+    return this.write((db) =>
+      db.isTransaction ? operation(db) : db.transaction().execute(operation),
+    );
   }
 
   /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
@@ -248,7 +231,7 @@ export class SqliteSessionBrokerStore {
     if (!input.requestId.trim() || !input.fingerprint.trim()) {
       throw new ActionableError("Session request identity and fingerprint must be non-empty");
     }
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const previous = await readRequest(trx, input.requestId);
       if (previous) {
         if (previous.fingerprint !== input.fingerprint) {
@@ -285,7 +268,7 @@ export class SqliteSessionBrokerStore {
     if (!input.requestId.trim() || !input.fingerprint.trim()) {
       throw new ActionableError("Session request identity and fingerprint must be non-empty");
     }
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const previous = await readRequest(trx, input.requestId);
       if (previous) {
         if (previous.fingerprint !== input.fingerprint) {
@@ -331,7 +314,7 @@ export class SqliteSessionBrokerStore {
     if (!requestId.trim() || !livenessOwnerToken) {
       throw new ActionableError("Session request identity and liveness owner token are required");
     }
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const previous = await readRequest(trx, requestId);
       if (!previous) {
         const tombstone = abandonedRequestIdentity(livenessOwnerToken);
@@ -365,7 +348,7 @@ export class SqliteSessionBrokerStore {
           ...(await this.currentDestructionTicket(trx, previous)),
         };
       }
-      if (!sameOwner(previous.owner, owner)) {
+      if (!sameProcess(previous.owner, owner)) {
         throw new SessionRequestOwnerMismatchError(previous.restartHandoff === true);
       }
       let ticket: DestructionTicket | undefined;
@@ -391,7 +374,7 @@ export class SqliteSessionBrokerStore {
 
   /** Only the owner of a pending eviction may resume, after its resource is confirmed absent. */
   async continueAdmission(input: BrokerAdmissionInput): Promise<BrokerAdmission> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = await this.ownedRequest(trx, input.requestId, input.owner);
       if (request.fingerprint !== input.fingerprint || request.state !== "acquiring") {
         throw new ActionableError("Cannot continue a changed or terminal session request");
@@ -419,12 +402,12 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
     sessionId: string,
-    phases?: SessionPreparationTiming,
+    preparation?: SessionPreparationTiming & { profile?: SessionDeviceProfile },
   ): Promise<BrokerRequestRecord> {
     if (!sessionId.trim()) {
       throw new ActionableError("A prepared session must have a non-empty session UUID");
     }
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
       if (request.state === "active" && request.sessionId === sessionId) {
         return request;
@@ -444,11 +427,14 @@ export class SqliteSessionBrokerStore {
           "Prepared session does not own the current physical device binding",
         );
       }
-      await this.updateResource(trx, resource, { state: "active" });
+      await this.updateResource(trx, resource, {
+        state: "active",
+        ...activationHardware(resource, preparation?.profile),
+      });
       return this.updateRequest(trx, requestId, {
         state: "active",
         session_id: sessionId,
-        ...completedAcquisitionTiming(request, resource, phases, this.clock.now()),
+        ...completedAcquisitionTiming(request, resource, preparation, this.clock.now()),
       });
     });
   }
@@ -457,7 +443,7 @@ export class SqliteSessionBrokerStore {
     sessionId: string,
     owner: BindingProcessIdentity,
   ): Promise<BrokerRequestRecord | undefined> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const row = await trx
         .selectFrom("session_broker_requests")
         .selectAll()
@@ -494,7 +480,7 @@ export class SqliteSessionBrokerStore {
     owner: BindingProcessIdentity,
     limits: BrokerLimits,
   ): Promise<readonly DestructionTicket[]> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
       if (request.state === "released") {
         return [];
@@ -540,8 +526,10 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
     error: string,
-    errorCode = "session_preparation_failed",
-    retryable = false,
+    {
+      errorCode = "session_preparation_failed",
+      retryable = false,
+    }: { errorCode?: string; retryable?: boolean } = {},
   ): Promise<DestructionTicket | undefined> {
     return this.failWhere(requestId, owner, { error, errorCode, retryable });
   }
@@ -575,7 +563,7 @@ export class SqliteSessionBrokerStore {
     },
   ): Promise<DestructionTicket | undefined> {
     const { error, errorCode, retryable, onlyFrom } = failure;
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
       if (
         request.state === "released" ||
@@ -608,7 +596,7 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
   ): Promise<DestructionTicket | undefined> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
       if (request.state === "released" || request.state === "failed") {
         return undefined;
@@ -629,7 +617,7 @@ export class SqliteSessionBrokerStore {
    * resource leaves the reusable set in one transaction, so no acquisition can reserve it.
    */
   async drainIdle(observed?: readonly DestructionTicket[]): Promise<DestructionTicket[]> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const resources = await this.readResources(trx, true);
       const tickets: DestructionTicket[] = [];
       for (const resource of resources.filter((entry) => drainableIdle(entry, observed))) {
@@ -646,7 +634,7 @@ export class SqliteSessionBrokerStore {
    * physical binding. An old deletion receipt cannot free a new incarnation of a resource.
    */
   async confirmDestroyed(ticket: DestructionTicket): Promise<boolean> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const resource = await readResource(trx, ticket.resourceId);
       if (!resource || resource.revision !== ticket.revision) {
         return false;
@@ -687,9 +675,9 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
   ): Promise<DestructionTicket | undefined> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = requireValue(await readRequest(trx, requestId), "Unknown session request");
-      if (sameOwner(request.owner, owner) || this.isOwnerLive(request.owner)) {
+      if (sameProcess(request.owner, owner) || this.isOwnerLive(request.owner)) {
         return undefined;
       }
       if (request.state === "released" || request.state === "failed") {
@@ -725,7 +713,7 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
   ): Promise<BrokerRequestRecord> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = await this.ownedRequest(trx, requestId, owner);
       if (request.state !== "active" || request.restartHandoff) {
         return request;
@@ -745,12 +733,12 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
   ): Promise<"adopted" | "pending" | "not-handoff"> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const request = requireValue(await readRequest(trx, requestId), "Unknown session request");
       if (!request.restartHandoff || request.state !== "active" || !request.sessionId) {
         return "not-handoff";
       }
-      if (sameOwner(request.owner, owner)) {
+      if (sameProcess(request.owner, owner)) {
         return "adopted";
       }
       if (this.isOwnerLive(request.owner)) {
@@ -774,7 +762,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async settleRequestAfterDestruction(
-    trx: Transaction<BindingRegistryDatabase>,
+    trx: Kysely<BindingRegistryDatabase>,
     resource: BrokerResourceRecord,
   ): Promise<void> {
     const request = await readRequest(trx, requireValue(resource.requestId, "No request"));
@@ -794,7 +782,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async reserve(
-    trx: Transaction<BindingRegistryDatabase>,
+    trx: Kysely<BindingRegistryDatabase>,
     request: BrokerRequestRecord,
     input: BrokerAdmissionInput,
   ): Promise<BrokerAdmission> {
@@ -896,7 +884,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async trimIdle(
-    trx: Transaction<BindingRegistryDatabase>,
+    trx: Kysely<BindingRegistryDatabase>,
     limits: BrokerLimits,
     returningResourceId?: string,
     returningRequestId?: string,
@@ -980,7 +968,7 @@ export class SqliteSessionBrokerStore {
     owner: BindingProcessIdentity,
   ): Promise<BrokerRequestRecord> {
     const request = requireValue(await readRequest(db, id), "Unknown session request");
-    if (!sameOwner(request.owner, owner)) {
+    if (!sameProcess(request.owner, owner)) {
       throw new SessionRequestOwnerMismatchError(request.restartHandoff === true);
     }
     return request;
@@ -1003,10 +991,13 @@ export class SqliteSessionBrokerStore {
   }
 
   private async updateResource(
-    trx: Transaction<BindingRegistryDatabase>,
+    trx: Kysely<BindingRegistryDatabase>,
     resource: BrokerResourceRecord,
     changes: Partial<
-      Pick<Selectable<BrokerResourcesTable>, "state" | "request_id" | "idle_order" | "reuse_count">
+      Pick<
+        Selectable<BrokerResourcesTable>,
+        "state" | "request_id" | "idle_order" | "reuse_count" | "profile_json"
+      >
     >,
   ): Promise<BrokerResourceRecord> {
     const row = await trx
@@ -1019,7 +1010,7 @@ export class SqliteSessionBrokerStore {
   }
 
   private async updateRequest(
-    trx: Transaction<BindingRegistryDatabase>,
+    trx: Kysely<BindingRegistryDatabase>,
     id: string,
     changes: Partial<
       Pick<

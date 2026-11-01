@@ -143,13 +143,10 @@ export class DaemonStart {
       this.host.socketPath,
       this.host.seams.exitRecordFileSystem,
     );
-    const resolution = resolveDaemonExitOptions(
-      options,
-      record,
-      this.host.timer.now(),
-      DAEMON_EXIT_RECORD_TTL_MS,
-      this.host.seams.currentBuildId(),
-    );
+    const resolution = resolveDaemonExitOptions(options, record, this.host.timer.now(), {
+      ttl: DAEMON_EXIT_RECORD_TTL_MS,
+      buildId: this.host.seams.currentBuildId(),
+    });
     if (resolution.outcome === "stale" || resolution.outcome === "build-mismatch") {
       logger.info(`Ignoring daemon exit record: ${resolution.outcome}`);
     }

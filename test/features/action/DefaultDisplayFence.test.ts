@@ -596,7 +596,13 @@ describe("ExecuteGesture path fences", () => {
   for (const site of ["android", "ios-single", "ios-multi"] as const) {
     test.each([...modes])(`${site}: %s`, async (mode: Mode) => {
       const h = harness(site === "android" ? "android" : "ios", mode);
-      const base = h.attach(new BaseVisualChange(h.device, h.adb, h.timer, undefined, h.deps));
+      const base = h.attach(
+        new BaseVisualChange(h.device, {
+          adb: h.adb,
+          timer: h.timer,
+          displayFence: h.deps,
+        }),
+      );
       const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
       let error: unknown;
       try {
@@ -1065,20 +1071,19 @@ describe("display fence options preserve public call shapes", () => {
                     { x: 50, y: 70 },
                     "longPress",
                     500,
-                    driver,
+                    { driver },
                     [],
                   ])
               : shape === "legacy"
                 ? () =>
-                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, driver)
-                : () =>
-                    strategy.executeCoordinateFallback(
-                      { x: 50, y: 70 },
-                      "longPress",
-                      500,
+                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, {
                       driver,
-                      options,
-                    );
+                    })
+                : () =>
+                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, {
+                      driver,
+                      fenceOptions: options,
+                    });
           break;
         case "longPress":
           invoke =
@@ -1088,12 +1093,16 @@ describe("display fence options preserve public call shapes", () => {
                     { x: 50, y: 70 },
                     500,
                     element,
-                    driver,
+                    { driver },
                     [],
                   ])
               : shape === "legacy"
-                ? () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver)
-                : () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver, options);
+                ? () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, { driver })
+                : () =>
+                    strategy.executeLongPress({ x: 50, y: 70 }, 500, element, {
+                      driver,
+                      fenceOptions: options,
+                    });
           break;
       }
       if (shape === "stale") {

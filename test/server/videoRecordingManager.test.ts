@@ -2512,7 +2512,7 @@ describe("VideoRecordingRepository latest ordering", () => {
   });
 
   bunTest("getVideoRecordingStatus is owner-scoped and read-only", async () => {
-    const repo = new VideoRecordingRepository(db);
+    const repo = new VideoRecordingRepository({ db });
     const timer = new FakeTimer();
     await setVideoRecordingManagerDependencies({
       recordingRepository: repo,
@@ -2585,7 +2585,9 @@ describe("VideoRecordingRepository latest ordering", () => {
     "latest uses startedAt and recordingId, independently of LRU (%s)",
     async (kind) => {
       const repo =
-        kind === "database" ? new VideoRecordingRepository(db) : new FakeVideoRecordingRepository();
+        kind === "database"
+          ? new VideoRecordingRepository({ db })
+          : new FakeVideoRecordingRepository();
       const base: VideoRecordingRecord = {
         recordingId: "older",
         deviceId: "device",

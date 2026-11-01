@@ -67,8 +67,7 @@ async function recordStartupResult(
   repository: MeasureStartupDependencies["repository"],
   device: BootedDevice,
   result: MeasureStartupResult,
-  timer: Timer,
-  sessionUuid: string | undefined,
+  { timer, sessionUuid }: { timer: Timer; sessionUuid?: string },
 ): Promise<void> {
   const timestamp = new Date(timer.now()).toISOString();
   await repository.recordAudit({
@@ -119,7 +118,10 @@ export const createMeasureStartupHandler =
       },
       signal,
     );
-    await recordStartupResult(deps.repository, device, result, deps.timer, args.sessionUuid);
+    await recordStartupResult(deps.repository, device, result, {
+      timer: deps.timer,
+      sessionUuid: args.sessionUuid,
+    });
     const ttfd = result.ttfd ? `, TTFD p50 ${result.ttfd.p50} ms` : "";
     return createStructuredToolResponse({
       success: true as const,

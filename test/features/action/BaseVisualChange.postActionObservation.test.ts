@@ -85,11 +85,16 @@ describe("BaseVisualChange post-action observation", () => {
     extraDeps: Pick<DisplayFenceDependencies, "predictionAnalyzer"> = {},
   ): TerminalVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new TerminalVisualChange(device, fakeAdb, fakeTimer, renderedDisplayRevision, {
-      awaitIdle: fakeAwaitIdle,
-      observeScreen: fakeObserveScreen,
-      window: fakeWindow,
-      ...extraDeps,
+    const instance = new TerminalVisualChange(device, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      renderedDisplayRevision,
+      displayFence: {
+        awaitIdle: fakeAwaitIdle,
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+        ...extraDeps,
+      },
     });
     return instance;
   }
@@ -777,7 +782,7 @@ describe("BaseVisualChange post-action observation", () => {
         updatedAt: screen,
       }),
     );
-    fakeObserveScreen.captureScreenshot = async (_perf, _signal, observation) => {
+    fakeObserveScreen.captureScreenshot = async (_perf, { observation } = {}) => {
       order.push(`capture-${observation?.observationId}-screen-${screen}`);
       if (observation) {
         observation.screenshotPath = `screen-${screen}.png`;

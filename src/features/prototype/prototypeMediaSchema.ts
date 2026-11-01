@@ -98,10 +98,30 @@ const castButtonShape = {
     .optional(),
 };
 
-/** The media node schemas (`videoPlayer`, `castButton`): the shared node fields plus their own. */
+/**
+ * The `cameraPreview` node's own fields (#14202): the in-app viewfinder. Lens, flash and zoom are
+ * state keys (checked in `prototypeCameraPreview.ts`) so ordinary state actions drive them.
+ */
+const cameraPreviewShape = {
+  type: z.enum(["cameraPreview"]),
+  lensKey: keySchema.optional(),
+  flashKey: keySchema.optional(),
+  zoomKey: keySchema.optional(),
+  aspectRatio: z.enum(["4:3", "16:9", "1:1"]).optional(),
+  contentScale: z.enum(["fit", "crop", "fill"]).optional(),
+  tapToFocus: z.boolean().optional(),
+  pinchToZoom: z.boolean().optional(),
+  mode: z.enum(["photo", "video"]).optional(),
+};
+
+/**
+ * The media node schemas (`videoPlayer`, `castButton`, `cameraPreview`): the shared node fields
+ * plus their own.
+ */
 export function prototypeMediaNodeSchemas<T extends z.ZodRawShape>(common: T) {
   return [
     z.object({ ...common, ...videoPlayerShape }).strict(),
     z.object({ ...common, ...castButtonShape }).strict(),
+    z.object({ ...common, ...cameraPreviewShape }).strict(),
   ] as const;
 }

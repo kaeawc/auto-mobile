@@ -41,14 +41,12 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
     const timer = new FakeTimer();
-    iosClient = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      () => {
+    iosClient = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: () => {
         throw new Error("database resource tests stub the client methods and never open a socket");
       },
       timer,
-    );
+    });
     getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(iosClient);
   });
 
@@ -121,7 +119,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
       "com.example.app",
       "/app/Documents/app.db",
       "notes",
-      { limit: expectedLimit, offset: expectedOffset },
+      { page: { limit: expectedLimit, offset: expectedOffset } },
     );
   });
 
@@ -293,7 +291,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
       "com.example.app",
       "/app/Documents/app.db",
       "notes",
-      { limit: 50, offset: 0 },
+      { page: { limit: 50, offset: 0 } },
     );
   });
 

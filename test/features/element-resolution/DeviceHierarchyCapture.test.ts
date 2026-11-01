@@ -1,3 +1,5 @@
+import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
+import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
 import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { expect, test } from "bun:test";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
@@ -25,7 +27,7 @@ test("selected-display owner null reports no answer rather than service reachabi
     {
       timer: new FakeTimer(),
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, timeout, options) => {
+        requestHierarchySync: async (_perf, _raw, _signal, { timeoutMs: timeout, ...options }) => {
           ownerReads++;
           expect(timeout).toBe(15000);
           expect(options?.displayId).toBe(2);
@@ -58,7 +60,7 @@ test.each([
     {
       timer: new FakeTimer(),
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, timeout, options) => {
+        requestHierarchySync: async (_perf, _raw, _signal, { timeoutMs: timeout, ...options }) => {
           expect(timeout).toBe(250);
           if (options?.diagnostics) {
             Object.assign(options.diagnostics, failure);
@@ -117,8 +119,9 @@ function fixture(elapsed: number, incomplete = true, updatedAt?: number, autoAdv
   };
   const syncClient: HierarchySyncClient = {
     requestHierarchySync: read,
-    requestHierarchySyncForObserver: (perf, filtering, signal, timeout, display) =>
-      read(perf, filtering, signal, timeout, {
+    requestHierarchySyncForObserver: (perf, filtering, signal, { timeoutMs: timeout, display }) =>
+      read(perf, filtering, signal, {
+        timeoutMs: timeout,
         displayId: typeof display === "number" ? display : display?.displayId,
       }),
     convertToViewHierarchyResult: () => ({ ...converted, updatedAt: undefined }),
@@ -168,7 +171,7 @@ test("incomplete hierarchy retry returns the complete accessibility reply withou
     signal,
   });
   expect(reads).toHaveLength(2);
-  expect(reads.map((args) => [args[1], args[2], args[3], args[4]?.displayId])).toEqual([
+  expect(reads.map((args) => [args[1], args[2], args[3].timeoutMs, args[3].displayId])).toEqual([
     [true, signal, 1000, 2],
     [true, signal, 900, 2],
   ]);
@@ -438,3 +441,22 @@ test.each(["device", "client-cache", undefined, "unknown"] as const)(
     expect(JSON.stringify(hierarchy)).not.toContain("client-cache");
   },
 );
+
+test("watch capture uses only its runner and the existing iOS hierarchy projection", async () => {
+  const client = new FakeWatchRunnerClient();
+  const unregister = watchRunners.register("capture-watch", client);
+  const timer = new FakeTimer();
+  try {
+    const capture = createDeviceHierarchyCapture(
+      { platform: "watchos", deviceId: "capture-watch", name: "Watch" },
+      { timer },
+    );
+    const snapshot = await capture.capture({ freshness: "fresh" });
+    expect(snapshot.hierarchy.screenWidth).toBe(184);
+    expect(snapshot.nodes.length).toBeGreaterThan(0);
+    expect(client.commands).toEqual([{ type: "hierarchy" }]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  } finally {
+    unregister();
+  }
+});

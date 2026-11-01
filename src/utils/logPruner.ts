@@ -238,8 +238,7 @@ async function pruneStaleLog(
   io: UnlinkContext,
   fullPath: string,
   file: string,
-  now: number,
-  abandonedMaxAgeMs: number,
+  { now, abandonedMaxAgeMs }: { now: number; abandonedMaxAgeMs: number },
 ): Promise<void> {
   // Another process may have removed it concurrently — ignore.
   await tryOrElseAsync(
@@ -385,7 +384,10 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     if (!shouldPruneExitedLog(file, opts.ownPrefix, isAlive, daemonLaunchLogProtection)) {
       continue;
     }
-    await pruneStaleLog(io, path.join(opts.dir, file), file, now, opts.abandonedMaxAgeMs);
+    await pruneStaleLog(io, path.join(opts.dir, file), file, {
+      now,
+      abandonedMaxAgeMs: opts.abandonedMaxAgeMs,
+    });
   }
 }
 

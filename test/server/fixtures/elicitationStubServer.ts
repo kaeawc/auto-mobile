@@ -40,7 +40,7 @@ const refusal = {
 const server = createSdkMcpServer(
   { name: "stub", version: "0.0.0" },
   { tools: { listChanged: true } },
-  era === "modern" ? MODERN_CACHE_HINTS : undefined,
+  { cacheHints: era === "modern" ? MODERN_CACHE_HINTS : undefined },
 );
 
 server.server.setRequestHandler("tools/list", async () => ({

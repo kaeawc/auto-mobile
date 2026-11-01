@@ -311,13 +311,11 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     const session = new FakeMcpServer();
     ResourceRegistry.registerWithServer(ephemeral, undefined, { ephemeral: true });
     ResourceRegistry.registerWithServer(session);
-    ResourceRegistry.register(
-      "automobile:test/ephemeral-resource",
-      "test",
-      "test resource",
-      "text/plain",
-      async () => ({ uri: "automobile:test/ephemeral-resource", text: "x" }),
-    );
+    ResourceRegistry.register("automobile:test/ephemeral-resource", "test", {
+      description: "test resource",
+      mimeType: "text/plain",
+      handler: async () => ({ uri: "automobile:test/ephemeral-resource", text: "x" }),
+    });
     try {
       await subscribe(ephemeral, "automobile:test/ephemeral-resource");
       await ResourceRegistry.notifyResourceListChanged();
@@ -350,13 +348,11 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     const second = new FakeMcpServer();
     ResourceRegistry.registerWithServer(first);
     ResourceRegistry.registerWithServer(second);
-    ResourceRegistry.register(
-      "automobile:test/updated-resource",
-      "test",
-      "test resource",
-      "text/plain",
-      async () => ({ uri: "automobile:test/updated-resource", text: "x" }),
-    );
+    ResourceRegistry.register("automobile:test/updated-resource", "test", {
+      description: "test resource",
+      mimeType: "text/plain",
+      handler: async () => ({ uri: "automobile:test/updated-resource", text: "x" }),
+    });
     // Subscribe the same way a client would: through the registered handler.
     const subscribeHandler = first.server.handlersBySchema.get("resources/subscribe");
     expect(subscribeHandler).toBeDefined();
@@ -389,10 +385,14 @@ describe("ResourceRegistry connection subscriptions", () => {
     ResourceRegistry.clearResources();
     ResourceRegistry.clearServersForTesting();
     for (const uri of [URI, OTHER_URI]) {
-      ResourceRegistry.register(uri, "Test", "Connection test", "text/plain", async () => ({
-        uri,
-        text: "x",
-      }));
+      ResourceRegistry.register(uri, "Test", {
+        description: "Connection test",
+        mimeType: "text/plain",
+        handler: async () => ({
+          uri,
+          text: "x",
+        }),
+      });
     }
   });
 
@@ -779,10 +779,14 @@ describe("ResourceRegistry URI-template matching", () => {
 describe("ResourceRegistry process-wide update event", () => {
   test("known resources emit once without a loopback subscriber; unknown resources do not", async () => {
     const resolved: string[][] = [];
-    ResourceRegistry.register("automobile:event", "Event", "Event", "text/plain", async () => ({
-      uri: "automobile:event",
-      text: "value",
-    }));
+    ResourceRegistry.register("automobile:event", "Event", {
+      description: "Event",
+      mimeType: "text/plain",
+      handler: async () => ({
+        uri: "automobile:event",
+        text: "value",
+      }),
+    });
     const stop = ResourceUpdatedBroadcaster.subscribe((resolve) => {
       resolved.push(resolve(new Set(["automobile:event", "automobile:other"])));
     });

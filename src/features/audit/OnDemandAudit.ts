@@ -156,7 +156,7 @@ export class OnDemandAudit {
     }
     const output: OnDemandAuditResult = { success: true, failed: false, appId };
     const reported = kinds.has("accessibility")
-      ? await this.runAccessibility(observation, screenshotPath, appId, input, output)
+      ? await this.runAccessibility(observation, screenshotPath, appId, { input, output })
       : [];
     if (reported === undefined) {
       return output;
@@ -186,8 +186,7 @@ export class OnDemandAudit {
     observation: ObserveResult,
     screenshotPath: string | undefined,
     appId: string,
-    input: OnDemandAuditInput,
-    output: OnDemandAuditResult,
+    { input, output }: { input: OnDemandAuditInput; output: OnDemandAuditResult },
   ): Promise<WcagViolation[] | undefined> {
     const config = {
       ...(this.engines.accessibilityConfig() ?? DEFAULT_ON_DEMAND_ACCESSIBILITY_CONFIG),

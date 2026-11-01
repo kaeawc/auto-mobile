@@ -7,6 +7,7 @@ import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { isForegroundUserPending, resolveSetupUser } from "./setupUser";
 import { ForegroundUserUnreadableError } from "./ForegroundUserUnreadableError";
 
@@ -17,17 +18,31 @@ export interface AndroidInstallSettleProbe {
   foregroundUserReady(signal: AbortSignal): Promise<boolean>;
 }
 
+function isAdbDeviceStillAuthorizing(error: unknown): boolean {
+  return /device still authorizing/i.test(errorMessage(error));
+}
+
 export function createAdbAndroidInstallSettleProbe(
   adb: AdbCommandRunner,
   device: Pick<BootedDevice, "formFactor">,
 ): AndroidInstallSettleProbe {
   return {
     async packageManagerReady(signal: AbortSignal): Promise<boolean> {
-      const result = await adb.executeCommand("shell pm path android", {
-        noRetry: true,
-        signal,
-      });
-      return result.stdout.split(/\r?\n/).some((line) => line.trim().startsWith("package:"));
+      try {
+        const result = await adb.executeCommand("shell pm path android", {
+          noRetry: true,
+          signal,
+        });
+        return result.stdout.split(/\r?\n/).some((line) => line.trim().startsWith("package:"));
+      } catch (error) {
+        signal.throwIfAborted();
+        if (isAdbDeviceStillAuthorizing(error)) {
+          // Device still authorizing during first boot is safe to retry inside the gate's budget.
+          logger.debug("[CTRL_PROXY] ADB device still authorizing before install", error);
+          return false;
+        }
+        throw error;
+      }
     },
 
     async bootCompleted(signal: AbortSignal): Promise<boolean> {

@@ -238,15 +238,9 @@ export function assertActiveRecordingOwner(
   if (requesterSessionUuid === undefined && !ctx.requesterResolver.isDeviceHeld(deviceId)) {
     return;
   }
-  throw new InputDeviceOwnedError(
-    "videoRecording stop",
-    deviceId,
-    requesterSessionUuid,
-    undefined,
-    {
-      message:
-        `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
-        "another session. Only the session that started an active recording can stop it.",
-    },
-  );
+  throw new InputDeviceOwnedError("videoRecording stop", deviceId, requesterSessionUuid, {
+    message:
+      `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
+      "another session. Only the session that started an active recording can stop it.",
+  });
 }

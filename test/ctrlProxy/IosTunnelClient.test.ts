@@ -322,10 +322,11 @@ describe("IosTunnelClient", () => {
     const manager = IOSCtrlProxyManager.createForTesting(
       { deviceId: request.udid, platform: "ios", name: "iPhone" },
       timer,
-      undefined,
-      fake,
-      // The manager asks `idevice_id` whether the device is attached before it tunnels.
-      executor,
+      {
+        tunnelClient: fake,
+        // The manager asks `idevice_id` whether the device is attached before it tunnels.
+        processExecutor: executor,
+      },
     );
     await manager["startIproxyTunnel"]();
     expect(fake.starts[0].localPort).toBe(manager.getServicePort());

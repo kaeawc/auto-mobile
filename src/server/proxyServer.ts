@@ -579,12 +579,14 @@ async function callProxyTool(
   const declaresTasks = requestDeclaresTasks({ envelope: extra.envelope, meta: extra._meta });
   if (!declaresTasks) {
     // An undeclared call is forwarded exactly as before the extension existed.
-    const result = await proxy.callTool(name, args, progressToken, onProgress, {
+    const result = await proxy.callTool(name, args, progressToken, {
+      onProgress,
       signal: extra.signal,
     });
     return brokerEndedRelayedResult(result, options.session);
   }
-  const result = await proxy.callTool(name, args, progressToken, onProgress, {
+  const result = await proxy.callTool(name, args, progressToken, {
+    onProgress,
     signal: extra.signal,
     declaresTasks,
   });

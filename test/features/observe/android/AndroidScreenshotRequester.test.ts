@@ -148,10 +148,12 @@ describe("AndroidScreenshotRequester", () => {
 
   test("a cancelled dispatch settles locally without consuming the rate limit", async () => {
     const { requester, requestManager, frames, calls } = harness();
-    const pending = requestManager.register<ScreenshotResult>("s-1", "screenshot", 1000, () => ({
-      success: false,
-      error: "timeout",
-    }));
+    const pending = requestManager.register<ScreenshotResult>("s-1", "screenshot", 1000, {
+      timeoutErrorFactory: () => ({
+        success: false,
+        error: "timeout",
+      }),
+    });
     await requester.dispatchScreenshotRequest("s-1", AbortSignal.abort());
     expect(await pending).toMatchObject({ success: false, error: OPERATION_CANCELLED_MESSAGE });
     expect(frames).toEqual([]);

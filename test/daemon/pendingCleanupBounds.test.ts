@@ -515,10 +515,7 @@ test("a row write landing just inside its budget settles without a monitor force
     h.manager,
     () => false,
     async () => {},
-    h.timer,
-    {
-      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
-    },
+    { timer: h.timer, forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
   );
   monitor.start();
   dispose.push(() => {
@@ -571,10 +568,7 @@ test("a clock restore retains its recorded budget after clearing its cache mid-r
     h.manager,
     () => false,
     async () => {},
-    h.timer,
-    {
-      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
-    },
+    { timer: h.timer, forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
   );
   monitor.start();
   dispose.push(() => {
@@ -629,10 +623,7 @@ test("an ownership hold anchors the stuck deadline to its cap then its settlemen
     h.manager,
     () => false,
     async () => {},
-    h.timer,
-    {
-      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
-    },
+    { timer: h.timer, forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
   );
   monitor.start();
   dispose.push(() => {
@@ -1078,8 +1069,10 @@ for (const interval of [3_000, 7_000]) {
         reaps++;
         await h.manager.releaseSession(id, reason);
       },
-      h.timer,
-      { forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
+      {
+        timer: h.timer,
+        forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
+      },
     );
     const scanOrigin = h.timer.now();
     monitor.start();
@@ -1179,8 +1172,7 @@ test("a monitor reap joining after an execution veto still meets the advertised 
       joinedAt = h.timer.now();
       await h.manager.releaseSession(id, reason);
     },
-    h.timer,
-    { forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
+    { timer: h.timer, forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
   );
   monitor.start();
   dispose.push(() => {
@@ -1223,10 +1215,7 @@ test("a monitor-tracked wedged release advertises the whole forced-release worst
     async (id, reason) => {
       await h.manager.releaseSession(id, reason);
     },
-    h.timer,
-    {
-      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
-    },
+    { timer: h.timer, forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
   );
   dispose.push(() => {
     void monitor.stop();
@@ -1352,7 +1341,7 @@ test("the env-resolved monitor interval is shared by the manager release bound",
     h.manager,
     () => false,
     async () => {},
-    h.timer,
+    { timer: h.timer },
   );
   monitor.start();
   dispose.push(() => {
@@ -1401,8 +1390,8 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
       reaps++;
       await h.manager.releaseSession(id, reason);
     },
-    h.timer,
     {
+      timer: h.timer,
       forceStuckRelease: async (id) => {
         forcedAt.push(h.timer.now());
         await forceStuckSessionRelease(h.manager, h.pool, id);
@@ -1494,10 +1483,7 @@ test("late screen-reader setup grows the stuck budget before its first restore",
     h.manager,
     () => false,
     async () => {},
-    h.timer,
-    {
-      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
-    },
+    { timer: h.timer, forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
   );
   monitor.start();
   dispose.push(() => void monitor.stop());
@@ -1558,8 +1544,8 @@ test.each(["volatile", "durable"] as const)(
       h.manager,
       () => false,
       async () => {},
-      h.timer,
       {
+        timer: h.timer,
         forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
       },
     );
@@ -1624,10 +1610,7 @@ test("an undecided commit fence still forces wedged teardown at its deadline", a
     h.manager,
     () => false,
     async () => {},
-    h.timer,
-    {
-      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
-    },
+    { timer: h.timer, forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
   );
   monitor.start();
   dispose.push(() => void monitor.stop());

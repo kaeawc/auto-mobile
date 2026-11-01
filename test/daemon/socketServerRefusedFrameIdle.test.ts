@@ -254,7 +254,11 @@ describe("a holder's control frame refused before it reaches the device", () => 
       (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
     );
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        sessionId,
+        query,
+      ),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
@@ -274,7 +278,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
         requestGestureMove: record("gestureMove"),
         requestGestureEnd: record("gestureEnd"),
         requestSetText: record("setText", 1),
-        requestImeAction: recordIme(4),
+        requestImeAction: recordIme(3),
         setPreference: recordWrite("setPreference", 3),
         removePreference: recordWrite("removePreference", 3),
         clearPreferenceStore: recordWrite("clearPreferenceStore", 2),
@@ -286,8 +290,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
         requestTapCoordinates: record("tap", 0),
         requestDrag: record("swipe", 0),
         requestSetText: record("setText", 1),
-        requestAppendText: record("appendText", 4),
-        requestImeAction: recordIme(4),
+        requestAppendText: record("appendText", 3),
+        requestImeAction: recordIme(3),
         setPreference: recordWrite("setPreference", 3),
         removePreference: recordWrite("removePreference", 3),
         clearPreferenceStore: recordWrite("clearPreferenceStore", 2),
@@ -303,12 +307,12 @@ describe("a holder's control frame refused before it reaches the device", () => 
     });
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(() => proxyManager);
     spyOn(PressButton.prototype, "press").mockImplementation(async (button, ...rest) => ({
-      ...(await run("pressButton", 4)(button, ...rest)),
+      ...(await run("pressButton", 1)(button, ...rest)),
       button,
       keyCode: 3,
     }));
     spyOn(InputKey.prototype, "press").mockImplementation(async (key, ...rest) => ({
-      ...(await run("key", 4)(key, ...rest)),
+      ...(await run("key", 3)(key, ...rest)),
       key,
       keyCode: "KEYCODE_ENTER",
     }));
@@ -341,7 +345,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     );
     server.appendTextFactory = () => ({
       appendText: async (...args) => ({
-        ...(await run("appendText", 4)(...args)),
+        ...(await run("appendText", 1)(...args)),
         charsSent: args[0].length,
       }),
     });
@@ -799,7 +803,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
           let directWrites = 0;
           const call = new AbortController();
           const pending = runWithAbortSignal(call.signal, () =>
-            internals.runIdeKeyValueMutation("android", androidDevice, "com.example", "prefs", {
+            internals.runIdeKeyValueMutation("android", androidDevice, "com.example", {
+              fileName: "prefs",
               ideMutation: {
                 track: () => {},
                 admit: () => {},

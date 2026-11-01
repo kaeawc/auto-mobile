@@ -188,7 +188,7 @@ async function harness() {
       waitForDeviceSessionExecutionsToEnd: async () => true,
     },
   });
-  manager.onSessionRelease((_id, _device, _reason, snapshot, options) =>
+  manager.onSessionRelease((_id, _device, _reason, { snapshot, ...options }) =>
     drain.onSessionReleased(snapshot, options),
   );
   cleanups.push(async () => {

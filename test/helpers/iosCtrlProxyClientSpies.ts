@@ -81,14 +81,12 @@ export function createIosTestClient(
   device: BootedDevice,
   overrides: IosClientOverrides = {},
 ): IOSCtrlProxyClient {
-  const client = IOSCtrlProxyClient.createForTesting(
-    device,
-    8765,
-    () => {
+  const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+    wsFactory: () => {
       throw new Error("Unexpected socket connection");
     },
-    new FakeTimer(),
-  );
+    timer: new FakeTimer(),
+  });
   if (overrides.requestDrag) {
     spyOn(client, "requestDrag").mockImplementation(overrides.requestDrag);
   }

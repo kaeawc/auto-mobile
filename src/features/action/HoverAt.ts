@@ -23,7 +23,12 @@ import type { ActionCall } from "./ActionCall";
 import { resolveTapAtCoordinates } from "./TapAtCoordinate";
 import { DRAG_PATH_DEFAULT_SEGMENT_MS, assertDragPathFitsRequestBudget } from "./dragPathPlan";
 import type { PointerEnvironment, PointerInjector } from "./pointer/PointerInjector";
-import { createInstrumentationDispatch } from "./pointer/instrumentationDispatch";
+import {
+  PointerNotSentError,
+  createInstrumentationDispatch,
+} from "./pointer/instrumentationDispatch";
+import { createUinputDispatch } from "./pointer/uinputDispatch";
+import { UINPUT_FIXED_OVERHEAD_MS } from "./pointer/uinputPenScript";
 import { defaultPointerRoutes } from "./pointer/pointerRoutes";
 import { readPointerEnvironment } from "./pointer/readPointerEnvironment";
 import { selectPointerRoute } from "./pointer/selectPointerRoute";
@@ -71,13 +76,18 @@ export class HoverAt extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: HoverAtDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.injectors =
       dependencies.pointerInjectors ??
       defaultPointerRoutes({
         a11y: notAHoverRoute,
         adbInputSource: notAHoverRoute,
-        instrumentation: createInstrumentationDispatch(this.adb),
+        instrumentation: createInstrumentationDispatch(this.adb, this.device.deviceId),
+        uinput: createUinputDispatch(this.adb, this.device.deviceId),
       });
     this.readEnvironment =
       dependencies.readPointerEnvironment ??
@@ -111,8 +121,8 @@ export class HoverAt extends BaseVisualChange {
           this.device,
           options.display,
           this.observeScreen,
-          this.adb,
           {
+            adb: this.adb,
             lastRenderedObservation: this.lastRenderedObservation,
             signal,
             transitions: this.displayTransitionReader,
@@ -169,6 +179,23 @@ export class HoverAt extends BaseVisualChange {
     return { points };
   }
 
+  /** The hover's planned event time, after refusing one that cannot finish within the deadline. */
+  private assertFitsBudget(
+    injector: PointerInjector,
+    points: HoverPoint[],
+    call: HoverDriveCall,
+  ): number {
+    const plannedDurationMs = points
+      .slice(1)
+      .reduce((sum, point) => sum + (point.durationMs ?? DRAG_PATH_DEFAULT_SEGMENT_MS), 0);
+    // The uinput pen's attach and close waits run before and after the hover's own events.
+    assertDragPathFitsRequestBudget(
+      plannedDurationMs + (injector.route === "uinput" ? UINPUT_FIXED_OVERHEAD_MS : 0),
+      call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
+    );
+    return plannedDurationMs;
+  }
+
   private async drive(
     injector: PointerInjector,
     options: HoverAtOptions,
@@ -196,13 +223,7 @@ export class HoverAt extends BaseVisualChange {
     if (layerRefusal) {
       return failure(layerRefusal);
     }
-    const plannedDurationMs = points
-      .slice(1)
-      .reduce((sum, point) => sum + (point.durationMs ?? DRAG_PATH_DEFAULT_SEGMENT_MS), 0);
-    assertDragPathFitsRequestBudget(
-      plannedDurationMs,
-      call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
-    );
+    const plannedDurationMs = this.assertFitsBudget(injector, points, call);
     throwIfAborted(call.signal);
     assertCurrent?.();
     try {
@@ -219,11 +240,16 @@ export class HoverAt extends BaseVisualChange {
         throw error;
       }
       logger.warn(`[hoverAt] injection failed: ${errorMessage(error)}`, error);
+      // A route that refused before sending anything leaves nothing to verify.
+      const advice =
+        error instanceof PointerNotSentError
+          ? ""
+          : ". The hover may have partially run; verify state with observe before retrying.";
       return {
         success: false,
         points: points.map(({ x, y }) => ({ x, y })),
         route: injector.route,
-        error: `hoverAt failed: ${errorMessage(error)}. The hover may have partially run; verify state with observe before retrying.`,
+        error: `hoverAt failed: ${errorMessage(error)}${advice}`,
       };
     }
     return {

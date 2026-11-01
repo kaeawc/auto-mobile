@@ -84,8 +84,7 @@ export class AndroidTraceCapture {
       this.deps.adb,
       request.deviceId,
       perfettoCategoryConfig(config),
-      remotePath,
-      request.signal,
+      { remotePath, signal: request.signal },
     );
     const warnings: string[] = [];
     if (!config.appId) {
@@ -129,11 +128,15 @@ export class AndroidTraceCapture {
     // The SIGTERM must reach the device before anything is unregistered: if it cannot be
     // dispatched (cancellation, adb error) the recorder is still running, and the trace stays
     // registered so a retry or the session's release cleanup can still stop it.
-    await stopPerfettoRecorder(adb, timer, record.pid, warnings, { poll, signal });
+    await stopPerfettoRecorder(adb, timer, record.pid, { warnings, poll, signal });
     // The recording ended here; waiting for the file, pulling and cleanup are not recording time.
     const recordedMs = timer.now() - record.startedAtMs;
     try {
-      await awaitFlushedDeviceFile(adb, timer, record.remotePath, LOG_TAG, { poll, signal });
+      await awaitFlushedDeviceFile(adb, timer, record.remotePath, {
+        logTag: LOG_TAG,
+        poll,
+        signal,
+      });
       await adb.execute(["pull", record.remotePath, record.hostPath], {
         timeoutMs: PULL_TIMEOUT_MS,
         noRetry: true,

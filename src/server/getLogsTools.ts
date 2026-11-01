@@ -84,10 +84,10 @@ export const defaultGetLogsDependencies: GetLogsDependencyFactory = (device, arg
       (target) => new SimCtlClient(target),
       nodeAppFileFileSystem,
       defaultTimer,
-      UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+      { unifiedLogTimeoutMs: UNIFIED_LOG_DEFAULT_TIMEOUT_MS },
     );
     return {
-      collect: (appId, lastSeconds, level, signal, processName) =>
+      collect: (appId, lastSeconds, level, { signal, processName } = {}) =>
         provider.collectUnifiedLog(
           device,
           appId,

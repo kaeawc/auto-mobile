@@ -144,8 +144,7 @@ function harness(platform: "android" | "ios" = "android") {
     },
     "/unused/shared-capture.sock",
     timer,
-    { authorize: () => {} },
-    permissiveDeviceAdmissionGate,
+    { authenticator: { authorize: () => {} }, admissionGate: permissiveDeviceAdmissionGate },
   );
   return {
     timer,

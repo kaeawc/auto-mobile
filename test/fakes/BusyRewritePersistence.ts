@@ -59,8 +59,7 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options?: MarkReleasedOptions,
+    { reason, ...options }: MarkReleasedOptions & { reason: string },
   ): Promise<void> {
     await this.park;
     if (this.failReleaseWrites > 0) {
@@ -68,11 +67,11 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
       throw new Error("SQLITE_BUSY: database is locked");
     }
     try {
-      if (options?.unlessTerminalOrOwnedByLivePeer && this.refuseGuardedReleaseWrites > 0) {
+      if (options.unlessTerminalOrOwnedByLivePeer && this.refuseGuardedReleaseWrites > 0) {
         this.refuseGuardedReleaseWrites--;
         throw new DeviceSessionRowNotReleasableError(sessionUuid);
       }
-      await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
+      await super.markReleased(sessionUuid, status, releasedAtMs, { reason, ...options });
     } catch (error) {
       // A refused release can be followed by an ownership hand-back before its read.
       const hook = this.afterRefusedRelease;

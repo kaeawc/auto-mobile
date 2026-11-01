@@ -183,9 +183,11 @@ export class ScreenshotComparator {
   static async compareImages(
     buffer1: Buffer,
     buffer2: Buffer,
-    threshold: number = 0.1,
-    fastMode: boolean = false,
-    deps: ImageComparisonDeps = {},
+    {
+      threshold = 0.1,
+      fastMode = false,
+      deps = {},
+    }: { threshold?: number; fastMode?: boolean; deps?: ImageComparisonDeps } = {},
   ): Promise<ScreenshotComparisonResult> {
     const { timer, backend } = resolveImageComparisonDeps(deps);
     const comparisonStart = timer.now();

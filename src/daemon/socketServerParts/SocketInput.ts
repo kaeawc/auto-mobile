@@ -133,8 +133,13 @@ export class SocketInput {
     client: IosRunnerScaleClient,
     deviceId: string,
     coordinates: number[],
-    probeTimeoutMs: number,
-    validateCanonicalCoordinates?: (geometry: ScreenScaleMetadata) => void,
+    {
+      probeTimeoutMs,
+      validateCanonicalCoordinates,
+    }: {
+      probeTimeoutMs: number;
+      validateCanonicalCoordinates?: (geometry: ScreenScaleMetadata) => void;
+    },
   ): Promise<number[]> {
     const knownMetadata = client.getScreenScaleMetadata();
     if (knownMetadata) {
@@ -265,8 +270,8 @@ export class SocketInput {
       args.platform,
       args.deviceId,
       socketSessionId,
-      route.action,
       {
+        action: route.action,
         bypassAndroidDeviceListCache: route.bypassAndroidDeviceListCache ?? false,
         requester: input?.requester,
       },
@@ -303,13 +308,10 @@ export class SocketInput {
             totalTimeoutMs,
           });
         },
-        this.callbacks.inputDeviceGate(
-          request.method,
-          route.origin,
-          totalTimeoutMs,
-          queueEnterMs,
+        this.callbacks.inputDeviceGate(request.method, route.origin, totalTimeoutMs, {
+          budgetStartMs: queueEnterMs,
           input,
-        ),
+        }),
       );
     const result = await (route.around ? route.around(targetDevice, keyed) : keyed());
     return { targetDevice, result };
@@ -348,11 +350,8 @@ export class SocketInput {
             );
             // The signal reaches the send step itself, so an owner that went away while the client
             // was still connecting never has its tap written to the device (#10006).
-            return await this.callbacks.dispatchFencedInput(
-              "Tap",
-              signal,
-              remainingTimeoutMs,
-              (fenced, onDispatch) =>
+            return await this.callbacks.dispatchFencedInput("Tap", signal, remainingTimeoutMs, {
+              send: (fenced, onDispatch) =>
                 client.requestTapCoordinates({
                   x: args.x,
                   y: args.y,
@@ -362,20 +361,22 @@ export class SocketInput {
                   onDispatch,
                   signal: fenced,
                 }),
-              dispatching,
-            );
+              onDispatch: dispatching,
+            });
           }
           const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
           const [x, y] = await this.callbacks.toIosRunnerCoordinates(
             iosClient,
             targetDevice.deviceId,
             [args.x, args.y],
-            remainingTimeoutMs,
-            (geometry) =>
-              this.callbacks.requireCoordinatesWithinKnownScreenGeometry(
-                [args.x, args.y],
-                geometry,
-              ),
+            {
+              probeTimeoutMs: remainingTimeoutMs,
+              validateCanonicalCoordinates: (geometry) =>
+                this.callbacks.requireCoordinatesWithinKnownScreenGeometry(
+                  [args.x, args.y],
+                  geometry,
+                ),
+            },
           );
           const gestureTimeoutMs = this.callbacks.remainingBudgetAfterProbe(
             queueEnterMs,
@@ -385,11 +386,8 @@ export class SocketInput {
           );
           // The scale probe awaited the runner; the owner may have left meanwhile.
           assertSocketInputNotAborted(signal);
-          return await this.callbacks.dispatchFencedInput(
-            "Tap",
-            signal,
-            gestureTimeoutMs,
-            (fenced, onDispatch) =>
+          return await this.callbacks.dispatchFencedInput("Tap", signal, gestureTimeoutMs, {
+            send: (fenced, onDispatch) =>
               iosClient.requestTapCoordinates({
                 x,
                 y,
@@ -399,8 +397,8 @@ export class SocketInput {
                 signal: fenced,
                 onDispatch,
               }),
-            dispatching,
-          );
+            onDispatch: dispatching,
+          });
         },
       },
     );
@@ -443,11 +441,8 @@ export class SocketInput {
               targetDevice,
               defaultAdbClientFactory,
             );
-            return await this.callbacks.dispatchFencedInput(
-              "Swipe",
-              signal,
-              remainingTimeoutMs,
-              (fenced, onDispatch) =>
+            return await this.callbacks.dispatchFencedInput("Swipe", signal, remainingTimeoutMs, {
+              send: (fenced, onDispatch) =>
                 client.requestSwipe({
                   x1: args.startX,
                   y1: args.startY,
@@ -459,15 +454,15 @@ export class SocketInput {
                   onDispatch,
                   signal: fenced,
                 }),
-              dispatching,
-            );
+              onDispatch: dispatching,
+            });
           }
           const client = IOSCtrlProxyClient.getInstance(targetDevice);
           const [startX, startY, endX, endY] = await this.callbacks.toIosRunnerCoordinates(
             client,
             targetDevice.deviceId,
             [args.startX, args.startY, args.endX, args.endY],
-            remainingTimeoutMs,
+            { probeTimeoutMs: remainingTimeoutMs },
           );
           const gestureTimeoutMs = this.callbacks.remainingBudgetAfterProbe(
             queueEnterMs,
@@ -476,11 +471,8 @@ export class SocketInput {
             "handleInputSwipe",
           );
           assertSocketInputNotAborted(signal);
-          return await this.callbacks.dispatchFencedInput(
-            "Swipe",
-            signal,
-            gestureTimeoutMs,
-            (fenced, onDispatch) =>
+          return await this.callbacks.dispatchFencedInput("Swipe", signal, gestureTimeoutMs, {
+            send: (fenced, onDispatch) =>
               client.requestDrag({
                 x1: startX,
                 y1: startY,
@@ -494,8 +486,8 @@ export class SocketInput {
                 signal: fenced,
                 onDispatch,
               }),
-            dispatching,
-          );
+            onDispatch: dispatching,
+          });
         },
       },
     );
@@ -524,30 +516,24 @@ export class SocketInput {
     kind: "start" | "move" | "end",
     socketSessionId: string,
     targetDevice: BootedDevice,
-    gestureId: string,
-    startAdmission: StrokeAdmission | undefined,
+    { gestureId, startAdmission }: { gestureId: string; startAdmission?: StrokeAdmission },
   ): Promise<void> {
-    return await this.inputStrokes.trackAckedGestureFrame(
-      kind,
-      socketSessionId,
-      targetDevice,
+    return await this.inputStrokes.trackAckedGestureFrame(kind, socketSessionId, targetDevice, {
       gestureId,
       startAdmission,
-    );
+    });
   }
   async liftingStrokeOnSessionRefusal<T>(
     kind: "start" | "move" | "end",
     socketSessionId: string | undefined,
     targetDevice: BootedDevice,
-    gestureId: string,
-    run: () => Promise<T>,
+    { gestureId, run }: { gestureId: string; run: () => Promise<T> },
   ): Promise<T> {
     return await this.inputStrokes.liftingStrokeOnSessionRefusal(
       kind,
       socketSessionId,
       targetDevice,
-      gestureId,
-      run,
+      { gestureId, run },
     );
   }
   captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {
@@ -627,17 +613,15 @@ export class SocketInput {
                 signal,
                 queueEnterMs + totalTimeoutMs - this.state.timer.now(),
                 send,
-                onDispatch,
-                "Button press request",
+                { onDispatch, label: "Button press request" },
               ),
           });
-          return await pressButton.press(
-            args.button,
-            remainingTimeoutMs,
-            args.frameContext,
+          return await pressButton.press(args.button, {
+            timeoutMs: remainingTimeoutMs,
+            frameContext: args.frameContext,
             signal,
-            dispatching,
-          );
+            onDispatch: dispatching,
+          });
         },
       },
     );
@@ -679,7 +663,10 @@ export class SocketInput {
           totalTimeoutMs,
         }) => {
           return await this.callbacks.executeSocketInputKey(
-            new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.state.timer),
+            new InputKey(targetDevice, {
+              adbFactory: defaultAdbClientFactory,
+              timer: this.state.timer,
+            }),
             {
               key: args.key,
               frameContext: args.frameContext,
@@ -718,7 +705,11 @@ export class SocketInput {
     const { key, frameContext, totalTimeoutMs, remainingTimeoutMs, signal, dispatching } = options;
     let dispatched = false;
     const send = (fenced: AbortSignal | undefined, onDispatch: () => void) =>
-      inputKey.press(key, remainingTimeoutMs, frameContext, [], { signal: fenced, onDispatch });
+      inputKey.press(key, remainingTimeoutMs, frameContext, {
+        modifiers: [],
+        signal: fenced,
+        onDispatch,
+      });
     return this.callbacks.runHeldInputOperation(
       "input/key",
       signal,
@@ -731,16 +722,13 @@ export class SocketInput {
             remainingTimeoutMs,
           },
           () =>
-            this.callbacks.holdDispatchedInputRequest(
-              signal,
-              remainingTimeoutMs,
-              send,
-              () => {
+            this.callbacks.holdDispatchedInputRequest(signal, remainingTimeoutMs, send, {
+              onDispatch: () => {
                 dispatched = true;
                 dispatch?.();
               },
-              "Key request",
-            ),
+              label: "Key request",
+            }),
           (timeoutError) => (dispatched ? InputKey.indeterminateError(timeoutError) : undefined),
         ),
       () => dispatching?.(),

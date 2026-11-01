@@ -144,13 +144,10 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
     const pool = makePool(sessions, `daemon-${pid}`, {
       timer,
       deviceManager: devices,
-      foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
-        pid,
-        files.source(),
-        sockets,
-        () => socketPath,
-        { timer },
-      ),
+      foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(pid, files.source(), sockets, {
+        ownerSocketPath: () => socketPath,
+        timer,
+      }),
     });
     await pool.initializeWithDevices([DEVICE]);
     const peer: Peer = { pid, pool, activeExecutions: 0, idleForMs: null };

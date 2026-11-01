@@ -254,7 +254,7 @@ export class BunSqliteConnectionState {
         try {
           return await this.#executeOnce<R>(sql, parameters);
         } catch (error) {
-          const delayMs = this.#prepareRetry(error, attempt, sql, isBegin, retryDeadlineMs);
+          const delayMs = this.#prepareRetry(error, attempt, sql, { isBegin, retryDeadlineMs });
           await this.#timer.sleep(delayMs);
         }
       }
@@ -268,8 +268,7 @@ export class BunSqliteConnectionState {
     error: unknown,
     attempt: number,
     sql: string,
-    isBegin: boolean,
-    retryDeadlineMs: number,
+    { isBegin, retryDeadlineMs }: { isBegin: boolean; retryDeadlineMs: number },
   ): number {
     if (!this.#shouldRetry(error, attempt, isBegin, retryDeadlineMs)) {
       throw error;
@@ -358,7 +357,11 @@ export class BunSqliteConnectionState {
       // word char, so `\breturning\b` correctly rejects `returning_items`.
       const hasReturning = /\breturning\b/.test(sqlLower);
 
-      return this.#executeStatement<R>(stmt, parameters, isSelect, hasReturning, schemaChanging);
+      return this.#executeStatement<R>(stmt, parameters, {
+        isSelect,
+        hasReturning,
+        schemaChanging,
+      });
     } catch (error) {
       // BigInt-safe: Kysely can bind BigInt params, and a bare
       // JSON.stringify(parameters) throws on BigInt — which would mask the real
@@ -384,9 +387,11 @@ export class BunSqliteConnectionState {
   #executeStatement<R>(
     stmt: BunStatement,
     parameters: readonly unknown[],
-    isSelect: boolean,
-    hasReturning: boolean,
-    schemaChanging: boolean,
+    {
+      isSelect,
+      hasReturning,
+      schemaChanging,
+    }: { isSelect: boolean; hasReturning: boolean; schemaChanging: boolean },
   ): QueryResult<R> {
     try {
       if (isSelect || hasReturning) {

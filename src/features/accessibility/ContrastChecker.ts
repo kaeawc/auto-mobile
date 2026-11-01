@@ -198,8 +198,7 @@ export class ContrastChecker {
     element: Element,
     wcagLevel: WcagLevel,
     screenshotFingerprint: string,
-    result: ContrastResult | null,
-    density?: number,
+    { result, density }: { result: ContrastResult | null; density?: number },
   ): void {
     // Cache the result
     if (result && this.config.enableElementCache) {
@@ -256,7 +255,10 @@ export class ContrastChecker {
         }
         results.set(
           element,
-          await this.checkBatchElement(image, element, wcagLevel, screenshotFingerprint, density),
+          await this.checkBatchElement(image, element, wcagLevel, {
+            screenshotFingerprint,
+            density,
+          }),
         );
       }
 
@@ -281,8 +283,7 @@ export class ContrastChecker {
     image: RawImage,
     element: Element,
     wcagLevel: WcagLevel,
-    screenshotFingerprint: string,
-    density?: number,
+    { screenshotFingerprint, density }: { screenshotFingerprint: string; density?: number },
   ): Promise<ContrastResult | null> {
     try {
       const cached = this.getBatchCachedContrast(
@@ -295,7 +296,7 @@ export class ContrastChecker {
         return cached.result;
       }
       const result = await this.checkContrastWithImage(image, element, wcagLevel, density);
-      this.cacheBatchContrast(element, wcagLevel, screenshotFingerprint, result, density);
+      this.cacheBatchContrast(element, wcagLevel, screenshotFingerprint, { result, density });
       return result;
     } catch (error) {
       logger.warn(`Error checking contrast for element: ${errorMessage(error)}`, error);

@@ -16,7 +16,9 @@ const iosTarget = (advertised: readonly string[]) => ({
 describe("prototype iOS minimum OS (#15242)", () => {
   test("the host refusal names the iOS version a gated capability needs", async () => {
     const refusal = await specCapabilityRefusal(iosTarget([]), chartSpec, undefined, {
-      [PROTOTYPE_CHART_CAPABILITY]: 18,
+      iosMinimumOs: {
+        [PROTOTYPE_CHART_CAPABILITY]: 18,
+      },
     });
 
     expect(refusal?.success).toBe(false);
@@ -25,7 +27,9 @@ describe("prototype iOS minimum OS (#15242)", () => {
   });
 
   test("a capability on the iOS floor gets the plain refusal", async () => {
-    const refusal = await specCapabilityRefusal(iosTarget([]), chartSpec, undefined, {});
+    const refusal = await specCapabilityRefusal(iosTarget([]), chartSpec, undefined, {
+      iosMinimumOs: {},
+    });
 
     expect(refusal?.success).toBe(false);
     expect(refusal?.error).not.toContain("It needs iOS");
@@ -34,7 +38,9 @@ describe("prototype iOS minimum OS (#15242)", () => {
   test("an agent that advertises the capability is not refused", async () => {
     await expect(
       specCapabilityRefusal(iosTarget([PROTOTYPE_CHART_CAPABILITY]), chartSpec, undefined, {
-        [PROTOTYPE_CHART_CAPABILITY]: 18,
+        iosMinimumOs: {
+          [PROTOTYPE_CHART_CAPABILITY]: 18,
+        },
       }),
     ).resolves.toBeUndefined();
   });
@@ -42,7 +48,9 @@ describe("prototype iOS minimum OS (#15242)", () => {
   test("Android refusals never carry an iOS version note", async () => {
     const android = { supportsCommand: async () => false };
     const refusal = await specCapabilityRefusal({ android }, chartSpec, undefined, {
-      [PROTOTYPE_CHART_CAPABILITY]: 18,
+      iosMinimumOs: {
+        [PROTOTYPE_CHART_CAPABILITY]: 18,
+      },
     });
 
     expect(refusal?.error).not.toContain("It needs iOS");

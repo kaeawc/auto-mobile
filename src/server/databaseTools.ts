@@ -143,8 +143,8 @@ export function registerDatabaseTools(
     "sqlQuery",
     "Execute SQL on app SQLite database.",
     sqlQuerySchema,
-    sqlQueryHandler,
     {
+      handler: sqlQueryHandler,
       defaultEnabled: false,
       embeddedSdkOnly: true,
       outputSchema: sqlQueryResultSchema,
@@ -181,13 +181,9 @@ async function executeSqlForDevice(
 
   if (device.platform === "ios") {
     try {
-      return await iosClient(device).executeSQLForIos(
-        args.appId,
-        args.databasePath,
-        args.query,
-        undefined,
-        isReadOnlySqlQuery(args.query),
-      );
+      return await iosClient(device).executeSQLForIos(args.appId, args.databasePath, args.query, {
+        readOnly: isReadOnlySqlQuery(args.query),
+      });
     } catch (error) {
       if (error instanceof SdkCapabilityQueryError) {
         throw error;

@@ -82,7 +82,7 @@ final class PrototypePlatformDriver {
         }
     }
 
-    private static func invalidArguments(_ call: PlatformCall) -> PlatformCallResult? {
+    nonisolated static func invalidArguments(_ call: PlatformCall) -> PlatformCallResult? {
         let parts = call.call.split(separator: ".")
         guard parts.count == 2,
               let definition = PrototypePlatformValidator.modules[String(parts[0])]?.calls[String(parts[1])]

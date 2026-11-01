@@ -143,7 +143,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
 
   capture(context: DeviceMutationResetContext): Promise<DeviceBaseline> {
     return captureAndroidMutationBaseline((command, timeoutMs) =>
-      this.execute(command, context, timeoutMs),
+      this.execute(command, context, { timeoutMs }),
     );
   }
 
@@ -155,11 +155,12 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     await cleanAndroidBaseline(
       baseline,
       context,
-      (command, timeoutMs) => this.execute(command, context, timeoutMs),
-      (mutation) => this.revert(mutation, context),
-      journalEntries,
+      (command, timeoutMs) => this.execute(command, context, { timeoutMs }),
+      { revert: (mutation) => this.revert(mutation, context), journalEntries },
     );
-    const output = await this.execute("shell cmd clipboard clear", context, undefined, true);
+    const output = await this.execute("shell cmd clipboard clear", context, {
+      optionalClipboard: true,
+    });
     if (this.unsupportedClipboard(output)) {
       logger.warn("Android cleaning skipped unsupported clipboard clear");
     } else if (this.failedOutput(output)) {
@@ -195,13 +196,11 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       return;
     }
     for (const { command, success, timeoutMs, retryable, wakeSleptScreen } of commands) {
-      const output = await this.execute(
-        command,
-        context,
+      const output = await this.execute(command, context, {
         timeoutMs,
-        mutation.kind === "clipboard",
+        optionalClipboard: mutation.kind === "clipboard",
         retryable,
-      );
+      });
       if (mutation.kind === "clipboard" && this.unsupportedClipboard(output)) {
         logger.warn("Android cleaning skipped unsupported journal clipboard clear");
         continue;
@@ -299,9 +298,11 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     command: string,
     context: DeviceMutationResetContext,
     // Legacy callers without a deadline retain one attempt; reset deadlines turn this into a floor.
-    timeoutMs = 2000,
-    optionalClipboard = false,
-    retryable = true,
+    {
+      timeoutMs = 2000,
+      optionalClipboard = false,
+      retryable = true,
+    }: { timeoutMs?: number; optionalClipboard?: boolean; retryable?: boolean } = {},
   ): Promise<string> {
     try {
       const dispatch = async (attemptTimeoutMs: number) => {

@@ -137,13 +137,23 @@ export class DisconnectMonitorSchedule {
   }
 }
 
-/** Back off only when discovery provides successful, complete absence-free evidence. */
+/**
+ * Back off only when discovery provides successful, complete absence-free evidence.
+ *
+ * @param succeededPlatforms - Platforms whose discovery succeeded this sweep
+ * @param missCount - Disconnect misses observed this sweep
+ * @param candidateDeviceIds - Devices that sessions hold
+ * @param inventory.bootedDeviceIds - Devices discovery listed as booted
+ * @param inventory.pooledDeviceIds - Devices in the pool
+ */
 export function eligibleIdleSweepSignature(
   succeededPlatforms: ReadonlySet<Platform>,
   missCount: number,
   candidateDeviceIds: Iterable<string>,
-  bootedDeviceIds: ReadonlySet<string>,
-  pooledDeviceIds: Iterable<string>,
+  {
+    bootedDeviceIds,
+    pooledDeviceIds,
+  }: { bootedDeviceIds: ReadonlySet<string>; pooledDeviceIds: Iterable<string> },
 ): string | undefined {
   if (
     succeededPlatforms.size === 0 ||

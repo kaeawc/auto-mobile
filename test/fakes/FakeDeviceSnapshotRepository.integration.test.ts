@@ -124,7 +124,7 @@ describe("FakeDeviceSnapshotRepository", () => {
   test("fake dual-order precedence matches the real DeviceSnapshotRepository", async () => {
     const fake = new FakeDeviceSnapshotRepository();
     const db = await createTestDatabase();
-    const real = new DeviceSnapshotRepository(db);
+    const real = new DeviceSnapshotRepository({ db });
     try {
       for (const row of conflictRows) {
         await fake.insertSnapshot(row);
@@ -154,7 +154,7 @@ describe("FakeDeviceSnapshotRepository", () => {
   test("orders offset-bearing timestamps lexically like SQLite TEXT, not by instant", async () => {
     const fake = new FakeDeviceSnapshotRepository();
     const db = await createTestDatabase();
-    const real = new DeviceSnapshotRepository(db);
+    const real = new DeviceSnapshotRepository({ db });
     try {
       for (const row of offsetRows) {
         await fake.insertSnapshot(row);

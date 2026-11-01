@@ -271,24 +271,20 @@ export async function getVideoArchiveItem(
 }
 
 export function registerVideoRecordingResources(): void {
-  ResourceRegistry.register(
-    VIDEO_RESOURCE_URIS.LATEST,
-    "Latest Video Recording",
-    "The most recent video recording with metadata and base64-encoded video data.",
-    "video/mp4",
+  ResourceRegistry.register(VIDEO_RESOURCE_URIS.LATEST, "Latest Video Recording", {
+    description: "The most recent video recording with metadata and base64-encoded video data.",
+    mimeType: "video/mp4",
     // Wrapped, not passed directly: a registered handler's first argument is the
     // reader's ResourceReadContext, while these functions take an injectable
     // store there. Calling with no arguments keeps the default-store seam.
-    () => getLatestVideoRecording(),
-  );
+    handler: () => getLatestVideoRecording(),
+  });
 
-  ResourceRegistry.register(
-    VIDEO_RESOURCE_URIS.ARCHIVE,
-    "Video Recording Archive",
-    "Metadata list for archived video recordings.",
-    "application/json",
-    () => getVideoArchiveList(),
-  );
+  ResourceRegistry.register(VIDEO_RESOURCE_URIS.ARCHIVE, "Video Recording Archive", {
+    description: "Metadata list for archived video recordings.",
+    mimeType: "application/json",
+    handler: () => getVideoArchiveList(),
+  });
 
   ResourceRegistry.registerTemplate(VIDEO_RESOURCE_URIS.ARCHIVE_ITEM, "Video Recording", {
     description: "Video recording content and metadata for the specified recording ID.",

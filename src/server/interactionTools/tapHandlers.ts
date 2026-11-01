@@ -1,4 +1,6 @@
 import { z } from "zod/v4";
+import { resolveActionCall, type ActionCall } from "../../features/action/ActionCall";
+import type { ProgressCallback } from "../../features/action/BaseVisualChange";
 import { TapAnyElement } from "../../features/action/TapAnyElement";
 import { TapAtCoordinate } from "../../features/action/TapAtCoordinate";
 import { previewHierarchyHitTest } from "../../features/observe/HierarchyHitTest";
@@ -7,6 +9,7 @@ import { snapshotReferences } from "../../features/observe/SnapshotReferenceStor
 import { RecompositionTracker } from "../../features/performance/RecompositionTracker";
 import { isSessionlessDeviceRead } from "../../features/toolSelection/toolSelectionContext";
 import { isTruthyFlag } from "../../features/utility/elementProperties";
+import { watchTapAt } from "../../features/watch/WatchActions";
 import {
   ActionableError,
   BootedDevice,
@@ -18,9 +21,12 @@ import { StructuredToolResponse, createStructuredToolResponse } from "../../util
 import { resolveTransportDeadlineMs } from "../formTools";
 import { defaultTapOnElementFactory, isIosAppOpenAlertHierarchy } from "../interactionToolHandlers";
 import type { TapAnyArgs, TapAtArgs, TapOnArgs } from "../interactionToolTypes";
-import { ProgressCallback } from "../toolRegistry";
 import { internalTapAtContext } from "../internalToolParams";
-import type { InteractionToolDependencies, TapAtElementLike } from "./dependencies";
+import type {
+  InteractionHandlerOptions,
+  InteractionToolDependencies,
+  TapAtElementLike,
+} from "./dependencies";
 import { hitTestSchema } from "./tapSchemas";
 
 /**
@@ -35,9 +41,15 @@ import { hitTestSchema } from "./tapSchemas";
 export function buildTapOnResultMessage(
   selectedElement: TapOnSelectedElement | undefined,
   searchSummary: string | undefined,
-  activatedSubtext?: { text: string; occurrence: number },
-  selectorLabel?: string,
-  longPress?: Pick<TapOnElementResult, "action" | "longClickAdvertised">,
+  {
+    activatedSubtext,
+    selectorLabel,
+    longPress,
+  }: {
+    activatedSubtext?: { text: string; occurrence: number };
+    selectorLabel?: string;
+    longPress?: Pick<TapOnElementResult, "action" | "longClickAdvertised">;
+  } = {},
 ): string {
   const details = buildTapOnResultDetails(
     selectedElement,
@@ -116,9 +128,17 @@ function buildTapOnResultDetails(
   return details;
 }
 
-const defaultTapAtElementFactory: NonNullable<
+export const defaultTapAtElementFactory: NonNullable<
   InteractionToolDependencies["tapAtElementFactory"]
-> = (device) => new TapAtCoordinate(device);
+> = (device) => {
+  if (device.platform === "watchos") {
+    return {
+      execute: (options, progressOrCall?: ProgressCallback | ActionCall, signal?: AbortSignal) =>
+        watchTapAt(device.deviceId, options, resolveActionCall(progressOrCall, signal).signal),
+    };
+  }
+  return new TapAtCoordinate(device);
+};
 
 const defaultHitTestObservationFactory: NonNullable<
   InteractionToolDependencies["hitTestObservationFactory"]
@@ -212,13 +232,11 @@ function buildTapOnSuccessMessage(
     );
     return `${label} was ${beforeState}, tapped, now ${afterState} (verified)${details.length > 0 ? `; ${details.join("; ")}` : ""}`;
   }
-  return buildTapOnResultMessage(
-    result.selectedElement,
-    searchSummary,
-    result.activatedSubtext,
+  return buildTapOnResultMessage(result.selectedElement, searchSummary, {
+    activatedSubtext: result.activatedSubtext,
     selectorLabel,
-    result,
-  );
+    longPress: result,
+  });
 }
 
 function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | undefined): string {
@@ -233,13 +251,24 @@ function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | u
   );
 }
 
+function resolveTapOnAction(
+  args: Pick<TapOnArgs, "action" | "duration">,
+): NonNullable<TapOnArgs["action"]> {
+  const hasDuration = (args.duration ?? 0) > 0;
+  if (args.action === "tap" && hasDuration) {
+    throw new ActionableError(
+      'duration applies only to longPress; pass action: "longPress" or omit duration',
+    );
+  }
+  return args.action ?? (hasDuration ? "longPress" : "tap");
+}
+
 export async function tapOnHandler(
   device: BootedDevice,
   args: TapOnArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
+  const action = resolveTapOnAction(args);
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const tapOnTextCommand = (deps.tapOnElementFactory ?? defaultTapOnElementFactory)(device);
   const result = await tapOnTextCommand.execute(
@@ -254,7 +283,7 @@ export async function tapOnHandler(
       sibling: args.sibling,
       selectionStrategy: args.selectionStrategy,
       index: args.index,
-      action: args.action,
+      action,
       duration: args.duration,
       searchUntil: args.searchUntil,
       preTapStability: args.preTapStability,
@@ -291,9 +320,7 @@ export async function tapOnHandler(
 export async function tapAtHandler(
   device: BootedDevice,
   args: TapAtArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const result = await (deps.tapAtElementFactory ?? defaultTapAtElementFactory)(device).execute(
@@ -328,9 +355,7 @@ export async function tapAtHandler(
 export async function hitTestHandler(
   device: BootedDevice,
   args: z.infer<typeof hitTestSchema>,
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   const observation = await readHitTestObservation(device, args.display, signal, deps);
   if (args.snapshotId) {
@@ -365,9 +390,7 @@ function buildTapAnySearchSummary(
 export async function tapAnyHandler(
   device: BootedDevice,
   args: TapAnyArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const tapAnyCommand = (deps.tapAnyElementFactory ?? defaultTapAnyElementFactory)(device);
@@ -377,7 +400,7 @@ export async function tapAnyHandler(
       container: args.container,
       selectionStrategy: args.selectionStrategy,
       scrollableContainer: args.scrollableContainer,
-      action: args.action,
+      action: args.action ?? (args.duration !== undefined ? "longPress" : "tap"),
       duration: args.duration,
       searchUntil: args.searchUntil,
       layer: args.layer,

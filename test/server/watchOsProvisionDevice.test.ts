@@ -19,7 +19,10 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { WatchSimulatorInventory } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
-import { WatchSimulatorLifecycle } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
+import {
+  WatchSimulatorLifecycle,
+  type WatchBootAdmission,
+} from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { WatchSimulatorProvisioner } from "../../src/utils/ios-cmdline-tools/WatchSimulatorProvisioner";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
@@ -64,7 +67,7 @@ describe("provisionDevice on an Apple Watch simulator", () => {
 
   async function arrange(
     devices: AppleDevice[] = [],
-    { autolock = "0" }: { autolock?: "0" | "1" } = {},
+    { autolock = "0", admission }: { autolock?: "0" | "1"; admission?: WatchBootAdmission } = {},
   ) {
     env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
     restoreEnv = ToolRegistry.setPipelineOverridesForTesting({ env });
@@ -111,7 +114,8 @@ describe("provisionDevice on an Apple Watch simulator", () => {
         runnerCalls.push(request.device.deviceId);
         throw new Error("a watch provision must never prepare an automation runner");
       },
-      watchSimulatorLifecycleFactory: () => new WatchSimulatorLifecycle(simctl, inventory),
+      watchSimulatorLifecycleFactory: () =>
+        new WatchSimulatorLifecycle(simctl, inventory, admission),
       watchSimulatorProvisionerFactory: () => new WatchSimulatorProvisioner(inventory, simctl),
     });
     registerDeviceTools();
@@ -181,6 +185,34 @@ describe("provisionDevice on an Apple Watch simulator", () => {
 
     expect(simctl.commands).toEqual([`shutdown ${existing.udid}`, `boot ${existing.udid} 480000`]);
     expect(result).toMatchObject({ lifecycleState: "ready", acquisition: "cold-boot" });
+  });
+
+  // A provision cancelled while its boot waits for simulator capacity must leave the admission
+  // queue instead of holding its place and lease until a slot frees (#15882).
+  test("a provision cancelled while its boot waits for admission cancels the admission", async () => {
+    const request = new AbortController();
+    const seen: Array<boolean | undefined> = [];
+    await arrange([], {
+      admission: {
+        run: async (boot) => {
+          seen.push(boot.signal?.aborted);
+          request.abort();
+          seen.push(boot.signal?.aborted);
+          boot.signal?.throwIfAborted();
+          throw new Error("admission must observe the cancelled request");
+        },
+      },
+    });
+
+    const outcome = await ToolRegistry.getTool("provisionDevice")!
+      .handler({ __mcpSessionId: "client-a", device: WATCH }, undefined, request.signal)
+      .then(
+        () => "delivered",
+        () => "refused",
+      );
+
+    expect(outcome).toBe("refused");
+    expect(seen).toEqual([false, true]);
   });
 
   test("boot false adopts the existing watch and binds nothing", async () => {

@@ -143,16 +143,15 @@ describe("PressButton Android keycode dispatch", () => {
         globalActionClient,
         frameContextClient,
       });
-      const pending = action.press(
-        "volume_up",
-        500,
-        outcome === "plain" ? undefined : "frame",
-        controller.signal,
-        () => {
+      const pending = action.press("volume_up", {
+        timeoutMs: 500,
+        frameContext: outcome === "plain" ? undefined : "frame",
+        signal: controller.signal,
+        onDispatch: () => {
           expect(fakeAdb.getExecutedArgv()).toEqual([]);
           marks++;
         },
-      );
+      });
       if (outcome === "cancelled") {
         await expect(pending).rejects.toThrow();
       } else {
@@ -183,7 +182,7 @@ describe("PressButton Android keycode dispatch", () => {
     const result = await new PressButton(androidDevice, fakeAdb, fakeTimer, {
       globalActionClient,
       frameContextClient,
-    }).press("back", 500, undefined, undefined, () => marks++);
+    }).press("back", { timeoutMs: 500, onDispatch: () => marks++ });
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedArgv()).toEqual([["shell", "input", "keyevent", "4"]]);
     expect(marks).toBe(1);
@@ -584,7 +583,7 @@ describe("PressButton Android keycode dispatch", () => {
         frameContextClient,
         window,
       });
-      const result = await dispatch(pressButton, "home", undefined, undefined, controller.signal);
+      const result = await dispatch(pressButton, "home", { signal: controller.signal });
 
       expect(result.success).toBe(true);
       const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
@@ -636,7 +635,7 @@ describe("PressButton Android keycode dispatch", () => {
       // Supply a 1234ms budget: the post-keyevent home verification must forward
       // the leftover budget into getActive rather than letting it fall back to
       // the 5s default (which would overrun a nearly-spent caller deadline).
-      await dispatch(pressButton, "home", 1234);
+      await dispatch(pressButton, "home", { timeoutMs: 1234 });
 
       const verifyOptions = window.getGetActiveOptions();
       expect(verifyOptions.length).toBeGreaterThan(0);
@@ -709,7 +708,7 @@ describe("PressButton Android keycode dispatch", () => {
         window: launcherWindow(),
       });
 
-      await dispatch(pressButton, "home", undefined, undefined, controller.signal);
+      await dispatch(pressButton, "home", { signal: controller.signal });
 
       expect(capturedSignal).toBe(controller.signal);
     });
@@ -733,7 +732,7 @@ describe("PressButton Android keycode dispatch", () => {
         window: launcherWindow(),
       });
 
-      await dispatch(pressButton, "back", undefined, "frame-9");
+      await dispatch(pressButton, "back", { frameContext: "frame-9" });
 
       expect(frameContexts).toEqual(["frame-9"]);
     });
@@ -759,7 +758,11 @@ describe("PressButton Android keycode dispatch", () => {
         frameContextClient,
       });
 
-      const result = await dispatch(pressButton, "back", 500, "frame-1", controller.signal);
+      const result = await dispatch(pressButton, "back", {
+        timeoutMs: 500,
+        frameContext: "frame-1",
+        signal: controller.signal,
+      });
 
       expect(result.success).toBe(true);
       expect(capturedSignal).toBe(controller.signal);
@@ -816,7 +819,7 @@ describe("PressButton Android keycode dispatch", () => {
       globalActionClient,
       frameContextClient,
     });
-    const result = await dispatch(pressButton, "back", 500, "epoch:2");
+    const result = await dispatch(pressButton, "back", { timeoutMs: 500, frameContext: "epoch:2" });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Stale frame context");
@@ -836,7 +839,10 @@ describe("PressButton Android keycode dispatch", () => {
       globalActionClient,
       frameContextClient,
     });
-    const result = await dispatch(pressButton, "volume_up", 500, "epoch:3");
+    const result = await dispatch(pressButton, "volume_up", {
+      timeoutMs: 500,
+      frameContext: "epoch:3",
+    });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Stale frame context");

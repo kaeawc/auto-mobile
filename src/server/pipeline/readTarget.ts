@@ -138,19 +138,18 @@ async function resolveStoppedReservedRead(
     read.resolve(
       deviceId,
       input.signal,
-      input.args.platform || pooledWatchPlatform(deviceId) || "either",
+      input.args.platform || pooledSimctlAppPlatform(deviceId) || "either",
     ),
   );
 }
 
 /**
- * A pooled watch read without a platform (a late or gated read of a watch session's device) is
- * listed as a watch: "either" lists Android and iOS only, so it would never find it (#14908).
+ * A pooled watch or Apple TV read without a platform uses its own platform:
+ * "either" lists Android and iOS only, so it would never find it (#14908).
  */
-function pooledWatchPlatform(deviceId: string): "watchos" | undefined {
-  return defaultDaemonContext.devicePool()?.getDevice(deviceId)?.platform === "watchos"
-    ? "watchos"
-    : undefined;
+function pooledSimctlAppPlatform(deviceId: string): "watchos" | "tvos" | undefined {
+  const platform = defaultDaemonContext.devicePool()?.getDevice(deviceId)?.platform;
+  return platform === "watchos" || platform === "tvos" ? platform : undefined;
 }
 
 class ReadTargetBecameHeld extends Error {
@@ -204,8 +203,15 @@ export async function ensureReadTargetOrWatch(
   input: ExecutionTargetInput,
   platform: SomePlatform,
   providedDeviceId: string | undefined,
-  options: DeviceReadyOptions,
-  { read, readinessTarget }: { read: SessionlessDeviceRead; readinessTarget: string | undefined },
+  {
+    options,
+    read,
+    readinessTarget,
+  }: {
+    options: DeviceReadyOptions;
+    read: SessionlessDeviceRead;
+    readinessTarget: string | undefined;
+  },
 ): Promise<
   | { device: BootedDevice; watched?: undefined }
   | { watched: ExecutionTargetContext; device?: undefined }
@@ -333,8 +339,13 @@ export async function findRunningExplicitReadTarget(
   input: ExecutionTargetInput,
   read: SessionlessDeviceRead,
   platform: SomePlatform,
-  getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>,
-  alreadyChecked: boolean,
+  {
+    getConnectedPlatforms,
+    alreadyChecked,
+  }: {
+    getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>;
+    alreadyChecked: boolean;
+  },
 ): Promise<{ device: BootedDevice; fromListing: boolean } | undefined> {
   const scan = await getConnectedPlatforms();
   const exact = scan.devices.find(

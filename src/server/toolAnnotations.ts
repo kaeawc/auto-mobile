@@ -104,6 +104,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   pressButton: entry("Press Button", destructiveDevice),
   recentApps: entry("Open Recent Apps", controlDevice),
   rotaryScroll: entry("Scroll Rotary Input", destructiveDevice),
+  rotateCrown: entry("Rotate Digital Crown", destructiveDevice),
   recordDeviceGestures: entry("Record Gestures", controlDevice),
   selectAllText: entry("Select All Text", controlDevice),
   sendSms: entry("Simulate SMS", controlDevice),

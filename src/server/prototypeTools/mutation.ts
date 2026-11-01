@@ -7,6 +7,7 @@ import {
   prototypeDegradedEffectsOutput,
 } from "../../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
+import { prototypeSensitiveWarnings } from "../../features/prototype/prototypeStrictPolicy";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
 import { pseudoLocalizeSpec } from "../../features/prototype/prototypePseudoLocale";
@@ -128,26 +129,25 @@ async function stageUnlessRefused(
   failure: PrototypeResult | undefined,
   args: z.infer<typeof prototypeSchema>,
   dependencies: PrototypeHandlerDependencies,
-  device: BootedDevice,
-  signal: AbortSignal | undefined,
+  { device, signal }: { device: BootedDevice; signal?: AbortSignal },
 ): Promise<AssetStage> {
   return failure
     ? { uploaded: [], prepared: [], failure }
-    : stageAssets(
-        dependencies.target,
-        args,
-        dependencies.assetReaders,
+    : stageAssets(dependencies.target, args, dependencies.assetReaders, {
         signal,
-        shaderCacheContext(dependencies, device.deviceId),
-      );
+        cached: shaderCacheContext(dependencies, device.deviceId),
+      });
 }
 
 export async function performPrototypeAction(
   dependencies: PrototypeHandlerDependencies,
   device: BootedDevice,
   args: Omit<z.infer<typeof prototypeSchema>, "action"> & { action: PrototypeMutation | "patch" },
-  scope: PrototypeScope,
-  { queue, signal }: { queue: PrototypePatchQueue; signal?: AbortSignal },
+  {
+    scope,
+    queue,
+    signal,
+  }: { scope: PrototypeScope; queue: PrototypePatchQueue; signal?: AbortSignal },
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
     const { store, target, cacheInvalidator } = dependencies;
@@ -162,7 +162,7 @@ export async function performPrototypeAction(
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
         // A patched node may add or drop a via "device" localhost request (#12530): staged here.
         specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal, undefined, dependencies.env))?.error ??
+          (await specCapabilityRefusal(target, spec, signal, { env: dependencies.env }))?.error ??
           (await cachedPrototypeShaderAssetProblem(
             spec,
             device.deviceId,
@@ -179,15 +179,14 @@ export async function performPrototypeAction(
       signal,
     );
   }
-  return performMutation(dependencies, device, { ...args, action: args.action }, scope, signal);
+  return performMutation(dependencies, device, { ...args, action: args.action }, { scope, signal });
 }
 
 async function performMutation(
   dependencies: PrototypeHandlerDependencies,
   device: BootedDevice,
   args: Omit<z.infer<typeof prototypeSchema>, "action"> & { action: PrototypeMutation },
-  scope: PrototypeScope,
-  signal?: AbortSignal,
+  { scope, signal }: { scope: PrototypeScope; signal?: AbortSignal },
 ): Promise<PrototypeOutput> {
   const { store, events, target: prototypeTarget, commits } = dependencies;
   const target = mutationTarget(args);
@@ -216,8 +215,7 @@ async function performMutation(
         { inPlace, shownDisplayId: shown?.displayId, signal },
         prototypeTarget,
         device,
-        args,
-        dependencies,
+        { args, dependencies },
       ),
     );
     // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
@@ -226,7 +224,7 @@ async function performMutation(
     const comparable = await withdrawOnAbort(
       ordering,
       signal,
-      comparableForMutation(resolved, inPlace, device, args, dependencies),
+      comparableForMutation(resolved, inPlace, device, { args, dependencies }),
     );
     // An in-place show names the display it replaces on: if the prototype is dismissed while assets
     // stage, the runner then shows it fresh there instead of on the default display.
@@ -234,7 +232,7 @@ async function performMutation(
     const stage = await withdrawOnAbort(
       ordering,
       signal,
-      stageUnlessRefused(resolved.failure, sendArgs, dependencies, device, signal),
+      stageUnlessRefused(resolved.failure, sendArgs, dependencies, { device, signal }),
     );
     // A failed upload ends the call unsent, like a refusal: it must not supersede a valid show.
     if (stage.failure) {
@@ -252,7 +250,7 @@ async function performMutation(
         beforeSend: async () => {
           // Last abort check before the grant, the event epoch and the device send.
           signal?.throwIfAborted();
-          await appLayerGrant(prototypeTarget, device, args, dependencies, signal)?.();
+          await appLayerGrant(prototypeTarget, device, args, { dependencies, signal })?.();
           // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
           // must leave the event epoch of a prototype still on screen alone (#11394).
           startFreshShowEvents(events, scope, source, { target, args, inPlace });
@@ -328,7 +326,7 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...(await showAdviceOutput(authoredArgs, device, dependencies, result, signal)),
+      ...(await showAdviceOutput(authoredArgs, device, dependencies, { result, signal })),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
@@ -384,8 +382,10 @@ async function showAdviceOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
   dependencies: Pick<PrototypeHandlerDependencies, "target" | "screenRoundFactory" | "adbFactory">,
-  result: Pick<PrototypeResult, "success" | "screenRound">,
-  signal?: AbortSignal,
+  {
+    result,
+    signal,
+  }: { result: Pick<PrototypeResult, "success" | "screenRound">; signal?: AbortSignal },
 ): Promise<
   Pick<
     PrototypeOutput,
@@ -600,12 +600,17 @@ async function comparableForMutation(
   resolved: { displayId?: number; failure?: PrototypeResult },
   inPlace: boolean,
   device: BootedDevice,
-  args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  {
+    args,
+    dependencies,
+  }: {
+    args: z.infer<typeof prototypeSchema>;
+    dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">;
+  },
 ): Promise<number | undefined | null> {
   return resolved.failure
     ? undefined
-    : comparableRequestedDisplay(inPlace, resolved.displayId, device, args, dependencies);
+    : comparableRequestedDisplay(inPlace, resolved.displayId, device, { args, dependencies });
 }
 
 interface CommitOutcome {
@@ -636,11 +641,14 @@ function commitMutation(
   if (args.action === "show" && result.success && target.id && args.replaceOthers !== false) {
     events.replaceShown(scope.deviceId, target.id);
   }
-  const lastResult = store.record(scope, args.action, target, result, {
-    displayId: placed.displayId,
-    data: args.action === "show" ? (args.spec as PrototypeSpec | undefined)?.data : undefined,
-    chrome: placed.chrome,
-    replaceOthers: args.replaceOthers,
+  const lastResult = store.record(scope, args.action, target, {
+    result,
+    details: {
+      displayId: placed.displayId,
+      data: args.action === "show" ? (args.spec as PrototypeSpec | undefined)?.data : undefined,
+      chrome: placed.chrome,
+      replaceOthers: args.replaceOthers,
+    },
   });
   if (target.id && events.isDismissed(scope, target.id)) {
     store.dismissed(scope, target.id);
@@ -681,8 +689,13 @@ async function comparableRequestedDisplay(
   inPlace: boolean,
   resolvedDisplayId: number | undefined,
   device: BootedDevice,
-  args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  {
+    args,
+    dependencies,
+  }: {
+    args: z.infer<typeof prototypeSchema>;
+    dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">;
+  },
 ): Promise<number | undefined | null> {
   if (!inPlace) {
     return resolvedDisplayId;
@@ -768,6 +781,7 @@ function missingAssetsOutput(
     degraded.warning,
     result.success ? landedWarning : undefined,
     ...(result.success ? prototypeTimerWarnings(spec) : []),
+    ...(result.success ? prototypeSensitiveWarnings(spec) : []),
   ]
     .filter((entry) => entry !== undefined)
     .join(" ");
@@ -783,6 +797,6 @@ function missingAssetsOutput(
 function shaderCacheContext(
   dependencies: PrototypeHandlerDependencies,
   serial: string,
-): NonNullable<Parameters<typeof stageAssets>[4]> {
+): NonNullable<NonNullable<Parameters<typeof stageAssets>[3]>["cached"]> {
   return { serial, cache: dependencies.shaderAssetCache ?? defaultPrototypeAssetCache() };
 }

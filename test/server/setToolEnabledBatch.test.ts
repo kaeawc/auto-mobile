@@ -62,13 +62,10 @@ describe("setToolEnabled batch enable (#6869)", () => {
       ["openLink", false],
       ["observe", true],
     ] as const) {
-      ToolRegistry.register(
-        name,
-        name,
-        z.object({ sessionUuid: z.string().optional() }),
-        async () => ({ content: [{ type: "text" as const, text: name }] }),
-        { defaultEnabled },
-      );
+      ToolRegistry.register(name, name, z.object({ sessionUuid: z.string().optional() }), {
+        handler: async () => ({ content: [{ type: "text" as const, text: name }] }),
+        defaultEnabled,
+      });
     }
     registerToolSelectionTools();
   });
@@ -223,7 +220,8 @@ describe("setToolEnabled batch enable (#6869)", () => {
 
   test("writes configurable batch names and reports setToolEnabled as always-on", async () => {
     for (const name of ["rotate", "displayConfig"]) {
-      ToolRegistry.register(name, name, z.object({}), async () => ({ content: [] }), {
+      ToolRegistry.register(name, name, z.object({}), {
+        handler: async () => ({ content: [] }),
         defaultEnabled: false,
       });
     }

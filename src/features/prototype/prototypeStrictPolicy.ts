@@ -1,5 +1,9 @@
 import { prototypeShareArgumentsError } from "./prototypeShare";
-import { prototypePlatformCall, prototypePlatformUses } from "./prototypePlatform";
+import {
+  prototypePlatformCall,
+  prototypePlatformEvent,
+  prototypePlatformUses,
+} from "./prototypePlatform";
 import {
   isPrototypeDataPointer,
   prototypeDataPathPointer,
@@ -15,6 +19,9 @@ import {
   visitPrototypeHandlerFields,
   type FieldVisitor,
 } from "./prototypeTemplate";
+
+export const SECURE_SCAN_BUDGET_MESSAGE =
+  "Secure binding scan exceeds 4194304 expanded UTF-8 bytes";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -65,7 +72,30 @@ function libraryPolicyError(
   if (host) {
     return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
   }
-  return hostChannelsError(spec) ?? secureLibraryError(spec) ?? sensitiveLibraryError(spec);
+  return (
+    hostChannelsError(spec) ??
+    secureLibraryError(spec) ??
+    sensitiveLibraryError(spec) ??
+    sensitiveModuleLibraryError(spec)
+  );
+}
+
+function sensitiveModuleLibraryError(spec: unknown): PrototypeValidationError | undefined {
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind === "call" && prototypePlatformCall(use.action.call)?.definition.sensitive) {
+      return {
+        path: use.path,
+        message: `Sensitive platform call ${String(use.action.call)} is unavailable in a library`,
+      };
+    }
+    if (use.kind === "handler" && prototypePlatformEvent(use.event)?.definition.sensitive) {
+      return {
+        path: use.path,
+        message: `Sensitive platform event ${use.event} is unavailable in a library`,
+      };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -152,6 +182,14 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   return errors;
 }
 
+export function prototypeSensitiveWarnings(spec: unknown): string[] {
+  return prototypeSensitiveSinkErrors(spec).map(({ path, message }) =>
+    message === SECURE_SCAN_BUDGET_MESSAGE
+      ? `${path}: sensitive sink analysis stopped at the 4194304 expanded-byte budget at this path, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.`
+      : `${path}: ${message}; this is a warning only and does not block the show.`,
+  );
+}
+
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
   return prototypeSensitiveSinkErrors(spec)[0];
 }
@@ -228,7 +266,7 @@ function secureScanBudgetError(
     if (expandedBytes > 4194304) {
       return {
         path: field.path,
-        message: "Secure binding scan exceeds 4194304 expanded UTF-8 bytes",
+        message: SECURE_SCAN_BUDGET_MESSAGE,
       };
     }
   }

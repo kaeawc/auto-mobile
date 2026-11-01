@@ -99,7 +99,7 @@ class TestableAppearanceSocketServer extends AppearanceSocketServer {
     deviceSource: AppearanceDeviceSource = emptyDeviceSource,
     dependencies: AppearanceSocketServerDependencies = fakeDependencies(),
   ) {
-    super("/fake/path/appearance.sock", timer, authenticator, deviceSource, dependencies);
+    super("/fake/path/appearance.sock", timer, authenticator, { deviceSource, dependencies });
   }
 
   async startFake(): Promise<void> {

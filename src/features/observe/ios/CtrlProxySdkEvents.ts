@@ -273,8 +273,7 @@ export class CtrlProxySdkEvents {
           event.eventType,
           event.applicationId,
           event.payload,
-          event.timestamp,
-          event.sequenceNumber,
+          { timestamp: event.timestamp, sequenceNumber: event.sequenceNumber },
         )
       ) {
         rememberedApplicationIds.add(event.applicationId!);

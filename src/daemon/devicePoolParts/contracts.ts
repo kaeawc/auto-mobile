@@ -240,8 +240,7 @@ export interface DeviceDisconnectSessionReleaser {
     sessionId: string,
     deviceId: string,
     releaseReason: SessionReleaseReason,
-    shouldCommit?: () => boolean,
-    options?: SessionReleaseOptions,
+    options?: { shouldCommit?: () => boolean; releaseOptions?: SessionReleaseOptions },
   ): Promise<boolean | void>;
 }
 
@@ -325,6 +324,10 @@ export type DeviceReadinessReservation = (() => Promise<void>) & {
 
 /** Who reserves a device for readiness and whether Android recovery handoffs exclude it. */
 export interface ReadinessReservationOptions {
+  /** Name that bridges an Android emulator's serial change; defaults to the expected name. */
+  stableRuntimeName?: string;
+  /** AVD name already verified for this device, which also lets the stable name be tracked. */
+  verifiedAndroidAvdName?: string;
   autolockClient?: AutolockClient & { restartResumeSessionId?: string };
   /** Defaults off: recovery handoffs reserve their target while ownership is still in flight. */
   enforceAndroidRecoveryExclusion?: boolean;
@@ -428,6 +431,8 @@ export interface DevicePoolDependencies {
   iosForeignDeviceOwnership?: ForeignDeviceOwnership;
   /** The same for Apple Watch simulators, claimed by UDID (#14908). */
   watchForeignDeviceOwnership?: ForeignDeviceOwnership;
+  /** The same for Apple TV simulators, claimed by UDID. */
+  tvForeignDeviceOwnership?: ForeignDeviceOwnership;
   /** Mirrors the claims `DevicePool.create` builds into the host-wide claims table (#11811 b). */
   deviceClaimMirrors?: { android?: DeviceClaimMirror; ios?: DeviceClaimMirror };
   /**

@@ -4,6 +4,7 @@ import {
   createFrameBrokerDaemonClient,
   waitForBrokerRelease,
 } from "../../scripts/manual-test/brokerDaemonClient";
+import type { SessionBrokerPoolDrainResult } from "../../src/daemon/sessionBroker/broker";
 import type { FrameConnection } from "../../scripts/manual-test/frameWire";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { FakeBrokerDaemonClient } from "../helpers/FakeBrokerDaemonClient";
@@ -395,3 +396,33 @@ test.each(["refused", "schema"])(
     expect(error).not.toBeInstanceOf(BrokerTransportError);
   },
 );
+
+test("drainPool uses the private frame wire and parses resource outcomes", async () => {
+  const f = fixture();
+  const result: SessionBrokerPoolDrainResult = {
+    resources: [
+      { resourceId: "destroyed-resource", outcome: "destroyed", cleanupPending: false },
+      { resourceId: "pending-resource", outcome: "cleanup_pending", cleanupPending: true },
+    ],
+  };
+  f.replies.push({ success: true, result });
+  expect(await f.client.drainPool()).toEqual(result);
+  expect(f.sockets[0].frames[0]).toMatchObject({
+    method: "daemon/drainBrokerPool",
+    params: {},
+    timeoutMs: 240000,
+  });
+  expect(f.sockets[0].destroyed).toBe(true);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("drainPool rejects malformed resource outcomes", async () => {
+  const f = fixture();
+  f.replies.push({
+    success: true,
+    result: { resources: [{ resourceId: "resource", outcome: "released", cleanupPending: false }] },
+  });
+  await expect(f.client.drainPool()).rejects.toThrow();
+  expect(f.sockets[0].destroyed).toBe(true);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});

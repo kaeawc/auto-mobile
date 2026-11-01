@@ -8,6 +8,7 @@ import type { BootedDevice } from "../../models";
 import { CheckResult } from "../types";
 import type { DoctorOptions, DoctorProbeOptions } from "../types";
 import { awaitDoctorProbe, DoctorDeadlineError, remainingDoctorProbe } from "../deadline";
+import { runWithTargetDeviceExecutionBinding } from "../../utils/deviceExecutionBinding";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { platform as getHostPlatform } from "node:os";
 import { DaemonManager } from "../../daemon/manager";
@@ -477,13 +478,17 @@ function describeDeviceCtrlProxy(
   };
 }
 
+/**
+ * @param failure.log - Logger that records the underlying error before the summarized result.
+ * @param failure.error - The caught device check failure.
+ */
 function androidDoctorDeviceFailure(
   name: string,
   device: BootedDevice,
   probe: DoctorProbeOptions,
-  log: Logger,
-  error: unknown,
+  failure: { log: Logger; error: unknown },
 ): CheckResult {
+  const { log, error } = failure;
   if (probe.signal?.aborted || error instanceof DoctorDeadlineError) {
     throw error;
   }
@@ -549,9 +554,15 @@ export async function checkCtrlProxy(
         currentProbe.signal?.throwIfAborted();
         const deviceProbe = remainingDoctorProbe(currentProbe);
         try {
-          results.push(await checkDeviceCtrlProxy(device, adbFactory, deviceProbe));
+          results.push(
+            await runWithTargetDeviceExecutionBinding(device.deviceId, targetDeviceId, () =>
+              checkDeviceCtrlProxy(device, adbFactory, deviceProbe),
+            ),
+          );
         } catch (error) {
-          results.push(androidDoctorDeviceFailure("CtrlProxy", device, currentProbe, log, error));
+          results.push(
+            androidDoctorDeviceFailure("CtrlProxy", device, currentProbe, { log, error }),
+          );
         }
         remainingDoctorProbe(currentProbe);
       }
@@ -676,16 +687,17 @@ export async function checkWorkProfileAccessibility(
       currentProbe.signal?.throwIfAborted();
       const deviceProbe = remainingDoctorProbe(currentProbe);
       try {
-        results.push(await checkDeviceWorkProfileAccessibility(device, adbFactory, deviceProbe));
+        results.push(
+          await runWithTargetDeviceExecutionBinding(device.deviceId, undefined, () =>
+            checkDeviceWorkProfileAccessibility(device, adbFactory, deviceProbe),
+          ),
+        );
       } catch (error) {
         results.push(
-          androidDoctorDeviceFailure(
-            "Work Profile Accessibility",
-            device,
-            currentProbe,
-            logger,
+          androidDoctorDeviceFailure("Work Profile Accessibility", device, currentProbe, {
+            log: logger,
             error,
-          ),
+          }),
         );
       }
       remainingDoctorProbe(currentProbe);

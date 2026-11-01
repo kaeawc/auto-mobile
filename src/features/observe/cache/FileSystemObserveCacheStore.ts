@@ -120,11 +120,11 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     timer: Timer = defaultTimer,
     cacheDir?: string,
     writeFile: ObserveCacheFileWriter = writeFileAsync,
-    idGenerator: IdGenerator = defaultIdGenerator,
     {
+      idGenerator = defaultIdGenerator,
       unlinkFile = unlinkAsync,
       diskMetadata = { readdir: sortedReaddir, stat: statAsync },
-    }: ObserveCacheDiskOperations = {},
+    }: ObserveCacheDiskOperations & { idGenerator?: IdGenerator } = {},
   ) {
     this.timer = timer;
     this.cacheDir = cacheDir ?? getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS);

@@ -43,7 +43,7 @@ export class Shake extends BaseVisualChange {
     timer: Timer = defaultTimer,
     collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.shakeTimer = timer;
   }
 

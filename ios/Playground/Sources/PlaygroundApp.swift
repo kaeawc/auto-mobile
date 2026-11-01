@@ -6,6 +6,8 @@ struct PlaygroundApp: App {
     init() {
         // Initialize AutoMobile SDK
         AutoMobileSDK.shared.initialize(bundleId: "dev.jasonpearson.automobile.Playground")
+        // The host opts in to SwiftUI navigation capture.
+        AutoMobileNavigation.shared.registerSwiftUI()
 
         do {
             try PhotosAuthorizationProbe.writeLiveSnapshotToDocuments()

@@ -512,7 +512,9 @@ export class CtrlProxySdkCapabilities {
   ): Promise<IosSdkCapabilities | null> {
     if (this.sdkCapabilitiesKnown) {
       if (
-        this.sdkCapabilities === null &&
+        (this.sdkCapabilities === null ||
+          (requested === "observation_bridge" &&
+            this.sdkCapabilities.observationBridge.status === "unavailable")) &&
         this.host.timer.now() - this.sdkCapabilitiesKnownAt >=
           CtrlProxySdkCapabilities.SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS
       ) {

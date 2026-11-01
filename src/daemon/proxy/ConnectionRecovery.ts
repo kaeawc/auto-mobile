@@ -42,6 +42,8 @@ export interface ConnectionRecoveryPort {
 
 /** What a recoverable reconnect may replay, and the caller's cancellation. */
 export interface RecoverableReconnectOptions {
+  /** Fence the session when the retried request answers not-found (default true). */
+  fenceSessionNotFoundOnRetry?: boolean;
   /** A tool that may have run must not be replayed on a fresh connection. */
   nonIdempotentToolName?: string;
   signal?: AbortSignal;
@@ -69,13 +71,19 @@ export class ConnectionRecovery {
     private readonly errorClassifier: DaemonErrorClassifier,
   ) {}
 
+  /**
+   * @param operation - The request to run, and to retry once after a recoverable failure
+   * @param attemptedSessionUuid - The session the request names
+   * @param allowReleasedSession - Admit a session the proxy already saw released
+   * @param options - Not-found fencing, replay and cancellation options
+   */
   async withRecoverableReconnect<T>(
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
-    fenceSessionNotFoundOnRetry = true,
     options?: RecoverableReconnectOptions,
   ): Promise<T> {
+    const fenceSessionNotFoundOnRetry = options?.fenceSessionNotFoundOnRetry ?? true;
     const { nonIdempotentToolName, signal } = resolveReconnectOptions(options);
     signal.throwIfAborted();
     if (this.port.isClosing()) {

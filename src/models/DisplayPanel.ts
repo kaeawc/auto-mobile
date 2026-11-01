@@ -58,14 +58,19 @@ export interface DisconnectedPanelContext {
   hasPostures: boolean;
 }
 
-/** Guidance for a known panel whose logical display is absent in this posture. */
+/**
+ * Guidance for a known panel whose logical display is absent in this posture.
+ *
+ * @param options.hasPostures - Whether the device reports postures, adding a setPosture remedy.
+ * @param options.pinned - Whether a session display pin selected the panel, adding a clear-pin remedy.
+ */
 export function buildDisconnectedPanelMessage(
   panelKey: string,
   panelRole: DisplayPanel["role"],
   connected: readonly { key: string; role?: DisplayPanel["role"] }[],
-  hasPostures: boolean,
-  pinned: boolean,
+  options: { hasPostures: boolean; pinned: boolean },
 ): string {
+  const { hasPostures, pinned } = options;
   const choices = connected.map(({ key, role }) => (role ? `${key} (${role})` : key)).join(", ");
   const posture = POSTURE_PANEL_ROLES.find(([, role]) => role === panelRole)?.[0];
   const postureRemedy = hasPostures

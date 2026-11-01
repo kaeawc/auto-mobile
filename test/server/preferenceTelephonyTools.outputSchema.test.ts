@@ -38,7 +38,10 @@ const preferenceResult = {
 
 const iosDevice: BootedDevice = { deviceId: "sim-1", name: "iPhone", platform: "ios" };
 const makeTelephony = (target: BootedDevice) =>
-  new Telephony(target, new FakeAdbExecutor(), undefined, () => new FakeIosSdkTriggerSender());
+  new Telephony(target, {
+    adbFactoryOrExecutor: new FakeAdbExecutor(),
+    iosSdkTriggers: () => new FakeIosSdkTriggerSender(),
+  });
 
 function textOf(response: { content: Array<{ type: string; text?: string }> }): string {
   const block = response.content[0];

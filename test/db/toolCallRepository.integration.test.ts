@@ -10,7 +10,7 @@ describe("ToolCallRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new ToolCallRepository(db);
+    repo = new ToolCallRepository({ db });
   });
 
   afterEach(async () => {
@@ -176,7 +176,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
       for (let index = 0; index < 10; index++) {
         await write("seed");
       }
-      const fresh = new ToolCallRepository(db, cap);
+      const fresh = new ToolCallRepository({ db, retentionMaxRows: cap });
       await fresh.recordToolCall({ toolName: "first", timestamp: "2026-01-01T00:00:00Z" });
       expect(await countRows()).toBe(cap);
       for (let index = 0; index < 255; index++) {
@@ -193,7 +193,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new ToolCallRepository(db);
+    repo = new ToolCallRepository({ db });
   });
 
   afterEach(async () => {

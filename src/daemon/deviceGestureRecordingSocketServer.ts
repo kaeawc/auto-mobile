@@ -204,6 +204,7 @@ const ensurePlatform = (value: unknown): Platform | undefined => {
 
 /** How the gesture recording server resolves and readies a device, and checks its binding. */
 export interface DeviceGestureRecordingServerDevices {
+  admissionGate?: DeviceAdmissionGate;
   deviceResolution?: DeviceGestureRecordingDeviceResolution;
   bindingGate?: DeviceGestureRecordingBindingGate;
 }
@@ -221,14 +222,22 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
   private readonly deviceResolution: DeviceGestureRecordingDeviceResolution;
   private readonly bindingGate: DeviceGestureRecordingBindingGate;
 
+  /**
+   * @param socketPath - Unix socket path to listen on
+   * @param timer - Clock for socket timers
+   * @param authenticator - Request authenticator
+   * @param options.admissionGate - Device admission gate
+   * @param options.deviceResolution - Selects and readies the recording device
+   * @param options.bindingGate - Checks the requester's device binding
+   */
   constructor(
     socketPath: string = getSocketPath(DEVICE_GESTURE_RECORDING_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "deviceGestureRecording",
     ),
-    admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
     {
+      admissionGate = daemonDeviceAdmissionGate,
       deviceResolution = createDeviceGestureRecordingDeviceResolution(() => {
         throw new ActionableError("Inject device readiness before recording gestures.");
       }),
@@ -353,7 +362,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
       });
     }
     const device = await this.deviceResolution.readyDevice(selected, request.sessionUuid);
-    const result = await startDeviceGestureRecording(device, undefined, undefined, undefined, {
+    const result = await startDeviceGestureRecording(device, undefined, undefined, {
       ownerSessionUuid: request.sessionUuid,
     });
     return {
@@ -465,7 +474,7 @@ export async function startDeviceGestureRecordingSocketServer(
 ): Promise<void> {
   await socketServer.start(
     () =>
-      new DeviceGestureRecordingSocketServer(undefined, undefined, undefined, undefined, {
+      new DeviceGestureRecordingSocketServer(undefined, undefined, undefined, {
         deviceResolution: createDeviceGestureRecordingDeviceResolution(() => readiness),
       }),
   );

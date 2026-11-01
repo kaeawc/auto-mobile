@@ -227,8 +227,7 @@ describe("start admission and owner resume for restart reservations", () => {
       "restartControl",
       "Exercise recovered control admission",
       z.object({ sessionUuid: z.string() }),
-      async (target) => ({ deviceId: target.deviceId }),
-      { deviceReadiness: "booted" },
+      { handler: async (target) => ({ deviceId: target.deviceId }), deviceReadiness: "booted" },
     );
     manager.clearHistory();
     autolockWrites.length = 0;

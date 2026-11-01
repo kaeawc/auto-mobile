@@ -165,16 +165,18 @@ export const createInjectAudioInputHandler =
       sessionManager,
       args.sessionUuid,
       device.deviceId,
-      (owner) =>
-        service.startInjection(device.deviceId, {
-          source,
-          loop: args.loop,
-          startDelayMs: args.startDelayMs,
-          gainDb: args.gainDb,
-          maxDurationMs: args.maxDurationMs,
-          sessionId: owner,
-        }),
-      { action: "inject audio", change: "audio injection" },
+      {
+        mutation: (owner) =>
+          service.startInjection(device.deviceId, {
+            source,
+            loop: args.loop,
+            startDelayMs: args.startDelayMs,
+            gainDb: args.gainDb,
+            maxDurationMs: args.maxDurationMs,
+            sessionId: owner,
+          }),
+        wording: { action: "inject audio", change: "audio injection" },
+      },
     );
     const outlived = startOutlivedBy(sessionManager, args.sessionUuid, device.deviceId, signal);
     if (outlived) {
@@ -240,7 +242,9 @@ const injectAudioInputTool = defineDeviceTool({
     "Session release stops it. Errors lead with a code: [audio_injection_busy] another injection " +
     "holds the microphone; [audio_injection_unsupported] no route (not a local emulator with gRPC " +
     "audio, or a host without a loopback default input); [audio_loopback_failed] the host loopback " +
-    "helper failed; [audio_guest_capture_unavailable] a safe Android guest capture could not be " +
+    "helper failed; [audio_record_permission_not_granted] CtrlProxy lacks android.permission.RECORD_AUDIO: " +
+    "run adb shell pm grant dev.jasonpearson.automobile.ctrlproxy android.permission.RECORD_AUDIO; " +
+    "[audio_guest_capture_unavailable] a safe Android guest capture could not be " +
     "verified; [audio_emulator_exited] the emulator exited during injection. Physical devices are refused.",
   input: injectAudioInputInput,
   options: {

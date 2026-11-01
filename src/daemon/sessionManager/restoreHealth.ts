@@ -208,7 +208,10 @@ export class DeviceRestoreHealth {
     retryTimeoutMs: number,
     retryKey?: string,
   ): void {
-    this.markDeviceNeedsKeyedRecovery(deviceId, retry, retryTimeoutMs, retryKey, "app-cleanup");
+    this.markDeviceNeedsKeyedRecovery(deviceId, retry, retryTimeoutMs, {
+      retryKey,
+      reason: "app-cleanup",
+    });
   }
 
   /** Recorder teardown was unconfirmed; quarantine synchronously before release settles. */
@@ -218,21 +221,17 @@ export class DeviceRestoreHealth {
     retryTimeoutMs: number,
     retryKey?: string,
   ): () => void {
-    return this.markDeviceNeedsKeyedRecovery(
-      deviceId,
-      retry,
-      retryTimeoutMs,
+    return this.markDeviceNeedsKeyedRecovery(deviceId, retry, retryTimeoutMs, {
       retryKey,
-      "recording-teardown",
-    );
+      reason: "recording-teardown",
+    });
   }
 
   private markDeviceNeedsKeyedRecovery(
     deviceId: string,
     retry: () => Promise<void>,
     retryTimeoutMs: number,
-    retryKey: string | undefined,
-    reason: "recording-teardown" | "app-cleanup",
+    { retryKey, reason }: { retryKey?: string; reason: "recording-teardown" | "app-cleanup" },
   ): () => void {
     this.pruneRecorderTeardownRetries();
     const health = this.deviceHealth;

@@ -34,6 +34,12 @@ import {
 } from "./androidInstallFailure";
 
 /** Live manager dependencies; callbacks preserve manager overrides and test spies. */
+/** Trailing install-step flags shared by the APK install host and its guarded step. */
+export interface ApkInstallFlags {
+  needsReinstallDueToUnknownSha: boolean;
+  perf: PerformanceTracker;
+}
+
 export interface AndroidCtrlProxyCompatibilityHost {
   getInstalledApkSha256WithDetails(signal?: AbortSignal): Promise<InstalledApkSha256Result>;
   getExpectedChecksum(useSharedCache?: boolean): Promise<string>;
@@ -50,8 +56,7 @@ export interface AndroidCtrlProxyCompatibilityHost {
     apkPath: string,
     result: AccessibilityVersionCheckResult,
     isInstalled: boolean,
-    needsReinstallDueToUnknownSha: boolean,
-    perf: PerformanceTracker,
+    flags: ApkInstallFlags,
   ): Promise<AccessibilityVersionCheckResult>;
   statusInspectionDeviceError(error: unknown): Error | undefined;
   cleanupApk(apkPath: string): Promise<void>;
@@ -65,7 +70,7 @@ export interface AndroidCtrlProxyCompatibilityHost {
   consumeCompletedPrefetchedApk(destinationPath: string): Promise<boolean>;
   clearAvailabilityCache(): void;
   executeApkStage(command: string, stage: string): Promise<ExecResult>;
-  grantLocalNetworkAfterInstall(): Promise<void>;
+  grantPostInstallPermissions(): Promise<void>;
   install(apkPath: string): Promise<void>;
   enable(): Promise<void>;
   readonly savedPrototypes: SavedPrototypeService;
@@ -233,13 +238,10 @@ export class AndroidCtrlProxyCompatibility {
       logger.info("[CTRL_PROXY] Service not installed, downloading and installing");
     }
 
-    return this.downloadCompatibleApk(
-      result,
-      isInstalled,
-      needsReinstallDueToUnknownSha,
+    return this.downloadCompatibleApk(result, isInstalled, needsReinstallDueToUnknownSha, {
       perf,
-      options,
-    );
+      ...options,
+    });
   }
 
   private getCachedCompatibilityResult(
@@ -259,8 +261,7 @@ export class AndroidCtrlProxyCompatibility {
     result: AccessibilityVersionCheckResult,
     isInstalled: boolean,
     needsReinstallDueToUnknownSha: boolean,
-    perf: PerformanceTracker,
-    options: AccessibilityVersionCheckOptions,
+    { perf, ...options }: AccessibilityVersionCheckOptions & { perf: PerformanceTracker },
   ): Promise<AccessibilityVersionCheckResult> {
     let apkPath: string | null = null;
     try {
@@ -269,13 +270,10 @@ export class AndroidCtrlProxyCompatibility {
       apkPath = await this.host.downloadApk();
       perf.endOperation("downloadApk");
 
-      return await this.host.installDownloadedApk(
-        apkPath,
-        result,
-        isInstalled,
+      return await this.host.installDownloadedApk(apkPath, result, isInstalled, {
         needsReinstallDueToUnknownSha,
         perf,
-      );
+      });
     } catch (error) {
       if (
         error instanceof DeviceOwnedByOtherDaemonError ||
@@ -435,8 +433,7 @@ export class AndroidCtrlProxyCompatibility {
           attemptedDownload: false,
         },
         true,
-        false,
-        perf,
+        { needsReinstallDueToUnknownSha: false, perf },
       );
 
       if (upgradeResult.status !== "failed") {
@@ -518,7 +515,7 @@ export class AndroidCtrlProxyCompatibility {
       perf.endOperation("installApk");
       logger.info("[CTRL_PROXY] APK upgraded successfully");
       this.host.clearAvailabilityCache();
-      await this.host.grantLocalNetworkAfterInstall();
+      await this.host.grantPostInstallPermissions();
       return {
         ...result,
         status: "upgraded",
@@ -565,8 +562,7 @@ export class AndroidCtrlProxyCompatibility {
     apkPath: string,
     result: AccessibilityVersionCheckResult,
     isInstalled: boolean,
-    needsReinstallDueToUnknownSha: boolean,
-    perf: PerformanceTracker,
+    { needsReinstallDueToUnknownSha, perf }: ApkInstallFlags,
   ): Promise<AccessibilityVersionCheckResult> {
     if (isInstalled && !needsReinstallDueToUnknownSha) {
       const upgraded = await this.tryInPlaceUpgrade(apkPath, result, perf);

@@ -286,8 +286,7 @@ function convertElement(
   element: IosSdkWebElement,
   bounds: Box,
   source: WebSource,
-  origin: string | undefined,
-  native?: Record<string, unknown>,
+  { origin, native }: { origin?: string; native?: Record<string, unknown> } = {},
 ): ViewHierarchyNode {
   const role = element.role ?? "element";
   const editable = isEditable(element, role);
@@ -451,7 +450,7 @@ export function mergeIosSdkWebSnapshots(
         snapshotId: snapshot.snapshotId,
         documentId: snapshot.documentId,
       };
-      return convertElement(element, bounds, source, origin, native);
+      return convertElement(element, bounds, source, { origin, native });
     };
     const placed = new Set<number>();
     summary.deduplicated += replaceCoveredLeaves(webViewNode, covering, build, placed);

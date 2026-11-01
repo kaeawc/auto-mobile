@@ -20,7 +20,10 @@ import {
 import { isProcessRunning, readPidFileDataSync } from "../daemonFiles";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 
-import { type AppendKeyEventValidator } from "../../features/action/InputText";
+import {
+  type AppendKeyEventValidator,
+  type AppendTextOptions,
+} from "../../features/action/InputText";
 
 import { DaemonStateAccess } from "../daemonRequestHandlers";
 
@@ -227,10 +230,7 @@ function resolveSocketBindGuard(
 export interface AppendTextInput {
   appendText(
     text: string,
-    timeoutMs?: number,
-    beforeKeyEvent?: AppendKeyEventValidator,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: AppendTextOptions,
   ): Promise<{
     success: boolean;
     error?: string;

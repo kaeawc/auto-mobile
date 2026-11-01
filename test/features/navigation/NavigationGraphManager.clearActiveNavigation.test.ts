@@ -24,10 +24,9 @@ describe("NavigationGraphManager.clearCurrentGraph active navigation", () => {
     // foreignKeys: true matches the production connection (database.ts), so a
     // dangling node_id is rejected instead of silently stored.
     db = await createTestDatabase({ foreignKeys: true });
-    manager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-    );
+    manager = NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+      testCoverageRepository: new TestCoverageRepository({ db }),
+    });
     TelemetryRecorder.resetInstance();
     telemetrySpy = spyOn(
       TelemetryRecorder.getInstance(),

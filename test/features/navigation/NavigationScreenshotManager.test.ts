@@ -249,8 +249,10 @@ describe("NavigationScreenshotManager", () => {
         { deviceId: "fake", platform: "android", name: "fake" },
         new FakeAdbExecutor(),
         "app",
-        "screen",
-        { execute: async () => ({ success: true, path: "/capture.png" }) },
+        {
+          screenName: "screen",
+          screenshotCapture: { execute: async () => ({ success: true, path: "/capture.png" }) },
+        },
       );
       expect(normalizePath(stored!)).toBe(
         `${screenshotDir}/${manager.generateFilename("app", "screen")}`,

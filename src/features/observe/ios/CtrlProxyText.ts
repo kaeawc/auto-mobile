@@ -91,8 +91,12 @@ export class CtrlProxyText extends SharedTextDelegate {
     text: string,
     timeoutMs: number = resolveTextCtrlProxyTimeoutMs(text),
     perf?: PerformanceTracker,
-    frameContext?: string,
-    options: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch"> = {},
+    {
+      frameContext,
+      ...options
+    }: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch"> & {
+      frameContext?: string;
+    } = {},
   ): Promise<BaseResult> {
     // Older released runners predate request_append_text, but their untargeted
     // request_set_text path already uses XCUITest typeText at the focused caret.

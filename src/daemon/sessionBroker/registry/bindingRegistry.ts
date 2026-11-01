@@ -15,7 +15,12 @@ import type { BindingRegistrySchemaProbe } from "./bindingRegistryMigrations";
  * Idempotency comes from that scoped identity plus the generation; there is no caller operation id.
  */
 
-export type BindingPlatform = "android" | "ios";
+/**
+ * A binding's platform. A `"watchos"` binding holds one unpaired Apple Watch simulator the broker
+ * creates, boots, reuses and deletes like an iOS simulator, ready once booted (#15882); its devices
+ * count against the shared total-resource limit.
+ */
+export type BindingPlatform = "android" | "ios" | "watchos";
 
 /** The three caller-declared parts of a scope; the scope key is derived from them. */
 export interface BindingScopeIdentity {

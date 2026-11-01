@@ -87,7 +87,7 @@ export function restorePrototypeStorage(
       result.dropped.push({ key, reason: "unlisted" });
     } else if (versionChanged) {
       result.dropped.push({ key, reason: "version" });
-    } else if (restoreOne(result, key, value, specState, spec.data)) {
+    } else if (restoreOne(result, key, value, { specState, specData: spec.data })) {
       result.applied.push(key);
     } else {
       result.dropped.push({ key, reason: "mismatch" });
@@ -101,8 +101,7 @@ function restoreOne(
   result: PrototypeStorageRestore,
   storageKey: string,
   value: unknown,
-  specState: Readonly<Record<string, unknown>>,
-  specData: unknown,
+  { specState, specData }: { specState: Readonly<Record<string, unknown>>; specData: unknown },
 ): boolean {
   const parsed = parsePrototypeStorageKey(storageKey);
   if (parsed?.kind === "state") {

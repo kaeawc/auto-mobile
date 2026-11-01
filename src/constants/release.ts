@@ -71,6 +71,14 @@ export interface ReleaseChecksumEntry {
    */
   prototypeViewerSha256?: string;
   /**
+   * SHA-256 of the release-key-signed standalone ProtoViewer Android APK
+   * (`automobile-protoviewer-<version>.apk`, #15301/#13623). Not the iOS
+   * simulator template viewer (`prototypeViewerSha256`). Optional so releases
+   * that predate it stay valid; filled by release automation
+   * (scripts/generate-release-constants.sh), never by hand.
+   */
+  protoViewerApkSha256?: string;
+  /**
    * SHA-256 of the signed, notarized universal macOS Network Filter app archive
    * (`automobile-network-filter-macos-universal.zip`, packed with
    * `ditto -c -k --keepParent` so the nested system extension keeps its
@@ -652,11 +660,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "71089fad82bfd994f8ffb3b0ac19089fa2ce12cfe4962bb12044abf81c4fd588",
-  ipaSha256: "2d9782c4d460c2b52df9bb4d4f174df842be560619b67fcfabdcd221526ef402",
+  apkSha256: "ab31e3cf915f7e98e74df250fe1fff8fb2195a9db74f123fc69d1ceb88f57612",
+  ipaSha256: "80815d33e3ede386e68ab106bc34f4e91a67b45dfd41d54aeaf34e998b49e7af",
   runnerSha256Target: "xctest",
   videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
-  runnerSha256: "c81c65b39980fc1eab646ca3fe1372800b0836d16772c8b545a571154654735c",
+  runnerSha256: "121bbe2ae59b73c8b272dd03e51660b1d2978038c62b5b092c63e8b1f5f5ec75",
 };
 
 /**

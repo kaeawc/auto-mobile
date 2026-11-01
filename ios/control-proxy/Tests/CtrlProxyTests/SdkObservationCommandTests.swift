@@ -25,9 +25,11 @@ final class SdkObservationCommandTests: XCTestCase {
     private func handle<T>(
         _ json: String,
         info: SdkHierarchyServerInfo?,
-        reply: SdkBridgeReply?,
+        reply: SdkBridgeRequestResult,
         as _: T.Type
-    ) async throws -> (T, ObservationSdkFake) {
+    )
+        async throws -> (T, ObservationSdkFake)
+    {
         let sdk = ObservationSdkFake(info: info, reply: reply)
         let locator = FakeElementLocator()
         locator.foregroundBundleId = "com.example.app"
@@ -50,7 +52,7 @@ final class SdkObservationCommandTests: XCTestCase {
     func testObservationRelaysTheBridgeSnapshot() async throws {
         let body = try JSONEncoder().encode(Self.snapshot)
         let (response, sdk) = try await handle(
-            Self.observeJson, info: Self.registered, reply: SdkBridgeReply(statusCode: 200, body: body),
+            Self.observeJson, info: Self.registered, reply: .reply(SdkBridgeReply(statusCode: 200, body: body)),
             as: SdkObservationResponse.self
         )
         XCTAssertTrue(response.success)
@@ -72,7 +74,7 @@ final class SdkObservationCommandTests: XCTestCase {
         ]
         for info in infos {
             let (response, sdk) = try await handle(
-                Self.observeJson, info: info, reply: SdkBridgeReply(statusCode: 200, body: Data()),
+                Self.observeJson, info: info, reply: .reply(SdkBridgeReply(statusCode: 200, body: Data())),
                 as: SdkObservationResponse.self
             )
             XCTAssertFalse(response.success)
@@ -84,12 +86,13 @@ final class SdkObservationCommandTests: XCTestCase {
     }
 
     func testSdkStatusCodesMapToTypedFailures() async throws {
-        let cases: [(SdkBridgeReply?, String, Bool)] = [
-            (nil, "bad_reply", true),
-            (SdkBridgeReply(statusCode: 503, body: Data()), "bridge_unavailable", false),
-            (SdkBridgeReply(statusCode: 409, body: Data()), "app_not_active", true),
-            (SdkBridgeReply(statusCode: 500, body: Data()), "bad_reply", true),
-            (SdkBridgeReply(statusCode: 200, body: Data("{}".utf8)), "bad_reply", true),
+        let cases: [(SdkBridgeRequestResult, String, Bool)] = [
+            (.notSent, "bridge_unavailable", false),
+            (.noReply, "bad_reply", true),
+            (.reply(SdkBridgeReply(statusCode: 503, body: Data())), "bridge_unavailable", false),
+            (.reply(SdkBridgeReply(statusCode: 409, body: Data())), "app_not_active", true),
+            (.reply(SdkBridgeReply(statusCode: 500, body: Data())), "bad_reply", true),
+            (.reply(SdkBridgeReply(statusCode: 200, body: Data("{}".utf8))), "bad_reply", true),
         ]
         for (reply, failure, available) in cases {
             let (response, _) = try await handle(
@@ -98,6 +101,39 @@ final class SdkObservationCommandTests: XCTestCase {
             XCTAssertEqual(response.failure, failure)
             XCTAssertEqual(response.available, available, failure)
             XCTAssertNil(response.observation)
+            if failure == "bridge_unavailable" {
+                XCTAssertEqual(
+                    response.error,
+                    "The foreground app's AutoMobile SDK observation bridge is unreachable or not registered."
+                )
+            }
+        }
+    }
+
+    func testTransportErrorsMapToCommandFailures() async throws {
+        let cases: [(StubOutcome, String)] = [
+            (.transportError, "bridge_unavailable"),
+            (.timedOut, "bad_reply"),
+            (.connectionLost, "bad_reply"),
+            (.respond(status: 503, body: Data()), "bridge_unavailable"),
+        ]
+        for (outcome, failure) in cases {
+            let transport = StubHTTPTransport([outcome])
+            let health = try StubHTTPTransport(status: 200, body: JSONEncoder().encode(Self.registered))
+            let client = try SdkHierarchyClient(
+                baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+                transport: transport, healthTransport: health
+            )
+            let locator = FakeElementLocator()
+            locator.foregroundBundleId = "com.example.app"
+            let handler = CommandHandler(
+                elementLocator: locator, gesturePerformer: FakeGesturePerformer(),
+                perf: PerfProvider(), sdkHierarchyClient: client
+            )
+            let request = try JSONDecoder().decode(WebSocketRequest.self, from: Data(Self.observeJson.utf8))
+            let payload = await handler.handle(request)
+            let response = try XCTUnwrap(payload as? SdkObservationResponse)
+            XCTAssertEqual(response.failure, failure)
         }
     }
 
@@ -110,7 +146,7 @@ final class SdkObservationCommandTests: XCTestCase {
         )
         let (response, sdk) = try await handle(
             Self.actionJson(XCTUnwrap(action)), info: Self.registered,
-            reply: SdkBridgeReply(statusCode: 200, body: body), as: SdkActionResponse.self
+            reply: .reply(SdkBridgeReply(statusCode: 200, body: body)), as: SdkActionResponse.self
         )
         XCTAssertTrue(response.success)
         XCTAssertEqual(response.result?.nextObservationIdentity, 42)
@@ -118,11 +154,28 @@ final class SdkObservationCommandTests: XCTestCase {
         XCTAssertEqual(routes, [.observationAction])
     }
 
+    func testActionForwardsOptionalWireBudget() async throws {
+        for budget in [nil, 12000.0, 13000.0] as [Double?] {
+            let fields: [String: Any] = [
+                "type": "request_sdk_action", "requestId": "act-budget",
+                "actionJson": #"{"longPress":{"observationIdentity":41,"elementId":"submit","durationMs":10000}}"#,
+            ]
+            var message = fields
+            message["timeoutMs"] = budget
+            let json = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: message), encoding: .utf8))
+            let (_, sdk) = try await handle(
+                json, info: Self.registered, reply: .noReply, as: SdkActionResponse.self
+            )
+            let timeouts = await sdk.timeouts
+            XCTAssertEqual(timeouts, [budget])
+        }
+    }
+
     func testBridgeRejectionIsAResultNotAFailure() async throws {
         let body = try JSONEncoder().encode(AutoMobileActionResult(status: .rejected, reason: "stale_observation"))
         let (response, _) = try await handle(
             Self.actionJson(#"{"back":{"observationIdentity":40}}"#), info: Self.registered,
-            reply: SdkBridgeReply(statusCode: 200, body: body), as: SdkActionResponse.self
+            reply: .reply(SdkBridgeReply(statusCode: 200, body: body)), as: SdkActionResponse.self
         )
         XCTAssertFalse(response.success)
         XCTAssertTrue(response.available)
@@ -134,7 +187,7 @@ final class SdkObservationCommandTests: XCTestCase {
     func testInvalidActionNeverReachesTheSdk() async throws {
         for json in [#"{"type":"request_sdk_action","requestId":"act-1"}"#, Self.actionJson(#"{"fly":{}}"#)] {
             let (response, sdk) = try await handle(
-                json, info: Self.registered, reply: SdkBridgeReply(statusCode: 200, body: Data()),
+                json, info: Self.registered, reply: .reply(SdkBridgeReply(statusCode: 200, body: Data())),
                 as: SdkActionResponse.self
             )
             XCTAssertEqual(response.failure, "invalid_action")
@@ -147,16 +200,18 @@ final class SdkObservationCommandTests: XCTestCase {
 
 private actor ObservationSdkFake: SdkHierarchyFetching {
     let info: SdkHierarchyServerInfo?
-    let reply: SdkBridgeReply?
+    let reply: SdkBridgeRequestResult
     var routes: [SdkRoute] = []
+    var timeouts: [Double?] = []
 
-    init(info: SdkHierarchyServerInfo?, reply: SdkBridgeReply?) {
+    init(info: SdkHierarchyServerInfo?, reply: SdkBridgeRequestResult) {
         self.info = info
         self.reply = reply
     }
 
-    func sendObservationRequest(_ route: SdkRoute, body _: Data) async -> SdkBridgeReply? {
+    func sendObservationRequest(_ route: SdkRoute, body _: Data, timeoutMs: Double?) async -> SdkBridgeRequestResult {
         routes.append(route)
+        timeouts.append(timeoutMs)
         return reply
     }
 

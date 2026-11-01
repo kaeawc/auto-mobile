@@ -27,10 +27,14 @@ async function arrange({ install = true } = {}) {
   plist.byPath.set(APP, BUNDLE);
   const simctl = new FakeWatchAppsSimctl(plist);
   const removed: string[] = [];
-  const apps = new WatchAppManager(watch, simctl, plist, undefined, {
-    containerOwnership: simulatorOwnership,
-    rm: async (target) => {
-      removed.push(String(target));
+  const apps = new WatchAppManager(watch, {
+    simctl,
+    plist,
+    dataWipe: {
+      containerOwnership: simulatorOwnership,
+      rm: async (target) => {
+        removed.push(String(target));
+      },
     },
   });
   if (install) {
@@ -114,10 +118,14 @@ describe("WatchAppManager launch", () => {
 
   test("a failed data wipe is reported, and the app is not launched", async () => {
     const { simctl } = await arrange();
-    const failing = new WatchAppManager(watch, simctl, new FakeWatchBundleIds(), undefined, {
-      containerOwnership: simulatorOwnership,
-      rm: async () => {
-        throw new Error("EACCES: permission denied");
+    const failing = new WatchAppManager(watch, {
+      simctl,
+      plist: new FakeWatchBundleIds(),
+      dataWipe: {
+        containerOwnership: simulatorOwnership,
+        rm: async () => {
+          throw new Error("EACCES: permission denied");
+        },
       },
     });
 

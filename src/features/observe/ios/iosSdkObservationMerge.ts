@@ -67,11 +67,14 @@ function convertNode(
     return null;
   }
   const actionable = node.enabled;
+  const editable = node.role.toLowerCase() === "textfield";
   const $: Record<string, unknown> = {
     "resource-id": node.id,
     "test-tag": node.id,
     class: node.role,
-    role: node.role,
+    // Match the native/web text-field properties used by focus selection and field detection.
+    role: editable ? "textfield" : node.role,
+    ...(editable ? { focusable: "true", "input-type": "text" } : {}),
     bounds: { ...node.bounds },
     enabled: String(node.enabled),
     [SDK_ELEMENT_ID_ATTRIBUTE]: node.id,

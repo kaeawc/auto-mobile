@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
-import { BrokerBatchRequestIds, renderClientRequest } from "./brokerBatch";
+import { BrokerBatchRequestIds, batchClientDevice, renderClientRequest } from "./brokerBatch";
 
 export interface BrokerClientFileDeps {
   exists(path: string): boolean;
@@ -157,13 +157,9 @@ export function nextBrokerRequest(
   for (let n = 0; n <= attempts.length; n++) {
     requestId = ids.next(client.name);
   }
+  const device = batchClientDevice(client.initial);
   const base = renderClientRequest(
-    {
-      name: client.name,
-      platform: client.initial.device.platform,
-      hardware: client.initial.device.hardware,
-      os: client.initial.device.os,
-    },
+    { name: client.name, platform: device.platform, hardware: device.hardware, os: device.os },
     requestId,
   );
   return parseSessionConfig({ ...client.initial, ...base });

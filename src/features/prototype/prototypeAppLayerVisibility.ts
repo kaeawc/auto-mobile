@@ -22,8 +22,7 @@ export async function confirmPrototypeAppLayerVisibility(
   capture: HierarchyCapture,
   timer: Timer,
   displayId: number | undefined,
-  signal: AbortSignal | undefined,
-  hiddenReason?: PrototypeHiddenReason,
+  { signal, hiddenReason }: { signal?: AbortSignal; hiddenReason?: PrototypeHiddenReason } = {},
 ): Promise<AppLayerNotVisible | undefined> {
   try {
     for (let attempt = 0; attempt < APP_LAYER_VISIBILITY_CAPTURES; attempt++) {
@@ -122,8 +121,7 @@ export async function prototypeAppLayerVisibilityOutput(request: {
     request.capture(),
     request.timer ?? defaultTimer,
     request.displayId,
-    request.signal,
-    request.hiddenReason,
+    { signal: request.signal, hiddenReason: request.hiddenReason },
   );
   return request.superseded() ? {} : (visibility ?? {});
 }

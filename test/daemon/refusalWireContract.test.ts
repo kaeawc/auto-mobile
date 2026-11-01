@@ -302,6 +302,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Session-log source failure caught by DefaultSessionLogService.runSource and reported as that source's {status, reason, code} outcome inside a successful collection (test/server/physicalIosSessionLog.test.ts); it never escapes as a tool or daemon refusal.",
   "daemon/sessionBroker/SessionBrokerStoppingError":
     "Shutdown refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionBrokerMaintenanceError":
+    "Maintenance refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
 };
 
 interface CodedErrorModule {

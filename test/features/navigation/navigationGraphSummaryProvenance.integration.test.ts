@@ -19,7 +19,7 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
   beforeEach(async () => {
     harness = await installInMemoryNavManager();
     // Seed via a repository sharing the harness's single connection.
-    seedRepo = new NavigationRepository(harness.db);
+    seedRepo = new NavigationRepository({ db: harness.db });
     await seedRepo.getOrCreateApp(APP);
   });
 
@@ -31,8 +31,18 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
     const home = await seedRepo.getOrCreateNode(APP, "Home", 100);
     const buildA = await seedRepo.getOrCreateBuildKey(APP, 1, "hashA");
     const buildB = await seedRepo.getOrCreateBuildKey(APP, 2, "hashB");
-    await seedRepo.recordNodeObservation(home.id, buildA.id, "device-1", "session-1", 100);
-    await seedRepo.recordNodeObservation(home.id, buildB.id, "device-2", "session-2", 200);
+    await seedRepo.recordNodeObservation(home.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 100,
+    });
+    await seedRepo.recordNodeObservation(home.id, {
+      buildKeyId: buildB.id,
+      deviceId: "device-2",
+      sessionUuid: "session-2",
+      seenAt: 200,
+    });
 
     const summary = await harness.manager.exportGraphSummaryForApp(APP);
     const node = summary.nodes.find((n) => n.screenName === "Home");
@@ -52,7 +62,12 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
   test("legacy summary fields are preserved (backward compatible)", async () => {
     const home = await seedRepo.getOrCreateNode(APP, "Home", 100);
     const buildA = await seedRepo.getOrCreateBuildKey(APP, 1, "hashA");
-    await seedRepo.recordNodeObservation(home.id, buildA.id, "device-1", "session-1", 100);
+    await seedRepo.recordNodeObservation(home.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 100,
+    });
 
     const summary = await harness.manager.exportGraphSummaryForApp(APP);
     const node = summary.nodes.find((n) => n.screenName === "Home")!;
@@ -70,27 +85,36 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
 
   test("edge provenance is unioned and deduped across aggregated edge rows", async () => {
     // Two distinct edge rows for the SAME transition aggregate into one summary edge.
-    const edge1 = await seedRepo.createEdge(
-      APP,
-      "Home",
-      "Details",
-      { toolName: "tapOn", toolArgs: null },
-      150,
-    );
-    const edge2 = await seedRepo.createEdge(
-      APP,
-      "Home",
-      "Details",
-      { toolName: "tapOn", toolArgs: null },
-      160,
-    );
+    const edge1 = await seedRepo.createEdge(APP, "Home", "Details", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 150,
+    });
+    const edge2 = await seedRepo.createEdge(APP, "Home", "Details", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 160,
+    });
     const buildA = await seedRepo.getOrCreateBuildKey(APP, 1, "hashA");
     const buildB = await seedRepo.getOrCreateBuildKey(APP, 2, "hashB");
     // Same (build, device, session) on both edge rows → deduped to one record.
-    await seedRepo.recordEdgeObservation(edge1.id, buildA.id, "device-1", "session-1", 150);
-    await seedRepo.recordEdgeObservation(edge2.id, buildA.id, "device-1", "session-1", 400);
+    await seedRepo.recordEdgeObservation(edge1.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 150,
+    });
+    await seedRepo.recordEdgeObservation(edge2.id, {
+      buildKeyId: buildA.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 400,
+    });
     // A different build on edge2 → a second distinct record.
-    await seedRepo.recordEdgeObservation(edge2.id, buildB.id, "device-1", "session-1", 500);
+    await seedRepo.recordEdgeObservation(edge2.id, {
+      buildKeyId: buildB.id,
+      deviceId: "device-1",
+      sessionUuid: "session-1",
+      seenAt: 500,
+    });
 
     const summary = await harness.manager.exportGraphSummaryForApp(APP);
     const edges = summary.edges.filter((e) => e.from === "Home" && e.to === "Details");

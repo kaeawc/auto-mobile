@@ -203,13 +203,10 @@ export class ObservedAndroidDisplayCache {
       });
       const hasPostures = (device.displays?.postures.length ?? 0) > 0;
       throw new DisplaySelectionError(
-        buildDisconnectedPanelMessage(
-          panel.key,
-          panel.role,
-          connectedPanels,
+        buildDisconnectedPanelMessage(panel.key, panel.role, connectedPanels, {
           hasPostures,
-          selectedDisplayPin() !== undefined,
-        ),
+          pinned: selectedDisplayPin() !== undefined,
+        }),
         { disconnectedPanel: { panel, connectedPanels, hasPostures } },
       );
     }

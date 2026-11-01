@@ -164,7 +164,11 @@ export class TapAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: TapAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.androidClient =
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
@@ -222,8 +226,8 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.device,
       display,
       this.observeScreen,
-      this.adb,
       {
+        adb: this.adb,
         lastRenderedObservation: this.lastRenderedObservation,
         signal,
         transitions: this.displayTransitionReader,

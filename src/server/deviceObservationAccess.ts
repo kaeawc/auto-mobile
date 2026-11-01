@@ -30,8 +30,8 @@ export interface DeviceObservationAccess {
   /** Host-only metadata; injected readers keep custom access independent of host AVD files. */
   avdConfigReader?: AvdConfigReader;
   /**
-   * Booted devices for a read. `scope` is "watchos" only for a read that names watchOS, which
-   * lists watches instead of Android and iOS (#14908); every other read lists Android and iOS.
+   * Booted devices for a read. `scope` names watchOS or tvOS only for a read of that platform;
+   * every other read lists Android and iOS (#14908).
    */
   listBooted(signal: AbortSignal | undefined, scope?: ReadListingScope): Promise<BootedDevice[]>;
   listBootedWithStatus?(
@@ -41,11 +41,11 @@ export interface DeviceObservationAccess {
   isAuthorized(device: BootedDevice): boolean;
 }
 
-/** What a read lists: Android and iOS, or (only when the call names it) watchOS. */
-export type ReadListingScope = "either" | "watchos";
+/** What a read lists: Android and iOS, or an explicitly resolved watchOS or tvOS target. */
+export type ReadListingScope = "either" | "watchos" | "tvos";
 
 function readListingScope(platform: SomePlatform): ReadListingScope {
-  return platform === "watchos" ? "watchos" : "either";
+  return platform === "watchos" || platform === "tvos" ? platform : "either";
 }
 
 export const defaultDeviceObservationAccess: DeviceObservationAccess = {
@@ -67,8 +67,9 @@ export interface DeviceReadRetryOptions {
 }
 
 function incompleteReadPlatform(listing: BootedResourceReadListing, platform: SomePlatform) {
-  // "either" never scans watches, so only a watchOS read can find watch discovery incomplete.
-  const platforms = platform === "watchos" ? (["watchos"] as const) : (["android", "ios"] as const);
+  // "either" never scans watches or TVs; their discovery gaps matter only on their own reads.
+  const platforms =
+    platform === "watchos" || platform === "tvos" ? [platform] : (["android", "ios"] as const);
   return platforms.find(
     (p) =>
       (platform === "either" || platform === p) &&
@@ -89,18 +90,22 @@ async function findObservationReadTarget(
   deviceId: string,
   signal: AbortSignal | undefined,
   access: DeviceObservationAccess,
-  platform: SomePlatform,
   {
+    platform,
     retry,
     confirmStopped,
-  }: { retry: DeviceReadRetryOptions; confirmStopped?: ConfirmStoppedReadTarget },
+  }: {
+    platform: SomePlatform;
+    retry: DeviceReadRetryOptions;
+    confirmStopped?: ConfirmStoppedReadTarget;
+  },
 ): Promise<{ device: BootedDevice | undefined; devices: BootedDevice[] }> {
   const targetPlatform = explicitReadTargetPlatform(deviceId, platform);
   try {
     return await new DefaultRetryExecutor(retry.timer).executeOrThrow(
       async () => {
         signal?.throwIfAborted();
-        // A read that names watchOS lists watches; any other read lists Android and iOS only.
+        // A read of watchOS or tvOS lists that platform; other reads list Android and iOS only.
         const scope = readListingScope(targetPlatform);
         const listing: BootedResourceReadListing = access.listBootedWithStatus
           ? await access.listBootedWithStatus(signal, scope)
@@ -110,6 +115,7 @@ async function findObservationReadTarget(
                 android: scope === "either",
                 ios: scope === "either",
                 watchos: scope === "watchos",
+                tvos: scope === "tvos",
               },
             };
         signal?.throwIfAborted();
@@ -152,11 +158,18 @@ async function findObservationReadTarget(
 export async function resolveDeviceForObservationRead(
   deviceId: string,
   signal: AbortSignal | undefined,
-  access: DeviceObservationAccess = defaultDeviceObservationAccess,
-  platform: SomePlatform = "either",
-  retry: DeviceReadRetryOptions = {},
+  {
+    access = defaultDeviceObservationAccess,
+    platform = "either",
+    retry = {},
+  }: {
+    access?: DeviceObservationAccess;
+    platform?: SomePlatform;
+    retry?: DeviceReadRetryOptions;
+  } = {},
 ): Promise<BootedDevice> {
-  const { device, devices } = await findObservationReadTarget(deviceId, signal, access, platform, {
+  const { device, devices } = await findObservationReadTarget(deviceId, signal, access, {
+    platform,
     retry,
   });
   if (!device) {
@@ -194,15 +207,13 @@ export function sessionlessDeviceReadFor(
 } {
   return {
     resolve: (deviceId, signal, platform) =>
-      resolveDeviceForObservationRead(deviceId, signal, access, platform, retry),
+      resolveDeviceForObservationRead(deviceId, signal, { access, platform, retry }),
     findRunning: async (deviceId, signal, platform, confirmStopped) => {
-      const { device } = await findObservationReadTarget(
-        deviceId,
-        signal,
-        access,
-        platform ?? "either",
-        { retry, confirmStopped },
-      );
+      const { device } = await findObservationReadTarget(deviceId, signal, access, {
+        platform: platform ?? "either",
+        retry,
+        confirmStopped,
+      });
       return device;
     },
     assertAuthorized: (device) => assertObservationReadAccess(device, access),

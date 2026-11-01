@@ -41,7 +41,7 @@ async function rehydrate(
     hasReceivedHeartbeat: true,
     ...row,
   });
-  await persistence.markReleased(sessionId, "expired", 900, "daemon-restart");
+  await persistence.markReleased(sessionId, "expired", 900, { reason: "daemon-restart" });
   const manager = new SessionManager(timer, persistence);
   const devicePool: SessionDeviceAssigner = {
     async assignDeviceToSession(id, _platform, target): Promise<string> {

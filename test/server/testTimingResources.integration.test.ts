@@ -31,7 +31,7 @@ describe("testTimingData", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(2_000_000);
-    repo = new TestExecutionRepository(db, timer);
+    repo = new TestExecutionRepository({ db, timer });
   });
 
   afterEach(async () => {

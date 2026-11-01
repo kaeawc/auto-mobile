@@ -109,8 +109,11 @@ export class SocketTextInput {
                 args.platform,
                 device.deviceId,
                 socketSessionId,
-                "input/typeText",
-                { bypassAndroidDeviceListCache: true, requester: input?.requester },
+                {
+                  action: "input/typeText",
+                  bypassAndroidDeviceListCache: true,
+                  requester: input?.requester,
+                },
               )
             : device,
         checksFrame: true,
@@ -203,8 +206,7 @@ export class SocketTextInput {
     signal: AbortSignal | undefined,
     timeoutMs: number,
     send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
-    label = "Text input request",
+    { onDispatch, label = "Text input request" }: { onDispatch?: () => void; label?: string } = {},
   ): Promise<T> {
     return holdDispatchedRequest({
       timer: this.state.timer,
@@ -251,8 +253,7 @@ export class SocketTextInput {
                         dispatched();
                       },
                     }),
-                  optionsForHold.onDispatch,
-                  optionsForHold.label,
+                  { onDispatch: optionsForHold.onDispatch, label: optionsForHold.label },
                 );
               };
             }
@@ -277,12 +278,16 @@ export class SocketTextInput {
     });
     const input = new InputText(device, factory, { timer: this.state.timer });
     return {
-      appendText: (...args) => {
-        deadline = this.state.timer.now() + (args[1] ?? 0);
+      appendText: (text, options = {}) => {
+        deadline = this.state.timer.now() + (options.timeoutMs ?? 0);
         // Latch dispatch only after the original validation and final abort check,
         // not inside InputText's earlier asynchronous beforeDispatch callback.
-        onDispatch = args[4];
-        return input.appendText(args[0], args[1], args[2], args[3]);
+        onDispatch = options.onDispatch;
+        return input.appendText(text, {
+          timeoutMs: options.timeoutMs,
+          beforeKeyEvents: options.beforeKeyEvents,
+          signal: options.signal,
+        });
       },
     };
   }
@@ -366,7 +371,8 @@ export class SocketTextInput {
         deadline - this.state.timer.now(),
         (fenced, dispatched) =>
           iosAppendClient
-            ? iosAppendClient.requestAppendText(text, timeoutMs, undefined, frameContext, {
+            ? iosAppendClient.requestAppendText(text, timeoutMs, undefined, {
+                frameContext,
                 abortSignal: fenced,
                 onDispatch: dispatched,
               })
@@ -376,14 +382,15 @@ export class SocketTextInput {
                 abortSignal: fenced,
                 onDispatch: dispatched,
               }),
-        onDispatch,
+        { onDispatch },
       );
       assertSocketInputNotAborted(signal);
       if (!textResult.success) {
         return { success: false, error: textResult.error };
       }
     }
-    return await this.callbacks.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs, {
+    return await this.callbacks.runImeActionWithinBudget(client, imeAction, deadline, {
+      totalTimeoutMs: timeoutMs,
       appendCharsSent,
       signal,
       onDispatch,
@@ -427,7 +434,13 @@ export class SocketTextInput {
       pending: string,
       timeoutMs: number,
       validate: typeof beforeKeyEvent,
-    ) => await input.appendText(pending, timeoutMs, validate, signal, onDispatch);
+    ) =>
+      await input.appendText(pending, {
+        timeoutMs,
+        beforeKeyEvents: validate,
+        signal,
+        onDispatch,
+      });
     const result = await run(cached.input, text, appendTimeoutMs, beforeKeyEvent);
     if (
       result.success ||
@@ -542,18 +555,18 @@ export class SocketTextInput {
     client: Pick<AndroidCtrlProxyClient | IOSCtrlProxyClient, "requestImeAction">,
     imeAction: ImeAction | undefined,
     deadline: number,
-    totalTimeoutMs: number,
     options: {
+      totalTimeoutMs: number;
       appendCharsSent?: number;
       signal?: AbortSignal;
       onDispatch?: () => void;
-    } = {},
+    },
   ): Promise<{
     success: boolean;
     error?: string;
     charsSent?: number;
   }> {
-    const { appendCharsSent, signal, onDispatch } = options;
+    const { totalTimeoutMs, appendCharsSent, signal, onDispatch } = options;
     const withAppendProgress = (result: { success: boolean; error?: string }) =>
       appendCharsSent !== undefined ? { ...result, charsSent: appendCharsSent } : result;
     if (!imeAction) {
@@ -575,8 +588,11 @@ export class SocketTextInput {
         signal,
         remainingTimeoutMs,
         (fenced, dispatched) =>
-          client.requestImeAction(imeAction, remainingTimeoutMs, undefined, fenced, dispatched),
-        onDispatch,
+          client.requestImeAction(imeAction, remainingTimeoutMs, undefined, {
+            abortSignal: fenced,
+            onDispatch: dispatched,
+          }),
+        { onDispatch },
       );
       assertSocketInputNotAborted(signal);
       if (!result.success) {

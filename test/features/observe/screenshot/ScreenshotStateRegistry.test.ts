@@ -15,7 +15,10 @@ describe("InMemoryScreenshotStateStore", () => {
     const timer = new FakeTimer();
     const store = new InMemoryScreenshotStateStore(timer);
     const size = { width: 540, height: 1200 };
-    store.updateForObservation("device", "observation", "/fake/small.png", undefined, size);
+    store.updateForObservation("device", "observation", {
+      path: "/fake/small.png",
+      imageSize: size,
+    });
     expect(store.getImageSizeForObservation("device", "observation", "/fake/small.png")).toEqual(
       size,
     );
@@ -26,7 +29,7 @@ describe("InMemoryScreenshotStateStore", () => {
     expect(
       store.getImageSizeForObservation("device", "observation", "/fake/small.png"),
     ).toBeUndefined();
-    store.updateForObservation("device", "observation", "/fake/other.png");
+    store.updateForObservation("device", "observation", { path: "/fake/other.png" });
     expect(
       store.getImageSizeForObservation("device", "observation", "/fake/other.png"),
     ).toBeUndefined();
@@ -175,7 +178,7 @@ describe("InMemoryScreenshotStateStore", () => {
 
     for (let index = 1; index <= 11; index++) {
       timer.setCurrentTime(1000 + index);
-      store.updateForObservation("device-A", `observation-${index}`, `/tmp/${index}.png`);
+      store.updateForObservation("device-A", `observation-${index}`, { path: `/tmp/${index}.png` });
     }
 
     expect(store.getPathForObservation("device-A", "observation-1")).toBeUndefined();
@@ -187,7 +190,7 @@ describe("InMemoryScreenshotStateStore", () => {
     const store = new InMemoryScreenshotStateStore(new FakeTimer());
 
     store.update("device-A", "/tmp/latest.png");
-    store.updateForObservation("device-A", "observation-A", "/tmp/exact.png");
+    store.updateForObservation("device-A", "observation-A", { path: "/tmp/exact.png" });
 
     expect(store.getPath("device-A")).toBe("/tmp/latest.png");
     expect(store.getPathForObservation("device-A", "observation-A")).toBe("/tmp/exact.png");
@@ -198,7 +201,7 @@ describe("InMemoryScreenshotStateStore", () => {
 
     store.beginObservation("device-A", "observation-A");
     store.clear("device-A");
-    store.updateForObservation("device-A", "observation-A", "/tmp/late.png");
+    store.updateForObservation("device-A", "observation-A", { path: "/tmp/late.png" });
     store.endObservation("device-A", "observation-A", "capture cancelled");
 
     expect(store.getPathForObservation("device-A", "observation-A")).toBeUndefined();
@@ -209,17 +212,17 @@ describe("InMemoryScreenshotStateStore", () => {
     const store = new InMemoryScreenshotStateStore(new FakeTimer());
 
     store.beginObservation("device-A", "completed-observation");
-    store.updateForObservation("device-A", "completed-observation", "/tmp/done.png");
+    store.updateForObservation("device-A", "completed-observation", { path: "/tmp/done.png" });
     store.beginObservation("device-A", "pending-observation");
     store.clear("device-A");
 
     expect(store.clearedObservationCount("device-A")).toBe(1);
     // The pending job's late callbacks are dropped ...
-    store.updateForObservation("device-A", "pending-observation", "/tmp/late.png");
+    store.updateForObservation("device-A", "pending-observation", { path: "/tmp/late.png" });
     expect(store.getPathForObservation("device-A", "pending-observation")).toBeUndefined();
     // ... while a completed id (which cannot call back late) is not fenced, so a
     // fresh write under that id behaves like any other new observation.
-    store.updateForObservation("device-A", "completed-observation", "/tmp/again.png");
+    store.updateForObservation("device-A", "completed-observation", { path: "/tmp/again.png" });
     expect(store.getPathForObservation("device-A", "completed-observation")).toBe("/tmp/again.png");
   });
 
@@ -233,7 +236,7 @@ describe("InMemoryScreenshotStateStore", () => {
     expect(store.clearedObservationCount("device-A")).toBe(1);
 
     timer.setCurrentTime(1000 + OBSERVE_RESULT_CACHE_TTL_MS + 1);
-    store.updateForObservation("device-A", "observation-A", "/tmp/late.png");
+    store.updateForObservation("device-A", "observation-A", { path: "/tmp/late.png" });
 
     expect(store.clearedObservationCount("device-A")).toBe(0);
     expect(store.getPathForObservation("device-A", "observation-A")).toBe("/tmp/late.png");
@@ -252,9 +255,9 @@ describe("InMemoryScreenshotStateStore", () => {
       MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE,
     );
     // The oldest tombstones were evicted; the newest are still fenced.
-    store.updateForObservation("device-A", "observation-0", "/tmp/evicted.png");
+    store.updateForObservation("device-A", "observation-0", { path: "/tmp/evicted.png" });
     expect(store.getPathForObservation("device-A", "observation-0")).toBe("/tmp/evicted.png");
-    store.updateForObservation("device-A", `observation-${total - 1}`, "/tmp/fenced.png");
+    store.updateForObservation("device-A", `observation-${total - 1}`, { path: "/tmp/fenced.png" });
     expect(store.getPathForObservation("device-A", `observation-${total - 1}`)).toBeUndefined();
   });
 
@@ -264,7 +267,7 @@ describe("InMemoryScreenshotStateStore", () => {
     store.beginObservation("device-A", "obsolete-observation");
     store.clear("device-A");
     store.beginObservation("device-A", "new-observation");
-    store.updateForObservation("device-A", "new-observation", "/tmp/new.png");
+    store.updateForObservation("device-A", "new-observation", { path: "/tmp/new.png" });
 
     expect(store.getPathForObservation("device-A", "new-observation")).toBe("/tmp/new.png");
   });
@@ -281,7 +284,7 @@ describe("InMemoryScreenshotStateStore", () => {
 
     await Promise.resolve();
     expect(settled).toBe(false);
-    store.updateForObservation("device-A", "observation-A", "/tmp/exact.png");
+    store.updateForObservation("device-A", "observation-A", { path: "/tmp/exact.png" });
     await waiting;
 
     expect(settled).toBe(true);
@@ -311,7 +314,7 @@ describe("InMemoryScreenshotStateStore", () => {
     const timer = new FakeTimer();
     const store = new InMemoryScreenshotStateStore(timer);
     store.update("device-A", "/tmp/latest.png");
-    store.updateForObservation("device-A", "obs-1", "/tmp/observation.png");
+    store.updateForObservation("device-A", "obs-1", { path: "/tmp/observation.png" });
 
     expect(new Set(store.getReferencedScreenshotPaths())).toEqual(
       new Set(["/tmp/latest.png", "/tmp/observation.png"]),

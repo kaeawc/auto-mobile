@@ -19,7 +19,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
-import { watchOsUnsupportedToolMessage } from "../../src/server/watchOsToolSupport";
+import { unsupportedPlatformToolMessage } from "../../src/server/applePlatformToolSupport";
 import type { Platform } from "../../src/models";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -167,22 +167,20 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       },
     };
     registerAppTools({
-      watchApps: (device) => new WatchAppManager(device, watchSimctl, plist, undefined, dataWipe),
+      watchApps: (device) => new WatchAppManager(device, { simctl: watchSimctl, plist, dataWipe }),
     });
     const resumed: string[] = [];
-    ToolRegistry.register(
-      "setActiveDevice",
-      "Set active device",
-      setActiveDeviceSchema,
-      createSetActiveDeviceHandler({
+    ToolRegistry.register("setActiveDevice", "Set active device", setActiveDeviceSchema, {
+      handler: createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async (deviceId, platform) => {
           resumed.push(`${platform}:${deviceId}`);
         },
         legacyDeviceSelection: () => readiness,
       }),
-      { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
-    );
+      defaultEnabled: true,
+      ...SELECTS_ACTIVE_DEVICE,
+    });
     return { pool, sessions, readiness, watchSimctl, resumed, wiped };
   }
 
@@ -296,7 +294,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const error = await failure(call("crashApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
 
     expect(error).toBeInstanceOf(ActionableError);
-    expect(error).toMatchObject({ message: watchOsUnsupportedToolMessage("crashApp") });
+    expect(error).toMatchObject({ message: unsupportedPlatformToolMessage("crashApp", "watchos") });
   });
 
   test("launch, relaunch with clearAppData, and terminate an app on the session-bound watch", async () => {

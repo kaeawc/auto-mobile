@@ -170,7 +170,11 @@ export class DragAndDrop extends BaseVisualChange {
     timer: Timer = defaultTimer,
     deps: DragAndDropDeps = {},
   ) {
-    super(device, adb, timer, deps.renderedDisplayRevision, deps);
+    super(device, {
+      adb,
+      timer,
+      displayFence: deps,
+    });
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.selector =
       deps.selector ??
@@ -284,8 +288,8 @@ export class DragAndDrop extends BaseVisualChange {
           this.device,
           options.display,
           this.observeScreen,
-          this.adb,
           {
+            adb: this.adb,
             lastRenderedObservation: this.lastRenderedObservation,
             signal,
             transitions: this.displayTransitionReader,
@@ -486,8 +490,12 @@ export class DragAndDrop extends BaseVisualChange {
             this.screenshotCapturer,
             viewHierarchy,
             searchCriteria,
-            this.visionConfig,
-            { baseError: finalErrorMessage, signal, visionAnalyzer: this.visionAnalyzer },
+            {
+              visionConfig: this.visionConfig,
+              baseError: finalErrorMessage,
+              signal,
+              visionAnalyzer: this.visionAnalyzer,
+            },
           );
         }
       }

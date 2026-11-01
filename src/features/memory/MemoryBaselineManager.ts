@@ -18,7 +18,7 @@ export class MemoryBaselineManager {
    * for tests that exercise the query paths (issue #3067).
    */
   constructor(db?: Kysely<Database>) {
-    this.repository = new MemoryBaselineRepository(db);
+    this.repository = new MemoryBaselineRepository({ db });
   }
 
   /**
@@ -45,8 +45,7 @@ export class MemoryBaselineManager {
     deviceId: string,
     packageName: string,
     toolName: string,
-    metrics: MemoryMetrics,
-    alpha: number = DEFAULT_EMA_ALPHA,
+    { metrics, alpha = DEFAULT_EMA_ALPHA }: { metrics: MemoryMetrics; alpha?: number },
   ): Promise<void> {
     try {
       const now = new Date().toISOString();

@@ -53,6 +53,7 @@ import type {
   NewFailureOccurrence,
   NewFailureOccurrenceScreen,
 } from "./types";
+import type { RepositoryDeps } from "./repositoryDeps";
 export { mergeScreenBreakdownRows, type RecordFailureInput } from "./failureAnalyticsQueries";
 
 const RETENTION_MAX_ROWS = 10_000;
@@ -66,15 +67,17 @@ export class FailureAnalyticsRepository {
   private getBarrier: () => DbWriteBarrier;
   private idGenerator: IdGenerator;
 
-  constructor(
-    db?: Kysely<Database>,
-    timer: Timer = defaultTimer,
+  constructor({
+    db,
+    timer = defaultTimer,
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912).
-    getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
-    idGenerator: IdGenerator = defaultIdGenerator,
-  ) {
+    getBarrier = getDbWriteBarrier,
+    idGenerator = defaultIdGenerator,
+  }: Pick<RepositoryDeps, "db" | "timer" | "idGenerator"> & {
+    getBarrier?: () => DbWriteBarrier;
+  } = {}) {
     this.db = db ?? null;
     this.timer = timer;
     this.getBarrier = getBarrier;

@@ -55,15 +55,14 @@ export class TargetFocus {
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
     display: string,
-    signal?: AbortSignal,
-    options: SendKeysFocusOptions = {},
+    { signal, ...options }: SendKeysFocusOptions & { signal?: AbortSignal } = {},
   ): Promise<{ displayId?: number; selector?: SendKeysSelector; assertCurrent: () => void }> {
     const target = await prepareTargetDisplayAction(
       this.deps.device,
       display,
       { execute: (options) => this.deps.observer.execute({ ...options, skipScreenshot: true }) },
-      this.deps.adb(),
       {
+        adb: this.deps.adb(),
         lastRenderedObservation: this.deps.lastRenderedObservation(),
         signal,
         transitions: this.deps.displayTransitionReader,

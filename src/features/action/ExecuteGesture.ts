@@ -87,7 +87,7 @@ export class ExecuteGesture extends BaseVisualChange {
     adb: AdbExecutor | AdbClientFactory | null = null,
     timer: Timer = defaultTimer,
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.device = device;
   }
 

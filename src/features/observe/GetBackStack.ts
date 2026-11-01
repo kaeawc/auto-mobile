@@ -189,8 +189,7 @@ function updateHistRow(
   line: string,
   currentTaskId: number,
   histCounts: Map<number, number>,
-  histRoots: Map<number, HistRootEntry>,
-  openHist: OpenHist | undefined,
+  { histRoots, openHist }: { histRoots: Map<number, HistRootEntry>; openHist?: OpenHist },
 ): OpenHist | undefined {
   const hist = parseHistRow(line);
   if (hist) {
@@ -487,7 +486,7 @@ export class GetBackStack implements BackStack {
         continue;
       }
 
-      openHist = updateHistRow(line, currentTaskId, histCounts, histRoots, openHist);
+      openHist = updateHistRow(line, currentTaskId, histCounts, { histRoots, openHist });
       openHist = updateHistRoot(line, histRoots, openHist);
       applyTaskFields(currentTask, line);
     }

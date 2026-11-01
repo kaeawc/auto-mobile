@@ -102,13 +102,10 @@ describe("DaemonClient cancel frame (issue #6384)", () => {
 
   test("a timed-out tools/call writes a cancel frame naming its request id", async () => {
     const timer = new FakeTimer();
-    const client = new DaemonClient(
-      socketPath,
-      CLIENT_TIMEOUT_MS,
-      timer,
-      {},
-      { clientIdentity: null },
-    );
+    const client = new DaemonClient(socketPath, CLIENT_TIMEOUT_MS, timer, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
     await client.connect();
     try {
       const call = client.callTool("installApp", {});
@@ -131,13 +128,10 @@ describe("DaemonClient cancel frame (issue #6384)", () => {
 
   test("a timed-out daemon method call also writes a cancel frame", async () => {
     const timer = new FakeTimer();
-    const client = new DaemonClient(
-      socketPath,
-      CLIENT_TIMEOUT_MS,
-      timer,
-      {},
-      { clientIdentity: null },
-    );
+    const client = new DaemonClient(socketPath, CLIENT_TIMEOUT_MS, timer, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
     await client.connect();
     try {
       const call = client.callDaemonMethod("daemon/availableDevices", {}, { timeoutMs: 50 });
@@ -157,13 +151,10 @@ describe("DaemonClient cancel frame (issue #6384)", () => {
   test("late answers to the cancelled request and its cancel frame are dropped without an unknown-id warning", async () => {
     const warnSpy = spyOn(logger, "warn");
     const timer = new FakeTimer();
-    const client = new DaemonClient(
-      socketPath,
-      CLIENT_TIMEOUT_MS,
-      timer,
-      {},
-      { clientIdentity: null },
-    );
+    const client = new DaemonClient(socketPath, CLIENT_TIMEOUT_MS, timer, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
     await client.connect();
     try {
       const abandoned = client.callDaemonMethod("daemon/availableDevices", {}, { timeoutMs: 50 });
@@ -242,13 +233,10 @@ describe("UnixSocketServer cancel frame (issue #6384)", () => {
   test("a client timeout aborts the in-flight forward and the next call on the socket runs", async () => {
     const clientTimer = new FakeTimer();
     const warnSpy = spyOn(logger, "warn");
-    const client = new DaemonClient(
-      socketPath,
-      CLIENT_TIMEOUT_MS,
-      clientTimer,
-      {},
-      { clientIdentity: null },
-    );
+    const client = new DaemonClient(socketPath, CLIENT_TIMEOUT_MS, clientTimer, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
     try {
       const slow = client.callTool("installApp", { deviceId: "device-1" });
       await callsChanged.until(() => calls.length === 1, "the slow forward to start");
@@ -341,13 +329,10 @@ describe("UnixSocketServer cancel frame (issue #6384)", () => {
   });
 
   test("a cancel frame without a request id is rejected", async () => {
-    const client = new DaemonClient(
-      socketPath,
-      CLIENT_TIMEOUT_MS,
-      new FakeTimer(),
-      {},
-      { clientIdentity: null },
-    );
+    const client = new DaemonClient(socketPath, CLIENT_TIMEOUT_MS, new FakeTimer(), {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
     try {
       await expect(client.callDaemonMethod(DAEMON_CANCEL_REQUEST_METHOD, {})).rejects.toThrow(
         "requires a non-empty string params.requestId",

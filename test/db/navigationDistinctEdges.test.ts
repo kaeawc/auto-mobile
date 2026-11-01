@@ -50,8 +50,10 @@ describe("navigation_edges distinct-transition readers (#10194)", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase({ foreignKeys: true });
-    repo = new NavigationRepository(db);
-    manager = NavigationGraphManager.createForTesting(repo, new TestCoverageRepository(db));
+    repo = new NavigationRepository({ db });
+    manager = NavigationGraphManager.createForTesting(repo, {
+      testCoverageRepository: new TestCoverageRepository({ db }),
+    });
     await repo.getOrCreateApp(APP);
     await manager.setCurrentApp(APP);
   });
@@ -139,13 +141,10 @@ describe("navigation_edges distinct-transition readers (#10194)", () => {
       .insertInto("navigation_edges")
       .values(traversalRows(TRAVERSALS, "Home", "Settings", "tapOn", tapArgs("Settings")))
       .execute();
-    const newest = await repo.createEdge(
-      APP,
-      "Home",
-      "Settings",
-      { toolName: "tapOn", toolArgs: { text: "Settings" } }, // A device clock that stepped backwards must not demote the newest row.
-      5,
-    );
+    const newest = await repo.createEdge(APP, "Home", "Settings", {
+      tool: { toolName: "tapOn", toolArgs: { text: "Settings" } }, // A device clock that stepped backwards must not demote the newest row.
+      timestamp: 5,
+    });
 
     const edges = await repo.getDistinctEdges(APP);
 
@@ -267,7 +266,7 @@ describe("navigation_edges traversal retention (#10194)", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase({ foreignKeys: true });
-    repo = new NavigationRepository(db);
+    repo = new NavigationRepository({ db });
     await repo.getOrCreateApp(APP);
     yields = 0;
   });
@@ -375,20 +374,14 @@ describe("navigation_edges traversal retention (#10194)", () => {
   });
 
   test("deleting a surplus row cascades its child rows and keeps the newest row's", async () => {
-    const oldest = await repo.createEdge(
-      APP,
-      "Home",
-      "Settings",
-      { toolName: "tapOn", toolArgs: { text: "S" } },
-      1,
-    );
-    const newest = await repo.createEdge(
-      APP,
-      "Home",
-      "Settings",
-      { toolName: "tapOn", toolArgs: { text: "S" } },
-      2,
-    );
+    const oldest = await repo.createEdge(APP, "Home", "Settings", {
+      tool: { toolName: "tapOn", toolArgs: { text: "S" } },
+      timestamp: 1,
+    });
+    const newest = await repo.createEdge(APP, "Home", "Settings", {
+      tool: { toolName: "tapOn", toolArgs: { text: "S" } },
+      timestamp: 2,
+    });
     await repo.setEdgeModals(oldest.id, "from", ["old-modal"]);
     await repo.setEdgeModals(newest.id, "from", ["new-modal"]);
 
@@ -399,29 +392,20 @@ describe("navigation_edges traversal retention (#10194)", () => {
   });
 
   test("a row referenced by a test-coverage session is never deleted", async () => {
-    const coverage = new TestCoverageRepository(db);
+    const coverage = new TestCoverageRepository({ db });
     const session = await coverage.startSession("session-1", APP);
-    const oldest = await repo.createEdge(
-      APP,
-      "Home",
-      "Settings",
-      { toolName: "tapOn", toolArgs: { text: "S" } },
-      1,
-    );
-    await repo.createEdge(
-      APP,
-      "Home",
-      "Settings",
-      { toolName: "tapOn", toolArgs: { text: "S" } },
-      2,
-    );
-    await repo.createEdge(
-      APP,
-      "Home",
-      "Settings",
-      { toolName: "tapOn", toolArgs: { text: "S" } },
-      3,
-    );
+    const oldest = await repo.createEdge(APP, "Home", "Settings", {
+      tool: { toolName: "tapOn", toolArgs: { text: "S" } },
+      timestamp: 1,
+    });
+    await repo.createEdge(APP, "Home", "Settings", {
+      tool: { toolName: "tapOn", toolArgs: { text: "S" } },
+      timestamp: 2,
+    });
+    await repo.createEdge(APP, "Home", "Settings", {
+      tool: { toolName: "tapOn", toolArgs: { text: "S" } },
+      timestamp: 3,
+    });
     await coverage.recordEdgeTraversal(session.id, oldest.id, 1);
 
     await retention({ maxEdgeTraversalsPerTransition: 1 }).prune(1_000_000);

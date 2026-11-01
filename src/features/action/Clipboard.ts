@@ -29,8 +29,7 @@ type ClipboardCtrlProxy = {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: DispatchOptions,
+    options?: DispatchOptions & { perf?: PerformanceTracker },
   ): Promise<{
     success: boolean;
     error?: string;
@@ -75,10 +74,17 @@ export class Clipboard {
 
   constructor(
     device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    ctrlProxyFactory?: ClipboardCtrlProxyFactory,
-    hierarchyProvider?: KeyboardHierarchyProvider,
-    timer: Timer = defaultTimer,
+    {
+      adbFactory = defaultAdbClientFactory,
+      ctrlProxyFactory,
+      hierarchyProvider,
+      timer = defaultTimer,
+    }: {
+      adbFactory?: AdbClientFactory;
+      ctrlProxyFactory?: ClipboardCtrlProxyFactory;
+      hierarchyProvider?: KeyboardHierarchyProvider;
+      timer?: Timer;
+    } = {},
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -171,7 +177,7 @@ export class Clipboard {
     let result: Awaited<ReturnType<ClipboardCtrlProxy["requestClipboard"]>>;
     try {
       result = await awaitWhileRequestIsLive(
-        client.requestClipboard(action, text, undefined, undefined, {
+        client.requestClipboard(action, text, undefined, {
           signal,
           onDispatch: () => {
             // copy sets supplied text and clear is idempotent; only paste risks duplication.
@@ -257,7 +263,7 @@ export class Clipboard {
     let pasteboardUnreadable = false;
     try {
       const clipboard = await awaitWhileRequestIsLive(
-        client.requestClipboard("get", undefined, undefined, undefined, { signal }),
+        client.requestClipboard("get", undefined, undefined, { signal }),
         signal,
       );
       if (clipboard.success && !clipboard.text) {
@@ -376,7 +382,7 @@ export class Clipboard {
     let ctrlProxyReason: string | undefined;
     try {
       const a11yResult = await awaitWhileRequestIsLive(
-        a11yClient.requestClipboard(action, text, undefined, undefined, {
+        a11yClient.requestClipboard(action, text, undefined, {
           signal,
           onDispatch: () => {
             // Only paste can duplicate an input action when replayed.

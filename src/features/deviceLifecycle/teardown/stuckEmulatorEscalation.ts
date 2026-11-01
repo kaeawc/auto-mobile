@@ -51,14 +51,18 @@ export class EmulatorTeardownEscalationError extends EmulatorStopDispatchedError
   readonly code = EMULATOR_TEARDOWN_FAILED_CODE;
   readonly retryable = false;
 
+  readonly softAttempts: number;
+  readonly pid?: number;
+
   constructor(
     message: string,
     readonly reason: EmulatorTeardownFailureReason,
     readonly serial: string,
-    readonly softAttempts: number,
-    readonly pid?: number,
+    { softAttempts, pid }: { softAttempts: number; pid?: number },
   ) {
     super(message);
+    this.softAttempts = softAttempts;
+    this.pid = pid;
   }
 }
 
@@ -157,7 +161,7 @@ async function escalateToProcessStop(
         `known to verify its process before signalling it. ${emulatorProcessEscapeHint(serial)}`,
       "no-identity",
       serial,
-      softAttempts,
+      { softAttempts },
     );
   }
   logger.warn(
@@ -213,8 +217,7 @@ async function verifyGoneAfterStop(
         emulatorProcessEscapeHint(serial),
       "still-listed",
       serial,
-      softAttempts,
-      pid,
+      { softAttempts, pid },
     );
   }
 }
@@ -234,8 +237,7 @@ function failureForOutcome(
           emulatorProcessEscapeHint(serial, [{ pid: outcome.pid, command: outcome.command }]),
         "still-running",
         serial,
-        softAttempts,
-        outcome.pid,
+        { softAttempts, pid: outcome.pid },
       );
     case "identity-mismatch":
       return new EmulatorTeardownEscalationError(
@@ -243,8 +245,7 @@ function failureForOutcome(
           "refusing to signal its replacement after the console kills failed.",
         "identity-mismatch",
         serial,
-        softAttempts,
-        outcome.pid,
+        { softAttempts, pid: outcome.pid },
       );
     case "unidentified": {
       const candidates = outcome.identity.kind === "ambiguous" ? outcome.identity.candidates : [];
@@ -258,7 +259,7 @@ function failureForOutcome(
           ),
         "unidentified",
         serial,
-        softAttempts,
+        { softAttempts },
       );
     }
   }

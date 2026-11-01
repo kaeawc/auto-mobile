@@ -126,12 +126,11 @@ test("legacy not-found retries offline then not listed then ready", async () => 
 
 for (const deadlineExhausted of [true, false]) {
   test(`runner readiness error retries offline then device: deadlineExhausted=${deadlineExhausted}`, async () => {
-    const original = new RunnerReadinessError(
-      "runner deadline",
-      false,
+    const original = new RunnerReadinessError("runner deadline", {
+      retryableAndroidFrameworkFailure: false,
       deadlineExhausted,
-      "runner-connect",
-    );
+      phase: "runner-connect",
+    });
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     let state = "offline";
@@ -173,7 +172,11 @@ for (const deadlineExhausted of [true, false]) {
 }
 
 test("runner readiness deadline finally propagates with the typed timeout wire shape", async () => {
-  const original = new RunnerReadinessError("runner deadline", false, true, "runner-connect");
+  const original = new RunnerReadinessError("runner deadline", {
+    retryableAndroidFrameworkFailure: false,
+    deadlineExhausted: true,
+    phase: "runner-connect",
+  });
   const h = arrange(["offline", "device"], 2, original);
   const error = await h.select({ deviceId: device.deviceId }).catch((caught: unknown) => caught);
   expect(error).toBe(original);

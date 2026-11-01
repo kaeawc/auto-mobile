@@ -92,6 +92,8 @@ import {
   startMatchExclusions,
   devicesHeldByOtherSessions,
 } from "./deviceToolsBootPreparation";
+import { requireAndroidOrIosPlatform } from "../models/Platform";
+import { isAppleTvStartRequest, startAppleTvDevice } from "./deviceToolsAppleTvStart";
 export { type CreatedDeviceRollback } from "./deviceToolsBootPreparation";
 
 type StartDeviceHooks = {
@@ -119,8 +121,7 @@ const bootAndPrepareDevice = async (
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   deps: DeviceToolsDependencies,
-  deviceUtils: PlatformDeviceManager,
-  options: BootPreparationOptions,
+  { deviceUtils, options }: { deviceUtils: PlatformDeviceManager; options: BootPreparationOptions },
 ) => {
   const {
     deviceMatcher,
@@ -212,7 +213,7 @@ const bootAndPrepareDevice = async (
     preparation.sourceImage,
     initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
   );
-  await reserveBootReadiness(args, budgets, deps, deps.daemonState, options);
+  await reserveBootReadiness(args, budgets, deps, { daemonState: deps.daemonState, ...options });
 
   // A new incarnation must not inherit a prior intentional-shutdown marker
   // while its per-device runner setup is in flight.
@@ -331,8 +332,13 @@ async function reserveBootReadiness(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   deps: DeviceToolsDependencies,
-  daemonState: DaemonStateLike,
-  { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
+  {
+    daemonState,
+    state,
+    signal,
+    requestedIdentity,
+    releaseReadinessReservations,
+  }: BootPreparationOptions & { daemonState: DaemonStateLike },
 ): Promise<void> {
   setAcquisitionStage(budgets, "reserving the device for readiness");
   const initialReservations: DeviceReadinessReservation[] = [];
@@ -365,13 +371,10 @@ async function reserveBootReadiness(
               ),
           );
         } else {
-          await reserveInitialDeviceForReadiness(
-            daemonState,
-            state.boot!,
-            initialReservations,
-            internalMcpSessionId(args),
-            internalOneShotCli(args),
-          );
+          await reserveInitialDeviceForReadiness(daemonState, state.boot!, initialReservations, {
+            mcpSessionId: internalMcpSessionId(args),
+            oneShotCli: internalOneShotCli(args),
+          });
         }
         // A grant can win the mutex just as the caller loses its deadline race.
         // Never publish that orphan into the caller's already-drained release list.
@@ -466,11 +469,8 @@ async function bindPreparedDevice(
     const boundSessionId =
       readinessResult.preservedSessionId && !autolockEnabled
         ? readinessResult.preservedSessionId
-        : await runOperationWithinDeadline(
-            deps.timer,
-            budgets.automationDeadlineMs,
-            signal,
-            bindUndoneIfUndelivered(
+        : await runOperationWithinDeadline(deps.timer, budgets.automationDeadlineMs, signal, {
+            operation: bindUndoneIfUndelivered(
               async (receipt, bindSignal) => {
                 return await bindBootedDeviceSession(
                   state.boot!.device,
@@ -478,9 +478,11 @@ async function bindPreparedDevice(
                   state.boot!.sourceImage && !readinessResult.preservedSessionId
                     ? preparation.sourceImage
                     : undefined,
-                  // Recovery already registered this process and its output tail.
-                  readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
                   {
+                    // Recovery already registered this process and its output tail.
+                    childProcess: readinessResult.preservedSessionId
+                      ? undefined
+                      : state.boot!.processHandle,
                     readinessReservationOwners: new Set(
                       releaseReadinessReservations.map((reservation) => reservation.owner),
                     ),
@@ -497,18 +499,16 @@ async function bindPreparedDevice(
               },
               () => state.boot,
             ),
-            {
-              timeoutError: () =>
-                acquisitionLifecycleTimeoutError(
-                  budgets,
-                  requestedIdentity,
-                  "binding the device session",
-                ),
-              onOrphan: (settlement) => {
-                state.bindingSettlements.push(settlement);
-              },
+            timeoutError: () =>
+              acquisitionLifecycleTimeoutError(
+                budgets,
+                requestedIdentity,
+                "binding the device session",
+              ),
+            onOrphan: (settlement) => {
+              state.bindingSettlements.push(settlement);
             },
-          );
+          });
     if (readinessResult.preservedSessionId && !autolockEnabled) {
       // Preserved-session validation can outlast the deadline; recheck before committing.
       await throwIfBindingAborted(signal, readinessResult);
@@ -577,10 +577,12 @@ export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Pro
             `platform=${request.device.platform} requested=[${request.requestedIdentity}] ` +
             `resolved=[${request.device.name} (${request.device.deviceId})] phase=runner-setup ` +
             "attempts=0 remainingBudgetMs=0: device preparation deadline exhausted",
-          false,
-          true,
-          "runner-setup",
-          { attempts: 0 },
+          {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: true,
+            phase: "runner-setup",
+            attempts: 0,
+          },
         ),
     };
     const pool = getStartDevicePool(getDeviceToolsDependencies().daemonState);
@@ -617,8 +619,8 @@ export async function bindBootedDeviceSession(
   device: BootedDevice,
   args: StartDeviceSessionArgs,
   sourceImage: DeviceInfo | undefined,
-  childProcess: ChildProcess | null | undefined,
   {
+    childProcess,
     autolockEnabled = captureAutolockPolicy(getDeviceToolsDependencies().env),
     readinessReservationOwners,
     verifiedAndroidAvdIdentity,
@@ -627,6 +629,7 @@ export async function bindBootedDeviceSession(
     receipt,
     signal,
   }: {
+    childProcess?: ChildProcess | null;
     autolockEnabled?: boolean;
     readinessReservationOwners?: ReadonlySet<symbol>;
     verifiedAndroidAvdIdentity?: DeviceInfo;
@@ -703,7 +706,8 @@ export async function bindBootedDeviceSession(
       recoveryTarget,
     });
   if (resumeSessionId) {
-    return await resumePreparedDeviceSession(device, args, resumeSessionId, bind, {
+    return await resumePreparedDeviceSession(device, args, resumeSessionId, {
+      bind,
       autolockEnabled: useAutolock,
       achievedReadiness,
       daemonState,
@@ -719,12 +723,13 @@ async function resumePreparedDeviceSession(
   device: BootedDevice,
   args: StartDeviceSessionArgs,
   resumeSessionId: string,
-  bind: (target?: SessionRecoveryTarget) => Promise<string>,
   {
+    bind,
     autolockEnabled,
     achievedReadiness,
     daemonState,
   }: {
+    bind: (target?: SessionRecoveryTarget) => Promise<string>;
     autolockEnabled: boolean;
     achievedReadiness: DeviceReadinessLevel;
     daemonState: Pick<DaemonStateLike, "getDevicePool" | "getSessionManager">;
@@ -911,15 +916,17 @@ export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceR
     args: StartDeviceArgs,
     budgets: DevicePreparationBudgets,
     deps: DeviceToolsDependencies,
-    deviceUtils: PlatformDeviceManager,
-    options: BootPreparationOptions,
+    {
+      deviceUtils,
+      options,
+    }: { deviceUtils: PlatformDeviceManager; options: BootPreparationOptions },
   ) => {
     const bootOptions = { ...options, rollbackCreatedDevice };
     // Keep a close during boot visible through a resumed session's bind and autolock adoption.
     const pool = options.autolockEnabled ? initializedDevicePool() : undefined;
     const endAutolockBind = pool?.beginMcpBind(internalMcpSessionId(args));
     try {
-      return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
+      return await bootAndPrepareDevice(args, budgets, deps, { deviceUtils, options: bootOptions });
     } catch (error) {
       await rollbackCreatedDeviceAfterBoot(bootOptions, error);
       throw error;
@@ -936,12 +943,17 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    if (isAppleTvStartRequest(rawArgs)) {
+      return await startAppleTvDevice(rawArgs, bindBootedDeviceSession, signal);
+    }
     if (isWatchStartRequest(rawArgs)) {
       return await startWatchDevice(rawArgs, bindBootedDeviceSession, signal);
     }
     const internalSessionId = internalMcpSessionId(rawArgs);
+    const parsed = startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs));
     const args = {
-      ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
+      ...parsed,
+      platform: requireAndroidOrIosPlatform(parsed.platform, "startDevice"),
       __mcpSessionId: internalSessionId,
       __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
       ...(internalOneShotCli(rawArgs) ? { __oneShotCli: true } : {}),
@@ -953,45 +965,47 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       rawArgs,
       getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
-      "startDevice",
-      async (deadlineMs, requestSignal, stage) => {
-        // Poster rendering runs under the acquisition deadline and cancellation.
-        const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
-          timer: getDeviceToolsDependencies().timer,
-          signal: requestSignal,
-          label: "startDevice camera poster",
-        });
-        const target = {
-          ...resolvedArgs,
-          ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
-        };
-        return prepareDevice(
-          target,
-          {
-            bootTimeoutMs: totalTimeoutMs,
-            automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
-            automationDeadlineMs: deadlineMs,
-            stage,
-            operationName: "startDevice",
-            stableTarget:
-              args.platform === "android" && target.name && !args.deviceId
-                ? { platform: "android", stableId: target.name }
-                : args.platform === "ios" && args.deviceId
-                  ? { platform: "ios", stableId: args.deviceId }
-                  : undefined,
-            ...(args.platform === "android" && args.avdName && args.deviceId
-              ? {
-                  androidAvdName: args.avdName,
-                  requestedAndroidIdentifierPair: {
-                    avdName: args.avdName,
-                    deviceId: args.deviceId,
-                  },
-                }
-              : {}),
-          },
-          progress,
-          requestSignal,
-        );
+      {
+        operationName: "startDevice",
+        operation: async (deadlineMs, requestSignal, stage) => {
+          // Poster rendering runs under the acquisition deadline and cancellation.
+          const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
+            timer: getDeviceToolsDependencies().timer,
+            signal: requestSignal,
+            label: "startDevice camera poster",
+          });
+          const target = {
+            ...resolvedArgs,
+            ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+          };
+          return prepareDevice(
+            target,
+            {
+              bootTimeoutMs: totalTimeoutMs,
+              automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
+              automationDeadlineMs: deadlineMs,
+              stage,
+              operationName: "startDevice",
+              stableTarget:
+                args.platform === "android" && target.name && !args.deviceId
+                  ? { platform: "android", stableId: target.name }
+                  : args.platform === "ios" && args.deviceId
+                    ? { platform: "ios", stableId: args.deviceId }
+                    : undefined,
+              ...(args.platform === "android" && args.avdName && args.deviceId
+                ? {
+                    androidAvdName: args.avdName,
+                    requestedAndroidIdentifierPair: {
+                      avdName: args.avdName,
+                      deviceId: args.deviceId,
+                    },
+                  }
+                : {}),
+            },
+            progress,
+            requestSignal,
+          );
+        },
       },
     );
   };

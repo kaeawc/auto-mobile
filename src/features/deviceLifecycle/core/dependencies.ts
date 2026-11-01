@@ -2,6 +2,7 @@ import type { AppleTvSimulatorProvisioner } from "../../../utils/ios-cmdline-too
 import type { AppleTvSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorBoot";
 import type { WatchSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
 import type { WatchSimulatorLifecycle } from "../../../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
+import type { TvosRunnerLifecycle } from "../../tvos/TvosRunnerLifecycle";
 import type { WatchRunnerLifecycle } from "../../watch/WatchRunnerLifecycle";
 import { getDefaultSimulatorCreationService } from "../../iosTemplates/defaultSimulatorCreationService";
 import { type DevicePool } from "../../../daemon/devicePool";
@@ -116,6 +117,7 @@ export interface DeviceToolsDependencies {
   /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
   watchSimulatorLifecycleFactory?: () => Pick<WatchSimulatorLifecycle, "findWatch" | "boot">;
   /** Process-wide watch runner owner, shared by startup and teardown. */
+  tvosRunnerLifecycleFactory?: () => Pick<TvosRunnerLifecycle, "start" | "attach" | "stop">;
   watchRunnerLifecycleFactory?: () => Pick<WatchRunnerLifecycle, "start" | "attach" | "stop">;
   /** Apple Watch simulator adoption, creation and deletion (#15882); defaults to simctl. */
   watchSimulatorProvisionerFactory?: () => Pick<

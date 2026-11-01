@@ -19,7 +19,7 @@ export const watchAwarePlatformSchema = () =>
     .enum(["android", "ios", "watchos", "tvos"])
     .optional()
     .describe(
-      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session. "tvos" (Apple TV) is not supported by any tool yet',
+      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name "tvos" for an Apple TV simulator; tools without tvOS support refuse it',
     );
 
 export const DEVICE_LABEL_DESCRIPTION = "Device label";

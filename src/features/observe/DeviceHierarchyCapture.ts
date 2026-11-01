@@ -1,3 +1,5 @@
+import { normalizeTvosHierarchy } from "../tvos/TvosHierarchy";
+import { tvosRunners } from "../tvos/TvosRunnerRegistry";
 import { normalizeWatchHierarchy } from "../watch/WatchHierarchy";
 import { watchRunners } from "../watch/WatchRunnerRegistry";
 import { holderOf } from "../../daemon/deviceBinding";
@@ -379,11 +381,15 @@ export function createDeviceHierarchyCapture(
   device: BootedDevice,
   dependencies: DeviceHierarchyCaptureDependencies = {},
 ): HierarchyCapture {
-  if (device.platform === "watchos") {
+  if (device.platform === "watchos" || device.platform === "tvos") {
     const read = async (request: HierarchyCaptureRequest) =>
-      normalizeWatchHierarchy(
-        await watchRunners.require(device.deviceId).hierarchy(request.signal),
-      );
+      device.platform === "tvos"
+        ? normalizeTvosHierarchy(
+            await tvosRunners.require(device.deviceId).hierarchy(request.signal),
+          )
+        : normalizeWatchHierarchy(
+            await watchRunners.require(device.deviceId).hierarchy(request.signal),
+          );
     // Watch wire trees use the iOS bounds/attribute projection, without routing iOS commands.
     return new DefaultHierarchyCapture(
       "ios",

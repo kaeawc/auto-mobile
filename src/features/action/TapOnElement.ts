@@ -1,3 +1,4 @@
+import { rejectTvosTouch } from "../tvos/TvosActions";
 import { watchTapOn } from "../watch/WatchActions";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -401,6 +402,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       timer: options.timer,
       displayFence: options,
     });
+    rejectTvosTouch(device.platform, "tapOn");
     this.refreshedDisplayTransitions = options.displayTransitions ?? displayTransitions;
     this.lastRenderedObservation = options.lastRenderedObservation;
     this.prototypeAgents = options.prototypeAgents ?? {
@@ -847,6 +849,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @returns Result of the command
    */
   async execute(options: TapOnElementOptions, call: TapOnCall = {}): Promise<TapOnFocusResult> {
+    rejectTvosTouch(this.device.platform, "tapOn");
     if (this.device.platform === "watchos") {
       return watchTapOn(this.device.deviceId, options, call.signal);
     }

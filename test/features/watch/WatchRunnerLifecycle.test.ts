@@ -7,6 +7,12 @@ import type {
 } from "../../../src/daemon/sessionManager";
 import { FakeWatchRunnerLauncher } from "../../fakes/FakeWatchRunnerLauncher";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
+import {
+  WebSocketWatchRunnerClient,
+  type WatchRunnerClient,
+} from "../../../src/features/watch/WatchRunnerClient";
+import { FakeWatchSocket } from "../../fakes/FakeWatchSocket";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 class FakeSessions {
   readonly releases: ((sessionId: string) => void)[] = [];
@@ -48,9 +54,9 @@ afterEach(() => {
   }
 });
 
-function fixture() {
+function fixture(clients: readonly WatchRunnerClient[] = []) {
   const client = new FakeWatchRunnerClient();
-  const launcher = new FakeWatchRunnerLauncher(client);
+  const launcher = new FakeWatchRunnerLauncher(client, clients);
   const released: string[] = [];
   const allocated: string[] = [];
   const artifacts = { resolve: async () => "/products/CtrlProxyWatch_watchsimulator.xctestrun" };
@@ -91,6 +97,49 @@ test("owns one launch and port per watch and reuses a registered runner", async 
   f.owner.stop("owned-watch");
   expect(f.released).toEqual(["owned-watch"]);
   expect(watchRunners.get("owned-watch")).toBeUndefined();
+});
+
+test("relaunches an owned runner after its socket disconnects", async () => {
+  const socket = new FakeWatchSocket();
+  const oldClient = new WebSocketWatchRunnerClient("ws://127.0.0.1:8765/ws", {
+    factory: () => socket,
+    timer: new FakeTimer(),
+  });
+  const newClient = new FakeWatchRunnerClient();
+  const f = fixture([oldClient, newClient]);
+  socket.connected();
+  await f.owner.start(f.request);
+  expect(watchRunners.get("owned-watch")).toBe(oldClient);
+  socket.disconnect();
+  const restarted = await f.owner.start(f.request);
+  expect(restarted.runnerUnavailable).toBeUndefined();
+  expect(f.launcher.launches).toHaveLength(2);
+  expect(f.launcher.stops).toBe(1);
+  expect(socket.closed).toBe(true);
+  expect(watchRunners.get("owned-watch")).toBe(newClient);
+  expect(newClient.closed).toBe(false);
+  expect(f.released).toEqual(["owned-watch"]);
+});
+
+test("a disconnected pre-registered runner requires an external restart", async () => {
+  const f = fixture();
+  const client = new FakeWatchRunnerClient();
+  client.failure = new Error("disconnected");
+  const unregister = watchRunners.register("owned-watch", client);
+  try {
+    const result = await f.owner.start(f.request);
+    expect(result.runnerUnavailable).toContain("owned-watch");
+    expect(result.runnerUnavailable).toContain("disconnected");
+    expect(result.runnerUnavailable).toContain("not started by AutoMobile");
+    expect(result.runnerUnavailable).toContain("restart");
+    expect(f.launcher.launches).toEqual([]);
+    expect(f.allocated).toEqual([]);
+    f.owner.stopAll();
+    expect(watchRunners.get("owned-watch")).toBe(client);
+    expect(client.closed).toBe(false);
+  } finally {
+    unregister();
+  }
 });
 
 test("a pre-registered runner is kept without allocation or launch", async () => {

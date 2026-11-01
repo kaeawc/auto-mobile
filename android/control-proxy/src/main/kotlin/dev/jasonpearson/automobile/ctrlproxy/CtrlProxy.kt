@@ -1830,65 +1830,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun onDestroy() {
     super.onDestroy()
 
-    try {
-      unregisterReceiver(commandReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering command receiver", e)
-    }
-
-    try {
-      unregisterReceiver(navigationEventReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering navigation event receiver", e)
-    }
-
-    try {
-      unregisterReceiver(recompositionReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering recomposition receiver", e)
-    }
-
-    try {
-      unregisterReceiver(frameMetricsReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering frame metrics receiver", e)
-    }
-
-    try {
-      unregisterReceiver(packageReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering package receiver", e)
-    }
-
-    try {
-      unregisterReceiver(handledExceptionReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering handled exception receiver", e)
-    }
-
-    try {
-      unregisterReceiver(crashReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering crash receiver", e)
-    }
-
-    try {
-      unregisterReceiver(anrReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering ANR receiver", e)
-    }
-
-    try {
-      unregisterReceiver(eventBatchReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering event batch receiver", e)
-    }
-
-    try {
-      unregisterReceiver(screenStateReceiver)
-    } catch (e: Exception) {
-      Log.e(TAG, "Error unregistering screen state receiver", e)
-    }
+    releaseEach(
+      listOf(
+        "command" to commandReceiver,
+        "navigation event" to navigationEventReceiver,
+        "recomposition" to recompositionReceiver,
+        "frame metrics" to frameMetricsReceiver,
+        "package" to packageReceiver,
+        "handled exception" to handledExceptionReceiver,
+        "crash" to crashReceiver,
+        "ANR" to anrReceiver,
+        "event batch" to eventBatchReceiver,
+        "screen state" to screenStateReceiver,
+      ),
+      release = { unregisterReceiver(it) },
+      onFailure = { name, e -> Log.e(TAG, "Error unregistering $name receiver", e) },
+    )
 
     if (::rotationProvenance.isInitialized) {
       rotationProvenance.close()

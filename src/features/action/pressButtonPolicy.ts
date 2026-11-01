@@ -9,6 +9,8 @@ const NAVIGATION_PRESS_BUTTONS = new Set([
   "power",
   "action",
   "camera",
+  // Remote select activates the focused item, like rotary_select.
+  "select",
   // The rotary press activates the focused item, which usually navigates (#14920).
   "rotary_select",
   ...ANDROID_SYSTEM_ACTION_BUTTONS,
@@ -17,6 +19,12 @@ const IN_PLACE_PRESS_BUTTONS = new Set([
   "menu",
   "volume_up",
   "volume_down",
+  // Remote directions move focus; play/pause controls playback in place.
+  "up",
+  "down",
+  "left",
+  "right",
+  "playpause",
   // Rotary rotation and nudges move focus only.
   "rotary_rotate_cw",
   "rotary_rotate_ccw",

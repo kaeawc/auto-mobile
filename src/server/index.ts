@@ -1,4 +1,5 @@
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
+import { registerTvosRunnerBuilder } from "../features/tvos/TvosRunnerLifecycle";
 import { registerWatchRunnerBuilder } from "../features/watch/WatchRunnerLifecycle";
 import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
@@ -207,6 +208,7 @@ let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefi
  */
 export function registerMcpTools(daemonMode: boolean): void {
   registerWatchRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
+  registerTvosRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
   installDefaultProvisionedDeviceTransportFence();
   // Re-registering rebuilds every definition and drops the tool-schema cache, which a
   // stateless endpoint (one createMcpServer per request) would pay on every tools/list.

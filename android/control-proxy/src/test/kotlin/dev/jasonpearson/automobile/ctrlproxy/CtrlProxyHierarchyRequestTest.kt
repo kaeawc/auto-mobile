@@ -59,7 +59,7 @@ class CtrlProxyHierarchyRequestTest {
           ),
       )
     private val handler =
-      proxy.queuedMessageHandler(CtrlProxyMessageHandler(proxy), scope, dispatcher)
+      proxy.queuedMessageHandler(CtrlProxyMessageHandler(proxy.actions), scope, dispatcher)
     val server =
       WebSocketServer(
         scope = scope,
@@ -215,7 +215,9 @@ class CtrlProxyHierarchyRequestTest {
   @Test
   fun `uncorrelated successful extraction retains broadcast routing`() = runTest {
     val fixture = Fixture(this) { ViewHierarchy(updatedAt = 0, packageName = "fixture") }
-    fixture.proxy.requestHierarchy(RequestHierarchy(disableAllFiltering = false, requestId = null))
+    fixture.proxy.actions.requestHierarchy(
+      RequestHierarchy(disableAllFiltering = false, requestId = null),
+    )
     runCurrent()
     assertEquals(1, fixture.requester.messages.size)
     assertEquals(fixture.requester.messages, fixture.peer.messages)
@@ -237,7 +239,7 @@ class CtrlProxyHierarchyRequestTest {
       val fixture = Fixture(this) { throw cancellation }
       fixture.server.registerRequestOwner("req_cancel", fixture.owner)
       try {
-        fixture.proxy.requestHierarchy(
+        fixture.proxy.actions.requestHierarchy(
           RequestHierarchy(disableAllFiltering = false, requestId = "req_cancel"),
         )
         error("expected cancellation")
@@ -258,7 +260,7 @@ class CtrlProxyHierarchyRequestTest {
       }
     fixture.server.registerRequestOwner("req_cancel_null", fixture.owner)
     command = launch {
-      fixture.proxy.requestHierarchy(
+      fixture.proxy.actions.requestHierarchy(
         RequestHierarchy(disableAllFiltering = false, requestId = "req_cancel_null"),
       )
     }
@@ -276,7 +278,7 @@ class CtrlProxyHierarchyRequestTest {
         null
       }
     fixture.server.registerRequestOwner("stale_cancel_launch", fixture.owner)
-    fixture.proxy.requestHierarchyIfStale(Long.MAX_VALUE, "stale_cancel_launch")
+    fixture.proxy.actions.requestHierarchyIfStale(Long.MAX_VALUE, "stale_cancel_launch")
     fixture.cancelServiceScope()
     runCurrent()
     assertEquals(0, extractions)
@@ -289,7 +291,7 @@ class CtrlProxyHierarchyRequestTest {
     // Model an admitted request: the queue skips new commands once the server is stopped.
     fixture.server.registerRequestOwner("req_stopped_success", fixture.owner)
     fixture.markServerStopped()
-    fixture.proxy.requestHierarchy(
+    fixture.proxy.actions.requestHierarchy(
       RequestHierarchy(disableAllFiltering = false, requestId = "req_stopped_success"),
     )
     runCurrent()
@@ -301,7 +303,7 @@ class CtrlProxyHierarchyRequestTest {
     val fixture = Fixture(this) { null }
     fixture.server.registerRequestOwner("req_stopped_null", fixture.owner)
     fixture.markServerStopped()
-    fixture.proxy.requestHierarchy(
+    fixture.proxy.actions.requestHierarchy(
       RequestHierarchy(disableAllFiltering = false, requestId = "req_stopped_null"),
     )
     runCurrent()
@@ -313,7 +315,7 @@ class CtrlProxyHierarchyRequestTest {
     val fixture = Fixture(this) { error("tree unavailable") }
     fixture.server.registerRequestOwner("req_stopped_throw", fixture.owner)
     fixture.markServerStopped()
-    fixture.proxy.requestHierarchy(
+    fixture.proxy.actions.requestHierarchy(
       RequestHierarchy(disableAllFiltering = false, requestId = "req_stopped_throw"),
     )
     runCurrent()

@@ -14,6 +14,10 @@ learn which storage features a device and app support.
 See [Keystore test state](keystore-test-state.md) for the Android `secure_state` response and
 [Keystore metadata](keystore-metadata.md) for inspecting aliases from app tests.
 
+Android `secure_state.write` and `secure_state.namespace_reset` remain `unsupported`.
+Use `resetKeychain` with a declared scope or alias for scoped alias deletion;
+it does not write aliases or reset package data.
+
 ## iOS Keychain
 
 `storage.keychain` never contains a Keychain value.

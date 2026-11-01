@@ -449,7 +449,7 @@ describe("determinism", () => {
 });
 
 describe("Android app-owned Keystore capability", () => {
-  it("reports discovered metadata support and keeps host read and mutation unavailable", () => {
+  it("reports metadata support and scoped deletion separately from host read, write and reset", () => {
     const keystore = {
       schemaVersion: 1,
       capability: "storage.keystore",
@@ -470,6 +470,13 @@ describe("Android app-owned Keystore capability", () => {
     expect(findOperationCapability(report, "secure_state", "namespace_reset")?.state).toBe(
       "unsupported",
     );
+    expect(findOperationCapability(report, "secure_state", "write")?.reason).toBe(
+      "Keystore aliases are not written; scoped alias deletion is exposed by resetKeychain with a declared scope or alias.",
+    );
+    expect(findOperationCapability(report, "secure_state", "namespace_reset")?.reason).toBe(
+      "Package-data reset is explicit and separate; resetKeychain deletes only aliases declared in a scope.",
+    );
+    expect(secure.note).toContain("resetKeychain deletes only declared aliases");
   });
   it("does not infer Keystore bridge availability from embedded SDK", () => {
     expect(

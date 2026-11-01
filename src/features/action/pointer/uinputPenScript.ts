@@ -134,8 +134,9 @@ function planFrames(request: PointerRequest): Frame[] {
       const fraction = frame / count;
       pressure = lerp(start.pressure, to.pressure ?? start.pressure, fraction);
       distance = lerp(start.distance, to.distance ?? start.distance, fraction);
-      tilt = start.tilt === undefined ? undefined : lerp(start.tilt, to.tilt ?? 0, fraction);
-      orientation = lerp(start.orientation, to.orientation ?? 0, fraction);
+      tilt =
+        start.tilt === undefined ? undefined : lerp(start.tilt, to.tilt ?? start.tilt, fraction);
+      orientation = lerp(start.orientation, to.orientation ?? start.orientation, fraction);
       frames.push({
         atMs: elapsed + Math.floor((durationMs * frame) / count),
         x: frame === count ? to.x : lerp(from.x, to.x, fraction),

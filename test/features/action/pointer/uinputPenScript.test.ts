@@ -229,7 +229,7 @@ describe("uinput extended axes", () => {
     }
   });
 
-  test("interpolates tilt and orientation and defaults omitted waypoint axes to zero", () => {
+  test("interpolates tilt and orientation and preserves omitted waypoint axes", () => {
     const frames = commands({
       features: { toolType: "stylus", extendedAxes: true },
       points: [
@@ -242,7 +242,7 @@ describe("uinput extended axes", () => {
       [0, 0, 0],
       [1, 30, 45],
       [2, 60, 90],
-      [3, 0, 0],
+      [3, 60, 90],
     ]) {
       const events = frames[index].events ?? [];
       const start = events.findIndex(
@@ -253,7 +253,24 @@ describe("uinput extended axes", () => {
     }
   });
 
-  test("defaults missing tilt or orientation to zero", () => {
+  test("keeps first-point tilt constant when the next waypoint omits it", () => {
+    const frames = commands({
+      features: { toolType: "stylus", extendedAxes: true },
+      points: [
+        { x: 0, y: 0, tilt: Math.PI / 3 },
+        { x: 20, y: 20, durationMs: 32 },
+      ],
+    }).filter((command) => command.command === "inject");
+    for (const frame of frames.slice(0, 3)) {
+      const events = frame.events ?? [];
+      const start = events.findIndex(
+        (value, i) => i % 3 === 0 && value === EV_ABS && events[i + 1] === 26,
+      );
+      expect(events.slice(start, start + 6)).toEqual([EV_ABS, 26, 0, EV_ABS, 27, 60]);
+    }
+  });
+
+  test("defaults missing first-point tilt or orientation to zero", () => {
     for (const [point, expected] of [
       [{ tilt: Math.PI / 6 }, [EV_ABS, 26, 0, EV_ABS, 27, 30]],
       [{ orientation: Math.PI / 2 }, [EV_ABS, 26, 0, EV_ABS, 27, 0]],

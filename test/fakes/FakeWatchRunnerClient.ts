@@ -14,6 +14,9 @@ export class FakeWatchRunnerClient implements WatchRunnerClient {
     }
     this.tree = tree;
   }
+  isUsable(): boolean {
+    return !this.closed && !this.failure;
+  }
   async request(
     command: WatchCommand,
     signal?: AbortSignal,

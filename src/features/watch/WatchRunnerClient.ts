@@ -13,6 +13,8 @@ export type WatchCommand =
   | { type: "swipe"; direction: "up" | "down" | "left" | "right" };
 
 export interface WatchRunnerClient {
+  /** Registered clients remain reusable until a permanent connection failure or close. */
+  isUsable(): boolean;
   request(
     command: WatchCommand,
     signal?: AbortSignal,
@@ -80,6 +82,10 @@ export class WebSocketWatchRunnerClient implements WatchRunnerClient {
     this.socket.onFailure((error) =>
       this.fail(toActionableError(error, "Watch runner connection failed")),
     );
+  }
+
+  isUsable(): boolean {
+    return this.failure === undefined;
   }
 
   private fail(error: ActionableError): void {

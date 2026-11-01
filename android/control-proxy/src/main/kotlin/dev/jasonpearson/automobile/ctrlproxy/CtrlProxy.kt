@@ -74,7 +74,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
@@ -84,7 +83,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
-import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
@@ -1536,33 +1534,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
               },
             windowOnScreen =
-              PrototypeWindowOnScreen { displayId ->
-                try {
-                  val selected =
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-                      // A null framework list is unavailable, rather than evidence of absence.
-                      windows?.let {
-                        if (displayId == Display.DEFAULT_DISPLAY) it else null
-                      }
-                    } else viewHierarchyExtractor.selectDisplayWindows(this, displayId).windows
-                  prototypeWindowOnScreen(
-                    selected,
-                    hasTitle = { hasPrototypeTitle(it.type, it.title) },
-                    rootPackage = { window ->
+              PrototypeWindowProbe(
+                sdkInt = Build.VERSION.SDK_INT,
+                source =
+                  object : PrototypeWindowProbe.Source<AccessibilityWindowInfo> {
+                    override fun legacyWindows(): List<AccessibilityWindowInfo>? = windows
+
+                    override fun displayWindows(displayId: Int) =
+                      viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId).windows
+
+                    override fun hasTitle(window: AccessibilityWindowInfo) =
+                      hasPrototypeTitle(window.type, window.title)
+
+                    override fun rootPackage(window: AccessibilityWindowInfo): String? {
                       val root = window.root
-                      try {
+                      return try {
                         root?.packageName?.toString()
                       } finally {
                         root?.recycle()
                       }
-                    },
-                    ownPackage = packageName,
-                  )
-                } catch (error: Exception) {
-                  Log.d(TAG, "Could not determine prototype window visibility", error)
-                  null
-                }
-              },
+                    }
+                  },
+                ownPackage = packageName,
+                onFailure = { Log.d(TAG, "Could not determine prototype window visibility", it) },
+              ),
             displays = prototypeDisplays,
             clearAssets = { prototypeAssets.clear() },
             hasAsset = { prototypeAssets.lookup(it) != null },

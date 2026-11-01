@@ -22,7 +22,7 @@ teardown() {
   run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts nope diff.patch' _ "$repo_dir"
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: check-boundary-row.ts <security|simctl|xcodebuild|plutil|ffmpeg|simulator-tcc-sqlite|android-emulator|ios-ctrl-proxy-process|app-bundle-metadata|child-process-import|archive-extraction|host-shell>"* ]]
+  [[ "$output" == *"usage: check-boundary-row.ts <security|simctl|xcodebuild|plutil|ffmpeg|simulator-tcc-sqlite|android-emulator|ios-ctrl-proxy-process|app-bundle-metadata|child-process-import|archive-extraction|daemon-launcher|host-shell>"* ]]
 }
 
 @test "reports a violation with the row's failure header and exit 1" {

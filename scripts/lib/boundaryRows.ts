@@ -3,6 +3,7 @@ import { type BoundaryHit, type BoundaryRow, type BoundarySpan, spanOf } from ".
 import * as appBundle from "./appBundleMetadataBoundary";
 import * as archiveExtraction from "./archiveExtractionBoundary";
 import { ALLOWED_IMPORTERS, findChildProcessImports } from "./childProcessImportBoundary";
+import * as daemonLauncher from "./daemonLauncherBoundary";
 import { findViolationsInSource as findHostShellCalls } from "./hostShellBoundary";
 import * as iosCtrlProxy from "./iosCtrlProxyProcessBoundary";
 import { findDirectEmulatorCalls } from "./androidEmulatorBoundary";
@@ -284,6 +285,20 @@ export const BOUNDARY_ROWS: readonly BoundaryRow[] = [
       archiveExtraction.directlyExtractsTar(source)
         ? [{ line: 1, column: 1, endLine: 1, text: "" }]
         : [],
+  },
+  {
+    id: "daemon-launcher",
+    owner: daemonLauncher.OWNER,
+    skipPrefixes: [],
+    treeRoot: daemonLauncher.SOURCE_ROOT,
+    scope: "tree",
+    report: "root-locations",
+    failureHeader: "error: daemon execution must use DaemonLauncher:",
+    successMessage: "daemon-launcher-boundary: no direct production daemon invocations.",
+    detect: (source, file) =>
+      daemonLauncher
+        .findViolationsInSource(file, source)
+        .map(({ line, column, text }) => ({ line, column, endLine: line, text })),
   },
   {
     id: "host-shell",

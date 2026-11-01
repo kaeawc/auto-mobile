@@ -68,6 +68,20 @@ describe("DeviceSnapshotRepository", () => {
     expect(result!.manifest.snapshotName).toBe("snap-1");
   });
 
+  test("a fixture's recorded identity survives the round-trip (#14065)", async () => {
+    const fixture = {
+      avdName: "Pixel_6",
+      systemImageId: "system-images;android-35;google_apis;arm64-v8a:abc",
+      avdConfigHash: "cfg",
+      emulatorVersion: "Android emulator version 35.2.10.0",
+      userdataGeneration: "42:1730000000000",
+    };
+    await repo.insertSnapshot(makeRecord({ manifest: makeManifest({ fixture }) }));
+
+    expect((await repo.getSnapshot("snap-1"))?.manifest.fixture).toEqual(fixture);
+    expect((await repo.listSnapshots())[0]?.manifest.fixture).toEqual(fixture);
+  });
+
   test("insertSnapshot upserts an existing snapshot name", async () => {
     await repo.insertSnapshot(makeRecord());
 

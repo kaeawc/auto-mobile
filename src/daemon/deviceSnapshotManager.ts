@@ -51,6 +51,11 @@ import {
 import { errorMessage } from "../utils/describeUnknownError";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import { logger } from "../utils/logger";
+import type { FixtureIdentityProbe } from "../features/snapshot/fixtureIdentity";
+import { createHostAvdFixtureIdentityProbe } from "../features/snapshot/hostAvdFixtureIdentityProbe";
+import { assertFixtureReloadable, readFixtureIdentityForCapture } from "./snapshotFixtureGuards";
+import type { CaptureFixture } from "./snapshotFixtureGuards";
+import { assertSnapshotMatchesDevice } from "./snapshotDeviceMatch";
 import {
   deviceSnapshotIncarnationInvalidator,
   type DeviceIncarnationInvalidator,
@@ -60,44 +65,6 @@ import type {
   DeviceSnapshotCaptureArgs,
   DeviceSnapshotRestoreArgs,
 } from "../models/deviceSnapshotArgsSchema";
-
-function snapshotMatchesDevice(record: DeviceSnapshotRecord, device: BootedDevice): boolean {
-  if (record.platform !== device.platform) {
-    return false;
-  }
-
-  if (device.platform === "ios") {
-    return record.deviceId === device.deviceId;
-  }
-
-  const targetIsEmulator = device.deviceId.startsWith("emulator-");
-  const recordIsEmulator = record.deviceId.startsWith("emulator-");
-  if (!targetIsEmulator) {
-    return record.deviceId === device.deviceId;
-  }
-
-  // Emulator serials are reassigned between sessions, so the AVD name is a
-  // compatible identity. A different AVD name is a conflict even if an old
-  // emulator serial happens to match the current one.
-  return (
-    (recordIsEmulator && record.deviceName === device.name) ||
-    (record.deviceId.length === 0 && record.deviceName === device.name) ||
-    (record.deviceId === device.deviceId && record.deviceName.length === 0)
-  );
-}
-
-function assertSnapshotMatchesDevice(record: DeviceSnapshotRecord, device: BootedDevice): void {
-  if (snapshotMatchesDevice(record, device)) {
-    return;
-  }
-
-  const snapshotOwner = `${record.platform} device '${record.deviceName || "unknown"}' (${record.deviceId || "unknown ID"})`;
-  const target = `${device.platform} device '${device.name}' (${device.deviceId})`;
-  throw new ActionableError(
-    `Snapshot '${record.snapshotName}' belongs to ${snapshotOwner} and cannot be restored to ${target}. ` +
-      "Restore it on its original device or capture a snapshot for the target device.",
-  );
-}
 
 interface DeviceSnapshotConfigUpdateResult {
   config: DeviceSnapshotConfig;
@@ -176,6 +143,8 @@ interface DeviceSnapshotManagerDependencies {
     store: DeviceSnapshotStorePort,
   ) => SnapshotRestoreProvider;
   deviceIncarnationInvalidator: DeviceIncarnationInvalidator;
+  /** Reads what a snapshot fixture depends on, on capture and before each reload (#14065). */
+  fixtureIdentityProbe: FixtureIdentityProbe;
 }
 
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
@@ -436,6 +405,7 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
       createRestoreProvider: (device, timer, store) =>
         new RestoreSnapshot(device, { timer, store }),
       deviceIncarnationInvalidator: deviceSnapshotIncarnationInvalidator,
+      fixtureIdentityProbe: createHostAvdFixtureIdentityProbe(),
     };
   }
 
@@ -458,6 +428,7 @@ export async function setDeviceSnapshotManagerDependencies(
     createRestoreProvider: deps.createRestoreProvider ?? current.createRestoreProvider,
     deviceIncarnationInvalidator:
       deps.deviceIncarnationInvalidator ?? current.deviceIncarnationInvalidator,
+    fixtureIdentityProbe: deps.fixtureIdentityProbe ?? current.fixtureIdentityProbe,
   };
 }
 
@@ -2157,6 +2128,29 @@ async function enforceCapturedSnapshotRetention(
   );
 }
 
+/** Refuse an unwritable capture name, and read the fixture identity a fixture capture records. */
+async function prepareCaptureName(
+  device: BootedDevice,
+  snapshotName: string,
+  useVmSnapshot: boolean,
+  args: DeviceSnapshotCaptureArgs,
+): Promise<CaptureFixture | undefined> {
+  // Reject a traversal/absolute name before any filesystem operation or capture
+  // command can act on it (issue #5705).
+  assertSafeSnapshotName(snapshotName);
+  // Reject reserved scope-root names (#5707). An existing same-name snapshot is
+  // deliberately allowed through — it is overwritten atomically below (#5713).
+  assertSnapshotNameWritable(snapshotName);
+  if (isAndroidEmulatorVmCapture(device, useVmSnapshot)) {
+    assertVmSnapshotNameWritable(snapshotName);
+  }
+  const { fixtureIdentityProbe } = await getDeviceSnapshotDependencies();
+  return readFixtureIdentityForCapture(
+    { device, snapshotName, useVmSnapshot, fixture: args.fixture },
+    fixtureIdentityProbe,
+  );
+}
+
 export async function captureDeviceSnapshot(
   device: BootedDevice,
   args: DeviceSnapshotCaptureArgs,
@@ -2172,15 +2166,7 @@ export async function captureDeviceSnapshot(
   const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
 
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
-  // Reject a traversal/absolute name before any filesystem operation or capture
-  // command can act on it (issue #5705).
-  assertSafeSnapshotName(snapshotName);
-  // Reject reserved scope-root names (#5707). An existing same-name snapshot is
-  // deliberately allowed through — it is overwritten atomically below (#5713).
-  assertSnapshotNameWritable(snapshotName);
-  if (isAndroidEmulatorVmCapture(device, useVmSnapshot)) {
-    assertVmSnapshotNameWritable(snapshotName);
-  }
+  const fixture = await prepareCaptureName(device, snapshotName, useVmSnapshot, args);
 
   // Cheapest possible hook for finishing reclaims that an offline emulator
   // blocked: this device is live and we already know its AVD, so the sweep is
@@ -2244,6 +2230,7 @@ export async function captureDeviceSnapshot(
                 appBundleIds: args.appBundleIds,
               });
               vmSnapshotWasCaptured = captured.manifest.snapshotType === "vm";
+              captured.manifest.fixture ??= await fixture?.confirmUnchanged();
 
               const sizeBytes = await resolveSnapshotSizeBytes(
                 snapshotName,
@@ -2354,6 +2341,7 @@ export async function restoreDeviceSnapshot(
     now,
     createRestoreProvider,
     deviceIncarnationInvalidator,
+    fixtureIdentityProbe,
   } = await getDeviceSnapshotDependencies();
   ensureSnapshotJournalSweepScheduled({ timer });
 
@@ -2389,6 +2377,11 @@ export async function restoreDeviceSnapshot(
       );
     }
 
+    const baseConfig = await getDeviceSnapshotConfig();
+    const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
+    const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
+    await assertFixtureReloadable(record, args, useVmSnapshot, fixtureIdentityProbe);
+
     try {
       await snapshotStore.recoverSnapshotData(
         record.snapshotName,
@@ -2408,10 +2401,6 @@ export async function restoreDeviceSnapshot(
         `Failed to recover snapshot '${record.snapshotName}' before restore`,
       );
     }
-
-    const baseConfig = await getDeviceSnapshotConfig();
-    const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
-    const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
 
     const restoreProvider = createRestoreProvider(device, timer, snapshotStore);
     let prepared = false;

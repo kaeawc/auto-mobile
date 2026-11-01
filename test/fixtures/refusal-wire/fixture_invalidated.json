@@ -1,0 +1,13 @@
+{
+  "code": "fixture_invalidated",
+  "builder": "SnapshotFixtureRefusedError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Fixture 'signed-in' no longer matches AVD 'Pixel_8' (userdata-wiped). Capture it again with fixture: true.\",\"code\":\"fixture_invalidated\",\"snapshotName\":\"signed-in\",\"retryable\":false,\"reasons\":[\"userdata-wiped\"]}"
+      }
+    ],
+    "isError": true
+  }
+}

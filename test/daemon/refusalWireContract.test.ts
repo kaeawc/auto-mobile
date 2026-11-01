@@ -93,6 +93,7 @@ import * as mcpTimeouts from "../../src/daemon/wire/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
 import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
+import * as snapshotFixtureRefused from "../../src/models/SnapshotFixtureRefusedError";
 import * as nsDaemonRequestNotDeliveredError from "../../src/daemon/DaemonRequestNotDeliveredError";
 import * as nsDaemonUnavailableError from "../../src/daemon/DaemonUnavailableError";
 import * as nsUnknownToolError from "../../src/daemon/UnknownToolError";
@@ -235,6 +236,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/wire/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
+  "models/SnapshotFixtureRefusedError": snapshotFixtureRefused,
   "models/SdkTooOldError": sdkTooOld,
   "features/prototype/prototypeHidden": prototypeHidden,
   "features/prototype/prototypeSuspended": prototypeSuspended,

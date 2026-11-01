@@ -63,6 +63,17 @@ describe("AvdFixtureIdentityProbe (#14065)", () => {
     ).toBe("none");
   });
 
+  test("reads the userdata image the emulator is redirected to, not the AVD's own", async () => {
+    const { deps, files } = fakeDeps();
+    files.set("/scratch/userdata.img", { ino: 9, birthtimeMs: 5 });
+    const probe = new AvdFixtureIdentityProbe({
+      ...deps,
+      userdataImage: () => "/scratch/userdata.img",
+    });
+
+    expect((await probe.currentIdentity("pixel")).userdataGeneration).toBe("9:5");
+  });
+
   test("refuses an AVD that is not on this host, or lacks system-image metadata", async () => {
     const { deps, config } = fakeDeps();
     const probe = new AvdFixtureIdentityProbe(deps);

@@ -8,7 +8,7 @@ import type {
 import type { FixtureIdentity, FixtureIdentityProbe } from "./fixtureIdentity";
 
 /** The userdata image the emulator re-creates on `-wipe-data`. */
-const USERDATA_IMAGE = "userdata-qemu.img";
+export const USERDATA_IMAGE = "userdata-qemu.img";
 
 /** The host reads an AVD fixture identity needs; each is injectable so tests use fakes. */
 export interface AvdFixtureIdentityDeps {
@@ -18,6 +18,8 @@ export interface AvdFixtureIdentityDeps {
   imageMetadata(imagePath: string): Promise<string>;
   /** Output of `emulator -version`. */
   emulatorVersion(): Promise<string>;
+  /** The userdata image the AVD's emulator runs; defaults to the AVD's own. */
+  userdataImage?(avdDirectory: string): string;
   /** Inode and birth time of a host file, or null when it does not exist. */
   fileIdentity(path: string): Promise<{ ino: number; birthtimeMs: number } | null>;
 }
@@ -47,7 +49,8 @@ export class AvdFixtureIdentityProbe implements FixtureIdentityProbe {
     if (!version) {
       throw new ActionableError("Could not read the emulator version for the fixture identity");
     }
-    const userdata = await this.deps.fileIdentity(join(directory, USERDATA_IMAGE));
+    const userdataImage = this.deps.userdataImage?.(directory) ?? join(directory, USERDATA_IMAGE);
+    const userdata = await this.deps.fileIdentity(userdataImage);
     return {
       avdName,
       systemImageId: `${config.systemImagePackage}:${sha256(metadata)}`,

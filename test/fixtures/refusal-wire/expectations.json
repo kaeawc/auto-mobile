@@ -159,6 +159,30 @@
         "acquireNewSession": false
       }
     },
+    "fixture_invalidated": {
+      "expected": "fail",
+      "fields": {
+        "code": "fixture_invalidated",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "fixture_requires_vm_snapshot": {
+      "expected": "fail",
+      "fields": {
+        "code": "fixture_requires_vm_snapshot",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "snapshot_not_a_fixture": {
+      "expected": "fail",
+      "fields": {
+        "code": "snapshot_not_a_fixture",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "app_not_running": {
       "expected": "fail",
       "fields": {

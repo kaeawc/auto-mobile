@@ -1306,6 +1306,11 @@ describe("tapOn long press outer budget", () => {
     ["longPress", 0, undefined, undefined, 30000],
     ["longPress", Infinity, undefined, undefined, 30000],
     ["tap", 17000, undefined, undefined, 30000],
+    ["doubleTap", 60000, undefined, undefined, 30000],
+    [undefined, 60000, undefined, undefined, 91500],
+    ["longPress", 60000, undefined, undefined, 91500],
+    ["tap", 60000, undefined, undefined, 30000],
+    [undefined, undefined, undefined, undefined, 30000],
   ])(
     "action %s duration %s search %s caller %s resolves %s",
     (action, duration, searchDuration, timeoutMs, expected) => {
@@ -1856,6 +1861,26 @@ describe("executePlan deadline derived from the plan's steps (#9882)", () => {
       ],
     });
     expect(resolvePlan(content)).toBe(2 * MIN_INSTALL_APP_MCP_TIMEOUT_MS + HEADROOM_MS);
+  });
+
+  test("duration-only tapOn steps get the same long-press budget as explicit actions", () => {
+    const steps = Array.from({ length: 7 }, () => ({
+      tool: "tapOn",
+      params: { selector: { text: "Target" }, duration: 60_000 },
+    }));
+    const inferredBudget = resolvePlan(planContent({ name: "p", steps }));
+    const explicitBudget = resolvePlan(
+      planContent({
+        name: "p",
+        steps: steps.map((step) => ({
+          ...step,
+          params: { ...step.params, action: "longPress" },
+        })),
+      }),
+    );
+    expect(inferredBudget).toBe(7 * 91_500 + HEADROOM_MS);
+    expect(inferredBudget).toBe(explicitBudget);
+    expect(inferredBudget).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
   });
 
   test("a short plan keeps the 600 s floor", () => {

@@ -21,7 +21,15 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "terminateApp",
     "observe",
   ]),
-  tvos: new Set<string>(["listDevices", "listDeviceImages", "provisionDevice", "deleteDevice"]),
+  tvos: new Set<string>([
+    "listDevices",
+    "listDeviceImages",
+    "provisionDevice",
+    "deleteDevice",
+    "startDevice",
+    "setActiveDevice",
+    "killDevice",
+  ]),
 };
 
 export function unsupportedPlatformToolMessage(
@@ -85,7 +93,8 @@ function nestedPlatform(value: unknown): unknown {
 
 /**
  * Plain tools (device management such as killDevice) look up their target themselves and are not
- * behind the registry's device gate, so each refuses an Apple TV request by name before any lookup.
+ * behind the registry's device gate, so tools that have not opted in refuse an Apple TV request
+ * by name before any lookup.
  * Without this, a `tvos` request could fall through to the iOS simulator path.
  */
 export function assertRequestNotTvos(toolName: string, args: object): void {
@@ -94,7 +103,7 @@ export function assertRequestNotTvos(toolName: string, args: object): void {
     record.platform,
     ...NESTED_PLATFORM_KEYS.map((key) => nestedPlatform(record[key])),
   ];
-  if (named.includes("tvos")) {
+  if (named.includes("tvos") && !APPLE_PLATFORM_SUPPORTED_TOOLS.tvos.has(toolName)) {
     throw new ActionableError(unsupportedPlatformToolMessage(toolName, "tvos"));
   }
 }

@@ -275,7 +275,7 @@ export function judgeManifest(
   }
   if (manifest.status === "complete") {
     if (
-      (slice === NETWORK_SLICE || manifest.bundleId !== undefined) &&
+      (slice === NETWORK_SLICE || slice === "faults" || manifest.bundleId !== undefined) &&
       manifest.bundleId !== PLAYGROUND_BUNDLE_ID
     ) {
       findings.push({

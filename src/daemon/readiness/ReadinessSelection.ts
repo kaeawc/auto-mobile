@@ -1,3 +1,4 @@
+import { resolveBootedAppleTvForCall } from "./appleTvReadiness";
 import { iosReadNotBootedMessage } from "./readinessLifecycleStart";
 import {
   type AppearanceMode,
@@ -57,6 +58,12 @@ import {
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleIdentity,
 } from "../../devices/virtualDeviceLifecycleCoordinator";
+
+const BOOTED_SIMULATOR_READINESS: Partial<Record<SomePlatform, typeof resolveBootedWatchForCall>> =
+  {
+    watchos: resolveBootedWatchForCall,
+    tvos: resolveBootedAppleTvForCall,
+  };
 
 interface ReadinessSelectionDependencies {
   applyAppearanceOnConnect(
@@ -246,14 +253,10 @@ export class ReadinessSelection {
     logger.info(
       `[DeviceReadiness] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
-    if (platform === "watchos") {
+    const resolveBootedSimulator = BOOTED_SIMULATOR_READINESS[platform];
+    if (resolveBootedSimulator) {
       const pin = this.dependencies.selection.getPin(options?.connectionId);
-      return resolveBootedWatchForCall(
-        this.dependencies.deviceUtils,
-        providedDeviceId,
-        pin,
-        options,
-      );
+      return resolveBootedSimulator(this.dependencies.deviceUtils, providedDeviceId, pin, options);
     }
     providedDeviceId = await this.resolveProvidedReadinessId(providedDeviceId);
 
@@ -820,9 +823,10 @@ export class ReadinessSelection {
       }
     }
     // With no matching deviceId, fall back to the platform setActiveDevice selected. A watch pin
-    // never decides a call that did not name watchOS (#14908).
+    // never decides a call that did not name its platform (#14908).
     const pin = this.dependencies.selection.getPin(options?.connectionId);
-    const selectedPlatform = pin?.platform === "watchos" ? undefined : pin?.platform;
+    const selectedPlatform =
+      pin?.platform === "watchos" || pin?.platform === "tvos" ? undefined : pin?.platform;
     if (selectedPlatform) {
       return {
         platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,

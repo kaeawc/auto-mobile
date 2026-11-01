@@ -240,11 +240,24 @@ function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | u
   );
 }
 
+function resolveTapOnAction(
+  args: Pick<TapOnArgs, "action" | "duration">,
+): NonNullable<TapOnArgs["action"]> {
+  const hasDuration = (args.duration ?? 0) > 0;
+  if (args.action === "tap" && hasDuration) {
+    throw new ActionableError(
+      'duration applies only to longPress; pass action: "longPress" or omit duration',
+    );
+  }
+  return args.action ?? (hasDuration ? "longPress" : "tap");
+}
+
 export async function tapOnHandler(
   device: BootedDevice,
   args: TapOnArgs,
   { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
+  const action = resolveTapOnAction(args);
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const tapOnTextCommand = (deps.tapOnElementFactory ?? defaultTapOnElementFactory)(device);
   const result = await tapOnTextCommand.execute(
@@ -259,7 +272,7 @@ export async function tapOnHandler(
       sibling: args.sibling,
       selectionStrategy: args.selectionStrategy,
       index: args.index,
-      action: args.action,
+      action,
       duration: args.duration,
       searchUntil: args.searchUntil,
       preTapStability: args.preTapStability,

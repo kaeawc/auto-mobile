@@ -61353,8 +61353,7 @@
           "enum": ["app", "prototype"]
         },
         "action": {
-          "description": "Action type (default: tap)",
-          "default": "tap",
+          "description": "Action type (default: longPress when duration is given, otherwise tap)",
           "type": "string",
           "enum": ["tap", "doubleTap", "longPress"]
         },

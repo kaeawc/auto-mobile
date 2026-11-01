@@ -304,6 +304,56 @@ describe("tapOn schema", () => {
 });
 
 describe("tapAny schema", () => {
+  test("infers longPress when only duration is given", () => {
+    expect(tapAnySchema.parse({ platform: "android", duration: 800 })).toMatchObject({
+      action: "longPress",
+      duration: 800,
+    });
+  });
+
+  test.each(["tap", "doubleTap"] as const)("rejects duration with explicit %s", (action) => {
+    expect(
+      zodIssues(() => tapAnySchema.parse({ platform: "android", action, duration: 800 })),
+    ).toContainEqual(
+      expect.objectContaining({
+        code: "custom",
+        message: "duration is only valid with action longPress",
+        path: ["duration"],
+      }),
+    );
+  });
+
+  test("preserves explicit longPress with duration", () => {
+    expect(
+      tapAnySchema.parse({ platform: "android", action: "longPress", duration: 800 }),
+    ).toMatchObject({ action: "longPress", duration: 800 });
+  });
+
+  test("forwards the default tap action to the handler command", async () => {
+    const requests: TapAnyElementOptions[] = [];
+    await tapAnyHandler(
+      { name: "fake", deviceId: "fake", platform: "android" },
+      tapAnySchema.parse({ platform: "android" }),
+      {
+        deps: {
+          tapAnyElementFactory: () => ({
+            execute: async (options) => {
+              requests.push(options);
+              return {
+                success: false,
+                action: options.action,
+                error: "injected failure",
+                element: { bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
+              };
+            },
+          }),
+        },
+      },
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.action).toBe("tap");
+  });
+
   test("requires only platform", () => {
     const result = tapAnySchema.parse({ platform: "android" });
     expect(result.action).toBe("tap");
@@ -339,11 +389,11 @@ describe("tapAny schema", () => {
       container: { text: "My List" },
       selectionStrategy: "first",
       scrollableContainer: true,
-      action: "doubleTap",
+      action: "longPress",
       duration: 500,
       searchUntil: { duration: 2000 },
     });
-    expect(result.action).toBe("doubleTap");
+    expect(result.action).toBe("longPress");
     expect(result.scrollableContainer).toBe(true);
   });
 

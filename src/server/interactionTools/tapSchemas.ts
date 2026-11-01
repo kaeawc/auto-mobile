@@ -296,8 +296,8 @@ export const tapAnySchema = withJsonSchemaOverride(
         layer: hierarchyLayerSchema.optional(),
         action: z
           .enum(["tap", "doubleTap", "longPress"])
-          .default("tap")
-          .describe("Action type (default: tap)"),
+          .optional()
+          .describe("Action type (default: longPress when duration is given, otherwise tap)"),
         // Bounded like tapOn.duration so a negative longPress cannot silently
         // become a plain tap (#5769).
         duration: z
@@ -326,6 +326,23 @@ export const tapAnySchema = withJsonSchemaOverride(
         ...responseShapeControlFields,
       })
       .strict(),
-  ),
+  )
+    .superRefine((value, context) => {
+      if (
+        value.duration !== undefined &&
+        value.action !== undefined &&
+        value.action !== "longPress"
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "duration is only valid with action longPress",
+          path: ["duration"],
+        });
+      }
+    })
+    .overwrite((value) => ({
+      ...value,
+      action: value.action ?? (value.duration !== undefined ? "longPress" : "tap"),
+    })),
   (js) => compactExclusiveSelectorProperties(js, ["container"]),
 );

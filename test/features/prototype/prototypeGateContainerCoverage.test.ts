@@ -696,5 +696,5 @@ test("layout direction is an independent root window gate", () => {
     ]);
   }
   expect(gate.fields({ root: label, state: { layoutDirection: "rtl" } })).toEqual([]);
-  expect(gate.unsupportedMessage(["window.layoutDirection"])).toContain("window.layoutDirection");
+  expect(gate.unsupportedMessage(["window.layoutDirection"], "ios")).toContain("window.layoutDirection");
 });

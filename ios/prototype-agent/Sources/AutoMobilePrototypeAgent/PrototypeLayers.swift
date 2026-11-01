@@ -83,8 +83,8 @@
             case .ltr: .forceLeftToRight
             case nil: .unspecified
             }
-            for root in [view, page.view, top.view] {
-                if root?.semanticContentAttribute != semantic { root?.semanticContentAttribute = semantic }
+            for root in [view, page.view, top.view] where root?.semanticContentAttribute != semantic {
+                root?.semanticContentAttribute = semantic
             }
             syncDeviceState()
             super.viewWillLayoutSubviews()

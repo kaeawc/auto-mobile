@@ -19,6 +19,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { isIosAppSwitcherVisible } from "../observe/ios/AppSwitcherSnapshotClassifier";
 import { deriveIosScreenIdentity } from "../observe/ios/IosScreenIdentity";
 import { hierarchyChanged } from "../../utils/hierarchyFingerprint";
 import type { CtrlProxyHierarchy } from "../observe/ios/types";
@@ -72,6 +73,8 @@ export interface IosHomeNavigationOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   onDispatch?: () => void;
+  /** Pre-navigation switcher evidence, before a runner press can return to the app. */
+  appSwitcherWasOpen?: boolean;
 }
 
 export class HomeScreen extends BaseVisualChange {
@@ -83,6 +86,7 @@ export class HomeScreen extends BaseVisualChange {
    */
   private static readonly HOME_KEYEVENT_TIMEOUT_MS = 3000;
   private static readonly IOS_HOME_VERIFICATION_TIMEOUT_MS = 4000;
+  private static readonly IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS = 1000;
   private static readonly IOS_HOME_HIERARCHY_READ_TIMEOUT_MS = 1000;
   private static readonly IOS_HOME_RETRY_DELAYS_MS: readonly number[] = [300, 600, 900];
   private static readonly IOS_SIMULATOR_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400, 500];
@@ -164,13 +168,18 @@ export class HomeScreen extends BaseVisualChange {
         }
         case "ios":
           await perf.track("iOSHomeNavigation", () =>
-            this.executeIosHomeNavigation({ perf, signal }),
+            this.executeIosHomeNavigation({
+              perf,
+              signal,
+              appSwitcherWasOpen: isIosAppSwitcherVisible(previousHierarchy?.hierarchy),
+            }),
           );
           // A fallback can also be the real home screen. Navigation above verifies
           // SpringBoard foreground; compare the final tree before calling it already home.
           if (
             previousHierarchy?.packageName === "com.apple.springboard" &&
-            !previousHierarchy.hierarchy?.error
+            !previousHierarchy.hierarchy?.error &&
+            !isIosAppSwitcherVisible(previousHierarchy.hierarchy)
           ) {
             alreadyOnHome = previousHierarchy.fallbackToSpringboard !== true;
             possiblyAlreadyHome = alreadyOnHome ? undefined : previousHierarchy;
@@ -361,19 +370,11 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   async executeIosHomeNavigation(options: IosHomeNavigationOptions = {}): Promise<void> {
-    const { perf, frameContext, timeoutMs, signal, onDispatch } = options;
+    const { perf, timeoutMs, signal, onDispatch, appSwitcherWasOpen } = options;
     throwIfAborted(signal);
     const backend = resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl });
     if (backend.kind === "physical") {
-      const client = this.iosClient();
-      const pressError = await awaitWhileRequestIsLive(
-        this.tryIosRunnerHome(client, 5000, { perf, frameContext, signal, onDispatch }),
-        signal,
-      );
-      if (pressError) {
-        throw new ActionableError(pressError);
-      }
-      await this.verifyIosHomeForeground(client, { perf, signal });
+      await this.executePhysicalIosHomeNavigation(options);
       return;
     }
 
@@ -392,8 +393,9 @@ export class HomeScreen extends BaseVisualChange {
 
     try {
       const client = this.iosClient();
+      let hierarchy: CtrlProxyHierarchy;
       try {
-        await this.verifyIosHomeForeground(client, {
+        hierarchy = await this.verifyIosHomeForeground(client, {
           perf,
           retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
           timeoutMs: this.iosHomeRemainingMs(deadline),
@@ -403,14 +405,23 @@ export class HomeScreen extends BaseVisualChange {
         });
       } catch (error) {
         // simctl's SpringBoard launch does not dismiss Spotlight on iOS 27 (#14827); the runner's
-        // hardware Home press does, so retry once through it and verify again.
+        // hardware Home press does, so retry once through it and verify again. A known
+        // switcher can return to an app first, so allow two runner presses in that case.
         if (
           !(error instanceof IosHomeNotForegroundError) ||
-          error.foregroundApp !== SPOTLIGHT_BUNDLE_ID
+          (!appSwitcherWasOpen && error.foregroundApp !== SPOTLIGHT_BUNDLE_ID)
         ) {
           throw error;
         }
-        await this.pressRunnerHomeThenVerify(client, perf, signal, onDispatch);
+        await this.pressRunnerHomeThenVerify(
+          client,
+          { perf, signal, onDispatch },
+          appSwitcherWasOpen ? 2 : 1,
+        );
+        return;
+      }
+      if (isIosAppSwitcherVisible(hierarchy.hierarchy)) {
+        await this.pressRunnerHomeThenVerify(client, { perf, signal, onDispatch }, 2, deadline);
       }
     } catch (error) {
       throwIfAborted(signal);
@@ -421,29 +432,92 @@ export class HomeScreen extends BaseVisualChange {
     }
   }
 
-  private async pressRunnerHomeThenVerify(
-    client: IosCtrlProxy,
-    perf: PerformanceTracker | undefined,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<void> {
+  private async executePhysicalIosHomeNavigation(options: IosHomeNavigationOptions): Promise<void> {
+    const { perf, frameContext, signal, onDispatch, appSwitcherWasOpen } = options;
+    const client = this.iosClient();
     const pressError = await awaitWhileRequestIsLive(
-      this.tryIosRunnerHome(client, 5000, { perf, signal, onDispatch }),
+      this.tryIosRunnerHome(client, 5000, { perf, frameContext, signal, onDispatch }),
       signal,
     );
-    // The runner checks the foreground once, right after the press, and SpringBoard can take
-    // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
-    // fall through to the polling check instead of failing before it runs.
-    if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
+    if (pressError && !(appSwitcherWasOpen && pressError === RUNNER_HOME_NOT_FOREGROUND_ERROR)) {
       throw new ActionableError(pressError);
     }
-    await this.verifyIosHomeForeground(client, {
-      perf,
-      retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
-      readTimeoutMs: HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
-      pollUntilDeadline: true,
-      signal,
-    });
+    let hierarchy: CtrlProxyHierarchy;
+    try {
+      hierarchy = await this.verifyIosHomeForeground(client, { perf, signal });
+    } catch (error) {
+      if (!appSwitcherWasOpen || !(error instanceof IosHomeNotForegroundError)) {
+        throw error;
+      }
+      await this.pressRunnerHomeThenVerify(client, { perf, signal, onDispatch });
+      return;
+    }
+    if (isIosAppSwitcherVisible(hierarchy.hierarchy)) {
+      await this.pressRunnerHomeThenVerify(client, { perf, signal, onDispatch });
+    }
+  }
+
+  private async pressRunnerHomeThenVerify(
+    client: IosCtrlProxy,
+    { perf, signal, onDispatch }: Pick<IosHomeNavigationOptions, "perf" | "signal" | "onDispatch">,
+    remainingPresses = 1,
+    deadline?: number,
+  ): Promise<void> {
+    for (let press = 0; press < remainingPresses; press++) {
+      const remainingMs = this.iosHomeRemainingMs(deadline);
+      const pressError = await awaitWhileRequestIsLive(
+        this.tryIosRunnerHome(client, Math.min(5000, remainingMs), { perf, signal, onDispatch }),
+        signal,
+      );
+      // The runner checks the foreground once, right after the press, and SpringBoard can take
+      // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
+      // fall through to the polling check instead of failing before it runs.
+      if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
+        throw new ActionableError(pressError);
+      }
+      const isLastPress = press + 1 === remainingPresses;
+      let hierarchy: CtrlProxyHierarchy;
+      try {
+        hierarchy = await this.verifyIosHomeForeground(client, {
+          perf,
+          ...this.iosHomePressVerificationPolicy(isLastPress, deadline),
+          retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+          readTimeoutMs: HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+          pollUntilDeadline: true,
+          signal,
+        });
+      } catch (error) {
+        this.iosHomeRemainingMs(deadline);
+        if (!(error instanceof IosHomeNotForegroundError) || isLastPress) {
+          throw error;
+        }
+        continue;
+      }
+      if (hierarchy.packageName !== "com.apple.springboard") {
+        continue;
+      }
+      if (!isIosAppSwitcherVisible(hierarchy.hierarchy)) {
+        return;
+      }
+      if (press + 1 === remainingPresses) {
+        throw new ActionableError(
+          "App Switcher is still open after Home navigation; dismiss it and retry Home",
+        );
+      }
+    }
+  }
+
+  private iosHomePressVerificationPolicy(isLastPress: boolean, deadline?: number) {
+    const boundMs = isLastPress
+      ? HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS
+      : HomeScreen.IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS;
+    const timeoutMs = Math.min(boundMs, this.iosHomeRemainingMs(deadline));
+    return {
+      timeoutMs,
+      // With less than one recovery window left, use it to verify this press.
+      returnOnNonSpringboard:
+        !isLastPress && timeoutMs === HomeScreen.IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS,
+    };
   }
 
   /** The device's runner client, resolved at each use so a retired client is never reused. */
@@ -524,7 +598,7 @@ export class HomeScreen extends BaseVisualChange {
     }
   }
 
-  private iosHomeRemainingMs(deadline: number): number {
+  private iosHomeRemainingMs(deadline = this.timer.now() + 5000): number {
     const remaining = deadline - this.timer.now();
     if (remaining <= 0) {
       throw new ActionableError("iOS Home deadline exhausted before SpringBoard could be verified");
@@ -540,9 +614,10 @@ export class HomeScreen extends BaseVisualChange {
       timeoutMs?: number;
       readTimeoutMs?: number;
       pollUntilDeadline?: boolean;
+      returnOnNonSpringboard?: boolean;
       signal?: AbortSignal;
     } = {},
-  ): Promise<void> {
+  ): Promise<CtrlProxyHierarchy> {
     const {
       perf,
       retryDelaysMs = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
@@ -571,8 +646,11 @@ export class HomeScreen extends BaseVisualChange {
       if (hierarchy) {
         lastHierarchy = hierarchy;
       }
-      if (hierarchy?.packageName === "com.apple.springboard" && this.timer.now() <= deadline) {
-        return;
+      if (
+        hierarchy &&
+        this.isIosHomeVerificationResult(hierarchy, deadline, options.returnOnNonSpringboard)
+      ) {
+        return hierarchy;
       }
 
       if (
@@ -587,6 +665,18 @@ export class HomeScreen extends BaseVisualChange {
     }
 
     this.throwIosHomeNotForeground(client, lastHierarchy);
+  }
+
+  private isIosHomeVerificationResult(
+    hierarchy: CtrlProxyHierarchy,
+    deadline: number,
+    returnOnNonSpringboard = false,
+  ): boolean {
+    return (
+      this.timer.now() <= deadline &&
+      (hierarchy.packageName === "com.apple.springboard" ||
+        (returnOnNonSpringboard && Boolean(hierarchy.packageName)))
+    );
   }
 
   private async waitForIosHomeRetry(

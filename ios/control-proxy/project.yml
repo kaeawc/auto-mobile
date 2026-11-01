@@ -99,6 +99,64 @@ targets:
         SWIFT_STRICT_CONCURRENCY: complete
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
+  AutoMobileTVTest:
+    type: application
+    platform: tvOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AutoMobileTVTest
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.tv
+        INFOPLIST_FILE: AutoMobileTVTest/Info.plist
+        CODE_SIGN_STYLE: Automatic
+
+  CtrlProxyTVUITests:
+    type: bundle.ui-testing
+    platform: tvOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests/CtrlProxyTVUITests
+      # Explicit transport and wire-model subset; never compile all of Sources/CtrlProxy.
+      - path: Sources/CtrlProxy/ByteChannel.swift
+      - path: Sources/CtrlProxy/ByteChannelState.swift
+      - path: Sources/CtrlProxy/NWByteChannel.swift
+      - path: Sources/CtrlProxy/ConnectionRegistry.swift
+      - path: Sources/CtrlProxy/Data+SHA1.swift
+      - path: Sources/CtrlProxy/WebSocketConnection.swift
+      - path: Sources/CtrlProxy/WebSocketFraming.swift
+      - path: Sources/CtrlProxy/WebSocketResponding.swift
+      - path: Sources/CtrlProxy/SdkEventBuffer.swift
+      - path: Sources/CtrlProxy/RangeReplaceableCollection+MaxSizeEnforcement.swift
+      - path: Sources/CtrlProxy/CommandError.swift
+      - path: Sources/CtrlProxy/Models/CommandPayload.swift
+      - path: Sources/CtrlProxy/Models/RequestHierarchy.swift
+      - path: Sources/CtrlProxy/Models/RequestPressButton.swift
+      - path: Sources/CtrlProxy/Models/WebSocketResponse.swift
+      - path: Sources/CtrlProxy/Models/HierarchyUpdateResponse.swift
+      - path: Sources/CtrlProxy/Models/ViewHierarchy.swift
+      - path: Sources/CtrlProxy/Models/UIElementInfo.swift
+      - path: Sources/CtrlProxy/Models/ElementBounds.swift
+      - path: Sources/CtrlProxy/Models/WindowInfo.swift
+      - path: Sources/CtrlProxy/Models/SemanticLink.swift
+      - path: Sources/CtrlProxy/Models/ObservationInsetsInfo.swift
+      - path: Sources/CtrlProxy/Models/EdgeInsetsInfo.swift
+      - path: Sources/CtrlProxy/Models/DisplayCutoutInfo.swift
+      - path: Sources/CtrlProxy/Models/SystemChromeInfo.swift
+      - path: Sources/CtrlProxy/Models/PerfTiming.swift
+      - path: Sources/CtrlProxy/Models/TapDiagnostics.swift
+    dependencies:
+      - target: AutoMobileTVTest
+      - package: AutoMobileSdkWire
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.tv.uitests
+        TEST_TARGET_NAME: AutoMobileTVTest
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+
   CtrlProxyWatch:
     type: application
     platform: watchOS
@@ -148,6 +206,16 @@ schemes:
       config: Debug
     archive:
       config: Release
+  AutoMobileTVTest:
+    build:
+      targets:
+        AutoMobileTVTest: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - CtrlProxyTVUITests
   CtrlProxyWatch:
     build:
       targets:

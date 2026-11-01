@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   UINPUT_REGISTRATION_SETTLE_MS,
   uinputPenScript,
+  uinputRawOrientation,
   uinputRawPoint,
   uinputTiltAxes,
 } from "../../../../src/features/action/pointer/uinputPenScript";
@@ -42,6 +43,28 @@ describe("uinputRawPoint", () => {
 
   test("clamps to the digitizer range", () => {
     expect(uinputRawPoint({ x: -5, y: 9999 }, PORTRAIT)).toEqual({ x: 0, y: 2399 });
+  });
+});
+
+describe("uinputRawOrientation", () => {
+  test("inverse-rotates the tilt direction with the screen coordinates", () => {
+    for (const orientation of [0, Math.PI / 7, -Math.PI / 3, Math.PI]) {
+      const x = -Math.sin(orientation);
+      const y = Math.cos(orientation);
+      // The linear part of uinputRawPoint: (x, y), (-y, x), (-x, -y), (y, -x).
+      const vectors = [
+        [x, y],
+        [-y, x],
+        [-x, -y],
+        [y, -x],
+      ];
+      for (const [rotation, offset] of [0, Math.PI / 2, Math.PI, -Math.PI / 2].entries()) {
+        const raw = uinputRawOrientation(orientation, rotation);
+        expect(raw).toBe(orientation + offset);
+        expect(-Math.sin(raw)).toBeCloseTo(vectors[rotation][0], 12);
+        expect(Math.cos(raw)).toBeCloseTo(vectors[rotation][1], 12);
+      }
+    }
   });
 });
 
@@ -190,6 +213,45 @@ describe("uinput extended axes", () => {
     [90, 45, -90, 90],
     [0, 90, 0, 0],
   ];
+
+  test("rotates tilt axes into digitizer space on every contact frame", () => {
+    for (const [rotation, x, y] of [
+      [0, 0, 45],
+      [1, -45, 0],
+      [2, 0, -45],
+      [3, 45, 0],
+    ]) {
+      const expected = uinputTiltAxes(Math.PI / 4, uinputRawOrientation(0, rotation));
+      expect(expected).toEqual({ x, y });
+      const frames = commands(
+        {
+          features: { toolType: "stylus", extendedAxes: true },
+          points: [
+            { x: 10, y: 20, tilt: Math.PI / 4, orientation: 0 },
+            { x: 20, y: 30, durationMs: 32 },
+          ],
+        },
+        { ...PORTRAIT, rotation },
+      ).filter((command) => command.command === "inject");
+      for (const frame of frames.slice(0, -1)) {
+        const events = frame.events ?? [];
+        const start = events.findIndex(
+          (value, i) => i % 3 === 0 && value === EV_ABS && events[i + 1] === 26,
+        );
+        expect(events.slice(start, start + 6)).toEqual([
+          EV_ABS,
+          26,
+          expected.x,
+          EV_ABS,
+          27,
+          expected.y,
+        ]);
+        if (rotation !== 0) {
+          expect(events.slice(start, start + 6)).not.toEqual([EV_ABS, 26, 0, EV_ABS, 27, 45]);
+        }
+      }
+    }
+  });
 
   test("inverts Android tilt and orientation into integer evdev degrees", () => {
     for (const [tilt, orientation, x, y] of pairs) {

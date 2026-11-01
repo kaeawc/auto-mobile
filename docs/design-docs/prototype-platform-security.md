@@ -44,10 +44,14 @@ does for `secure` text fields (`secureLibraryError`). Successful MCP-direct show
 for those bindings. No host path imports specs yet. Sensitive `/platform` state and `storage.keys`
 checks are not applied, and the Swift validator does not apply this rule yet (tracked in #15635).
 
-**R3: side effects need a user gesture.** Side-effecting calls (`share.*`, notifications,
-background leases) run only from taps, submits and user-initiated platform events, never from
-`onAppear`, timers or show time, and each module has a call rate limit. _Not yet enforced_
-([#15637](https://github.com/kaeawc/auto-mobile/issues/15637)).
+**R3: side effects need a user gesture.** The TypeScript validator permits `share.open` and
+`notifications.post|schedule|setBadge` only in `onTap`, `onLongPress`, `onDoubleTap`, `onSubmit`
+or user-initiated platform event chains (`notifications.opened|action|reply`, `map.markerTap`).
+Follow-ups inherit the chain's gesture status; `onAppear`, `onEndReached`, timers and show-time
+calls are refused at the action path. The contract limits share to 5 calls per 10000 ms and
+notifications to 10 per 60000 ms. The iOS runtime enforces each module's sliding-window `rateLimit`
+with `too_many_in_flight` refusals. Swift validator gesture refusal and Android validator/runtime
+parity remain (#15637).
 
 **R4: runtime isolation.** Where a module runs decides which privileges it can reach. The split
 below is the design; it is _not yet enforced_

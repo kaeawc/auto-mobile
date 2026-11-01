@@ -23579,11 +23579,16 @@
           },
           "permissions": [],
           "background": [],
-          "sensitive": true
+          "sensitive": true,
+          "userGesture": true
         }
       },
       "events": {},
-      "state": {}
+      "state": {},
+      "rateLimit": {
+        "calls": 5,
+        "windowMs": 10000
+      }
     },
     "battery": {
       "capability": "prototype_platform_battery_v1",
@@ -24334,7 +24339,8 @@
       "calls": {},
       "events": {
         "markerTap": {
-          "sensitive": false
+          "sensitive": false,
+          "userInitiated": true
         },
         "cameraIdle": {
           "sensitive": false
@@ -24699,7 +24705,8 @@
           },
           "permissions": ["notifications"],
           "background": [],
-          "sensitive": false
+          "sensitive": false,
+          "userGesture": true
         },
         "cancel": {
           "args": {
@@ -24742,7 +24749,8 @@
           },
           "permissions": ["notifications"],
           "background": [],
-          "sensitive": false
+          "sensitive": false,
+          "userGesture": true
         },
         "schedule": {
           "args": {
@@ -24913,18 +24921,22 @@
           "permissions": ["notifications"],
           "background": [],
           "sensitive": false,
-          "capability": "prototype_platform_notifications_scheduled_v1"
+          "capability": "prototype_platform_notifications_scheduled_v1",
+          "userGesture": true
         }
       },
       "events": {
         "opened": {
-          "sensitive": false
+          "sensitive": false,
+          "userInitiated": true
         },
         "action": {
-          "sensitive": false
+          "sensitive": false,
+          "userInitiated": true
         },
         "reply": {
-          "sensitive": true
+          "sensitive": true,
+          "userInitiated": true
         },
         "dismissed": {
           "sensitive": false
@@ -24980,6 +24992,10 @@
             "kind": "boolean"
           }
         }
+      },
+      "rateLimit": {
+        "calls": 10,
+        "windowMs": 60000
       }
     },
     "media": {

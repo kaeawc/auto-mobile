@@ -1,4 +1,8 @@
-import type { BootedDevice, DeviceInfo, Platform } from "../models";
+import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
+import {
+  isPlayStoreSystemImageTag,
+  parseAndroidSystemImageRuntime,
+} from "./android-cmdline-tools/AndroidSystemImageRuntime";
 import type { DeviceDisplays, DisplayPanel } from "../models/DisplayPanel";
 import { displayInventoryOutcome, type DisplayInventoryOutcome } from "../models/DeviceInfo";
 import type {
@@ -235,17 +239,31 @@ export function matchesDeviceCriteria(
     screenWidth?: number;
     screenHeight?: number;
     isRunning?: boolean;
+    runtimeId?: string;
   },
   criteria: DeviceMatchCriteria,
 ): boolean {
   return (
     matchesPlatform(item, criteria) &&
+    matchesPlayStore(item, criteria) &&
     matchesVersionRange(item, criteria) &&
     matchesName(item, criteria) &&
     matchesFormFactor(item, criteria) &&
     matchesRequiredDisplays(item, criteria) &&
     matchesScreenSize(item, criteria)
   );
+}
+
+/**
+ * `requires.playStore` (#14302) holds only for a device built from a Play Store system image; a
+ * device whose image is unknown (a physical device, an unenriched AVD) cannot show it.
+ */
+function matchesPlayStore(item: { runtimeId?: string }, criteria: DeviceMatchCriteria): boolean {
+  if (criteria.requires?.playStore !== true) {
+    return true;
+  }
+  const tag = item.runtimeId ? parseAndroidSystemImageRuntime(item.runtimeId)?.tag : undefined;
+  return tag !== undefined && isPlayStoreSystemImageTag(tag);
 }
 
 function matchesRequiredDisplays(
@@ -542,6 +560,24 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
       images.filter((image) => matchesDeviceCriteria(image, criteria)),
       strategy,
       this.random,
+    );
+  }
+}
+
+/**
+ * Requirements no new device can satisfy: display capabilities (unknown until a device exists) and
+ * `requires.playStore` off Android, where a created simulator would still not match (#14302).
+ */
+export function assertCreatableRequirements(
+  criteria: DeviceMatchCriteria,
+  candidates: Parameters<typeof describeDisplayRequirements>[1],
+): void {
+  if (criteria.requires?.panels !== undefined || criteria.requires?.posture !== undefined) {
+    throw new ActionableError(describeDisplayRequirements(criteria, candidates));
+  }
+  if (criteria.requires?.playStore === true && criteria.platform !== "android") {
+    throw new ActionableError(
+      "requires.playStore applies to Android emulators only: no device was created. Remove it for an iOS request.",
     );
   }
 }

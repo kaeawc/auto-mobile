@@ -57,11 +57,15 @@ API level and ABI. The default preference therefore supplies GMS but does not
 supply a working Play Billing service on the API 36 `google_apis` image. See
 [device resources](device-resources.md) for `googlePlayServices` disabling.
 
-Provisioning does not switch to `google_apis_playstore` for a session that wants
-Play-dependent features. That image is a user build that refuses `adb root`, and
-Play Billing on it still needs a signed-in Google account, which no captured image
-has (evidence B). Choosing it automatically would give up root without making a
-purchase flow work.
+A request that sets `requires.playStore: true` asks for Play-dependent features. It
+matches only an emulator built from a Play Store system image (a `*playstore*` tag, or
+Google TV), and a new emulator is created from `google_apis_playstore` (or the Play car
+image for `automotive`). With no such image installed the request is refused with the
+`sdkmanager` package to install. A device whose image is unknown, such as a physical
+device, does not match. Without the requirement the preference above is unchanged.
+Play Store images are user builds that refuse `adb root`, so root-dependent features on
+them refuse with a message that they need a non-Play image. Play Billing there still
+needs a signed-in Google account, which no captured image has (evidence B).
 
 ## Backend advertisement (#14302, contract only)
 

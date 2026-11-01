@@ -394,6 +394,30 @@ describe("integrityState injector", () => {
     expect(await resolve(owner, "integrityState")!.isClean()).toBe(true);
   });
 
+  test("an unverified integrity removal keeps fixture provenance for the retry (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-unverified-rm" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    await integrityController.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    // The removal reports success but the device keeps the files.
+    adb.ignoreWrites = true;
+    expect((await integrityController.restore()).verifiedClean).toBe(false);
+    adb.ignoreWrites = false;
+    const rootOutcome = await root.apply("rooted-detectable");
+    // Integrity clears independently while rootState is active, handing the leftovers to root.
+    expect((await integrityController.restore()).verifiedClean).toBe(true);
+    await rootOutcome.reset?.();
+    // Root's reset removes them: they were never the image's.
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await resolve(owner, "integrityState")!.isClean()).toBe(true);
+  });
+
   test("factory-local SELinux owners isolate the same device id across adb clients", async () => {
     const firstAdb = new IntegrityAdb();
     const secondAdb = new IntegrityAdb();

@@ -194,10 +194,12 @@ class IntegrityStateInjector implements DeviceConditionInjector {
         signal,
       );
     }
-    // This mutation's own stubs are released before the read-back, so a retained one another
-    // fixture still needs is read as that fixture's (#16275).
+    // Stubs handed to another fixture are released before the read-back, so they read as that
+    // fixture's. Removed ones keep their provenance until the read-back confirms they are gone
+    // (the bookkeeping below releases them), so an unverified removal is never taken for the
+    // image's (#16275).
     for (const path of mutation.paths) {
-      if (!mutation.before.paths.has(path)) {
+      if (!mutation.before.paths.has(path) && this.artifacts.heldByOther(this, path)) {
         this.artifacts.release(this, path);
       }
     }

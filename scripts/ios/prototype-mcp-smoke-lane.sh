@@ -3,7 +3,7 @@
 #
 # Creates ONE fresh simulator, builds Playground (Debug) for it, and runs the MCP smoke
 # beside the agent demo lane. The smoke checks launch, show, tap, awaitEvent, dismiss and
-# host-session release. Cleans up its simulator and stale simulators from other runs.
+# host-session release. Cleans up its simulator and lane simulators older than two hours.
 #
 # Usage: scripts/ios/prototype-mcp-smoke-lane.sh <ios-version|latest>   e.g. 26, 18.5, latest
 #
@@ -15,6 +15,7 @@
 #   PROTOTYPE_MCP_SMOKE_LOG_DIR       output dir (default scratch/prototype-mcp-smoke-lane/ios-<request>)
 #   PROTOTYPE_MCP_SMOKE_AUX_ROOT      private socket dir parent (default /tmp; keep paths short)
 #   PROTOTYPE_MCP_SMOKE_RETRY_SLEEP   seconds between simulator delete attempts (default 5)
+#   PROTOTYPE_MCP_SMOKE_NOW_EPOCH     Unix seconds clock override (default date +%s)
 #   PROTOTYPE_SMOKE_DEVICE_TYPE       simulator device type (default highest iPhone model generation)
 #
 # Exit codes: 0 pass; 1 setup/build failed; 2 usage; 3 no matching runtime (skip).
@@ -155,14 +156,21 @@ fi
 
 run_tag=runlocal
 if [[ ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ ]]; then run_tag="run${GITHUB_RUN_ID}"; fi
+# Two hours exceeds the job's 60-minute timeout, protecting concurrent runner jobs.
+readonly STALE_SIMULATOR_AGE_SECONDS=7200
+creation_epoch="${PROTOTYPE_MCP_SMOKE_NOW_EPOCH:-$(date +%s)}"
+[[ ${creation_epoch} =~ ^[0-9]{1,10}$ ]] || fail 'invalid simulator creation epoch'
 set +e
 devices_json="$(run_with_timeout 60 "${XCRUN_BIN}" simctl list devices --json)"
 sweep_status=$?
 set -e
 if [[ ${sweep_status} -eq 0 ]]; then
-  stale_udids="$(jq -r --arg tag "-${run_tag}-" '
+  stale_udids="$(jq -r --argjson now "${creation_epoch}" --argjson age "${STALE_SIMULATOR_AGE_SECONDS}" '
     .devices[][] | select(.name | startswith("prototype-mcp-smoke-"))
-    | select(.name | contains($tag) | not) | .udid' <<< "${devices_json}")" || {
+    | . as $device
+    | (.name | capture("^prototype-mcp-smoke-[0-9]+(\\.[0-9]+)*-run(local|[0-9]+)-leg(latest|[0-9]+(\\.[0-9]+)*)-epoch(?<epoch>[0-9]{1,10})-[0-9]+$")?)
+    | select(($now - (.epoch | tonumber)) > $age)
+    | $device.udid' <<< "${devices_json}")" || {
     echo 'prototype-mcp-smoke-lane: warning: could not parse stale simulators' >&2
     stale_udids=""
   }
@@ -184,7 +192,7 @@ else
   echo 'prototype-mcp-smoke-lane: warning: could not list stale simulators' >&2
 fi
 
-udid="$("${XCRUN_BIN}" simctl create "prototype-mcp-smoke-${runtime_version}-${run_tag}-$$" "${device_type}" "${runtime_id}")" || fail 'simctl create failed'
+udid="$("${XCRUN_BIN}" simctl create "prototype-mcp-smoke-${runtime_version}-${run_tag}-leg${requested}-epoch${creation_epoch}-$$" "${device_type}" "${runtime_id}")" || fail 'simctl create failed'
 [[ -n ${udid} ]] || fail 'simctl create returned no UDID'
 "${XCRUN_BIN}" simctl boot "${udid}" || fail 'simulator boot failed'
 "${XCRUN_BIN}" simctl bootstatus "${udid}" -b || fail 'simulator did not finish booting'

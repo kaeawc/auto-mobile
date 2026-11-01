@@ -1,7 +1,10 @@
 #!/usr/bin/env bats
 # All simulator, build and CLI work is stubbed; no device or daemon is touched.
+# Bats runs each test in its own subshell; exported fixture overrides are intentional.
+# shellcheck disable=SC2030,SC2031
 
 setup() {
+  bats_require_minimum_version 1.5.0
   repo_root="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   script="${repo_root}/scripts/ios/prototype-mcp-smoke-lane.sh"
   stubs="${BATS_TEST_TMPDIR}/stubs"
@@ -15,6 +18,7 @@ setup() {
   export PROTOTYPE_MCP_SMOKE_LOG_DIR="${BATS_TEST_TMPDIR}/out"
   export PROTOTYPE_MCP_SMOKE_AUX_ROOT="${BATS_TEST_TMPDIR}/aux"
   export PROTOTYPE_MCP_SMOKE_RETRY_SLEEP=0
+  export PROTOTYPE_MCP_SMOKE_NOW_EPOCH=1800000000
   export PATH="${stubs}:${PATH}"
   unset AUTO_MOBILE_CMD PROTOTYPE_SMOKE_DEVICE_TYPE GITHUB_RUN_ID
   export STUB_BUILD_MODE=ok STUB_SMOKE_EXIT=0 STUB_BOOT_FAIL=0 STUB_CLEANUP_FAIL=0
@@ -37,7 +41,19 @@ JSON
   'simctl list devices --json')
     [[ "${STUB_LIST_FAIL}" -eq 0 ]] || exit 1
     if [[ "${STUB_STALE_DEVICES}" -eq 1 ]]; then
-      printf '%s\n' '{"devices":{"runtime.26.5":[{"name":"prototype-mcp-smoke-26.5-run424241-123","udid":"UDID-STALE"},{"name":"prototype-mcp-smoke-26.5-run424242-456","udid":"UDID-CURRENT"},{"name":"AutoMobile CI iPhone","udid":"UDID-CI"}]}}'
+      cat <<'JSON'
+{"devices":{"runtime.26.5":[
+ {"name":"prototype-mcp-smoke-26.5-run424241-leg26-epoch1799992799-123","udid":"UDID-STALE"},
+ {"name":"prototype-mcp-smoke-26.5-run424241-leglatest-epoch1799999999-456","udid":"UDID-RECENT"},
+ {"name":"prototype-mcp-smoke-26.5-run424242-leg26-epoch1799999999-789","udid":"UDID-CURRENT"},
+ {"name":"prototype-mcp-smoke-26.5-run424241-leg26-epoch1799992800-123","udid":"UDID-BOUNDARY"},
+ {"name":"prototype-mcp-smoke-26.5-run424241-leg26-epoch1800000001-123","udid":"UDID-FUTURE"},
+ {"name":"prototype-mcp-smoke-26.5-run424241-leg26-epochoops-123","udid":"UDID-MALFORMED"},
+ {"name":"prototype-mcp-smoke-26.5-run424241-123","udid":"UDID-LEGACY"},
+ {"name":"other-prototype-mcp-smoke-26.5-run424241-leg26-epoch1799992799-123","udid":"UDID-PREFIX"},
+ {"name":"AutoMobile CI iPhone","udid":"UDID-CI"}
+]}}
+JSON
     else
       printf '%s\n' '{"devices":{"runtime.26.5":[{"name":"AutoMobile CI iPhone","udid":"UDID-CI"}]}}'
     fi
@@ -97,7 +113,7 @@ STUB
 }
 
 assert_cleaned() {
-  ! grep -q 'xcrun .*UDID-CI' "${STUB_LOG}"
+  if grep -q 'xcrun .*UDID-CI' "${STUB_LOG}"; then return 1; fi
   grep -qx 'xcrun simctl shutdown UDID-FRESH' "${STUB_LOG}"
   grep -qx 'xcrun simctl delete UDID-FRESH' "${STUB_LOG}"
   [ "$(grep -c '^xcrun simctl delete ' "${STUB_LOG}")" -eq 1 ]
@@ -110,8 +126,8 @@ assert_cleaned() {
   run bash "${script}" 27
   [ "${status}" -eq 3 ]
   [[ "${output}" == *"no installed iOS runtime matches '27'; skipping"* ]]
-  ! grep -q 'simctl create' "${STUB_LOG}"
-  ! grep -q '^build ' "${STUB_LOG}"
+  run ! grep -q 'simctl create' "${STUB_LOG}"
+  run ! grep -q '^build ' "${STUB_LOG}"
 }
 
 @test "success selects the newest matching runtime and creates boots and deletes once" {
@@ -131,7 +147,7 @@ assert_cleaned() {
   run bash "${script}" 26
   [ "${status}" -eq 1 ]
   [[ "${output}" == *'Playground build failed'* ]]
-  ! grep -q '^smoke ' "${STUB_LOG}"
+  run ! grep -q '^smoke ' "${STUB_LOG}"
   assert_cleaned
 }
 
@@ -140,7 +156,7 @@ assert_cleaned() {
   run bash "${script}" 26
   [ "${status}" -eq 1 ]
   [[ "${output}" == *'Playground build produced no app'* ]]
-  ! grep -q '^smoke ' "${STUB_LOG}"
+  run ! grep -q '^smoke ' "${STUB_LOG}"
   assert_cleaned
 }
 
@@ -169,7 +185,7 @@ assert_cleaned() {
   run bash "${script}" 26
   [ "${status}" -eq 0 ]
   grep -q '^smoke aux=.* socket=unset pid=unset session=unset legacy-session=unset$' "${STUB_LOG}"
-  ! grep -q 'resident\|legacy-session=legacy' "${STUB_LOG}"
+  run ! grep -q 'resident\|legacy-session=legacy' "${STUB_LOG}"
   [ "$(grep -c '^cli aux=.* socket=unset pid=unset$' "${STUB_LOG}")" -eq 2 ]
   assert_cleaned
 }
@@ -185,14 +201,42 @@ assert_cleaned() {
   assert_cleaned
 }
 
-@test "stale simulators from other runs are removed before create while current and CI devices are untouched" {
+@test "lane simulators older than two hours are removed before create" {
   export GITHUB_RUN_ID=424242 STUB_STALE_DEVICES=1
   run bash "${script}" 26
   [ "${status}" -eq 0 ]
   [[ "$(cat "${STUB_LOG}")" == *'xcrun simctl shutdown UDID-STALE'*'xcrun simctl delete UDID-STALE'*'xcrun simctl create '* ]]
-  ! grep -q 'xcrun .*UDID-CURRENT\|xcrun .*UDID-CI' "${STUB_LOG}"
+  run ! grep -q 'xcrun .*UDID-CURRENT\|xcrun .*UDID-CI' "${STUB_LOG}"
   [ "$(grep -c '^xcrun simctl delete UDID-STALE$' "${STUB_LOG}")" -eq 1 ]
   [ "$(grep -c '^xcrun simctl delete UDID-FRESH$' "${STUB_LOG}")" -eq 1 ]
+}
+
+@test "recent other-run and current-run simulators survive the sweep" {
+  export GITHUB_RUN_ID=424242 STUB_STALE_DEVICES=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  run ! grep -Eq 'xcrun .*UDID-(RECENT|CURRENT)' "${STUB_LOG}"
+}
+
+@test "simulators exactly two hours old or future dated survive the sweep" {
+  export STUB_STALE_DEVICES=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  run ! grep -Eq 'xcrun .*UDID-(BOUNDARY|FUTURE)' "${STUB_LOG}"
+}
+
+@test "unparseable and legacy lane names survive the sweep" {
+  export STUB_STALE_DEVICES=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  run ! grep -Eq 'xcrun .*UDID-(MALFORMED|LEGACY)' "${STUB_LOG}"
+}
+
+@test "AutoMobile CI iPhone and names without the exact lane prefix are never matched" {
+  export STUB_STALE_DEVICES=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  run ! grep -Eq 'xcrun .*UDID-(CI|PREFIX)' "${STUB_LOG}"
 }
 
 @test "delete retries twice then succeeds without failing the lane" {
@@ -217,11 +261,11 @@ assert_cleaned() {
   [ "$(grep -c '^xcrun simctl delete UDID-FRESH$' "${STUB_LOG}")" -eq 3 ]
 }
 
-@test "simulator name contains the GitHub run tag" {
+@test "simulator name contains the GitHub run tag matrix leg and creation epoch" {
   export GITHUB_RUN_ID=424242
   run bash "${script}" 26
   [ "${status}" -eq 0 ]
-  grep -q '^xcrun simctl create prototype-mcp-smoke-26.5-run424242-' "${STUB_LOG}"
+  grep -Eq '^xcrun simctl create prototype-mcp-smoke-26.5-run424242-leg26-epoch1800000000-[0-9]+ dt.newest runtime.26.5$' "${STUB_LOG}"
   assert_cleaned
 }
 
@@ -246,7 +290,7 @@ assert_cleaned() {
   [ "${status}" -eq 0 ]
   [[ "${output}" == *'warning: could not delete stale simulator UDID-STALE'* ]]
   [ "$(grep -c '^xcrun simctl delete UDID-STALE$' "${STUB_LOG}")" -eq 3 ]
-  ! grep -q 'xcrun .*UDID-CURRENT\|xcrun .*UDID-CI' "${STUB_LOG}"
+  run ! grep -q 'xcrun .*UDID-CURRENT\|xcrun .*UDID-CI' "${STUB_LOG}"
 }
 
 @test "daemon stop failure does not fail the lane or skip cleanup" {
@@ -281,7 +325,7 @@ assert_cleaned() {
   export STUB_BOOT_FAIL=9
   run bash "${script}" 26
   [ "${status}" -eq 1 ]
-  ! grep -q '^build ' "${STUB_LOG}"
+  run ! grep -q '^build ' "${STUB_LOG}"
   assert_cleaned
 }
 

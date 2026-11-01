@@ -13,6 +13,10 @@ import { pressButtonHandler } from "../../../src/server/interactionTools/deviceH
 import { pressButtonTool, tapOnSchema } from "../../../src/server/interactionTools";
 import { assertToolSupportsDevicePlatform } from "../../../src/server/applePlatformToolSupport";
 import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
+import { createSendKeysHandler } from "../../../src/server/interactionToolHandlers";
+import { sendKeysSchema } from "../../../src/server/interactionTools/inputSchemas";
+import { TvosRunnerError } from "../../../src/features/tvos/TvosRunnerError";
+import { toolStructured, toolIsError } from "../../helpers/toolResponse";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device: BootedDevice = { platform: "tvos", name: "TV", deviceId: "tvos-actions" };
@@ -100,4 +104,146 @@ test("tapOn default handler factory reaches the tvOS runner", async () => {
     { type: "request_hierarchy" },
     { type: "request_press_button", action: "select" },
   ]);
+});
+
+const sendKeys = createSendKeysHandler({
+  sendKeysFactory: () => {
+    throw new Error("tvOS must bypass SendKeys");
+  },
+  keyboardFactory: () => {
+    throw new Error("tvOS must not dismiss the keyboard");
+  },
+});
+
+test("sendKeys type reaches the tvOS runner with the standard structured result", async () => {
+  const result = await sendKeys(
+    device,
+    sendKeysSchema.parse({ commands: [{ action: "type", text: "hello" }] }),
+  );
+  expect(client.commands).toEqual([{ type: "request_append_text", text: "hello" }]);
+  expect(toolStructured(result)).toMatchObject({
+    success: true,
+    completedCommands: 1,
+    commands: [{ index: 0, action: "type", success: true, textLength: 5 }],
+  });
+  expect(toolIsError(result)).toBe(false);
+});
+
+test("sendKeys sends two type commands in order", async () => {
+  await sendKeys(
+    device,
+    sendKeysSchema.parse({
+      commands: [
+        { action: "type", text: "one" },
+        { action: "type", text: "two" },
+      ],
+    }),
+  );
+  expect(client.commands).toEqual([
+    { type: "request_append_text", text: "one" },
+    { type: "request_append_text", text: "two" },
+  ]);
+});
+
+test.each([
+  {
+    commands: [
+      { action: "type", text: "first" },
+      { action: "key", key: "enter" },
+    ],
+  },
+  { commands: [{ action: "clear" }] },
+  { selector: { text: "field" } },
+  { container: { text: "panel" } },
+  { selectionStrategy: "first" },
+  { layer: "app" },
+  { display: "active" },
+])("sendKeys refuses unsupported tvOS input before dispatch: %j", async (unsupported) => {
+  const args = Object.assign(
+    sendKeysSchema.parse({ commands: [{ action: "type", text: "hello" }] }),
+    unsupported,
+  );
+  await expect(sendKeys(device, args)).rejects.toBeInstanceOf(ActionableError);
+  await expect(sendKeys(device, args)).rejects.toThrow(
+    "tvOS sendKeys supports only type commands into the already focused field",
+  );
+  expect(client.commands).toEqual([]);
+});
+
+test("sendKeys refuses empty text before dispatch", async () => {
+  const args = sendKeysSchema.parse({ commands: [{ action: "type", text: "hello" }] });
+  args.commands = [{ action: "type", text: "", operation: "insert", mode: "auto" }];
+  await expect(sendKeys(device, args)).rejects.toBeInstanceOf(ActionableError);
+  expect(client.commands).toEqual([]);
+});
+
+test("sendKeys stops at the runner's actionable failure", async () => {
+  client.failure = new TvosRunnerError("no focused text input", "invalid_parameter");
+  const result = await sendKeys(
+    device,
+    sendKeysSchema.parse({
+      commands: [
+        { action: "type", text: "one" },
+        { action: "type", text: "two" },
+      ],
+    }),
+  );
+  expect(client.commands).toEqual([{ type: "request_append_text", text: "one" }]);
+  expect(toolStructured(result)).toMatchObject({
+    success: false,
+    completedCommands: 0,
+    failedIndex: 0,
+    error: "no focused text input",
+  });
+  expect(toolIsError(result)).toBe(true);
+});
+
+test("sendKeys opts into tvOS while touch remains unsupported", () => {
+  expect(() => assertToolSupportsDevicePlatform("sendKeys", device)).not.toThrow();
+  expect(() => assertToolSupportsDevicePlatform("tapAt", device)).toThrow(ActionableError);
+});
+
+test("sendKeys preserves completed commands when a later runner request fails", async () => {
+  const request = client.request.bind(client);
+  client.request = (command, signal, options) => {
+    if (client.commands.length === 1) {
+      client.failure = new ActionableError("field lost focus; pressButton select first");
+    }
+    return request(command, signal, options);
+  };
+  const result = await sendKeys(
+    device,
+    sendKeysSchema.parse({
+      commands: [
+        { action: "type", text: "one" },
+        { action: "type", text: "two" },
+        { action: "type", text: "three" },
+      ],
+    }),
+  );
+  expect(client.commands).toEqual([
+    { type: "request_append_text", text: "one" },
+    { type: "request_append_text", text: "two" },
+  ]);
+  expect(toolStructured(result)).toMatchObject({
+    success: false,
+    completedCommands: 1,
+    failedIndex: 1,
+    error: "field lost focus; pressButton select first",
+  });
+  expect(toolIsError(result)).toBe(true);
+});
+
+test("sendKeys observes cancellation before dispatch", async () => {
+  const controller = new AbortController();
+  controller.abort(new ActionableError("cancelled"));
+  await expect(
+    sendKeys(
+      device,
+      sendKeysSchema.parse({ commands: [{ action: "type", text: "hello" }] }),
+      undefined,
+      controller.signal,
+    ),
+  ).rejects.toThrow("cancelled");
+  expect(client.commands).toEqual([]);
 });

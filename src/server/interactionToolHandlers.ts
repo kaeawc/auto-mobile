@@ -41,6 +41,7 @@ import type {
 } from "./interactionTools/dependencies";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../features/observe/ios";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
+import { tvosSendKeys } from "../features/tvos/TvosActions";
 import { SendKeys } from "../features/action/SendKeys";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
@@ -741,6 +742,19 @@ export const createSendKeysHandler =
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    if (device.platform === "tvos") {
+      const result = await tvosSendKeys(device.deviceId, args.commands, args.selector, {
+        ...args,
+        signal,
+      });
+      const response = createStructuredToolResponse({
+        message: result.success
+          ? `Executed ${result.completedCommands} sendKeys command(s)`
+          : `sendKeys stopped at command ${result.failedIndex}: ${result.error}`,
+        ...result,
+      });
+      return result.success ? response : { ...response, isError: true };
+    }
     await assertSendKeysRunnerCompatible(device);
     RecompositionTracker.getInstance().recordInteraction(device.deviceId);
     const sendKeys = (deps.sendKeysFactory ?? defaultSendKeysFactory)(device);

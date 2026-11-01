@@ -18,7 +18,8 @@ export const TV_REMOTE_BUTTONS = [
 export type TVRemoteButton = (typeof TV_REMOTE_BUTTONS)[number];
 export type TvosCommand =
   | { type: "request_hierarchy" | "request_screenshot" }
-  | { type: "request_press_button"; action: TVRemoteButton };
+  | { type: "request_press_button"; action: TVRemoteButton }
+  | { type: "request_append_text"; text: string };
 
 export interface TvosRunnerClient {
   /** Registered clients remain reusable until a permanent connection failure or close. */

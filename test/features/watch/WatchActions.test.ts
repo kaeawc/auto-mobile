@@ -54,6 +54,36 @@ describe("watch actions", () => {
       { type: "tap", identifier: "ctrlproxy-crown" },
     ]);
   });
+  test.each([
+    { left: 0, top: 0, right: 0, bottom: 0 },
+    { left: 10, top: 224, right: 50, bottom: 244 },
+  ])("uses the visible row's center when an earlier duplicate is offscreen: %j", async (bounds) => {
+    unregister();
+    const tree = structuredClone(hierarchy);
+    tree.root.children = [
+      {
+        ...tree.root,
+        accessibilityIdentifier: "reused-row",
+        accessibilityLabel: "Earlier row",
+        bounds,
+        children: [],
+      },
+      {
+        ...tree.root,
+        accessibilityIdentifier: "reused-row",
+        accessibilityLabel: "Visible row",
+        bounds: { left: 10, top: 40, right: 70, bottom: 80 },
+        children: [],
+      },
+    ];
+    client = new FakeWatchRunnerClient(tree);
+    unregister = watchRunners.register(device.deviceId, client);
+
+    const result = await watchTapOn(device.deviceId, { action: "tap", text: "Visible row" });
+
+    expect(result).toMatchObject({ success: true, element: { text: "Visible row" } });
+    expect(client.commands).toEqual([{ type: "hierarchy" }, { type: "tap", x: 40, y: 60 }]);
+  });
   test("text-only nodes dispatch their center in XCTest points", async () => {
     await watchTapOn(device.deviceId, { action: "tap", text: "CtrlProxyWatch" });
     expect(client.commands[1]).toEqual({ type: "tap", x: 92, y: 112 });

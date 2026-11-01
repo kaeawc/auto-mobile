@@ -1,0 +1,32 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "request",
+        "url": "https://example.com/",
+        "onSuccess": [
+          {
+            "type": "platform",
+            "call": "share.open",
+            "args": {
+              "text": {
+                "value": "Hello {name} {data:/post/title} {item.name} {index}"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

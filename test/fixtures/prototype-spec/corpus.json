@@ -80,6 +80,21 @@
     "flow-max-lines-repeat.json",
     "font-asset.json",
     "fullscreen-all-nodes.json",
+    "gesture-button.json",
+    "gesture-dialog-confirm.json",
+    "gesture-event-binding.json",
+    "gesture-map.markerTap.json",
+    "gesture-notifications.action.json",
+    "gesture-notifications.opened.json",
+    "gesture-notifications.reply.json",
+    "gesture-onDoubleTap.json",
+    "gesture-onLongPress.json",
+    "gesture-onSubmit.json",
+    "gesture-onTap.json",
+    "gesture-tap-onError.json",
+    "gesture-tap-onSuccess.json",
+    "gesture-top-app-bar.json",
+    "gesture-unflagged-call.json",
     "gestures-repeat.json",
     "gestures.json",
     "glass-conditional.json",
@@ -835,6 +850,18 @@
     "font-family-asset-extra-key.json",
     "font-family-asset-not-string.json",
     "font-family-unknown-name.json",
+    "gesture-appear-onError.json",
+    "gesture-appear-onSuccess.json",
+    "gesture-device.changed.json",
+    "gesture-event-timer.json",
+    "gesture-notifications.dismissed.json",
+    "gesture-notifications.scheduledFired.json",
+    "gesture-onAppear.json",
+    "gesture-onEndReached.json",
+    "gesture-tap-timer.json",
+    "gesture-timer-event-binding.json",
+    "gesture-timer-onError.json",
+    "gesture-timer-onSuccess.json",
     "glass-bad-interactive.json",
     "glass-bad-surface.json",
     "glass-bad-tint.json",
@@ -3349,6 +3376,80 @@
       "prototype_platform_v1"
     ],
     "layout-direction-ltr.json": ["prototype_layout_direction_v1"],
-    "layout-direction-rtl.json": ["prototype_layout_direction_v1"]
+    "layout-direction-rtl.json": ["prototype_layout_direction_v1"],
+    "gesture-button.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-dialog-confirm.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-event-binding.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-map.markerTap.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-notifications.action.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-notifications.opened.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-notifications.reply.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-onDoubleTap.json": [
+      "prototype_gestures_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-onLongPress.json": [
+      "prototype_gestures_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-onSubmit.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1",
+      "prototype_text_field_actions_v1"
+    ],
+    "gesture-onTap.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-tap-onError.json": [
+      "prototype_network_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-tap-onSuccess.json": [
+      "prototype_network_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-top-app-bar.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-unflagged-call.json": [
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1",
+      "prototype_timers_v1"
+    ]
   }
 }

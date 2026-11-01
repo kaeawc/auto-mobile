@@ -17,8 +17,27 @@ setup() {
   export PROTOTYPE_SMOKE_BUILD_SCRIPT="${stubs}/build.sh"
   export PROTOTYPE_SMOKE_DRIVER="${stubs}/driver"
   export STUB_SAME_SCREENSHOTS=0
+  unset PROTOTYPE_SMOKE_PORT
+  export STUB_BUSY_PORT=8771
   export STUB_DRIVER_MODE=ok
   export PATH="${stubs}:${PATH}"
+
+  cat > "${stubs}/sleep" << 'STUB'
+#!/usr/bin/env bash
+# Settle/poll delays must remain disabled; the held driver blocks on a FIFO instead.
+[[ $1 == 0 ]]
+STUB
+
+  cat > "${stubs}/lsof" << 'STUB'
+#!/usr/bin/env bash
+echo "lsof $*" >> "${STUB_LOG}"
+if [[ " $* " == *" -iTCP:${STUB_BUSY_PORT} "* || ${STUB_BUSY_PORT} == all ]]; then
+  echo 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME'
+  echo 'OtherApp 4321 user 9u IPv4 0 0t0 TCP localhost:port (LISTEN)'
+  exit 0
+fi
+exit 1
+STUB
 
   cat > "${stubs}/build.sh" << 'STUB'
 #!/usr/bin/env bash
@@ -58,6 +77,7 @@ STUB
   cat > "${stubs}/driver" << 'STUB'
 #!/usr/bin/env bash
 echo "driver $*" >> "${STUB_LOG}"
+echo "driver-port $1 ${AUTOMOBILE_PROTOTYPE_PORT:-unset}" >> "${STUB_LOG}"
 shown_file="${STUB_STATE}/shown"
 hold_pid_file="${STUB_STATE}/hold.pid"
 # Like the real agent, the stub keeps a prototype only while a host connection is held: every
@@ -75,9 +95,21 @@ case "$1" in
     fi
     echo "$$" > "${hold_pid_file}"
     echo '{"type":"host_hold","connected":true}'
-    exec sleep 60
+    mkfifo "${STUB_STATE}/hold-stop"
+    read -r stop < "${STUB_STATE}/hold-stop"
     ;;
   status)
+    if [[ ${STUB_DRIVER_MODE} == handshake-rejected ]]; then
+      echo 'Agent closed the connection during the handshake. The auth token does not match this launch (or another app holds the port).' >&2
+      echo 'Bun v1.3.0 (macOS arm64)' >&2
+      exit 1
+    fi
+    if [[ ${STUB_DRIVER_MODE} == connection-refused ]]; then
+      echo 'error: connection refused' >&2
+      echo '  at connect (driver.ts:42:1)' >&2
+      echo 'Bun v1.3.0 (macOS arm64)' >&2
+      exit 1
+    fi
     if [[ ${STUB_DRIVER_MODE} == never-connects ]]; then
       echo "not listening" >&2
       exit 1
@@ -139,7 +171,7 @@ JSON
     ;;
 esac
 STUB
-  chmod +x "${stubs}/build.sh" "${stubs}/xcrun" "${stubs}/driver"
+  chmod +x "${stubs}/sleep" "${stubs}/lsof" "${stubs}/build.sh" "${stubs}/xcrun" "${stubs}/driver"
 }
 
 @test "passes on the newest matching runtime and cleans up the simulator it created" {
@@ -306,4 +338,64 @@ STUB
   run bash "${script}" 26
   [ "${status}" -eq 1 ]
   [[ ${output} == *"sequence did not increase"* ]]
+}
+
+@test "fails after one rejected handshake and reports the error without the Bun banner" {
+  export STUB_DRIVER_MODE=handshake-rejected
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [ "$(grep -c '^driver status$' "${STUB_LOG}")" -eq 1 ]
+  [[ ${output} == *"handshake was rejected on port "* ]]
+  [[ ${output} == *"closed the connection during the handshake. The auth token does not match this launch"* ]]
+  [[ ${output} != *"Bun v"* ]]
+  grep -q 'simctl delete UDID-FRESH' "${STUB_LOG}"
+}
+
+@test "retries connection failures and reports all stderr lines except the Bun banner" {
+  export STUB_DRIVER_MODE=connection-refused
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [ "$(grep -c '^driver status$' "${STUB_LOG}")" -eq "${PROTOTYPE_SMOKE_CONNECT_ATTEMPTS}" ]
+  [[ ${output} == *"error: connection refused"* ]]
+  [[ ${output} == *"  at connect (driver.ts:42:1)"* ]]
+  [[ ${output} != *"Bun v"* ]]
+}
+
+@test "rejects an occupied explicit port before build or any simctl call" {
+  export PROTOTYPE_SMOKE_PORT=23456 STUB_BUSY_PORT=23456
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"23456"* && ${output} == *"OtherApp"* && ${output} == *"4321"* ]]
+  [[ ${output} == *"pass another port or omit PROTOTYPE_SMOKE_PORT"* ]]
+  ! grep -q '^build$' "${STUB_LOG}"
+  ! grep -q '^xcrun ' "${STUB_LOG}"
+}
+
+@test "exports a free per-run port to every driver invocation when 8771 is occupied" {
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  port="$(awk '$1 == "driver-port" && $2 == "launch" {print $3}' "${STUB_LOG}")"
+  [[ ${port} =~ ^[0-9]+$ ]]
+  [ "${port}" -ge 20000 ]
+  [ "${port}" -le 59999 ]
+  [ "${port}" -ne 8771 ]
+  awk -v port="${port}" '$1 == "driver-port" && $3 != port {exit 1}' "${STUB_LOG}"
+}
+
+@test "uses an explicit free port for every driver invocation" {
+  export PROTOTYPE_SMOKE_PORT=23456
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  grep -q '^driver-port launch 23456$' "${STUB_LOG}"
+  awk '$1 == "driver-port" && $3 != 23456 {exit 1}' "${STUB_LOG}"
+}
+
+@test "bounds random port probes and fails before build or simctl when all are busy" {
+  export STUB_BUSY_PORT=all
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"no free agent port found"* ]]
+  [ "$(grep -c '^lsof ' "${STUB_LOG}")" -eq 20 ]
+  ! grep -q '^build$' "${STUB_LOG}"
+  ! grep -q '^xcrun ' "${STUB_LOG}"
 }

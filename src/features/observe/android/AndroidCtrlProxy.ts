@@ -98,6 +98,7 @@ export type AndroidCtrlProxyClientSurface = Pick<
   | "pushNetworkMockRules"
   | "getSdkCapabilities"
   | "discoverKeystore"
+  | "resetKeystore"
   | "setPreference"
   | "removePreference"
   | "clearPreferenceStore"

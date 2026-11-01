@@ -45,6 +45,7 @@ async function harness() {
   client.connectionTestHooks.socket = socket;
   client.connectionTestHooks.supportedCommands = new Set([
     "discover_keystore",
+    "reset_keystore",
     "get_sdk_capabilities",
     SDK_CAPABILITIES_USER_ID_CAPABILITY,
   ]);
@@ -539,4 +540,66 @@ test("an empty correlated failure keeps the method's fallback error", async () =
   h.manager.resolveError(h.manager.getPendingIds()[0], "", 7);
   await expect(pending).rejects.toThrow("Failed to list preference files");
   expect(h.manager.getPendingCount()).toBe(0);
+});
+
+test("Keystore reset sends exact selectors and resolves a narrow response", async () => {
+  const h = await harness();
+  try {
+    const pending = h.storage.resetKeystore("pkg", "login", "token", 50);
+    await flushDispatch();
+    const request = JSON.parse(h.socket.frames.at(-1)!);
+    expect(request).toEqual({
+      type: "reset_keystore",
+      requestId: request.requestId,
+      packageName: "pkg",
+      scope: "login",
+      alias: "token",
+    });
+    const state: Awaited<ReturnType<CtrlProxyStorage["resetKeystore"]>> = {
+      schemaVersion: 1,
+      capability: "storage.keystore",
+      outcome: "ok",
+      bridgeAvailable: true,
+      status: "deleted",
+      deletedCount: 1,
+      aliases: [{ alias: "token", outcome: "deleted" }],
+    };
+    h.manager.resolve<{ state: unknown }>(request.requestId, {
+      state: { ...state, key: "must strip" },
+    });
+    expect(await pending).toEqual(state);
+  } finally {
+    void h.client.close();
+  }
+});
+
+test("Keystore reset timeout is a structured unavailable result", async () => {
+  const h = await harness();
+  try {
+    const pending = h.storage.resetKeystore("pkg", "login", undefined, 50);
+    await flushDispatch();
+    h.timer.advanceTime(50);
+    expect(await pending).toMatchObject({
+      outcome: "unavailable",
+      reason: "BRIDGE_UNAVAILABLE",
+      deletedCount: 0,
+    });
+  } finally {
+    void h.client.close();
+  }
+});
+
+test("Keystore reset unsupported command never sends", async () => {
+  const h = await harness();
+  try {
+    h.client.connectionTestHooks.supportedCommands = new Set(["discover_keystore"]);
+    expect(await h.storage.resetKeystore("pkg", undefined, "token")).toMatchObject({
+      outcome: "unsupported",
+      reason: "DECLARED_UNSUPPORTED",
+      requestedAlias: "token",
+    });
+    expect(h.socket.frames).toEqual([]);
+  } finally {
+    void h.client.close();
+  }
 });

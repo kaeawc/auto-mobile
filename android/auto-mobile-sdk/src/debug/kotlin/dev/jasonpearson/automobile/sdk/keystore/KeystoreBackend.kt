@@ -21,6 +21,8 @@ internal enum class EntryCategory {
  * false presence result means not present or not observable: the SPI swallows metadata errors.
  */
 internal interface KeystoreBackend {
+  fun deleteAlias(alias: String)
+
   fun containsAlias(alias: String): Boolean
 
   fun entryCategory(alias: String): EntryCategory
@@ -29,6 +31,8 @@ internal interface KeystoreBackend {
 internal class AndroidKeystoreBackend : KeystoreBackend {
   // Lazy: disabled/discovery/undeclared requests never open AndroidKeyStore.
   private val store by lazy { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } }
+
+  override fun deleteAlias(alias: String) = store.deleteEntry(alias)
 
   override fun containsAlias(alias: String): Boolean = store.containsAlias(alias)
 

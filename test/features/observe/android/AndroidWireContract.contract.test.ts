@@ -61,6 +61,7 @@ const TS_ONLY_RESPONSE_FIELDS: Record<string, string> = {
   "storage_changed.error": "WsMessageBase permits an error; StorageChangedEvent has no error slot.",
   "crash_event.error": "WsMessageBase permits an error; crash details live inside event.",
   "anr_event.error": "WsMessageBase permits an error; ANR details live inside event.",
+  "keystore_reset.error": "WsMessageBase permits an error; reset failures live inside state.",
   "keystore_discovery.error":
     "WsMessageBase permits an error; discovery failures live inside state.",
   "sdk_capabilities.error":

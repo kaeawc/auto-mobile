@@ -779,6 +779,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     AppDiscoveryController(
       source =
         object : AppDiscoveryController.Source {
+          override fun resetKeystore(packageName: String, scope: String?, alias: String?) =
+            dev.jasonpearson.automobile.ctrlproxy.storage.resetKeystore(
+              this@CtrlProxy,
+              packageName,
+              scope,
+              alias,
+            )
+
           override fun keystore(packageName: String) =
             dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(
               this@CtrlProxy,
@@ -2327,6 +2335,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     storageController.handleGetPreferences(requestId, packageName, fileName)
+
+  override suspend fun resetKeystore(
+    requestId: String?,
+    packageName: String,
+    scope: String?,
+    alias: String?,
+  ) = appDiscovery.resetKeystore(requestId, packageName, scope, alias)
 
   override suspend fun discoverKeystore(requestId: String?, packageName: String) =
     appDiscovery.discoverKeystore(requestId, packageName)

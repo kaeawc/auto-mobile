@@ -812,10 +812,12 @@ const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArg
   const result = await action.execute({
     appId: args.appId,
     confirm: args.confirm,
+    scope: args.scope,
+    alias: args.alias,
     explicitlyTargeted,
   });
 
-  return createStructuredToolResponse({ ...result });
+  return withIsErrorOnFailure(createStructuredToolResponse({ ...result }), result.success);
 };
 
 export function registerAppTools(dependencies: AppToolsDependencies = {}) {
@@ -957,7 +959,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "resetKeychain",
-    "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
+    "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization, without confirm. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     resetKeychainSchema,
     {
       handler: resetKeychainHandler,

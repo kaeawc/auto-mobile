@@ -1,3 +1,5 @@
+import type { KeystoreResetBackend } from "../storage/keystoreReset";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { ActionableError, toActionableError } from "../../models";
 import type { BootedDevice, ExecResult, ResetKeychainResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -25,7 +27,9 @@ export interface ResetKeychainOptions {
    * Keychain for EVERY app on the device, this action refuses to run unless the
    * caller passes `confirm: true`.
    */
-  confirm: boolean;
+  confirm?: boolean;
+  scope?: string;
+  alias?: string;
   /**
    * Whether the caller supplied an explicit device-bound selector (a `deviceId`,
    * a `device` label, or a `sessionUuid`) rather than letting the device be
@@ -42,7 +46,7 @@ export interface ResetKeychainOptions {
  * #5188, #5190).
  *
  * This is a cross-platform tool with a scoped, per-`appId` contract, but the
- * only backend implemented today is the iOS Simulator's device-wide reset:
+ * backends honor platform-specific authorization:
  *
  * - **iOS Simulator** → `xcrun simctl keychain <udid> reset`. This is
  *   device-wide: it erases EVERY app's Keychain regardless of the requested
@@ -50,10 +54,9 @@ export interface ResetKeychainOptions {
  *   `exceededRequestedScope: true` so callers are never misled into thinking one
  *   app was targeted.
  * - **Physical iOS** → rejected; a scoped, app-owned reset is tracked in #5188.
- * - **Android** → rejected; a scoped, app-owned Keystore reset is tracked in
- *   #5190.
+ * - **Android** → deletes only app-declared aliases, under the SDK mutation gate.
  *
- * It requires explicit `confirm: true` because the simulator backend is
+ * The iOS Simulator path requires `confirm: true` because its reset is
  * destructive far beyond a single app. Tooling unavailability and command
  * failures surface as {@link ActionableError}.
  */
@@ -61,7 +64,11 @@ export class ResetKeychain {
   private device: BootedDevice;
   private simctl: SimctlKeychainClient;
 
-  constructor(device: BootedDevice, simctl: SimctlKeychainClient | null = null) {
+  constructor(
+    device: BootedDevice,
+    simctl: SimctlKeychainClient | null = null,
+    private readonly keystore: KeystoreResetBackend | null = null,
+  ) {
     this.device = device;
     this.simctl = simctl ?? new SimCtlClient(device);
   }
@@ -76,24 +83,17 @@ export class ResetKeychain {
     // Keychain wipe must never land on a simulator the caller did not select.
     if (!options.explicitlyTargeted) {
       throw new ActionableError(
-        `Refusing to reset the Keychain without an explicit device target. This is a ` +
-          `destructive, device-wide operation, so it will not run against an ambiently ` +
-          `selected device. Provide a deviceId, a device label, or a sessionUuid.`,
+        `Refusing to reset secure state without an explicit device target. ` +
+          `Provide a deviceId, a device label, or a sessionUuid.`,
       );
     }
 
     if (this.device.platform === "android") {
-      // Scoped, app-owned Android Keystore reset is not implemented yet (#5190).
-      throw new ActionableError(
-        `Scoped Keystore reset for '${appId}' is not yet implemented on Android (tracked in #5190). ` +
-          `Only iOS Simulator device-wide Keychain reset is currently supported.`,
-      );
+      return this.resetAndroid(options);
     }
 
     if (this.device.platform !== "ios") {
-      throw new ActionableError(
-        "Keychain reset is only supported on iOS simulators (Android Keystore support is tracked in #5190)",
-      );
+      throw new ActionableError("Secure-state reset is supported on Android and iOS simulators.");
     }
 
     // Reject physical iOS devices: the only supported operation is the
@@ -134,6 +134,23 @@ export class ResetKeychain {
         `Reset the iOS Simulator Keychain on simulator ${deviceId}. ` +
         `iOS Simulator only supports a device-wide reset, so EVERY app's Keychain data ` +
         `was erased — not just '${appId}'.`,
+    };
+  }
+  private async resetAndroid(options: ResetKeychainOptions): Promise<ResetKeychainResult> {
+    if (!options.scope?.trim() && !options.alias?.trim()) {
+      throw new ActionableError("Android Keystore reset requires a scope or alias selector.");
+    }
+    const backend = this.keystore ?? AndroidCtrlProxyClient.getInstance(this.device);
+    const state = await backend.resetKeystore(options.appId, options.scope, options.alias);
+    return {
+      ...state,
+      success: state.status === "deleted",
+      deviceId: this.device.deviceId,
+      platform: "android",
+      requestedAppId: options.appId,
+      scope: "app",
+      exceededRequestedScope: false,
+      message: `Android Keystore reset: ${state.status ?? state.outcome}; ${state.deletedCount} aliases deleted.`,
     };
   }
 }

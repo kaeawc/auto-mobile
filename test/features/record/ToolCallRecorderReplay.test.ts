@@ -50,7 +50,7 @@ function registerResetKeychain(simctl: FakeSimctl): void {
     {
       handler: async (args: {
         appId: string;
-        confirm: boolean;
+        confirm?: boolean;
         deviceId?: string;
         sessionUuid?: string;
       }) => {

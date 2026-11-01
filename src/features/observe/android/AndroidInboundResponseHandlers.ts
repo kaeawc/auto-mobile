@@ -434,6 +434,9 @@ export class AndroidInboundResponseHandlers {
         error: message.error,
       })),
 
+    keystore_reset: (message) =>
+      this.ctx.resolvePendingResponse(message, (message) => ({ state: message.state })),
+
     keystore_discovery: (message) =>
       this.ctx.resolvePendingResponse(message, (message) => ({ state: message.state })),
 
@@ -559,6 +562,7 @@ export class AndroidInboundResponseHandlers {
     | "frame_context_validation_result"
     | "device_info_result"
     | "keystore_discovery"
+    | "keystore_reset"
     | "sdk_capabilities"
     | "preference_files"
     | "preferences"

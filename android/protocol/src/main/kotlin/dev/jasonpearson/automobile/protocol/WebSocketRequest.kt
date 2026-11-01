@@ -596,6 +596,16 @@ data class GetPreferences(
   val fileName: String,
 ) : WebSocketRequest()
 
+/** Deletes only app-declared aliases through the debug bridge. */
+@Serializable
+@SerialName("reset_keystore")
+data class ResetKeystore(
+  override val requestId: String? = null,
+  val packageName: String,
+  val scope: String? = null,
+  val alias: String? = null,
+) : WebSocketRequest()
+
 /** Discovers the app-owned read-only Keystore metadata bridge. */
 @Serializable
 @SerialName("discover_keystore")

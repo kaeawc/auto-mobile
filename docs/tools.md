@@ -90,7 +90,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🗄️ <code>listDataStores</code>        | List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter)                |
 | 🗄️ <code>getDataStore</code>          | Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter) |
 | 🧮 <code>sqlQuery</code>              | Execute SQL on app SQLite database                                                             |
-| 🔐 <code>resetKeychain</code>         | Reset an app's Keychain/Keystore state (scoped by appId)                                       |
+| 🔐 <code>resetKeychain</code>         | Reset declared Android scope/alias; iOS Simulator clears all apps with confirm:true            |
 | 🔗 <code>setAppLinks</code>           | Android 12+: change an app's App Links state so https links open the app directly (or not)     |
 | ⏱️ <code>measureStartup</code>        | Measure cold/warm/hot app startup                                                              |
 | 📜 <code>getLogs</code>               | Read device logs with filters                                                                  |

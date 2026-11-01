@@ -351,6 +351,10 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
   }
 
+  async resetKeystore(packageName: string, scope?: string, alias?: string) {
+    return this.storage.resetKeystore(packageName, scope, alias);
+  }
+
   async discoverKeystore(packageName: string) {
     return this.storage.discoverKeystore(packageName);
   }

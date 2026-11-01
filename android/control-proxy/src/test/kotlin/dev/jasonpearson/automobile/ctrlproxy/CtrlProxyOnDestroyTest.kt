@@ -114,6 +114,38 @@ class CtrlProxyOnDestroyTest {
   }
 
   @Test
+  fun `onDestroy releases every broadcast receiver even when releases fail`() {
+    // These receivers are registered in onServiceConnected, which this offline test never runs, so
+    // each release throws "not registered". That turns the log into a record of every attempt and
+    // proves one failure does not stop the rest.
+    destroyService()
+
+    val attempted =
+      ShadowLog.getLogs()
+        .mapNotNull { log ->
+          log.msg?.removePrefix("Error unregistering ")?.removeSuffix(" receiver")?.takeIf {
+            log.msg.startsWith("Error unregistering ")
+          }
+        }
+        .toSet()
+    assertEquals(
+      setOf(
+        "command",
+        "navigation event",
+        "recomposition",
+        "frame metrics",
+        "package",
+        "handled exception",
+        "crash",
+        "ANR",
+        "event batch",
+        "screen state",
+      ),
+      attempted,
+    )
+  }
+
+  @Test
   fun `onDestroy destroys interactive host outside the cancelled service scope`() {
     val host = FakePrototypeHost()
     ReflectionHelpers.setField(

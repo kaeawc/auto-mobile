@@ -46,7 +46,7 @@ final class PrototypePlatformRateLimiterTests: XCTestCase {
 
     func testBackwardWallClockStepDoesNotResetBudget() {
         let clock = RateLimitClock()
-        clock.nowMilliseconds = 100000
+        clock.nowMilliseconds = 100_000
         var limiter = PrototypePlatformRateLimiter(clock: clock)
         for _ in 0 ..< 5 {
             XCTAssertNil(admit("share.open", using: &limiter))
@@ -238,6 +238,53 @@ final class PrototypePlatformRateLimiterTests: XCTestCase {
         XCTAssertEqual(
             refused.last?.payload.objectFields?["error"]?.objectFields?["message"],
             .string("Rate limit exceeded for share: at most 5 calls per 10000 ms")
+        )
+        XCTAssertTrue(session.takePlatformCommands().isEmpty)
+    }
+
+    func testSessionResolvedArgumentFailuresDoNotConsumeShareBudget() throws {
+        let clock = RateLimitClock()
+        var session = try session(clock: clock)
+        let invalid = try JSONDecoder().decode(PrototypeAction.self, from: Data("""
+        {"type":"platform","call":"share.open","statusKey":"status",
+         "into":"/data/share","args":{"text":{"value":42}},
+         "onError":[{"type":"emit","name":"invalid"}]}
+        """.utf8))
+        for _ in 0 ..< 5 {
+            let events = session.run([invalid])
+            let payload = try XCTUnwrap(events.first { $0.name == "prototype_platform" }?.payload.objectFields)
+            XCTAssertEqual(payload["error"], .object([
+                "code": .string(PlatformErrorCode.invalidArgs.rawValue),
+                "message": .string("Invalid argument: text"),
+            ]))
+            XCTAssertEqual(session.state["status"], .string("error"))
+            XCTAssertEqual(events.last?.name, "invalid")
+            XCTAssertTrue(session.takePlatformCommands().isEmpty)
+            let id = try XCTUnwrap(payload["callId"]?.stringValue)
+            XCTAssertTrue(session.completePlatformCall(id, .success(.null), durationMs: 0).isEmpty)
+        }
+        // The fake clock stays within the same window for the corrected calls.
+        let action = try shareAction()
+        for _ in 0 ..< 5 {
+            let id = try start(action, in: &session)
+            XCTAssertEqual(session.state["status"], .string("loading"))
+            _ = session.completePlatformCall(id, .success(.null), durationMs: 0)
+        }
+        let events = session.run([action])
+        let payload = try XCTUnwrap(events.first { $0.name == "prototype_platform" }?.payload.objectFields)
+        XCTAssertEqual(payload["error"], .object([
+            "code": .string(PlatformErrorCode.tooManyInFlight.rawValue),
+            "message": .string("Rate limit exceeded for share: at most 5 calls per 10000 ms"),
+        ]))
+        XCTAssertTrue(session.takePlatformCommands().isEmpty)
+        let invalidEvents = session.run([invalid])
+        let invalidPayload = try XCTUnwrap(
+            invalidEvents.first { $0.name == "prototype_platform" }?.payload
+                .objectFields
+        )
+        XCTAssertEqual(
+            invalidPayload["error"]?.objectFields?["code"],
+            .string(PlatformErrorCode.invalidArgs.rawValue)
         )
         XCTAssertTrue(session.takePlatformCommands().isEmpty)
     }

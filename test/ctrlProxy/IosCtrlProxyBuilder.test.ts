@@ -241,6 +241,101 @@ describe("IosCtrlProxyBuilder", function () {
     }
   });
 
+  test("derived-data tasks are FIFO and a throwing task releases the lock", async () => {
+    const builder = IosCtrlProxyBuilder.getInstance();
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const events: number[] = [];
+    const first = builder.runExclusiveOnDerivedData(async () => {
+      events.push(1);
+      started.resolve();
+      await release.promise;
+      throw new ActionableError("fake task failed");
+    });
+    const rejection = Promise.allSettled([first]);
+    await started.promise;
+    const second = builder.runExclusiveOnDerivedData(async () => {
+      events.push(2);
+      return 42;
+    });
+    const third = builder.runExclusiveOnDerivedData(async () => {
+      events.push(3);
+    });
+    expect(events).toEqual([1]);
+    release.resolve();
+    expect(await rejection).toEqual([
+      { status: "rejected", reason: new ActionableError("fake task failed") },
+    ]);
+    expect(await second).toBe(42);
+    await third;
+    expect(events).toEqual([1, 2, 3]);
+  });
+
+  test.each(["clean", "extract"])(
+    "%s waits for and holds the shared derived-data lock",
+    async (operation) => {
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      const builder = IosCtrlProxyBuilder.getInstance({}, { downloader });
+      const held = Promise.withResolvers<void>();
+      const releaseHolder = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      const releaseWork = Promise.withResolvers<void>();
+      const events: string[] = [];
+      const holder = builder.runExclusiveOnDerivedData(async () => {
+        held.resolve();
+        await releaseHolder.promise;
+      });
+      await held.promise;
+      const remove = spyOn(fs, "rm").mockImplementation(async () => {
+        events.push("rm");
+        if (operation === "clean") {
+          entered.resolve();
+          await releaseWork.promise;
+        }
+      });
+      const ownership = spyOn(
+        builder["artifactVerifier"],
+        "assertDerivedDataDirOwnedByCurrentUid",
+      ).mockResolvedValue(undefined);
+      downloader.extractBundle = async () => {
+        events.push("extract");
+        entered.resolve();
+        await releaseWork.promise;
+        throw new ActionableError("fake extraction failed");
+      };
+      try {
+        const work =
+          operation === "clean"
+            ? builder.cleanBuildArtifacts()
+            : builder["extractBundle"]("fake.zip", null);
+        const result = Promise.allSettled([work]);
+        await Promise.resolve();
+        expect(events).toEqual([]);
+        expect(ownership).not.toHaveBeenCalled();
+        releaseHolder.resolve();
+        await holder;
+        await entered.promise;
+        let successorRan = false;
+        const successor = builder.runExclusiveOnDerivedData(async () => {
+          successorRan = true;
+        });
+        await Promise.resolve();
+        expect(successorRan).toBe(false);
+        releaseWork.resolve();
+        const [outcome] = await result;
+        expect(outcome!.status).toBe(operation === "clean" ? "fulfilled" : "rejected");
+        await successor;
+        expect(successorRan).toBe(true);
+        expect(events).toEqual(operation === "clean" ? ["rm"] : ["rm", "extract"]);
+      } finally {
+        releaseHolder.resolve();
+        releaseWork.resolve();
+        remove.mockRestore();
+        ownership.mockRestore();
+      }
+    },
+  );
+
   beforeEach(async function () {
     // Save original environment
     originalProjectRoot = process.env.AUTOMOBILE_PROJECT_ROOT;

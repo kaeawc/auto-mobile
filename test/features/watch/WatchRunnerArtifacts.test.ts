@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import path from "node:path";
+import { Mutex } from "async-mutex";
 import { WatchRunnerArtifacts } from "../../../src/features/watch/WatchRunnerArtifacts";
 import { createExecResult } from "../../../src/utils/execResult";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
@@ -114,4 +115,96 @@ test("a missing source project requires a prebuilt override without building", a
   await expect(f.artifacts.resolve()).rejects.toThrow("AUTOMOBILE_WATCH_RUNNER_XCTESTRUN");
   expect(f.accesses).toEqual([path.join("/repo", "ios", "control-proxy", "CtrlProxy.xcodeproj")]);
   expect(f.commands).toEqual([]);
+});
+
+test("existing watch artifacts bypass both building and the derived-data lock", async () => {
+  let locks = 0;
+  let builds = 0;
+  const artifacts = new WatchRunnerArtifacts({
+    builder: {
+      getConfig: () => ({ projectRoot: "/repo", derivedDataPath: "/derived" }),
+      getXctestrunPath: async () => "/existing.xctestrun",
+      runExclusiveOnDerivedData: async (task) => {
+        locks += 1;
+        return task();
+      },
+    },
+    override: () => undefined,
+    xcodebuild: {
+      executeCommand: async () => {
+        builds += 1;
+        return createExecResult("", "");
+      },
+    },
+  });
+  expect(await artifacts.resolve()).toBe("/existing.xctestrun");
+  expect(locks).toBe(0);
+  expect(builds).toBe(0);
+});
+
+test("watch build waits for extraction and holds the lock through post-build discovery", async () => {
+  const mutex = new Mutex();
+  const extraction = Promise.withResolvers<void>();
+  const extractionStarted = Promise.withResolvers<void>();
+  const lockRequested = Promise.withResolvers<void>();
+  const buildStarted = Promise.withResolvers<void>();
+  const buildFinished = Promise.withResolvers<void>();
+  const lookupStarted = Promise.withResolvers<void>();
+  const lookupFinished = Promise.withResolvers<void>();
+  let built = false;
+  let extracting = false;
+  const firstExtraction = mutex.runExclusive(async () => {
+    extractionStarted.resolve();
+    await extraction.promise;
+  });
+  await extractionStarted.promise;
+  const artifacts = new WatchRunnerArtifacts({
+    builder: {
+      getConfig: () => ({ projectRoot: "/repo", derivedDataPath: "/derived" }),
+      getXctestrunPath: async () => {
+        if (!built) {
+          return null;
+        }
+        lookupStarted.resolve();
+        await lookupFinished.promise;
+        return "/built.xctestrun";
+      },
+      runExclusiveOnDerivedData: (task) => {
+        lockRequested.resolve();
+        return mutex.runExclusive(task);
+      },
+    },
+    override: () => undefined,
+    access: async () => {},
+    xcodebuild: {
+      executeCommand: async () => {
+        built = true;
+        buildStarted.resolve();
+        await buildFinished.promise;
+        return createExecResult("", "");
+      },
+    },
+  });
+  const resolving = artifacts.resolve();
+  // Flush the bounded promise-only setup, including SingleFlight's task microtask.
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
+  expect(built).toBe(false);
+  extraction.resolve();
+  await firstExtraction;
+  await lockRequested.promise;
+  await buildStarted.promise;
+  const secondExtraction = mutex.runExclusive(async () => {
+    extracting = true;
+  });
+  await Promise.resolve();
+  expect(extracting).toBe(false);
+  buildFinished.resolve();
+  await lookupStarted.promise;
+  expect(extracting).toBe(false);
+  lookupFinished.resolve();
+  expect(await resolving).toBe("/built.xctestrun");
+  await secondExtraction;
+  expect(extracting).toBe(true);
 });

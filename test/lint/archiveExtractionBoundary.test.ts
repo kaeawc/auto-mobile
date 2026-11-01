@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
 import {
   directlyExtractsTar,
   EXCEPTIONS,
-  findOffenders,
   sourceFiles,
-} from "../../scripts/check-archive-extraction-boundary";
+} from "../../scripts/lib/archiveExtractionBoundary";
+import { BOUNDARY_ROWS } from "../../scripts/lib/boundaryRows";
+import { scanBoundary } from "../../scripts/lib/boundaryScanner";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -17,7 +20,16 @@ describe("archive extraction boundary (issue #4065)", () => {
   // below still parse their own inputs, and both tree assertions inspect this real scan.
   beforeAll(async () => {
     sources = Object.freeze(sourceFiles(join(ROOT, "src")));
-    offenders = Object.freeze(await findOffenders(ROOT));
+    const row = BOUNDARY_ROWS.find((candidate) => candidate.id === "archive-extraction")!;
+    const changed = sources.map((file) => ({
+      path: relative(ROOT, file).replace(/\\/g, "/"),
+      addedLines: new Set<number>(),
+    }));
+    offenders = Object.freeze(
+      scanBoundary(row, changed, {
+        readSource: (path) => readFileSync(join(ROOT, path), "utf8"),
+      }).map((violation) => violation.file),
+    );
   }, 30_000);
 
   test("only ArchiveExtractor directly runs tar extraction", () => {

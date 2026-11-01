@@ -5,6 +5,7 @@ import {
   parseUnifiedDiff,
   renderBoundaryResult,
   scanBoundary,
+  treeTooSmallMessage,
 } from "../../scripts/lib/boundaryScanner";
 
 function row(id: string): BoundaryRow {
@@ -294,5 +295,44 @@ describe("renderBoundaryResult", () => {
       stderr: "",
     });
     expect(renderBoundaryResult(row("xcodebuild"), []).stdout).toContain("xcodebuild-boundary:");
+  });
+});
+
+describe("archive-extraction row (#13219)", () => {
+  const treeFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+  const extract = 'spawn("tar", ["-xzf", archive]);\nexec("tar -xzf a.tar.gz -C d");';
+
+  test("flags a file that runs tar extraction once and skips the owner", () => {
+    const owner = treeFile("src/utils/ArchiveExtractor.ts", extract);
+    const other = treeFile("src/y.ts", extract);
+    const creates = treeFile("src/z.ts", 'spawn("tar", ["-czf", archive]);');
+
+    expect(scan("archive-extraction", [owner, other, creates]).map(({ file }) => file)).toEqual([
+      "src/y.ts",
+    ]);
+  });
+
+  test("keeps the checker's per-file failure lines and success message byte for byte", () => {
+    const violation = { file: "src/y.ts", line: 1, column: 1, text: "" };
+
+    expect(renderBoundaryResult(row("archive-extraction"), [violation, violation]).stderr).toBe(
+      "error: tar extraction must use src/utils/ArchiveExtractor.ts:\n" +
+        "src/y.ts directly runs tar extraction; route it through src/utils/ArchiveExtractor.ts instead.\n",
+    );
+    expect(renderBoundaryResult(row("archive-extraction"), []).stdout).toBe(
+      "archive-extraction-boundary: no direct production tar extraction.\n",
+    );
+  });
+
+  test("refuses a tree scan that found too few files to mean anything", () => {
+    expect(treeTooSmallMessage(row("archive-extraction"), 12)).toBe(
+      "error: archive-extraction-boundary scanned only 12 files under src; expected the full source tree.",
+    );
+    expect(treeTooSmallMessage(row("archive-extraction"), 100)).toBeUndefined();
+    expect(treeTooSmallMessage(row("ffmpeg"), 0)).toBeUndefined();
   });
 });

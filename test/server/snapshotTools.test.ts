@@ -157,10 +157,38 @@ describe("snapshot tool", () => {
     expect(toolDefinition).toBeDefined();
     const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     expect(schema.required).toEqual(["action"]);
-    expect(schema.properties?.action?.enum).toEqual(["capture", "restore"]);
+    expect(schema.properties?.action?.enum).toEqual(["capture", "restore", "delete"]);
     expect(schema.anyOf).toBeUndefined();
     expect(schema.oneOf).toBeUndefined();
     expect(schema.allOf).toBeUndefined();
+  });
+
+  test("delete requires a snapshotName and takes no capture options (#14065)", () => {
+    expect(deviceSnapshotSchema.safeParse({ action: "delete" }).success).toBe(false);
+    expect(
+      deviceSnapshotSchema.safeParse({ action: "delete", snapshotName: "s", includeAppData: true })
+        .success,
+    ).toBe(false);
+    expect(deviceSnapshotSchema.safeParse({ action: "delete", snapshotName: "s" }).success).toBe(
+      true,
+    );
+  });
+
+  test("deletes a snapshot and reports it (#14065)", async () => {
+    const tool = ToolRegistry.getTool("deviceSnapshot");
+    await tool!.deviceAwareHandler!(device, {
+      action: "capture",
+      snapshotName: "to-delete",
+      includeAppData: true,
+      appBundleIds: ["com.example.app"],
+    });
+
+    const payload = toolJson(
+      await tool!.deviceAwareHandler!(device, { action: "delete", snapshotName: "to-delete" }),
+    );
+
+    expect(payload).toMatchObject({ snapshotName: "to-delete", deleted: true });
+    expect(payload.message).toContain("deleted");
   });
 
   test("captures snapshot and returns payload", async () => {

@@ -1,5 +1,5 @@
-import Foundation
 import AutoMobileSdkWire
+import Foundation
 
 public protocol SdkDatabaseFetching: Sendable {
     func executeSQL(
@@ -19,7 +19,7 @@ public protocol SdkDatabaseFetching: Sendable {
 }
 
 extension SdkDatabaseFetching {
-    public func queryCoreData(store: String, entity: String, limit: Int?) async throws -> CoreDataQueryResult {
+    public func queryCoreData(store _: String, entity _: String, limit _: Int?) async throws -> CoreDataQueryResult {
         throw SdkDatabaseError.unavailable("core_data_query_unavailable")
     }
 }

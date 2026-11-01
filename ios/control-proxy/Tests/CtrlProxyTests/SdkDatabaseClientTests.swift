@@ -1,6 +1,6 @@
+import AutoMobileSdkWire
 @testable import CtrlProxy
 import Foundation
-import AutoMobileSdkWire
 import XCTest
 
 final class SdkDatabaseClientTests: XCTestCase {
@@ -30,15 +30,17 @@ final class SdkDatabaseClientTests: XCTestCase {
 
     func testCoreDataQueryUsesReadOnlyRouteAndPreservesTruncation() async throws {
         let expected = CoreDataQueryResult(columns: ["name"], rows: [[nil]], truncated: true)
-        let stub = StubHTTPTransport(status: 200, body: try JSONEncoder().encode(expected))
+        let stub = try StubHTTPTransport(status: 200, body: JSONEncoder().encode(expected))
         let result = try await makeClient(stub).queryCoreData(store: "Main", entity: "Item", limit: 2)
         XCTAssertEqual(result, expected)
         let request = try XCTUnwrap(stub.recordedRequests.first)
         XCTAssertEqual(request.url?.path, SdkRoute.dbCoreDataQuery.path)
         XCTAssertEqual(request.httpMethod, "POST")
         let body = try XCTUnwrap(request.httpBody)
-        XCTAssertEqual(try JSONDecoder().decode(CoreDataQueryRequest.self, from: body),
-                       CoreDataQueryRequest(store: "Main", entity: "Item", limit: 2))
+        XCTAssertEqual(
+            try JSONDecoder().decode(CoreDataQueryRequest.self, from: body),
+            CoreDataQueryRequest(store: "Main", entity: "Item", limit: 2)
+        )
     }
 
     // MARK: - executeSQL success + request shape

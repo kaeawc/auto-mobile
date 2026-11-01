@@ -190,7 +190,8 @@ final class CommandHandler: CommandHandling {
             return try await dispatchPreferences(request, startTime: startTime)
         case .setNetworkMockRules, .setNetworkFaultRules, .setNetworkErrorSimulation, .getSdkCapabilities:
             return try await dispatchNetwork(request, startTime: startTime)
-        case .queryCoreData, .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData, .getTableStructure:
+        case .queryCoreData, .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData,
+             .getTableStructure:
             return try await dispatchDatabase(request, startTime: startTime)
         }
     }

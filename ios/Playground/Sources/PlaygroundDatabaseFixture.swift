@@ -1,6 +1,6 @@
 import AutoMobileSDK
-import Foundation
 import CoreData
+import Foundation
 
 protocol PlaygroundFileSystem {
     var applicationSupportDirectory: URL? { get }
@@ -196,12 +196,12 @@ final class PlaygroundCoreDataFixture: CoreDataReadOnlyFetching, @unchecked Send
             let values = try context.fetch(request)
             let countRequest = NSFetchRequest<NSManagedObject>(entityName: entity)
             countRequest.includesPendingChanges = false
-            return CoreDataQueryResult(
+            return try CoreDataQueryResult(
                 columns: ["name", "quantity"],
                 rows: values.map { row in
                     ["name", "quantity"].map { key in row[key].map { String(describing: $0) } }
                 },
-                truncated: try context.count(for: countRequest) > values.count
+                truncated: context.count(for: countRequest) > values.count
             )
         }
     }

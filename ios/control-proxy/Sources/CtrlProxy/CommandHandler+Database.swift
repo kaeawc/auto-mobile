@@ -9,7 +9,11 @@ extension CommandHandler {
                 throw VerbatimLocalizedError(message: self.databaseUnavailableMessage)
             }
             try await self.validateDatabaseAppId(request.appId)
-            let result = try await client.queryCoreData(store: request.store, entity: request.entity, limit: request.limit)
+            let result = try await client.queryCoreData(
+                store: request.store,
+                entity: request.entity,
+                limit: request.limit
+            )
             return ExecuteSqlResponse(
                 requestId: request.requestId, success: true, queryType: "query",
                 columns: result.columns, rows: result.rows, rowsAffected: 0,

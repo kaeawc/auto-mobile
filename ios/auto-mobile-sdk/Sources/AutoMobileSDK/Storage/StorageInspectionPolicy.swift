@@ -1,5 +1,5 @@
-import Foundation
 import AutoMobileSdkWire
+import Foundation
 
 /// Host-owned read seam. Implementations fetch at most `limit` rows and report whether more exist.
 /// Use the host coordinator/context; never save, mutate objects, or open a writer for inspection.

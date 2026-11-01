@@ -213,7 +213,8 @@
                 return error(statusCode: 503, code: "db_inspection_disabled")
             }
             guard let request = try? JSONDecoder().decode(CoreDataQueryRequest.self, from: body),
-                  request.limit == nil || request.limit! > 0 else {
+                  request.limit == nil || request.limit! > 0
+            else {
                 return error(statusCode: 400, code: "bad_request")
             }
             let configuration = DatabaseInspector.shared.inspectionConfiguration

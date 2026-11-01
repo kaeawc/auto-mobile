@@ -9,7 +9,11 @@
             func fetch(entity: String, limit: Int) throws -> CoreDataQueryResult {
                 XCTAssertEqual(entity, "Item")
                 XCTAssertEqual(limit, 2)
-                return CoreDataQueryResult(columns: ["name", "token"], rows: [["A", "secret"], ["B", nil]], truncated: true)
+                return CoreDataQueryResult(
+                    columns: ["name", "token"],
+                    rows: [["A", "secret"], ["B", nil]],
+                    truncated: true
+                )
             }
         }
 
@@ -27,8 +31,14 @@
             DatabaseInspector.shared.setEnabled(true)
         }
 
-        private func query(store: String = "Main", entity: String = "Item", limit: Int? = 99) throws -> SdkRouteResponse {
-            SdkDatabaseRouteHandler().handleCoreDataQuery(body: try JSONEncoder().encode(
+        private func query(
+            store: String = "Main",
+            entity: String = "Item",
+            limit: Int? = 99
+        )
+            throws -> SdkRouteResponse
+        {
+            try SdkDatabaseRouteHandler().handleCoreDataQuery(body: JSONEncoder().encode(
                 CoreDataQueryRequest(store: store, entity: entity, limit: limit)
             ))
         }
@@ -46,7 +56,10 @@
 
         func testUnknownStoreAndEntityAreStructuredErrors() throws {
             configure()
-            for (store, entity, code) in [("missing", "Item", "unknown_core_data_store"), ("Main", "Other", "unknown_core_data_entity")] {
+            for (store, entity, code) in [
+                ("missing", "Item", "unknown_core_data_store"),
+                ("Main", "Other", "unknown_core_data_entity"),
+            ] {
                 let response = try query(store: store, entity: entity)
                 XCTAssertEqual(response.statusCode, 404)
                 let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
@@ -56,10 +69,16 @@
 
         func testUnsupportedWithoutFetcherAndSupportedWithFetcher() throws {
             configure(fetcher: nil)
-            XCTAssertEqual(StorageStoreState.states(for: DatabaseInspector.shared.inspectionConfiguration).first?.query, "unsupported")
+            XCTAssertEqual(
+                StorageStoreState.states(for: DatabaseInspector.shared.inspectionConfiguration).first?.query,
+                "unsupported"
+            )
             XCTAssertEqual(try query().statusCode, 501)
             configure()
-            XCTAssertEqual(StorageStoreState.states(for: DatabaseInspector.shared.inspectionConfiguration).first?.query, "supported")
+            XCTAssertEqual(
+                StorageStoreState.states(for: DatabaseInspector.shared.inspectionConfiguration).first?.query,
+                "supported"
+            )
             let encoded = try JSONEncoder().encode(DatabaseInspector.shared.inspectionConfiguration.coreDataStores[0])
             let decoded = try JSONDecoder().decode(CoreDataStoreRegistration.self, from: encoded)
             XCTAssertNil(decoded.fetcher)

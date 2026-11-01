@@ -119,7 +119,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try decodePreferences(requestType, from: decoder)
         case .setNetworkMockRules, .setNetworkFaultRules, .setNetworkErrorSimulation, .getSdkCapabilities:
             return try decodeNetwork(requestType, from: decoder)
-        case .queryCoreData, .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData, .getTableStructure:
+        case .queryCoreData, .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData,
+             .getTableStructure:
             return try decodeDatabase(requestType, from: decoder)
         }
     }

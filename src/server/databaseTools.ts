@@ -56,21 +56,27 @@ export const sqlQuerySchema = withAppIdAliases(
       .strict(),
   ),
 ).refine(
-  (args) =>
-    (args.databasePath !== undefined &&
-      args.query !== undefined &&
-      args.store === undefined &&
-      args.entity === undefined &&
-      args.limit === undefined) ||
-    (args.store !== undefined &&
-      args.entity !== undefined &&
-      args.databasePath === undefined &&
-      args.query === undefined),
+  isValidSqlQueryMode,
   "Supply exactly databasePath and query, or store and entity (with optional limit)",
 );
 
 // Type interface for tool arguments
 type SqlQueryArgs = z.output<typeof sqlQuerySchema>;
+
+function isValidSqlQueryMode(args: SqlQueryArgs): boolean {
+  return (
+    (typeof args.databasePath === "string" &&
+      typeof args.query === "string" &&
+      args.store === undefined &&
+      args.entity === undefined &&
+      args.limit === undefined) ||
+    (Boolean(args.store) &&
+      Boolean(args.entity) &&
+      args.databasePath === undefined &&
+      args.query === undefined &&
+      (args.limit === undefined || (Number.isSafeInteger(args.limit) && args.limit > 0)))
+  );
+}
 
 /**
  * Extract table names from SQL query for notification purposes.
@@ -136,7 +142,12 @@ export function registerDatabaseTools(
   // SQL Query handler
   const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
     try {
-      args = sqlQuerySchema.parse(args);
+      // Device-aware dispatch carries internal metadata and does not parse the schema.
+      if (!isValidSqlQueryMode(args)) {
+        throw new ActionableError(
+          "Supply exactly databasePath and query, or store and entity (with optional positive integer limit)",
+        );
+      }
       if (args.store !== undefined && args.entity !== undefined) {
         return await queryCoreDataForDevice(
           device,

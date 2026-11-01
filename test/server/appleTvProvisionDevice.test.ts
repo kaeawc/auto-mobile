@@ -1,3 +1,6 @@
+import { TvosRunnerLifecycle } from "../../src/features/tvos/TvosRunnerLifecycle";
+import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
+import { FakeTvosRunnerLauncher } from "../fakes/FakeTvosRunnerLauncher";
 import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
 import {
   runWithAcquisitionReceipt,
@@ -64,7 +67,9 @@ describe("provisionDevice on an Apple TV simulator", () => {
   let restoreEnv: (() => void) | undefined;
   let sessionManager: SessionManager | undefined;
 
+  let tvosRunner: TvosRunnerLifecycle | undefined;
   const cleanup = () => {
+    tvosRunner?.stopAll();
     env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
     restoreEnv?.();
     restoreEnv = undefined;
@@ -113,10 +118,24 @@ describe("provisionDevice on an Apple TV simulator", () => {
     );
     await pool.initializeWithDevices(await deviceUtils.getBootedDevices("tvos"));
     DaemonState.getInstance().initialize(sessionManager, pool);
+    const launcher = new FakeTvosRunnerLauncher();
+    const releasedPorts: string[] = [];
+    const artifacts = { resolve: async () => "/products/TV.xctestrun" };
+    tvosRunner = new TvosRunnerLifecycle({
+      artifacts,
+      launcher,
+      ports: {
+        allocate: () => 9012,
+        release: (id) => {
+          releasedPorts.push(id);
+        },
+      },
+    });
     const runnerCalls: string[] = [];
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     setDeviceToolsDependencies({
       lifecycleCoordinator,
+      tvosRunnerLifecycleFactory: () => tvosRunner!,
       env,
       timer,
       deviceManagerFactory: () => deviceUtils,
@@ -132,7 +151,17 @@ describe("provisionDevice on an Apple TV simulator", () => {
       appleTvSimulatorProvisionerFactory: () => new AppleTvSimulatorProvisioner(inventory, simctl),
     });
     registerDeviceTools();
-    return { simctl, pool, sessions: sessionManager, runnerCalls, timer, lifecycleCoordinator };
+    return {
+      simctl,
+      pool,
+      sessions: sessionManager,
+      runnerCalls,
+      timer,
+      lifecycleCoordinator,
+      launcher,
+      artifacts,
+      releasedPorts,
+    };
   }
 
   const provision = (args: Record<string, unknown>) =>
@@ -144,7 +173,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
       (error: unknown) => error,
     );
 
-  test("startDevice boots an existing TV and binds at booted readiness without a runner", async () => {
+  test("startDevice boots an existing TV, starts its runner and binds at booted readiness", async () => {
     const tv = tvDevice({ name: NAME, state: "Shutdown" });
     const { simctl, sessions, runnerCalls, timer } = await arrange([tv]);
     const result = toolJson(
@@ -170,6 +199,48 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(simctl.commands).toEqual([`boot ${tv.udid} 360000`]);
     expect(runnerCalls).toEqual([]);
     expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("startDevice reuses a connected runner and release stops the owned launch", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { launcher, sessions, releasedPorts } = await arrange([tv]);
+    const start = () =>
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      });
+    const first = toolJson(await start());
+    await start();
+    expect(launcher.launches).toHaveLength(1);
+    expect(tvosRunners.get(tv.udid)).toBe(launcher.client);
+    const id = z
+      .object({ runtime: z.object({ session: z.object({ sessionUuid: z.string() }) }) })
+      .parse(first).runtime.session.sessionUuid;
+    await sessions.releaseSession(id, "explicit-release");
+    expect(launcher.stops).toBe(1);
+    expect(tvosRunners.get(tv.udid)).toBeUndefined();
+    expect(releasedPorts).toEqual([tv.udid]);
+  });
+
+  test("runner startup failure preserves a booted session with an actionable message", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { artifacts, launcher } = await arrange([tv]);
+    artifacts.resolve = async () => {
+      throw new Error("set AUTOMOBILE_TVOS_RUNNER_XCTESTRUN");
+    };
+    const result = toolJson(
+      await ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    expect(result.message).toContain(
+      "tvOS runner unavailable: set AUTOMOBILE_TVOS_RUNNER_XCTESTRUN",
+    );
+    expect(launcher.launches).toEqual([]);
+    expect(result.readiness).toMatchObject({ level: "booted" });
   });
 
   test("startDevice adopts an already booted TV by exact name without another boot", async () => {
@@ -569,7 +640,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     const tools = await failure(provision({ device: TV, enableTools: ["observe"] }));
 
     expect(readiness).toBeInstanceOf(ActionableError);
-    expect(String(readiness)).toContain("tvOS has no automation runner");
+    expect(String(readiness)).toContain("tvOS provisioning accepts only readiness");
     expect(String(resources)).toContain("resources is not supported on tvOS");
     expect(String(tools)).toContain("enableTools is not supported on tvOS");
     expect(simctl.commands).toEqual([]);

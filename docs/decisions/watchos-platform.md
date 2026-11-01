@@ -11,9 +11,18 @@ non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platfo
 everything below that says "watch" applies to it unless a section names watchOS specifically.
 `tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
 `startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
-`terminateApp` and `listApps`. Discovery and selection require an explicit
+`terminateApp`, `listApps`, `observe` and `pressButton`. Discovery and selection require an explicit
 tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
-readiness without an automation runner, keyboard, biometric or prototype setup. A broker binding
+readiness after best-effort tvOS runner startup, without iOS keyboard, biometric or prototype setup.
+The tvOS runner uses `request_hierarchy` through the iOS hierarchy converter, preserving focus
+in the hierarchy and existing `focusedElement` output. `pressButton` sends remote up/down/left/right,
+select, menu, home and playPause. Touch gestures are refused with focus-navigation guidance;
+long press and text input are unsupported. A tvOS handshake is required before registration.
+`AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` overrides artifact discovery; otherwise an appletvsimulator
+xctestrun is discovered or the `AutoMobileTVTest` scheme is built with a 120-second limit.
+Startup uses the tvOS destination and an isolated xctestrun with `AM_PORT`; runner ownership,
+release, shutdown and deletion follow the watch lifecycle. Connected observations use runner
+screenshots, while observations without a runner retain the simctl screenshot-only fallback. A broker binding
 never reuses a TV. Unlike watchOS,
 `tvos` is advertised in tool input schemas ahead of support (see the schema rule below).
 

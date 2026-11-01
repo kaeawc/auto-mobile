@@ -1,3 +1,4 @@
+import { rejectTvosTouch } from "../tvos/TvosActions";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { AndroidCoordinateTalkBack } from "./AndroidCoordinateTalkBack";
 import { AndroidCoordinateTapDispatcher } from "./AndroidCoordinateTapDispatcher";
@@ -169,6 +170,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       timer: dependencies.timer,
       displayFence: dependencies,
     });
+    rejectTvosTouch(device.platform, "tapAt");
     this.androidClient =
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
@@ -306,6 +308,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     signalArg?: AbortSignal,
     planContextArg?: TapAtPlanContext,
   ): Promise<TapAtResult> {
+    rejectTvosTouch(this.device.platform, "tapAt");
     const { progress, signal, planContext } = resolveTapAtCall(
       progressOrCall,
       signalArg,

@@ -1,3 +1,4 @@
+import { rejectTvosTouch } from "../tvos/TvosActions";
 import { unsupportedWatchAction } from "../watch/WatchActions";
 import {
   dispatchRichStylus,
@@ -205,6 +206,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       failure: (error: string) => SwipeResult;
     },
   ): Promise<SwipeResult> {
+    rejectTvosTouch(this.device.platform, "swipeOn");
     const { call, perf, failure } = context;
     const { progress, signal } = call;
     if (this.device.platform !== "android") {
@@ -392,6 +394,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     fence: { assertCurrent: () => void } | undefined,
     { pointer, signal }: { pointer?: PointerOption; signal?: AbortSignal } = {},
   ): Promise<SwipeResult> {
+    rejectTvosTouch(this.device.platform, "swipeOn");
     const { from, to } = resolved;
     const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
     try {
@@ -438,6 +441,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     options: SwipeAtOptions,
     call: ActionCall & { recordingContext?: SwipeAtRecordingContext } = {},
   ): Promise<SwipeResult> {
+    rejectTvosTouch(this.device.platform, "swipeOn");
     if (this.device.platform === "watchos") {
       unsupportedWatchAction("coordinate swipe; use swipeOn with a direction");
     }

@@ -12,12 +12,16 @@ import { type DeviceToolsDependencies } from "../core/dependencies";
 import { type TeardownContext, type TeardownResolvedTarget } from "./teardownContracts";
 import { runWithinShutdownDeadline } from "../core/deadlines";
 import { type TeardownDeviceArgs } from "../core/contracts";
+import { getTvosRunnerLifecycle } from "../../tvos/TvosRunnerLifecycle";
 import { getWatchRunnerLifecycle } from "../../watch/WatchRunnerLifecycle";
 
 export function stopWatchRunnerBeforeShutdown(
   device: BootedDevice,
   dependencies: DeviceToolsDependencies,
 ): void {
+  if (device.platform === "tvos") {
+    (dependencies.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(device.deviceId);
+  }
   if (device.platform === "watchos") {
     (dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(device.deviceId);
   }
@@ -63,6 +67,10 @@ export async function evictTeardownManagers(
   const { platform, stableId } = context.args.target;
   if (platform === "watchos") {
     (context.dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(
+      runtimeId ?? stableId,
+    );
+  } else if (platform === "tvos") {
+    (context.dependencies.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(
       runtimeId ?? stableId,
     );
   } else if (platform === "ios") {

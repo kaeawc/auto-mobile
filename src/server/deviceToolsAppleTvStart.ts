@@ -1,3 +1,9 @@
+import {
+  getTvosRunnerLifecycle,
+  type TvosRunnerLifecycle,
+} from "../features/tvos/TvosRunnerLifecycle";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError } from "../models";
 import {
   getDeviceToolsDependencies,
@@ -93,6 +99,8 @@ export async function startAppleTvDevice(
               coordinator: deps.lifecycleCoordinator,
             },
           );
+          let stopLaunchedRunner: (() => void) | undefined;
+          let completed = false;
           try {
             const lifecycleSignal =
               combineAbortSignals(requestSignal, lease.signal) ?? lease.signal;
@@ -118,6 +126,33 @@ export async function startAppleTvDevice(
               },
             );
             lifecycleSignal.throwIfAborted();
+            stage.current = "starting the Apple TV automation runner";
+            let runnerUnavailable: string | undefined;
+            let runner: Pick<TvosRunnerLifecycle, "start" | "attach" | "stop"> | undefined;
+            const sessions = deps.daemonState.isInitialized()
+              ? deps.daemonState.getSessionManager()
+              : undefined;
+            try {
+              if (!sessions)
+                throw new ActionableError(
+                  "tvOS runner ownership requires a daemon-managed session; start the daemon and retry startDevice.",
+                );
+              runner = (deps.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)();
+              const started = await runner.start({
+                deviceId: tv.deviceId,
+                sessions,
+                signal: lifecycleSignal,
+              });
+              runnerUnavailable = started.runnerUnavailable;
+              stopLaunchedRunner = started.stop;
+            } catch (error) {
+              runnerUnavailable = errorMessage(error);
+              logger.warn(
+                `[TvosRunner] Runner unavailable for ${tv.deviceId}: ${runnerUnavailable}`,
+                error,
+              );
+            }
+            lifecycleSignal.throwIfAborted();
             stage.current = "binding the device session";
             const sessionId = await bindBootedSimulatorSession(
               { device: fresh, boot, rawArgs, operation: "startDevice" },
@@ -125,8 +160,23 @@ export async function startAppleTvDevice(
               deps.timer,
               { deadlineMs, signal: lifecycleSignal },
             );
+            if (runner && sessions) {
+              const attachError = runner.attach({
+                deviceId: tv.deviceId,
+                ownerSession: sessionId,
+                sessions,
+              });
+              if (attachError)
+                throw new ActionableError(
+                  "The tvOS session ended before runner startup; retry startDevice.",
+                );
+            }
+            lifecycleSignal.throwIfAborted();
+            completed = true;
             return createStructuredToolResponse({
-              message: `tvos '${boot.device.name}' is booted`,
+              message:
+                `tvos '${boot.device.name}' is booted` +
+                (runnerUnavailable ? `; tvOS runner unavailable: ${runnerUnavailable}` : ""),
               ...projectBootedDevice(
                 describeDevice({
                   kind: "booted",
@@ -144,6 +194,7 @@ export async function startAppleTvDevice(
               },
             });
           } finally {
+            if (!completed) stopLaunchedRunner?.();
             lease.release();
           }
         }),

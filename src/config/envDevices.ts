@@ -371,6 +371,12 @@ export const DEVICES_ENV = {
     default: "temp dir",
     doc: "Derived-data directory for iOS CtrlProxy builds.",
   },
+  TVOS_RUNNER_XCTESTRUN: {
+    name: "AUTOMOBILE_TVOS_RUNNER_XCTESTRUN",
+    kind: "path",
+    default: "discover or build the AutoMobileTVTest scheme",
+    doc: "Prebuilt tvOS simulator runner xctestrun used by startDevice.",
+  },
   WATCH_RUNNER_XCTESTRUN: {
     name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
     kind: "path",

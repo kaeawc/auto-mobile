@@ -1,3 +1,10 @@
+import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
+import { FakeTvosRunnerClient } from "../fakes/FakeTvosRunnerClient";
+import b01 from "../fixtures/tvos-xcuitest/tvos-runner-hierarchy-focus-b01.json";
+import field from "../fixtures/tvos-xcuitest/tvos-runner-hierarchy-focus-field.json";
+import { DefaultElementParser } from "../../src/features/utility/ElementParser";
+import { getStructuredPayload } from "../../src/utils/toolUtils";
+import type { ObserveResult } from "../../src/models";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -24,7 +31,7 @@ import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtect
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { toolJson } from "../helpers/toolResponse";
+import { toolJson, readToolResponse } from "../helpers/toolResponse";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateEmptyToolRegistry();
@@ -79,7 +86,7 @@ describe("observe on an Apple TV simulator through the registry", () => {
     cleanup();
   });
 
-  async function arrange() {
+  async function arrange({ runnerScreenshot = false } = {}) {
     const connected = [iphone];
     const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     const timer = new FakeTimer();
@@ -142,7 +149,7 @@ describe("observe on an Apple TV simulator through the registry", () => {
         throw new Error("the Android/iOS observe pipeline ran");
       },
       watch: {
-        screenshots,
+        ...(runnerScreenshot ? {} : { screenshots }),
         fileWriter: writer,
         idGenerator: new CountingIdGenerator("appleTv-observe"),
         cacheDir: () => "/cache/screenshots",
@@ -162,6 +169,65 @@ describe("observe on an Apple TV simulator through the registry", () => {
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler({ __mcpSessionId: CONNECTION, ...args });
+
+  test("connected tvOS observe uses request_screenshot without simctl capture", async () => {
+    const { screenshots } = await arrange({ runnerScreenshot: true });
+    const client = new FakeTvosRunnerClient();
+    client.screenshotData = pngOfSize(1920, 1080).toString("base64");
+    const unregister = tvosRunners.register(appleTv.deviceId, client);
+    try {
+      const response = await call("observe", {
+        platform: "tvos",
+        deviceId: appleTv.deviceId,
+        project: "full",
+      });
+      const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
+      expect(result.focusedElement?.["resource-id"]).toBe("B01");
+      expect(result.screenshotImageSize).toEqual({ width: 1920, height: 1080 });
+      expect(client.commands).toEqual([
+        { type: "request_hierarchy" },
+        { type: "request_screenshot" },
+      ]);
+      expect(screenshots.captures).toEqual([]);
+    } finally {
+      unregister();
+    }
+  });
+
+  test.each([
+    [b01, "B01", "am-text-field"],
+    [field, "am-text-field", "B01"],
+  ] as const)(
+    "full observe returns the runner hierarchy and marks its focused element",
+    async (capture, focused, other) => {
+      const { iosScreens } = await arrange();
+      const client = new FakeTvosRunnerClient(capture.data);
+      const unregister = tvosRunners.register(appleTv.deviceId, client);
+      try {
+        const response = await call("observe", {
+          platform: "tvos",
+          deviceId: appleTv.deviceId,
+          project: "full",
+        });
+        const result = getStructuredPayload<ObserveResult>(readToolResponse(response))!;
+        expect(result.focusedElement).toMatchObject({ "resource-id": focused, focused: true });
+        expect("hierarchyUnavailable" in result).toBe(false);
+        expect(result.viewHierarchy).toBeDefined();
+        const elements = new DefaultElementParser()
+          .flattenViewHierarchy(result.viewHierarchy!)
+          .map((entry) => entry.element);
+        expect(elements.find((e) => e["resource-id"] === focused)?.focused).toBe("true");
+        const unfocused = elements.find((e) => e["resource-id"] === other);
+        expect(unfocused).toBeDefined();
+        expect(unfocused?.focused).not.toBe("true");
+        expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+        expect(iosScreens).toEqual([]);
+        expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+      } finally {
+        unregister();
+      }
+    },
+  );
 
   const failure = (promise: Promise<unknown>) =>
     promise.then(

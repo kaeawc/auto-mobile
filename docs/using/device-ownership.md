@@ -347,6 +347,18 @@ releases its session before deletion, then confirms absence with a fresh listing
 An absent UDID returns `already_absent`; a mismatched `target.stableName` fails
 with `identity_conflict`, and an unsuccessful deletion with `tv_delete_failed`.
 
+`startDevice` with `platform: "tvos"` boots an existing simulator, starts its automation
+runner and binds a session. Set `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` to a prebuilt
+simulator runner xctestrun; otherwise a source checkout discovers or builds it.
+If startup fails, the response explains why and the booted session supports screenshot-only
+observation. Releasing the session, killing or deleting the simulator stops its runner.
+
+With a connected runner, `observe` returns the hierarchy and the existing `focusedElement`;
+use `project: "full"` to include the full hierarchy. Navigate focus with `pressButton`
+using `up`, `down`, `left`, `right`, `select`, `menu`, `home` or `playPause`.
+Touch gestures, long press and text input are unsupported. Without a runner, observation
+returns a screenshot and `hierarchyUnavailable`; call `startDevice` again to prepare automation.
+
 ## Apple Watch simulators
 
 A watch is reached only by naming it: `platform: "watchos"`, or the
@@ -386,7 +398,7 @@ watch, even after one was selected.
   Without a runner, observation returns a fresh screenshot (`screenshotPath`,
   `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note.
   Hierarchy fields are absent, not empty; use the screenshot and retry `startDevice`
-  before acting. Apple TV observation remains screenshot-only.
+  before acting. Apple TV observation uses its connected runner for hierarchy and focus.
 - A session request (`--session-config` / `AUTOMOBILE_SESSION_CONFIG`) asks for
   a watch with `device: { "schemaVersion": 1, "platform": "watchos", "spec": {
   "runtime": "...", "deviceType": "..." } }`: the exact watchOS runtime and Apple

@@ -344,7 +344,7 @@ export class IosCtrlProxyBuilder {
    * Get the .xctestrun file path
    */
   public async getXctestrunPath(
-    platform?: IOSCtrlProxyPlatform | "watchSimulator",
+    platform?: IOSCtrlProxyPlatform | "watchSimulator" | "tvSimulator",
   ): Promise<string | null> {
     // Local discovery/prefetch follows the simulator default of build-product paths.
     platform ??= this.isLocalBuildMode() ? "simulator" : undefined;
@@ -379,12 +379,14 @@ export class IosCtrlProxyBuilder {
         device: "iphoneos",
         simulator: "iphonesimulator",
         watchSimulator: "watchsimulator",
+        tvSimulator: "appletvsimulator",
         any: "",
       }[cacheKey];
       const candidates = xctestrunFiles.filter(
         (file) =>
           file.includes(platformFilter) &&
-          (platform === "watchSimulator" || !file.includes("watchsimulator")),
+          (platform === "watchSimulator" || !file.includes("watchsimulator")) &&
+          (platform === "tvSimulator" || !file.includes("appletvsimulator")),
       );
 
       if (candidates.length === 0) {

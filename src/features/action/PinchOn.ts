@@ -1,3 +1,4 @@
+import { rejectTvosTouch } from "../tvos/TvosActions";
 import { rejectWatchAction } from "../watch/WatchActions";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
@@ -190,6 +191,7 @@ export class PinchOn extends BaseVisualChange {
       timer: deps.timer,
       displayFence: deps,
     });
+    rejectTvosTouch(device.platform, "pinch");
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.resolver = deps.resolver ?? new ElementResolver();
     this.capture =
@@ -232,6 +234,7 @@ export class PinchOn extends BaseVisualChange {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     rejectWatchAction(this.device.platform, "pinch");
+    rejectTvosTouch(this.device.platform, "pinch");
     this.validateDuration(options.duration);
     this.validateRotation(options.rotationDegrees);
     let displayTarget: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;

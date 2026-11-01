@@ -1,3 +1,4 @@
+import { tvosPress, unsupportedTvosAction } from "../tvos/TvosActions";
 import { watchPress, unsupportedWatchAction } from "../watch/WatchActions";
 import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
 import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
@@ -279,6 +280,12 @@ export class PressButton extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    if (this.device.platform === "tvos") {
+      if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
+        unsupportedTvosAction("remote press with steps");
+      }
+      return tvosPress(this.device.deviceId, button, signal);
+    }
     if (this.device.platform === "watchos") {
       if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
         unsupportedWatchAction("home with steps");

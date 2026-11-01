@@ -376,6 +376,7 @@ public final class NavigationAdapterHub: Sendable
   public static let shared = NavigationAdapterHub()
   public var isActive: Bool
   public func isActive(owner: String?) -> Bool
+  public func start(owner: String = "default")
   public func start(owner: String = "default", redactor: any NavigationDataRedacting = NoOpNavigationRedactor())
   public func stop(owner: String = "default")
   public func record( owner: String = "default", destination: String, source: NavigationSource, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true, arguments: [String: String] = [:], metadata: [String: String] = [:] )
@@ -421,6 +422,15 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, Sendabl
 public struct TrackNavigationModifier: ViewModifier
   public func body(content: Content) -> some View
   public func trackNavigation( destination: String, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+
+// Navigation/AutoMobileNavigation.swift
+public final class AutoMobileNavigation: Sendable
+  public static let shared = AutoMobileNavigation(sdk: .shared)
+  @discardableResult public func registerUIKit() -> UIKitNavigationAdapter
+  @discardableResult public func registerSwiftUI() -> SwiftUINavigationAdapter
+  @discardableResult public func registerDeepLinks() -> DeepLinkNavigationAdapter
+  @discardableResult public func registerCustomRouter() -> CustomNavigationAdapter
+  public func hostIntegrationCapabilities() -> [SdkCapabilityDescriptor]
 
 // Navigation/NavigationEvent.swift
 public struct NavigationEvent: Sendable
@@ -955,6 +965,7 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
   public let configuration: AutoMobileWebViewConfiguration
   public let policy: AutoMobileWebViewPolicy
   public init( webViewId: String = UUID().uuidString, configuration: AutoMobileWebViewConfiguration = .init(), recorder: NetworkCaptureRecorder? = nil, emitEvent: @escaping @Sendable (SdkWebViewEvent) -> Void = { event in AutoMobileSDK.shared.recordWebViewEvent(event) } )
+  public nonisolated func register(_ webView: WKWebView)
   public func attach(to webView: WKWebView)
   public func detach()
   public func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage)

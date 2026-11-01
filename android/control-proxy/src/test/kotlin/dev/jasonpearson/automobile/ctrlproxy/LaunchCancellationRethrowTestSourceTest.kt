@@ -218,6 +218,7 @@ internal class LaunchCancellationRethrowTestSourceTest {
         ScannedSource("DeviceEventBroadcaster.kt", exemptSuspendFns = emptyList()),
         ScannedSource("ScreenshotRequestHandler.kt", exemptSuspendFns = emptyList()),
         ScannedSource("FrameContextGate.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("HierarchyExtractCommandHandler.kt", exemptSuspendFns = emptyList()),
       )
   }
 

@@ -1634,7 +1634,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
       try {
         val queuedHandler = queuedMessageHandler()
-        val prototypes = prototypeController
+        val sessions = clientSessionRouter(queuedHandler, prototypeController)
         webSocketServer =
           WebSocketServer(
             port = 8765,
@@ -1643,19 +1643,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             options =
               WebSocketServerOptions(
                 messageHandler = queuedHandler,
-                onClientDisconnected = { client ->
-                  queuedHandler.disconnect(client)
-                  gestureController.cancelStreamsOwnedBy(client)
-                  // Its in-flight host requests have no socket to answer on, even if another
-                  // remains.
-                  hostPrototypeHttp.onHostLost(client)
-                },
-                onClientCountChanged = { count, session ->
-                  if (count == 0) hostPrototypeHttp.onHostLost()
-                  serviceScope.launch { prototypes.onClientCountChanged(count, session) }
-                },
+                onClientDisconnected = sessions::onClientDisconnected,
+                onClientCountChanged = sessions::onClientCountChanged,
                 onPrototypeResponse = hostPrototypeHttp::onResponse,
-                onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
+                onClientConnected = sessions::onClientConnected,
                 onPermanentStartFailure = { disableSelf() },
               ),
           )
@@ -1718,6 +1709,35 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Service will continue running even if some initialization fails
     }
   }
+
+  private fun clientSessionRouter(
+    queuedHandler: QueuedWebSocketMessageHandler,
+    prototypes: PrototypeController,
+  ) =
+    ClientSessionRouter(
+      object : ClientSessionRouter.Host<WebSocketServer.ConnectedClient> {
+        override fun dropQueuedCommands(client: WebSocketServer.ConnectedClient) =
+          queuedHandler.disconnect(client)
+
+        override fun cancelGestureStreams(client: WebSocketServer.ConnectedClient) =
+          gestureController.cancelStreamsOwnedBy(client)
+
+        override fun failHostRequests(client: WebSocketServer.ConnectedClient?) =
+          hostPrototypeHttp.onHostLost(client)
+
+        override fun launch(block: suspend () -> Unit) {
+          serviceScope.launch { block() }
+        }
+
+        override suspend fun prototypeClientCountChanged(count: Int, observerSession: Int) {
+          prototypes.onClientCountChanged(count, observerSession)
+        }
+
+        override suspend fun prototypeClientConnected() {
+          prototypes.onClientConnected()
+        }
+      },
+    )
 
   /**
    * Registers a receiver for broadcasts sent from other processes (the SDK in an app under test,

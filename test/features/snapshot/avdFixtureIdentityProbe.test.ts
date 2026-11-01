@@ -1,17 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import {
   AvdFixtureIdentityProbe,
   type AvdFixtureIdentityDeps,
 } from "../../../src/features/snapshot/avdFixtureIdentityProbe";
 import type { AvdConfig } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
+/** Where the probe looks for the userdata image, joined with the host separator as the probe does. */
+const USERDATA = join("/avd/pixel.avd", "userdata-qemu.img");
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** Stateful fakes for every host read the probe makes. */
 function fakeDeps(overrides: Partial<AvdFixtureIdentityDeps> = {}) {
   const files = new Map<string, { ino: number; birthtimeMs: number }>([
-    ["/avd/pixel.avd/userdata-qemu.img", { ino: 42, birthtimeMs: 1_730_000_000_000 }],
+    [USERDATA, { ino: 42, birthtimeMs: 1_730_000_000_000 }],
   ]);
   const config: AvdConfig = {
     systemImagePackage: "system-images;android-35;google_apis;arm64-v8a",
@@ -47,7 +50,7 @@ describe("AvdFixtureIdentityProbe (#14065)", () => {
     const { deps, files } = fakeDeps();
     const probe = new AvdFixtureIdentityProbe(deps);
     const before = await probe.currentIdentity("pixel");
-    files.set("/avd/pixel.avd/userdata-qemu.img", { ino: 77, birthtimeMs: 1_730_000_500_000 });
+    files.set(USERDATA, { ino: 77, birthtimeMs: 1_730_000_500_000 });
     const after = await probe.currentIdentity("pixel");
     expect(after).toEqual({ ...before, userdataGeneration: `77:${1_730_000_500_000}` });
   });

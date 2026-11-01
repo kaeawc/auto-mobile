@@ -133,7 +133,11 @@ class PrototypeAnchorLayerTest {
     Rect(x * DENSITY, y * DENSITY, (x + size) * DENSITY, (y + size) * DENSITY)
 
   private fun wrapRoot(vararg children: PrototypeNode) =
-    PrototypeBoxNode(testTag = "root", children = children.toList())
+    PrototypeBoxNode(
+      testTag = "root",
+      style = PrototypeStyle(width = PrototypeDimension.Wrap, height = PrototypeDimension.Wrap),
+      children = children.toList(),
+    )
 
   @Test
   fun `a zero-size wrap root still exposes its anchored nodes to accessibility at their anchors`() {

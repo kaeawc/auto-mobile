@@ -75,7 +75,12 @@ class PrototypeDataBindingTest {
         // The fixture root is already resolved; inserted data text must not be scanned again.
         prototypeRenderModel(
           spec,
-          PrototypeNodeMapping(spec.state.orEmpty(), emptyMap()).map(root, "root"),
+          PrototypeNodeMapping(
+              spec.state.orEmpty(),
+              emptyMap(),
+              fullscreenRoot = spec.window.placement is PrototypeFullscreenPlacement,
+            )
+            .map(root, "root"),
         ),
         runtime(spec).renderModel(),
       )

@@ -1,3 +1,4 @@
+import { deleteAppleTvDevice } from "./deviceToolsAppleTvDelete";
 import type { DeleteDeviceOptions } from "../features/deviceLifecycle/teardown/teardownContracts";
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
@@ -770,102 +771,112 @@ async function resolveKillDeviceArgs(
   return { ...args, device };
 }
 
+// Shared stop step. Public killDevice admission stays at its handler boundary below.
+async function stopDevice(
+  args: KillDeviceArgs,
+  _progress?: ProgressCallback,
+  abortSignal?: AbortSignal,
+) {
+  const deps = getDeviceToolsDependencies();
+  const requestAbortSignal = abortSignal ?? getAbortSignal();
+  const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+  args = await resolveKillDeviceArgs(args, deps, requestAbortSignal);
+  const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
+  const { daemonState } = deps;
+  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  // Preflight: if this target's AVD name comes from the pool rather than from
+  // the runtime, pin the label to its epoch. The runtime is made to confirm it
+  // immediately before the platform kill, not here (#6863 review).
+  const pooledAvdCapture = capturePooledAvdIdentity(args.device, devicePool, {
+    timer: deps.timer,
+    deadlineMs,
+    signal: requestAbortSignal,
+  });
+  if (pooledAvdCapture.kind === "refusal") {
+    throw new PooledAvdIdentityError(
+      pooledAvdNameRefusalMessage(args.device, pooledAvdCapture.refusal),
+    );
+  }
+  const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
+  const lifecycleLease = stableTarget
+    ? await reserveStableDeviceLifecycle(stableTarget, args.device, deps.timer, {
+        deadlineMs,
+        requestAbortSignal: requestAbortSignal,
+        timeoutError: undefined,
+        operation: "shutdown",
+        coordinator: deps.lifecycleCoordinator,
+      })
+    : await deps.lifecycleCoordinator.reserve(
+        selectorLifecycleIdentity(args.device.platform, { deviceId: args.device.deviceId }),
+        { operation: "shutdown", deadlineMs, signal: requestAbortSignal },
+      );
+  const signals = [requestAbortSignal, lifecycleLease.signal].filter(
+    (signal): signal is AbortSignal => signal !== undefined,
+  );
+  let retainLifecycleLease = false;
+  const retainLifecycleUntil = (operation: Promise<unknown>): void => {
+    retainLifecycleLease = true;
+    void operation.then(
+      () => lifecycleLease.release(),
+      () => lifecycleLease.release(),
+    );
+  };
+  try {
+    const result = await shutdownDevice(
+      {
+        device: args.device,
+        timer: deps.timer,
+        deadlineMs,
+        requestAbortSignal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+        stopPerformanceMonitoring: deps.stopPerformanceMonitoring,
+      },
+      deps,
+      "killDevice",
+      {
+        strictDeadline: false,
+        timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
+        stoppingSessionUuid: lifecycleRequester(args).sessionUuid,
+        stoppingMcpSessionId: lifecycleRequester(args).mcpSessionId,
+        stableIds: [args.device.name],
+        stopIdentity,
+        retainLifecycleUntil,
+        pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
+        // The entry check predates the lease wait; re-check under the assignment mutex.
+        assertHolder: (confirmedIdentity = stopIdentity) =>
+          assertLifecycleCallerHoldsDevice({
+            checkRestartHold: true,
+            toolName: "killDevice",
+            device: args.device,
+            requester: lifecycleRequester(args),
+            force: args.force ?? false,
+            stableIds: [args.device.name],
+            stopIdentity: confirmedIdentity,
+          }),
+        foreignClaim: {
+          toolName: "killDevice",
+          force: args.force ?? false,
+          remedy: LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
+        },
+      },
+    );
+    return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
+  } finally {
+    if (!retainLifecycleLease) {
+      lifecycleLease.release();
+    }
+  }
+}
+
 export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurrencyPool } = {}) {
   const iosDeleteGate = options.iosDeleteGate ?? new BootConcurrencyGate(IOS_DELETE_CONCURRENCY);
+
   const killDeviceHandler = async (
     args: KillDeviceArgs,
-    _progress?: ProgressCallback,
-    abortSignal?: AbortSignal,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
   ) => {
     assertRequestNotTvos("killDevice", args);
-    const deps = getDeviceToolsDependencies();
-    const requestAbortSignal = abortSignal ?? getAbortSignal();
-    const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-    args = await resolveKillDeviceArgs(args, deps, requestAbortSignal);
-    const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
-    const { daemonState } = deps;
-    const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
-    // Preflight: if this target's AVD name comes from the pool rather than from
-    // the runtime, pin the label to its epoch. The runtime is made to confirm it
-    // immediately before the platform kill, not here (#6863 review).
-    const pooledAvdCapture = capturePooledAvdIdentity(args.device, devicePool, {
-      timer: deps.timer,
-      deadlineMs,
-      signal: requestAbortSignal,
-    });
-    if (pooledAvdCapture.kind === "refusal") {
-      throw new PooledAvdIdentityError(
-        pooledAvdNameRefusalMessage(args.device, pooledAvdCapture.refusal),
-      );
-    }
-    const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
-    const lifecycleLease = stableTarget
-      ? await reserveStableDeviceLifecycle(stableTarget, args.device, deps.timer, {
-          deadlineMs,
-          requestAbortSignal: requestAbortSignal,
-          timeoutError: undefined,
-          operation: "shutdown",
-          coordinator: deps.lifecycleCoordinator,
-        })
-      : await deps.lifecycleCoordinator.reserve(
-          selectorLifecycleIdentity(args.device.platform, { deviceId: args.device.deviceId }),
-          { operation: "shutdown", deadlineMs, signal: requestAbortSignal },
-        );
-    const signals = [requestAbortSignal, lifecycleLease.signal].filter(
-      (signal): signal is AbortSignal => signal !== undefined,
-    );
-    let retainLifecycleLease = false;
-    const retainLifecycleUntil = (operation: Promise<unknown>): void => {
-      retainLifecycleLease = true;
-      void operation.then(
-        () => lifecycleLease.release(),
-        () => lifecycleLease.release(),
-      );
-    };
-    try {
-      const result = await shutdownDevice(
-        {
-          device: args.device,
-          timer: deps.timer,
-          deadlineMs,
-          requestAbortSignal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
-          stopPerformanceMonitoring: deps.stopPerformanceMonitoring,
-        },
-        deps,
-        "killDevice",
-        {
-          strictDeadline: false,
-          timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
-          stoppingSessionUuid: lifecycleRequester(args).sessionUuid,
-          stoppingMcpSessionId: lifecycleRequester(args).mcpSessionId,
-          stableIds: [args.device.name],
-          stopIdentity,
-          retainLifecycleUntil,
-          pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
-          // The entry check predates the lease wait; re-check under the assignment mutex.
-          assertHolder: (confirmedIdentity = stopIdentity) =>
-            assertLifecycleCallerHoldsDevice({
-              checkRestartHold: true,
-              toolName: "killDevice",
-              device: args.device,
-              requester: lifecycleRequester(args),
-              force: args.force ?? false,
-              stableIds: [args.device.name],
-              stopIdentity: confirmedIdentity,
-            }),
-          foreignClaim: {
-            toolName: "killDevice",
-            force: args.force ?? false,
-            remedy: LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
-          },
-        },
-      );
-      return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
-    } finally {
-      if (!retainLifecycleLease) {
-        lifecycleLease.release();
-      }
-    }
+    return await stopDevice(args, progress, signal);
   };
 
   async function executeDeleteDevice(
@@ -906,16 +917,15 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
-    assertRequestNotTvos("deleteDevice", args);
-    if (isWatchTeardownRequest(args)) {
+    if (args.target.platform === "tvos" || isWatchTeardownRequest(args)) {
       const force = args.force ?? false;
-      return await deleteWatchDevice(
+      const remove = args.target.platform === "tvos" ? deleteAppleTvDevice : deleteWatchDevice;
+      return await remove(
         args,
         {
           assertCaller: (device) => assertWatchDeleteCaller(device, args, force),
-          // killDevice judges the same caller (its internal params ride along) and stops the watch.
-          stop: (device, signal) =>
-            killDeviceHandler({ ...args, device, force }, undefined, signal),
+          // The shared killDevice step judges the same caller and releases the simulator session.
+          stop: (device, signal) => stopDevice({ ...args, device, force }, undefined, signal),
         },
         abortSignal ?? getAbortSignal(),
       );

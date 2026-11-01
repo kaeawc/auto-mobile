@@ -110,3 +110,5 @@ macos test/ctrlProxy/runnerQueryTimeoutEnv.test.ts                       # impor
 macos test/features/utility/writeBulletinBoardTemp.test.ts               # imports only the iOS notification authorization reader
 macos test/utils/CtrlProxyCodesignVerifier.test.ts                       # imports only the iOS codesign verifier
 macos test/utils/runtimeCompatibility.test.ts                            # imports only the simulator runtime compatibility check
+
+portable test/devices/appleTvProvision.test.ts                          # exact tvOS provisioning and verified absence over fake simctl

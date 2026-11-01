@@ -40671,6 +40671,44 @@
               },
               "required": ["platform", "name", "spec"],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "const": "tvos"
+                },
+                "name": {
+                  "description": "Exact Apple TV simulator name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "deviceId": {
+                  "description": "Exact Apple TV simulator UDID; a UDID that names no Apple TV is refused, not created",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "description": "tvOS CoreSimulator runtime identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deviceType": {
+                      "description": "Apple TV CoreSimulator device-type identifier",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["runtime", "deviceType"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["platform", "name", "spec"],
+              "additionalProperties": false
             }
           ]
         },
@@ -40680,7 +40718,7 @@
           "type": "boolean"
         },
         "readiness": {
-          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS has no runner and takes only \"none\" (its default)",
+          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS and tvOS have no runner and take only \"none\" (their default)",
           "type": "string",
           "enum": ["automation", "none"]
         },

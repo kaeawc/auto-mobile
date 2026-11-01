@@ -172,3 +172,11 @@ export const watchProvisionDeviceSpecSchema = z
 export const watchBindingSpecSchema = watchProvisionDeviceSpecSchema;
 
 export type WatchBindingSpec = z.output<typeof watchBindingSpecSchema>;
+
+/** Exact identifiers from the host's Apple TV catalog. */
+export const appleTvProvisionDeviceSpecSchema = z
+  .object({
+    runtime: z.string().min(1).describe("tvOS CoreSimulator runtime identifier"),
+    deviceType: z.string().min(1).describe("Apple TV CoreSimulator device-type identifier"),
+  })
+  .strict();

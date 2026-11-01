@@ -89,6 +89,10 @@ function readinessDependencyOverrides(
       deps.watchSimulatorLifecycleFactory ?? currentDeps.watchSimulatorLifecycleFactory,
     watchSimulatorProvisionerFactory:
       deps.watchSimulatorProvisionerFactory ?? currentDeps.watchSimulatorProvisionerFactory,
+    appleTvSimulatorBootFactory:
+      deps.appleTvSimulatorBootFactory ?? currentDeps.appleTvSimulatorBootFactory,
+    appleTvSimulatorProvisionerFactory:
+      deps.appleTvSimulatorProvisionerFactory ?? currentDeps.appleTvSimulatorProvisionerFactory,
     deviceCreationGateFactory:
       deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,

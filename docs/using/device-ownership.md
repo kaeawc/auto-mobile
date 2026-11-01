@@ -321,7 +321,7 @@ the device really should be stopped out from under its holder.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 
-## Apple TV simulator inventory
+## Apple TV simulators
 
 Call `listDevices` with `platform: "tvos"` to list booted Apple TV simulators, or
 `listDeviceImages` with `platform: "tvos"` to list configured ones. Read
@@ -329,6 +329,22 @@ Call `listDevices` with `platform: "tvos"` to list booted Apple TV simulators, o
 Apple TV models and their compatible runtimes. Check inventory completeness before
 treating an empty result as no devices; retry a failed listing.
 General device and image listings continue to cover Android and iOS.
+
+`provisionDevice` with `device.platform: "tvos"` takes an exact `name`, optional
+`deviceId` (UDID), and `spec: { runtime, deviceType }` identifiers from that
+catalog. It adopts an exact match or creates a simulator; a name clash, missing
+UDID or incompatible runtime/model is refused. A missing tvOS runtime must be
+installed with `xcodebuild -downloadPlatform tvOS`; the tool never downloads it.
+With `boot` (the default), it boots and binds a session at readiness `booted`;
+a simulator it created is deleted again if boot or binding fails. `boot: false`
+creates or adopts without a session. `resources`, `enableTools` and
+`readiness: "automation"` are unsupported.
+
+`deleteDevice` takes `target: { platform: "tvos", isVirtual: true, stableId: "<UDID>" }`,
+`mode: "destroy"` and `verifyAbsence: true`. It stops a running simulator and
+releases its session before deletion, then confirms absence with a fresh listing.
+An absent UDID returns `already_absent`; a mismatched `target.stableName` fails
+with `identity_conflict`, and an unsuccessful deletion with `tv_delete_failed`.
 
 ## Apple Watch simulators
 

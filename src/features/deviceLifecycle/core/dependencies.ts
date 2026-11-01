@@ -1,3 +1,5 @@
+import type { AppleTvSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
+import type { AppleTvSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorBoot";
 import type { WatchSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
 import type { WatchSimulatorLifecycle } from "../../../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { getDefaultSimulatorCreationService } from "../../iosTemplates/defaultSimulatorCreationService";
@@ -115,6 +117,13 @@ export interface DeviceToolsDependencies {
   /** Apple Watch simulator adoption, creation and deletion (#15882); defaults to simctl. */
   watchSimulatorProvisionerFactory?: () => Pick<
     WatchSimulatorProvisioner,
+    "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
+  >;
+  /** Apple TV boot through shared simctl readiness and simulator capacity admission. */
+  appleTvSimulatorBootFactory?: () => Pick<AppleTvSimulatorBoot, "boot">;
+  /** Exact Apple TV adoption, creation and verified deletion. */
+  appleTvSimulatorProvisionerFactory?: () => Pick<
+    AppleTvSimulatorProvisioner,
     "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
   >;
   deviceCreationGateFactory: () => DeviceCreationGate;

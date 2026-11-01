@@ -168,11 +168,16 @@ class HierarchyWriteSerializationWiringTest {
     return source.substring(braceOpen, KotlinSourceScan.matchBrace(source, braceOpen))
   }
 
-  // Hierarchy delivery and the leak-safe seam live in HierarchyController (#11876); the ADB
-  // delivery site remains in CtrlProxy.kt, so scan both files together.
+  // Hierarchy delivery and the leak-safe seam live in HierarchyController and the ADB-broadcast
+  // delivery site in HierarchyExtractCommandHandler (#11876); the collector wiring remains in
+  // CtrlProxy.kt, so scan the three files together.
   private fun readCtrlProxySource(): String {
     val service = locateCtrlProxySource()
-    return service.readText() + "\n" + File(service.parentFile, "HierarchyController.kt").readText()
+    return listOf("HierarchyController.kt", "HierarchyExtractCommandHandler.kt").fold(
+      service.readText(),
+    ) { source, sibling ->
+      source + "\n" + File(service.parentFile, sibling).readText()
+    }
   }
 
   private fun locateCtrlProxySource(): File {

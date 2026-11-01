@@ -678,6 +678,46 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
     )
   }
+  private val hierarchyExtractCommands by lazy {
+    HierarchyExtractCommandHandler(
+      object : HierarchyExtractCommandHandler.Host {
+        override fun cleanupUuidHierarchyFiles() = hierarchyController.cleanupUuidHierarchyFiles()
+
+        override fun extractHierarchy(textFilter: String?, disableAllFiltering: Boolean) =
+          hierarchyController.extractHierarchy(textFilter, disableAllFiltering)
+
+        override fun serialize(hierarchy: ViewHierarchy) =
+          perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+
+        override fun writeHierarchyToFile(
+          hierarchy: ViewHierarchy,
+          filename: String,
+          serialized: String,
+        ) = hierarchyController.writeHierarchyToFile(hierarchy, filename, serialized = serialized)
+
+        override suspend fun broadcastHierarchyUpdate(
+          hierarchy: ViewHierarchy,
+          serialized: String,
+          requestId: String,
+        ) =
+          hierarchyController.broadcastHierarchyUpdate(
+            hierarchy,
+            serialized = serialized,
+            requestId = requestId,
+          )
+
+        override fun releaseFrameContext(hierarchy: ViewHierarchy) {
+          hierarchyController.extractedHierarchyFrameContexts.remove(hierarchy)
+        }
+
+        override fun sendResult(success: Boolean, data: String?, error: String?) =
+          this@CtrlProxy.sendResult(success, data, error)
+
+        override suspend fun sendErrorFrame(frame: ErrorResponse?) =
+          broadcastHierarchyExtractFrame(frame)
+      },
+    )
+  }
   private val permissionController by lazy {
     PermissionController(
       permissions = { permission, request ->
@@ -2764,78 +2804,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
 
-  private suspend fun handleCommand(intent: Intent) {
-    // Clean up any lingering UUID-based hierarchy files before processing new requests
-    hierarchyController.cleanupUuidHierarchyFiles()
-
-    when (intent.action) {
-      ACTION_EXTRACT_HIERARCHY -> {
-        val uuid = intent.getStringExtra("uuid")
-        if (uuid.isNullOrBlank()) {
-          // No uuid to correlate a WebSocket error frame to, so only the legacy ADB result is sent.
-          sendResult(success = false, error = "UUID parameter is required")
-          return
-        }
-
-        // The daemon's ADB-broadcast hierarchy fallback awaits this uuid over the WebSocket in
-        // waitForFreshData. On extraction failure we send a correlated error frame keyed by the
-        // uuid so that wait fails fast rather than hanging to timeout, closing the last member of
-        // the #3032/#3061 hang class (issue #3089). The legacy ADB result broadcast is retained.
-        try {
-          val textFilter = intent.getStringExtra("text")
-          val disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false)
-          val hierarchy = hierarchyController.extractHierarchy(textFilter, disableAllFiltering)
-          if (hierarchy != null) {
-            val filename = "hierarchy_$uuid.json"
-            // Explicit request: serialize once and reuse for the file and the wire frame (#5469).
-            // Routed through deliverHierarchyFrame so the frame-context entry is released even if
-            // the encode throws (leak fix) — the outer catch still reports the failure frame.
-            deliverHierarchyFrame(
-              serialize = {
-                perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-              },
-              write = { serialized ->
-                hierarchyController.writeHierarchyToFile(
-                  hierarchy,
-                  filename,
-                  serialized = serialized,
-                )
-              },
-              broadcast = { serialized ->
-                hierarchyController.broadcastHierarchyUpdate(
-                  hierarchy,
-                  serialized = serialized,
-                  requestId = uuid,
-                )
-              },
-              releaseFrameContext = {
-                hierarchyController.extractedHierarchyFrameContexts.remove(hierarchy)
-              },
-            )
-
-            val message =
-              if (textFilter != null) {
-                "Hierarchy extracted with text filter: '$textFilter', saved as $filename"
-              } else {
-                "Hierarchy extracted successfully, saved as $filename"
-              }
-            sendResult(success = true, data = message)
-          } else {
-            sendResult(success = false, error = HierarchyExtractErrorFrames.NULL_HIERARCHY_ERROR)
-            broadcastHierarchyExtractFrame(HierarchyExtractErrorFrames.nullResultFrame(uuid))
-          }
-        } catch (e: CancellationException) {
-          // Cooperative cancellation (service scope shutting down) must never be converted into an
-          // error frame — let it propagate so the coroutine unwinds cleanly.
-          throw e
-        } catch (e: Exception) {
-          Log.e(TAG, "Error extracting hierarchy for uuid=$uuid", e)
-          sendResult(success = false, error = CorrelatedErrorReporter.causeOf(e))
-          broadcastHierarchyExtractFrame(HierarchyExtractErrorFrames.thrownFrame(uuid, e))
-        }
-      }
-    }
-  }
+  private suspend fun handleCommand(intent: Intent) =
+    hierarchyExtractCommands.handle(
+      if (intent.action == ACTION_EXTRACT_HIERARCHY) {
+        ExtractHierarchyCommand(
+          uuid = intent.getStringExtra("uuid"),
+          textFilter = intent.getStringExtra("text"),
+          disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false),
+        )
+      } else {
+        null
+      },
+    )
 
   private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {
     val resultIntent =

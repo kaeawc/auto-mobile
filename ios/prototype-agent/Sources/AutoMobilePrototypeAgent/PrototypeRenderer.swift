@@ -1036,7 +1036,8 @@
                 ))
                 .modifier(PrototypeImageZoomModifier(
                     options: node.type == "image" ? node.zoomable : nil,
-                    enabled: model.isEnabled(node)
+                    enabled: model.isEnabled(node),
+                    consumeDeadTap: { model.consumeDeadTap() }
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
@@ -1622,6 +1623,7 @@
     private struct PrototypeImageZoomModifier: ViewModifier {
         let options: PrototypeImageZoomable?
         let enabled: Bool
+        let consumeDeadTap: () -> Void
         @State private var zoom = PrototypeImageZoom()
         @State private var viewport: CGSize = .zero
         @State private var pinchStart: CGFloat?
@@ -1675,6 +1677,7 @@
                     .simultaneousGesture(
                         TapGesture(count: 2).onEnded {
                             guard enabled else { return }
+                            consumeDeadTap()
                             update(scale: zoom.toggledScale(maxScale: options.maxScale), pan: zoom.pan)
                         },
                         including: enabled ? .all : .none

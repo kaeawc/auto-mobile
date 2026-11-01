@@ -11,6 +11,9 @@ describe("cleanupDaemonChildProcesses", () => {
       stopWatchRunners: () => {
         calls.push("stop-watch-runners");
       },
+      stopTvosRunners: () => {
+        calls.push("stop-tvos-runners");
+      },
       stopAcceptingVideoRecordingStarts: async () => {
         calls.push("stop-recording-starts");
       },
@@ -36,6 +39,7 @@ describe("cleanupDaemonChildProcesses", () => {
 
     expect(calls).toEqual([
       "stop-watch-runners",
+      "stop-tvos-runners",
       "stop-recording-starts",
       "shutdown-ios-ctrl-proxies",
       "stop:recording-a",

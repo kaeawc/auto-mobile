@@ -1,3 +1,6 @@
+import { TvosRunnerLifecycle } from "../../src/features/tvos/TvosRunnerLifecycle";
+import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
+import { FakeTvosRunnerLauncher } from "../fakes/FakeTvosRunnerLauncher";
 import { deleteAppleTvDevice } from "../../src/server/deviceToolsAppleTvDelete";
 import { AppleTvSimulatorBoot } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorBoot";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -47,7 +50,9 @@ describe("deleteDevice on an Apple TV simulator", () => {
   let restoreEnv: (() => void) | undefined;
   let sessionManager: SessionManager | undefined;
 
+  let tvosRunner: TvosRunnerLifecycle | undefined;
   const cleanup = () => {
+    tvosRunner?.stopAll();
     env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
     restoreEnv?.();
     restoreEnv = undefined;
@@ -105,10 +110,17 @@ describe("deleteDevice on an Apple TV simulator", () => {
     );
     await pool.initializeWithDevices(await deviceUtils.getBootedDevices("tvos"));
     DaemonState.getInstance().initialize(sessionManager, pool);
+    const launcher = new FakeTvosRunnerLauncher();
+    tvosRunner = new TvosRunnerLifecycle({
+      artifacts: { resolve: async () => "/products/TV.xctestrun" },
+      launcher,
+      ports: { allocate: () => 9013, release: () => {} },
+    });
     const runnerCalls: string[] = [];
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     setDeviceToolsDependencies({
       lifecycleCoordinator,
+      tvosRunnerLifecycleFactory: () => tvosRunner!,
       env,
       timer,
       deviceManagerFactory: () => deviceUtils,
@@ -124,7 +136,16 @@ describe("deleteDevice on an Apple TV simulator", () => {
       appleTvSimulatorProvisionerFactory: () => new AppleTvSimulatorProvisioner(inventory, simctl),
     });
     registerDeviceTools();
-    return { simctl, pool, sessions: sessionManager, runnerCalls, timer, lifecycleCoordinator };
+    return {
+      simctl,
+      pool,
+      sessions: sessionManager,
+      runnerCalls,
+      timer,
+      lifecycleCoordinator,
+      launcher,
+      runner: tvosRunner,
+    };
   }
 
   const provision = (args: Record<string, unknown>) =>
@@ -152,6 +173,23 @@ describe("deleteDevice on an Apple TV simulator", () => {
     Object.values(simctl.listing.devices)
       .flat()
       .map((device) => device.udid);
+
+  test.each(["kill", "delete"] as const)("%s stops an owned tvOS runner", async (operation) => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { runner, launcher } = await arrange([tv]);
+    await runner.start({ deviceId: tv.udid });
+    expect(tvosRunners.get(tv.udid)).toBe(launcher.client);
+    if (operation === "delete") {
+      expect(toolJson(await remove(target(tv.udid))).state).toBe("destroyed");
+    } else {
+      await ToolRegistry.getTool("killDevice")!.handler({
+        device: { platform: "tvos", deviceId: tv.udid, name: NAME },
+        __mcpSessionId: "client-a",
+      });
+    }
+    expect(launcher.stops).toBe(1);
+    expect(tvosRunners.get(tv.udid)).toBeUndefined();
+  });
 
   test("deletes a stopped TV and confirms it absent from a fresh listing", async () => {
     const tv = tvDevice({ name: NAME });
@@ -188,6 +226,22 @@ describe("deleteDevice on an Apple TV simulator", () => {
     expect(simctl.commands).toEqual([`shutdown ${udid}`, `delete ${udid}`]);
     expect(pool.getDevice(udid)).toBeNull();
     expect(sessions.getSession(sessionId)?.assignedDevice ?? null).toBeNull();
+  });
+
+  test("an absent TV still held by another connection keeps its owned runner", async () => {
+    const { simctl, runner, launcher } = await arrange();
+    await provision({ device: TV });
+    const udid = createdUdid(simctl);
+    await runner.start({ deviceId: udid });
+    for (const devices of Object.values(simctl.listing.devices)) {
+      const index = devices.findIndex((tv) => tv.udid === udid);
+      if (index >= 0) {
+        devices.splice(index, 1);
+      }
+    }
+    await expect(remove(target(udid), "client-b")).rejects.toBeInstanceOf(ActionableError);
+    expect(launcher.stops).toBe(0);
+    expect(tvosRunners.get(udid)).toBe(launcher.client);
   });
 
   test("a TV another connection's session holds is refused, and nothing is stopped or deleted", async () => {

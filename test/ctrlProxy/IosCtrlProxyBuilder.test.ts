@@ -858,11 +858,16 @@ describe("IosCtrlProxyBuilder", function () {
   });
 
   describe("getXctestrunPath", function () {
-    test("discovers only watchsimulator artifacts and excludes them from iOS discovery", async function () {
+    test("isolates watch, tvOS and iOS simulator artifacts", async function () {
       const productsDir = path.join(tempDir, "Build", "Products");
       await fs.mkdir(productsDir, { recursive: true });
       const watchFile = path.join(productsDir, "CtrlProxyWatch_watchsimulator26.0-arm64.xctestrun");
       await fs.writeFile(watchFile, "watch artifact");
+      const tvFile = path.join(
+        productsDir,
+        "AutoMobileTVTest_appletvsimulator26.0-arm64.xctestrun",
+      );
+      await fs.writeFile(tvFile, "TV artifact");
       await fs.writeFile(
         path.join(productsDir, "AutoMobileTest_iphonesimulator26.0-arm64.xctestrun"),
         "phone artifact",
@@ -872,6 +877,8 @@ describe("IosCtrlProxyBuilder", function () {
         derivedDataPath: tempDir,
       });
       expect(await builder.getXctestrunPath("watchSimulator")).toBe(watchFile);
+      expect(await builder.getXctestrunPath("tvSimulator")).toBe(tvFile);
+      await fs.utimes(tvFile, new Date("2031-01-01"), new Date("2031-01-01"));
       await fs.utimes(watchFile, new Date("2030-01-01"), new Date("2030-01-01"));
       expect(await builder.getXctestrunPath()).toBe(
         path.join(productsDir, "AutoMobileTest_iphonesimulator26.0-arm64.xctestrun"),

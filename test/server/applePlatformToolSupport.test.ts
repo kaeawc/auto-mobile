@@ -43,7 +43,7 @@ describe("assertToolSupportsDevicePlatform", () => {
   test("rejects an Apple TV for a tool that has not opted in, naming the tool and platform", () => {
     expect(() => assertToolSupportsDevicePlatform("tapOn", appleTv)).toThrow(
       new ActionableError(
-        "tapOn does not support tvOS yet. Target an Android or iOS device instead.",
+        "tapOn does not support tvOS touch gestures; use focus navigation via pressButton (up/down/left/right/select).",
       ),
     );
   });

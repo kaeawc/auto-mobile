@@ -1,4 +1,10 @@
-import { ActionableError } from "../models";
+import {
+  getTvosRunnerLifecycle,
+  type TvosRunnerLifecycle,
+} from "../features/tvos/TvosRunnerLifecycle";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
+import { ActionableError, type DeviceInfo } from "../models";
 import {
   getDeviceToolsDependencies,
   initializedDevicePool,
@@ -64,22 +70,8 @@ export async function startAppleTvDevice(
           const find = async (signal: AbortSignal) => {
             signal.throwIfAborted();
             stage.current = "resolving the Apple TV simulator";
-            const matches = (
-              await deps.deviceManagerFactory().listDeviceImages("tvos", signal)
-            ).filter(
-              (tv) =>
-                tv.platform === "tvos" &&
-                tv.deviceId &&
-                (!args.deviceId || tv.deviceId === args.deviceId) &&
-                (!args.name || tv.name === args.name),
-            );
-            const tv = matches[0];
-            if (matches.length !== 1 || !tv?.deviceId) {
-              throw new ActionableError(
-                "Apple TV simulator not found or ambiguous; use an exact deviceId",
-              );
-            }
-            return { ...tv, deviceId: tv.deviceId };
+            const images = await deps.deviceManagerFactory().listDeviceImages("tvos", signal);
+            return selectAppleTvSimulator(images, args);
           };
           const tv = await find(requestSignal);
           const lease = await reserveStableDeviceLifecycle(
@@ -93,6 +85,8 @@ export async function startAppleTvDevice(
               coordinator: deps.lifecycleCoordinator,
             },
           );
+          let stopLaunchedRunner: (() => void) | undefined;
+          let completed = false;
           try {
             const lifecycleSignal =
               combineAbortSignals(requestSignal, lease.signal) ?? lease.signal;
@@ -101,12 +95,7 @@ export async function startAppleTvDevice(
             if (fresh.deviceId !== tv.deviceId) {
               throw new ActionableError("Apple TV simulator identity changed; retry with deviceId");
             }
-            const reusableSessionId = internalOneShotCli(rawArgs)
-              ? reusableAnonymousSessionId(tv.deviceId, deps)
-              : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
-                  internalMcpSessionId(rawArgs),
-                  tv.deviceId,
-                );
+            const reusableSessionId = reusableTvSessionId(rawArgs, tv.deviceId, deps);
             assertTvUnclaimed(tv.deviceId, deps, lease, reusableSessionId);
             lifecycleSignal.throwIfAborted();
             stage.current = "booting the Apple TV simulator";
@@ -118,6 +107,34 @@ export async function startAppleTvDevice(
               },
             );
             lifecycleSignal.throwIfAborted();
+            stage.current = "starting the Apple TV automation runner";
+            let runnerUnavailable: string | undefined;
+            let runner: Pick<TvosRunnerLifecycle, "start" | "attach" | "stop"> | undefined;
+            const sessions = deps.daemonState.isInitialized()
+              ? deps.daemonState.getSessionManager()
+              : undefined;
+            try {
+              if (!sessions) {
+                throw new ActionableError(
+                  "tvOS runner ownership requires a daemon-managed session; start the daemon and retry startDevice.",
+                );
+              }
+              runner = (deps.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)();
+              const started = await runner.start({
+                deviceId: tv.deviceId,
+                sessions,
+                signal: lifecycleSignal,
+              });
+              runnerUnavailable = started.runnerUnavailable;
+              stopLaunchedRunner = started.stop;
+            } catch (error) {
+              runnerUnavailable = errorMessage(error);
+              logger.warn(
+                `[TvosRunner] Runner unavailable for ${tv.deviceId}: ${runnerUnavailable}`,
+                error,
+              );
+            }
+            lifecycleSignal.throwIfAborted();
             stage.current = "binding the device session";
             const sessionId = await bindBootedSimulatorSession(
               { device: fresh, boot, rawArgs, operation: "startDevice" },
@@ -125,8 +142,17 @@ export async function startAppleTvDevice(
               deps.timer,
               { deadlineMs, signal: lifecycleSignal },
             );
+            if (runner && sessions) {
+              attachTvRunner(runner, {
+                deviceId: tv.deviceId,
+                ownerSession: sessionId,
+                sessions,
+              });
+            }
+            lifecycleSignal.throwIfAborted();
+            completed = true;
             return createStructuredToolResponse({
-              message: `tvos '${boot.device.name}' is booted`,
+              message: bootedTvMessage(boot.device.name, runnerUnavailable),
               ...projectBootedDevice(
                 describeDevice({
                   kind: "booted",
@@ -144,11 +170,59 @@ export async function startAppleTvDevice(
               },
             });
           } finally {
+            if (!completed) {
+              stopLaunchedRunner?.();
+            }
             lease.release();
           }
         }),
     },
   );
+}
+
+function selectAppleTvSimulator(images: DeviceInfo[], args: z.infer<typeof parameters>) {
+  const matches = images.filter(
+    (tv) =>
+      tv.platform === "tvos" &&
+      tv.deviceId &&
+      (!args.deviceId || tv.deviceId === args.deviceId) &&
+      (!args.name || tv.name === args.name),
+  );
+  const tv = matches[0];
+  if (matches.length !== 1 || !tv?.deviceId) {
+    throw new ActionableError("Apple TV simulator not found or ambiguous; use an exact deviceId");
+  }
+  return { ...tv, deviceId: tv.deviceId };
+}
+
+function reusableTvSessionId(
+  rawArgs: object,
+  deviceId: string,
+  deps: DeviceToolsDependencies,
+): string | undefined {
+  return internalOneShotCli(rawArgs)
+    ? reusableAnonymousSessionId(deviceId, deps)
+    : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
+        internalMcpSessionId(rawArgs),
+        deviceId,
+      );
+}
+
+function bootedTvMessage(name: string, runnerUnavailable: string | undefined): string {
+  return (
+    `tvos '${name}' is booted` +
+    (runnerUnavailable ? `; tvOS runner unavailable: ${runnerUnavailable}` : "")
+  );
+}
+
+function attachTvRunner(
+  runner: Pick<TvosRunnerLifecycle, "attach">,
+  request: Parameters<TvosRunnerLifecycle["attach"]>[0],
+): void {
+  const attachError = runner.attach(request);
+  if (attachError) {
+    throw new ActionableError("The tvOS session ended before runner startup; retry startDevice.");
+  }
 }
 
 function reusableAnonymousSessionId(

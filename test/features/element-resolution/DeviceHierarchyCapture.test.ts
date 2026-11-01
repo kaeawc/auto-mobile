@@ -1,3 +1,6 @@
+import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
+import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
+import { findFocusedElement } from "../../../src/features/observe/HierarchyFocus";
 import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
 import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
@@ -455,6 +458,28 @@ test("watch capture uses only its runner and the existing iOS hierarchy projecti
     expect(snapshot.hierarchy.screenWidth).toBe(184);
     expect(snapshot.nodes.length).toBeGreaterThan(0);
     expect(client.commands).toEqual([{ type: "hierarchy" }]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  } finally {
+    unregister();
+  }
+});
+
+test("tvOS capture uses its runner and preserves remote focus", async () => {
+  const client = new FakeTvosRunnerClient();
+  const unregister = tvosRunners.register("capture-tv", client);
+  const timer = new FakeTimer();
+  try {
+    const capture = createDeviceHierarchyCapture(
+      { platform: "tvos", deviceId: "capture-tv", name: "TV" },
+      { timer },
+    );
+    const snapshot = await capture.capture({ freshness: "fresh" });
+    expect(snapshot.hierarchy.screenWidth).toBe(1920);
+    expect(findFocusedElement(snapshot.hierarchy)).toMatchObject({
+      "resource-id": "B01",
+      focused: true,
+    });
+    expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
     expect(timer.getSleepHistory()).toEqual([]);
   } finally {
     unregister();

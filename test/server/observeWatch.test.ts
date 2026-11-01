@@ -295,7 +295,7 @@ describe("observe on an Apple TV simulator", () => {
     const { observe, writer } = arrange(pngOfSize(1920, 1080));
     const result = getStructuredPayload<WatchObservation>(await observe({}, appleTv))!;
     expect(result.hierarchyUnavailable.platform).toBe("tvos");
-    expect(result.hierarchyUnavailable.message).toContain("not available on tvOS yet");
+    expect(result.hierarchyUnavailable.message).toContain("No tvOS runner is connected");
     expect(result.screenSize).toEqual({ width: 1920, height: 1080, units: "physical-pixels" });
     expect(result.screenshotMimeType).toBe("image/png");
     expect(writer.written).toEqual([result.screenshotPath!]);

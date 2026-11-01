@@ -12,6 +12,7 @@ import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { stopTvosRunners } from "../features/tvos/TvosRunnerLifecycle";
 import { stopWatchRunners } from "../features/watch/WatchRunnerLifecycle";
 
 // DaemonManager and stdin lifecycle both force-exit after ten seconds. Keep each
@@ -34,6 +35,7 @@ export interface DaemonChildProcessCleanupDependencies {
   interruptVideoRecording(recordingId: string): Promise<void>;
   shutdownIOSCtrlProxies(): Promise<void>;
   stopWatchRunners(): void;
+  stopTvosRunners?(): void;
   timer?: Timer;
   timeoutMs?: number;
 }
@@ -50,6 +52,7 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
   interruptVideoRecording,
   shutdownIOSCtrlProxies: () => IOSCtrlProxyManager.shutdownAll(),
   stopWatchRunners,
+  stopTvosRunners,
 };
 
 /**
@@ -62,6 +65,7 @@ export async function cleanupDaemonChildProcesses(
 ): Promise<void> {
   dependencies.shutdownInventoryReads?.();
   dependencies.stopWatchRunners();
+  dependencies.stopTvosRunners?.();
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
   const recordingIds = new Set<string>();
@@ -88,15 +92,7 @@ export async function cleanupDaemonChildProcesses(
     logger.warn(`[Daemon] Failed to list active recordings during shutdown: ${error}`);
   }
 
-  // The service is the process owner. Keep its in-memory snapshot independent
-  // of the repository query so a database failure cannot strand a capture.
-  try {
-    for (const recordingId of dependencies.listOwnedActiveVideoRecordingIds()) {
-      recordingIds.add(recordingId);
-    }
-  } catch (error) {
-    logger.warn(`[Daemon] Failed to list in-memory recordings during shutdown: ${error}`);
-  }
+  addOwnedRecordingIdsForCleanup(dependencies, recordingIds);
 
   // Signal independent owners together so an unresponsive recording cannot
   // postpone the CtrlProxy/iproxy termination attempt until the outer daemon
@@ -157,6 +153,21 @@ export async function cleanupDaemonChildProcesses(
     logger.warn(
       `[Daemon] Failed to stop iOS CtrlProxy instances during shutdown: ${proxies.error}`,
     );
+  }
+}
+
+function addOwnedRecordingIdsForCleanup(
+  dependencies: DaemonChildProcessCleanupDependencies,
+  recordingIds: Set<string>,
+): void {
+  // The service is the process owner. Keep its in-memory snapshot independent
+  // of the repository query so a database failure cannot strand a capture.
+  try {
+    for (const recordingId of dependencies.listOwnedActiveVideoRecordingIds()) {
+      recordingIds.add(recordingId);
+    }
+  } catch (error) {
+    logger.warn(`[Daemon] Failed to list in-memory recordings during shutdown: ${error}`);
   }
 }
 

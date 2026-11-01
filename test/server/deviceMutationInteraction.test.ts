@@ -124,6 +124,12 @@ describe("Interaction journal intents (#14359)", () => {
 
   test("pressButton classifies every button the schema accepts", () => {
     const transient = [
+      "up",
+      "down",
+      "left",
+      "right",
+      "select",
+      "playPause",
       "home",
       "back",
       "menu",
@@ -141,8 +147,12 @@ describe("Interaction journal intents (#14359)", () => {
     const buttons = pressButtonInput.shape.button.options;
     expect([...transient, ...persistent].sort()).toEqual([...buttons].sort());
     for (const button of transient) {
-      expect(deviceToolMutations("pressButton", { button }, "android")).toEqual([]);
-      expect(deviceToolMutations("pressButton", { button }, "ios")).toEqual([]);
+      for (const platform of ["android", "ios", "tvos"] as const) {
+        expect(deviceToolMutations("pressButton", { button }, platform)).toEqual([]);
+        expect(
+          deviceToolMutations("pressButton", { button: button.toUpperCase() }, platform),
+        ).toEqual([]);
+      }
     }
     for (const button of persistent) {
       const recorded = (["android", "ios"] as const).flatMap((platform) =>

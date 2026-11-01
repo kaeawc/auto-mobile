@@ -100,6 +100,12 @@ export const selectAllTextInput = z.object({
 
 export const pressButtonInput = z.object({
   button: z.enum([
+    "up",
+    "down",
+    "left",
+    "right",
+    "select",
+    "playPause",
     "home",
     "back",
     "menu",

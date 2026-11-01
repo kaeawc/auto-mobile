@@ -2798,8 +2798,11 @@ content (`/data`), state (`/state`) or one node by id (`replaceNode`). Android C
 carries `revision`; a state conflict carries
 `{success:false,error,conflict:{revision,state:{key:scalar}}}`. Revisions are
 non-negative safe integers; conflict values are strings, booleans or finite
-numbers with valid state keys. Malformed reply fields are dropped. Show, status,
-inspect and events do not report revisions through this host contract.
+numbers with valid state keys. Malformed reply fields are dropped. Each shown
+prototype's `status` and `inspect` entry carries `revision`: the newest one the host
+saw, from a landed patch reply or a device `/data` write event, never moving back. It
+is absent until one arrives after the show; the device's `inspect` reply has no revision
+of its own, so `inspect` keeps the host's.
 
 Ops apply in order, completely or not at all. `add`, `replace`, `remove` and
 `test` address `/data` or `/data` followed by an RFC 6901 JSON pointer: `~0`
@@ -2831,7 +2834,7 @@ runs the full validator before sending. Errors preserve deterministic paths.
 The host validates state ops against the agent-declared state and leaves value
 comparison for `/state` `test` to the device; its copy cannot know user edits.
 
-Patches are FIFO per device, one in flight at a time; a pending show makes patch refuse as busy, and shows are not delayed by patches. If a dispatched show and an acknowledged patch overlap, their device-side order is unknown: the host forgets its spec, warns, and requires a further successful show before patching. A failed dispatched show, dismissed event, successful dismiss, session release, device removal or unbinding also ends tracking. Inspect retains each reported tracked id and drops missing ids (adopted siblings do not end tracking); a fifth-surface refusal with `replaceOthers: false` retains the acknowledged specs. A timeout or connection loss after dispatch is indeterminate and requires a new show; a failure before dispatch keeps the tracked copy; an atomic device refusal leaves it unchanged. A successful patch refreshes shown status data without changing `lastResult`, timestamps or event snapshots.
+Patches are FIFO per device, one in flight at a time; a pending show makes patch refuse as busy, and shows are not delayed by patches. If a dispatched show and an acknowledged patch overlap, their device-side order is unknown: the host forgets its spec, warns, and requires a further successful show before patching. A failed dispatched show, dismissed event, successful dismiss, session release, device removal or unbinding also ends tracking. Inspect retains each reported tracked id and drops missing ids (adopted siblings do not end tracking); a fifth-surface refusal with `replaceOthers: false` retains the acknowledged specs. A timeout or connection loss after dispatch is indeterminate and requires a new show; a failure before dispatch keeps the tracked copy; an atomic device refusal leaves it unchanged. A successful patch refreshes shown status data and sets the entry's `lastAction` to `patch` (kept by a later `inspect`, reset by the next `show`), without changing `lastResult`, timestamps or event snapshots.
 
 ### Re-showing a prototype
 

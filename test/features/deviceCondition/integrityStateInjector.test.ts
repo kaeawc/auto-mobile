@@ -180,7 +180,8 @@ describe("integrityState injector", () => {
     adb.failures.clear();
     await second.reset?.();
     expect(adb.rooted).toBe(true);
-    expect(await injector.isClean()).toBe(false);
+    // The older frame still owns root, so the newest reset verifies clean (#16275).
+    expect(await injector.isClean()).toBe(true);
     await first.reset?.();
     expect(adb.rooted).toBe(false);
     expect(await injector.isClean()).toBe(true);
@@ -307,6 +308,38 @@ describe("integrityState injector", () => {
     expect((await controller.restore()).verifiedClean).toBe(true);
     expect(adb.files.size).toBe(0);
     expect(adb.mode).toBe("Enforcing");
+  });
+
+  test("stacked resets from non-root adbd verify clean at each step and drop root at the end (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    const injector = createIntegrityStateInjector(adb);
+    const controller = new DeviceConditionController(() => injector);
+    await controller.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    await controller.apply({ integrityState: { signals: { "selinux-permissive": "on" } } });
+    const report = await controller.restore();
+    expect(report).toMatchObject({ verifiedClean: true, failures: [] });
+    expect(controller.hasActiveConditions()).toBe(false);
+    expect(adb.rooted).toBe(false);
+    expect(adb.files.size).toBe(0);
+    expect(adb.mode).toBe("Enforcing");
+  });
+
+  test("privilege cleanup still owed after the last reset is not clean (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    const injector = createIntegrityStateInjector(adb);
+    const controller = new DeviceConditionController(() => injector);
+    await controller.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    await controller.apply({ integrityState: { signals: { "selinux-permissive": "on" } } });
+    adb.failures.add("unroot");
+    const report = await controller.restore();
+    expect(report.verifiedClean).toBe(false);
+    expect(adb.rooted).toBe(true);
+    expect(controller.hasActiveConditions()).toBe(true);
+    adb.failures.clear();
+    expect((await controller.restore()).verifiedClean).toBe(true);
+    expect(adb.rooted).toBe(false);
   });
 
   test("successive disjoint signal requests restore their own snapshots newest first", async () => {

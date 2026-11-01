@@ -131,3 +131,29 @@ test("Android reset without an injected backend throws an actionable availabilit
   await expect(reset).rejects.toBeInstanceOf(ActionableError);
   await expect(reset).rejects.toThrow("Android Keystore reset is unavailable in this entry point.");
 });
+
+test("Android refuses an explicit confirm: false before calling the facade (#16274)", async () => {
+  let calls = 0;
+  const action = new ResetKeychain(device, null, {
+    async resetKeystore() {
+      calls++;
+      return state;
+    },
+  });
+  await expect(
+    action.execute({
+      appId: "com.example",
+      scope: "login",
+      confirm: false,
+      explicitlyTargeted: true,
+    }),
+  ).rejects.toThrow("Set confirm: true to proceed");
+  expect(calls).toBe(0);
+  await action.execute({
+    appId: "com.example",
+    scope: "login",
+    confirm: true,
+    explicitlyTargeted: true,
+  });
+  expect(calls).toBe(1);
+});

@@ -463,7 +463,9 @@ class IntegrityStateInjector implements DeviceConditionInjector {
 
   isClean(signal?: AbortSignal): Promise<boolean> {
     return this.serialize(async () => {
-      if (this.acquiredRoot) {
+      // Root an older, still-applied frame needs is held on purpose (#16275). Once no frame has
+      // mutations left to restore, root still acquired is owed cleanup.
+      if (this.acquiredRoot && !this.frames.some((frame) => frame.mutations.length > 0)) {
         return false;
       }
       try {

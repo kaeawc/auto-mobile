@@ -27,7 +27,13 @@ export interface PrototypeLastResult {
   data?: PrototypeData;
   id?: string;
   all?: true;
-  lastAction: PrototypeMutation;
+  /** A shown prototype's entry reads `patch` once a patch has landed on it since its show (#16277). */
+  lastAction: PrototypeMutation | "patch";
+  /**
+   * The newest revision the device reported for this prototype: from a landed patch or a device
+   * `/data` write (#16277). Absent until one arrives after the show.
+   */
+  revision?: number;
   /**
    * Android logical display the prototype is on: the one requested for a fresh show; a same-id show
    * without reset and a dismiss echo the shown prototype's.
@@ -141,7 +147,12 @@ export interface PrototypeStatusStore {
     options: { result: PrototypeResult; details?: PrototypeRecordDetails },
   ): PrototypeLastResult;
   readonly shownSpecs: PrototypeShownSpecs;
-  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
+  /** A patch landed: refresh the data, mark the entry `patch` and keep the device's revision. */
+  recordPatch(
+    deviceId: string,
+    id: string,
+    patch: { data: PrototypeData | undefined; revision?: number },
+  ): void;
   /** The device wiped this prototype's stored values (#12522): drop the reported `storage`. */
   forgetStorage(deviceId: string, id: string): void;
 }
@@ -160,6 +171,14 @@ interface StoredPrototypeStatus extends PrototypeScope {
   lastResult?: PrototypeLastResult;
   snapshots?: Map<string, PrototypeEventState>;
   pendingSnapshots?: Map<string, PrototypeEventState>;
+}
+
+/** `revision` when it is newer than the one the entry already reports. */
+function newerRevision(
+  entry: PrototypeLastResult,
+  revision: number | undefined,
+): Pick<PrototypeLastResult, "revision"> {
+  return revision === undefined || (entry.revision ?? -1) > revision ? {} : { revision };
 }
 
 function shownData(
@@ -276,6 +295,8 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...scope,
       shown: new Map<string, PrototypeLastResult>(),
     };
+    // The device reports no revision, so a patch this host saw land is kept across the adoption.
+    const patched = this.patchedFields(scope.deviceId, prototype.id);
     // Adoption transfers this id to the inspecting scope while retaining its siblings.
     this.clearShown(scope.deviceId, prototype.id);
     const entry: PrototypeLastResult = {
@@ -297,6 +318,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     stored.lastResult = entry;
     stored.shown.set(prototype.id, {
       ...entry,
+      ...patched,
       ...shownData("show", { success: true }, prototype.data),
     });
     stored.pendingSnapshots?.delete(prototype.id);
@@ -418,7 +440,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
             : write.op === "extend" || write.op === "prepend"
               ? applyPrototypeDataWrite(entry.data, { ...write, value: write.value })
               : applyPrototypeDataWrite(entry.data, { ...write, value: write.value });
-      const written = { ...entry };
+      const written = { ...entry, ...newerRevision(entry, write.revision) };
       if (applied?.success) {
         written.data = applied.data;
       } else {
@@ -428,11 +450,19 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     }
   }
 
-  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void {
+  recordPatch(
+    deviceId: string,
+    id: string,
+    { data, revision }: { data: PrototypeData | undefined; revision?: number },
+  ): void {
     for (const stored of this.scopes.values()) {
       const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
       if (entry) {
-        const patched = { ...entry };
+        const patched: PrototypeLastResult = {
+          ...entry,
+          lastAction: "patch",
+          ...newerRevision(entry, revision),
+        };
         if (data === undefined) {
           delete patched.data;
         } else {
@@ -557,6 +587,23 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   dismissed(scope: PrototypeScope, id: string): void {
     this.shownSpecs.forget(scope.deviceId, id);
     this.clearShown(scope.deviceId, id);
+  }
+
+  /** The patch outcome a shown entry carries, for an `inspect` that re-adopts the same id. */
+  private patchedFields(
+    deviceId: string,
+    id: string,
+  ): Partial<Pick<PrototypeLastResult, "lastAction" | "revision">> {
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
+      if (entry?.lastAction === "patch" || entry?.revision !== undefined) {
+        return {
+          ...(entry.lastAction === "patch" ? { lastAction: "patch" as const } : {}),
+          ...(entry.revision === undefined ? {} : { revision: entry.revision }),
+        };
+      }
+    }
+    return {};
   }
 
   shownIds(deviceId: string): readonly string[] {

@@ -53,7 +53,7 @@ export function createPrototypePatchQueue(): PrototypePatchQueue {
   };
 }
 export interface PrototypePatchDependencies {
-  store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatchedData">;
+  store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatch">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
   /** Checks spec-level capabilities on the complete validated patch result. */
@@ -190,7 +190,10 @@ async function finishPatch(
     applied.spec,
   );
   if (committed) {
-    deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
+    deps.store.recordPatch(deviceId, args.id, {
+      data: applied.validated.data,
+      revision: fields.revision,
+    });
   }
   deps.retire(result);
   const output = successfulPatchOutput(fields.revision, committed, args.id);

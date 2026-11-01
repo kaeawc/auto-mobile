@@ -22,7 +22,7 @@ function harness(patch: () => Promise<PrototypePatchReply>) {
   shownSpecs.endShow("d", ticket, { id: "p", spec });
   const settled: boolean[] = [];
   const dependencies: PrototypePatchDependencies = {
-    store: { shownSpecs, recordPatchedData: () => {} },
+    store: { shownSpecs, recordPatch: () => {} },
     transport: { patch },
     supportsPatch: async () => true,
     specRefusal: async () => undefined,

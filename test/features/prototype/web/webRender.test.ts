@@ -217,6 +217,26 @@ describe("prototype web still (#16346)", () => {
     );
   });
 
+  test("an unsized fullscreen or sheet root fills its window; a floating root does not", () => {
+    const rootOf = (placement: Record<string, unknown>, style?: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          window: { placement },
+          root: { type: "column", testTag: "root", children: [], ...(style ? { style } : {}) },
+        }),
+        "root",
+      )[0]!.style;
+    expect(rootOf({ type: "fullscreen" })).toMatchObject({ flex: "1 1 auto", width: "100%" });
+    expect(rootOf({ type: "sheet", edge: "bottom", height: 200 })).toMatchObject({
+      flex: "1 1 auto",
+    });
+    expect(rootOf({ type: "fullscreen" }, { height: { dp: 40 } })).toMatchObject({
+      height: "40px",
+    });
+    expect(rootOf({ type: "floating", gravity: "center" })).not.toHaveProperty("flex");
+  });
+
   for (const frame of ["pixel-9", "iphone-16"]) {
     for (const orientation of ["portrait", "landscape"] as const) {
       test(`snapshot on ${frame} in ${orientation}`, () => {

@@ -69,6 +69,23 @@ function floatingWindow(placement: Raw, children: WebElement[]): WebElement {
 }
 
 /**
+ * A fullscreen or sheet root fills its window on each axis it leaves unsized, as both devices do
+ * (#16190); explicit sizes stay, and a floating root keeps its content size.
+ */
+function sizedRoot(spec: unknown): unknown {
+  const root = record(record(spec)?.root);
+  const placement = record(record(record(spec)?.window)?.placement)?.type;
+  if (!root || placement === "floating") {
+    return root;
+  }
+  const style = record(root.style) ?? {};
+  return {
+    ...root,
+    style: { width: "fill", height: "fill", ...style },
+  };
+}
+
+/**
  * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
  * a floating window sits at its `gravity`, moved by its `offset`.
  */
@@ -112,7 +129,7 @@ export function renderPrototypeStill(
   );
   const expanded = prototypeSpecForDevice(spec);
   const scope = stillScope(expanded, options, frame.platform);
-  const root = renderWebNode(record(expanded)?.root, scope, "root");
+  const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const element = renderDeviceFrame(

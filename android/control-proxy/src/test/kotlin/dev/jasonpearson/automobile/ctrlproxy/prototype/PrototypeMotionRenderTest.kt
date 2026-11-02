@@ -279,6 +279,86 @@ class PrototypeMotionRenderTest {
     assertTrue(atStart("page2"))
   }
 
+  private fun sizeSpec(motion: String? = null) =
+    PrototypeSpec(
+      "size",
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      motion = motion,
+      state = mapOf("show" to PrototypeScalar.BooleanValue(true)),
+      root =
+        PrototypeColumnNode(
+          testTag = "container",
+          children =
+            listOf(
+              PrototypeBoxNode(
+                children = emptyList(),
+                style =
+                  PrototypeStyle(
+                    width = PrototypeDimension.Dp(40.0),
+                    height = PrototypeDimension.Dp(40.0),
+                  ),
+              ),
+              PrototypeBoxNode(
+                children = emptyList(),
+                transition = PrototypeTransition("none"),
+                visibleWhen = PrototypeCondition("show", PrototypeScalar.BooleanValue(true)),
+                style =
+                  PrototypeStyle(
+                    width = PrototypeDimension.Dp(40.0),
+                    height = PrototypeDimension.Dp(120.0),
+                  ),
+              ),
+            ),
+        ),
+    )
+
+  private fun containerHeight() =
+    compose.onNodeWithTag("container").fetchSemanticsNode().boundsInRoot.height
+
+  @Test
+  fun `animateContentSize draws an intermediate size then settles`() {
+    setDurationScale(1f)
+    val runtime = show(sizeSpec())
+    val initial = containerHeight()
+    runtime.tapThenAdvance(hide, frames = 2)
+    compose.mainClock.advanceTimeBy(48)
+    assertTrue(containerHeight() < initial)
+    assertTrue(containerHeight() > initial / 4)
+    assertTrue(runtime.motionActivity.snapshot().active > 0)
+    settle()
+    assertEquals(initial / 4, containerHeight(), 1f)
+    assertEquals(0, runtime.motionActivity.snapshot().active)
+  }
+
+  private fun assertInstantSize(motion: String?, scale: Float) {
+    setDurationScale(scale)
+    val runtime = show(sizeSpec(motion))
+    val initial = containerHeight()
+    runtime.tapThenAdvance(hide)
+    assertEquals(initial / 4, containerHeight(), 1f)
+    assertEquals(0, runtime.motionActivity.snapshot().active)
+  }
+
+  @Test
+  fun `animateContentSize settles in one frame with motion none`() = assertInstantSize("none", 1f)
+
+  @Test
+  fun `animateContentSize settles in one frame with animator scale zero`() =
+    assertInstantSize(null, 0f)
+
+  @Test
+  fun `animator scale zero leaves attention loops settled`() {
+    setDurationScale(0f)
+    val runtime =
+      show(
+        sizeSpec().copy(root = PrototypeTextNode(text = "Hi", loop = PrototypeLoop("spin", 400))),
+      )
+    compose.mainClock.advanceTimeByFrame()
+    assertEquals(PrototypeMotionState.Settled, runtime.motionActivity.snapshot())
+    compose.mainClock.advanceTimeBy(800)
+    assertEquals(PrototypeMotionState.Settled, runtime.motionActivity.snapshot())
+  }
+
   private companion object {
     const val SETTLE_MS = 2_000L
   }

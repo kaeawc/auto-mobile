@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "loop": {
+        "effect": "pulse",
+        "periodMs": 800
+      },
+      "styleWhen": [
+        {
+          "when": {
+            "key": "on",
+            "equals": true
+          },
+          "style": {
+            "scale": 1
+          }
+        }
+      ]
+    },
+    "state": {
+      "on": true
+    }
+  },
+  "expectedPath": "root.loop",
+  "expectedMessage": "pulse loop cannot set style.scale"
+}

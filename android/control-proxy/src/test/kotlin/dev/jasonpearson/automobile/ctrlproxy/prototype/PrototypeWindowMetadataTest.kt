@@ -394,9 +394,12 @@ class PrototypeWindowMetadataTest {
     assertNull(controller.windowMetadata())
 
     controller.show("r1", spec(PrototypeFullscreenPlacement()))
+    val activity = checkNotNull(host.requests.last().motionActivity)
+    assertFalse(activity.captureHeld())
     // The appearance the show resolved to rides along; PrototypeAppearanceTest covers it.
     fun placementAndOpacity() = controller.windowMetadata()?.copy(appearance = null, motion = null)
     assertEquals(PrototypeWindowMetadata("fullscreen", true), placementAndOpacity())
+    assertTrue(activity.captureHeld())
     // Nothing animates in a freshly shown, static prototype (#15114).
     assertEquals(PrototypeMotionState.Settled, controller.windowMetadata()?.motion)
 

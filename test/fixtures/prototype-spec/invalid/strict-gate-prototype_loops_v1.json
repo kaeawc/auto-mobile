@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "loop": {
+        "effect": "pulse",
+        "periodMs": 800
+      }
+    }
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_loops_v1",
+  "options": {
+    "supportedCapabilities": []
+  }
+}

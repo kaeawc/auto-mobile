@@ -89,7 +89,8 @@
     "MAX_PROTOTYPE_UPLOAD_PARTS": 16,
     "MAX_PROTOTYPE_KEYFRAME_NODES": 16,
     "MAX_PROTOTYPE_MEDIA_PLAYERS": 4,
-    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3
+    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3,
+    "MAX_PROTOTYPE_LOOPS": 8
   },
   "definitions": {
     "authAccount": {
@@ -3578,6 +3579,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -3861,6 +3869,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4137,6 +4152,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4386,6 +4408,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -4658,6 +4687,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4922,6 +4958,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -5208,6 +5251,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]
@@ -5487,6 +5537,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -5758,6 +5815,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -5980,6 +6044,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -6358,6 +6429,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "dependents": {
@@ -6623,6 +6701,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -6885,6 +6970,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -7134,6 +7226,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -7405,6 +7504,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -7652,6 +7758,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -7916,6 +8029,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -8201,6 +8321,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -8449,6 +8576,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -8720,6 +8854,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -8963,6 +9104,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -9216,6 +9364,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -9457,6 +9612,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -9729,6 +9891,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -9960,6 +10129,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -10188,6 +10364,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -10432,6 +10615,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -10705,6 +10895,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -10947,6 +11144,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -11200,6 +11404,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -11470,6 +11681,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -11724,6 +11942,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -12013,6 +12238,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -12307,6 +12539,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -12575,6 +12814,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -12836,6 +13082,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13107,6 +13360,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13399,6 +13659,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -13606,6 +13873,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13871,6 +14145,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -14145,6 +14426,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -14401,6 +14689,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -14721,6 +15016,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -14936,6 +15238,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "loop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -23152,6 +23461,34 @@
             "max": 3
           },
           "optional": false
+        }
+      }
+    },
+    "loop": {
+      "kind": "object",
+      "fields": {
+        "effect": {
+          "rule": {
+            "kind": "enum",
+            "values": ["pulse", "spin"]
+          },
+          "optional": false
+        },
+        "periodMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 400,
+            "max": 4000
+          },
+          "optional": false
+        },
+        "iterations": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconEffectRepeat"
+          },
+          "optional": true
         }
       }
     }

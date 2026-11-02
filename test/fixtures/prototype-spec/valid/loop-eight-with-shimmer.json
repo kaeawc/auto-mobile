@@ -1,0 +1,101 @@
+{
+  "id": "loops",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      },
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      },
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      },
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      },
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      },
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      },
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      },
+      {
+        "type": "box",
+        "children": [],
+        "loop": {
+          "effect": "pulse",
+          "periodMs": 800
+        },
+        "style": {
+          "shimmer": true
+        }
+      }
+    ]
+  }
+}

@@ -46,4 +46,19 @@ changes and retains effects; motion off snaps everything. Existing motion v2/v3
 capability requirements still apply; iOS advertises the token capability but
 continues to refuse those broader features until its corresponding capabilities
 are available.
+
+## Attention loops
+
+(Android only, requires \`prototype_loops_v1\`) Any node accepts
+\`loop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}\`.
+The period and finite count are integers; omitted iterations means infinite. Pulse scales
+1 → 1.08 → 1 per period; spin turns 0 → 360 degrees. Drawing changes without changing
+layout, reported bounds or touch targets. A pulse node must omit \`style.scale\`; a spin node
+must omit \`style.rotation\`, including every \`styleWhen\` style. At most eight expanded nodes
+may carry loops, including repeat instances; shimmer does not consume that limit.
+Finite loops settle at identity and contribute to settling motion while running. Infinite
+loops and shimmer contribute only to the intentional loop count. Reduced motion, motion
+none and animator scale 0 leave loops at rest. On Android each observe metadata read renews
+a 1500 ms capture hold: attention loops draw identity and shimmer draws no band during it,
+so captures within the hold are identical when the rest of the scene is unchanged.
 `;

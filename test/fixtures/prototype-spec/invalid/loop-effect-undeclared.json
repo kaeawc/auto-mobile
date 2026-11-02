@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "loop": {
+        "effect": "bounce",
+        "periodMs": 800
+      }
+    }
+  },
+  "expectedPath": "root.loop.effect",
+  "expectedMessage": "Invalid enum value"
+}

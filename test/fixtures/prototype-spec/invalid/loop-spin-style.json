@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "loop": {
+        "effect": "spin",
+        "periodMs": 800
+      },
+      "style": {
+        "rotation": 1
+      }
+    }
+  },
+  "expectedPath": "root.loop",
+  "expectedMessage": "spin loop cannot set style.rotation"
+}

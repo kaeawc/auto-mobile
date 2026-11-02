@@ -93,6 +93,8 @@ internal object PrototypeStructuralWalk {
         ++context.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
     )
       return fail("$path.keyframes", "Keyframe node limit exceeded")
+    if ("loop" in node && ++context.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
+      return fail("$path.loop", "Loop node limit exceeded")
     PrototypeEffectRules.charge(node, path, context)?.let {
       return it
     }

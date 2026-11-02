@@ -58,6 +58,7 @@ class PrototypeSpecModelsTest {
       "safeAreaPadding",
       PrototypeSafeAreaPadding(listOf("top", "start"), listOf("systemBars", "ime")),
     )
+    assertRoundTrip("loop", PrototypeLoop("pulse", 1200, PrototypeIconEffectRepeat()))
     assertRoundTrip("animate", PrototypeAnimate(450, "spring"))
     assertRoundTrip("stagger", PrototypeStagger(40, "center"))
     assertRoundTrip("zoomable", PrototypeZoomable(4.5))

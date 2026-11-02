@@ -51,6 +51,10 @@ import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 import { wireCapture } from "../../helpers/wireCapture";
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon";
+import { BudgetedIosLockStateProbe } from "../../../src/features/observe/ios/BudgetedIosLockStateProbe";
+import { CachedIosLockStateProbe } from "../../../src/features/observe/ios/CachedIosLockStateProbe";
+import { applyIosLockStateReading } from "../../../src/features/observe/ios/IosLockStateProbe";
+import type { SystemTrayObserver } from "../../../src/features/systemTray/helpers/dependencies";
 import { ios26SettingsClosed, ios26TrayOpenSettings } from "./iosTrayObservationFixture";
 import { SystemTray } from "../../../src/features/systemTray/SystemTray";
 
@@ -4539,6 +4543,88 @@ describe("iOS systemTray open/close", () => {
         expect(client.swipeCalls[0].y1).toBe(5);
       },
     );
+
+    test.each(["find", "tap", "dismiss"] as const)(
+      "%s never matches app-owned Settings content under the lock-only tray signal",
+      async (action) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        observer.setObserveResult(() => ios26TrayOpenSettings);
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          observeScreenFactory: () => observer,
+        });
+        await expect(
+          new SystemTray(iosDevice).execute({
+            action,
+            notification: { title: "General" },
+            awaitTimeout: 500,
+          }),
+        ).rejects.toThrow("Notification not found after 500ms");
+        expect(client.tapCalls).toHaveLength(0);
+        expect(client.swipeCalls).toHaveLength(0);
+      },
+    );
+
+    test("open keeps a slow shared lock probe alive across polls until it reports locked", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      let probeStarts = 0;
+      const cache = new CachedIosLockStateProbe(
+        {
+          read: async () => {
+            probeStarts++;
+            await timer.sleep(900);
+            return { kind: "known", lock: { locked: true, keyguardShowing: true } };
+          },
+        },
+        timer,
+      );
+      const budgeted = new BudgetedIosLockStateProbe(cache, timer);
+      const observer: SystemTrayObserver = {
+        execute: async () => {
+          const result: ObserveResult = { ...ios26SettingsClosed };
+          applyIosLockStateReading(result, await budgeted.read(iosDevice.deviceId));
+          return result;
+        },
+      };
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        iosLockStateInvalidator: cache,
+        observeScreenFactory: () => observer,
+      });
+      const result = await ensureSystemTrayOpen(iosDevice, 5000);
+      expect(result.opened).toBe(true);
+      expect(result.observation?.deviceLock).toEqual({ locked: true, keyguardShowing: true });
+      expect(probeStarts).toBe(2);
+      expect(client.swipeCalls).toHaveLength(1);
+    });
+
+    test("list over the lock-only app tray is rejected before any row is read", async () => {
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(() => ios26TrayOpenSettings);
+      setSystemTrayDependencies({
+        timer: new FakeTimer(),
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      await expect(
+        new SystemTray(iosDevice).execute({
+          action: "list",
+          notification: { appId: "com.apple.Preferences" },
+          awaitTimeout: 500,
+        }),
+      ).rejects.toThrow("supported only on Android");
+      expect(observer.getExecuteCallCount()).toBe(0);
+      expect(client.tapCalls).toHaveLength(0);
+      expect(client.swipeCalls).toHaveLength(0);
+    });
 
     test("already open over Settings skips the gesture", async () => {
       const observer = new SequencedObserveScreen([ios26TrayOpenSettings]);

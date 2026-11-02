@@ -24,7 +24,10 @@ import {
   isSameObservationScreen,
 } from "../../observe/output/ObserveResultOutput";
 import { isStabilityDiffEmpty } from "../../observe/SettleObserve";
-import { SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS } from "../notificationHints";
+import {
+  hasIosCoverSheetNotificationCenter,
+  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS,
+} from "../notificationHints";
 import type { SystemTrayCall, SystemTrayNotificationArgs } from "../systemTrayTypes";
 import { hasIosAppNotificationCoverSheet } from "../IosNotificationUIDetector";
 import { getDetector, getSystemTrayDependencies, type SystemTrayObserver } from "./dependencies";
@@ -245,8 +248,9 @@ export const waitForSystemTrayOpen = async (
       signal,
     );
     throwIfAborted(signal);
-    if (isIosAppObservation(observation)) {
-      // A settling unlocked read can otherwise stay cached throughout these retries.
+    if (isIosAppObservation(observation) && observation.deviceLock?.locked === false) {
+      // A settling unlocked read can otherwise stay cached throughout these retries. A pending
+      // or unknown reading must keep the shared probe: invalidating would discard its late result.
       detector.invalidateLockState?.();
     }
     observation = await observeSystemTray(observeScreen, minTimestamp, signal);
@@ -462,6 +466,44 @@ const buildUnmatchedNotificationDiagnostics = (
   return { info, debug };
 };
 
+/**
+ * Whether the observation's hierarchy holds notification rows that may be matched. An iOS 26.5
+ * tray over an app is detected from lock flags alone and the hierarchy stays the unchanged app
+ * tree, so its nodes are app content, never notifications.
+ */
+export const hasMatchableNotificationContent = (
+  detector: NotificationUIDetector,
+  observation: ObserveResult,
+): boolean => {
+  const { viewHierarchy, deviceLock } = observation;
+  if (!viewHierarchy || !detector.isTrayOpen(viewHierarchy, deviceLock)) {
+    return false;
+  }
+  return !(
+    hasIosAppNotificationCoverSheet(viewHierarchy, deviceLock) &&
+    !hasIosCoverSheetNotificationCenter(viewHierarchy)
+  );
+};
+
+interface DiagSignatures {
+  info: string;
+  debug: string;
+}
+
+const logUnmatchedDiagnostics = (
+  diagnostics: { info: string; debug: string },
+  signatures: DiagSignatures,
+): void => {
+  if (diagnostics.info !== signatures.info) {
+    signatures.info = diagnostics.info;
+    logger.info(diagnostics.info);
+  }
+  if (diagnostics.debug !== signatures.debug) {
+    signatures.debug = diagnostics.debug;
+    logger.debug(diagnostics.debug);
+  }
+};
+
 export const waitForNotificationMatch = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
@@ -481,32 +523,32 @@ export const waitForNotificationMatch = async (
     observation = await observeSystemTray(observeScreen, minTimestamp, signal);
   }
 
-  let lastInfoDiagSignature = "";
-  let lastDebugDiagSignature = "";
+  const diagSignatures: DiagSignatures = { info: "", debug: "" };
   let lastReexpandAtMs = timer.now();
   while (true) {
     throwIfAborted(signal);
     const viewHierarchy = observation.viewHierarchy;
-    if (viewHierarchy && detector.isTrayOpen(viewHierarchy, observation.deviceLock)) {
+    if (viewHierarchy && hasMatchableNotificationContent(detector, observation)) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
         return { observation, match };
       }
       // Diagnostic: log the candidate breakdown when the shade is open but nothing
       // matched, deduped so a 120s poll loop does not emit identical lines each tick.
-      const diagnostics = buildUnmatchedNotificationDiagnostics(
-        viewHierarchy,
-        criteria,
-        appMatchTexts,
+      logUnmatchedDiagnostics(
+        buildUnmatchedNotificationDiagnostics(viewHierarchy, criteria, appMatchTexts),
+        diagSignatures,
       );
-      if (diagnostics.info !== lastInfoDiagSignature) {
-        lastInfoDiagSignature = diagnostics.info;
-        logger.info(diagnostics.info);
+    } else if (viewHierarchy && detector.isTrayOpen(viewHierarchy, observation.deviceLock)) {
+      // Open per the lock flags, but the tree is the app's: there is no notification content to
+      // match, so keep polling for the typed not-found result and never re-expand an open shade.
+      const unavailable =
+        "[systemTray][diag] shade open but notification content unavailable (app-owned hierarchy)";
+      if (unavailable !== diagSignatures.info) {
+        diagSignatures.info = unavailable;
+        logger.info(unavailable);
       }
-      if (diagnostics.debug !== lastDebugDiagSignature) {
-        lastDebugDiagSignature = diagnostics.debug;
-        logger.debug(diagnostics.debug);
-      }
+      diagSignatures.debug = "";
     } else {
       // The shade is not open. ensureSystemTrayOpen expanded it once, but a
       // high-importance notification that re-posts (e.g. a persistent connection
@@ -524,11 +566,11 @@ export const waitForNotificationMatch = async (
       const trayDiag =
         `[systemTray][diag] shade NOT detected open during notification wait ` +
         `(hasHierarchy=${Boolean(observation.viewHierarchy)})`;
-      if (trayDiag !== lastInfoDiagSignature) {
-        lastInfoDiagSignature = trayDiag;
+      if (trayDiag !== diagSignatures.info) {
+        diagSignatures.info = trayDiag;
         logger.info(trayDiag);
       }
-      lastDebugDiagSignature = "";
+      diagSignatures.debug = "";
     }
 
     if (timer.now() >= deadlineMs) {

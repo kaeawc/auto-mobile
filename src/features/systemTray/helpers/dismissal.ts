@@ -36,6 +36,7 @@ import {
   SYSTEM_TRAY_POLL_INTERVAL_MS,
   SYSTEM_TRAY_REEXPAND_INTERVAL_MS,
   ensureSystemTrayOpen,
+  hasMatchableNotificationContent,
   observeSystemTray,
   sleep,
   swipeElement,
@@ -505,7 +506,9 @@ const readClearAllShadeOnce = async (
     throwIfAborted(signal);
     const readable = isReadableNotificationShade(detector, observation);
     const match =
-      readable && observation.viewHierarchy
+      readable &&
+      observation.viewHierarchy &&
+      hasMatchableNotificationContent(detector, observation)
         ? findBestNotificationMatch(observation.viewHierarchy, criteria, appMatchTexts)
         : null;
     if (match) {

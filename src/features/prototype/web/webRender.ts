@@ -50,6 +50,8 @@ export interface WebRenderScope {
   readonly unsupported: UnsupportedWebNode[];
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
+  /** Values only text placeholders read, never control state: a pager's `page` and `pageCount`. */
+  readonly textLocals?: Readonly<Record<string, unknown>>;
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
@@ -80,6 +82,10 @@ function bindBare(text: string, scope: WebRenderScope): string {
   return text.replace(/\{([^{}]+)\}/g, (whole, inner: string) => {
     if (!inner.startsWith("derived:")) {
       const key = unshield(inner);
+      const locals = scope.textLocals ?? {};
+      if (Object.hasOwn(locals, key)) {
+        return shield(renderScalar(locals[key]));
+      }
       return Object.hasOwn(scope.condition.state, key)
         ? shield(renderScalar(scope.condition.state[key]))
         : whole;

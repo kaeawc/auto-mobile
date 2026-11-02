@@ -174,14 +174,12 @@ export const pagerRenderer =
       overflow: "hidden",
       position: "relative",
     });
-    // Page content reads the pager's one-based `page` and `pageCount`, as on the devices.
+    // Page text reads the pager's one-based `page` and `pageCount`, as on the devices; control
+    // state is left alone, so a pager keyed `page` still selects by its own value.
     const inner = kit.child(scope, {
       inBox: true,
       style: { ...scope.style, parentAxis: undefined },
-      condition: {
-        ...scope.condition,
-        state: { ...scope.condition.state, page: page + 1, pageCount: pages.length },
-      },
+      textLocals: { ...scope.textLocals, page: page + 1, pageCount: pages.length },
     });
     const content = kit.renderNode(pages[page], inner, `${path}.children[${page}]`);
     const pageBox = el(

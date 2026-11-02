@@ -106,6 +106,37 @@ describe("web still pager (#16382)", () => {
     expect(textOf(pager)).toBe("Page 2 of 2");
   });
 
+  test("page placeholders leave control state alone, even for a pager keyed `page`", () => {
+    const still = renderPrototypeStill(
+      rootOf(
+        {
+          type: "pager",
+          id: "p",
+          stateKey: "page",
+          children: [
+            {
+              type: "column",
+              children: [
+                { type: "text", testTag: "label", text: "Page {page} of {pageCount}" },
+                {
+                  type: "tabBar",
+                  testTag: "tabs",
+                  pager: "p",
+                  items: [{ label: "One" }, { label: "Two" }],
+                },
+              ],
+            },
+            { type: "text", text: "second" },
+          ],
+        },
+        { state: { page: 0 } },
+      ),
+    ).element;
+    expect(textOf(byTag(still, "label")[0]!)).toBe("Page 1 of 2");
+    const tabs = find(byTag(still, "tabs")[0]!, (element) => element.attrs.role === "tab");
+    expect(tabs.map((tab) => tab.attrs["aria-selected"])).toEqual(["true", "false"]);
+  });
+
   test("applies peek padding and a fixed page size on the pager's axis", () => {
     const pager = byNode(
       renderPrototypeStill(

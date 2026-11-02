@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeStubBuilder } from "../../fakes/FakeStubBuilder";
+import { MAGISK_PACKAGE } from "../../../src/features/deviceCondition/magiskStub";
 import {
   DeviceConditionController,
   type DeviceConditionInjector,
@@ -32,6 +34,7 @@ function result(stdout = ""): ExecResult {
 /** A stateful fake: observations come from the simulated adb state, independently of command success. */
 class IntegrityAdb extends FakeAdbExecutor {
   files = new Set<string>();
+  packages = new Set<string>();
   mode = "Enforcing";
   commands: string[] = [];
   failures = new Set<string>();
@@ -74,6 +77,12 @@ class IntegrityAdb extends FakeAdbExecutor {
       return result([...this.files].filter((path) => args.includes(path)).join("\n"));
     }
     if (!this.ignoreWrites) {
+      if (args[0] === "install") {
+        this.packages.add(MAGISK_PACKAGE);
+      }
+      if (args[0] === "uninstall") {
+        this.packages.delete(args[1]!);
+      }
       if (args[1] === "printf") {
         this.files.add(args.at(-1)!);
       }
@@ -85,6 +94,9 @@ class IntegrityAdb extends FakeAdbExecutor {
       if (args[1] === "setenforce") {
         this.mode = args[2] === "0" ? "Permissive" : "Enforcing";
       }
+    }
+    if (command === `shell pm list packages ${MAGISK_PACKAGE}`) {
+      return result(this.packages.has(MAGISK_PACKAGE) ? `package:${MAGISK_PACKAGE}` : "");
     }
     return result();
   }
@@ -203,7 +215,10 @@ describe("integrityState injector", () => {
   for (const integrityFirst of [true, false]) {
     test(`shared SELinux baseline survives clearing ${integrityFirst ? "integrity" : "root"} first`, async () => {
       const adb = new IntegrityAdb();
-      const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+      const resolve = createDefaultInjectorResolver({
+        stubBuilder: new FakeStubBuilder(),
+        adbFactory: { create: () => adb },
+      });
       const device = { name: "e", platform: "android" as const, deviceId: "shared" };
       const owner = { device, deviceId: device.deviceId };
       const integrity = resolve(owner, "integrityState")!;
@@ -222,7 +237,10 @@ describe("integrityState injector", () => {
 
   test("clearing integrity keeps su stubs an active rootState fixture still needs (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-files" };
     const owner = { device, deviceId: device.deviceId };
     const integrity = resolve(owner, "integrityState")!;
@@ -247,7 +265,10 @@ describe("integrityState injector", () => {
 
   test("integrity off refuses su stubs rootState still needs (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-off" };
     const owner = { device, deviceId: device.deviceId };
     const integrity = resolve(owner, "integrityState")!;
@@ -261,7 +282,10 @@ describe("integrityState injector", () => {
 
   test("rootState re-plants an artifact it depends on but did not plant (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-drift" };
     const owner = { device, deviceId: device.deviceId };
     const integrity = resolve(owner, "integrityState")!;
@@ -275,7 +299,10 @@ describe("integrityState injector", () => {
 
   test("root-first maximal integrity restores clean around root-held stubs (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-root-first" };
     const owner = { device, deviceId: device.deviceId };
     const root = resolve(owner, "rootState")!;
@@ -293,7 +320,10 @@ describe("integrityState injector", () => {
 
   test("a failed integrity plant leaves no hold that keeps a stub after root reset (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-failed-plant" };
     const owner = { device, deviceId: device.deviceId };
     const integrity = resolve(owner, "integrityState")!;
@@ -313,7 +343,10 @@ describe("integrityState injector", () => {
   test("an image-shipped su held by rootState stays in the integrity baseline (#16275)", async () => {
     const adb = new IntegrityAdb();
     adb.files.add("/system/xbin/su");
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-image-su" };
     const owner = { device, deviceId: device.deviceId };
     const root = resolve(owner, "rootState")!;
@@ -330,7 +363,10 @@ describe("integrityState injector", () => {
 
   test("restoring an integrity off while rootState holds the stubs verifies (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-off-restore" };
     const owner = { device, deviceId: device.deviceId };
     const integrity = resolve(owner, "integrityState")!;
@@ -351,7 +387,10 @@ describe("integrityState injector", () => {
   test("a later integrity baseline keeps stubs integrity itself still holds (#16275)", async () => {
     const adb = new IntegrityAdb();
     adb.mode = "Permissive";
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-later-frame" };
     const owner = { device, deviceId: device.deviceId };
     const root = resolve(owner, "rootState")!;
@@ -372,7 +411,10 @@ describe("integrityState injector", () => {
 
   test("a failed plant whose rollback also fails keeps its fixture provenance (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-owed-plant" };
     const owner = { device, deviceId: device.deviceId };
     const root = resolve(owner, "rootState")!;
@@ -396,7 +438,10 @@ describe("integrityState injector", () => {
 
   test("an unverified integrity removal keeps fixture provenance for the retry (#16275)", async () => {
     const adb = new IntegrityAdb();
-    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const resolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => adb },
+    });
     const device = { name: "e", platform: "android" as const, deviceId: "shared-unverified-rm" };
     const owner = { device, deviceId: device.deviceId };
     const root = resolve(owner, "rootState")!;
@@ -424,8 +469,12 @@ describe("integrityState injector", () => {
     secondAdb.mode = "Permissive";
     const device = { name: "e", platform: "android" as const, deviceId: "same-id" };
     const owner = { device, deviceId: device.deviceId };
-    const firstResolve = createDefaultInjectorResolver({ adbFactory: { create: () => firstAdb } });
+    const firstResolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
+      adbFactory: { create: () => firstAdb },
+    });
     const secondResolve = createDefaultInjectorResolver({
+      stubBuilder: new FakeStubBuilder(),
       adbFactory: { create: () => secondAdb },
     });
     const integrity = firstResolve(owner, "integrityState")!;
@@ -443,7 +492,10 @@ describe("integrityState injector", () => {
   for (const integrityFirst of [true, false]) {
     test(`root-first acquisition restores the first baseline when ${integrityFirst ? "integrity" : "root"} clears first`, async () => {
       const adb = new IntegrityAdb();
-      const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+      const resolve = createDefaultInjectorResolver({
+        stubBuilder: new FakeStubBuilder(),
+        adbFactory: { create: () => adb },
+      });
       const device = { name: "e", platform: "android" as const, deviceId: "root-first" };
       const owner = { device, deviceId: device.deviceId };
       const integrity = resolve(owner, "integrityState")!;

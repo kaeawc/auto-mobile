@@ -25,6 +25,7 @@ import {
 import { resolveStorageFaultInjector } from "./storageFaultInjectors";
 import { resolveVehicleStateInjector } from "./vehicleStateInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
+import type { MagiskStubBuilder } from "./magiskStub";
 import {
   deviceConditionInputIsMeaningful,
   type DeviceConditionInput,
@@ -233,7 +234,7 @@ export class DeviceConditionRegistry {
  * `unsupported` rather than silently dropping.
  */
 export function createDefaultInjectorResolver(
-  deps: ReadOnlyFilesystemInjectorDeps = {},
+  deps: ReadOnlyFilesystemInjectorDeps & { stubBuilder?: MagiskStubBuilder } = {},
 ): DeviceConditionInjectorResolver {
   const adbFactory = deps.adbFactory ?? defaultAdbClientFactory;
   // Factory-local caches keep injected adb clients separate from the production instances.
@@ -247,6 +248,7 @@ export function createDefaultInjectorResolver(
     resolveIosRefusalInjector(device, key) ??
     resolveRootStateInjector(device, key, adbFactory, {
       cache: rootCache,
+      stubBuilder: deps.stubBuilder,
       selinuxOwners,
       artifactOwners,
     }) ??

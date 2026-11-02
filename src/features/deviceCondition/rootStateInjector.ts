@@ -1,5 +1,5 @@
 import type { BootedDevice } from "../../models";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -15,6 +15,11 @@ import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { SelinuxOwner, resolveSelinuxOwner, selinuxOwnersByDevice } from "./SelinuxOwner";
 import { ArtifactOwner, artifactOwnersByDevice, resolveArtifactOwner } from "./ArtifactOwner";
+import {
+  DefaultMagiskStubBuilder,
+  createMagiskPackageArtifact,
+  type MagiskStubBuilder,
+} from "./magiskStub";
 import { OwedResetError } from "./OwedResetError";
 import { adbCommand, rejectValue, shell } from "./injectorSupport";
 
@@ -138,7 +143,21 @@ export function createRootStateInjector(
   adb: AdbExecutor,
   selinux = new SelinuxOwner(),
   artifacts = new ArtifactOwner(),
+  stubBuilder: MagiskStubBuilder = new DefaultMagiskStubBuilder(),
 ): DeviceConditionInjector {
+  const magisk = createMagiskPackageArtifact(adb, stubBuilder);
+  const packageArtifact = magisk.key;
+  const listArtifacts = async (paths: string[], signal?: AbortSignal): Promise<Set<string>> => {
+    const existing = await listExisting(
+      adb,
+      paths.filter((path) => path !== packageArtifact),
+      signal,
+    );
+    if (paths.includes(packageArtifact) && (await magisk.present(signal))) {
+      existing.add(packageArtifact);
+    }
+    return existing;
+  };
   const selinuxToken = {};
   const artifactToken = {};
   // Every artifact this fixture depends on, planted here or already present. Shared with
@@ -155,15 +174,21 @@ export function createRootStateInjector(
     // Re-acquire the privileges the cleanup needs: an earlier reset (or a reboot) may
     // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
     await ensureRootAdb(adb, resetSignal);
-    let remaining = new Set<string>();
+    const remaining = new Set<string>();
     // Planted by a fixture (here or by integrityState) and needed by no other fixture.
     const removable = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
-    if (removable.length > 0) {
+    const removableFiles = removable.filter((path) => path !== packageArtifact);
+    if (removable.includes(packageArtifact) && (await magisk.remove(resetSignal))) {
+      remaining.add(packageArtifact);
+    }
+    if (removableFiles.length > 0) {
       // A reboot can return /system to read-only while the planted files survive.
       await remountSystem(adb, resetSignal);
-      await shell(adb, ["rm", "-f", ...removable], resetSignal);
+      await shell(adb, ["rm", "-f", ...removableFiles], resetSignal);
       // Confirm the removal; the holds are only released once the files are really gone.
-      remaining = await listExisting(adb, removable, resetSignal);
+      for (const path of await listExisting(adb, removableFiles, resetSignal)) {
+        remaining.add(path);
+      }
     }
     await selinux.release(adb, selinuxToken, resetSignal);
     await adbCommand(adb, ["unroot"], resetSignal);
@@ -183,7 +208,7 @@ export function createRootStateInjector(
   // Every artifact the fixture depends on, not only those it planted: a file another fixture
   // planted can be removed under it.
   const artifactsStillThere = async (signal?: AbortSignal): Promise<boolean> => {
-    const existing = await listExisting(adb, [...held], signal);
+    const existing = await listArtifacts([...held], signal);
     return [...held].every((path) => existing.has(path));
   };
   // After a reboot that keeps the modified system image the files survive but SELinux is back
@@ -207,6 +232,7 @@ export function createRootStateInjector(
       }
       // Both reads happen before the first mutation, so a failed probe changes nothing.
       const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
+      const hadPackage = await magisk.present(signal);
       if (!selinux.has(selinuxToken)) {
         await selinux.capture(adb, selinuxToken, signal);
       }
@@ -224,6 +250,14 @@ export function createRootStateInjector(
           held.add(path);
         }
         await plantArtifacts(adb, toPlant, planted, signal);
+        await magisk.apply(
+          hadPackage,
+          (plantedPackage) => {
+            artifacts[plantedPackage ? "plant" : "hold"](artifactToken, packageArtifact);
+            held.add(packageArtifact);
+          },
+          signal,
+        );
       } catch (error) {
         try {
           await reset();
@@ -235,7 +269,7 @@ export function createRootStateInjector(
             { cause: error },
           );
         }
-        throw error;
+        throw toActionableError(error, "Could not apply rootState fixture");
       }
       active = true;
       if (wasActive) {
@@ -256,12 +290,12 @@ export function createRootStateInjector(
       const owed = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
       if (owed.length > 0) {
         try {
-          if ((await listExisting(adb, owed, signal)).size > 0) {
+          if ((await listArtifacts(owed, signal)).size > 0) {
             return false;
           }
         } catch (error) {
           if (signal?.aborted) {
-            throw error;
+            throw toActionableError(error, "rootState clean check aborted");
           }
           // A read that cannot run cannot show the device is clean, so report it as not clean.
           logger.warn(
@@ -293,6 +327,7 @@ export function resolveRootStateInjector(
         cache: Map<string, DeviceConditionInjector>;
         selinuxOwners?: Map<string, SelinuxOwner>;
         artifactOwners?: Map<string, ArtifactOwner>;
+        stubBuilder?: MagiskStubBuilder;
       } = injectorsByDevice,
 ): DeviceConditionInjector | undefined {
   if (device.platform !== "android" || key !== "rootState") {
@@ -307,6 +342,7 @@ export function resolveRootStateInjector(
       adbFactory.create(device),
       resolveSelinuxOwner(device.deviceId, selinuxOwners),
       resolveArtifactOwner(device.deviceId, artifactOwners),
+      options instanceof Map ? undefined : options.stubBuilder,
     );
     cache.set(device.deviceId, injector);
   }

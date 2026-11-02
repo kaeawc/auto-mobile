@@ -178,6 +178,29 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
     expect(updatedUris().slice(before)).toContain("automobile:prototype/b/web");
   });
 
+  test("byte-cap pruning of another prototype's history updates that prototype", async () => {
+    const specOf = (id: string, text: string) => ({ ...spec(text), id });
+    const bytes = Buffer.byteLength(JSON.stringify(specOf("a", "r1")));
+    ResourceRegistry.restoreForTesting(snapshot);
+    revisions = new PrototypeSpecRevisions(new FakeTimer(), { revisions: 20, bytes: bytes * 3 });
+    specs = new PrototypeShownSpecs(revisions);
+    registerPrototypeResources(undefined, { revisions, rendererVersion: () => "9.9.9" });
+    const showAs = (id: string, text: string) => {
+      const ticket = specs.beginShow("d", id, false, "android");
+      specs.endShow("d", ticket, { id, spec: specOf(id, text), replaceOthers: false });
+    };
+    await request("resources/subscribe", { uri: "automobile:prototype/a/web" });
+    showAs("a", "r1");
+    showAs("a", "r2");
+    showAs("b", "r1");
+    await prototypeWebNotificationsSettled();
+    const before = updatedUris().length;
+    showAs("b", "r2");
+    await prototypeWebNotificationsSettled();
+    expect(revisions.history("a").map((entry) => entry.revision)).toEqual([2]);
+    expect(updatedUris().slice(before)).toContain("automobile:prototype/a/web");
+  });
+
   test("an unknown id is an actionable error listing known ids", async () => {
     show("first");
     expect(request("resources/read", { uri: "automobile:prototype/nope/web" })).rejects.toThrow(

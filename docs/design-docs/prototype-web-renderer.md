@@ -27,9 +27,9 @@ device frame registry.
   unregistered when the id is evicted; each change sends `list_changed`. List entries carry no
   `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
   `_meta`.
-- **Updates.** Every new revision sends `resources/updated` for the parameter-free URI of the id,
-  of each id in its variant group, and of each id in the group it left (or was evicted from), in
-  revision order. The concrete resource matches subscriptions
+- **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
+  `resources/updated` for the parameter-free URI of the id, of each id in its variant group, and of
+  each id in the group it left (or was evicted from), in revision order. The concrete resource matches subscriptions
   exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
 
 ## Spec revisions
@@ -46,7 +46,8 @@ device frame registry.
   host-only and never sent to the device.
 - Bounds: the last `MAX_PROTOTYPE_SPEC_REVISIONS` (20) per id, and `MAX_PROTOTYPE_SPEC_REVISION_BYTES`
   (32 MiB) of spec JSON across ids. Over the byte cap the oldest non-latest revision goes first;
-  when only latest revisions remain, the least recently revised other id is dropped whole.
+  when only latest revisions remain, the least recently revised other id is dropped whole. Each id
+  whose history shrinks this way gets a `pruned` event, and each id dropped whole an `evicted` one.
 - The daemon keeps one store for the process (`daemonPrototypeSpecRevisions`), outliving any one
   prototype host; a host with injected state gets its own. Nothing is persisted across restarts.
 

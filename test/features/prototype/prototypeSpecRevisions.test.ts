@@ -124,8 +124,12 @@ describe("PrototypeSpecRevisions", () => {
     revisions.recordShow("a", { spec: spec("r2") });
     revisions.recordShow("b", { spec: spec("r1") });
     revisions.recordShow("c", { spec: spec("r1") });
-    // Over the cap: a's r1 goes before any id's latest.
+    // Over the cap: a's r1 goes before any id's latest, and a hears that its history changed.
     expect(revisions.history("a").map((entry) => entry.revision)).toEqual([2]);
+    expect(events.slice(-2)).toEqual([
+      { kind: "revision", id: "c", revision: 1 },
+      { kind: "pruned", id: "a" },
+    ]);
     revisions.recordShow("d", { spec: spec("r1") });
     // Only latest revisions remain, so the least recently revised id (a) is dropped whole.
     expect(revisions.ids()).toEqual(["b", "c", "d"]);

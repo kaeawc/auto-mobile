@@ -45,6 +45,8 @@ export interface PrototypeSpecRevisionRecorder {
 
 export type PrototypeSpecRevisionEvent =
   | { readonly kind: "revision"; readonly id: string; readonly revision: number }
+  /** The byte cap dropped older revisions of an id other than the one just revised. */
+  | { readonly kind: "pruned"; readonly id: string }
   | { readonly kind: "evicted"; readonly id: string };
 
 /** Read side for resources: kept history per id and change notifications. */
@@ -203,23 +205,30 @@ export class PrototypeSpecRevisions
     while (history.kept.length > this.limits.revisions) {
       this.totalBytes -= history.kept.shift()!.bytes;
     }
-    const evicted = this.enforceByteCap(id);
+    const { pruned, evicted } = this.enforceByteCap(id);
     this.emit({ kind: "revision", id, revision });
+    for (const other of pruned) {
+      if (other !== id && !evicted.includes(other)) {
+        this.emit({ kind: "pruned", id: other });
+      }
+    }
     for (const gone of evicted) {
       this.emit({ kind: "evicted", id: gone });
     }
   }
 
   /** Drops the oldest non-latest revisions, then whole least recently revised ids, never `current`. */
-  private enforceByteCap(current: string): string[] {
+  private enforceByteCap(current: string): { pruned: Set<string>; evicted: string[] } {
+    const pruned = new Set<string>();
     while (this.totalBytes > this.limits.bytes) {
-      const older = [...this.histories.values()]
-        .filter((history) => history.kept.length > 1)
-        .sort((a, b) => a.kept[0]!.sequence - b.kept[0]!.sequence)[0];
+      const older = [...this.histories.entries()]
+        .filter(([, history]) => history.kept.length > 1)
+        .sort(([, a], [, b]) => a.kept[0]!.sequence - b.kept[0]!.sequence)[0];
       if (!older) {
         break;
       }
-      this.totalBytes -= older.kept.shift()!.bytes;
+      this.totalBytes -= older[1].kept.shift()!.bytes;
+      pruned.add(older[0]);
     }
     const evicted: string[] = [];
     while (this.totalBytes > this.limits.bytes) {
@@ -235,7 +244,7 @@ export class PrototypeSpecRevisions
       this.retired.set(id, history.next);
       evicted.push(id);
     }
-    return evicted;
+    return { pruned, evicted };
   }
 
   private emit(event: PrototypeSpecRevisionEvent): void {

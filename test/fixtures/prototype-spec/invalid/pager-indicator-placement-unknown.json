@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "carousel",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "pager",
+      "id": "pages",
+      "indicator": "dots",
+      "children": [
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "text",
+              "text": "A"
+            }
+          ]
+        },
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "text",
+              "text": "B"
+            }
+          ]
+        }
+      ],
+      "indicatorPlacement": "sideways"
+    }
+  },
+  "expectedPath": "root.indicatorPlacement"
+}

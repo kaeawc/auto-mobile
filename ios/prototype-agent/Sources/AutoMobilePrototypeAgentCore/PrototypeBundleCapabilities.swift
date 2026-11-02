@@ -124,7 +124,7 @@ enum PrototypeBundleCapabilities {
                 if node["stateKey"] != nil { need("pager_state_key") }
                 if ["axis", "pageSpacing", "peek", "pageSize"]
                     .contains(where: { node[$0] != nil }) { need("pager_options") }
-                if node["indicator"] != nil { need("carousel") }
+                if node["indicator"] != nil || node["indicatorPlacement"] != nil { need("carousel") }
             }
             if type == "stack", node["transition"] != nil { need("stack_transitions") }
             if type == "stack",

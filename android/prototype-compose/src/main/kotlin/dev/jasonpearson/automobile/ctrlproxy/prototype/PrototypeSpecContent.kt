@@ -1291,18 +1291,11 @@ private fun RenderPrototypePager(
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
   var boundedHeight by remember { mutableStateOf(false) }
-  val pagerModifier =
-    modifier
-      .layout { measurable, constraints ->
-        if (boundedHeight != constraints.hasBoundedHeight)
-          boundedHeight = constraints.hasBoundedHeight
-        val placeable = measurable.measure(constraints)
-        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-      }
-      .then(
-        if (source.indicator == "dots") Modifier.pagerIndicator(pager, source.axis == "vertical")
-        else Modifier,
-      )
+  val pagerModifier = modifier.layout { measurable, constraints ->
+    if (boundedHeight != constraints.hasBoundedHeight) boundedHeight = constraints.hasBoundedHeight
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+  }
   // Preserve the horizontal pager's retention rule; vertical pages fill across the width.
   val keepNeighbours =
     if (source.axis == "vertical") fill.width && boundedHeight else fill.height && boundedHeight
@@ -1328,30 +1321,37 @@ private fun RenderPrototypePager(
   val padding = pagerContentPadding(source.axis, source.peek)
   val size = pagerPageSize(source.pageSize)
   val spacing = pagerPageSpacing(source.pageSpacing)
-  if (source.axis == "vertical") {
-    VerticalPager(
-      pager,
-      pagerModifier,
-      contentPadding = padding,
-      pageSize = size,
-      pageSpacing = spacing,
-      snapPosition = SnapPosition.Start,
-      beyondViewportPageCount = if (keepNeighbours) 1 else 0,
-      key = { node.children[it].identity },
-      pageContent = pageContent,
-    )
-  } else {
-    HorizontalPager(
-      pager,
-      pagerModifier,
-      contentPadding = padding,
-      pageSize = size,
-      pageSpacing = spacing,
-      snapPosition = SnapPosition.Start,
-      beyondViewportPageCount = if (keepNeighbours) 1 else 0,
-      key = { node.children[it].identity },
-      pageContent = pageContent,
-    )
+  PrototypePagerIndicatorLayout(
+    pager,
+    source.axis == "vertical",
+    PrototypePagerIndicator(source.indicator, source.indicatorPlacement, fill),
+    pagerModifier,
+  ) { pagesModifier ->
+    if (source.axis == "vertical") {
+      VerticalPager(
+        pager,
+        pagesModifier,
+        contentPadding = padding,
+        pageSize = size,
+        pageSpacing = spacing,
+        snapPosition = SnapPosition.Start,
+        beyondViewportPageCount = if (keepNeighbours) 1 else 0,
+        key = { node.children[it].identity },
+        pageContent = pageContent,
+      )
+    } else {
+      HorizontalPager(
+        pager,
+        pagesModifier,
+        contentPadding = padding,
+        pageSize = size,
+        pageSpacing = spacing,
+        snapPosition = SnapPosition.Start,
+        beyondViewportPageCount = if (keepNeighbours) 1 else 0,
+        key = { node.children[it].identity },
+        pageContent = pageContent,
+      )
+    }
   }
 }
 

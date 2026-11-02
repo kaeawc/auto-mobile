@@ -6,7 +6,8 @@
  * CtrlProxy and applied by the registered transports), `observe` (observe, tapOn and sendKeys
  * through the SDK observation bridge) and `storage-default` / `storage` (the storage capability
  * resource for the default and a registered storage configuration). Every failure names the
- * boundary that disagreed.
+ * boundary that disagreed. `navigation` checks host registration, ordered navigation and
+ * WKWebView lifecycle forwarding, including an iPad multi-scene transition.
  *
  * Usage: bun scripts/ios/sdk-contract/run.ts --device <udid> --app <Playground.app> [--report <file>]
  * Prefer scripts/ios/sdk-contract-integration.sh, which builds Playground first.
@@ -27,6 +28,7 @@ import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient"
 import { NetworkState } from "../../../src/utils/NetworkState";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { formatFindings, type ContractBoundary, type ContractFinding } from "./boundaries";
+import { NAVIGATION_SLICE, judgeNavigation } from "./navigationSlice";
 import { CAPABILITY_SLICE, judgeCapabilities } from "./capabilitySlice";
 import { setFaultRulesThroughCtrlProxy } from "./ctrlProxyFaultRules";
 import {
@@ -346,6 +348,7 @@ interface ScenarioContext {
 
 const SCENARIOS = [
   NETWORK_SLICE,
+  NAVIGATION_SLICE,
   CAPABILITY_SLICE,
   FAULT_SLICE,
   OBSERVATION_SLICE,
@@ -471,6 +474,9 @@ async function judgeScenario(
     observationOutcomes?: ReadonlyMap<string, ToolOutcome>;
   },
 ): Promise<ContractFinding[]> {
+  if (scenario === NAVIGATION_SLICE) {
+    return judgeNavigation(manifest);
+  }
   if (scenario === CAPABILITY_SLICE) {
     return judgeCapabilities(manifest);
   }

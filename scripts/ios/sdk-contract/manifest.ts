@@ -99,6 +99,22 @@ const sdkContractManifestSchema = z.object({
   faults: z.array(faultCaseObservationSchema),
   capabilities: capabilityObservationSchema.optional(),
   observation: observationHostLogSchema.optional(),
+  navigation: z
+    .object({
+      deviceClass: z.enum(["ipad", "iphone"]),
+      multiScene: z.enum(["complete", "not-applicable"]),
+      sceneIdentifiers: z.array(z.string().min(1)),
+      events: z.array(
+        z.object({
+          source: z.string(),
+          destination: z.string(),
+          sequenceNumber: z.number().int().positive(),
+          sceneIdentifier: z.string().optional(),
+          transitionCompleted: z.boolean(),
+        }),
+      ),
+    })
+    .optional(),
   storage: storageRegistrationSchema.optional(),
   events: z.array(sdkEnvelopeSchema),
   undecodableBatches: z.number().int().nonnegative(),

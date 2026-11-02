@@ -211,6 +211,33 @@ describe("web still pager (#16382)", () => {
     expect(alerts.map(textOf)).toEqual(["on page two"]);
   });
 
+  test("a pager's own visibleWhen and styleWhen read its page", () => {
+    const pager = byNode(
+      renderPrototypeStill(
+        rootOf(
+          {
+            type: "pager",
+            id: "p",
+            stateKey: "selected",
+            visibleWhen: { key: "page", equals: 2 },
+            styleWhen: [
+              { when: { key: "pageCount", equals: 2 }, style: { background: "#FF0000" } },
+            ],
+            children: [
+              { type: "text", text: "first" },
+              { type: "text", text: "second" },
+            ],
+          },
+          { state: { page: 0, selected: 1 } },
+        ),
+      ).element,
+      "pager",
+    );
+    expect(pager).toHaveLength(1);
+    expect(pager[0]!.style["background-color"]).toBe("rgba(255,0,0,1)");
+    expect(textOf(pager[0]!)).toBe("second");
+  });
+
   test("applies peek padding and a fixed page size on the pager's axis", () => {
     const pager = byNode(
       renderPrototypeStill(

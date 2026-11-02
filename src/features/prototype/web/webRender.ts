@@ -13,7 +13,13 @@ import {
   type Instance,
   type Raw,
 } from "../prototypeTemplate";
-import { defaultFillAxes, filling, webCollectionRenderers, type WebAxis } from "./webCollections";
+import {
+  defaultFillAxes,
+  filling,
+  webCollectionRenderers,
+  withPagerLocals,
+  type WebAxis,
+} from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -1023,11 +1029,13 @@ export function renderWebNode(
     (current, instance) => bindStructure(current, path, instance),
     authored,
   );
-  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(scope))) {
+  // A pager's locals exist before its own conditions run, as on Android.
+  const local = withPagerLocals(raw, scope, KIT);
+  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
     return undefined;
   }
-  const styled: Raw = { ...raw, style: resolvedStyle(raw, scope) };
-  const own: WebRenderScope = { ...scope, ownInsets: safeAreaEdges(styled) };
+  const styled: Raw = { ...raw, style: resolvedStyle(raw, local) };
+  const own: WebRenderScope = { ...local, ownInsets: safeAreaEdges(styled) };
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
   return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
 }

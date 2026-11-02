@@ -46,6 +46,23 @@ export function pagerPage(node: Raw, scope: WebRenderScope, kit: WebRenderKit): 
   return Math.trunc(Math.min(Math.max(value, 0), count - 1));
 }
 
+/**
+ * The scope a node's own conditions and its content read: for a pager, its one-based `page` and
+ * `pageCount` over any outer locals, as Android builds them before evaluating the pager itself.
+ */
+export function withPagerLocals(
+  node: Raw,
+  scope: WebRenderScope,
+  kit: WebRenderKit,
+): WebRenderScope {
+  if (node.type !== "pager") {
+    return scope;
+  }
+  const count = Array.isArray(node.children) ? node.children.length : 0;
+  const page = pagerPage(node, scope, kit) + 1;
+  return { ...scope, textLocals: { ...scope.textLocals, page, pageCount: count } };
+}
+
 /** The initial page of the spec's pager with this id, for a tab bar or bottom nav linked to it. */
 export function linkedPagerPage(
   id: string,
@@ -174,12 +191,10 @@ export const pagerRenderer =
       overflow: "hidden",
       position: "relative",
     });
-    // Page text reads the pager's one-based `page` and `pageCount`, as on the devices; control
-    // state is left alone, so a pager keyed `page` still selects by its own value.
+    // The page inherits the locals renderWebNode set for this pager (`page`, `pageCount`).
     const inner = kit.child(scope, {
       inBox: true,
       style: { ...scope.style, parentAxis: undefined },
-      textLocals: { ...scope.textLocals, page: page + 1, pageCount: pages.length },
     });
     const content = kit.renderNode(pages[page], inner, `${path}.children[${page}]`);
     const pageBox = el(

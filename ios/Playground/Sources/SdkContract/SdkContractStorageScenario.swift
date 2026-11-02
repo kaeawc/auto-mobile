@@ -13,6 +13,7 @@ struct StorageRegistration: Encodable, Equatable, Sendable {
 
     struct CoreDataStore: Encodable, Equatable, Sendable {
         let identifier: String
+        let queryable: Bool
         let appGroup: String?
         let coordination: String?
     }
@@ -27,7 +28,7 @@ struct StorageRegistration: Encodable, Equatable, Sendable {
 }
 
 /// Storage slice (#5164 phase D). `storage` registers two app-group suites (one host-coordinated),
-/// an app-private and a shared Core Data store, and Keychain deletion for one exact item, then
+/// two app-private (one queryable) and a shared Core Data store, and Keychain deletion for one exact item, then
 /// writes a secret into a registered suite. `storage-default` applies the default configuration,
 /// which registers nothing and leaves Keychain deletion off. The SDK keeps serving the
 /// registration until the harness has read the MCP storage capability resource.
@@ -41,7 +42,9 @@ enum SdkContractStorageScenario {
         scenario: String,
         runId: String,
         inspector: DatabaseInspector = .shared
-    ) -> StorageRegistration {
+    )
+        throws -> StorageRegistration
+    {
         guard scenario == registeredScenario else {
             inspector.configure(StorageInspectionConfiguration())
             return StorageRegistration(
@@ -75,6 +78,18 @@ enum SdkContractStorageScenario {
         inspector.registerAppGroupSuite(coordinated, coordination: .hostCoordinated)
         inspector.registerCoreDataStore(privateStore)
         inspector.registerCoreDataStore(sharedStore)
+        let queryIdentifier = "ContractQuery-\(runId)"
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        else {
+            throw PlaygroundDatabaseFixtureError.applicationSupportDirectoryUnavailable
+        }
+        let directory = support.appendingPathComponent("SdkContract", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let queryFixture = try PlaygroundCoreDataFixture(
+            storeURL: directory.appendingPathComponent("\(queryIdentifier).sqlite"),
+            identifier: queryIdentifier
+        )
+        queryFixture.register(with: inspector)
         let defaults = UserDefaults(suiteName: uncoordinated)
         defaults?.set(secret, forKey: "contract.token")
         return StorageRegistration(
@@ -85,8 +100,14 @@ enum SdkContractStorageScenario {
             uncoordinatedSuites: [uncoordinated],
             hostCoordinatedSuites: [coordinated],
             coreDataStores: [
-                .init(identifier: privateStore.identifier, appGroup: nil, coordination: nil),
-                .init(identifier: sharedStore.identifier, appGroup: uncoordinated, coordination: "host_coordinated"),
+                .init(identifier: privateStore.identifier, queryable: false, appGroup: nil, coordination: nil),
+                .init(
+                    identifier: sharedStore.identifier,
+                    queryable: false,
+                    appGroup: uncoordinated,
+                    coordination: "host_coordinated"
+                ),
+                .init(identifier: queryIdentifier, queryable: true, appGroup: nil, coordination: nil),
             ],
             secretWritten: defaults != nil
         )

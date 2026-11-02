@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
 import type { FixtureIdentity } from "../../src/models/FixtureIdentity";
 import { SnapshotFixtureRefusedError } from "../../src/models/SnapshotFixtureRefusedError";
+import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../../src/models/DeviceSnapshotConfigDefaults";
 import type { FixtureIdentityProbe } from "../../src/features/snapshot/fixtureIdentity";
 import {
   captureDeviceSnapshot,
@@ -10,6 +11,10 @@ import {
   setDeviceSnapshotManagerDependencies,
 } from "../../src/daemon/deviceSnapshotManager";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import {
+  deleteDeviceSnapshot,
+  forgetFixturesOfDestroyedAvd,
+} from "../../src/daemon/snapshotDeletion";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
@@ -57,6 +62,8 @@ describe("deviceSnapshot fixtures (#14065)", () => {
   let probe: FakeFixtureIdentityProbe;
   let captures: string[];
   let restores: string[];
+  let avd: FakeAvdSnapshotService;
+  let configs: FakeDeviceSnapshotConfigRepository;
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -64,11 +71,14 @@ describe("deviceSnapshot fixtures (#14065)", () => {
     probe = new FakeFixtureIdentityProbe();
     captures = [];
     restores = [];
+    avd = new FakeAvdSnapshotService();
+    avd.setLiveEmulator("Pixel_8", EMULATOR.deviceId);
+    configs = new FakeDeviceSnapshotConfigRepository();
     await setDeviceSnapshotManagerDependencies({
       snapshotRepository: repository,
-      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      configRepository: configs,
       snapshotStore: new FakeDeviceSnapshotStore(),
-      avdSnapshots: new FakeAvdSnapshotService(),
+      avdSnapshots: avd,
       timer,
       now: () => new Date(timer.now()),
       fixtureIdentityProbe: probe,
@@ -292,6 +302,175 @@ describe("deviceSnapshot fixtures (#14065)", () => {
 
     expect(error.code).toBe("fixture_requires_vm_snapshot");
     expect(restores).toEqual([]);
+  });
+
+  describe("cleanup policy (#14065)", () => {
+    test("VM retention never evicts a fixture, and a fixture does not count toward it", async () => {
+      await configs.setConfig({ ...DEFAULT_DEVICE_SNAPSHOT_CONFIG, maxVmSnapshotsPerAvd: 1 });
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "kept",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+      timer.advanceTime(1000);
+      await captureDeviceSnapshot(EMULATOR, { snapshotName: "plain-1", useVmSnapshot: true });
+      timer.advanceTime(1000);
+      const { evictedSnapshotNames } = await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "plain-2",
+        useVmSnapshot: true,
+      });
+
+      expect(evictedSnapshotNames).toEqual(["plain-1"]);
+      expect(await repository.getSnapshot("kept")).not.toBeNull();
+    });
+
+    test("an invalidated fixture is removed when its reload is refused", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+      probe.identity = { ...IDENTITY, userdataGeneration: "77:1730000500000" };
+
+      const error = await refusal(
+        restoreDeviceSnapshot(EMULATOR, { snapshotName: "f", useVmSnapshot: true }),
+      );
+
+      expect(error.code).toBe("fixture_invalidated");
+      expect(error.message).toContain("removed");
+      expect(await repository.getSnapshot("f")).toBeNull();
+      expect(avd.getDeleteCalls().map((call) => call.snapshotName)).toEqual(["f"]);
+    });
+
+    test("a fixture refused for another reason is kept", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+
+      const error = await refusal(
+        restoreDeviceSnapshot(EMULATOR, { snapshotName: "f", useVmSnapshot: false, fixture: true }),
+      );
+
+      expect(error.code).toBe("fixture_requires_vm_snapshot");
+      expect(await repository.getSnapshot("f")).not.toBeNull();
+    });
+
+    test("a fixture whose identity cannot be read is refused but kept", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+      probe.failure = new Error("Could not read the emulator version");
+
+      await expect(
+        restoreDeviceSnapshot(EMULATOR, { snapshotName: "f", useVmSnapshot: true }),
+      ).rejects.toThrow("emulator version");
+      expect(await repository.getSnapshot("f")).not.toBeNull();
+    });
+
+    test("an explicit delete removes a fixture and its in-AVD snapshot", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+
+      expect(await deleteDeviceSnapshot(EMULATOR, { snapshotName: "f" })).toEqual({
+        snapshotName: "f",
+        deleted: true,
+      });
+      expect(await repository.getSnapshot("f")).toBeNull();
+      expect(avd.getDeleteCalls().map((call) => call.snapshotName)).toEqual(["f"]);
+    });
+
+    test("destroying an AVD forgets its fixtures and keeps every other snapshot", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+      await captureDeviceSnapshot(EMULATOR, { snapshotName: "plain", useVmSnapshot: true });
+      const other = { ...EMULATOR, deviceId: "emulator-5556", name: "Pixel_9" };
+      await captureDeviceSnapshot(other, { snapshotName: "g", useVmSnapshot: true, fixture: true });
+
+      expect(await forgetFixturesOfDestroyedAvd("Pixel_8")).toEqual(["f"]);
+
+      expect(await repository.getSnapshot("f")).toBeNull();
+      expect(await repository.getSnapshot("plain")).not.toBeNull();
+      expect(await repository.getSnapshot("g")).not.toBeNull();
+      // The AVD and its in-AVD snapshots are gone already: nothing is asked of an emulator.
+      expect(avd.getDeleteCalls()).toEqual([]);
+    });
+
+    test("an invalidated fixture whose payload cannot be reclaimed now is kept pending, then swept by the next capture", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+      probe.identity = { ...IDENTITY, userdataGeneration: "77:1730000500000" };
+      avd.failNextDeletesWith("console busy");
+
+      const error = await refusal(
+        restoreDeviceSnapshot(EMULATOR, { snapshotName: "f", useVmSnapshot: true }),
+      );
+      expect(error.message).toContain("pending");
+      expect((await repository.getSnapshot("f"))?.pendingReclaim).toBe(true);
+
+      avd.failNextDeletesWith(null);
+      await captureDeviceSnapshot(EMULATOR, { snapshotName: "other", useVmSnapshot: true });
+      expect(await repository.getSnapshot("f")).toBeNull();
+    });
+
+    test("deleting a snapshot whose reclaim was pending finishes it", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+      avd.failNextDeletesWith("console busy");
+      expect(await deleteDeviceSnapshot(EMULATOR, { snapshotName: "f" })).toEqual({
+        snapshotName: "f",
+        deleted: false,
+        pendingReclaim: true,
+      });
+
+      avd.failNextDeletesWith(null);
+      expect(await deleteDeviceSnapshot(EMULATOR, { snapshotName: "f" })).toEqual({
+        snapshotName: "f",
+        deleted: true,
+      });
+      expect(await repository.getSnapshot("f")).toBeNull();
+    });
+
+    test("a delete on another AVD's emulator is refused with delete wording", async () => {
+      await captureDeviceSnapshot(EMULATOR, {
+        snapshotName: "f",
+        useVmSnapshot: true,
+        fixture: true,
+      });
+      const other = { ...EMULATOR, deviceId: "emulator-5556", name: "Pixel_9" };
+
+      await expect(deleteDeviceSnapshot(other, { snapshotName: "f" })).rejects.toThrow(
+        "cannot be deleted on",
+      );
+      expect(await repository.getSnapshot("f")).not.toBeNull();
+    });
+
+    test("a broker baseline snapshot is refused up front", async () => {
+      await expect(
+        deleteDeviceSnapshot(EMULATOR, { snapshotName: "automobile-broker-baseline-x" }),
+      ).rejects.toThrow("Broker baseline snapshots are reserved");
+    });
+
+    test("deleting an unknown snapshot is refused", async () => {
+      await expect(deleteDeviceSnapshot(EMULATOR, { snapshotName: "nope" })).rejects.toThrow(
+        "Snapshot 'nope' not found",
+      );
+    });
   });
 
   test("the refusal reaches the client as a typed payload with its reasons", () => {

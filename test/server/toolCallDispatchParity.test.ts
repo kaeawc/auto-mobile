@@ -6,7 +6,8 @@ import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { afterAll, beforeEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { DaemonClient, type DaemonToolCallOptions } from "../../src/daemon/client/client";
-import { DAEMON_VERSION, INTERNAL_EXECUTION_ID_PARAM } from "../../src/daemon/wire/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
+import { currentExecution } from "../../src/features/toolSelection/toolSelectionContext";
 import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { ActionableError } from "../../src/models";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -124,6 +125,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
   let isAvailableSpy: ReturnType<typeof spyOn> | undefined;
   let restoreHermeticServer: () => void;
   const handlerArgs: Record<string, unknown>[] = [];
+  const handlerExecutionIds: Array<string | undefined> = [];
   const originalDebug = isDebugModeEnabled();
 
   beforeAll(async () => {
@@ -136,6 +138,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
       z.object({ count: z.number() }).strict(),
       async (args: Record<string, unknown>) => {
         handlerArgs.push(args);
+        handlerExecutionIds.push(currentExecution()?.executionId);
         return { content: [{ type: "text", text: `count=${String(args.count)}` }] };
       },
     );
@@ -195,6 +198,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
 
   beforeEach(() => {
     handlerArgs.length = 0;
+    handlerExecutionIds.length = 0;
     setDebugModeEnabled(false);
   });
 
@@ -294,10 +298,10 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
   test("the live direct handler is the full dispatcher, not the SDK per-tool callback", async () => {
     await callThrough(direct.client, OK_TOOL, { count: 1 });
 
-    // Only the shared dispatcher's backend stamps the execution id; the SDK's
+    // Only the shared dispatcher's backend runs the handler under an execution; the SDK's
     // per-tool callback (shadowed) would have refused the call instead.
     expect(handlerArgs).toHaveLength(1);
-    expect(typeof handlerArgs[0][INTERNAL_EXECUTION_ID_PARAM]).toBe("string");
+    expect(typeof handlerExecutionIds[0]).toBe("string");
   });
 
   test("undeclared sessionUuid is stripped before strict validation on every entry point", async () => {

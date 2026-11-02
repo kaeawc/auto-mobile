@@ -369,6 +369,24 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
         ),
+      variant: z
+        .object({
+          group: z
+            .string()
+            .min(1)
+            .max(64)
+            .describe("Name shared by every alternative of one design"),
+          label: z
+            .string()
+            .min(1)
+            .max(64)
+            .describe("This alternative's name, shown in the web preview's variant switcher"),
+        })
+        .strict()
+        .optional()
+        .describe(
+          "show only: host-side grouping of design alternatives; never sent to the device and does not change what it shows. Shows of different ids with the same group become variants of one web preview (automobile:prototype/{id}/web). Each show states it afresh; a later patch keeps it.",
+        ),
       locale: z
         .string()
         .max(35)
@@ -489,6 +507,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "display",
     "reset",
     "replaceOthers",
+    "variant",
     "locale",
     "pseudoLocale",
     "appearance",
@@ -523,6 +542,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       "appearance",
       "assets",
       "replaceOthers",
+      "variant",
       "locale",
       "pseudoLocale",
       "mock",

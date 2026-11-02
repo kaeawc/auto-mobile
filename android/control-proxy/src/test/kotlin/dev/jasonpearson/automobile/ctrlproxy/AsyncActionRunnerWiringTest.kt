@@ -200,6 +200,8 @@ class AsyncActionRunnerWiringTest {
     listOf(
         "CtrlProxy.kt",
         "CtrlProxyActionRouter.kt",
+        "CtrlProxyServiceLifecycle.kt",
+        "CtrlProxyWebSocketTransports.kt",
         "StorageController.kt",
         "DeviceInfoController.kt",
         "PermissionController.kt",

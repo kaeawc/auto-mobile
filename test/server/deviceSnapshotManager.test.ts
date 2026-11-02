@@ -14,6 +14,7 @@ import {
   updateDeviceSnapshotConfig,
 } from "../../src/daemon/deviceSnapshotManager";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
+import { deleteDeviceSnapshot } from "../../src/daemon/snapshotDeletion";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
@@ -1353,6 +1354,41 @@ describe("deviceSnapshotManager", () => {
       expect(record).not.toBeNull();
       expect(record?.createdAt).toBe(timestamp);
       expect(record?.sizeBytes).toBeGreaterThan(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("deleteDeviceSnapshot finds a legacy snapshot the way restore does (#14065)", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-legacy-delete-"));
+    try {
+      const legacyStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
+      await legacyStore.ensureSnapshotsDirectory();
+      const snapshotName = "legacy-delete";
+      const snapshotDir = legacyStore.getSnapshotPath(snapshotName);
+      await fs.mkdir(snapshotDir, { recursive: true });
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp: new Date(fakeTimer.now()).toISOString(),
+        deviceId: TEST_DEVICE.deviceId,
+        deviceName: TEST_DEVICE.name,
+        platform: TEST_DEVICE.platform,
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+      };
+      await fs.writeFile(path.join(snapshotDir, "manifest.json"), JSON.stringify(manifest));
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: legacyStore });
+
+      expect(await deleteDeviceSnapshot(TEST_DEVICE, { snapshotName })).toEqual({
+        snapshotName,
+        deleted: true,
+      });
+      expect(await repository.getSnapshot(snapshotName)).toBeNull();
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

@@ -1053,7 +1053,7 @@ export class Explore extends BaseVisualChange {
   private platformRecovery(): ExplorePlatformRecovery {
     return new ExplorePlatformRecovery(this.device, this.adb, this.timer, {
       callInternalTool: async (toolName, args, signal) => {
-        const response = await toolCaller.callInternal(toolName, args, undefined, signal);
+        const response = await toolCaller.callInternal(toolName, args, undefined, { signal });
         throwIfInternalToolFailed(response, toolName, this.device.platform);
       },
       sessionUuid: this.sessionUuid,

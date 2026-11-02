@@ -20,6 +20,7 @@ import { stripInternalParams } from "../../src/features/record/ToolCallRecorder"
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { toolField } from "../helpers/toolResponse";
+import { currentRequestDeadline } from "../../src/features/toolSelection/toolSelectionContext";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -55,16 +56,22 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
           const receivedDeadline = (args as Record<string, unknown>)[
             INTERNAL_MCP_REQUEST_DEADLINE_PARAM
           ];
+          // The request deadline the call runs under ambiently (#15663).
+          const requestDeadline = currentRequestDeadline();
           return createStructuredToolResponse({
             success: true,
             receivedTimeoutMs: typeof received === "number" ? received : null,
             receivedDeadlineMs: typeof receivedDeadline === "number" ? receivedDeadline : null,
+            ambientTimeoutMs: requestDeadline?.timeoutMs ?? null,
+            ambientDeadlineMs: requestDeadline?.deadlineMs ?? null,
           });
         },
         outputSchema: z.object({
           success: z.boolean(),
           receivedTimeoutMs: z.number().nullable(),
           receivedDeadlineMs: z.number().nullable(),
+          ambientTimeoutMs: z.number().nullable(),
+          ambientDeadlineMs: z.number().nullable(),
         }),
       },
     );
@@ -122,6 +129,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       });
 
       expect(toolField(result, "receivedTimeoutMs")).toBeNull();
+      expect(toolField(result, "ambientTimeoutMs")).toBeNull();
     });
 
     test("a caller-supplied __mcpRequestDeadlineMs is IGNORED, never reattached", async () => {
@@ -132,6 +140,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       });
 
       expect(toolField(result, "receivedDeadlineMs")).toBeNull();
+      expect(toolField(result, "ambientDeadlineMs")).toBeNull();
     });
 
     test("live deadline metadata is removed before a direct strict tool handler", async () => {
@@ -162,24 +171,27 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       await fixture.teardown();
     });
 
-    test("a legitimate __mcpRequestTimeoutMs is honored and reattached", async () => {
+    // Honored as the request's ambient deadline, never written back into the args (#15663).
+    test("a legitimate __mcpRequestTimeoutMs is honored as the request deadline", async () => {
       const { client } = fixture.getContext();
       const result = await client.callTool({
         name: TOOL,
         arguments: { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 12_345 },
       });
 
-      expect(toolField(result, "receivedTimeoutMs")).toBe(12_345);
+      expect(toolField(result, "receivedTimeoutMs")).toBeNull();
+      expect(toolField(result, "ambientTimeoutMs")).toBe(12_345);
     });
 
-    test("a legitimate __mcpRequestDeadlineMs is honored and reattached", async () => {
+    test("a legitimate __mcpRequestDeadlineMs is honored as the request deadline", async () => {
       const { client } = fixture.getContext();
       const result = await client.callTool({
         name: TOOL,
         arguments: { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 98_765 },
       });
 
-      expect(toolField(result, "receivedDeadlineMs")).toBe(98_765);
+      expect(toolField(result, "receivedDeadlineMs")).toBeNull();
+      expect(toolField(result, "ambientDeadlineMs")).toBe(98_765);
     });
 
     // Each of these is forwarded alone by at least one daemon route --
@@ -230,8 +242,8 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         const result = await client.callTool({ name: STRICT_TOOL, arguments: argumentsWithKey });
 
         expect(result.isError ?? false).toBe(false);
-        // Trusted daemon metadata is deliberately reattached for deadline consumers.
-        expect(strictHandlerArgs).toHaveProperty(INTERNAL_LIVE_DEADLINE_KEY_PARAM, "live-key");
+        // Trusted daemon metadata reaches handlers ambiently, never in their args (#15663).
+        expect(strictHandlerArgs).not.toHaveProperty(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
         expect(stripInternalToolParams(strictHandlerArgs)).toEqual({ appId: "com.example" });
         expect(JSON.stringify(result)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
         expect(JSON.stringify(result)).not.toContain("live-key");

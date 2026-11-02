@@ -6,7 +6,8 @@
  * CtrlProxy and applied by the registered transports), `observe` (observe, tapOn and sendKeys
  * through the SDK observation bridge) and `storage-default` / `storage` (the storage capability
  * resource for the default and a registered storage configuration). Every failure names the
- * boundary that disagreed.
+ * boundary that disagreed. `navigation` checks host registration, ordered navigation and
+ * WKWebView lifecycle forwarding, including an iPad multi-scene transition.
  *
  * Usage: bun scripts/ios/sdk-contract/run.ts --device <udid> --app <Playground.app> [--report <file>]
  * Prefer scripts/ios/sdk-contract-integration.sh, which builds Playground first.
@@ -27,6 +28,7 @@ import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient"
 import { NetworkState } from "../../../src/utils/NetworkState";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { formatFindings, type ContractBoundary, type ContractFinding } from "./boundaries";
+import { NAVIGATION_SLICE, judgeNavigation } from "./navigationSlice";
 import { CAPABILITY_SLICE, judgeCapabilities } from "./capabilitySlice";
 import { setFaultRulesThroughCtrlProxy } from "./ctrlProxyFaultRules";
 import {
@@ -60,6 +62,7 @@ import {
   STORAGE_DEFAULT_SLICE,
   STORAGE_SLICE,
   judgeStorageReport,
+  judgeCoreDataQuery,
   judgeUnreachableStorageReport,
 } from "./storageSlice";
 import {
@@ -113,7 +116,18 @@ export function parseOptions(argv: readonly string[]): Options {
   return { deviceId, appPath, reportPath: value("--report") };
 }
 
-/** Tool calls use the auto-mobile CLI, as the other simulator-lane scripts do. */
+/** Resolve this checkout's built CLI and preserve the caller's argument order. */
+export function resolveCliCommand(
+  args: readonly string[],
+  execPath: string,
+): { command: string; args: string[] } {
+  return {
+    command: execPath,
+    args: [resolve(fileURLToPath(new URL("../../../dist/src/index.js", import.meta.url))), ...args],
+  };
+}
+
+/** Tool calls use this checkout's built auto-mobile CLI. */
 async function callTool(
   tool: string,
   args: Record<string, string | boolean>,
@@ -121,11 +135,15 @@ async function callTool(
 ): Promise<JsonRecord> {
   const flags = Object.entries(args).flatMap(([key, val]) => [`--${key}`, String(val)]);
   const session = sessionUuid ? ["--session-uuid", sessionUuid] : [];
-  const { stdout } = await execFileAsync(
-    "auto-mobile",
+  const cli = resolveCliCommand(
     ["--debug", "--embedded-sdk", "--cli", ...session, tool, ...flags],
-    { maxBuffer: 64 * 1024 * 1024, timeout: TOOL_TIMEOUT_MS, env: CLI_ENV },
+    process.execPath,
   );
+  const { stdout } = await execFileAsync(cli.command, cli.args, {
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TOOL_TIMEOUT_MS,
+    env: CLI_ENV,
+  });
   return parseToolOutput(stdout);
 }
 
@@ -148,7 +166,8 @@ async function invokeTool(
 
 async function releaseSession(sessionUuid: string): Promise<void> {
   try {
-    await execFileAsync("auto-mobile", ["--daemon", "release-session", sessionUuid], {
+    const cli = resolveCliCommand(["--daemon", "release-session", sessionUuid], process.execPath);
+    await execFileAsync(cli.command, cli.args, {
       env: { ...process.env, AUTOMOBILE_DAEMON_TIMEOUT_MS: "2000" },
       timeout: 30_000,
     });
@@ -329,6 +348,7 @@ interface ScenarioContext {
 
 const SCENARIOS = [
   NETWORK_SLICE,
+  NAVIGATION_SLICE,
   CAPABILITY_SLICE,
   FAULT_SLICE,
   OBSERVATION_SLICE,
@@ -419,10 +439,25 @@ export async function readStorageCapabilities(
 async function judgeStorage(
   manifest: SdkContractManifest,
   deviceId: string,
+  sessionUuid: string,
 ): Promise<ContractFinding[]> {
   const findings = judgeStorageReport(manifest, await readStorageCapabilities(deviceId));
   if (manifest.scenario !== STORAGE_SLICE) {
     return findings;
+  }
+  for (const queryCase of ["limited", "all", "unknown-entity"] as const) {
+    const outcome = await invokeTool(
+      "sqlQuery",
+      {
+        appId: PLAYGROUND_BUNDLE_ID,
+        store: `ContractQuery-${manifest.runId}`,
+        entity: queryCase === "unknown-entity" ? "UnknownContractEntity" : "Item",
+        ...(queryCase === "limited" ? { limit: "2" } : {}),
+        platform: "ios",
+      },
+      sessionUuid,
+    );
+    findings.push(...judgeCoreDataQuery(queryCase, outcome));
   }
   await new SimCtlClient().terminateApp(PLAYGROUND_BUNDLE_ID, deviceId).catch(() => undefined);
   return [
@@ -439,6 +474,9 @@ async function judgeScenario(
     observationOutcomes?: ReadonlyMap<string, ToolOutcome>;
   },
 ): Promise<ContractFinding[]> {
+  if (scenario === NAVIGATION_SLICE) {
+    return judgeNavigation(manifest);
+  }
   if (scenario === CAPABILITY_SLICE) {
     return judgeCapabilities(manifest);
   }
@@ -446,7 +484,7 @@ async function judgeScenario(
     return judgeObservationCases(manifest, live.observationOutcomes ?? new Map());
   }
   if (scenario === STORAGE_SLICE || scenario === STORAGE_DEFAULT_SLICE) {
-    return judgeStorage(manifest, live.deviceId);
+    return judgeStorage(manifest, live.deviceId, live.sessionUuid);
   }
   const expected =
     scenario === FAULT_SLICE ? expectedFaultRecords(manifest, manifest.runId) : manifest.network;

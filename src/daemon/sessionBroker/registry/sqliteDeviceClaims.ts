@@ -1,6 +1,11 @@
 import { sql, type Kysely } from "kysely";
 import type { Platform } from "../../../models";
-import type { DeviceClaim, DeviceClaimKind, DeviceClaims } from "../../deviceClaims";
+import type {
+  DeviceClaim,
+  DeviceClaimKind,
+  DeviceClaims,
+  DeviceClaimVersion,
+} from "../../deviceClaims";
 
 export interface DeviceClaimTables {
   device_claims: {
@@ -27,19 +32,7 @@ export class SqliteDeviceClaims implements DeviceClaims {
   ) {}
 
   async upsert(claim: DeviceClaim): Promise<void> {
-    const row = {
-      platform: claim.platform,
-      device_id: claim.deviceId,
-      kind: claim.kind,
-      daemon_session_id: claim.daemonSessionId ?? null,
-      pid: claim.pid,
-      owner_token: claim.ownerToken,
-      process_generation_token: claim.processGenerationToken ?? null,
-      session_uuid: claim.sessionUuid ?? null,
-      metadata: claim.metadata ?? null,
-      claimed_at_ms: claim.claimedAtMs,
-      updated_at_ms: claim.updatedAtMs,
-    };
+    const row = toRow(claim);
     await this.write((db) =>
       db
         .insertInto("device_claims")
@@ -58,6 +51,30 @@ export class SqliteDeviceClaims implements DeviceClaims {
         )
         .execute(),
     );
+  }
+
+  async replaceIf(expected: DeviceClaimVersion | undefined, claim: DeviceClaim): Promise<boolean> {
+    const row = toRow(claim);
+    return this.write(async (db) => {
+      if (!expected) {
+        const inserted = await db
+          .insertInto("device_claims")
+          .values(row)
+          .onConflict((conflict) => conflict.columns(["platform", "device_id"]).doNothing())
+          .executeTakeFirst();
+        return Number(inserted.numInsertedOrUpdatedRows ?? 0) > 0;
+      }
+      const updated = await db
+        .updateTable("device_claims")
+        .set(row)
+        .where("platform", "=", claim.platform)
+        .where("device_id", "=", claim.deviceId)
+        .where("pid", "=", expected.pid)
+        .where("owner_token", "=", expected.ownerToken)
+        .where("updated_at_ms", "=", expected.updatedAtMs)
+        .executeTakeFirst();
+      return Number(updated.numUpdatedRows) > 0;
+    });
   }
 
   async release(
@@ -105,6 +122,22 @@ export class SqliteDeviceClaims implements DeviceClaims {
       .execute();
     return rows.map(toClaim);
   }
+}
+
+function toRow(claim: DeviceClaim): DeviceClaimTables["device_claims"] {
+  return {
+    platform: claim.platform,
+    device_id: claim.deviceId,
+    kind: claim.kind,
+    daemon_session_id: claim.daemonSessionId ?? null,
+    pid: claim.pid,
+    owner_token: claim.ownerToken,
+    process_generation_token: claim.processGenerationToken ?? null,
+    session_uuid: claim.sessionUuid ?? null,
+    metadata: claim.metadata ?? null,
+    claimed_at_ms: claim.claimedAtMs,
+    updated_at_ms: claim.updatedAtMs,
+  };
 }
 
 function toClaim(row: DeviceClaimTables["device_claims"]): DeviceClaim {

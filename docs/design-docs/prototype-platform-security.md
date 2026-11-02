@@ -49,9 +49,8 @@ checks are not applied, and the Swift validator does not apply this rule yet (tr
 or user-initiated platform event chains (`notifications.opened|action|reply`, `map.markerTap`).
 Follow-ups inherit the chain's gesture status; `onAppear`, `onEndReached`, timers and show-time
 calls are refused at the action path. The contract limits share to 5 calls per 10000 ms and
-notifications to 10 per 60000 ms. The iOS runtime enforces each module's sliding-window `rateLimit`
-with `too_many_in_flight` refusals. The Kotlin validator applies the gesture rule; Android runtime
-rate-limit enforcement remains open (#15637).
+notifications to 10 per 60000 ms. Both iOS and Android runtimes enforce each module's sliding-window
+`rateLimit` with `too_many_in_flight` refusals. The Kotlin validator applies the gesture rule.
 
 **R4: runtime isolation.** Where a module runs decides which privileges it can reach. The iOS
 installer derives Info.plist usage strings from `requires.permissions`, strips inherited usage

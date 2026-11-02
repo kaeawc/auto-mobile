@@ -5,9 +5,20 @@ Tracking issue: #11811. For the release notes of the first release that contains
 
 ## What changes
 
-The host binding registry database gains a `device_claims` table: one row per claimed device,
-written beside the allocation claim files and read as an extra source of device ownership. The
-claim files still decide when the table cannot be read.
+The host binding registry database gains a `device_claims` table: one row per claimed device.
+For Android and iOS the table decides allocation: a daemon claims a device with an atomic write
+that succeeds only while no live daemon holds the row. For this release the winner also writes its
+allocation claim file, so a daemon that cannot use the table at that moment (a registry still
+opening, a busy write, a failed open) and falls back to the claim files still sees the claim. The
+release after this one stops writing claim files and stops reading them. Claim files alone decide
+for watchOS and tvOS (the table does not admit those platforms yet) and whenever no registry can
+decide (none open, a files-only daemon, a failed write).
+
+## Mixed versions are unsupported
+
+Every daemon that shares an adb server must run this release or later. An older daemon reads
+only the allocation claim files, so it does not see a device a newer daemon claimed in the table
+and can allocate it too. Upgrade all daemons on a host together, then restart them.
 
 ## Older daemons run files-only after the upgrade
 
@@ -26,7 +37,7 @@ The exclusion diagnostic exposes the degraded mode and remedy.
 
 Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs-device-verify`).
 
-## Known limits until the claim files stop deciding
+## Known limits
 
 - Files-only daemons do not enforce managed bindings: they can allocate a device held
   only by a managed binding because allocation claim files alone decide ownership.
@@ -39,9 +50,6 @@ Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs
   post-bind background open backfills held claims with their original claim time and owed releases.
   A file created after the last step (about 7.6 minutes after the last write) is picked up by the next
   claim or release, or at the next daemon start.
-- The table is read after a claim file is taken and written afterwards, so two daemons that use
-  different claim directories can still both take a device in the same instant. Closing that needs an
-  atomic insert-if-absent, which belongs to the step that makes the table the authority.
 - A row without a recorded control socket (written by an early build or while no socket was bound) is
   judged by its owner's PID alone, so a live owner whose release write was lost keeps the device
   refused until it exits.

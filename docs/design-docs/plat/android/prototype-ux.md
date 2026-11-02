@@ -374,7 +374,7 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   `{light: assetId, dark: assetId}`. Only the asset for the resolved mode is decoded and drawn;
   both ids are checked at `show` and reported in `missingAssets`, and both stay retained with the
   prototype.
-- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and window scrim are resolved in the show's mode and count as solid only when fully opaque (an opaque role counts; the `scrim` role in a scrim slot never does). The root counts only when drawn over the whole window (#11408): `width` and `height` both `fill` (omitted fullscreen-root dimensions default to `fill`), no `anchor`, no `maxWidth`/`maxHeight` cap, no `aspectRatio`, no non-zero `offset`, no rounded corner and no `pressScale` below one. A root failing any of these lets the app show at an edge or corner, so only an opaque fullscreen scrim behind it can still make the window opaque. A chromeless fullscreen window can report `true` when opacity is 100 and its root or scrim is solid; a fullscreen window with the translucent dismiss bar still reports false.
+- **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and window scrim are resolved in the show's mode and count as solid only when fully opaque (an opaque role counts; the `scrim` role in a scrim slot never does). The root counts only when drawn over the whole window (#11408): `width` and `height` both `fill` (omitted fullscreen- and sheet-root dimensions default to `fill`), no `anchor`, no `maxWidth`/`maxHeight` cap, no `aspectRatio`, no non-zero `offset`, no rounded corner and no `pressScale` below one. A root failing any of these lets the app show at an edge or corner, so only an opaque fullscreen scrim behind it can still make the window opaque. A chromeless fullscreen window can report `true` when opacity is 100 and its root or scrim is solid; a fullscreen window with the translucent dismiss bar still reports false.
 
 ### Live appearance (#11221, `prototype_appearance_v1`)
 
@@ -397,9 +397,10 @@ chrome mode) and persistent non-fullscreen windows keep their host controls opaq
 | `sheet`          | Required `edge`: `top` or `bottom`; required positive `height` in dp. App stays touchable outside the window.            |
 | `floating`       | Required `gravity` from the alignment list below; required `offset: {x, y}` in dp. Outside-window touches reach the app. |
 
-A fullscreen root defaults each omitted `width` or `height` to `fill`, including
-behind system bars and cutouts; explicit dimensions and style constraints still apply.
-Floating and sheet roots keep content sizing unless styled otherwise.
+Fullscreen and sheet roots default each omitted `width` or `height` to `fill`.
+Fullscreen roots extend behind system bars and cutouts; sheet roots fill the
+window's full width and specified height. Explicit dimensions and style constraints
+still apply. Floating roots keep content sizing unless styled otherwise.
 No display selection is defined here (#9308).
 
 Optional `layer` (#10496) is `system` (default) or `app`. `system` is
@@ -3069,7 +3070,12 @@ An origin change removes all authored headers. Host, connection/framing, Cookie,
 headers and Expect are not accepted from requests. Other RFC1918 destinations remain permitted
 on ordinary ports, including `10.1.2.3` and `192.168.1.10`.
 A policy refusal is `blocked_destination`: the destination
-is not permitted. Device requests retain their platform transport behavior.
+is not permitted. The same policy applies to host WebSocket and SSE channel transports.
+The WebSocket handshake connects to the validated pinned address with the authored Host and TLS
+server name, ignores proxy environment variables, and never follows a redirect: a handshake
+redirect is `handshake_failed`. SSE redirects are re-checked at each hop. A channel policy refusal
+is `blocked_destination`. Mock-origin channels never reach DNS, the policy or a socket.
+Device requests retain their platform transport behavior.
 
 The host transport makes a direct connection. Node uses a fresh agent with an empty `proxyEnv`,
 ignoring HTTP(S)_PROXY, ALL_PROXY and NO_PROXY routing configuration. Bun refuses the request
@@ -3581,10 +3587,12 @@ to the resolved runtime count. Shared fixtures define host validation behavior.
 
 ## Carousel and pager indicator (not device-verified)
 
-`prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
-(default `none`): Android draws page dots over the pager (a centred row at the bottom, or a column at
-the end edge for a vertical pager); iOS lays them out below horizontal pages or beside vertical pages.
-The current page is filled. The dots are decoration and add no semantics node.
+`prototype_carousel_v1` gates carousels and pager indicator fields. A pager may declare
+`indicator: "dots"` (default `none`) and `indicatorPlacement: "over" | "below"`.
+Placement applies only with dots; otherwise it is accepted and ignored. Android defaults to `over`:
+a centred row at the bottom or a column at the end edge, inset 8 dp, preserving the full page size.
+`below` gives pages the remaining space and places a centred row under horizontal pages or a column
+beside vertical pages. iOS defaults to `below`. The current page is filled; dots add no semantics node.
 
 A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
 `repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is

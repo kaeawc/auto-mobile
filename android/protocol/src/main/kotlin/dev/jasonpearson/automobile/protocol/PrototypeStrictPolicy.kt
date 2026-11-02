@@ -313,7 +313,7 @@ internal object PrototypeStrictPolicy {
         mapOf(
           "pager_options" to listOf("axis", "pageSpacing", "peek", "pageSize"),
           "pager_state_key" to listOf("stateKey"),
-          "carousel" to listOf("indicator"),
+          "carousel" to listOf("indicator", "indicatorPlacement"),
         ),
       "scroll" to
         mapOf("chat_scroll" to listOf("reverse", "stickToEnd", "atEndKey", "onStartReached")),

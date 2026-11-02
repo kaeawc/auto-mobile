@@ -10,10 +10,11 @@ import { ToolRegistry } from "./toolRegistry";
 registerInternalToolCaller({
   getTool: (name) => ToolRegistry.getTool(name),
   // A handle came from getTool(), so re-resolving it by name yields the same registered tool.
-  callInternal: (tool, args, progress, signal) =>
+  callInternal: (tool, args, progress, request) =>
     ToolRegistry.callInternal(typeof tool === "string" ? tool : tool.name, args, {
       progress,
-      signal,
+      signal: request?.signal,
+      requestDeadline: request?.requestDeadline,
     }),
   callInternalTyped: (name, args, progress, signal) =>
     ToolRegistry.callInternalTyped(name, args, { progress, signal }),

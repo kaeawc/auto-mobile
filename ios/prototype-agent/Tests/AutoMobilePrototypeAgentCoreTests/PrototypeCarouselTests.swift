@@ -49,8 +49,26 @@ final class PrototypeCarouselTests: XCTestCase {
         XCTAssertEqual(PrototypeCarousel.indicatorSide(vertical: true), .beside)
     }
 
+    func testPlacementDefaultsToBelowAndExplicitOverPreservesPageBounds() throws {
+        for vertical in [false, true] {
+            XCTAssertEqual(PrototypeCarousel.indicatorSide(vertical: vertical, placement: nil),
+                           vertical ? .beside : .below)
+            XCTAssertEqual(PrototypeCarousel.indicatorSide(vertical: vertical, placement: "below"),
+                           vertical ? .beside : .below)
+            XCTAssertEqual(PrototypeCarousel.indicatorSide(vertical: vertical, placement: "over"), .over)
+        }
+        let pager = try node(#"{"type":"pager","id":"p","indicatorPlacement":"over","children":[]}"#)
+        XCTAssertEqual(pager.indicatorPlacement, "over")
+        XCTAssertFalse(PrototypeCarousel.showsIndicator(pager))
+        XCTAssertThrowsError(try PrototypeCarousel.validate(.object([
+            "type": .string("pager"), "indicatorPlacement": .string("sideways"),
+        ]))) { error in
+            XCTAssertTrue("\(error)".contains("root.indicatorPlacement"))
+        }
+    }
+
     func testSharedFixturesDecode() throws {
-        for name in ["carousel-multi-browse", "carousel-hero-repeat", "pager-indicator-dots"] {
+        for name in ["carousel-multi-browse", "carousel-hero-repeat", "pager-indicator-dots", "pager-indicator-placement"] {
             let spec = try JSONDecoder().decode(
                 PrototypeSpec.self,
                 from: Data(contentsOf: fixtures.appendingPathComponent(name + ".json"))
@@ -76,10 +94,10 @@ final class PrototypeCarouselTests: XCTestCase {
     func testSharedInvalidCarouselFixturesFailAtTheirPathExceptTheChildCount() throws {
         let invalid = fixtures.deletingLastPathComponent().appendingPathComponent("invalid")
         let names = try FileManager.default.contentsOfDirectory(atPath: invalid.path)
-            .filter { $0.hasPrefix("carousel-") || $0 == "pager-indicator-unknown.json" }
+            .filter { $0.hasPrefix("carousel-") || $0.hasPrefix("pager-indicator-") }
             .filter { $0 != "carousel-no-children.json" }
             .sorted()
-        XCTAssertEqual(names.count, 6)
+        XCTAssertEqual(names.count, 7)
         for name in names {
             let data = try Data(contentsOf: invalid.appendingPathComponent(name))
             let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])

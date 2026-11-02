@@ -1,4 +1,8 @@
 import { resolve } from "node:path";
+import {
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DeviceOwnedByOtherDaemonError,
+} from "../../../src/models/DeviceOwnedByOtherDaemonError";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import type { BootAdmission } from "../../../src/models/BootAdmission";
@@ -71,6 +75,7 @@ function setup(options: { posterExists?: boolean } = {}) {
   const timer = new FakeTimer();
   let booted: BootedDevice[] = [];
   let starting = false;
+  let advertised: string[] = [];
   const coordinator = new DefaultEmulatorLaunchCoordinator({
     timer: () => timer,
     launcher: () => launcher,
@@ -79,6 +84,7 @@ function setup(options: { posterExists?: boolean } = {}) {
     posterFileSystem: () => ({ existsSync: () => options.posterExists ?? true }),
     getBootedDevicesChecked: async () => booted,
     isAvdStarting: async () => starting,
+    advertisedSerials: async () => advertised,
   });
   return {
     coordinator,
@@ -90,6 +96,9 @@ function setup(options: { posterExists?: boolean } = {}) {
     },
     setStarting: (value: boolean) => {
       starting = value;
+    },
+    setAdvertised: (serials: string[]) => {
+      advertised = serials;
     },
   };
 }
@@ -109,15 +118,60 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
     controller.abort(new Error("later reset failure"));
     expect(spawned.killed).toBe(false);
   });
-  test("refuses launching an AVD already owned by another daemon", async () => {
+  test("refuses, typed, an AVD already owned by another daemon", async () => {
     const { coordinator, launcher, setBooted } = setup();
     setBooted([
       { name: "Pixel", platform: "android", deviceId: "emulator-5556", foreignOwned: true },
     ]);
-    await expect(
-      coordinator.adoptsExistingAvdLaunch("Pixel", new NoOpPerformanceTracker()),
-    ).rejects.toThrow(/another daemon.*Pixel/);
+    const failure = await coordinator
+      .adoptsExistingAvdLaunch("Pixel", new NoOpPerformanceTracker())
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+    expect(failure).toMatchObject({
+      code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      deviceId: "emulator-5556",
+    });
+    expect((failure as Error).message).toContain("Pixel");
     expect(launcher.calls).toHaveLength(0);
+  });
+
+  test("refuses, typed, a running AVD another daemon holds under an unnamed placeholder, instead of waiting for it (#16339)", async () => {
+    const { coordinator, launcher, setBooted, setStarting, setAdvertised } = setup();
+    // Another daemon's emulator is not enriched, so the scan cannot name it; the emulator's own
+    // running-AVD advertisement maps the AVD to its console serial.
+    setBooted([
+      {
+        name: "Unknown (emulator-5556)",
+        platform: "android",
+        deviceId: "emulator-5556",
+        foreignOwned: true,
+      },
+    ]);
+    setStarting(true);
+    setAdvertised(["emulator-5556"]);
+    const failure = await coordinator
+      .adoptsExistingAvdLaunch("Pixel", new NoOpPerformanceTracker())
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+    expect(failure).toMatchObject({ deviceId: "emulator-5556" });
+    expect(launcher.calls).toHaveLength(0);
+  });
+
+  test("another daemon's emulator on a different serial does not refuse this AVD's start", async () => {
+    const { coordinator, setBooted, setStarting, setAdvertised } = setup();
+    setBooted([
+      {
+        name: "Unknown (emulator-5558)",
+        platform: "android",
+        deviceId: "emulator-5558",
+        foreignOwned: true,
+      },
+    ]);
+    setStarting(true);
+    setAdvertised(["emulator-5556"]);
+    expect(await coordinator.adoptsExistingAvdLaunch("Pixel", new NoOpPerformanceTracker())).toBe(
+      true,
+    );
   });
 
   test("an already aborted request is cancelled before launching", async () => {

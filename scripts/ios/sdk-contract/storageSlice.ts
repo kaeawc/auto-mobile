@@ -1,3 +1,4 @@
+import type { ToolOutcome } from "./observationSlice";
 import type { ContractFinding } from "./boundaries";
 import type { SdkContractManifest, StorageRegistration } from "./manifest";
 
@@ -84,7 +85,7 @@ export function expectedStores(registration: StorageRegistration): {
           ? "host_coordinated"
           : "uncoordinated"
         : "single_process",
-      query: "unsupported",
+      query: store.queryable ? "supported" : "unsupported",
     })),
   };
 }
@@ -244,5 +245,55 @@ export function judgeUnreachableStorageReport(
   ];
   return problems.length > 0
     ? [finding(slice, "unreachable", "ios-client", problems.join("; "))]
+    : [];
+}
+
+/** Judge parsed sqlQuery output; the CLI preserves SDK error codes in its error text. */
+export function judgeCoreDataQuery(
+  queryCase: "limited" | "all" | "unknown-entity",
+  outcome: ToolOutcome,
+): ContractFinding[] {
+  const caseName = `core-data-query-${queryCase}`;
+  const result = outcome.result;
+  const failed = outcome.error !== undefined || result?.success === false;
+  const error = outcome.error ?? String(result?.error ?? "");
+  if (queryCase === "unknown-entity") {
+    return failed && /\bunknown_core_data_entity\b/.test(error)
+      ? []
+      : [
+          finding(
+            STORAGE_SLICE,
+            caseName,
+            "mcp-surface",
+            `expected unknown_core_data_entity, received ${error || JSON.stringify(result)}`,
+          ),
+        ];
+  }
+  if (failed || !result) {
+    return [
+      finding(STORAGE_SLICE, caseName, "mcp-surface", error || "sqlQuery returned no result"),
+    ];
+  }
+  const rows = [
+    ["Apples", "1"],
+    ["Bread", "2"],
+    ["Carrots", "3"],
+    ["Dates", "4"],
+  ];
+  const limited = queryCase === "limited";
+  const expectedRows = limited ? rows.slice(0, 2) : rows;
+  const problems = [
+    ...(JSON.stringify(result.columns) === JSON.stringify(["name", "quantity"])
+      ? []
+      : ["columns must be name,quantity"]),
+    ...(JSON.stringify(result.rows) === JSON.stringify(expectedRows)
+      ? []
+      : [
+          `expected seeded rows ${JSON.stringify(expectedRows)}, received ${JSON.stringify(result.rows)}`,
+        ]),
+    ...(result.truncated === limited ? [] : [`truncated must be ${limited}`]),
+  ];
+  return problems.length > 0
+    ? [finding(STORAGE_SLICE, caseName, "sdk-adapter", problems.join("; "))]
     : [];
 }

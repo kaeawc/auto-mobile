@@ -31,7 +31,7 @@ function observationFor(caseName: string): FaultCaseObservation {
 
 function manifest(faults: FaultCaseObservation[]): SdkContractManifest {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId,
     scenario: "faults",
     status: "complete",

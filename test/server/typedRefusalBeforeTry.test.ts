@@ -19,6 +19,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ExecutionTrackerPlanExecutionLock } from "../../src/server/ExecutionTrackerPlanExecutionLock";
 import { executionTracker } from "../../src/daemon/executionTracker";
+import { currentExecution } from "../../src/features/toolSelection/toolSelectionContext";
 import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { SessionReleasedDuringCreationError } from "../../src/models/deviceAcquisitionRefusals";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -163,9 +164,9 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     );
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
-        resolveExecutionTarget: async ({ args }) => {
+        resolveExecutionTarget: async () => {
           // Reproduce the recovery admission followed by creation's terminal refusal (#11351).
-          executionTracker.markSessionAdmitted(args.__executionId);
+          executionTracker.markSessionAdmitted(currentExecution()!.executionId);
           throw new SessionReleasedDuringCreationError(sessionUuid);
         },
       },

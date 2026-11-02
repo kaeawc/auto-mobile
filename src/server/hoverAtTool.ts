@@ -136,7 +136,7 @@ export async function hoverAtHandler(
       snapshotId: args.snapshotId,
       layer: args.layer,
     },
-    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs() },
   );
   const message = result.success
     ? `Hovered over ${args.points.length} point${args.points.length === 1 ? "" : "s"} (${result.plannedDurationMs} ms planned, via ${result.route})`

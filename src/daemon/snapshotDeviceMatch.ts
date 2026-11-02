@@ -29,6 +29,7 @@ function snapshotMatchesDevice(record: DeviceSnapshotRecord, device: BootedDevic
 export function assertSnapshotMatchesDevice(
   record: DeviceSnapshotRecord,
   device: BootedDevice,
+  action: "restored" | "deleted" = "restored",
 ): void {
   if (snapshotMatchesDevice(record, device)) {
     return;
@@ -37,7 +38,9 @@ export function assertSnapshotMatchesDevice(
   const snapshotOwner = `${record.platform} device '${record.deviceName || "unknown"}' (${record.deviceId || "unknown ID"})`;
   const target = `${device.platform} device '${device.name}' (${device.deviceId})`;
   throw new ActionableError(
-    `Snapshot '${record.snapshotName}' belongs to ${snapshotOwner} and cannot be restored to ${target}. ` +
-      "Restore it on its original device or capture a snapshot for the target device.",
+    `Snapshot '${record.snapshotName}' belongs to ${snapshotOwner} and cannot be ${action === "restored" ? "restored to" : "deleted on"} ${target}. ` +
+      (action === "restored"
+        ? "Restore it on its original device or capture a snapshot for the target device."
+        : "Delete it on its original device."),
   );
 }

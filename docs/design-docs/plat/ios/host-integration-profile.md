@@ -138,6 +138,11 @@ redaction run outside locks.
 
 ## Fixture requirement
 
-A reference integration must register every transport through this API, with no direct adapter
-construction, and must show that each registered transport emits exactly one ordered lifecycle
-stream. `HostTransportRegistryTests` covers registration and the capability matrix in-process.
+The SDK contract harness's `navigation` scenario registers WKWebView, UIKit, SwiftUI, deep links
+and custom routers through their documented registration calls, retains the fixture's delegates,
+and records capabilities before and after registration. Its manifest contains the SDK's ordered
+navigation events with their assigned sequence numbers and WKWebView lifecycle envelopes. The
+judge checks one event per completed transition, contiguous navigation ordering, and host opt-in
+capabilities. On iPad the fixture requests a new scene and records a transition using its actual
+session identifier; on iPhone it reports multi-scene as not applicable. `HostTransportRegistryTests`
+covers transport registration and the capability matrix in-process.

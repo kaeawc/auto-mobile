@@ -17,6 +17,20 @@ export interface ToolCallRecordingContext {
   swipeAt?: SwipeAtRecordingContext;
 }
 
+/**
+ * The transport deadline of the request a call runs for (#15663, #6222), in the units the daemon
+ * forwards: an absolute deadline, the remaining budget, the execution start it is measured from,
+ * and the key of the live (progress-extended) deadline. Set at MCP ingress; a plan step and
+ * anything nested inside a plan inherit it, as does a nested call made without `callInternal`.
+ * Another `callInternal` call runs without one unless its caller passes one (`requestDeadline`).
+ */
+export interface RequestDeadline {
+  readonly deadlineMs?: number;
+  readonly timeoutMs?: number;
+  readonly startTime?: number;
+  readonly liveDeadlineKey?: string;
+}
+
 export type ToolSelectionContext = {
   /** A device-aware wrapper already owns this execution's session resolution (#11680). */
   deviceAwareDispatch?: true;
@@ -26,12 +40,10 @@ export type ToolSelectionContext = {
    * another session holds (#10830). Read it through `isSessionlessDeviceRead`.
    */
   explicitObserveDeviceRead?: boolean;
-  /** Trusted enclosing plan metadata, reattached after each step's schema parse. */
+  /** The request's transport deadline; an explicit `undefined` clears an inherited one. */
+  requestDeadline?: RequestDeadline;
+  /** Set while a plan runs: its steps inherit the request's deadline and use its progress. */
   planRequest?: {
-    deadlineMs?: unknown;
-    timeoutMs?: unknown;
-    startTime?: unknown;
-    liveDeadlineKey?: unknown;
     progress?: ProgressCallback;
   };
   routingSessionUuid?: string;
@@ -104,6 +116,16 @@ function resolveDeviceConnectionKey(
   return context.deviceConnectionKey ?? parent?.deviceConnectionKey;
 }
 
+/** An explicit `requestDeadline` (even `undefined`) replaces the parent's (#15663). */
+function resolveRequestDeadline(
+  context: ToolSelectionContext,
+  parent: ToolSelectionContext | undefined,
+): RequestDeadline | undefined {
+  return Object.hasOwn(context, "requestDeadline")
+    ? context.requestDeadline
+    : parent?.requestDeadline;
+}
+
 export const runWithToolSelectionContext = async <T>(
   context: ToolSelectionContext,
   fn: () => Promise<T>,
@@ -118,6 +140,7 @@ export const runWithToolSelectionContext = async <T>(
       callerMcpSessionId: resolveCallerMcpSessionId(context, parent),
       deviceConnectionKey: resolveDeviceConnectionKey(context, parent),
       execution: context.execution ?? parent?.execution,
+      requestDeadline: resolveRequestDeadline(context, parent),
       toolSelectionProfileUuid:
         context.toolSelectionProfileUuid ?? parent?.toolSelectionProfileUuid,
       labelSessionUuids: resolveLabelSessionUuids(context, parent),
@@ -132,6 +155,19 @@ export const runWithToolSelectionContext = async <T>(
 
 export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
   toolSelectionContext.getStore();
+
+/**
+ * The tracked execution the current call runs under (#15663): set at MCP ingress and inherited by
+ * every nested call and plan step. Absent outside a tool call.
+ */
+export function currentExecution(): ToolSelectionContext["execution"] {
+  return getToolSelectionContext()?.execution;
+}
+
+/** The transport deadline of the request the current call runs for, if it has one (#15663). */
+export function currentRequestDeadline(): RequestDeadline | undefined {
+  return getToolSelectionContext()?.requestDeadline;
+}
 
 /** Whether the current device-aware call runs on the read-only device path (#10830). */
 export function isSessionlessDeviceRead(): boolean {

@@ -24,15 +24,16 @@ enum PrototypeCarousel {
         node.type == "pager" && node.indicator == "dots"
     }
 
-    /// Where a pager's dots sit relative to its pages: a row under a horizontal pager, a column
-    /// beside a vertical one. They are laid out after the pages, never drawn over them.
+    /// Dots default to a row below horizontal pages or a column beside vertical pages on iOS.
     enum IndicatorSide: Equatable {
         case below
         case beside
+        case over
     }
 
-    static func indicatorSide(vertical: Bool) -> IndicatorSide {
-        vertical ? .beside : .below
+    static func indicatorSide(vertical: Bool, placement: String? = nil) -> IndicatorSide {
+        if placement == "over" { return .over }
+        return vertical ? .beside : .below
     }
 }
 
@@ -73,6 +74,11 @@ extension PrototypeCarousel {
            indicator != .string("none"), indicator != .string("dots")
         {
             throw violation("\(path).indicator", "Invalid enum value")
+        }
+        if node["type"] == .string("pager"), let placement = node["indicatorPlacement"],
+           placement != .string("over"), placement != .string("below")
+        {
+            throw violation("\(path).indicatorPlacement", "Invalid enum value")
         }
         if node["type"] == .string("carousel") {
             try validateCarousel(node, path: path)

@@ -19,7 +19,7 @@ const swiftManifest = {
   ],
   runId: "run-1",
   scenario: "network",
-  schemaVersion: 3,
+  schemaVersion: 4,
   status: "complete",
   undecodableBatches: 0,
 };
@@ -70,7 +70,7 @@ test("parses URLProtocol records, fault observations and capability descriptors"
 });
 
 test("rejects a manifest from a newer schema", () => {
-  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 4 }));
+  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 5 }));
   expect(result).toMatchObject({ success: false });
   if (!result.success) {
     expect(result.error).toContain("schemaVersion");
@@ -91,7 +91,7 @@ test("reads the observation host log and the storage registration", () => {
       },
       storage: {
         allowKeychainDeletion: true,
-        coreDataStores: [{ identifier: "ContractPrivate-run-1" }],
+        coreDataStores: [{ identifier: "ContractPrivate-run-1", queryable: false }],
         hostCoordinatedSuites: [],
         keychainEntries: [{ accessGroup: "g", account: "a", service: "s" }],
         secretWritten: true,
@@ -107,5 +107,29 @@ test("reads the observation host log and the storage registration", () => {
       observationIdentity: 3,
     });
     expect(result.manifest.storage?.coreDataStores[0].appGroup).toBeUndefined();
+  }
+});
+
+test("Core Data registrations require an explicit queryable flag", () => {
+  const storage = {
+    allowKeychainDeletion: false,
+    coreDataStores: [{ identifier: "store" }],
+    hostCoordinatedSuites: [],
+    uncoordinatedSuites: [],
+    keychainEntries: [],
+    secretWritten: false,
+  };
+  expect(parseSdkContractManifest(JSON.stringify({ ...swiftManifest, storage })).success).toBe(
+    false,
+  );
+  for (const queryable of [true, false]) {
+    expect(
+      parseSdkContractManifest(
+        JSON.stringify({
+          ...swiftManifest,
+          storage: { ...storage, coreDataStores: [{ identifier: "store", queryable }] },
+        }),
+      ).success,
+    ).toBe(true);
   }
 });

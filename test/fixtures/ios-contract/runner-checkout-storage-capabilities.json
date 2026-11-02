@@ -1,0 +1,33 @@
+{
+  "request": {
+    "type": "storage_capabilities",
+    "requestId": "storage_capabilities_8b62ff59-ca2a-49db-857b-5a813d16f866",
+    "appId": "dev.jasonpearson.automobile.Playground"
+  },
+  "response": {
+    "capabilities": {
+      "coreDataStores": [],
+      "keychain": {
+        "capability": "storage.keychain",
+        "deletion": "disabled",
+        "deletionScopes": [],
+        "inspection": "unavailable",
+        "reason": "DISABLED",
+        "schemaVersion": 1
+      },
+      "mutationAuthorized": false,
+      "readOnly": true,
+      "registeredAppGroupSuites": [],
+      "stores": [],
+      "unavailableStores": [
+        "keychain",
+        "file_caches"
+      ]
+    },
+    "requestId": "storage_capabilities_8b62ff59-ca2a-49db-857b-5a813d16f866",
+    "success": true,
+    "timestamp": 1793572640399,
+    "totalTimeMs": 135,
+    "type": "storage_capabilities_result"
+  }
+}

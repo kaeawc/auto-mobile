@@ -22,6 +22,7 @@ internal class PrototypePlatformDispatcher(
   private val publish: (String, JsonObject) -> Unit,
   private val warn: (String) -> Unit,
   private val limiter: PrototypeRequestLimiter,
+  monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
   class Pending(
     val id: String,
@@ -37,6 +38,7 @@ internal class PrototypePlatformDispatcher(
     lateinit var job: Job
   }
 
+  private val rateLimiter = PrototypePlatformRateLimiter(monotonicMs)
   private val pending = linkedMapOf<String, Pending>()
   private val subscriptions = mutableListOf<Job>()
   @Volatile private var closed = false
@@ -84,6 +86,7 @@ internal class PrototypePlatformDispatcher(
       complete(call, refusal)
       return
     }
+    rateLimiter.recordAdmission(action.call)
     call.job =
       scope.launch(start = CoroutineStart.LAZY) { runCall(call, action, args ?: return@launch) }
     val registered =
@@ -112,6 +115,9 @@ internal class PrototypePlatformDispatcher(
     }
     val invalidArgs = PrototypePlatformCalls.argumentsError(action.call, args)
     if (invalidArgs != null) return failure(PlatformErrorCode.INVALID_ARGS, invalidArgs.message)
+    rateLimiter.refusal(action.call)?.let {
+      return it
+    }
     if (limiter.tryAcquire()) return null
     return failure(
       PlatformErrorCode.TOO_MANY_IN_FLIGHT,

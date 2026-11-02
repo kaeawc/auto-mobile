@@ -12,7 +12,7 @@ setup() {
   export PATH="$TEST_DIR/bin:$PATH"
   unset AUTO_MOBILE_CMD RELEASE_FAILS
   local stub
-  for stub in "$TEST_DIR/bin/auto-mobile" "$TEST_DIR/override/cli.sh"; do
+  for stub in "$TEST_DIR/bin/auto-mobile" "$TEST_DIR/override/cli.sh" "$TEST_DIR/override/entry.ts"; do
     cat > "$stub" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -25,6 +25,10 @@ STUB
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'bun-like %s\n' "$*" >> "$CALLS"
+if [[ ${1:-} == run ]]; then
+  [[ ${2:-} == --silent ]] || exit 1
+  shift 2
+fi
 exec bash "$@"
 STUB
   chmod +x "$TEST_DIR/override/bun-like"
@@ -75,4 +79,12 @@ cli.sh --daemon release-session test-session timeout=2000" ]
   [ -z "$output" ]
   [ "$(cat "$TEST_DIR/stderr")" = 'warning: could not release session test-session' ]
   [ "$(cat "$CALLS")" = 'auto-mobile --daemon release-session test-session timeout=2000' ]
+}
+
+@test "release preserves runtime options and entrypoint before CLI flags" {
+  export AUTO_MOBILE_CMD="$TEST_DIR/override/bun-like run --silent $TEST_DIR/override/entry.ts --debug --cli"
+  run_release
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CALLS")" = "bun-like run --silent $TEST_DIR/override/entry.ts --daemon release-session test-session
+entry.ts --daemon release-session test-session timeout=2000" ]
 }

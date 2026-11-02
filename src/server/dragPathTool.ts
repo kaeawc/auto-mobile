@@ -180,7 +180,7 @@ export async function dragPathHandler(
       layer: args.layer,
       pointer: args.pointer,
     },
-    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs() },
   );
   const message = result.success
     ? `Dragged along ${args.points.length} points (${result.plannedDurationMs} ms planned, ${result.moveCount} moves)`

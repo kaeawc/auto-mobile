@@ -1,6 +1,7 @@
 import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, BootedDevice } from "../../models";
+import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import type {
   SystemTrayAdb,
@@ -30,6 +31,11 @@ export function createNotificationUIDetector(
 ): NotificationUIDetector {
   if (device.platform === "ios") {
     const deps: IosNotificationUIDetectorDeps = {
+      invalidateLockState: () => {
+        (getDependencies().iosLockStateInvalidator ?? getIosLockStateCache()).invalidate(
+          device.deviceId,
+        );
+      },
       pressHome: () => {
         throwIfAborted(signal);
         const { pressHomeFactory } = getDependencies();

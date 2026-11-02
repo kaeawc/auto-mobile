@@ -1,4 +1,4 @@
-import { internalExecutionId, internalMcpSessionId } from "../internalToolParams";
+import { internalMcpSessionId } from "../internalToolParams";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import {
   explicitReadTargetPlatform,
@@ -41,7 +41,10 @@ import {
 } from "../../daemon/inputDeviceOwnership";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/internalToolCall";
-import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
+import {
+  currentExecution,
+  getToolSelectionContext,
+} from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
 import { executionTracker } from "../../daemon/executionTracker";
@@ -222,7 +225,7 @@ export async function ensureReadTargetOrWatch(
     };
   }
   const readiness = new AbortController();
-  const executionId = internalExecutionId(input.args);
+  const executionId = currentExecution()?.executionId;
   let markedTarget = readinessTarget;
   let resolvedDevice: BootedDevice | undefined;
   const mark = (deviceId: string) => {
@@ -678,7 +681,7 @@ export function adoptHolderConnectionSession(args: Record<string, unknown>): voi
     return;
   }
   args.sessionUuid = holderSessionUuid;
-  const executionId = internalExecutionId(args);
+  const executionId = currentExecution()?.executionId;
   if (executionId !== undefined) {
     // Attribute the execution to the session: its end is use, and it vetoes release in flight.
     executionTracker.setResolvedAutolockSessionUuid(executionId, holderSessionUuid);

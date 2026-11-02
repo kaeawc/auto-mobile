@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
 } from "../../src/daemon/wire/constants";
@@ -11,7 +10,8 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/daemon/executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -117,14 +117,12 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
   const runDeviceTool = async (tool: RegisteredTool, args: Args): Promise<void> => {
     const execution = executionTracker.startExecution(tool.name, OTHER, HOLDER);
     try {
-      await tool.handler(
-        {
-          ...args,
-          [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-          [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-        },
-        undefined,
-        execution.abortController.signal,
+      await runWithToolSelectionContext({ execution: sessionExecutionMetadataOf(execution) }, () =>
+        tool.handler(
+          { ...args, [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime },
+          undefined,
+          execution.abortController.signal,
+        ),
       );
     } finally {
       executionTracker.endExecution(execution.id);

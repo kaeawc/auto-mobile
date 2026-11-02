@@ -51,6 +51,9 @@ class FakeA11ySource implements A11ySource {
   }
 }
 
+import { DisplayGeometryTracker } from "../../../../src/features/record/android/DisplayGeometryTracker";
+import { ScreenGeometryTimeline } from "../../../../src/features/record/android/ScreenGeometryTimeline";
+
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Test", platform: "android" };
 
 const BUTTON = {
@@ -71,6 +74,78 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     a11y = new FakeA11ySource();
     timer = new FakeTimer();
     recorder = new DualTrackRecorder(device, gestures, a11y, { timer });
+  });
+
+  test("labels sampled stroke and hover steps that span a display geometry change", async () => {
+    const display = { width: 1080, height: 2400 };
+    const timeline = new ScreenGeometryTimeline(
+      { xMin: 0, xMax: 32767, yMin: 0, yMax: 32767 },
+      { rotation: 0, display },
+      timer.now(),
+    );
+    const geometry = new DisplayGeometryTracker(
+      timeline,
+      {
+        readRotation: async () => 0,
+        readPhysicalSize: async () => display,
+      },
+      timer,
+    );
+    recorder = new DualTrackRecorder(device, gestures, a11y, { timer, geometry });
+    await recorder.start();
+    timer.advanceTime(1000);
+    const downAt = timer.now();
+    timer.advanceTime(100);
+    timeline.noteChangeReported(timer.now());
+    timer.advanceTime(100);
+    gestures.emit({
+      type: "stroke",
+      toolType: "stylus",
+      downAt,
+      arrivedAt: timer.now(),
+      path: [
+        { x: 10, y: 20, pressure: 0.2, arrivedAt: downAt },
+        { x: 30, y: 40, pressure: 0.8, arrivedAt: timer.now() },
+      ],
+    });
+    gestures.emit({
+      type: "hover",
+      toolType: "stylus",
+      downAt,
+      arrivedAt: timer.now(),
+      hover: [
+        { x: 10, y: 20, distance: 0.5, arrivedAt: downAt },
+        { x: 30, y: 40, distance: 0.5, arrivedAt: timer.now() },
+      ],
+    });
+    const result = await recorder.stop();
+    expect(result.steps.map((step) => step.tool)).toEqual(["dragPath", "hoverAt"]);
+    expect(result.steps.map((step) => step.label)).toEqual([
+      expect.stringContaining("gesture spans a display rotation/size change"),
+      expect.stringContaining("gesture spans a display rotation/size change"),
+    ]);
+    expect(result.geometryWarnings).toEqual([
+      expect.stringContaining("gesture spans a display rotation/size change"),
+    ]);
+  });
+
+  test("stop warns when a known stylus stroke exceeds the replay duration limit", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "stroke",
+      toolType: "stylus",
+      arrivedAt: timer.now(),
+      path: Array.from({ length: 31 }, (_, index) => ({
+        x: index,
+        y: 20,
+        pressure: index / 30,
+        arrivedAt: index * 1000,
+      })),
+    });
+    const result = await recorder.stop();
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("20 second")]);
+    expect(result.exportWarnings?.[0]).not.toContain("without a known position or path");
   });
 
   test("a stylus tap over an element is a tapAt with a pointer, never a tapOn", async () => {
@@ -318,7 +393,7 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     ]);
   });
 
-  test("a hover is not exported, and the stop result says it was dropped", async () => {
+  test("a hover without a known position is not exported and warns", async () => {
     await recorder.start();
     gestures.emit({ type: "hover", arrivedAt: timer.now(), toolType: "stylus" });
 
@@ -326,6 +401,20 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
 
     expect(result.steps).toEqual([]);
     expect(result.exportWarnings).toEqual([expect.stringContaining("hover")]);
+  });
+
+  test("a positioned hover without distance warns instead of exporting a touch", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "hover",
+      arrivedAt: timer.now(),
+      toolType: "stylus",
+      screenX: 10,
+      screenY: 20,
+    });
+    const result = await recorder.stop();
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("hover distance")]);
   });
 
   test("hovers next to a tap warn once and leave the tap exported", async () => {

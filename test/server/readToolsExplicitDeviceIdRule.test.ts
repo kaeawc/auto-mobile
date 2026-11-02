@@ -3,10 +3,6 @@ import { splitRegistration } from "../../src/server/toolRegistryErasure";
 import { z } from "zod/v4";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  INTERNAL_EXECUTION_ID_PARAM,
-  INTERNAL_EXECUTION_START_TIME_PARAM,
-} from "../../src/daemon/wire/constants";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { matchRunningReadTarget } from "../../src/devices/runningReadTarget";
 import { afterAll, afterEach, beforeAll, expect, mock, spyOn, test } from "bun:test";
@@ -48,7 +44,7 @@ import {
 } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
-import { executionTracker } from "../../src/daemon/executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -570,14 +566,15 @@ for (const platform of ["android", "ios"] as const) {
       const execution = executionTracker.startExecution(name);
       try {
         const response = await runWithToolSelectionContext(
-          { explicitObserveDeviceRead: name === "observe" },
+          {
+            explicitObserveDeviceRead: name === "observe",
+            execution: sessionExecutionMetadataOf(execution),
+          },
           () =>
             ToolRegistry.getTool(name)!.handler({
               platform,
               deviceId: h!.device.deviceId,
               ...readArgs[name],
-              [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-              [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
             }),
         );
         expect(response).toMatchObject({ success: true });
@@ -869,12 +866,13 @@ for (const platform of ["android", "ios"] as const) {
           let decision: string;
           try {
             const outcome = runWithToolSelectionContext(
-              { explicitObserveDeviceRead: name === "observe" && !!id },
+              {
+                explicitObserveDeviceRead: name === "observe" && !!id,
+                execution: sessionExecutionMetadataOf(execution),
+              },
               () =>
                 ToolRegistry.getTool(name)!.handler({
                   ...args,
-                  [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-                  [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
                 }),
             );
             if (failedOther || exactRunningPin) {
@@ -1121,14 +1119,15 @@ for (const column of probeColumns) {
       try {
         // The serial fast path is the generic resolver contract, including observe outside its explicit context.
         await runWithToolSelectionContext(
-          { explicitObserveDeviceRead: name === "observe" && column !== "probe-running-id" },
+          {
+            explicitObserveDeviceRead: name === "observe" && column !== "probe-running-id",
+            execution: sessionExecutionMetadataOf(execution),
+          },
           () =>
             ToolRegistry.getTool(name)!.handler({
               platform: "android",
               deviceId: id,
               ...readArgs[name],
-              [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-              [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
             }),
         );
         decision = `device:${h.runs[0]?.deviceId};boots:${h.boots.length}`;
@@ -1382,14 +1381,14 @@ for (const platform of ["android", "ios"] as const) {
         );
         const execution = executionTracker.startExecution("listApps");
         try {
-          const result = await ToolRegistry.getTool("listApps")!
-            .handler({
-              platform,
-              deviceId: id,
-              [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-              [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-            })
-            .catch((error: unknown) => error);
+          const result = await runWithToolSelectionContext(
+            { execution: sessionExecutionMetadataOf(execution) },
+            () =>
+              ToolRegistry.getTool("listApps")!.handler({
+                platform,
+                deviceId: id,
+              }),
+          ).catch((error: unknown) => error);
           if (platform === "ios" && phase === "images") {
             expect(result).toBeInstanceOf(ActionableError);
             expect(result).toHaveProperty("message", stoppedIosMessage(h.device));
@@ -2020,15 +2019,15 @@ for (const platform of ["android"] as const) {
         const shutdown = spyOn(current.discovery, "killDevice");
         try {
           const outcome = runWithAbortSignal(execution.abortController.signal, () =>
-            ToolRegistry.getTool("listApps")!.handler(
-              {
-                platform,
-                deviceId: platform === "android" ? device.name : device.deviceId,
-                [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-                [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-              },
-              undefined,
-              execution.abortController.signal,
+            runWithToolSelectionContext({ execution: sessionExecutionMetadataOf(execution) }, () =>
+              ToolRegistry.getTool("listApps")!.handler(
+                {
+                  platform,
+                  deviceId: platform === "android" ? device.name : device.deviceId,
+                },
+                undefined,
+                execution.abortController.signal,
+              ),
             ),
           );
           // Attach rejection handling before releasing the fake lifecycle barrier.
@@ -2106,14 +2105,14 @@ for (const operation of ["start", "shutdown"] as const) {
     );
     const execution = executionTracker.startExecution("listApps");
     try {
-      const result = await ToolRegistry.getTool("listApps")!
-        .handler({
-          platform: "ios",
-          deviceId: current.device.deviceId,
-          [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-          [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-        })
-        .catch((error: unknown) => error);
+      const result = await runWithToolSelectionContext(
+        { execution: sessionExecutionMetadataOf(execution) },
+        () =>
+          ToolRegistry.getTool("listApps")!.handler({
+            platform: "ios",
+            deviceId: current.device.deviceId,
+          }),
+      ).catch((error: unknown) => error);
       expect(result).toBeInstanceOf(ActionableError);
       expect(result).toHaveProperty("message", stoppedIosMessage(current.device));
       assertNoIosReadBoot(current);

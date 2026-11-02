@@ -294,7 +294,7 @@ export async function tapOnHandler(
       subtext: args.subtext,
       layer: args.layer,
     },
-    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs() },
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -415,7 +415,7 @@ export async function tapAnyHandler(
       searchUntil: args.searchUntil,
       layer: args.layer,
     },
-    { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
+    { progress, signal, deadlineMs: resolveTransportDeadlineMs() },
   );
 
   const searchSummary = buildTapAnySearchSummary(result);

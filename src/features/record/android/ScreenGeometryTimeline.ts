@@ -1,4 +1,5 @@
 import { buildScaler, type CoordScaler, type TimedCoordScaler } from "./AxisRanges";
+import type { TouchInputNode } from "./TouchNodeDiscovery";
 
 /**
  * How far either side of a gesture a reported display change makes that gesture
@@ -144,9 +145,21 @@ export class ScreenGeometryTimeline implements TimedCoordScaler {
     }
   }
 
-  /** Mirror every geometry change into `follower`, which maps a different node's raw axes. */
-  follow(follower: ScreenGeometryTimeline): void {
+  /** Mirror geometry history and future changes into a digitizer with different raw axes. */
+  follow(follower: ScreenGeometryTimeline): () => void {
+    follower.entries.splice(
+      0,
+      follower.entries.length,
+      ...this.entries.map((entry) => follower.entry(entry, entry.reportedAt, entry.caveats)),
+    );
+    follower.changeReports.splice(0, follower.changeReports.length, ...this.changeReports);
     this.followers.push(follower);
+    return () => {
+      const index = this.followers.indexOf(follower);
+      if (index !== -1) {
+        this.followers.splice(index, 1);
+      }
+    };
   }
 
   /** Append a new entry derived from the latest one, effective from `reportedAt`. */
@@ -227,4 +240,26 @@ export class ScreenGeometryTimeline implements TimedCoordScaler {
       }),
     };
   }
+}
+
+/**
+ * Pen digitizers have their own raw ranges but share the display geometry, so each gets a
+ * timeline that mirrors the primary one.
+ */
+export function followWithPenTimelines(
+  primary: ScreenGeometryTimeline,
+  penNodes: ReadonlyArray<TouchInputNode>,
+  initial: { rotation: number; display: { width: number; height: number } },
+  { startedAt, caveats }: { startedAt: number; caveats: readonly string[] },
+): Array<{ node: TouchInputNode; scaler: ScreenGeometryTimeline; stopFollowing: () => void }> {
+  return penNodes.map((node) => {
+    const penTimeline = new ScreenGeometryTimeline(
+      { xMin: node.axisXMin, xMax: node.axisXMax, yMin: node.axisYMin, yMax: node.axisYMax },
+      initial,
+      startedAt,
+      caveats,
+    );
+    const stopFollowing = primary.follow(penTimeline);
+    return { node, scaler: penTimeline, stopFollowing };
+  });
 }

@@ -1,16 +1,15 @@
 # Pressure, hover and stylus input
 
-AutoMobile injects finger touches. It cannot yet drive stylus-only drawing modes,
-pressure-sensitive brushes, palm rejection, hover previews, Apple Pencil
-interactions or force-press menus. This note records what each platform's
-injection path can carry and the direction that follows (#12539). Companion spike:
+AutoMobile injects finger touches and Android stylus input, including pressure
+curves and hover through capable routes. Apple Pencil injection remains unsupported.
+This note describes each platform's input contract and evidence (#12539). Companion spike:
 [Stylus, pressure and hover injection](../mcp/stylus-pressure-hover-injection.md).
 
-**Status:** shipped so far (#13081): a stylus pointer on `tapAt` and a straight
-`swipeAt` for Android 12+, at pressure 1.0. Otherwise a research note. Nothing was
-verified on physical hardware; the iOS simulator probe is recorded below. Remaining
-claims needing a device are marked **unverified** and carried into the
-[verification plan](#verification-plan).
+Android supports a stylus pointer on `tapAt`, `swipeAt` and `dragPath`, plus a
+separate `hoverAt` tool. Pressure and hover require instrumentation or root-only
+`uinput`; the shell stylus source supports only pressure 1.0. Physical hardware
+claims remain **unverified**; the platform evidence and
+[verification plan](#verification-plan) describe their limits.
 
 ## Evidence levels
 
@@ -23,9 +22,10 @@ claims needing a device are marked **unverified** and carried into the
 
 ## Android
 
-### What AutoMobile can carry today: fingers only
+### Finger injection paths
 
-Android touch input reaches the device two ways, and both inject a finger:
+The default Android touch paths inject a finger; explicit stylus and hover requests use
+the pointer routes described below:
 
 - CtrlProxy's `AccessibilityService.dispatchGesture` (`CtrlProxy.kt`:
   `performTapCoordinates`, `performSwipe`, `performDrag`, `performPinch`, and the
@@ -105,15 +105,20 @@ also reads pen data (**Source**):
 
 - **Pen nodes.** `InputNodeDiscovery.ts` finds the touch node and any separate
   single-touch pen node (`ABS_X`/`ABS_Y` plus `BTN_TOOL_PEN` or `BTN_TOOL_RUBBER`), and
-  `GetEventReader` runs one `getevent -lt` process per node.
+  `GetEventReader` runs one `getevent -lt` process per node. An all-node `getevent -lt`
+  monitor watches add/remove notifications throughout recording. Added nodes are probed
+  with `getevent -lp <path>`; only pen-kind nodes get a reader and a timeline following
+  the current display geometry. Removal stops that reader and cancels pending discovery.
+  Monitor or pen-reader failure is logged while finger recording continues.
 - **Pen state.** `TouchFrameReconstructor.ts` tracks `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`/
   `BTN_TOOL_RUBBER`, `BTN_TOUCH`, `BTN_STYLUS`/`BTN_STYLUS2`, `ABS_TILT_X`/`ABS_TILT_Y` and
   `ABS_DISTANCE`/`ABS_MT_DISTANCE`. A pen in range without contact is hover and never
   becomes a tap or swipe. A pen that comes into range and leaves again without ever touching
   (a single-touch pen's tool key down then up, or a multitouch pen reporting a hover
-  distance until its tracking id ends) is reported once as a `hover` event, which the
-  recorder turns into a stop-result warning. Hover around a contact is not reported, and a
-  digitizer that reports no hover distance cannot be told from contact.
+  distance until its tracking id ends) is reported once as a `hover` event with sampled
+  positions and distance. A positioned stylus hover with a known distance range exports as
+  `hoverAt`; otherwise it produces a stop-result warning. Hover around a contact is not
+  reported. A multitouch digitizer with no hover distance cannot be told from contact.
 - **Pressure axes.** A touch node reports `ABS_MT_PRESSURE`; a single-touch pen node
   reports the non-multitouch `ABS_PRESSURE` instead. Discovery reads each node's axis range
   from `getevent -p`, and the raw values are scaled to 0-1 against it; without a usable
@@ -122,20 +127,27 @@ also reads pen data (**Source**):
   `pressure` (min, max and mean, normalized when the axis range is known) and `buttons`.
   A pen gesture exports as a coordinate step carrying `pointer: { toolType: "stylus" }` (or
   `"eraser"`): a tap or long press as `tapAt`, a swipe as `swipeAt`, never `tapOn` or `swipeOn`,
-  which cannot say "stylus". Recorded pressure is not exported, because replay injects the fixed 1.0 and
-  refuses anything else. A pen gesture with no known position or path is left out with a warning
+  which cannot say "stylus". Constant pressure is carried by the pointer. A stylus drag
+  with a normalized pressure range of at least 0.05 becomes a `stroke`, exported as
+  `dragPath` with per-point pressure and the pointer's mean pressure fallback, tilt and held
+  buttons; constant-pressure drags deliberately remain `swipeAt`.
+  Contact and hover paths retain at most 100 samples, halving older temporal samples at
+  the cap while preserving the first point, pressure extrema and the latest point.
+  Coordinates use the mapping at contact down or hover entry; distance is normalized against its discovered
+  axis range. Segment durations use node-local kernel timestamps, falling back to host arrival
+  deltas when timestamps are absent. Elapsed offsets are rounded once; samples within the same
+  millisecond are coalesced, and gaps over 5000 ms are split with linear position and pressure/distance
+  interpolation. If splitting exceeds 100 points, the shortest adjacent segments are merged while
+  retaining endpoints, pen extrema and elapsed time. A stroke or hover whose unrounded elapsed
+  time exceeds the 20 second replay limit is omitted with a dedicated stop-result warning.
+  A pen gesture with no known position or path is left out with a warning
   on the stop result, which a salvaged stop keeps. An eraser gesture is exported with a warning
   because only a root `adb shell` with the `uinput` tool can replay it. A stylus double tap is exported with a warning because
   replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger
-  gestures export unchanged. Hover is not exported (it only warns), nor are stroke paths or
-  pressure series.
-
-One structural limit remains, and extending the axes alone does not remove it
-(**Source**):
-
-- **No drag event.** `GestureEventType` has no drag, and `DualTrackRecorder` maps a
-  moving single-contact gesture to `swipeAt` or `swipeOn`, which keep only the
-  endpoints. A drawn stroke loses its path.
+  gestures export unchanged. Stroke and hover replay use pointer route selection, which
+  refuses unsupported pressure or hover before dispatch and never substitutes a finger.
+  Tilt and distance on exported `swipeAt` steps remain outside the recorder contract;
+  pre-recording axis/button state and cross-node kernel-time ordering are not synchronized.
 
 ## iOS
 
@@ -196,7 +208,7 @@ platforms), so there is no iOS recorder representation to extend.
 | Pressure curve                      | Instrumentation, `uinput` (root) and gRPC pen (**Measured**)                                                                  | Unverified (`UiAutomation`; `uinput` is root-only) | No-go: accepted pressure leaves force 0 (#13083)                      | Unverified                  |
 | Tilt, eraser, barrel button         | Tilt and button via instrumentation (**Measured**) or `uinput` encoding (**Source**); eraser via `uinput` only (**Measured**) | Unverified (`UiAutomation`; `uinput` is root-only) | No-go via known paths: no pen or tool-type selectors (#13083)         | Impossible without a Pencil |
 | Hover                               | Instrumentation (stylus or mouse) and `uinput` (**Measured**)                                                                 | Unverified (`UiAutomation`; `uinput` is root-only) | Observed on mouse pointer paths; Pencil hover not observed (#13083)   | Unverified                  |
-| Records the above                   | Partly: tool type, pressure, buttons (#13101); not hover or replay (**Source**)                                               | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                | No (**Source**)             |
+| Records the above                   | Tool type, pressure series and positioned hover with distance (**Source**)                                                    | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                | No (**Source**)             |
 
 "Supported" means a documented path exists in source. Mouse pointer hover is
 observed on the iOS simulator; pressure and Pencil injection are a no-go there.
@@ -214,14 +226,12 @@ specified and reviewed when the work is picked up.
   touch: a silent downgrade is the failure reported with Appium pressure above, and it
   makes a stylus-only UI test pass for the wrong reason.
 - **Hover is its own tool.** A `hoverAt` tool has different semantics from a gesture
-  (no contact, no scroll or fling) and the weakest platform support, so it is not part
-  of the first slice.
-- **Stage by what is proven.** The only path demonstrated in source is the stylus
-  source of `adb shell input`, at a fixed pressure of `1.0`. The first slice is that,
-  for `tapAt` and a straight `swipeAt`; pressure curves, tilt, eraser, hover and
-  `dragPath` wait for the experiments below.
+  (no contact, no scroll or fling); replay requires a route that explicitly supports hover.
+- **Stage by what is proven.** `adb shell input` supports a stylus tap or straight swipe
+  only at pressure `1.0`. Pressure curves and hover use instrumentation or root-only
+  `uinput`, subject to each route's capability checks.
 - **Recording follows the tools.** A stylus step is never silently exported or replayed as a
-  finger step; hover, stroke path and pressure series are the recorder gaps under
+  finger step; pressure curves and positioned hover export through the contracts under
   [What the recorder sees](#what-the-recorder-sees).
 
 ## Verification plan

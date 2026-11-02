@@ -1,4 +1,4 @@
-import { internalExecutionId, internalMcpSessionId } from "./internalToolParams";
+import { internalMcpSessionId } from "./internalToolParams";
 import { holderOf } from "../daemon/deviceBinding";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
@@ -43,7 +43,10 @@ import { executionTracker } from "../daemon/executionTracker";
 import { isTypedToolRefusal } from "../daemon/shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  currentExecution,
+  getToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 import { deviceConnectionIdFor } from "./deviceConnectionId";
 
@@ -57,7 +60,6 @@ export interface SetActiveDeviceArgs {
 interface HandlerArgs extends SetActiveDeviceArgs {
   sessionUuid?: string;
   __mcpSessionId?: string;
-  __executionId?: string;
 }
 
 type ResumeCtrlProxy = (deviceId: string, platform: Platform) => Promise<void>;
@@ -459,9 +461,16 @@ function admitSessionlessSelection(args: HandlerArgs): void {
   }
   // No session holds it yet, but another request is preparing it and will bind it (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);
-  const executionId = internalExecutionId(args);
-  if (executionId && args.display === undefined) {
-    executionTracker.markSessionlessDeviceUse(executionId, args.deviceId);
+  if (args.display === undefined) {
+    markSessionlessDeviceUse(args.deviceId);
+  }
+}
+
+/** The current call now uses the device with no session, so an acquiring session cancels it. */
+function markSessionlessDeviceUse(deviceId: string): void {
+  const execution = currentExecution();
+  if (execution) {
+    executionTracker.markSessionlessDeviceUse(execution.executionId, deviceId);
   }
 }
 

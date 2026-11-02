@@ -156,14 +156,36 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(response.errorCode, "command_failed")
         XCTAssertEqual(response.error, "Snapshot failed")
     }
+
+    func testBackgroundAppReturnsTypedErrorWithoutHierarchy() throws {
+        let source = FakeWatchSource()
+        source.snapshotError = .appNotForeground
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"hierarchy","requestId":"h"}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.type, "error")
+        XCTAssertEqual(response.requestId, "h")
+        XCTAssertEqual(response.errorCode, "app_not_foreground")
+        XCTAssertEqual(
+            response.error,
+            "The watch runner app is not in the foreground; open it to observe its hierarchy."
+        )
+        XCTAssertNil(response.data)
+        let decoded = try JSONDecoder().decode(WatchResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertEqual(decoded.errorCode, "app_not_foreground")
+        XCTAssertNil(decoded.data)
+        XCTAssertEqual(source.calls, [])
+    }
 }
 
 @MainActor
 private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer {
     var calls: [String] = []
     var shouldFail = false
+    var snapshotError: WatchCommandError?
 
     func snapshot() throws -> SdkViewHierarchy {
+        if let snapshotError { throw snapshotError }
         if shouldFail { throw WatchCommandError.commandFailed("Snapshot failed") }
         calls.append("hierarchy")
         return SdkViewHierarchy(

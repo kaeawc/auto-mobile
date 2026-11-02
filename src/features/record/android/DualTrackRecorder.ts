@@ -11,13 +11,17 @@ import type {
 import { GESTURE_THRESHOLDS, pointerOf } from "./types";
 import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
 import { noteExportLoss } from "./penExportWarnings";
+import { buildPenSampleStep } from "./penSampleStep";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverInputNodes } from "./InputNodeDiscovery";
-import type { TouchInputNode } from "./TouchNodeDiscovery";
 import { queryDensity, queryDisplaySize } from "./AxisRanges";
 import { normalizedAxis } from "../normalizedAxis";
-import { ROTATION_UNKNOWN_CAVEAT, ScreenGeometryTimeline } from "./ScreenGeometryTimeline";
+import {
+  ROTATION_UNKNOWN_CAVEAT,
+  ScreenGeometryTimeline,
+  followWithPenTimelines,
+} from "./ScreenGeometryTimeline";
 import {
   createAdbGeometryProbe,
   DisplayGeometryTracker,
@@ -26,6 +30,7 @@ import {
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "../../action/tapAtGesture";
 import { GetEventReader } from "./GetEventReader";
+import { PenHotplugReader } from "./PenHotplugReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 
@@ -346,7 +351,10 @@ export class DualTrackRecorder {
     }
 
     if (gesture.type === "hover") {
-      noteExportLoss(this.exportWarnings, gesture, null);
+      const step = buildPenStep(gesture);
+      noteExportLoss(this.exportWarnings, gesture, step);
+      this.trackGeometrySpan(gesture, step);
+      this.enqueueStep({ resolved: true, step: step ?? undefined });
       return;
     }
 
@@ -512,7 +520,7 @@ export class DualTrackRecorder {
     if (
       step &&
       gesture.downAt !== undefined &&
-      ["tapAt", "swipeOn", "swipeAt"].includes(step.tool)
+      ["tapAt", "swipeOn", "swipeAt", "dragPath", "hoverAt"].includes(step.tool)
     ) {
       this.geometrySpans.set(step, { downAt: gesture.downAt, upAt: gesture.arrivedAt });
     }
@@ -676,7 +684,6 @@ export class DualTrackRecorder {
     if (!node) {
       throw new Error("[DualTrackRecorder] No multitouch input device found on this device");
     }
-    const penNodes = touch ? pen : pen.slice(1);
     const density = await queryDensity(adb);
     const probe = createAdbGeometryProbe(adb);
     const display = await queryDisplaySize(adb);
@@ -688,46 +695,43 @@ export class DualTrackRecorder {
       caveats,
     );
     this.geometry = new DisplayGeometryTracker(timeline, probe, this.timer);
-    const penReaders = followWithPenTimelines(
-      timeline,
-      penNodes,
-      { rotation, display },
-      { startedAt: this.timer.now(), caveats },
-    );
-
-    const reader = new GetEventReader({
+    const primary = new GetEventReader({
       adb,
       touchNode: node,
-      penNodes: penReaders,
       // Each touch is mapped with the geometry in force at its DOWN, not at recording start.
       scaler: timeline,
       density,
       timer: this.timer,
     });
+    const reader = new PenHotplugReader({
+      adb,
+      primary: { node, reader: primary },
+      penNodes: touch ? pen : pen.slice(1),
+      createPenReader: (penNode) => {
+        const [{ scaler, stopFollowing }] = followWithPenTimelines(
+          timeline,
+          [penNode],
+          { rotation, display },
+          { startedAt: this.timer.now(), caveats },
+        );
+        const penReader = new GetEventReader({
+          adb,
+          touchNode: penNode,
+          scaler,
+          density,
+          timer: this.timer,
+        });
+        return {
+          start: (onGesture, onError) => penReader.start(onGesture, onError),
+          stop: () => {
+            penReader.stop();
+            stopFollowing();
+          },
+        };
+      },
+    });
     return withTimelineGeometry(reader, timeline, this.timer);
   }
-}
-
-/**
- * Pen digitizers have their own raw ranges but share the display geometry, so each gets a
- * timeline that mirrors the primary one.
- */
-function followWithPenTimelines(
-  primary: ScreenGeometryTimeline,
-  penNodes: ReadonlyArray<TouchInputNode>,
-  initial: { rotation: number; display: { width: number; height: number } },
-  { startedAt, caveats }: { startedAt: number; caveats: readonly string[] },
-): Array<{ node: TouchInputNode; scaler: ScreenGeometryTimeline }> {
-  return penNodes.map((node) => {
-    const penTimeline = new ScreenGeometryTimeline(
-      { xMin: node.axisXMin, xMax: node.axisXMax, yMin: node.axisYMin, yMax: node.axisYMax },
-      initial,
-      startedAt,
-      caveats,
-    );
-    primary.follow(penTimeline);
-    return { node, scaler: penTimeline };
-  });
 }
 
 /**
@@ -964,12 +968,16 @@ function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): Pla
 
 /**
  * A pen contact replays only as a coordinate step that carries its pointer: an element tap or a
- * swipe direction cannot say "stylus" or "eraser", so either would replay as a finger. A swipe keeps
- * only its endpoints.
+ * swipe direction cannot say "stylus" or "eraser", so either would replay as a finger. A constant-
+ * pressure swipe keeps its endpoints; a stroke retains its sampled pressure path. Hover uses the
+ * existing hoverAt `toolType` field (its strict schema has no `pointer` field).
  */
 function buildPenStep(gesture: GestureEvent): PlanStep | null {
   if (gesture.toolType !== "stylus" && gesture.toolType !== "eraser") {
     return null;
+  }
+  if (gesture.type === "stroke" || gesture.type === "hover") {
+    return buildPenSampleStep(gesture);
   }
   if (gesture.type === "swipe") {
     const endpoints = swipeEndpoints(gesture);

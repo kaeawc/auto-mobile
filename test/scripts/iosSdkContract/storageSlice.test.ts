@@ -11,6 +11,8 @@ import type {
 } from "../../../scripts/ios/sdk-contract/manifest";
 import {
   expectedKeychain,
+  expectedStores,
+  judgeCoreDataQuery,
   judgeStorageReport,
   judgeUnreachableStorageReport,
 } from "../../../scripts/ios/sdk-contract/storageSlice";
@@ -27,8 +29,14 @@ const registered: StorageRegistration = {
   uncoordinatedSuites: [suite],
   hostCoordinatedSuites: [coordinatedSuite],
   coreDataStores: [
-    { identifier: "ContractPrivate-run-1" },
-    { identifier: "ContractShared-run-1", appGroup: suite, coordination: "host_coordinated" },
+    { identifier: "ContractPrivate-run-1", queryable: false },
+    {
+      identifier: "ContractShared-run-1",
+      appGroup: suite,
+      coordination: "host_coordinated",
+      queryable: false,
+    },
+    { identifier: "ContractQuery-run-1", queryable: true },
   ],
   secretWritten: true,
 };
@@ -44,7 +52,7 @@ const defaults: StorageRegistration = {
 
 function manifest(scenario: string, storage?: StorageRegistration): SdkContractManifest {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId: "run-1",
     scenario,
     status: "complete",
@@ -105,6 +113,13 @@ const registeredSdkPayload = {
       coordination: "host_coordinated",
       query: "unsupported",
       reason: "core_data_query_unavailable",
+    },
+    {
+      kind: "core_data",
+      identifier: "ContractQuery-run-1",
+      sharing: "app_private",
+      coordination: "single_process",
+      query: "supported",
     },
   ],
 };
@@ -218,4 +233,89 @@ describe("storage slice (#5164 phase D)", () => {
       expect.objectContaining({ caseName: "unreachable", boundary: "ios-client" }),
     ]);
   });
+});
+
+const queryRows = [
+  ["Apples", "1"],
+  ["Bread", "2"],
+  ["Carrots", "3"],
+  ["Dates", "4"],
+];
+const queryResult = (limited: boolean) => ({
+  columns: ["name", "quantity"],
+  rows: limited ? queryRows.slice(0, 2) : queryRows,
+  truncated: limited,
+});
+
+test("Core Data query support follows each registration's fetcher", () => {
+  expect(expectedStores(registered).databases.map((store) => store.query)).toEqual([
+    "unsupported",
+    "unsupported",
+    "supported",
+  ]);
+});
+
+test("Core Data queries return the seeded rows with and without a limit", () => {
+  expect(judgeCoreDataQuery("limited", { result: queryResult(true) })).toEqual([]);
+  expect(judgeCoreDataQuery("all", { result: queryResult(false) })).toEqual([]);
+  expect(
+    judgeCoreDataQuery("unknown-entity", {
+      error: "The entity is not registered (unknown_core_data_entity).",
+    }),
+  ).toEqual([]);
+  expect(
+    judgeCoreDataQuery("unknown-entity", {
+      result: { success: false, error: "unknown_core_data_entity" },
+    }),
+  ).toEqual([]);
+});
+
+for (const [field, value] of [
+  ["columns", ["quantity", "name"]],
+  ["rows", queryRows],
+  [
+    "rows",
+    [
+      ["Wrong", "1"],
+      ["Bread", "2"],
+    ],
+  ],
+  ["truncated", false],
+] as const) {
+  test(`a wrong limited query ${field} names the SDK adapter (${JSON.stringify(value)})`, () => {
+    expect(
+      judgeCoreDataQuery("limited", { result: { ...queryResult(true), [field]: value } }),
+    ).toEqual([expect.objectContaining({ boundary: "sdk-adapter" })]);
+  });
+}
+
+test("an unlimited query cannot silently truncate or omit rows", () => {
+  expect(judgeCoreDataQuery("all", { result: queryResult(true) })).toEqual([
+    expect.objectContaining({ boundary: "sdk-adapter" }),
+  ]);
+});
+
+test("query endpoint errors and missing output name the MCP surface", () => {
+  for (const outcome of [
+    { error: "offline" },
+    { result: { success: false, error: "disabled" } },
+    {},
+  ]) {
+    expect(judgeCoreDataQuery("limited", outcome)).toEqual([
+      expect.objectContaining({ boundary: "mcp-surface" }),
+    ]);
+  }
+});
+
+test("an unknown entity must fail with the exact SDK error code", () => {
+  for (const outcome of [
+    { result: queryResult(false) },
+    { error: "unknown_core_data_store" },
+    { error: "unknown_core_data_entity_extra" },
+    { result: { message: "unknown_core_data_entity" } },
+  ]) {
+    expect(judgeCoreDataQuery("unknown-entity", outcome)).toEqual([
+      expect.objectContaining({ boundary: "mcp-surface" }),
+    ]);
+  }
 });

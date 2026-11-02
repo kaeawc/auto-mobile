@@ -5,9 +5,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.JsonObject
 
-class FakePlatformModule : PrototypePlatformModule {
-  override val name = "test"
-  override val capability = "prototype_platform_test_v1"
+class FakePlatformModule(override val name: String = "test") : PrototypePlatformModule {
+  override val capability = "prototype_platform_${name}_v1"
   var available: PlatformAvailability = PlatformAvailability.Ready
 
   override fun availability() = available

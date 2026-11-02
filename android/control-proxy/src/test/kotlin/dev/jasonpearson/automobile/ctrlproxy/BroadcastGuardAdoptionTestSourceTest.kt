@@ -230,6 +230,8 @@ internal class BroadcastGuardAdoptionTestSourceTest {
     listOf(
         "CtrlProxy.kt",
         "CtrlProxyActionRouter.kt",
+        "CtrlProxyServiceLifecycle.kt",
+        "CtrlProxyWebSocketTransports.kt",
         "CaCertificateController.kt",
         "SettingsController.kt",
         "PackageController.kt",

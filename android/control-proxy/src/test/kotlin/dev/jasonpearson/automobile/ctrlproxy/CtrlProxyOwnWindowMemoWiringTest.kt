@@ -67,14 +67,16 @@ class CtrlProxyOwnWindowMemoWiringTest {
     @BeforeClass
     @JvmStatic
     fun loadSource() {
+      // The service, plus the prototype setup it delegates to (attach and dismiss callbacks).
       source =
-        KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText()).filterNot {
-          it.isWhitespace()
-        }
+        listOf("CtrlProxy.kt", "CtrlProxyPrototypeSetup.kt")
+          .joinToString("\n") { locateCtrlProxySource(it).readText() }
+          .let(KotlinSourceScan::maskLiteralsAndComments)
+          .filterNot { it.isWhitespace() }
     }
 
-    private fun locateCtrlProxySource(): File {
-      val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+    private fun locateCtrlProxySource(fileName: String): File {
+      val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
       var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
       while (dir != null) {
         for (candidate in
@@ -87,7 +89,7 @@ class CtrlProxyOwnWindowMemoWiringTest {
         }
         dir = dir.parentFile
       }
-      fail("Could not locate CtrlProxy.kt from user.dir=${System.getProperty("user.dir")}")
+      fail("Could not locate $fileName from user.dir=${System.getProperty("user.dir")}")
       error("unreachable")
     }
   }

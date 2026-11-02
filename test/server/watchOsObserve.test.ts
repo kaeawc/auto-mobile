@@ -1,6 +1,8 @@
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
 import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
+import { WatchRunnerError } from "../../src/features/watch/WatchRunnerError";
+import { WATCH_HIERARCHY_UNAVAILABLE_MESSAGE } from "../../src/models/WatchObservation";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -195,6 +197,40 @@ describe("observe on an Apple Watch simulator through the registry", () => {
       { type: "swipe", direction: "up" },
       { type: "home" },
     ]);
+  });
+
+  test("backgrounded runner app returns screenshot-only observations without stale elements", async () => {
+    const runner = new FakeWatchRunnerClient();
+    const { screenshots, writer } = await arrange(runner);
+    const target = { platform: "watchos", deviceId: watch.deviceId };
+    expect(JSON.stringify(toolJson(await call("observe", target)))).toContain("CtrlProxy Watch");
+    runner.failure = new WatchRunnerError(
+      "Watch app is not in the foreground",
+      "app_not_foreground",
+    );
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = toolJson(await call("observe", target));
+      expectScreenshotOnly(result);
+      expect(result.hierarchyUnavailable).toEqual({
+        platform: "watchos",
+        message: WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
+      });
+      expect(writer.written).toContain(String(result.screenshotPath));
+      expect(JSON.stringify(result)).not.toContain("CtrlProxy Watch");
+    }
+    expect(screenshots.captures).toHaveLength(4);
+    runner.failure = undefined;
+    expect(JSON.stringify(toolJson(await call("observe", target)))).toContain("CtrlProxy Watch");
+  });
+
+  test("unexpected runner failures still fail observe", async () => {
+    const runner = new FakeWatchRunnerClient();
+    runner.failure = new WatchRunnerError("Snapshot failed", "command_failed");
+    const { screenshots } = await arrange(runner);
+    await expect(
+      call("observe", { platform: "watchos", deviceId: watch.deviceId }),
+    ).rejects.toThrow("Snapshot failed");
+    expect(screenshots.captures).toEqual([]);
   });
 
   const call = (name: string, args: Record<string, unknown>) =>

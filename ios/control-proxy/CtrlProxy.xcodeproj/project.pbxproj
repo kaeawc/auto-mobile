@@ -184,6 +184,7 @@
 		97680EFAC6E43D5F8ECE6E63 /* RequestAddHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F8DAF2C427F896348E37111 /* RequestAddHighlight.swift */; };
 		97F6378991206EAA06851712 /* HierarchyPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B059B0C297ADFB4ACC7B958 /* HierarchyPair.swift */; };
 		98DAEE393AE211A22F28C5AF /* ElementLocator+Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61419C30153676D5BC6CE0F7 /* ElementLocator+Snapshot.swift */; };
+		9B7D0A96235822072C9EC851 /* TVCommandRouterSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EDB60CC9E73D5B329EFB896 /* TVCommandRouterSmokeTests.swift */; };
 		9CBFAF4E5741E384AB9FDCD6 /* RequestSwipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE75B447A68DDA765666D6CB /* RequestSwipe.swift */; };
 		9D183EBBA3F971C480FE6E30 /* RequestListDatabases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C9249BFE3B0F7337A45255B /* RequestListDatabases.swift */; };
 		9E975A4E407F93A21BD80EB4 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDA90BC9E26458BCE47381F /* SdkDatabaseClient.swift */; };
@@ -456,6 +457,7 @@
 		4CA336452A8061DC2F877FE0 /* HierarchyPairFileRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyPairFileRecorder.swift; sourceTree = "<group>"; };
 		4D00292B2519A871F9517787 /* SdkDatabaseInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkDatabaseInfo.swift; sourceTree = "<group>"; };
 		4DD2EDC3CEC352F034F617F2 /* NWByteChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NWByteChannel.swift; sourceTree = "<group>"; };
+		4EDB60CC9E73D5B329EFB896 /* TVCommandRouterSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVCommandRouterSmokeTests.swift; sourceTree = "<group>"; };
 		4F461D5175E20912E842C753 /* GesturePerforming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerforming.swift; sourceTree = "<group>"; };
 		4F4FAF1DFEC886E79DFF11A8 /* CommandHandler+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+Actions.swift"; sourceTree = "<group>"; };
 		4F66153329C4425D27796D48 /* WireError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireError.swift; sourceTree = "<group>"; };
@@ -918,6 +920,7 @@
 				96652918AA6C8469173F9860 /* CtrlProxyTVUITests.swift */,
 				8CF75E7944BD948C6B711297 /* TVCommandPolicy.swift */,
 				1813D6B9A071E30DEABE0897 /* TVCommandRouter.swift */,
+				4EDB60CC9E73D5B329EFB896 /* TVCommandRouterSmokeTests.swift */,
 				97ABD9B1FC7F0F6F95CC0527 /* TVWebSocketServer.swift */,
 			);
 			name = CtrlProxyTVUITests;
@@ -1650,6 +1653,7 @@
 				61ACDD5AB36F07628FE81A2F /* SystemChromeInfo.swift in Sources */,
 				3274B3EABF00E8465F8D2601 /* TVCommandPolicy.swift in Sources */,
 				E6EF1B4C36F06BD043CF31C6 /* TVCommandRouter.swift in Sources */,
+				9B7D0A96235822072C9EC851 /* TVCommandRouterSmokeTests.swift in Sources */,
 				C6A03EC59746770FEE14E472 /* TVWebSocketServer.swift in Sources */,
 				7BAE3BFAFF6645B4826E8CAC /* TapDiagnostics.swift in Sources */,
 				ED1448A61281AC296AAC8771 /* UIElementInfo.swift in Sources */,

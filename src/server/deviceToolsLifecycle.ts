@@ -24,6 +24,8 @@ import {
 } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import { isTeardownFailure } from "../features/deviceLifecycle/provisioning/provisioning";
+import { forgetFixturesOfDestroyedAvd } from "../daemon/snapshotDeletion";
 import { hasSimctlTimeoutCause } from "../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import {
   BootConcurrencyGate,
@@ -910,12 +912,16 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
       }
     }
     try {
-      return await runDeleteDevice(args, deps, callerSignal, {
+      const response = await runDeleteDevice(args, deps, callerSignal, {
         teardownService,
         lifecycleLease,
         requester,
         internal,
       });
+      if (args.target.platform === "android" && !isTeardownFailure(response)) {
+        await forgetDestroyedAvdFixtures(deps, args.target.stableId);
+      }
+      return response;
     } finally {
       permit?.release();
     }
@@ -947,4 +953,19 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
   };
 
   return { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler };
+}
+
+/** A destroyed AVD's snapshot fixtures are forgotten (#14065); a failure never fails the delete. */
+async function forgetDestroyedAvdFixtures(
+  deps: DeviceToolsDependencies,
+  avdName: string,
+): Promise<void> {
+  try {
+    await (deps.forgetDestroyedAvdFixtures ?? forgetFixturesOfDestroyedAvd)(avdName);
+  } catch (error) {
+    logger.warn(
+      `[deleteDevice] Could not forget the snapshot fixtures of destroyed AVD '${avdName}': ${errorMessage(error)}`,
+      error,
+    );
+  }
 }

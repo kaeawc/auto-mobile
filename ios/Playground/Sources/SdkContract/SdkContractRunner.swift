@@ -27,7 +27,13 @@ enum SdkContractRunner {
 
     static func run(_ launch: SdkContractLaunch) async {
         var manifest = SdkContractManifest(runId: launch.runId, scenario: launch.scenario)
-        let tap = SdkContractBatchTap(belongsToRun: SdkContractBatchTap.networkEvents(forRun: launch.runId))
+        let belongsToRun: @Sendable (SdkEventEnvelope) -> Bool
+        if launch.scenario == "navigation" {
+            belongsToRun = navigationEvent
+        } else {
+            belongsToRun = SdkContractBatchTap.networkEvents(forRun: launch.runId)
+        }
+        let tap = SdkContractBatchTap(belongsToRun: belongsToRun)
         tap.start()
         defer { tap.stop() }
         let server = SdkContractLoopbackServer()
@@ -39,9 +45,17 @@ enum SdkContractRunner {
             try await runScenario(launch, server: server, into: &manifest)
             // Missing expected records are a finding for the harness to attribute,
             // not a fixture failure, so the run still completes.
-            let captured = await waitForCapture(tap, network: manifest.network, faults: manifest.faults)
+            let captured = await waitForCapture(
+                tap, network: manifest.network, faults: manifest.faults, navigation: manifest.navigation
+            )
             manifest.bundleId = captured.bundleId
             manifest.events = captured.events
+            if manifest.navigation != nil {
+                manifest.navigation?.events = captured.events.compactMap { envelope in
+                    guard envelope.eventType == .navigation else { return nil }
+                    return try? JSONDecoder().decode(SdkNavigationEvent.self, from: envelope.payload)
+                }
+            }
             manifest.undecodableBatches = captured.undecodableBatches
             manifest.status = .complete
         } catch {
@@ -65,6 +79,11 @@ enum SdkContractRunner {
         }
     }
 
+    private static func navigationEvent(_ envelope: SdkEventEnvelope) -> Bool {
+        let type = envelope.eventType
+        return type == .navigation || type == .webView
+    }
+
     private static func runScenario(
         _ launch: SdkContractLaunch,
         server: SdkContractLoopbackServer,
@@ -79,6 +98,10 @@ enum SdkContractRunner {
                 let ports = try await server.start()
                 return try await SdkContractNetworkScenario(runId: runId, ports: ports).run()
             }
+        case "navigation":
+            let (capabilities, navigation) = try await SdkContractNavigationScenario().run()
+            manifest.capabilities = capabilities
+            manifest.navigation = navigation
         case capabilityScenario:
             manifest.capabilities = SdkContractCapabilityScenario.run()
         case observationScenario:
@@ -91,7 +114,7 @@ enum SdkContractRunner {
             )
             manifest.observation = host.log()
         case SdkContractStorageScenario.registeredScenario, SdkContractStorageScenario.defaultScenario:
-            manifest.storage = SdkContractStorageScenario.run(scenario: launch.scenario, runId: runId)
+            manifest.storage = try SdkContractStorageScenario.run(scenario: launch.scenario, runId: runId)
         case faultScenario:
             try await waitForMarker(
                 runId: runId,
@@ -139,13 +162,26 @@ enum SdkContractRunner {
     private static func waitForCapture(
         _ tap: SdkContractBatchTap,
         network: [ExpectedNetworkEvent],
-        faults: [FaultCaseObservation]
+        faults: [FaultCaseObservation],
+        navigation: NavigationHostLog?
     )
         async -> SdkContractBatchTap.Snapshot
     {
         let deadline = Date().addingTimeInterval(captureWaitSeconds)
         var snapshot = tap.snapshot()
-        while !hasCapturedCases(snapshot, network: network, faults: faults), Date() < deadline {
+        while Date() < deadline {
+            if let navigation {
+                let expected = navigation.multiScene == "complete" ? 5 : 4
+                if snapshot.events.filter({ $0.eventType == .navigation }).count >= expected,
+                   snapshot.events.contains(where: {
+                       guard $0.eventType == .webView,
+                             let event = try? JSONDecoder().decode(SdkWebViewEvent.self, from: $0.payload)
+                       else { return false }
+                       return event.name == "navigation_finished"
+                   }) { break }
+            } else if hasCapturedCases(snapshot, network: network, faults: faults) {
+                break
+            }
             try? await Task.sleep(nanoseconds: capturePollNanoseconds)
             snapshot = tap.snapshot()
         }

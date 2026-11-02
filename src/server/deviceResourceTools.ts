@@ -26,10 +26,8 @@ import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../utils/deviceTimeouts";
-import {
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  deleteInternalToolParams,
-} from "../daemon/wire/constants";
+import { deleteInternalToolParams } from "../daemon/wire/constants";
+import { currentRequestDeadline } from "../features/toolSelection/toolSelectionContext";
 import {
   trackDeviceAcquisitionReadiness,
   deviceReadinessLockKey,
@@ -51,7 +49,7 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
         const callerSignal = signal ?? getAbortSignal();
         callerSignal?.throwIfAborted();
         const external: Record<string, unknown> = { ...args };
-        const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+        const transportDeadline = currentRequestDeadline()?.deadlineMs;
         deleteInternalToolParams(external);
         const parsed = setDeviceResourcesSchema.parse(external);
         const deps = dependencies();
@@ -101,7 +99,7 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
         const callerSignal = signal ?? getAbortSignal();
         callerSignal?.throwIfAborted();
         const external: Record<string, unknown> = { ...args };
-        const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+        const transportDeadline = currentRequestDeadline()?.deadlineMs;
         deleteInternalToolParams(external);
         const parsed = reconcileDeviceResourcesSchema.parse(external);
         const deps = dependencies();

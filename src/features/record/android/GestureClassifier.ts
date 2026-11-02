@@ -17,6 +17,7 @@ interface ContactInfo {
   unknownAxes?: GestureEvent["unknownAxes"];
   /** Pen/pressure observed over the contact; empty for plain finger contacts. */
   pen: PenObservation;
+  path?: RawTouchFrame["activeSlots"][number]["path"];
 }
 
 interface PenObservation {
@@ -147,6 +148,7 @@ export class GestureClassifier {
       if (existing) {
         existing.lastX = slot.x;
         existing.lastY = slot.y;
+        existing.path = slot.path ?? existing.path;
       }
     }
     for (const slot of frame.activeSlots) {
@@ -162,6 +164,7 @@ export class GestureClassifier {
         }
         existing.lastX = slot.x;
         existing.lastY = slot.y;
+        existing.path = slot.path;
         existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
         observePen(existing.pen, slot, this.tiltAxes);
       } else {
@@ -176,6 +179,7 @@ export class GestureClassifier {
           scaler: this.scalerAt(frame.arrivedAt),
           unknownAxes: slot.unknownAxes,
           pen,
+          path: slot.path,
         });
       }
     }
@@ -235,7 +239,46 @@ export class GestureClassifier {
             durationMs,
             frame.arrivedAt,
           );
-    return { ...gesture, ...this.downStamp(contact), ...this.penFields(contact) };
+    return this.completeContactGesture(contact, gesture, frame.arrivedAt, durationMs);
+  }
+
+  private completeContactGesture(
+    contact: ContactInfo,
+    gesture: GestureEvent,
+    arrivedAt: number,
+    durationMs: number,
+  ): GestureEvent {
+    const pen = this.penFields(contact);
+    if (
+      gesture.type === "swipe" &&
+      contact.pen.toolType === "stylus" &&
+      pen.pressure?.normalized &&
+      this.pressureRange &&
+      (contact.pen.pressureMax - contact.pen.pressureMin) /
+        (this.pressureRange.max - this.pressureRange.min) >=
+        GESTURE_THRESHOLDS.STROKE_PRESSURE_RANGE &&
+      contact.path &&
+      contact.path.length >= 2
+    ) {
+      this.lastTap = null;
+      const range = this.pressureRange;
+      const path = contact.path.map((sample) => ({
+        ...contact.scaler.toScreenPoint(sample.x, sample.y),
+        arrivedAt: sample.arrivedAt,
+        ...(sample.kernelAtMs === undefined ? {} : { kernelAtMs: sample.kernelAtMs }),
+        pressure:
+          Math.round(clamp01((sample.pressure - range.min) / (range.max - range.min)) * 1e4) / 1e4,
+      }));
+      return {
+        type: "stroke",
+        arrivedAt,
+        durationMs,
+        path,
+        ...this.downStamp(contact),
+        ...pen,
+      };
+    }
+    return { ...gesture, ...this.downStamp(contact), ...pen };
   }
 
   /** Optional pen/pressure fields; empty (so the event keeps its finger shape) without pen data. */

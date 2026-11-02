@@ -1,6 +1,6 @@
 import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/wire/constants";
+import { underRequestDeadline } from "../helpers/requestDeadline";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -94,7 +94,7 @@ test("wakeAndUnlock handler forwards the daemon's absolute transport deadline", 
     expect(registered).toBeDefined();
     const handler = deviceAwareHandler(registered!);
     const device: BootedDevice = { deviceId: "fake-unlock", platform: "android", name: "Fake" };
-    await handler(device, { pin: "1234", [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 123_000 });
+    await underRequestDeadline({ deadlineMs: 123_000 }, () => handler(device, { pin: "1234" }));
     await handler(device, {});
     expect(calls).toEqual([
       ["1234", { deadlineMs: 123_000, signal: undefined }],

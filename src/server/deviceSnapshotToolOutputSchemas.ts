@@ -31,5 +31,20 @@ const restoreResultSchema = z
   })
   .passthrough();
 
-/** Capture and restore return different shapes; `success` only appears on restore. */
-export const deviceSnapshotResultSchema = z.union([captureResultSchema, restoreResultSchema]);
+const deleteResultSchema = z
+  .object({
+    message: z.string(),
+    snapshotName: z.string(),
+    deleted: z.boolean(),
+    pendingReclaim: z.literal(true).optional(),
+    deviceId: z.string(),
+    deviceName: z.string(),
+  })
+  .passthrough();
+
+/** Capture, restore and delete return different shapes; `success` only appears on restore. */
+export const deviceSnapshotResultSchema = z.union([
+  captureResultSchema,
+  restoreResultSchema,
+  deleteResultSchema,
+]);

@@ -307,6 +307,13 @@ describe("default sources: the host-wide claims table (#11811 b)", () => {
     expect((await view.ownershipOf(device)).disagreements).toEqual([]);
   });
 
+  test("a live table row with no claim file agrees: step (d) writes no file (#11811 d)", async () => {
+    const view = new DeviceOwnershipView(sourcesFor(true, "same"));
+    const ownership = await view.ownershipOf(device);
+    expect(ownership.liveOwnerPids).toEqual([77]);
+    expect(ownership.disagreements).toEqual([]);
+  });
+
   test("no table means no table records", async () => {
     const sources = createDefaultDeviceOwnershipSources({
       readers: { readLock: () => undefined, isProcessRunning: () => false, listFiles: () => [] },

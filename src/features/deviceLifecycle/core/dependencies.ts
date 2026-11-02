@@ -156,6 +156,11 @@ export interface DeviceToolsDependencies {
    */
   bootCapacityReporters?: Partial<Record<Platform, BootCapacityReporter>>;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
+  /**
+   * Forgets the snapshot fixtures of an Android AVD the delete workflow destroyed (#14065). Defaults
+   * to the daemon's snapshot manager, wired where the workflow runs.
+   */
+  forgetDestroyedAvdFixtures?: (avdName: string) => Promise<unknown>;
   stopPerformanceMonitoring: (deviceId: string) => void;
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
   idGenerator: IdGenerator;

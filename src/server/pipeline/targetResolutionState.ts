@@ -1,8 +1,5 @@
-import {
-  internalExecutionId,
-  internalExecutionStartTime,
-  internalMcpSessionId,
-} from "../internalToolParams";
+import { internalMcpSessionId } from "../internalToolParams";
+import { currentExecution } from "../../features/toolSelection/toolSelectionContext";
 import type { ExecutionTargetInput } from "./executionTarget";
 import type { ConnectedPlatformScan } from "../../daemon/readiness/DeviceReadiness";
 import { BootedDevice, SomePlatform } from "../../models";
@@ -69,7 +66,7 @@ export function createTargetResolution(
     baseSessionUuid: args.sessionUuid,
     mcpSessionId: internalMcpSessionId(args),
     deviceConnectionId: deviceConnectionIdFor(args),
-    execution: executionMetadataFromArgs(args),
+    execution: currentExecutionMetadata(),
     keepScreenAwake: typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined,
     internalCall: args[INTERNAL_NO_DIFF_PARAM] === true,
     providedDeviceId: args.deviceId,
@@ -82,17 +79,17 @@ export function createTargetResolution(
   };
 }
 
-function executionMetadataFromArgs(args: object): TargetResolution["execution"] {
-  const executionId = internalExecutionId(args);
-  const startTime = internalExecutionStartTime(args);
-  if (executionId === undefined || startTime === undefined) {
+function currentExecutionMetadata(): TargetResolution["execution"] {
+  const execution = currentExecution();
+  if (!execution) {
     return undefined;
   }
+  const { executionId, startTime } = execution;
   return {
     executionId,
     startTime,
-    // The forwarded start is a wall-clock stamp; session expiry judges the session-clock
-    // one the tracker took when the call started (#11290).
+    // The start is a wall-clock stamp; session expiry judges the session-clock one the tracker
+    // took when the call started (#11290).
     sessionClockStartTime: executionTracker.getSessionClockStartTime(executionId),
   };
 }
@@ -108,11 +105,10 @@ export function bindingAccessFor(state: TargetResolution) {
 }
 
 export function toolContextSessionOptions(state: TargetResolution) {
-  const { args } = state.input;
   const { platform } = state;
   return {
     keepScreenAwake: state.keepScreenAwake,
-    requestDeadlineMs: resolveTransportDeadlineMs(args),
+    requestDeadlineMs: resolveTransportDeadlineMs(),
     platform: platform === "android" || platform === "ios" ? platform : undefined,
     // #6227: the persisted/daemon-session path must honor a tool's declared
     // deviceReadiness the same way the legacy/no-session path below does

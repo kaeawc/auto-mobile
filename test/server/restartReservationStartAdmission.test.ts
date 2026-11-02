@@ -1,4 +1,5 @@
 import { toolJson } from "../helpers/toolResponse";
+import { withWireDeadline } from "../helpers/requestDeadline";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod/v4";
@@ -231,9 +232,12 @@ describe("start admission and owner resume for restart reservations", () => {
     );
     manager.clearHistory();
     autolockWrites.length = 0;
+    // In-band deadline keys become the ambient request deadline, as at MCP ingress (#15663).
     const call = (name: string, args: Record<string, unknown>, routingSessionUuid?: string) =>
-      runWithToolSelectionContext({ routingSessionUuid }, () =>
-        ToolRegistry.getTool(name)!.handler(args),
+      withWireDeadline(args, (rest) =>
+        runWithToolSelectionContext({ routingSessionUuid }, () =>
+          ToolRegistry.getTool(name)!.handler(rest),
+        ),
       );
     const exact = platform === "android" ? { avdName: device.name } : { udid: device.deviceId };
     const start = (args: Record<string, unknown> = exact, routing?: string) =>

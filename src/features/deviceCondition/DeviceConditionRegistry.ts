@@ -22,9 +22,14 @@ import {
   resolveReadOnlyFilesystemInjector,
   type ReadOnlyFilesystemInjectorDeps,
 } from "./readOnlyFilesystemInjector";
+import {
+  resolveMemoryPressureInjector,
+  type MemoryPressureOptions,
+} from "./memoryPressureInjector";
 import { resolveStorageFaultInjector } from "./storageFaultInjectors";
 import { resolveVehicleStateInjector } from "./vehicleStateInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
+import type { MagiskStubBuilder } from "./magiskStub";
 import {
   deviceConditionInputIsMeaningful,
   type DeviceConditionInput,
@@ -233,13 +238,15 @@ export class DeviceConditionRegistry {
  * `unsupported` rather than silently dropping.
  */
 export function createDefaultInjectorResolver(
-  deps: ReadOnlyFilesystemInjectorDeps = {},
+  deps: ReadOnlyFilesystemInjectorDeps &
+    MemoryPressureOptions & { stubBuilder?: MagiskStubBuilder } = {},
 ): DeviceConditionInjectorResolver {
   const adbFactory = deps.adbFactory ?? defaultAdbClientFactory;
   // Factory-local caches keep injected adb clients separate from the production instances.
   const selinuxOwners = new Map<string, SelinuxOwner>();
   // Shared like selinuxOwners: rootState and integrityState plant the same stubs (#16275).
   const artifactOwners = new Map<string, ArtifactOwner>();
+  const memoryCache = new Map<string, DeviceConditionInjector>();
   const rootCache = new Map<string, DeviceConditionInjector>();
   const integrityCache = new Map<string, DeviceConditionInjector>();
   const readOnlyCache = deps.cache ?? new Map<string, DeviceConditionInjector>();
@@ -247,6 +254,7 @@ export function createDefaultInjectorResolver(
     resolveIosRefusalInjector(device, key) ??
     resolveRootStateInjector(device, key, adbFactory, {
       cache: rootCache,
+      stubBuilder: deps.stubBuilder,
       selinuxOwners,
       artifactOwners,
     }) ??
@@ -254,7 +262,8 @@ export function createDefaultInjectorResolver(
       cache: integrityCache,
       selinuxOwners,
       artifactOwners,
-    });
+    }) ??
+    resolveMemoryPressureInjector(device, key, { ...deps, adbFactory, cache: memoryCache });
   return (owner, key) =>
     owner.device
       ? (resolveFixture(owner.device, key) ??

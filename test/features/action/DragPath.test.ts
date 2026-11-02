@@ -1,7 +1,7 @@
 import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
 import type { GestureStartRequest } from "../../../src/features/observe/android/CtrlProxyGestures";
 import { describe, expect, test } from "bun:test";
-import { DragPath } from "../../../src/features/action/DragPath";
+import { DragPath, type DragPathDependencies } from "../../../src/features/action/DragPath";
 import {
   DRAG_PATH_MAX_TOTAL_MS,
   dragPathTimeline,
@@ -10,10 +10,14 @@ import {
   resolveDragPathPoints,
 } from "../../../src/features/action/dragPathPlan";
 import { runDragPathStroke, type StrokeClient } from "../../../src/features/action/dragPathStroke";
+import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "../../../src/features/action/gestureTransportTimeout";
+import { instrumentationTimeoutMs } from "../../../src/features/action/pointer/instrumentationDispatch";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import { dragPathSchema } from "../../../src/server/dragPathTool";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakePointerInjector } from "../../fakes/FakePointerInjector";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -188,6 +192,22 @@ describe("dragPathTimeline", () => {
 });
 
 describe("assertDragPathFitsRequestBudget", () => {
+  test("accepts the exact gesture ceiling even with dispatch overhead", () => {
+    const overheadMs = instrumentationTimeoutMs(20_000) - 20_000;
+    const neededMs = instrumentationTimeoutMs(20_000) + LONG_PRESS_TIMEOUT_HEADROOM_MS;
+    expect(() => assertDragPathFitsRequestBudget(20_000, undefined, overheadMs)).not.toThrow();
+    expect(() => assertDragPathFitsRequestBudget(20_000, neededMs, overheadMs)).not.toThrow();
+  });
+
+  test("adds dispatch overhead only to the request budget and names the gesture duration", () => {
+    const overheadMs = instrumentationTimeoutMs(15_000) - 15_000;
+    const neededMs = instrumentationTimeoutMs(15_000) + LONG_PRESS_TIMEOUT_HEADROOM_MS;
+    expect(() => assertDragPathFitsRequestBudget(15_000, neededMs - 1, overheadMs)).toThrow(
+      `dragPath duration 15000 ms does not fit the remaining request budget (${neededMs - 1} ms; needs ${neededMs} ms including dispatch headroom)`,
+    );
+    expect(() => assertDragPathFitsRequestBudget(15_000, neededMs, overheadMs)).not.toThrow();
+  });
+
   test("rejects a path over the hard ceiling", () => {
     expect(() => assertDragPathFitsRequestBudget(DRAG_PATH_MAX_TOTAL_MS + 1, undefined)).toThrow(
       "exceeds",
@@ -314,18 +334,85 @@ describe("runDragPathStroke", () => {
 });
 
 describe("DragPath", () => {
-  function create(device: BootedDevice, client: StrokeClient, timer: FakeTimer) {
+  function create(
+    device: BootedDevice,
+    client: StrokeClient,
+    timer: FakeTimer,
+    stylus?: DragPathDependencies["stylus"],
+  ) {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation(100, 200));
     const dragPath = new DragPath(device, new FakeAdbExecutor(), {
       timer,
       androidClient: client,
       idGenerator: new CountingIdGenerator("stroke"),
+      stylus,
     });
     dragPath.window = new FakeWindow();
     dragPath.observeScreen = observe;
     return dragPath;
   }
+
+  test.each([15_000, 20_000])(
+    "validates and dispatches a %i ms stylus path without charging overhead to the limit",
+    async (durationMs) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const { client, frames } = fakeClient(timer);
+      const route = new FakePointerInjector("instrumentation");
+      const drag = create(android, client, timer, {
+        injectors: [route],
+        readEnvironment: async () => ({
+          platform: "android",
+          apiLevel: 34,
+          capabilities: new Set(["stylus_input_v1"]),
+        }),
+      });
+      const points = [
+        { x: 1, y: 1 },
+        ...Array.from({ length: durationMs / 5000 }, (_, i) => ({
+          x: i + 2,
+          y: i + 2,
+          durationMs: 5000,
+        })),
+      ];
+      const options = dragPathSchema.parse({ points, pointer: { toolType: "stylus" } });
+      const result = await drag.execute(options, {
+        deadlineMs: instrumentationTimeoutMs(durationMs) + LONG_PRESS_TIMEOUT_HEADROOM_MS,
+      });
+      expect(result.success).toBe(true);
+      expect(result.plannedDurationMs).toBe(durationMs);
+      expect(route.injected).toHaveLength(1);
+      expect(route.injected[0].features).toEqual({ toolType: "stylus", path: true });
+      expect(route.injected[0].points).toEqual(points);
+      expect(frames).toEqual([]);
+    },
+  );
+
+  test("refuses a 20100 ms stylus path before sending input", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const { client, frames } = fakeClient(timer);
+    const route = new FakePointerInjector("instrumentation");
+    const drag = create(android, client, timer, { injectors: [route] });
+    const options = {
+      points: [
+        { x: 1, y: 1 },
+        ...[5000, 5000, 5000, 5000, 100].map((durationMs, i) => ({
+          x: i + 2,
+          y: i + 2,
+          durationMs,
+        })),
+      ],
+      pointer: { toolType: "stylus" as const },
+    };
+    expect(dragPathSchema.safeParse(options).success).toBe(false);
+    await expect(drag.execute(options)).rejects.toThrow(
+      "dragPath total duration 20100 ms exceeds the 20000 ms limit; shorten the segments or holds. No input was sent.",
+    );
+    expect(route.injected).toEqual([]);
+    expect(frames).toEqual([]);
+  });
 
   test.each([android, ios])(
     "rejects a changed snapshot layout before a drag on $platform",

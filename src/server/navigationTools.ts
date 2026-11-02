@@ -1,7 +1,4 @@
-import {
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-} from "../daemon/wire/constants";
+import { currentRequestDeadline } from "../features/toolSelection/toolSelectionContext";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
@@ -96,8 +93,6 @@ export const exploreSchema = addDeviceTargetingToSchema(
 
 // Export interfaces for type safety
 export interface NavigateToArgs {
-  [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]?: number;
-  [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]?: number;
   targetScreen: string;
   platform?: Platform;
   sessionUuid?: string;
@@ -144,6 +139,18 @@ export interface NavigateToHandlerDependencies {
   navigationManagerFactory?: NavigationManagerFactory;
 }
 
+/** The request deadline a navigateTo's replayed calls run under: its absolute and remaining budget. */
+function replayRequestDeadline(): Pick<NavigateToOptions, "requestDeadline"> {
+  const requestDeadline = currentRequestDeadline();
+  const deadline = {
+    ...(requestDeadline?.timeoutMs !== undefined ? { timeoutMs: requestDeadline.timeoutMs } : {}),
+    ...(requestDeadline?.deadlineMs !== undefined
+      ? { deadlineMs: requestDeadline.deadlineMs }
+      : {}),
+  };
+  return Object.keys(deadline).length > 0 ? { requestDeadline: deadline } : {};
+}
+
 export function createNavigateToHandler({
   navigationManagerFactory = getNavigationManager,
   navigateToFactory = (device, args) =>
@@ -159,12 +166,7 @@ export function createNavigateToHandler({
       throwIfAborted(signal);
       const navigateTo = navigateToFactory(device, args);
       const options: NavigateToOptions = {
-        ...(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
-          ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
-          : {}),
-        ...(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
-          ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
-          : {}),
+        ...replayRequestDeadline(),
         targetScreen: args.targetScreen,
         platform: requireAndroidOrIosPlatform(args.platform || device.platform, "navigateTo"),
         sessionUuid: args.sessionUuid,

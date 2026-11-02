@@ -8,7 +8,9 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/daemon/executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -133,6 +135,24 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
 
     expect(tools.deviceReadiness.getExplicitDevicePin()?.deviceId).toBe(free.deviceId);
   });
+
+  arranged(
+    "a nested selection marks the enclosing execution's sessionless use of the device (#15663)",
+    async () => {
+      const execution = executionTracker.startExecution("executePlan");
+      try {
+        await runWithToolSelectionContext(
+          { execution: sessionExecutionMetadataOf(execution) },
+          () => ToolRegistry.callInternal("setActiveDevice", { deviceId: free.deviceId }),
+        );
+
+        // A session acquiring the device now cancels the plan, as it would at the next device step.
+        expect([...(execution.sessionlessDeviceUse ?? [])]).toEqual([free.deviceId]);
+      } finally {
+        executionTracker.endExecution(execution.id);
+      }
+    },
+  );
 
   arranged(
     "a session acquiring the device during readiness cancels the selection before the pin",

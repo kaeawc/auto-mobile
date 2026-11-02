@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
@@ -17,6 +18,62 @@ class PrototypeCarouselTest {
 
   private fun spec(root: PrototypeNode) =
     PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
+
+  @Test
+  fun `placement defaults to overlay and below reserves space after pages`() {
+    assertFalse(pagerIndicatorBelow(null))
+    assertFalse(pagerIndicatorBelow("over"))
+    assertTrue(pagerIndicatorBelow("below"))
+  }
+
+  @Test
+  fun `below falls back to overlay only when bounded space cannot fit the strip`() {
+    listOf(0f, 1f, 21f, 22f).forEach { assertFalse(pagerIndicatorBelow("below", it)) }
+    listOf(23f, 100f, Float.POSITIVE_INFINITY).forEach {
+      assertTrue(pagerIndicatorBelow("below", it))
+    }
+    assertFalse(pagerIndicatorBelow("over", 22f))
+    assertFalse(pagerIndicatorBelow("over", 23f))
+  }
+
+  @Test
+  fun `a below horizontal pager weights pages only when its height fills`() {
+    val wrap =
+      prototypePageFill(
+        PrototypeStyle(width = PrototypeDimension.Fill, height = PrototypeDimension.Wrap),
+        axis = "horizontal",
+      )
+    val fill =
+      prototypePageFill(
+        PrototypeStyle(width = PrototypeDimension.Wrap, height = PrototypeDimension.Fill),
+        axis = "horizontal",
+      )
+    assertFalse(pagerIndicatorPagesUseWeight(vertical = false, fill = wrap))
+    assertTrue(pagerIndicatorPagesUseWeight(vertical = false, fill = fill))
+  }
+
+  @Test
+  fun `a below vertical pager weights pages only when its width fills`() {
+    val wrap =
+      prototypePageFill(
+        PrototypeStyle(width = PrototypeDimension.Wrap, height = PrototypeDimension.Fill),
+        axis = "vertical",
+      )
+    val fill =
+      prototypePageFill(
+        PrototypeStyle(width = PrototypeDimension.Fill, height = PrototypeDimension.Wrap),
+        axis = "vertical",
+      )
+    assertFalse(pagerIndicatorPagesUseWeight(vertical = true, fill = wrap))
+    assertTrue(pagerIndicatorPagesUseWeight(vertical = true, fill = fill))
+  }
+
+  @Test
+  fun `unbounded space never weights pages even when their default size fills`() {
+    val fill = prototypePageFill(PrototypeStyle())
+    assertFalse(pagerIndicatorPagesUseWeight(vertical = false, fill = fill, bounded = false))
+    assertFalse(pagerIndicatorPagesUseWeight(vertical = true, fill = fill, bounded = false))
+  }
 
   @Test
   fun `a horizontal indicator centres the dots near the bottom edge`() {

@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test as bunTest } from "bun:test";
 import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { RestartScenario, type ShutdownKind } from "../helpers/daemonRestartScenario";
 import { warmedTests } from "../helpers/warmedTests";
@@ -43,9 +43,10 @@ function told(outcome: Outcome): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-// Every scenario runs once in beforeAll, outside the per-test budget, and again as the measured
-// test: the first run of each pays for one-time module work (database template, the Daemon module
-// graph) and for the shutdown, rehydration and reconnect paths while they are still cold.
+// The other describes run each scenario once in beforeAll, outside the per-test budget, and
+// again as the measured test: the first run pays for one-time module work (database template,
+// the Daemon module graph) and cold shutdown, rehydration and reconnect paths. The owner-reconnect
+// matrix instead runs each case's setup in beforeAll and checks its restart window in the test.
 const test = warmedTests(() => {});
 
 describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in flight)", () => {
@@ -55,105 +56,141 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
         const name = `${devices.length} session(s), ${kind}, owner ${
           returnsAtMs === undefined ? "never returns" : `returns at ${returnsAtMs / 1_000} s`
         }`;
-        test(name, async () => {
-          const run = await RestartScenario.start({ devices });
-          try {
-            const sessions: string[] = [];
+        describe(name, () => {
+          let run: RestartScenario | undefined;
+          const sessions: string[] = [];
+          let leftBehind: Array<[unknown, unknown, unknown]> = [];
+          let releaseReasons: string[] = [];
+
+          beforeAll(async () => {
+            run = await RestartScenario.start({ devices });
             for (const device of devices) {
               sessions.push(await run.scenario.acquire(device));
             }
             await run.idle(3_000);
             run.ownerAway();
             await run.end(kind);
+            const scenario = run.scenario;
+            leftBehind = (
+              await Promise.all(sessions.map((session) => scenario.repository.getSession(session)))
+            ).map((row) => [row?.status, row?.release_reason, row?.released_at_ms]);
+            releaseReasons = scenario.releases.map((release) => release.reason);
             await run.startSuccessor();
-            const other = run.scenario.addProxy({ token: "another-client" });
+          });
 
-            let lapsedAt: number | undefined;
-            for (let second = 0; second <= 14; second++) {
-              await run.idleUntilSinceRestart(second * 1_000);
-              if (returnsAtMs === second * 1_000) {
-                run.ownerReturns();
-              }
-              const snapshots = await Promise.all(
-                sessions.map((session, index) => run.snapshot(session, devices[index]!)),
-              );
-              const held = snapshots.filter((snapshot) => snapshot.held).length;
-              // Every surface agrees on every device at this instant.
-              for (const [index, snapshot] of snapshots.entries()) {
-                expect(snapshot.pool).toEqual(
-                  snapshot.held
-                    ? { status: "busy", sessionId: sessions[index]! }
-                    : { status: "idle", sessionId: null },
-                );
-                expect(snapshot.row?.released).toBe(!snapshot.held);
-              }
-              expect(snapshots[0]!.stats).toEqual({
-                idle: devices.length - held,
-                assigned: held,
-              });
-              expect(await run.availableDevices()).toBe(devices.length - held);
-              if (second < 8) {
-                // Inside lease + grace the session is the owner's, returned or not.
-                expect(held).toBe(sessions.length);
-              }
-              if (second === 3) {
-                // No other client takes the device in the window.
-                const taken = await settled(other.callTool("getAndroid", { deviceId: A }));
-                expect(Reflect.get(Object(taken.error), "code")).toBe(
-                  "device_owned_by_other_session",
-                );
-              }
-              if (held === 0 && lapsedAt === undefined) {
-                lapsedAt = second * 1_000;
-              }
-            }
+          afterAll(async () => {
+            await run?.stop();
+          });
 
-            // At 7 s recovery has handed over, but the plain proxy's probe reclaims from the
-            // successor inside its lease + grace owner window, keeping every session (#12282).
-            const returnedInsideRecovery = returnsAtMs === 1_000;
-            if (returnedInsideRecovery) {
-              expect(lapsedAt).toBeUndefined();
-              for (const session of sessions) {
-                expect(await run.ownerControlCall(session)).toBe("ok");
-              }
-              expect(run.scenario.driven.map((ran) => ran.sessionUuid)).toEqual(sessions);
-              return;
+          bunTest(name, async () => {
+            if (run === undefined) {
+              throw new Error("restart scenario did not start");
             }
-            if (returnsAtMs === 7_000) {
-              expect(lapsedAt).toBeUndefined();
-            }
-            if (returnsAtMs === undefined) {
-              expect(lapsedAt).toBe(RELEASED_BY_MS);
-            }
-            run.ownerReturns();
-            if (lapsedAt === undefined) {
-              // A return between grace and the scan revived it: then the owner's call must work.
-              for (const session of sessions) {
-                expect(await run.ownerControlCall(session)).toBe("ok");
-              }
-              return;
-            }
-            expect(lapsedAt).toBeLessThanOrEqual(RELEASED_BY_MS);
-            for (const [index, session] of sessions.entries()) {
-              const row = await run.scenario.repository.getSession(session);
-              expect(row?.release_reason).toBe("rehydration-owner-timeout");
-              // The proxy agrees with the daemon: terminal for this session, nothing driven.
-              expect(await run.ownerControlCall(session)).toMatch(/^threw: Daemon(Session|Bound)/);
-              // The device is free right after the window lapses.
-              const taken = await settled(
-                other.callTool("getAndroid", { deviceId: devices[index]! }),
-              );
-              expect(told(taken)).toMatch(/^result /);
-            }
-            expect(run.scenario.driven).toEqual([]);
-          } finally {
-            await run.stop();
-          }
+            await checkRestartWindow(run, kind, devices, sessions, returnsAtMs, {
+              leftBehind,
+              releaseReasons,
+            });
+          });
         });
       }
     }
   }
 });
+
+async function checkRestartWindow(
+  run: RestartScenario,
+  kind: ShutdownKind,
+  devices: string[],
+  sessions: string[],
+  returnsAtMs: number | undefined,
+  firstDaemon: { leftBehind: Array<[unknown, unknown, unknown]>; releaseReasons: string[] },
+): Promise<void> {
+  // A clean stop releases every session as recoverable; a crash writes nothing.
+  expect(firstDaemon.leftBehind).toEqual(
+    sessions.map(() =>
+      kind === "clean" ? ["released", "daemon-shutdown", 3_000] : ["active", null, null],
+    ),
+  );
+  expect(firstDaemon.releaseReasons).toEqual(
+    kind === "clean" ? sessions.map(() => "daemon-shutdown") : [],
+  );
+  const other = run.scenario.addProxy({ token: "another-client" });
+
+  let lapsedAt: number | undefined;
+  for (let second = 0; second <= 14; second++) {
+    await run.idleUntilSinceRestart(second * 1_000);
+    if (returnsAtMs === second * 1_000) {
+      run.ownerReturns();
+    }
+    const snapshots = await Promise.all(
+      sessions.map((session, index) => run.snapshot(session, devices[index]!)),
+    );
+    const held = snapshots.filter((snapshot) => snapshot.held).length;
+    // Every surface agrees on every device at this instant.
+    for (const [index, snapshot] of snapshots.entries()) {
+      expect(snapshot.pool).toEqual(
+        snapshot.held
+          ? { status: "busy", sessionId: sessions[index]! }
+          : { status: "idle", sessionId: null },
+      );
+      expect(snapshot.row?.released).toBe(!snapshot.held);
+    }
+    expect(snapshots[0]!.stats).toEqual({
+      idle: devices.length - held,
+      assigned: held,
+    });
+    expect(await run.availableDevices()).toBe(devices.length - held);
+    if (second < 8) {
+      // Inside lease + grace the session is the owner's, returned or not.
+      expect(held).toBe(sessions.length);
+    }
+    if (second === 3) {
+      // No other client takes the device in the window.
+      const taken = await settled(other.callTool("getAndroid", { deviceId: A }));
+      expect(Reflect.get(Object(taken.error), "code")).toBe("device_owned_by_other_session");
+    }
+    if (held === 0 && lapsedAt === undefined) {
+      lapsedAt = second * 1_000;
+    }
+  }
+
+  // At 7 s recovery has handed over, but the plain proxy's probe reclaims from the
+  // successor inside its lease + grace owner window, keeping every session (#12282).
+  const returnedInsideRecovery = returnsAtMs === 1_000;
+  if (returnedInsideRecovery) {
+    expect(lapsedAt).toBeUndefined();
+    for (const session of sessions) {
+      expect(await run.ownerControlCall(session)).toBe("ok");
+    }
+    expect(run.scenario.driven.map((ran) => ran.sessionUuid)).toEqual(sessions);
+    return;
+  }
+  if (returnsAtMs === 7_000) {
+    expect(lapsedAt).toBeUndefined();
+  }
+  if (returnsAtMs === undefined) {
+    expect(lapsedAt).toBe(RELEASED_BY_MS);
+  }
+  run.ownerReturns();
+  if (lapsedAt === undefined) {
+    // A return between grace and the scan revived it: then the owner's call must work.
+    for (const session of sessions) {
+      expect(await run.ownerControlCall(session)).toBe("ok");
+    }
+    return;
+  }
+  expect(lapsedAt).toBeLessThanOrEqual(RELEASED_BY_MS);
+  for (const [index, session] of sessions.entries()) {
+    const row = await run.scenario.repository.getSession(session);
+    expect(row?.release_reason).toBe("rehydration-owner-timeout");
+    // The proxy agrees with the daemon: terminal for this session, nothing driven.
+    expect(await run.ownerControlCall(session)).toMatch(/^threw: Daemon(Session|Bound)/);
+    // The device is free right after the window lapses.
+    const taken = await settled(other.callTool("getAndroid", { deviceId: devices[index]! }));
+    expect(told(taken)).toMatch(/^result /);
+  }
+  expect(run.scenario.driven).toEqual([]);
+}
 
 describe("restart matrix: a plan's derived label session, an observer and a viewer", () => {
   for (const kind of KINDS) {

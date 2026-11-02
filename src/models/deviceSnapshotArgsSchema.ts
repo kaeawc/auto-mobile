@@ -56,6 +56,12 @@ export const deviceSnapshotRestoreArgsShape = {
   ...deviceSnapshotCommonShape,
 };
 
+/** Delete a snapshot by name (#14065): the name, and the VM console timeout its delete uses. */
+export const deviceSnapshotDeleteArgsShape = {
+  snapshotName: deviceSnapshotRestoreArgsShape.snapshotName,
+  vmSnapshotTimeoutMs: deviceSnapshotCommonShape.vmSnapshotTimeoutMs,
+};
+
 const deviceSnapshotCaptureArgsSchema = z.object(deviceSnapshotCaptureArgsShape);
 const deviceSnapshotRestoreArgsSchema = z.object(deviceSnapshotRestoreArgsShape);
 

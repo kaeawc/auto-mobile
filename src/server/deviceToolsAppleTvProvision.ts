@@ -68,7 +68,6 @@ export async function provisionAppleTvDevice(
     spec: args.device.spec,
   };
   return await runWithAcquisitionDeadline(
-    rawArgs,
     startedAtMs + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS),
     signal,
     {

@@ -1,7 +1,22 @@
-import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  type RequestDeadline,
+  type ToolSelectionContext,
+} from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import type { InternalToolCallOptions, InternalToolInvocationContext } from "../toolRegistryTypes";
-import { applyInheritedPlanRequestParams } from "./advertisedSchema";
+import { withoutPlanSuppliedDeadlineParams } from "./advertisedSchema";
+
+/**
+ * Inside a plan every internal call runs under the request's deadline, as plan steps always have;
+ * anything else gets only the deadline its caller passes (#15663).
+ */
+function internalCallRequestDeadline(
+  context: ToolSelectionContext | undefined,
+  options: InternalToolCallOptions,
+): RequestDeadline | undefined {
+  return context?.planRequest ? context.requestDeadline : options.requestDeadline;
+}
 
 /**
  * What an internal call (`callInternal`: a plan step, a nested tool) runs under: its arguments with
@@ -12,9 +27,8 @@ export function internalToolInvocationContext(
   options: InternalToolCallOptions,
 ): InternalToolInvocationContext {
   const context = getToolSelectionContext();
-  const request = context?.planRequest;
-  if (request) {
-    args = applyInheritedPlanRequestParams(args, request);
+  if (context?.planRequest) {
+    args = withoutPlanSuppliedDeadlineParams(args);
   }
   // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
   // so a plan step or navigation replay routes to the same derived/label
@@ -27,6 +41,7 @@ export function internalToolInvocationContext(
   return {
     args: sessionUuid && args.sessionUuid !== sessionUuid ? { ...args, sessionUuid } : args,
     tapAtPlanContext: options.tapAtPlanContext,
+    requestDeadline: internalCallRequestDeadline(context, options),
     routingSessionUuid: sessionUuid,
     toolSelectionProfileUuid: context?.toolSelectionProfileUuid,
     sessionToolSelectionService:

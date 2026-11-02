@@ -313,6 +313,9 @@ internal object PrototypePlatformRules {
   }
 }
 
+/** A module's contract-defined sliding-window admission budget. */
+data class PrototypeRateLimit(val calls: Int, val windowMs: Long)
+
 /** Checks resolved runtime arguments against the same contract rules as literal arguments. */
 object PrototypePlatformCalls {
   val maxInFlight: Int =
@@ -322,6 +325,24 @@ object PrototypePlatformCalls {
       .int
   val defaultTimeoutMs: Int =
     PrototypeSpecContract.limits.getValue("DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS").jsonPrimitive.int
+
+  /** Null for modules without a positive integer rate-limit contract. */
+  fun rateLimit(module: String): PrototypeRateLimit? {
+    val limit = PrototypePlatformModules.module(module)?.member("rateLimit") ?: return null
+    val calls =
+      (limit["calls"] as? JsonPrimitive)
+        ?.takeUnless { it.isString }
+        ?.content
+        ?.toIntOrNull()
+        ?.takeIf { it > 0 } ?: return null
+    val windowMs =
+      (limit["windowMs"] as? JsonPrimitive)
+        ?.takeUnless { it.isString }
+        ?.content
+        ?.toLongOrNull()
+        ?.takeIf { it > 0 } ?: return null
+    return PrototypeRateLimit(calls, windowMs)
+  }
 
   fun eventOwner(name: String): String? = eventModule(name)
 

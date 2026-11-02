@@ -88,11 +88,64 @@ class PrototypeRenderMapperTest {
         )
         .opaque,
     )
-    val sheet =
-      spec(PrototypeTextNode(text = "sheet"))
-        .copy(window = PrototypeWindow(PrototypeSheetPlacement("bottom", 200.0)))
-    assertNull(mapPrototypeSpec(sheet).root.style.source.width)
-    assertNull(mapPrototypeSpec(sheet).root.style.source.height)
+  }
+
+  @Test
+  fun `sheet roots fill both axes in direct and cached mapping`() {
+    val children = listOf(PrototypeTextNode(text = "Sheet title"))
+    val roots =
+      listOf(
+        PrototypeCardNode(children = children),
+        PrototypeColumnNode(children = children),
+      )
+    for (root in roots) {
+      val mapper = PrototypeRenderMapper()
+      val input = spec(root)
+      for (placement in
+        listOf(
+          PrototypeSheetPlacement("bottom", 340.0),
+          PrototypeSheetPlacement("top", 340.0),
+          PrototypeFloatingPlacement("center", PrototypeOffset(0.0, 0.0)),
+          PrototypeFullscreenPlacement(),
+          PrototypeSheetPlacement("bottom", 340.0),
+        )) {
+        val placed = input.copy(window = PrototypeWindow(placement))
+        val direct = mapPrototypeSpec(placed)
+        val cached = mapper.map(placed, emptyMap())
+        val expected =
+          if (placement is PrototypeFloatingPlacement) null else PrototypeDimension.Fill
+        assertEquals(expected, direct.root.style.source.width)
+        assertEquals(expected, direct.root.style.source.height)
+        assertEquals(direct, cached)
+        assertNull(direct.root.children.single().style.source.width)
+        assertNull(direct.root.children.single().style.source.height)
+      }
+    }
+  }
+
+  @Test
+  fun `sheet root preserves explicit and conditional dimensions`() {
+    val condition = PrototypeCondition("a", PrototypeScalar.BooleanValue(true))
+    val root =
+      PrototypeColumnNode(
+        style = PrototypeStyle(width = PrototypeDimension.Dp(117.0)),
+        styleWhen =
+          listOf(PrototypeStyleWhen(condition, PrototypeStyle(height = PrototypeDimension.Wrap))),
+        children = listOf(PrototypeTextNode(text = "body")),
+      )
+    val input = spec(root).copy(window = PrototypeWindow(PrototypeSheetPlacement("bottom", 340.0)))
+    val mapper = PrototypeRenderMapper()
+    for (active in listOf(false, true, false)) {
+      val changed = input.copy(state = mapOf("a" to PrototypeScalar.BooleanValue(active)))
+      val direct = mapPrototypeSpec(changed)
+      val cached = mapper.map(changed, emptyMap())
+      assertEquals(PrototypeDimension.Dp(117.0), direct.root.style.source.width)
+      assertEquals(
+        if (active) PrototypeDimension.Wrap else PrototypeDimension.Fill,
+        direct.root.style.source.height,
+      )
+      assertEquals(direct, cached)
+    }
   }
 
   @Test

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeFullscreenPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypeSheetPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStrings
@@ -112,7 +113,9 @@ internal class PrototypeRenderMapper(
             data = resolved.data,
             derive = resolved.derive.orEmpty(),
             formatter = formatter,
-            fullscreenRoot = resolved.window.placement is PrototypeFullscreenPlacement,
+            fillWindowRoot =
+              resolved.window.placement is PrototypeFullscreenPlacement ||
+                resolved.window.placement is PrototypeSheetPlacement,
           )
         val model = prototypeRenderModel(resolved, mapping.map(resolved.root, "root"))
         cache = static

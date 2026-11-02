@@ -1,4 +1,3 @@
-import { internalExecutionId, internalExecutionStartTime } from "../internalToolParams";
 import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
@@ -35,7 +34,9 @@ import {
   TOOL_CALL_REMEDY,
 } from "../../daemon/inputDeviceOwnership";
 import {
+  currentExecution,
   getToolSelectionContext,
+  runWithToolSelectionContext,
   type ToolCallRecordingContext,
 } from "../../features/toolSelection/toolSelectionContext";
 import {
@@ -93,29 +94,14 @@ export function markDeviceCallKind(executionId: string, toolName: string, readOn
   }
 }
 
-function withAmbientDeviceContext(
+/** The ambient routing session, re-injected so a nested call keeps the outer call's (#4611). */
+function withAmbientRoutingSession(
   args: Record<string, unknown>,
   routingSessionUuid: string | undefined,
-  execution: { executionId: string; startTime: number } | undefined,
 ): Record<string, unknown> {
-  const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
-  const needsExecution =
-    execution &&
-    (internalExecutionId(args) !== execution.executionId ||
-      internalExecutionStartTime(args) !== execution.startTime);
-  if (!needsRoutingSession && !needsExecution) {
-    return args;
-  }
-  return {
-    ...args,
-    ...(needsRoutingSession ? { sessionUuid: routingSessionUuid } : {}),
-    ...(needsExecution
-      ? {
-          __executionId: execution!.executionId,
-          __executionStartTime: execution!.startTime,
-        }
-      : {}),
-  };
+  return routingSessionUuid && args.sessionUuid !== routingSessionUuid
+    ? { ...args, sessionUuid: routingSessionUuid }
+    : args;
 }
 
 /**
@@ -146,12 +132,38 @@ export function deviceAwareHandlerArgs(
     !args.sessionUuid
       ? undefined
       : context?.routingSessionUuid;
-  const handlerArgs = withAmbientDeviceContext(
+  return withAmbientRoutingSession(
     withoutBlankSessionUuid(args),
     nonBlankSessionUuid(routingSession),
-    context?.execution,
   );
-  return handlerArgs;
+}
+
+/**
+ * When the outermost device-aware call of an execution resolved no session, clear the execution's
+ * resolved autolock session. A call nested in a device-aware dispatch leaves it as it is.
+ */
+export function clearSessionlessAutolockAttribution(
+  context: ReturnType<typeof getToolSelectionContext>,
+  resolvedSessionUuid: string | undefined,
+): void {
+  if (context?.execution && !context.deviceAwareDispatch && !resolvedSessionUuid) {
+    executionTracker.setResolvedAutolockSessionUuid(context.execution.executionId, undefined);
+  }
+}
+
+/**
+ * The request deadline a device-aware handler runs under (#15663): the inherited one, measured
+ * from the current execution's start, which the deadline fallback (`timeout + start`) reads.
+ */
+export function runWithDeviceCallRequestDeadline<T>(
+  context: ReturnType<typeof getToolSelectionContext>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const requestDeadline = context?.requestDeadline;
+  const startTime = context?.execution?.startTime;
+  return requestDeadline && startTime !== undefined && requestDeadline.startTime !== startTime
+    ? runWithToolSelectionContext({ requestDeadline: { ...requestDeadline, startTime } }, fn)
+    : fn();
 }
 
 /**
@@ -615,9 +627,10 @@ export async function invokeResolvedDeviceHandler(input: {
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
+  const execution = currentExecution();
   deviceActionClock.recordDispatch(
-    internalExecutionId(args),
-    internalExecutionStartTime(args),
+    execution?.executionId,
+    execution?.startTime,
     target.device.deviceId,
   );
   const withdraw = navigationRecorder.record(name, args, target.device, {

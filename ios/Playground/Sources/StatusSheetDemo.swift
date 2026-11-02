@@ -16,6 +16,7 @@ struct StatusSheetDemo: View {
                 TextEditor(text: $notes)
                     .frame(height: 100)
                     .accessibilityIdentifier("status.textEditor")
+                    .accessibilityLabel("Notes")
 
                 SecureField("Secure field", text: $secureValue)
                     .accessibilityIdentifier("status.secureField")

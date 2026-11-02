@@ -9,6 +9,11 @@ import okhttp3.OkHttpClient
 
 class App : Application(), SingletonImageLoader.Factory {
 
+  override fun onCreate() {
+    super.onCreate()
+    registerComponentCallbacks(TrimMemoryLogger())
+  }
+
   override fun newImageLoader(context: coil3.PlatformContext): ImageLoader {
     val clientBuilder = OkHttpClient.Builder()
 

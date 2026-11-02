@@ -57,6 +57,7 @@ export const rotaryScrollResultSchema = z
       }),
     ),
     reason: z.string().optional(),
+    warningCode: z.enum(["not_watch", "traits_unavailable"]).optional(),
     warning: z
       .string()
       .optional()
@@ -124,16 +125,28 @@ export function traitsWatchCheck(traits: DeviceTraits, adbFactory: AdbClientFact
 const defaultWatchCheck = traitsWatchCheck(defaultDeviceTraits, defaultAdbClientFactory);
 
 /** Most phones ignore rotary events, so a scroll on one is worth flagging (#14902). */
-export function watchWarning(watch: boolean | undefined): string | undefined {
+export function watchWarning(
+  watch: boolean | undefined,
+):
+  | Required<Pick<z.output<typeof rotaryScrollResultSchema>, "warningCode" | "warning">>
+  | undefined {
   if (watch === true) {
     return undefined;
   }
   return watch === false
-    ? "This device does not announce a watch build (ro.build.characteristics); most phones and tablets ignore rotary input."
-    : "Could not read the device traits to confirm this is a watch; rotary input may be ignored.";
+    ? {
+        warningCode: "not_watch",
+        warning:
+          "This device is not a Wear OS watch. Rotary input is sent, but phones usually ignore it. Use swipeOn for lists on this device, or run the test on a Wear OS image such as wearos_small_round.",
+      }
+    : {
+        warningCode: "traits_unavailable",
+        warning:
+          "Could not read the device traits, so the watch status is unknown. Check the device with observe or listDevices (formFactor) before trusting a rotary result.",
+      };
 }
 
-function payload(result: RotaryScrollResult, warning: string | undefined) {
+function payload(result: RotaryScrollResult, warning: ReturnType<typeof watchWarning>) {
   return {
     success: result.success,
     message: result.success
@@ -143,7 +156,7 @@ function payload(result: RotaryScrollResult, warning: string | undefined) {
     ...(result.method ? { method: result.method } : {}),
     attempts: result.attempts,
     ...(result.reason ? { reason: result.reason } : {}),
-    ...(warning ? { warning } : {}),
+    ...warning,
   };
 }
 

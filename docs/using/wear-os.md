@@ -64,8 +64,9 @@ expect to move. It is not listed by default; enable it with `setToolEnabled` (se
   and after each reads the screen back. `success` is `true` once one of them changed the screen;
   `method` names it and `attempts` lists every try.
 - A list already at its end does not change, so it reports `success: false`.
-- On a device that does not announce a watch build the input is still sent, and the result carries
-  a `warning`, since most phones ignore rotary input.
+- On a device that is not a Wear OS watch the input is still sent, and the result carries
+  `warningCode: "not_watch"` and a `warning`: phones usually ignore rotary input, so use `swipeOn`
+  for lists on this device or run the test on a Wear OS image such as `wearos_small_round`.
 
 Which of the three methods works on a given image is unverified; check `attempts`.
 

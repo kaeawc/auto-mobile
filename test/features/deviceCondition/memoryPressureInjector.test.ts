@@ -3,6 +3,8 @@ import { createDefaultInjectorResolver } from "../../../src/features/deviceCondi
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -531,8 +533,13 @@ test("default binary directory follows the package root and the injected environ
     const applied = await injector.apply("on");
     expect(paths).toEqual([
       directory
-        ? "/custom pressure/x86_64/lmk_pressure"
-        : new URL("../../../build/lmk-pressure/x86_64/lmk_pressure", import.meta.url).pathname,
+        ? join(directory, "x86_64", "lmk_pressure")
+        : resolve(
+            dirname(fileURLToPath(import.meta.url)),
+            "../../../build/lmk-pressure",
+            "x86_64",
+            "lmk_pressure",
+          ),
     ]);
     await applied.reset?.();
   }

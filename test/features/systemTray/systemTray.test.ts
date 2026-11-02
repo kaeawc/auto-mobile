@@ -57,6 +57,9 @@ import { applyIosLockStateReading } from "../../../src/features/observe/ios/IosL
 import type { SystemTrayObserver } from "../../../src/features/systemTray/helpers/dependencies";
 import { ios26SettingsClosed, ios26TrayOpenSettings } from "./iosTrayObservationFixture";
 import { SystemTray } from "../../../src/features/systemTray/SystemTray";
+import { createNotificationUIDetector } from "../../../src/features/systemTray/createNotificationUIDetector";
+import { getSystemTrayDependencies } from "../../../src/features/systemTray/helpers/dependencies";
+import { hasMatchableNotificationContent } from "../../../src/features/systemTray/helpers/runtime";
 
 isolateToolRegistry();
 
@@ -484,6 +487,40 @@ describe("systemTray post-tap observation", () => {
 describe("systemTray find", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
+  });
+
+  test("matches Android notification shade rows over the keyguard", async () => {
+    const tray = createTrayHierarchy("Locked Notification");
+    const observation: ObserveResult = {
+      ...createObservation({
+        ...tray,
+        hierarchy: {
+          node: {
+            $: {
+              "resource-id": "com.android.systemui:id/notification_panel",
+              packageName: SYSTEM_TRAY_PACKAGE,
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            },
+            node: [tray.hierarchy.node!],
+          },
+        },
+      }),
+      deviceLock: { locked: true, keyguardShowing: true },
+    };
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      adbFactory: () => new SequencedFakeAdbExecutor([1000]),
+      observeScreenFactory: () => new SequencedObserveScreen([observation]),
+    });
+
+    const detector = createNotificationUIDetector(device, getSystemTrayDependencies);
+    expect(hasMatchableNotificationContent(detector, observation)).toBe(true);
+
+    const result = await waitForNotificationMatch(device, { title: "Locked Notification" }, [], {
+      awaitTimeoutMs: 0,
+    });
+    expect(result.match).not.toBeNull();
+    expect(result.match?.candidate.node.$?.text).toBe("Locked Notification");
   });
 
   test("waits for the tray to open before matching", async () => {

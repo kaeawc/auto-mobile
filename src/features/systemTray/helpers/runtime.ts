@@ -469,7 +469,8 @@ const buildUnmatchedNotificationDiagnostics = (
 /**
  * Whether the observation's hierarchy holds notification rows that may be matched. An iOS 26.5
  * tray over an app is detected from lock flags alone and the hierarchy stays the unchanged app
- * tree, so its nodes are app content, never notifications.
+ * tree, so its nodes are app content, never notifications. This exclusion applies only to iOS;
+ * Android shades over the keyguard can contain readable notification rows.
  */
 export const hasMatchableNotificationContent = (
   detector: NotificationUIDetector,
@@ -480,6 +481,7 @@ export const hasMatchableNotificationContent = (
     return false;
   }
   return !(
+    detector.device.platform === "ios" &&
     hasIosAppNotificationCoverSheet(viewHierarchy, deviceLock) &&
     !hasIosCoverSheetNotificationCenter(viewHierarchy)
   );

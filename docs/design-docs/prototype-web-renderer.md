@@ -1,7 +1,41 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers its device frame registry.
+document covers the still renderer and the device frame registry.
+
+## Still renderer
+
+`renderPrototypeStill(spec, {frame, orientation, mode})` in `src/features/prototype/web/webStill.ts`
+draws the spec as a still screen and returns an element tree plus `unsupportedNodes`. It renders on
+the host, so the page's script only switches between views it was given and never runs spec logic.
+
+- **Input.** The spec after component expansion, with its own `state` and `data`. The stack shows
+  its `start` screen. No action, timer or `request` runs.
+- **Text.** A bare `{key}` reads spec state, then a top-level `derive` entry. Repeat placeholders
+  bind each item, including the repeat's own `derive` fields. Formatting uses `en-US`, `UTC` and a
+  caller-supplied clock (default 0), so derived relative times are fixed.
+- **Conditions.** `visibleWhen` evaluates `key`, `platform`, `all`, `any` and `not` against spec
+  state. A condition the still cannot decide (data paths, validity, string operators) keeps the
+  node visible rather than hiding it on a guess.
+- **Layout.** Rows and columns are flex lines, a box is a one-cell grid aligned by
+  `style.alignment`, and stack screens fill the stack. `fill`, `{dp}`, `weight`, padding (logical
+  start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
+- **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
+  accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
+  roles unpainted. Unpainted screen regions show a checkerboard.
+- **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
+  `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
+  `listItem`. Icons draw as a tinted square titled with the icon name, because the glyph set is not
+  inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  dashed placeholder labelled with its type and id, with reason `unsupportedType`.
+- **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
+  generic status bar, the cutout and the navigation handle. Landscape swaps the screen size, uses
+  the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
+  landscape top inset is 0 (an iPhone) draws no status bar in landscape. Safe areas are exposed as
+  `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`; a top app bar pads by
+  `--safe-top`.
+- **Determinism.** Serialization writes attributes and style properties in sorted order, so the
+  same input renders the same bytes. Event-handler attributes are rejected.
 
 ## Device frame registry
 

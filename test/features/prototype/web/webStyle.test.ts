@@ -1,0 +1,77 @@
+import { expect, test } from "bun:test";
+import { prototypeRolePalette } from "../../../../src/features/prototype/prototypeContrast";
+import { boxLayoutCss, lineCss, nodeCss } from "../../../../src/features/prototype/web/webStyle";
+
+const context = { mode: "light" as const, palette: prototypeRolePalette({}, "light") };
+
+test("fill takes the remaining main axis and stretches the cross axis", () => {
+  expect(nodeCss({ height: "fill" }, { ...context, parentAxis: "column" })).toMatchObject({
+    flex: "1 1 auto",
+  });
+  expect(nodeCss({ width: "fill" }, { ...context, parentAxis: "column" })).toMatchObject({
+    "align-self": "stretch",
+    width: "100%",
+  });
+});
+
+test("a dp size is fixed and does not shrink", () => {
+  expect(nodeCss({ width: { dp: 40 } }, context)).toMatchObject({
+    width: "40px",
+    "flex-shrink": "0",
+  });
+});
+
+test("weight shares the parent's main axis", () => {
+  expect(nodeCss({ weight: 2 }, { ...context, parentAxis: "row" })).toMatchObject({
+    flex: "2 2 0",
+    "min-width": "0",
+  });
+});
+
+test("corner radius accepts numbers, shape tokens and per-corner objects", () => {
+  expect(nodeCss({ cornerRadius: "medium" }, context)["border-radius"]).toBe("12px");
+  expect(nodeCss({ cornerRadius: 6 }, context)["border-radius"]).toBe("6px");
+  expect(nodeCss({ cornerRadius: { topStart: 8 } }, context)["border-radius"]).toBe(
+    "8px 0px 0px 0px",
+  );
+});
+
+test("padding uses logical start and end", () => {
+  expect(nodeCss({ padding: { start: 4, end: 8 } }, context)).toMatchObject({
+    "padding-inline-start": "4px",
+    "padding-inline-end": "8px",
+  });
+});
+
+test("a light/dark colour pair resolves per mode", () => {
+  const pair = { light: "#FF0000", dark: "#00FF00" };
+  expect(nodeCss({ background: pair }, context)["background-color"]).toBe("rgba(255,0,0,1)");
+  expect(
+    nodeCss({ background: pair }, { mode: "dark", palette: prototypeRolePalette({}, "dark") })[
+      "background-color"
+    ],
+  ).toBe("rgba(0,255,0,1)");
+});
+
+test("rows arrange and align along their axes", () => {
+  expect(
+    lineCss("row", { arrangement: "spaceBetween", alignment: "bottomStart", spacing: 8 }),
+  ).toEqual({
+    display: "flex",
+    "flex-direction": "row",
+    "justify-content": "space-between",
+    gap: "8px",
+    "align-items": "flex-end",
+  });
+});
+
+test("a box aligns its children on one grid cell", () => {
+  expect(boxLayoutCss({ alignment: "bottomEnd" })).toMatchObject({
+    "align-items": "end",
+    "justify-items": "end",
+  });
+  expect(boxLayoutCss(undefined)).toMatchObject({
+    "align-items": "start",
+    "justify-items": "start",
+  });
+});

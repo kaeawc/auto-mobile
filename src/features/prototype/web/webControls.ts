@@ -78,7 +78,12 @@ const iconButtonRenderer =
  * its `variant`, as both devices draw them: 32 px tall with an 8 px radius inside a 48 px target,
  * outlined, or tonal with a leading check while selected.
  */
-function chipBody(selected: boolean, label: string, scope: WebRenderScope, kit: WebRenderKit) {
+function chipBody(
+  chip: { selected: boolean; label: string; color?: string },
+  scope: WebRenderScope,
+  kit: WebRenderKit,
+) {
+  const { selected, label, color } = chip;
   const outline = cssColor("outlineVariant", scope.style) ?? "currentColor";
   const roles = selected
     ? kit.roleCss(scope, "secondaryContainer", "onSecondaryContainer")
@@ -99,6 +104,8 @@ function chipBody(selected: boolean, label: string, scope: WebRenderScope, kit: 
         "line-height": "20px",
         border: selected ? "1px solid transparent" : `1px solid ${outline}`,
         ...roles,
+        // An authored foreground wins over the Material role, as on the devices.
+        ...(color ? { color } : {}),
       },
     },
     [...(selected ? [sizedIcon("check", 18, scope, kit)] : []), label],
@@ -122,7 +129,7 @@ const chipRenderer =
       ? { role: "checkbox", "aria-checked": String(selected) }
       : { role: "button" };
     return el("div", { attrs: { ...attrs, ...role, ...disabled.attrs }, style }, [
-      chipBody(selected, kit.bound(node.label, scope), scope, kit),
+      chipBody({ selected, label: kit.bound(node.label, scope), color: style.color }, scope, kit),
     ]);
   };
 

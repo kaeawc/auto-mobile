@@ -173,7 +173,6 @@ export const pagerRenderer =
       "flex-direction": vertical ? "row" : "column",
       overflow: "hidden",
       position: "relative",
-      ...peekCss(node, vertical),
     });
     const inner = kit.child(scope, {
       inBox: true,
@@ -185,8 +184,25 @@ export const pagerRenderer =
       { attrs: { "data-part": "page" }, style: pageCss(node, vertical) },
       content ? [content] : [],
     );
+    // Peek pads an inner viewport, so it adds to the pager's own padding as contentPadding does.
+    const viewport = el(
+      "div",
+      {
+        attrs: { "data-part": "viewport" },
+        style: {
+          display: "flex",
+          "flex-direction": vertical ? "row" : "column",
+          flex: "1 1 auto",
+          "align-self": "stretch",
+          "min-width": "0",
+          "min-height": "0",
+          ...peekCss(node, vertical),
+        },
+      },
+      [pageBox],
+    );
     const indicator = dots ? [pagerDots(pages.length, page, { vertical, over }, scope)] : [];
-    return el("div", { attrs, style }, [pageBox, ...indicator]);
+    return el("div", { attrs, style }, [viewport, ...indicator]);
   };
 
 /**

@@ -98,11 +98,34 @@ describe("web still pager (#16382)", () => {
       ).element,
       "pager",
     )[0]!;
-    expect(pager.style).toMatchObject({
+    expect(byPart(pager, "viewport")[0]!.style).toMatchObject({
       "padding-inline-start": "24px",
       "padding-inline-end": "16px",
     });
     expect(byPart(pager, "page")[0]!.style).toMatchObject({ width: "200px" });
+  });
+
+  test("peek insets add to the pager's own padding instead of replacing it", () => {
+    const pager = byNode(
+      renderPrototypeStill(
+        rootOf({
+          type: "pager",
+          id: "p",
+          peek: { start: 24, end: 16 },
+          style: { padding: { start: 12, end: 8 } },
+          children: [{ type: "text", text: "A" }],
+        }),
+      ).element,
+      "pager",
+    )[0]!;
+    expect(pager.style).toMatchObject({
+      "padding-inline-start": "12px",
+      "padding-inline-end": "8px",
+    });
+    expect(byPart(pager, "viewport")[0]!.style).toMatchObject({
+      "padding-inline-start": "24px",
+      "padding-inline-end": "16px",
+    });
   });
 
   test("a tab bar linked to a pager selects the pager's page", () => {
@@ -408,6 +431,15 @@ describe("web still chips and sliders (#16382)", () => {
     )[0]!;
     expect(slider.attrs["aria-disabled"]).toBe("true");
     expect(slider.style.opacity).toBe("0.38");
+  });
+
+  test("a chip's authored foreground colour wins over its Material role", () => {
+    const chip = byNode(
+      renderPrototypeStill(rootOf({ type: "chip", label: "X", style: { color: "#FF0000" } }))
+        .element,
+      "chip",
+    )[0]!;
+    expect(byPart(chip, "chip")[0]!.style.color).toBe("rgba(255,0,0,1)");
   });
 
   test("a chip whose enabledWhen is false draws disabled", () => {

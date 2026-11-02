@@ -206,6 +206,8 @@ export function renderDeviceFrame(
         "--safe-bottom": px(insets.bottom),
         "--safe-left": px(insets.left),
         "--safe-right": px(insets.right),
+        "--safe-start": "var(--safe-left)",
+        "--safe-end": "var(--safe-right)",
       },
     },
     [

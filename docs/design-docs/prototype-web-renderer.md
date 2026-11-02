@@ -27,14 +27,15 @@ the host, so the page's script only switches between views it was given and neve
   string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
   condition counts as true, so a node is never hidden on a guess.
 - **Window.** An explicit `window.layoutDirection` sets the content's `dir` (the frame is never
-  mirrored). Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
+  mirrored), and `start`/`end` safe-area edges read the inset on the matching physical side. Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
   each axis it leaves unsized, as on devices; a sheet spans the screen width, `height` dp tall at its `edge`; a floating window
   sits at its `gravity`, moved by its `offset`.
 - **Style precedence.** A control's default styling applies first and the spec's own style wins.
   `styleWhen` entries whose condition holds merge over `style` in authored order; an entry the
   still cannot decide is not applied. `textStyle` resolves to the Material 3 type scale before
   explicit `textSize`, `fontWeight` and `lineHeight`.
-- **Layout.** Rows, columns, cards and scrolls are flex lines that start-align children on the cross axis unless
+- **Layout.** Rows, columns, cards and scrolls (reversed when `reverse`, so they open at the end) are flex
+  lines that start-align children on the cross axis unless
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill` (inside a box grid, only on its own axis), `{dp}`, `weight`, padding (logical
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.

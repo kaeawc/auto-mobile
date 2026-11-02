@@ -97,8 +97,9 @@ export function bound(text: unknown, scope: WebRenderScope): string {
 const SAFE_AREA_EDGES: Readonly<Record<string, [string, string]>> = {
   top: ["padding-top", "--safe-top"],
   bottom: ["padding-bottom", "--safe-bottom"],
-  start: ["padding-inline-start", "--safe-left"],
-  end: ["padding-inline-end", "--safe-right"],
+  // Logical edges read logical insets, which the window maps to the physical side for its direction.
+  start: ["padding-inline-start", "--safe-start"],
+  end: ["padding-inline-end", "--safe-end"],
 };
 
 /**
@@ -331,7 +332,8 @@ const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
   const { attrs, style } = base(node, scope, {
     display: "flex",
-    "flex-direction": horizontal ? "row" : "column",
+    // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
+    "flex-direction": `${horizontal ? "row" : "column"}${node.reverse === true ? "-reverse" : ""}`,
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
@@ -359,7 +361,13 @@ const divider: NodeRenderer = (node, scope) => {
       scope,
       vertical
         ? { width: "1px", "align-self": "stretch", "background-color": color }
-        : { height: "1px", "align-self": "stretch", "background-color": color },
+        : // Inside a box grid the line axis is horizontal, so it stretches there too.
+          {
+            height: "1px",
+            "align-self": "stretch",
+            "justify-self": "stretch",
+            "background-color": color,
+          },
     ),
   );
 };

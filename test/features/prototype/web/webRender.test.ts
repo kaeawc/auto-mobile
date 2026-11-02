@@ -834,6 +834,9 @@ describe("prototype web still (#16346)", () => {
     const still = renderPrototypeStill({ ...reference, window: { layoutDirection: "rtl" } });
     const layer = find(still.element, (element) => element.attrs["data-window"] !== undefined)[0]!;
     expect(layer.attrs.dir).toBe("rtl");
+    // In RTL the logical start inset is the physical right one.
+    expect(layer.style["--safe-start"]).toBe("var(--safe-right)");
+    expect(layer.style["--safe-end"]).toBe("var(--safe-left)");
     expect(still.element.attrs).not.toHaveProperty("dir");
   });
 
@@ -851,7 +854,7 @@ describe("prototype web still (#16346)", () => {
       "b",
     )[0]!;
     expect(button.style).toMatchObject({
-      "padding-inline-start": "calc(24px + var(--safe-left))",
+      "padding-inline-start": "calc(24px + var(--safe-start))",
       "padding-inline-end": "24px",
     });
     expect(button.style).not.toHaveProperty("padding");
@@ -871,6 +874,34 @@ describe("prototype web still (#16346)", () => {
       "line-height": "50px",
       "font-family": "serif",
     });
+  });
+
+  test("a horizontal divider stretches across a box", () => {
+    const line = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "box",
+          style: { width: { dp: 200 }, height: { dp: 200 } },
+          children: [{ type: "divider", testTag: "d" }],
+        },
+      }),
+      "d",
+    )[0]!;
+    expect(line.style["justify-self"]).toBe("stretch");
+  });
+
+  test("a reverse scroll starts at its end", () => {
+    const scrollOf = (reverse: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "scroll", testTag: "s", reverse, child: { type: "column", children: [] } },
+        }),
+        "s",
+      )[0]!.style["flex-direction"];
+    expect(scrollOf(true)).toBe("column-reverse");
+    expect(scrollOf(false)).toBe("column");
   });
 
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {

@@ -117,9 +117,19 @@ function sizedRoot(spec: unknown): unknown {
 function placed(spec: unknown, content: WebElement | undefined): WebElement {
   const window = placedWindow(spec, content);
   const direction = record(record(spec)?.window)?.layoutDirection;
-  return direction === "rtl" || direction === "ltr"
-    ? { ...window, attrs: { ...window.attrs, dir: direction } }
-    : window;
+  if (direction !== "rtl" && direction !== "ltr") {
+    return window;
+  }
+  // In RTL the logical start is the physical right, so the logical insets swap sides.
+  const insets: Record<string, string> =
+    direction === "rtl"
+      ? { "--safe-start": "var(--safe-right)", "--safe-end": "var(--safe-left)" }
+      : {};
+  return {
+    ...window,
+    attrs: { ...window.attrs, dir: direction },
+    style: { ...window.style, ...insets },
+  };
 }
 
 function placedWindow(spec: unknown, content: WebElement | undefined): WebElement {

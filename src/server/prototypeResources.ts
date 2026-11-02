@@ -30,10 +30,20 @@ import type {
   PrototypeSpecRevisionSource,
 } from "../features/prototype/prototypeSpecRevisions";
 import {
+  PROTOTYPE_COMPOSE_TEMPLATE,
+  PROTOTYPE_SWIFTUI_TEMPLATE,
   PROTOTYPE_WEB_TEMPLATE,
-  prototypeWebResourceName,
+  prototypeResourceName,
+  prototypeResourceUri,
   prototypeWebUri,
+  type PrototypeResourceFormat,
 } from "../features/prototype/prototypeWebUris";
+import {
+  prototypeSourceMimeType,
+  readPrototypeSourceResource,
+  type PrototypeSourceFormat,
+  type PrototypeSourceResourceQuery,
+} from "../features/prototype/prototypeSourceResource";
 import {
   prototypeVariantIds,
   readPrototypeWebResource,
@@ -55,7 +65,7 @@ export function defaultNativePrototypeSources(): NativePrototypeSources {
   };
 }
 
-/** Where the web resource reads spec revisions and the version stamped into its `_meta`. */
+/** Where the per-id resources read spec revisions and the version stamped into their `_meta`. */
 export interface PrototypeWebSources {
   readonly revisions: PrototypeSpecRevisionSource;
   readonly rendererVersion: () => string;
@@ -68,23 +78,89 @@ export function defaultPrototypeWebSources(): PrototypeWebSources {
   };
 }
 
-function readWeb(sources: PrototypeWebSources, query: PrototypeWebResourceQuery): ResourceContent {
-  const web = readPrototypeWebResource(sources.revisions, query, sources.rendererVersion());
-  const params = new URLSearchParams(
-    Object.entries({ frame: query.frame, revision: query.revision, variant: query.variant })
+/** The read URI: the parameter-free one plus the given parameters in a stable order. */
+function readUri(
+  id: string,
+  format: PrototypeResourceFormat,
+  params: Record<string, string | undefined>,
+): string {
+  const query = new URLSearchParams(
+    Object.entries(params)
       .filter((entry): entry is [string, string] => entry[1] !== undefined)
       .sort(([a], [b]) => a.localeCompare(b)),
   ).toString();
-  const uri = prototypeWebUri(query.id);
+  const uri = prototypeResourceUri(id, format);
+  return query ? `${uri}?${query}` : uri;
+}
+
+function readWeb(sources: PrototypeWebSources, query: PrototypeWebResourceQuery): ResourceContent {
+  const web = readPrototypeWebResource(sources.revisions, query, sources.rendererVersion());
+  const { frame, revision, variant } = query;
   return {
-    uri: params ? `${uri}?${params}` : uri,
+    uri: readUri(query.id, "web", { frame, revision, variant }),
     mimeType: "text/html",
     text: web.html,
     _meta: { ...web.meta },
   };
 }
 
-/** Ids whose concrete web resource this module registered, so stale ones can be unregistered. */
+function readSource(
+  sources: PrototypeWebSources,
+  format: PrototypeSourceFormat,
+  query: PrototypeSourceResourceQuery,
+): ResourceContent {
+  const file = readPrototypeSourceResource(
+    sources.revisions,
+    format,
+    query,
+    sources.rendererVersion(),
+  );
+  const { frame, revision } = query;
+  return {
+    uri: readUri(query.id, format, { frame, revision }),
+    mimeType: file.mimeType,
+    text: file.text,
+    _meta: { ...file.meta },
+  };
+}
+
+/** One per-id format: how its concrete resource is listed and read. */
+interface PerIdFormat {
+  readonly format: PrototypeResourceFormat;
+  readonly title: string;
+  description(id: string): string;
+  readonly mimeType: string;
+  read(sources: PrototypeWebSources, id: string): ResourceContent;
+}
+
+const sourceFormat = (format: PrototypeSourceFormat, label: string): PerIdFormat => ({
+  format,
+  title: label,
+  description: (id) =>
+    `Prototype ${id} as one ${label} source file with the spec inlined (latest revision)`,
+  mimeType: prototypeSourceMimeType(format),
+  read: (sources, id) => readSource(sources, format, { id }),
+});
+
+const PER_ID_FORMATS: readonly PerIdFormat[] = [
+  {
+    format: "web",
+    title: "web",
+    description: (id) =>
+      `Prototype ${id} as a self-contained HTML page in a device frame (latest revision)`,
+    mimeType: "text/html",
+    read: (sources, id) => readWeb(sources, { id }),
+  },
+  sourceFormat("compose", "Compose"),
+  sourceFormat("swiftui", "SwiftUI"),
+];
+
+/** Every format's parameter-free URI of an id. */
+function perIdUris(id: string): string[] {
+  return PER_ID_FORMATS.map(({ format }) => prototypeResourceUri(id, format));
+}
+
+/** Ids whose concrete resources this module registered, so stale ones can be unregistered. */
 const listedWebIds = new Set<string>();
 let unsubscribeWeb: (() => void) | undefined;
 let webNotifications: Promise<void> = Promise.resolve();
@@ -95,28 +171,37 @@ function syncWebResources(sources: PrototypeWebSources): boolean {
   let changed = false;
   for (const id of listedWebIds) {
     if (!known.has(id)) {
-      ResourceRegistry.unregister(prototypeWebUri(id));
+      perIdUris(id).forEach((uri) => ResourceRegistry.unregister(uri));
       listedWebIds.delete(id);
       changed = true;
     }
   }
   for (const id of known) {
-    if (listedWebIds.has(id) && ResourceRegistry.getResource(prototypeWebUri(id))) {
+    if (listedWebIds.has(id) && perIdUris(id).every((uri) => ResourceRegistry.getResource(uri))) {
       continue;
     }
-    ResourceRegistry.register(prototypeWebUri(id), prototypeWebResourceName(id), {
-      title: `${id} (web)`,
-      description: `Prototype ${id} as a self-contained HTML page in a device frame (latest revision)`,
-      mimeType: "text/html",
-      handler: async () => readWeb(sources, { id }),
-    });
+    for (const entry of PER_ID_FORMATS) {
+      ResourceRegistry.register(
+        prototypeResourceUri(id, entry.format),
+        prototypeResourceName(id, entry.format),
+        {
+          title: `${id} (${entry.title})`,
+          description: entry.description(id),
+          mimeType: entry.mimeType,
+          handler: async () => entry.read(sources, id),
+        },
+      );
+    }
     listedWebIds.add(id);
     changed = true;
   }
   return changed;
 }
 
-/** A new revision changes the page of its id and of every variant sharing its group. */
+/**
+ * A new revision changes every format of its id, and the web page of every variant sharing its
+ * group (only the web page shows variants).
+ */
 async function onWebRevision(
   sources: PrototypeWebSources,
   event: PrototypeSpecRevisionEvent,
@@ -134,8 +219,12 @@ async function onWebRevision(
   // evicted, the group it was dropped from).
   const current = known.has(event.id) ? prototypeVariantIds(sources.revisions, event.id) : [];
   const ids = new Set([...(known.has(event.id) ? [event.id] : []), ...current, ...former]);
-  if (ids.size > 0) {
-    await ResourceRegistry.notifyResourcesUpdated([...ids].map(prototypeWebUri));
+  const uris = new Set([
+    ...[...ids].map(prototypeWebUri),
+    ...(known.has(event.id) ? perIdUris(event.id) : []),
+  ]);
+  if (uris.size > 0) {
+    await ResourceRegistry.notifyResourcesUpdated([...uris]);
   }
 }
 
@@ -164,6 +253,24 @@ function nextGroups(
   return next;
 }
 
+function registerSourceTemplate(
+  sources: PrototypeWebSources,
+  template: string,
+  format: PrototypeSourceFormat,
+  label: string,
+): void {
+  ResourceRegistry.registerTemplate(template, `Prototype as one ${label} file`, {
+    description: `A shown prototype as one ${label} source file: the spec inlined as a string constant, a header naming the renderer library, required capabilities and asset URIs, and a preview sized to the frame (frame: a device frame id; revision: a kept spec revision, default the latest)`,
+    mimeType: prototypeSourceMimeType(format),
+    handler: async (params: Record<string, string>) =>
+      readSource(sources, format, {
+        id: decodeSegmentOrThrow(params.id ?? ""),
+        frame: params.frame,
+        revision: params.revision,
+      }),
+  });
+}
+
 function registerPrototypeWebResources(sources: PrototypeWebSources): void {
   ResourceRegistry.registerTemplate(PROTOTYPE_WEB_TEMPLATE, "Prototype as a web page", {
     description:
@@ -177,6 +284,8 @@ function registerPrototypeWebResources(sources: PrototypeWebSources): void {
         variant: params.variant,
       }),
   });
+  registerSourceTemplate(sources, PROTOTYPE_COMPOSE_TEMPLATE, "compose", "Jetpack Compose");
+  registerSourceTemplate(sources, PROTOTYPE_SWIFTUI_TEMPLATE, "swiftui", "SwiftUI");
   syncWebResources(sources);
   ResourceRegistry.registerListRefresher("prototype-web", async () => {
     syncWebResources(sources);
@@ -201,7 +310,7 @@ export function prototypeWebNotificationsSettled(): Promise<void> {
 
 /**
  * Registers the `prototype` authoring guide, its icon lookup (#11052), the native-code
- * resources (#13729) and the per-prototype web page (#16345).
+ * resources (#13729) and the per-prototype web page and Compose/SwiftUI files (#16345).
  */
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),

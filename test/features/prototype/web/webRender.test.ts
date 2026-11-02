@@ -523,6 +523,67 @@ describe("prototype web still (#16346)", () => {
     expect((sheet.children[0] as WebElement).style["align-items"]).toBe("flex-start");
   });
 
+  test("draws switches, checkboxes, text fields and list items disabled when enabledWhen is false", () => {
+    const disabledOf = (type: string) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { ready: false, on: true },
+          root: {
+            type,
+            testTag: "c",
+            stateKey: "on",
+            label: "L",
+            headline: "H",
+            enabledWhen: { key: "ready", equals: true },
+          },
+        }),
+        "c",
+      )[0]!;
+    for (const type of ["switch", "checkbox", "textField", "listItem"]) {
+      expect(disabledOf(type).attrs["aria-disabled"]).toBe("true");
+      expect(disabledOf(type).style.opacity).toBe("0.38");
+    }
+  });
+
+  test("draws a button's icon before its label", () => {
+    const button = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: { type: "button", testTag: "save", label: "Save", icon: "check" },
+      }),
+      "save",
+    )[0]!;
+    expect((button.children[0] as WebElement).attrs.title).toBe("check");
+    expect(textOf(button)).toBe("Save");
+  });
+
+  test("a span keeps its own text decoration", () => {
+    const rich = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "text",
+          testTag: "price",
+          spans: [{ text: "$100", style: { textDecoration: "lineThrough" } }, { text: " $80" }],
+        },
+      }),
+      "price",
+    )[0]!;
+    expect(toHtml(rich)).toContain('<span style="text-decoration:line-through">$100</span>');
+  });
+
+  test("paints a divider with its authored colour", () => {
+    const line = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: { type: "divider", testTag: "d", style: { color: "#FF0000" } },
+      }),
+      "d",
+    )[0]!;
+    expect(line.style["background-color"]).toBe("rgba(255,0,0,1)");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

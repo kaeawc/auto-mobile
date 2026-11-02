@@ -45,8 +45,9 @@ the host, so the page's script only switches between views it was given and neve
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
   `listItem` (with its leading icon and its trailing switch, checkbox or icon). A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
-  and actions as icon placeholders labelled with their action. A button whose `enabledWhen` is decidably
-  false draws disabled. A text field shows `errorText` with error colours when `errorWhen` is
+  and actions as icon placeholders labelled with their action. A button, switch, checkbox, text field or
+  list item whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
+  its label, a divider paints its authored colour, and text decorations map to CSS. A text field shows `errorText` with error colours when `errorWhen` is
   decidably true, and otherwise its `supportingText`; a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a

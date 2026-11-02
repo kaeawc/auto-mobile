@@ -151,6 +151,13 @@ function typographyRole(style: Raw): Css {
 }
 
 /** Text styles inherit in CSS as they do down a native text tree. */
+const TEXT_DECORATION: Readonly<Record<string, string>> = {
+  none: "none",
+  underline: "underline",
+  lineThrough: "line-through",
+  underlineLineThrough: "underline line-through",
+};
+
 export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
   if (!style) {
     return {};
@@ -178,6 +185,10 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
   }
   if (style.fontStyle === "italic") {
     css["font-style"] = "italic";
+  }
+  const decoration = TEXT_DECORATION[String(style.textDecoration)];
+  if (decoration) {
+    css["text-decoration"] = decoration;
   }
   return css;
 }

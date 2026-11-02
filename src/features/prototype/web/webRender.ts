@@ -281,7 +281,11 @@ const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node),
 
 const divider: NodeRenderer = (node, scope) => {
   const vertical = node.orientation === "vertical";
-  const color = cssColor("outlineVariant", scope.style) ?? "rgba(0,0,0,0.12)";
+  // The authored colour paints the line, as natively; otherwise outlineVariant.
+  const color =
+    cssColor(record(node.style)?.color, scope.style) ??
+    cssColor("outlineVariant", scope.style) ??
+    "rgba(0,0,0,0.12)";
   return el(
     "div",
     base(
@@ -345,9 +349,23 @@ const BUTTON_ROLES: Readonly<Record<string, [string, string]>> = {
   elevated: ["surfaceContainerLow", "primary"],
 };
 
-const button: NodeRenderer = (node, scope) => {
+/**
+ * A control whose enabledWhen is decidably false draws disabled (Material's 0.38 opacity) and
+ * says so to assistive tech, as the native controls do. Undecidable conditions stay enabled.
+ */
+function disabledState(
+  node: Raw,
+  scope: WebRenderScope,
+): { css: Record<string, string>; attrs: Record<string, string> } {
   const enabled =
     node.enabledWhen === undefined || conditionHolds(node.enabledWhen, scope.condition);
+  return enabled
+    ? { css: {}, attrs: {} }
+    : { css: { opacity: "0.38" }, attrs: { "aria-disabled": "true" } };
+}
+
+const button: NodeRenderer = (node, scope) => {
+  const disabled = disabledState(node, scope);
   const variant = typeof node.variant === "string" ? node.variant : "filled";
   const roles = BUTTON_ROLES[variant];
   const outline: Record<string, string> =
@@ -363,12 +381,14 @@ const button: NodeRenderer = (node, scope) => {
     "border-radius": "20px",
     "font-weight": "500",
     ...(roles ? roleCss(scope, roles[0], roles[1]) : roleCss(scope, "transparent", "primary")),
+    gap: "8px",
     ...outline,
-    // A button whose enabledWhen is decidably false draws disabled, as the native button does.
-    ...(enabled ? {} : { opacity: "0.38" }),
+    ...disabled.css,
   });
-  const role = { ...attrs, role: "button", ...(enabled ? {} : { "aria-disabled": "true" }) };
-  return el("div", { attrs: role, style }, [bound(node.label, scope)]);
+  return el("div", { attrs: { ...attrs, role: "button", ...disabled.attrs }, style }, [
+    ...namedIcon(node.icon, scope),
+    bound(node.label, scope),
+  ]);
 };
 
 /** App-bar navigation and action slots draw as icon placeholders labelled with their action. */
@@ -467,6 +487,7 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
 const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
   const error = node.errorWhen !== undefined && decide(node.errorWhen, scope.condition) === true;
+  const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "align-items": "center",
@@ -476,16 +497,21 @@ const textField: NodeRenderer = (node, scope, path) => {
     "border-radius": "4px",
     border: `1px solid ${cssColor(error ? "error" : "outline", scope.style) ?? "currentColor"}`,
     ...(empty ? { opacity: "0.7" } : {}),
+    ...disabled.css,
   });
   const caption = fieldCaption(node, error, scope);
   // With a caption, the wrapper is what the parent lays out, so it takes the field's sizing.
   const [outer, inner] = caption.length === 0 ? [{}, style] : splitParentFacing(style);
-  const field = el("div", { attrs: { ...attrs, role: "textbox" }, style: inner }, [
-    ...namedIcon(node.leadingIcon, scope),
-    el("span", { style: { flex: "1 1 auto" } }, [shown]),
-    // The trailing slot is an {icon, label} action, like an app-bar action.
-    ...appBarIcons([node.trailingIcon], scope, path),
-  ]);
+  const field = el(
+    "div",
+    { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner },
+    [
+      ...namedIcon(node.leadingIcon, scope),
+      el("span", { style: { flex: "1 1 auto" } }, [shown]),
+      // The trailing slot is an {icon, label} action, like an app-bar action.
+      ...appBarIcons([node.trailingIcon], scope, path),
+    ],
+  );
   return caption.length === 0
     ? field
     : el("div", { style: { ...outer, display: "flex", "flex-direction": "column", gap: "4px" } }, [
@@ -528,13 +554,16 @@ const toggle =
   (role: "switch" | "checkbox"): NodeRenderer =>
   (node, scope) => {
     const on = isOn(node.stateKey, scope);
+    const disabled = disabledState(node, scope);
     const { attrs, style } = base(node, scope, {
       display: "flex",
       "align-items": "center",
       gap: "12px",
       "min-height": "48px",
+      ...disabled.css,
     });
-    return el("div", { attrs: { ...attrs, role, "aria-checked": String(on) }, style }, [
+    const semantics = { ...attrs, role, "aria-checked": String(on), ...disabled.attrs };
+    return el("div", { attrs: semantics, style }, [
       bound(node.label, scope),
       toggleMark(role, on, scope),
     ]);
@@ -580,6 +609,7 @@ function trailing(node: Raw, scope: WebRenderScope): WebChild[] {
 }
 
 const listItem: NodeRenderer = (node, scope) => {
+  const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "align-items": "center",
@@ -587,6 +617,7 @@ const listItem: NodeRenderer = (node, scope) => {
     "min-height": "56px",
     padding: "8px 16px",
     "align-self": "stretch",
+    ...disabled.css,
   });
   const supporting =
     node.supporting === undefined
@@ -601,7 +632,7 @@ const listItem: NodeRenderer = (node, scope) => {
     { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
     [el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]), ...supporting],
   );
-  return el("div", { attrs: { ...attrs, role: "listitem" }, style }, [
+  return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
     ...namedIcon(node.leadingIcon, scope),
     texts,
     ...trailing(node, scope),

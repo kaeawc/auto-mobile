@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import { prototypeRolePalette } from "../../../../src/features/prototype/prototypeContrast";
-import { boxLayoutCss, lineCss, nodeCss } from "../../../../src/features/prototype/web/webStyle";
+import {
+  boxLayoutCss,
+  lineCss,
+  nodeCss,
+  textCss,
+} from "../../../../src/features/prototype/web/webStyle";
 
 const context = { mode: "light" as const, palette: prototypeRolePalette({}, "light") };
 
@@ -79,4 +84,13 @@ test("a box aligns its children on one grid cell", () => {
     "align-items": "start",
     "justify-items": "start",
   });
+});
+
+test("maps every text decoration to CSS", () => {
+  const decoration = (textDecoration: string) =>
+    textCss({ textDecoration }, context)["text-decoration"];
+  expect(decoration("lineThrough")).toBe("line-through");
+  expect(decoration("underline")).toBe("underline");
+  expect(decoration("underlineLineThrough")).toBe("underline line-through");
+  expect(decoration("none")).toBe("none");
 });

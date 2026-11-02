@@ -13,6 +13,7 @@
 #   ADB                   adb executable (default: adb)
 #   SMOKE_POLL_SECONDS    delay between READY checks (default: 1)
 #   SMOKE_READY_ATTEMPTS  READY checks before failing (default: 30)
+#   SMOKE_EXIT_ATTEMPTS   exit checks after kill before failing (default: 10)
 
 set -euo pipefail
 
@@ -25,6 +26,7 @@ binary="$1/x86_64/lmk_pressure"
 adb="${ADB:-adb}"
 poll_seconds="${SMOKE_POLL_SECONDS:-1}"
 attempts="${SMOKE_READY_ATTEMPTS:-30}"
+exit_attempts="${SMOKE_EXIT_ATTEMPTS:-10}"
 remote="/data/local/tmp/automobile-lmk-pressure-smoke"
 output="${remote}.out"
 megabytes=64
@@ -75,7 +77,16 @@ if [ "$uid" != "$shell_uid" ]; then
 fi
 
 "$adb" shell "kill $pid 2>/dev/null; true" > /dev/null
-if "$adb" shell "test -d /proc/$pid" > /dev/null 2>&1; then
+# SIGTERM is asynchronous: give the payload time to exit before judging it.
+stopped=""
+for ((attempt = 0; attempt < exit_attempts; attempt++)); do
+  if ! "$adb" shell "test -d /proc/$pid" > /dev/null 2>&1; then
+    stopped="yes"
+    break
+  fi
+  sleep "$poll_seconds"
+done
+if [ -z "$stopped" ]; then
   echo "FAIL: payload $pid is still running after kill" >&2
   exit 1
 fi

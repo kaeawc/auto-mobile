@@ -12,7 +12,7 @@ setup() {
   printf 'payload' > "$BIN_DIR/x86_64/lmk_pressure"
   export FAKE_STATE="$BATS_TEST_TMPDIR/device"
   mkdir -p "$FAKE_STATE"
-  export FAKE_ABI="x86_64" FAKE_READY="READY 64" FAKE_UID="2000"
+  export FAKE_ABI="x86_64" FAKE_READY="READY 64" FAKE_UID="2000" FAKE_EXIT_CHECKS=0
   export ADB_LOG="$BATS_TEST_TMPDIR/adb.log"
   export ADB="$BATS_TEST_TMPDIR/adb"
   cat > "$ADB" <<'EOF'
@@ -30,8 +30,15 @@ case "$cmd" in
   nohup*) touch "$FAKE_STATE/running"; echo 4242 ;;
   "cat /data/local/tmp/automobile-lmk-pressure-smoke.out"*) [ -f "$FAKE_STATE/running" ] && echo "$FAKE_READY" ;;
   "grep Uid /proc/4242/status"*) [ -f "$FAKE_STATE/running" ] && printf 'Uid:\t%s\t%s\t%s\t%s\n' "$FAKE_UID" "$FAKE_UID" "$FAKE_UID" "$FAKE_UID" ;;
-  "kill 4242"*) rm -f "$FAKE_STATE/running" ;;
-  "test -d /proc/4242"*) [ -f "$FAKE_STATE/running" ] ;;
+  "kill 4242"*) touch "$FAKE_STATE/killed" ;;
+  "test -d /proc/4242"*)
+    # A killed process lingers for FAKE_EXIT_CHECKS checks before it is gone.
+    if [ -f "$FAKE_STATE/killed" ]; then
+      checks=$(($(cat "$FAKE_STATE/exit-checks" 2>/dev/null || echo 0) + 1))
+      echo "$checks" > "$FAKE_STATE/exit-checks"
+      if [ "$checks" -gt "$FAKE_EXIT_CHECKS" ]; then rm -f "$FAKE_STATE/running"; fi
+    fi
+    [ -f "$FAKE_STATE/running" ] ;;
   "rm -f"*) rm -f "$FAKE_STATE/pushed" ;;
   *) ;;
 esac
@@ -49,6 +56,18 @@ EOF
   [ ! -f "$FAKE_STATE/pushed" ]
 }
 
+@test "waits for a killed payload to exit instead of checking only once" {
+  FAKE_EXIT_CHECKS=2 run bash "$SCRIPT" "$BIN_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS: x86_64 lmk-pressure payload reached READY 64"* ]]
+}
+
+@test "fails when a killed payload never exits" {
+  FAKE_EXIT_CHECKS=99 run bash "$SCRIPT" "$BIN_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"payload 4242 is still running after kill"* ]]
+}
+
 @test "refuses a device that is not x86_64" {
   FAKE_ABI="arm64-v8a" run bash "$SCRIPT" "$BIN_DIR"
   [ "$status" -ne 0 ]
@@ -61,7 +80,7 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"did not report READY 64"* ]]
   [[ "$output" == *"Segmentation fault"* ]]
-  [ ! -f "$FAKE_STATE/running" ]
+  [ -f "$FAKE_STATE/killed" ]
   [ ! -f "$FAKE_STATE/pushed" ]
 }
 
@@ -69,7 +88,7 @@ EOF
   FAKE_UID="0" run bash "$SCRIPT" "$BIN_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"runs as uid 0, expected 2000"* ]]
-  [ ! -f "$FAKE_STATE/running" ]
+  [ -f "$FAKE_STATE/killed" ]
 }
 
 @test "fails when the built x86_64 binary is missing" {

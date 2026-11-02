@@ -152,13 +152,7 @@ export function getFocusedTextFieldIdentity(
         if (identity !== undefined || !isFocusedTextInputProperties(properties)) {
           return;
         }
-        const searchable = toSearchable(properties);
-        identity = JSON.stringify([
-          searchable.nativeId ?? null,
-          searchable.className ?? null,
-          searchable.bounds?.left ?? null,
-          searchable.bounds?.top ?? null,
-        ]);
+        identity = focusedTextFieldIdentity(properties, true);
       });
     }
     if (identity !== undefined) {
@@ -166,6 +160,22 @@ export function getFocusedTextFieldIdentity(
     }
   }
   return undefined;
+}
+
+function focusedTextFieldIdentity(
+  properties: Record<string, unknown>,
+  allowClassOnly = false,
+): string | undefined {
+  const searchable = toSearchable(properties);
+  if (!allowClassOnly && searchable.nativeId === undefined && searchable.bounds === undefined) {
+    return undefined;
+  }
+  return JSON.stringify([
+    searchable.nativeId ?? null,
+    searchable.className ?? null,
+    searchable.bounds?.left ?? null,
+    searchable.bounds?.top ?? null,
+  ]);
 }
 
 /** Read the editable value, never an iOS field's accessibility label or placeholder. */
@@ -177,6 +187,8 @@ export function getFocusedTextValue(
 }
 
 export interface FocusedTextField {
+  /** Resource id, class and top-left position, excluding mutable text and field size. */
+  identity?: string;
   value?: string;
   secure: boolean;
   /** Non-secure native iOS values, used only when native focus is unavailable. */
@@ -190,6 +202,8 @@ export interface FocusedTextField {
 }
 
 export interface FocusedTextFieldOptions {
+  /** Include stable identity on the same field selected for value verification. */
+  includeIdentity?: boolean;
   /** Typing verification can compare native inputs when WebKit focus is unreliable. */
   includeIosNativeEditableValues?: boolean;
   /**
@@ -365,7 +379,14 @@ function readFocusedTextFieldWithTokens(
   options: FocusedTextFieldOptions,
   parser: ElementParser,
 ): FocusedTextField | undefined {
-  const field = readFocusedTextField(properties, options);
+  const valueField = readFocusedTextField(properties, options);
+  const field =
+    valueField && options.includeIdentity
+      ? {
+          ...valueField,
+          identity: focusedTextFieldIdentity({ ...properties, bounds: nodeBounds(node) }),
+        }
+      : valueField;
   if (field === undefined || field.secure) {
     return field;
   }

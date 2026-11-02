@@ -11,6 +11,8 @@ import {
 import type { TextActionResult } from "../../../../src/features/action/SendKeys";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { typedObservation } from "../IosTypedTextTestHarness";
+import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
+import { nodeAttributes } from "../../../../src/models/ViewHierarchyResult";
 
 function harness() {
   const timer = new FakeTimer();
@@ -72,6 +74,44 @@ function harness() {
 
 const longText = "a".repeat(3 * IOS_TEXT_CHUNK_CODE_POINTS + IOS_TEXT_CHUNK_CODE_POINTS / 2);
 
+test("single-chunk insert retains the transport warning", async () => {
+  const h = harness();
+  const insert = h.deps.insert;
+  h.deps.insert = async (text, options) => ({ ...(await insert(text, options)), warning: "w" });
+  expect((await h.typer.executeIosType("short", "insert")).warning).toBe("w");
+});
+
+test.each([false, true])(
+  "focus moving to another field after chunk one stops before chunk two (secure=%s)",
+  async (secure) => {
+    const h = harness();
+    h.state.secure = secure;
+    const observe = h.deps.observer.execute;
+    h.deps.observer.execute = async (options) => {
+      const observation = await observe(options);
+      const parser = new DefaultElementParser();
+      for (const root of parser.extractRootNodes(observation.viewHierarchy!)) {
+        parser.traverseNode(root, (node) => {
+          const attributes = nodeAttributes(node);
+          if (attributes.focused === "true") {
+            attributes["resource-id"] = h.inserts.length === 0 ? "first" : "second";
+            if (!secure && h.inserts.length > 0) {
+              attributes.value = "another field's value";
+            }
+          }
+        });
+      }
+      return observation;
+    };
+    const result = await h.typer.executeIosType(longText, "insert");
+    expect(result).toMatchObject({ success: false, partialApplication: true, retryable: false });
+    expect(result.error).toContain("focus moved to another field");
+    expect(result.error).toContain("chunk 2 of 4 failed; 1000 code points committed");
+    expect(h.inserts).toHaveLength(1);
+    expect(h.state.reads).toBe(2);
+  },
+);
+
 test("3500 code points append in four verified requests with one read per chunk", async () => {
   const h = harness();
   expect(await h.typer.executeIosType(longText, "insert")).toEqual({
@@ -86,6 +126,125 @@ test("3500 code points append in four verified requests with one read per chunk"
   expect(h.state.reads).toBe(5);
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
+
+test("a partial repeated-character chunk stops further inserts", async () => {
+  const h = harness();
+  h.state.value = "x".repeat(100);
+  const insert = h.deps.insert;
+  h.deps.insert = async (text, options) => {
+    const result = await insert(text, options);
+    if (h.inserts.length === 2) {
+      h.state.value = h.state.value.slice(0, -500);
+    }
+    return result;
+  };
+  const result = await h.typer.executeIosType(longText, "insert");
+  expect(result).toMatchObject({ success: false, partialApplication: true, retryable: false });
+  expect(result.error).toContain("not fully appended");
+  expect(result.error).toContain("1000 code points committed");
+  expect(h.inserts).toHaveLength(2);
+});
+
+test("chunk typing warns when repeated values saturate the XCUI window", async () => {
+  const h = harness();
+  h.state.value = "a".repeat(512);
+  h.deps.observer.execute = async () => typedObservation(h.state.value.slice(-512));
+  const result = await h.typer.executeIosType(longText, "insert");
+  expect(result.success).toBe(true);
+  expect(result.warning).toContain("not verified");
+  expect(result.warning).toContain("512-character XCUI value window");
+  expect(h.inserts).toHaveLength(4);
+});
+
+test("chunk typing fails open when stable field identity is unavailable", async () => {
+  const h = harness();
+  h.deps.observer.execute = async () => ({
+    ...typedObservation(h.state.value),
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          $: {
+            class: "UITextField",
+            focused: "true",
+            editable: "true",
+            value: h.state.value,
+          },
+        },
+      },
+    },
+  });
+  expect((await h.typer.executeIosType(longText, "insert")).success).toBe(true);
+  expect(h.inserts).toHaveLength(4);
+});
+
+test("bounds identify a focus change when resource ids are unavailable", async () => {
+  const h = harness();
+  h.deps.observer.execute = async () => ({
+    ...typedObservation(h.state.value),
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          $: {
+            class: "UITextField",
+            focused: "true",
+            editable: "true",
+            value: h.state.value,
+            bounds: h.inserts.length === 0 ? "[0,10][100,100]" : "[200,10][300,100]",
+          },
+        },
+      },
+    },
+  });
+  const result = await h.typer.executeIosType(longText, "insert");
+  expect(result.error).toContain("focus moved to another field");
+  expect(result.error).toContain("1000 code points committed");
+  expect(h.inserts).toHaveLength(1);
+});
+
+test("field growth and text-derived attributes do not change chunk target identity", async () => {
+  const h = harness();
+  h.deps.observer.execute = async () => ({
+    ...typedObservation(h.state.value),
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          $: {
+            class: "UITextField",
+            focused: "true",
+            editable: "true",
+            value: h.state.value,
+            "resource-id": "field",
+            "view-id": h.state.value,
+            text: h.state.value,
+            label: h.state.value,
+            bounds: `[0,10][100,${100 + h.inserts.length * 10}]`,
+          },
+        },
+      },
+    },
+  });
+  expect((await h.typer.executeIosType(longText, "insert")).success).toBe(true);
+  expect(h.inserts).toHaveLength(4);
+});
+
+test.each(["insert", "replace"] as const)(
+  "%s abort before the first chunk still throws",
+  async (operation) => {
+    const h = harness();
+    const controller = new AbortController();
+    const observe = h.deps.observer.execute;
+    h.deps.observer.execute = async (options) => {
+      const result = await observe(options);
+      controller.abort("cancelled before typing");
+      return result;
+    };
+    await expect(h.typer.executeIosType(longText, operation, controller.signal)).rejects.toBe(
+      "cancelled before typing",
+    );
+    expect(h.inserts).toHaveLength(0);
+    expect(h.state.clears).toBe(operation === "replace" ? 1 : 0);
+  },
+);
 
 test("verification chains the previous chunk's read and stops on unchanged chunk three", async () => {
   const h = harness();
@@ -109,10 +268,8 @@ test.each(["insert", "replace"] as const)(
     expect(result.error).toContain("2000 code points committed");
     expect(result.error).toContain("chunk 3 of 4");
     expect(result.error).toContain("runner refused");
-    expect(result.retryable).toBe(true);
-    if (operation === "replace") {
-      expect(result.partialApplication).toBe(true);
-    }
+    expect(result.partialApplication).toBe(true);
+    expect(result.retryable).toBe(false);
     expect(h.inserts).toHaveLength(3);
   },
 );
@@ -158,6 +315,18 @@ test("remaining request deadline refuses before preparation", async () => {
   expect(result.success).toBe(false);
   expect(h.inserts).toEqual([]);
   expect(h.state).toMatchObject({ reads: 0, clears: 0 });
+});
+
+test("a 3500-code-point web assignment bypasses the chunked typing budget and inserts once", async () => {
+  const h = harness();
+  h.deps.willAssignWebValue = () => true;
+  h.deps.assignsWebValue = () => h.state.clears === 1;
+  const result = await runWithTextRequestContext({ getDeadlineMs: () => 60_000 }, () =>
+    h.typer.executeIosType(longText, "replace"),
+  );
+  expect(result.success).toBe(true);
+  expect(h.inserts.map(({ text }) => text)).toEqual([longText]);
+  expect(h.state).toMatchObject({ clears: 1, reads: 2, value: longText });
 });
 
 test.each(["short", "😀".repeat(IOS_TEXT_CHUNK_CODE_POINTS)])(
@@ -240,7 +409,7 @@ test("each chunk uses the remaining deadline, same signal and display", async ()
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
 
-test("abort between chunks dispatches no later append", async () => {
+test("abort between chunks reports committed text and dispatches no later append", async () => {
   const h = harness();
   const controller = new AbortController();
   const insert = h.deps.insert;
@@ -251,8 +420,10 @@ test("abort between chunks dispatches no later append", async () => {
     }
     return result;
   };
-  await expect(h.typer.executeIosType(longText, "insert", controller.signal)).rejects.toThrow(
-    "caller cancelled",
+  const result = await h.typer.executeIosType(longText, "insert", controller.signal);
+  expect(result).toMatchObject({ success: false, partialApplication: true, retryable: false });
+  expect(result.error).toBe(
+    "caller cancelled iOS chunk 3 of 4 failed; 2000 code points committed in fully successful chunks.",
   );
   expect(h.inserts).toHaveLength(2);
 });
@@ -281,6 +452,6 @@ test("secure verification warnings across chunks are deduplicated", async () => 
     resolvedMode: "xcuiTypeText",
     warning: "iOS typed text check skipped for a secure field.",
   });
-  expect(h.state.reads).toBe(1);
+  expect(h.state.reads).toBe(5);
   expect(h.inserts).toHaveLength(4);
 });

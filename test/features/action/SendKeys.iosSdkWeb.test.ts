@@ -84,6 +84,17 @@ function harness() {
 }
 
 describe("sendKeys on a web-view field (#5162)", () => {
+  test("a 1500-code-point web replace assigns the full text once", async () => {
+    const { h, web, field } = harness();
+    const text = "a".repeat(1000) + "b".repeat(500);
+    const result = await h.executor.type({ action: "type", text, operation: "replace" });
+    expect(result).toMatchObject({ success: true, backend: "sdk" });
+    expect(field.value).toBe(text);
+    expect(web.requests.map(({ action }) => action)).toEqual(["clear", "setValue"]);
+    expect(web.requests[1].text).toBe(text);
+    expect(h.clientCalls).toEqual([]);
+  });
+
   test("a replace clears and sets the value through the web view, never through XCTest", async () => {
     const { h, web, field } = harness();
     const result = await h.executor.type({ action: "type", text: "new", operation: "replace" });

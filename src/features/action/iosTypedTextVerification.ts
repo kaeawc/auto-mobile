@@ -37,6 +37,8 @@ class SecureValueOmittingParser extends DefaultElementParser {
         password: true,
         editable: attributes.editable,
         actions: attributes.actions,
+        "resource-id": attributes["resource-id"],
+        bounds: attributes.bounds,
       };
     }
     return super.extractNodeProperties(node);
@@ -49,15 +51,81 @@ export interface IosTypedTextVerificationResult {
   warning?: string;
 }
 
+/** XCUI can expose only this many characters of a long editable value. */
+const IOS_XCUI_VALUE_WINDOW_CHARS = 512;
+
+function compareIosChunkAppend(
+  text: string,
+  before: string,
+  after: string,
+): IosTypedTextVerificationResult {
+  if (
+    before.length === IOS_XCUI_VALUE_WINDOW_CHARS &&
+    after.length === IOS_XCUI_VALUE_WINDOW_CHARS
+  ) {
+    return {
+      success: true,
+      warning:
+        "iOS typed text result was not verified: both focused field values fill the 512-character XCUI value window.",
+    };
+  }
+  if (before === after) {
+    return {
+      success: false,
+      error: "iOS nothing was typed: the focused field value is unchanged.",
+    };
+  }
+  // A suffix alone is insufficient: earlier repeated characters can hide a partial append.
+  return after.length - before.length >= text.length && after.endsWith(text)
+    ? { success: true }
+    : {
+        success: false,
+        error: "iOS typed text chunk was not fully appended to the focused field.",
+      };
+}
+
 /** Literal Unicode characters in order; intervening mask characters are allowed. */
 export function compareIosTypedText(
   text: string,
   before: FocusedTextField = { secure: false },
   after: FocusedTextField = { secure: false },
+  verifyAppend = false,
 ): IosTypedTextVerificationResult {
   if (before.secure || after.secure) {
     return { success: true, warning: "iOS typed text check skipped for a secure field." };
   }
+  return (
+    (verifyAppend ? compareIosChunkField(text, before, after) : undefined) ??
+    compareIosNonSecureTypedText(text, before, after)
+  );
+}
+
+function compareIosChunkField(
+  text: string,
+  before: FocusedTextField,
+  after: FocusedTextField,
+): IosTypedTextVerificationResult | undefined {
+  if (
+    before.identity !== undefined &&
+    after.identity !== undefined &&
+    before.identity !== after.identity
+  ) {
+    return {
+      success: true,
+      warning: "iOS typed text result was not verified: focus moved to another field.",
+    };
+  }
+  if (before.value !== undefined && after.value !== undefined && !isIosTokenField(before, after)) {
+    return compareIosChunkAppend(text, before.value, after.value);
+  }
+  return undefined;
+}
+
+function compareIosNonSecureTypedText(
+  text: string,
+  before: FocusedTextField,
+  after: FocusedTextField,
+): IosTypedTextVerificationResult {
   const nativeComparison = compareNativeEditableValues(
     before.nativeEditableValues,
     after.nativeEditableValues,
@@ -261,21 +329,26 @@ export async function verifyIosTypedText(
   text: string,
   before: FocusedTextField | undefined,
   read: IosTypedTextRead,
+  verifyAppend = false,
 ): Promise<IosTypedTextVerificationResult & { after: FocusedTextField | undefined }> {
   const { timer, signal } = read;
-  if (before?.secure) {
+  if (before?.secure && !verifyAppend) {
     return { ...compareIosTypedText(text, before, undefined), after: before };
   }
-  let after = await readIosTypedTextField(read);
-  let result = compareIosTypedText(text, before, after);
+  let after = await readIosTypedTextField(read, { includeIdentity: verifyAppend });
+  let result = compareIosTypedText(text, before, after, verifyAppend);
   // A recipient/token field can settle after the keystrokes land; re-read it, bounded, before
   // reporting that nothing was typed.
   const settleDeadline = timer.now() + IOS_TOKEN_SETTLE_MAX_MS;
   while (!result.success && isIosTokenField(before, after) && timer.now() < settleDeadline) {
     signal?.throwIfAborted();
     await timer.sleep(IOS_TOKEN_SETTLE_POLL_MS);
-    after = await readIosTypedTextField(read, {}, Math.max(0, settleDeadline - timer.now()));
-    result = compareIosTypedText(text, before, after);
+    after = await readIosTypedTextField(
+      read,
+      { includeIdentity: verifyAppend },
+      Math.max(0, settleDeadline - timer.now()),
+    );
+    result = compareIosTypedText(text, before, after, verifyAppend);
   }
   return { ...result, after };
 }

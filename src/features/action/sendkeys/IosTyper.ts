@@ -1,5 +1,6 @@
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import type { Timer } from "../../../utils/SystemTimer";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import {
   explainIosIndeterminateText,
   readIosTypedTextField,
@@ -26,6 +27,7 @@ import type {
 
 interface IosChunkRead extends IosTypedTextRead {
   deadlineMs: number | undefined;
+  verifyAppend?: boolean;
 }
 
 export interface IosTyperDeps {
@@ -33,6 +35,8 @@ export interface IosTyperDeps {
   observer: SendKeysObserver;
   timer: Timer;
   targetLayer(): HierarchyLayer | undefined;
+  willAssignWebValue?(): boolean;
+  assignsWebValue?(): boolean;
   clear(signal?: AbortSignal, display?: string): Promise<TextActionResult>;
   insert: SendKeysTextClient["insert"];
   withTextWarnings(result: TextActionResult, warnings: Array<string | undefined>): TextActionResult;
@@ -55,13 +59,8 @@ export class IosTyper {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
     const chunks = splitIosTextChunks(text);
-    const admissionDeadlineMs = getTextRequestDeadlineMs();
     const codePoints = Array.from(text).length;
-    const budget = assessIosTextToolBudget(
-      codePoints,
-      chunks.length,
-      admissionDeadlineMs === undefined ? undefined : admissionDeadlineMs - this.deps.timer.now(),
-    );
+    const budget = this.assessTypingBudget(codePoints, chunks.length, operation);
     if (budget.exceedsBudget) {
       return {
         success: false,
@@ -69,7 +68,7 @@ export class IosTyper {
         resolvedMode,
       };
     }
-    const preparation = await this.prepareTyping(operation, signal, display);
+    const preparation = await this.prepareTyping(operation, signal, display, chunks.length > 1);
     if (preparation.kind === "refused") {
       return preparation.result;
     }
@@ -82,7 +81,7 @@ export class IosTyper {
       display,
       deadlineMs: getTextRequestDeadlineMs(),
     };
-    if (chunks.length === 1) {
+    if (chunks.length === 1 || (operation === "replace" && this.deps.assignsWebValue?.())) {
       signal?.throwIfAborted();
       const typed = await this.typeChunk(
         text,
@@ -95,7 +94,7 @@ export class IosTyper {
           operation === "replace" && typed.insertFailed
             ? this.deps.markPartialAfterMutation(typed.result)
             : typed.result,
-          [clearWarning],
+          [clearWarning, typed.insertWarning],
         ),
         resolvedMode,
       };
@@ -106,6 +105,15 @@ export class IosTyper {
     };
   }
 
+  private assessTypingBudget(codePoints: number, chunkCount: number, operation: SendKeysOperation) {
+    const admissionDeadlineMs = getTextRequestDeadlineMs();
+    return assessIosTextToolBudget(
+      codePoints,
+      operation === "replace" && this.deps.willAssignWebValue?.() ? 1 : chunkCount,
+      admissionDeadlineMs === undefined ? undefined : admissionDeadlineMs - this.deps.timer.now(),
+    );
+  }
+
   private async typeChunks(
     chunks: string[],
     preparation: { before: FocusedTextField | undefined; clearWarning: string | undefined },
@@ -113,25 +121,32 @@ export class IosTyper {
     read: IosChunkRead,
   ): Promise<TextActionResult> {
     let { before } = preparation;
+    const targetIdentity = before?.identity;
     const warnings = new Set([preparation.clearWarning]);
     let committed = 0;
     let result: TextActionResult = { success: true };
     for (const [index, chunk] of chunks.entries()) {
-      read.signal?.throwIfAborted();
-      const typed = await this.typeChunk(chunk, before, read);
+      if (index === 0) {
+        read.signal?.throwIfAborted();
+      }
+      const interruption =
+        index > 0
+          ? this.chunkInterruption(read.signal, targetIdentity, before?.identity)
+          : undefined;
+      const typed =
+        interruption !== undefined
+          ? {
+              result: { success: false, error: interruption },
+              after: before,
+              insertWarning: undefined,
+            }
+          : await this.typeChunk(chunk, before, { ...read, verifyAppend: true });
       result = typed.result;
       before = typed.after;
       warnings.add(typed.insertWarning);
       warnings.add(result.warning);
       if (!result.success) {
-        if (operation === "replace") {
-          result = this.deps.markPartialAfterMutation(result);
-        }
-        result = {
-          ...result,
-          ...(isTextIndeterminateMessage(result.error) ? { retryable: false } : {}),
-          error: `${result.error ?? "iOS typing failed."} iOS chunk ${index + 1} of ${chunks.length} failed; ${committed} code points committed in fully successful chunks.`,
-        };
+        result = this.chunkFailure(result, operation, { index, total: chunks.length, committed });
         break;
       }
       committed += Array.from(chunk).length;
@@ -140,6 +155,36 @@ export class IosTyper {
     result = { ...result };
     delete result.warning;
     return this.deps.withTextWarnings(result, [...warnings]);
+  }
+
+  private chunkInterruption(
+    signal: AbortSignal | undefined,
+    target: string | undefined,
+    current: string | undefined,
+  ): string | undefined {
+    if (signal?.aborted) {
+      return errorMessage(signal.reason);
+    }
+    return target !== undefined && current !== undefined && target !== current
+      ? "iOS focus moved to another field."
+      : undefined;
+  }
+
+  private chunkFailure(
+    result: TextActionResult,
+    operation: SendKeysOperation,
+    progress: { index: number; total: number; committed: number },
+  ): TextActionResult {
+    if (operation === "replace") {
+      result = this.deps.markPartialAfterMutation(result);
+    }
+    const { index, total, committed } = progress;
+    return {
+      ...result,
+      ...(committed > 0 ? { partialApplication: true, retryable: false } : {}),
+      ...(isTextIndeterminateMessage(result.error) ? { retryable: false } : {}),
+      error: `${result.error ?? "iOS typing failed."} iOS chunk ${index + 1} of ${total} failed; ${committed} code points committed in fully successful chunks.`,
+    };
   }
 
   private async typeChunk(
@@ -175,7 +220,12 @@ export class IosTyper {
     if (!verify) {
       return { result, after: before };
     }
-    const { after, ...verification } = await verifyIosTypedText(text, before, read);
+    const { after, ...verification } = await verifyIosTypedText(
+      text,
+      before,
+      read,
+      read.verifyAppend,
+    );
     return { result: verification, after, insertWarning: result.warning };
   }
 
@@ -183,6 +233,7 @@ export class IosTyper {
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
+    includeIdentity = false,
   ): Promise<
     | { kind: "refused"; result: TextActionResult & { resolvedMode: ResolvedSendKeysTypingMode } }
     | { kind: "ready"; before: FocusedTextField | undefined; clearWarning: string | undefined }
@@ -204,9 +255,13 @@ export class IosTyper {
       display,
     };
     if (this.deps.targetLayer() === "prototype") {
-      return { kind: "ready", before: await readIosTypedTextField(read), clearWarning };
+      return {
+        kind: "ready",
+        before: await readIosTypedTextField(read, { includeIdentity }),
+        clearWarning,
+      };
     }
-    const focus = await readIosTypedTextFocus(read);
+    const focus = await readIosTypedTextFocus(read, { includeIdentity });
     // Unavailable reads retain their existing best-effort dispatch behavior.
     if (focus.kind === "read" && !focus.hasFocusedTextInput && !focus.keyboardVisible) {
       return {

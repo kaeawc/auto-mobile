@@ -1400,39 +1400,7 @@ class CtrlProxy : AccessibilityService() {
       }
       overlayManager.setPrototypeAttached(prototypeController.isShowing)
 
-      // Commands first, then the SDK event receivers, before the slower service initialization
-      // below. The SDK sender cannot detect an absent dynamic receiver, while
-      // SdkEventBatchProcessor retains accepted events until the WebSocket starts.
-      for ((name, receiver, filter) in
-        listOf(
-          Triple("Command", commandReceiver, ReceiverFilters.command()),
-          Triple("Navigation event", navigationEventReceiver, ReceiverFilters.navigation()),
-          Triple("Event batch", eventBatchReceiver, ReceiverFilters.eventBatch()),
-          Triple("Recomposition", recompositionReceiver, ReceiverFilters.recomposition()),
-          Triple("Frame metrics", frameMetricsReceiver, ReceiverFilters.frameMetrics()),
-          Triple("Package", packageReceiver, ReceiverFilters.packages()),
-          Triple(
-            "Handled exception",
-            handledExceptionReceiver,
-            ReceiverFilters.handledException(),
-          ),
-          Triple("Crash", crashReceiver, ReceiverFilters.crash()),
-          Triple("ANR", anrReceiver, ReceiverFilters.anr()),
-        )) {
-        registerExportedReceiver(receiver, filter)
-        Log.d(TAG, "$name receiver registered")
-      }
-
-      // Screen on/off and unlock are protected system broadcasts, so this one is not exported. The
-      // filter stays inline so lint can see that and accept the flagless registration.
-      val screenStateFilter =
-        IntentFilter().apply {
-          addAction(Intent.ACTION_SCREEN_ON)
-          addAction(Intent.ACTION_SCREEN_OFF)
-          addAction(Intent.ACTION_USER_PRESENT)
-        }
-      registerReceiver(screenStateReceiver, screenStateFilter)
-      Log.d(TAG, "Screen state receiver registered")
+      registerReceivers()
 
       hierarchyController.start()
 
@@ -1449,6 +1417,54 @@ class CtrlProxy : AccessibilityService() {
       Log.e(TAG, "Error during service connection", e)
       // Service will continue running even if some initialization fails
     }
+  }
+
+  /**
+   * The receivers for broadcasts from other processes, in registration order: commands first, then
+   * the SDK event receivers, before the slower service initialization. The SDK sender cannot detect
+   * an absent dynamic receiver, while SdkEventBatchProcessor retains accepted events until the
+   * WebSocket starts. Registration and teardown both read this list, so each one is released.
+   */
+  private fun exportedReceivers(): List<Triple<String, BroadcastReceiver, () -> IntentFilter>> =
+    listOf(
+      Triple("command", commandReceiver, ReceiverFilters::command),
+      Triple("navigation event", navigationEventReceiver, ReceiverFilters::navigation),
+      Triple("event batch", eventBatchReceiver, ReceiverFilters::eventBatch),
+      Triple("recomposition", recompositionReceiver, ReceiverFilters::recomposition),
+      Triple("frame metrics", frameMetricsReceiver, ReceiverFilters::frameMetrics),
+      Triple("package", packageReceiver, ReceiverFilters::packages),
+      Triple("handled exception", handledExceptionReceiver, ReceiverFilters::handledException),
+      Triple("crash", crashReceiver, ReceiverFilters::crash),
+      Triple("ANR", anrReceiver, ReceiverFilters::anr),
+    )
+
+  /** Registers every broadcast receiver; [unregisterReceivers] releases the same set. */
+  internal fun registerReceivers() {
+    for ((name, receiver, filter) in exportedReceivers()) {
+      registerExportedReceiver(receiver, filter())
+      Log.d(TAG, "${name.replaceFirstChar(Char::uppercaseChar)} receiver registered")
+    }
+
+    // Screen on/off and unlock are protected system broadcasts, so this one is not exported. The
+    // filter stays inline so lint can see that and accept the flagless registration.
+    val screenStateFilter =
+      IntentFilter().apply {
+        addAction(Intent.ACTION_SCREEN_ON)
+        addAction(Intent.ACTION_SCREEN_OFF)
+        addAction(Intent.ACTION_USER_PRESENT)
+      }
+    registerReceiver(screenStateReceiver, screenStateFilter)
+    Log.d(TAG, "Screen state receiver registered")
+  }
+
+  /** Releases every receiver [registerReceivers] registered, continuing past a failed one. */
+  internal fun unregisterReceivers() {
+    releaseEach(
+      exportedReceivers().map { (name, receiver) -> name to receiver } +
+        ("screen state" to screenStateReceiver),
+      release = { unregisterReceiver(it) },
+      onFailure = { name, e -> Log.e(TAG, "Error unregistering $name receiver", e) },
+    )
   }
 
   /**
@@ -1477,22 +1493,7 @@ class CtrlProxy : AccessibilityService() {
   override fun onDestroy() {
     super.onDestroy()
 
-    releaseEach(
-      listOf(
-        "command" to commandReceiver,
-        "navigation event" to navigationEventReceiver,
-        "recomposition" to recompositionReceiver,
-        "frame metrics" to frameMetricsReceiver,
-        "package" to packageReceiver,
-        "handled exception" to handledExceptionReceiver,
-        "crash" to crashReceiver,
-        "ANR" to anrReceiver,
-        "event batch" to eventBatchReceiver,
-        "screen state" to screenStateReceiver,
-      ),
-      release = { unregisterReceiver(it) },
-      onFailure = { name, e -> Log.e(TAG, "Error unregistering $name receiver", e) },
-    )
+    unregisterReceivers()
 
     if (::rotationProvenance.isInitialized) {
       rotationProvenance.close()

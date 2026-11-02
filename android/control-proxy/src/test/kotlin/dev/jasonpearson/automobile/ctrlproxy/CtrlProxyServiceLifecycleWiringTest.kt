@@ -16,6 +16,7 @@ class CtrlProxyServiceLifecycleWiringTest {
       listOf(
         "createPrototypeController()",
         "prototypeAssets.purgeLeftovers()",
+        "registerReceivers()",
         "hierarchyController.start()",
         "startStorageSubscription()",
         "startWebSocketServer()",
@@ -46,7 +47,7 @@ class CtrlProxyServiceLifecycleWiringTest {
     val body = functionBody("overridefunonDestroy(")
     val steps =
       listOf(
-        "releaseEach(",
+        "unregisterReceivers()",
         "stopLogcatForwarding()",
         "hierarchyController.stop()",
         "stopEventIngestion()",

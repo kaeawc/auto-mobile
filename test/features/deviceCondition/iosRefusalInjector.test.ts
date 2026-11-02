@@ -24,6 +24,7 @@ describe("iOS refusals (#14073)", () => {
       "faults.thermal",
       "faults.dontKeepActivities",
       "faults.storage",
+      "faults.memoryPressure",
       "faults.readOnlyFilesystem",
     ] satisfies DeviceConditionKey[]) {
       const injector = resolveIosRefusalInjector(ios, key);

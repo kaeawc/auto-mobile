@@ -15,12 +15,6 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { holdTaskDeviceLeases } from "./tasks/runAsTask";
 import { planCallerContext } from "./planCallerIdentity";
-import {
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_EXECUTION_START_TIME_PARAM,
-  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../daemon/wire/constants";
 
 const testMetadataSchema = z.object({
   testClass: z.string(),
@@ -264,20 +258,12 @@ const executePlanTool = async (
     progress,
     signal,
   });
-  // These fields come from the enclosing MCP call, never from step params.
-  // Preserve the live registry key rather than freezing its current deadline.
-  const internalParams = params as Record<string, unknown>;
   const result = await runWithToolSelectionContext(
     {
       // #11469: steps run for the connection that called executePlan.
-      ...planCallerContext(internalParams),
-      planRequest: {
-        deadlineMs: internalParams[INTERNAL_MCP_REQUEST_DEADLINE_PARAM],
-        timeoutMs: internalParams[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM],
-        startTime: internalParams[INTERNAL_EXECUTION_START_TIME_PARAM],
-        liveDeadlineKey: internalParams[INTERNAL_LIVE_DEADLINE_KEY_PARAM],
-        progress,
-      },
+      ...planCallerContext(),
+      // Steps inherit the request's deadline ambiently (#15663); the plan carries their progress.
+      planRequest: { progress },
     },
     () => orchestrator.execute(),
   );

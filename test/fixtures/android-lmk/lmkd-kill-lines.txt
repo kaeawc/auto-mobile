@@ -1,0 +1,4 @@
+11-02 10:15:52.134   157   157 I lowmemorykiller: Kill 'com.android.keychain' (1796), uid 1000, oom_score_adj 999 to free 54416kB rss, 27932kB swap; reason: low watermark is breached and swap is low (60048kB < 190340kB)
+11-02 10:15:52.143   157   157 I lowmemorykiller: Kill 'com.google.android.onetimeinitializer' (2047), uid 10125, oom_score_adj 999 to free 52572kB rss, 28056kB swap; reason: low watermark is breached and swap is low (60532kB < 190340kB)
+11-02 10:15:52.154   157   157 I lowmemorykiller: Kill 'com.android.externalstorage' (2319), uid 10093, oom_score_adj 999 to free 55084kB rss, 28916kB swap; reason: low watermark is breached and swap is low (60940kB < 190340kB)
+11-02 10:15:52.889   157   157 I lowmemorykiller: Kill 'com.android.managedprovisioning' (3016), uid 10094, oom_score_adj 999 to free 43720kB rss, 28284kB swap; reason: low watermark is breached and swap is low (170064kB < 190340kB)

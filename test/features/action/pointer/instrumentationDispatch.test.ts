@@ -4,6 +4,7 @@ import {
   POINTER_INSTRUMENTATION_COMPONENT,
   createInstrumentationDispatch,
   encodePointerRequest,
+  instrumentationTimeoutMs,
   parsePointerInstrumentationOutput,
   pointerInstrumentationCommand,
 } from "../../../../src/features/action/pointer/instrumentationDispatch";
@@ -46,6 +47,16 @@ class GatedAdbExecutor extends FakeAdbExecutor {
     return response;
   }
 }
+
+describe("instrumentationTimeoutMs", () => {
+  test.each([
+    [0, 15_000],
+    [15_000, 45_000],
+    [20_000, 55_000],
+  ])("allows %i ms planned time a %i ms timeout", (plannedMs, timeoutMs) => {
+    expect(instrumentationTimeoutMs(plannedMs)).toBe(timeoutMs);
+  });
+});
 
 describe("encodePointerRequest", () => {
   test("is base64 JSON with the version, tool and points", () => {
@@ -150,6 +161,17 @@ describe("createInstrumentationDispatch", () => {
     const [command] = adb.getExecutedCommands();
     expect(command).toContain("am instrument -w -r --no-restart -e request");
     expect(command).toContain(POINTER_INSTRUMENTATION_COMPONENT);
+  });
+
+  test("allows 45 seconds for a 15-second planned stroke", async () => {
+    const adb = await run(success, {
+      features: { toolType: "stylus", path: true },
+      points: [
+        { x: 10, y: 20 },
+        { x: 30, y: 40, durationMs: 15_000 },
+      ],
+    });
+    expect(adb.getCommandCalls()[0].timeoutMs).toBe(45_000);
   });
 
   test("a refusal the instrumentation reports becomes an actionable error with the count", async () => {

@@ -206,6 +206,14 @@ jobs:
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+  build-candidate-lmk-pressure:
+    needs: prepare-version
+    uses: ./.github/workflows/build-lmk-pressure.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+
   build-candidate-screen-capture-helper:
     needs: prepare-version
     uses: ./.github/workflows/build-screen-capture-helper.yml
@@ -305,6 +313,7 @@ jobs:
         build-candidate-control-proxy-apk,
         build-candidate-protoviewer-apk,
         build-candidate-video-server-jar,
+        build-candidate-lmk-pressure,
         build-candidate-screen-capture-helper,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
@@ -340,6 +349,8 @@ jobs:
           PROTOTYPE_AGENT_SHA256: ${{ needs.build-candidate-prototype-agent.outputs.sha256 }}
           PROTOTYPE_VIEWER_SHA256: ${{ needs.build-candidate-prototype-viewer.outputs.sha256 }}
           NETWORK_FILTER_SHA256: ${{ needs.build-candidate-network-filter-identity-probe.outputs.sha256 }}
+          LMK_PRESSURE_ARM64_SHA256: ${{ needs.build-candidate-lmk-pressure.outputs.arm64_sha256 }}
+          LMK_PRESSURE_X86_64_SHA256: ${{ needs.build-candidate-lmk-pressure.outputs.x86_64_sha256 }}
         run: bash scripts/generate-release-constants.sh
 
       - name: Commit release constants to staging ref
@@ -413,6 +424,7 @@ jobs:
         build-candidate-control-proxy-apk,
         build-candidate-protoviewer-apk,
         build-candidate-video-server-jar,
+        build-candidate-lmk-pressure,
         build-candidate-screen-capture-helper,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
@@ -460,6 +472,12 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: video-server-jar
+          path: /tmp
+
+      - name: "Download lmk-pressure binaries"
+        uses: actions/download-artifact@v7
+        with:
+          name: lmk-pressure
           path: /tmp
 
       - name: "Download screen-capture-helper"
@@ -513,6 +531,8 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-protoviewer.apk protoviewerapk
           bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-lmk-pressure-arm64-v8a lmkpressurearm64
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-lmk-pressure-x86_64 lmkpressurex8664
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeAgent.dylib prototypeagent
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeViewer.zip prototypeviewer
@@ -569,7 +589,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
+              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "lmk-pressure", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

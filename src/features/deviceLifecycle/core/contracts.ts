@@ -73,18 +73,14 @@ export interface ProvisionDeviceArgs {
   boot: boolean;
   readiness: "automation" | "none";
   resources?: DeviceResourceConfiguration;
-  /** Android only; resolves AVD RAM to LOW_RAM_MEMORY_MB (#16265). */
-  lowRam?: boolean;
   timeoutMs?: number;
   __mcpSessionId?: string;
   /** Daemon-forwarded one-shot `--cli` marker (#11096). */
   __oneShotCli?: boolean;
-  /** Daemon-provided remaining transport budget. */
-  __mcpRequestTimeoutMs?: number;
-  /** Daemon-provided absolute transport deadline. */
-  __mcpRequestDeadlineMs?: number;
-  /** Daemon-generated key of this forwarded call; correlates a cancellation outcome. */
-  __mcpLiveDeadlineKey?: string;
+  /** The request's absolute transport deadline, from the ambient call context (#15663). */
+  transportDeadlineMs?: number;
+  /** The daemon-generated key of this forwarded call; correlates a cancellation outcome. */
+  liveDeadlineKey?: string;
 }
 
 /** Only in-process binding reconciliation may retain a created simulator for readiness retry. */

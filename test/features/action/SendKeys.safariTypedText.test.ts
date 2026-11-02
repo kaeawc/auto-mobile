@@ -9,6 +9,7 @@ import {
 } from "../../../src/features/action/iosTypedTextVerification";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { typedObservation } from "./IosTypedTextTestHarness";
+import { createSendKeysHarness, ios } from "./SendKeysTestHarness";
 
 function safariObservation(
   value = "example.com",
@@ -60,6 +61,49 @@ test("captured Safari native URL change verifies typing despite unchanged focuse
   const before = await read(safariObservation("previous.example"));
   const after = await read(safariObservation());
   expect(compareIosTypedText("example.com", before, after)).toEqual({ success: true });
+});
+
+test("captured Safari native URL accepts 1500 code points in two verified chunks", async () => {
+  let value = "previous.example";
+  const h = createSendKeysHarness(ios, { execute: async () => safariObservation(value) });
+  const insert = h.client.insert;
+  h.client.insert = async (text, options) => {
+    value += text;
+    return insert(text, options);
+  };
+  const text = "a".repeat(1000) + "b".repeat(500);
+  expect(await h.executor.type({ action: "type", text })).toMatchObject({ success: true });
+  expect(h.inserted.map((chunk) => chunk.length)).toEqual([1000, 500]);
+  expect(value).toBe(`previous.example${text}`);
+});
+
+test("chunk verification accepts a native URL insertion at the caret despite stale web focus", async () => {
+  const before = await read(safariObservation("prefixSUFFIX"));
+  const after = await read(safariObservation("prefixabcSUFFIX"));
+  expect(compareIosTypedText("abc", before, after, true)).toEqual({ success: true });
+});
+
+test.each([
+  { label: "partial repeated chunk", append: "a".repeat(500) },
+  { label: "different chunk", append: "b".repeat(1000) },
+  { label: "extra growth", append: "a".repeat(1001) },
+])("chunk verification rejects native URL changes with $label", async ({ append }) => {
+  const before = await read(safariObservation("a".repeat(1000)));
+  const after = await read(safariObservation("a".repeat(1000) + append));
+  expect(compareIosTypedText("a".repeat(1000), before, after, true).success).toBe(false);
+  // Ordinary verification retains its existing changed-native-value contract.
+  expect(compareIosTypedText("a".repeat(1000), before, after)).toEqual({ success: true });
+});
+
+test("chunk verification requires a shared native identity for the insertion fallback", () => {
+  expect(
+    compareIosTypedText(
+      "abc",
+      { secure: false, value: "web", nativeEditableValues: { first: "prefix" } },
+      { secure: false, value: "web", nativeEditableValues: { second: "prefixabc" } },
+      true,
+    ).success,
+  ).toBe(false);
 });
 
 test("captured Safari unchanged native and web inputs still fail typing verification", async () => {

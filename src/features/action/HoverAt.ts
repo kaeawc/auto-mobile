@@ -190,8 +190,9 @@ export class HoverAt extends BaseVisualChange {
       .reduce((sum, point) => sum + (point.durationMs ?? DRAG_PATH_DEFAULT_SEGMENT_MS), 0);
     // The uinput pen's attach and close waits run before and after the hover's own events.
     assertDragPathFitsRequestBudget(
-      plannedDurationMs + (injector.route === "uinput" ? UINPUT_FIXED_OVERHEAD_MS : 0),
+      plannedDurationMs,
       call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
+      injector.route === "uinput" ? UINPUT_FIXED_OVERHEAD_MS : 0,
     );
     return plannedDurationMs;
   }

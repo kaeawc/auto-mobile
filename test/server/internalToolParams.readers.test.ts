@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
-  internalLiveDeadlineKey,
   internalMcpSessionId,
   internalOneShotCli,
   internalRestartResumeSessionUuid,
@@ -74,12 +73,6 @@ describe("start-device handoff readers", () => {
 });
 
 describe("provisioning handoff readers", () => {
-  test("the live deadline key reads only a string", () => {
-    expect(internalLiveDeadlineKey({ __mcpLiveDeadlineKey: "k1" })).toBe("k1");
-    expect(internalLiveDeadlineKey({ __mcpLiveDeadlineKey: 1 })).toBeUndefined();
-    expect(internalLiveDeadlineKey({})).toBeUndefined();
-  });
-
   test("adopting a resume session never replaces one the args already name", () => {
     const named: { __restartResumeSessionUuid?: string } = { __restartResumeSessionUuid: "mine" };
     adoptRestartResumeSessionUuid(named, "other");

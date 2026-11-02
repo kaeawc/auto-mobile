@@ -1,8 +1,9 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the resource that serves it, spec revisions, the page, the still renderer and the
-device frame registry.
+document covers the per-prototype resources (the page and the single-file Compose and SwiftUI
+sources), spec revisions, the page, its browser check, the still renderer and the device frame
+registry.
 
 ## Resource
 
@@ -22,14 +23,30 @@ device frame registry.
   `ActionableError`s.
 - **Read result.** `_meta` is `{revision, deviceRevision?, revisions, variants, frame, sha256,
   rendererVersion}`; `rendererVersion` is the server release version.
-- **Listing.** Each known id gets a concrete resource `automobile:prototype/{id}/web` named
-  `prototype-{id}-web`, titled `{id} (web)`, registered when its first revision appears and
-  unregistered when the id is evicted; each change sends `list_changed`. List entries carry no
+- **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision}` (`text/x-kotlin`)
+  and `automobile:prototype/{id}/swiftui{?frame,revision}` (`text/x-swift`) are read by
+  `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render
+  the `automobile:prototype/native` host file (`nativePrototypeTemplates.ts`) with an `inline`
+  input: the spec JSON as a string constant (Kotlin splits it into joined literals of at most
+  16 384 characters to stay under the JVM's 65 535-byte constant limit), a header comment naming
+  the URI, revision, frame, library coordinate, required capabilities and, per referenced asset,
+  its bundle path and `automobile:prototype/native/asset?id=…&assetId=…` URI (assets are never
+  inlined), and a preview sized to the frame's screen (`@Preview(widthDp, heightDp)`, `#Preview`
+  with `.frame`). The native resource's output is unchanged without `inline`. Revision and errors
+  follow the web resource; `frame` defaults to `defaultDeviceFrameId` of the format's platform
+  (`pixel-9`, `iphone-16`), since the format fixes the platform. The shader and Swift-equivalent
+  asset id refusals are the native resource's. `_meta` is `{revision, deviceRevision?, revisions,
+  frame, sha256, rendererVersion}`.
+- **Listing.** Each known id gets concrete resources `automobile:prototype/{id}/{web,compose,swiftui}`
+  named `prototype-{id}-{format}`, titled `{id} (web)`, `{id} (Compose)` and `{id} (SwiftUI)`,
+  registered when its first revision appears and unregistered when the id is evicted; each change
+  sends `list_changed`. List entries carry no
   `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
   `_meta`.
 - **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
-  `resources/updated` for the parameter-free URI of the id, of each id in its variant group, and of
-  each id in the group it left (or was evicted from), in revision order. The concrete resource matches subscriptions
+  `resources/updated` for the parameter-free URI of every format of the id, and for the web URI of
+  each id in its variant group and of each id in the group it left (or was evicted from), in
+  revision order. The concrete resource matches subscriptions
   exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
 
 ## Spec revisions
@@ -76,6 +93,39 @@ it inlined per variant.
   shell (head, toolbar, full history list and script). If the kept revisions alone do not fit, the
   build fails with an `ActionableError` naming the largest view.
 - **Determinism.** The same input yields byte-identical HTML.
+
+## Browser check
+
+`test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
+spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
+`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
+`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
+`webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
+nothing at runtime drives a browser.
+
+- **Assertions.** The page is served from one fixed URL and every other request is aborted and
+  fails the case, on top of the page's own CSP. No console error, page error or
+  `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
+  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; rotate
+  shows the landscape view, wider than tall.
+- **Goldens.** One PNG per case in `test/fixtures/prototype-web/screenshots/`
+  (`<spec>--<frame>.png`, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+  with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
+  case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
+  different size never matches. A unit test keeps the directory in step with the case list.
+- **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
+  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens. It needs the
+  Chromium build of the pinned `playwright-core`:
+  `node_modules/.bin/playwright-core install --only-shell chromium`. Every case that reaches
+  capture writes `<case>.png`, and a pixel mismatch also `<case>.diff.png`, to
+  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`).
+- **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
+  and on pull requests that touch the web renderer, its reference fixtures, the check, or
+  `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux
+  Chromium build, whose text anti-aliasing other machines may not match, so a local run can fail on
+  pixels alone; when the runner renders differently, the job uploads the
+  `prototype-web-screenshots` artifact, and adopting it means reviewing its PNGs and copying those
+  other than `*.diff.png` into the golden directory.
 
 ## Still renderer
 

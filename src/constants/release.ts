@@ -86,6 +86,15 @@ export interface ReleaseChecksumEntry {
    * by release automation (scripts/generate-release-constants.sh), never by hand.
    */
   networkFilterSha256?: string;
+  /**
+   * SHA-256 of the arm64-v8a `deviceCondition` memory-pressure payload
+   * (`automobile-lmk-pressure-arm64-v8a`, built from `android/lmk-pressure/` with
+   * the NDK, #16402). Optional so releases predating its delivery stay valid;
+   * filled by release automation, never by hand.
+   */
+  lmkPressureArm64Sha256?: string;
+  /** SHA-256 of the x86_64 memory-pressure payload (`automobile-lmk-pressure-x86_64`, #16402). */
+  lmkPressureX8664Sha256?: string;
 }
 
 /**
@@ -1104,6 +1113,41 @@ export function resolveNetworkFilterChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.networkFilterSha256 ?? "";
+}
+
+/** Android ABIs the deviceCondition memory-pressure payload is released for (#16402). */
+export type LmkPressureAbi = "arm64-v8a" | "x86_64";
+
+/** Fixed GitHub Release asset name of each ABI's memory-pressure payload. */
+export const LMK_PRESSURE_ASSET_FILENAMES: Readonly<Record<LmkPressureAbi, string>> = {
+  "arm64-v8a": "automobile-lmk-pressure-arm64-v8a",
+  x86_64: "automobile-lmk-pressure-x86_64",
+};
+
+/** Download URL of one ABI's memory-pressure payload for the pinned version. */
+export function resolveLmkPressureUrl(
+  abi: LmkPressureAbi,
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    LMK_PRESSURE_ASSET_FILENAMES[abi],
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected SHA-256 of one ABI's memory-pressure payload; "" when the release predates it. */
+export function resolveLmkPressureChecksum(
+  abi: LmkPressureAbi,
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  const entry = entryForPinnedVersion(env, registry);
+  return (
+    (abi === "arm64-v8a" ? entry?.lmkPressureArm64Sha256 : entry?.lmkPressureX8664Sha256) ?? ""
+  );
 }
 
 /**

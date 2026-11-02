@@ -1,13 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +16,12 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
 
@@ -51,16 +52,20 @@ internal fun pagerIndicatorDots(
 }
 
 /**
- * Reserve a strip only when it leaves room for pages; infinity represents unbounded wrap sizing.
+ * Placement preference and minimum strip space; layout also checks the measured pages. Infinity
+ * represents unbounded wrap sizing.
  */
 internal fun pagerIndicatorBelow(
   placement: String?,
   availableSizeDp: Float = Float.POSITIVE_INFINITY,
 ): Boolean = placement == "below" && availableSizeDp > 22f
 
-/** Weight reserves the remaining space beside the strip only when that dimension fills. */
-internal fun pagerIndicatorPagesUseWeight(vertical: Boolean, fill: PrototypePageFill): Boolean =
-  if (vertical) fill.width else fill.height
+/** Allocate the remaining space beside the strip only when that dimension fills and is bounded. */
+internal fun pagerIndicatorPagesUseWeight(
+  vertical: Boolean,
+  fill: PrototypePageFill,
+  bounded: Boolean = true,
+): Boolean = bounded && if (vertical) fill.width else fill.height
 
 internal data class PrototypePagerIndicator(
   val style: String?,
@@ -81,15 +86,7 @@ internal fun PrototypePagerIndicatorLayout(
   } else if (!pagerIndicatorBelow(indicator.placement)) {
     pages(modifier.pagerIndicator(pager, vertical))
   } else {
-    // Keep sizing on the outer node and pass its minimums through to the original row/column.
-    BoxWithConstraints(modifier, propagateMinConstraints = true) {
-      val availableSizeDp = if (vertical) maxWidth.value else maxHeight.value
-      if (pagerIndicatorBelow(indicator.placement, availableSizeDp)) {
-        PrototypePagerIndicatorBelow(pager, vertical, indicator.fill, pages)
-      } else {
-        pages(Modifier.pagerIndicator(pager, vertical))
-      }
-    }
+    PrototypePagerIndicatorBelow(pager, vertical, indicator.fill, modifier, pages)
   }
 }
 
@@ -98,29 +95,104 @@ private fun PrototypePagerIndicatorBelow(
   pager: PagerState,
   vertical: Boolean,
   fill: PrototypePageFill,
+  modifier: Modifier,
   pages: @Composable (Modifier) -> Unit,
 ) {
-  if (vertical) {
-    Row {
-      pages(
-        Modifier.then(
-            if (pagerIndicatorPagesUseWeight(vertical, fill)) Modifier.weight(1f) else Modifier,
-          )
-          .then(if (fill.height) Modifier.fillMaxHeight() else Modifier),
-      )
-      Box(Modifier.width(22.dp).fillMaxHeight().pagerIndicator(pager, true))
-    }
-  } else {
-    Column {
-      pages(
-        Modifier.then(
-            if (pagerIndicatorPagesUseWeight(vertical, fill)) Modifier.weight(1f) else Modifier,
-          )
-          .then(if (fill.width) Modifier.fillMaxWidth() else Modifier),
-      )
-      Box(Modifier.height(22.dp).fillMaxWidth().pagerIndicator(pager, false))
+  Layout(
+    modifier = modifier,
+    content = {
+      Box(propagateMinConstraints = true) {
+        pages(
+          if (vertical && fill.height) Modifier.fillMaxHeight()
+          else if (!vertical && fill.width) Modifier.fillMaxWidth() else Modifier,
+        )
+      }
+      Box(Modifier.pagerIndicator(pager, vertical))
+    },
+  ) { measurables, constraints ->
+    val strip = 22.dp.roundToPx()
+    val measure = pagerIndicatorPageMeasure(constraints, vertical, fill, strip)
+    val page = measurables[0].measure(measure.pageConstraints)
+    val pageSize = IntSize(page.width, page.height)
+    val below = pagerIndicatorFitsBelow(measure, vertical, strip, pageSize)
+    val placement = pagerIndicatorPlacement(constraints, vertical, strip, pageSize, below)
+    val dots = measurables[1].measure(placement.dotsConstraints)
+    layout(placement.size.width, placement.size.height) {
+      page.placeRelative(0, 0)
+      dots.placeRelative(placement.dotsOffset.x, placement.dotsOffset.y)
     }
   }
+}
+
+private data class PrototypePagerIndicatorMeasure(
+  val pageConstraints: Constraints,
+  val canReserve: Boolean,
+  val bounded: Boolean,
+  val available: Int,
+)
+
+private fun pagerIndicatorPageMeasure(
+  constraints: Constraints,
+  vertical: Boolean,
+  fill: PrototypePageFill,
+  strip: Int,
+): PrototypePagerIndicatorMeasure {
+  val bounded = if (vertical) constraints.hasBoundedWidth else constraints.hasBoundedHeight
+  val available = if (vertical) constraints.maxWidth else constraints.maxHeight
+  // Tiny bounds use overlay; never reserve a strip leaving less than another strip for pages.
+  val canReserve = !bounded || available - strip >= strip
+  val weight = canReserve && pagerIndicatorPagesUseWeight(vertical, fill, bounded)
+  val pageMax = if (weight) available - strip else available
+  val pageMin =
+    if (weight) pageMax
+    else if (canReserve) 0 else if (vertical) constraints.minWidth else constraints.minHeight
+  val pageConstraints =
+    if (vertical) constraints.copy(minWidth = pageMin, maxWidth = pageMax)
+    else constraints.copy(minHeight = pageMin, maxHeight = pageMax)
+  return PrototypePagerIndicatorMeasure(pageConstraints, canReserve, bounded, available)
+}
+
+private fun pagerIndicatorFitsBelow(
+  measure: PrototypePagerIndicatorMeasure,
+  vertical: Boolean,
+  strip: Int,
+  pageSize: IntSize,
+): Boolean {
+  val pageExtent = if (vertical) pageSize.width else pageSize.height
+  // Wrap pages are measured first. If the complete strip will not fit, draw over the pages.
+  return measure.canReserve && (!measure.bounded || measure.available - pageExtent >= strip)
+}
+
+private data class PrototypePagerIndicatorPlacement(
+  val size: IntSize,
+  val dotsConstraints: Constraints,
+  val dotsOffset: IntOffset,
+)
+
+private fun pagerIndicatorPlacement(
+  constraints: Constraints,
+  vertical: Boolean,
+  strip: Int,
+  pageSize: IntSize,
+  below: Boolean,
+): PrototypePagerIndicatorPlacement {
+  val extra = if (!below) IntSize.Zero else if (vertical) IntSize(strip, 0) else IntSize(0, strip)
+  val size =
+    IntSize(
+      constraints.constrainWidth(pageSize.width + extra.width),
+      constraints.constrainHeight(pageSize.height + extra.height),
+    )
+  val dotsSize =
+    if (!below) size
+    else if (vertical) IntSize(strip, pageSize.height) else IntSize(pageSize.width, strip)
+  val dotsOffset =
+    if (!below) IntOffset.Zero
+    else if (vertical) IntOffset(pageSize.width, 0) else IntOffset(0, pageSize.height)
+  return PrototypePagerIndicatorPlacement(
+    size,
+    Constraints.fixed(dotsSize.width, dotsSize.height),
+    dotsOffset,
+  )
 }
 
 /** The dots a pager draws over itself: the current page filled, the rest dimmed. */

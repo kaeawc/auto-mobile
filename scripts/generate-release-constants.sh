@@ -14,6 +14,9 @@ screen_capture_helper_checksum="${SCREEN_CAPTURE_HELPER_SHA256:-}"
 prototype_agent_checksum="${PROTOTYPE_AGENT_SHA256:-}"
 prototype_viewer_checksum="${PROTOTYPE_VIEWER_SHA256:-}"
 network_filter_checksum="${NETWORK_FILTER_SHA256:-}"
+# Optional, like videoJarSha256: the release workflow enforces their presence (#16402).
+lmk_pressure_arm64_checksum="${LMK_PRESSURE_ARM64_SHA256:-}"
+lmk_pressure_x86_64_checksum="${LMK_PRESSURE_X86_64_SHA256:-}"
 
 max_registry_entries=100
 
@@ -22,7 +25,7 @@ max_registry_entries=100
 #   - Checksums only (no version): update registry[0] checksums in place
 #   - Nothing set: no-op
 has_checksums=false
-if [ -n "$apk_checksum" ] || [ -n "$protoviewer_apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ]; then
+if [ -n "$apk_checksum" ] || [ -n "$protoviewer_apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ] || [ -n "$lmk_pressure_arm64_checksum" ] || [ -n "$lmk_pressure_x86_64_checksum" ]; then
   has_checksums=true
 fi
 
@@ -89,6 +92,18 @@ fi
 if [ -n "$network_filter_checksum" ] && ! [[ "$network_filter_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: NETWORK_FILTER_SHA256 must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${network_filter_checksum}"
+  exit 1
+fi
+
+if [ -n "$lmk_pressure_arm64_checksum" ] && ! [[ "$lmk_pressure_arm64_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: LMK_PRESSURE_ARM64_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${lmk_pressure_arm64_checksum}"
+  exit 1
+fi
+
+if [ -n "$lmk_pressure_x86_64_checksum" ] && ! [[ "$lmk_pressure_x86_64_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: LMK_PRESSURE_X86_64_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${lmk_pressure_x86_64_checksum}"
   exit 1
 fi
 
@@ -210,6 +225,8 @@ if [ -n "$release_version" ]; then
     prototypeAgentSha256: \"${prototype_agent_checksum}\",
     prototypeViewerSha256: \"${prototype_viewer_checksum}\",
     networkFilterSha256: \"${network_filter_checksum}\",
+    lmkPressureArm64Sha256: \"${lmk_pressure_arm64_checksum}\",
+    lmkPressureX8664Sha256: \"${lmk_pressure_x86_64_checksum}\",
   },"
 
     # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
@@ -289,6 +306,14 @@ else
 
   if [ -n "$network_filter_checksum" ]; then
     update_registry_field "$tmp_file" "nightly" "networkFilterSha256" "$network_filter_checksum"
+  fi
+
+  if [ -n "$lmk_pressure_arm64_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "lmkPressureArm64Sha256" "$lmk_pressure_arm64_checksum"
+  fi
+
+  if [ -n "$lmk_pressure_x86_64_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "lmkPressureX8664Sha256" "$lmk_pressure_x86_64_checksum"
   fi
 
   echo "Updated release constants:"
@@ -395,6 +420,20 @@ if [ -n "$network_filter_checksum" ]; then
     update_registry_field "$tmp_file" "$release_version" "networkFilterSha256" "$network_filter_checksum"
   fi
   echo "   network-filter checksum: ${network_filter_checksum}"
+fi
+
+if [ -n "$lmk_pressure_arm64_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "lmkPressureArm64Sha256" "$lmk_pressure_arm64_checksum"
+  fi
+  echo "   lmk-pressure arm64-v8a checksum: ${lmk_pressure_arm64_checksum}"
+fi
+
+if [ -n "$lmk_pressure_x86_64_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "lmkPressureX8664Sha256" "$lmk_pressure_x86_64_checksum"
+  fi
+  echo "   lmk-pressure x86_64 checksum: ${lmk_pressure_x86_64_checksum}"
 fi
 
 if cmp -s "$constants_path" "$tmp_file"; then

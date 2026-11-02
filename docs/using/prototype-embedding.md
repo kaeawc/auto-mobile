@@ -50,6 +50,25 @@ The JSON result holds:
   `automobile:prototype/native/asset?id=<id>&assetId=<asset>&deviceId=<device>`.
 - `notes`: anything the app must still do, such as supplying asset files or an HTTP client.
 
+## Read one Compose or SwiftUI file
+
+For a single file to paste into an app, read `automobile:prototype/<id>/compose` (Kotlin,
+`text/x-kotlin`) or `automobile:prototype/<id>/swiftui` (Swift, `text/x-swift`) for a prototype
+shown in this daemon session.
+
+| Parameter  | Meaning                                                                                                                                      |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frame`    | A device frame id such as `pixel-9` or `iphone-16`, used to size the preview. Defaults to `pixel-9` for Compose and `iphone-16` for SwiftUI. |
+| `revision` | A kept revision. Defaults to the latest.                                                                                                     |
+
+The file is the same host the native resource generates, with the spec built in as a string
+constant and a `@Preview` (Compose) or `#Preview` (SwiftUI) sized to the frame. Its header comment
+names the library to add and the capabilities the spec needs, and lists each referenced image or
+font with the path the file loads it from and its `automobile:prototype/native/asset` URI. Assets
+are not built in: add those files yourself (a saved prototype serves their bytes from the URI).
+Revisions, errors, `_meta` (without `variants`) and subscriptions work as for the web page below,
+and `resources/list` lists both files for every prototype shown in this daemon session.
+
 ## Where the files go
 
 Copy each `files[].path` and `assets[].path` exactly as the resource returns it. The host file reads

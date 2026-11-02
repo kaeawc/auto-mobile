@@ -2,7 +2,33 @@ import { expect, test } from "bun:test";
 import {
   TextRequestState,
   resolveTextCtrlProxyTimeoutMs,
+  assessIosTextToolBudget,
+  IOS_TEXT_MEASURED_MS_PER_CODE_POINT,
+  IOS_TEXT_CHUNK_OVERHEAD_MS,
+  IOS_TEXT_TOOL_BUDGET_MS,
+  TEXT_MCP_REQUEST_HEADROOM_MS,
 } from "../../../src/features/action/textTransportTimeout";
+
+test("long text admission uses the measured rate and per-chunk overhead", () => {
+  expect(assessIosTextToolBudget(3500, 4)).toEqual({
+    estimatedMs: 3500 * IOS_TEXT_MEASURED_MS_PER_CODE_POINT + 4 * IOS_TEXT_CHUNK_OVERHEAD_MS,
+    exceedsBudget: false,
+  });
+  expect(assessIosTextToolBudget(40_000, 40).exceedsBudget).toBe(true);
+  expect(assessIosTextToolBudget(40_000, 40, 2 * IOS_TEXT_TOOL_BUDGET_MS).exceedsBudget).toBe(true);
+});
+
+test("admission compares the remaining deadline after reserving headroom", () => {
+  const { estimatedMs } = assessIosTextToolBudget(3500, 4);
+  expect(
+    assessIosTextToolBudget(3500, 4, estimatedMs + TEXT_MCP_REQUEST_HEADROOM_MS).exceedsBudget,
+  ).toBe(false);
+  expect(
+    assessIosTextToolBudget(3500, 4, estimatedMs + TEXT_MCP_REQUEST_HEADROOM_MS - 1).exceedsBudget,
+  ).toBe(true);
+  expect(assessIosTextToolBudget(3500, 4, -1).exceedsBudget).toBe(true);
+  expect(assessIosTextToolBudget(5, 1, 0).exceedsBudget).toBe(false);
+});
 
 test.each([
   [0, 5000],

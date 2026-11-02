@@ -310,6 +310,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       observer: this.observer,
       timer: this.timer,
       targetLayer: () => this.targetLayer,
+      willAssignWebValue: () => this.iosSdkText.willAssignWebValue(),
+      assignsWebValue: () => this.iosSdkText.assignsWebValue(),
       clear: (signal, display) => this.clear(signal, display),
       insert: (text, options) =>
         this.iosSdkText.insert(

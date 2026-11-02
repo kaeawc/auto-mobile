@@ -1,9 +1,8 @@
+import { internalMcpSessionId, internalOneShotCli } from "../../../daemon/wire/internalToolParams";
 import {
-  internalLiveDeadlineKey,
-  internalMcpRequestDeadlineMs,
-  internalMcpSessionId,
-  internalOneShotCli,
-} from "../../../daemon/wire/internalToolParams";
+  currentRequestDeadline,
+  type RequestDeadline,
+} from "../../toolSelection/toolSelectionContext";
 import { UnsafeDeviceResourceCombinationError } from "../../../models/UnsafeDeviceResourceCombinationError";
 import { ProvisionDeviceError } from "../../../devices/exactDeviceProvisioning";
 import {
@@ -29,7 +28,6 @@ import {
 } from "../core/contracts";
 import { type TeardownToolResponse } from "../teardown/teardownContracts";
 import { provisionDeviceSchema } from "../core/schemas";
-import { LOW_RAM_MEMORY_MB } from "../../../utils/provisionDeviceSpecSchemas";
 
 export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {
   if (error instanceof ProvisionDeviceError) {
@@ -189,13 +187,17 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
+/**
+ * @param requestDeadline the request's transport deadline, read from the ambient call context by
+ *   default (#15663): its absolute deadline bounds the run, and its live key correlates a
+ *   cancellation outcome.
+ */
 export function parseProvisionDeviceArgs(
   input: Partial<InternalProvisionDeviceArgs>,
+  requestDeadline: RequestDeadline | undefined = currentRequestDeadline(),
 ): InternalProvisionDeviceArgs {
   const __mcpSessionId = internalMcpSessionId(input);
   const __oneShotCli = internalOneShotCli(input);
-  const __mcpRequestDeadlineMs = internalMcpRequestDeadlineMs(input);
-  const __mcpLiveDeadlineKey = internalLiveDeadlineKey(input);
   const publicInput: Record<string, unknown> = { ...input };
   // `provisionDeviceSchema` is `.strict()`, so EVERY internal param the daemon
   // may inject has to go before re-parsing -- hence the canonical shared list
@@ -205,13 +207,9 @@ export function parseProvisionDeviceArgs(
   deleteInternalToolParams(publicInput);
   delete publicInput.rollbackOnRetryableReadiness;
   delete publicInput.discardSnapshotOnExit;
+  delete publicInput.transportDeadlineMs;
+  delete publicInput.liveDeadlineKey;
   const parsed = provisionDeviceSchema.parse(publicInput);
-  if (parsed.lowRam === true && parsed.device.platform === "android") {
-    parsed.device.spec.configuration = {
-      ...parsed.device.spec.configuration,
-      memoryMb: LOW_RAM_MEMORY_MB,
-    };
-  }
   return {
     ...parsed,
     ...(input.rollbackOnRetryableReadiness === false
@@ -222,8 +220,19 @@ export function parseProvisionDeviceArgs(
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,
     ...(__oneShotCli ? { __oneShotCli } : {}),
-    __mcpRequestDeadlineMs,
-    ...(__mcpLiveDeadlineKey ? { __mcpLiveDeadlineKey } : {}),
+    ...provisionDeadlineFields(requestDeadline),
+  };
+}
+
+/** The request deadline as the provisioning args carry it: its absolute deadline and live key. */
+function provisionDeadlineFields(
+  requestDeadline: RequestDeadline | undefined,
+): Pick<ProvisionDeviceArgs, "transportDeadlineMs" | "liveDeadlineKey"> {
+  const transportDeadlineMs = requestDeadline?.deadlineMs;
+  const liveDeadlineKey = requestDeadline?.liveDeadlineKey;
+  return {
+    ...(typeof transportDeadlineMs === "number" ? { transportDeadlineMs } : {}),
+    ...(liveDeadlineKey ? { liveDeadlineKey } : {}),
   };
 }
 
@@ -236,7 +245,7 @@ export function provisionDeviceDeadlineMs(
   reserveRollbackTime: boolean,
 ): number {
   const requestedDeadlineMs = timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
-  const mcpRequestDeadlineMs = internalMcpRequestDeadlineMs(args);
+  const mcpRequestDeadlineMs = args.transportDeadlineMs;
   if (!reserveRollbackTime || mcpRequestDeadlineMs === undefined) {
     return requestedDeadlineMs;
   }

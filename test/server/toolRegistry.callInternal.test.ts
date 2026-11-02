@@ -6,7 +6,9 @@ import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constant
 import { ActionableError } from "../../src/models/ActionableError";
 import { deviceActionClock } from "../../src/server/pipeline/deviceActionClock";
 import { resolveTransportDeadlineMs } from "../../src/server/transportDeadline";
+import { planCallerContext } from "../../src/server/planCallerIdentity";
 import {
+  currentAutolockMcpSessionId,
   currentExecution,
   currentRequestDeadline,
   getToolSelectionContext,
@@ -238,9 +240,9 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       // The step runs under the outer execution ambiently; its id is not written in-band (#15663).
       expect(captured).toHaveLength(1);
       expect(seenExecution).toMatchObject({ executionId: "outer-execution", startTime: 123 });
+      // Neither the execution nor its deadline is written in-band (#15663).
       expect(captured[0].args).not.toHaveProperty("__executionId");
-      // Still in-band for the transport-deadline fallback until that moves too.
-      expect(captured[0].args.__executionStartTime).toBe(123);
+      expect(captured[0].args).not.toHaveProperty("__executionStartTime");
     } finally {
       restore();
       ToolRegistry.setCollaboratorsForTesting({ navigationToolCallRecorder: originalRecorder });
@@ -248,15 +250,43 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     }
   });
 
-  // Inherited plan metadata must never become an own property with value
-  // `undefined`: a `.strict()` tool schema (getAndroid/getApple/provisionDevice)
-  // counts such a key as unrecognized and rejects the step outright.
-  describe("inherited plan-request metadata", () => {
-    test("omits absent parent metadata instead of writing undefined keys", async () => {
+  // A plan step runs under the request's ambient deadline (#15663); no deadline key reaches its args.
+  describe("the connection's autolock identity", () => {
+    test("a nested call does not inherit it but keeps the caller identity", async () => {
+      let seen: { autolock?: string; caller?: string } | undefined;
+      ToolRegistry.register("clipboard", "Mock clipboard", schema, async () => {
+        seen = {
+          autolock: currentAutolockMcpSessionId(),
+          caller: getToolSelectionContext()?.callerMcpSessionId,
+        };
+        return SENTINEL;
+      });
+
+      await runWithToolSelectionContext(
+        { autolockMcpSessionId: "conn-A", callerMcpSessionId: "conn-A" },
+        () => ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true }),
+      );
+
+      expect(seen).toEqual({ autolock: undefined, caller: "conn-A" });
+    });
+
+    test("executePlan's steps run for the connection that called it", async () => {
+      expect(planCallerContext()).toEqual({});
+      const inside = await runWithToolSelectionContext(
+        { autolockMcpSessionId: "conn-A" },
+        async () => planCallerContext(),
+      );
+      expect(inside).toEqual({ callerMcpSessionId: "conn-A" });
+    });
+  });
+
+  describe("plan steps carry no in-band deadline", () => {
+    test("nothing is written into a step's args", async () => {
       registerCapturingTool("clipboard");
 
-      await runWithToolSelectionContext({ planRequest: {} }, () =>
-        ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true }),
+      await runWithToolSelectionContext(
+        { planRequest: {}, requestDeadline: { deadlineMs: 10, timeoutMs: 20, startTime: 30 } },
+        () => ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true }),
       );
 
       expect(captured).toHaveLength(1);
@@ -270,40 +300,25 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       expect(() => strict.parse(captured[0].args)).not.toThrow();
     });
 
-    test("forwards parent metadata that is present", async () => {
+    test("a plan-supplied deadline key is stripped, so plan content cannot pick a deadline", async () => {
       registerCapturingTool("clipboard");
 
-      await runWithToolSelectionContext(
-        {
-          planRequest: {
-            deadlineMs: 10,
-            timeoutMs: 20,
-            startTime: 30,
-            liveDeadlineKey: "live-key",
-          },
-        },
-        () => ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true }),
-      );
-
-      expect(captured[0].args[INTERNAL_LIVE_DEADLINE_KEY_PARAM]).toBe("live-key");
-      expect(captured[0].args.__mcpRequestDeadlineMs).toBe(10);
-      expect(captured[0].args.__mcpRequestTimeoutMs).toBe(20);
-      expect(captured[0].args.__executionStartTime).toBe(30);
-    });
-
-    test("an absent parent value still strips a plan-supplied key", async () => {
-      registerCapturingTool("clipboard");
-
-      await runWithToolSelectionContext({ planRequest: { timeoutMs: 20 } }, () =>
+      await runWithToolSelectionContext({ planRequest: {} }, () =>
         ToolRegistry.callInternal(
           "clipboard",
-          { text: "Go", [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "forged-key" },
+          {
+            text: "Go",
+            [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "forged-key",
+            __mcpRequestDeadlineMs: 1,
+            __mcpRequestTimeoutMs: 2,
+            __executionStartTime: 3,
+          },
           { forPlan: true },
         ),
       );
 
-      expect(Object.keys(captured[0].args)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
-      expect(captured[0].args.__mcpRequestTimeoutMs).toBe(20);
+      expect(Object.keys(captured[0].args).filter((key) => key.startsWith("__mcp"))).toEqual([]);
+      expect(captured[0].args).not.toHaveProperty("__executionStartTime");
     });
   });
 

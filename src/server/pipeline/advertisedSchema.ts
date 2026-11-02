@@ -21,13 +21,8 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "../../daemon/wire/constants";
 
-/**
- * Internal params a plan step inherits from its enclosing request, in-band for provisioning; other
- * readers take the ambient request deadline (#15663). Listed once
- * so the "parent wins even when absent" strip in
- * `internalToolInvocationContext` cannot drift from the set it writes.
- */
-const INHERITED_PLAN_REQUEST_PARAMS = [
+/** The transport-deadline keys a plan step must never carry: plan content cannot pick a deadline. */
+const PLAN_STEP_DEADLINE_PARAMS = [
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
@@ -35,37 +30,21 @@ const INHERITED_PLAN_REQUEST_PARAMS = [
 ] as const;
 
 /**
- * Overlay the enclosing request's metadata onto a plan step's args.
- *
- * Parent metadata wins even when absent: a passthrough step schema must not let
- * plan content choose another request's live deadline. An absent parent value
- * therefore DELETES the plan-supplied key rather than writing `undefined` over
- * it — an own property whose value is `undefined` is still an unrecognized key
- * to a `.strict()` tool schema (getAndroid/getApple/provisionDevice), which
- * would reject the step before it runs.
+ * A plan step's args without any transport-deadline key the plan supplied. A step runs under the
+ * enclosing request's ambient deadline (#15663); a key left in its args would be an unrecognized
+ * key to a `.strict()` tool schema (getAndroid/getApple/provisionDevice) and reject the step.
  */
-export function applyInheritedPlanRequestParams(
+export function withoutPlanSuppliedDeadlineParams(
   args: Record<string, unknown>,
-  request: {
-    deadlineMs?: unknown;
-    timeoutMs?: unknown;
-    startTime?: unknown;
-    liveDeadlineKey?: unknown;
-  },
 ): Record<string, unknown> {
-  const inherited: Record<string, unknown> = {
-    ...args,
-    [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: request.deadlineMs,
-    [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: request.timeoutMs,
-    [INTERNAL_EXECUTION_START_TIME_PARAM]: request.startTime,
-    [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: request.liveDeadlineKey,
-  };
-  for (const key of INHERITED_PLAN_REQUEST_PARAMS) {
-    if (inherited[key] === undefined) {
-      delete inherited[key];
-    }
+  if (!PLAN_STEP_DEADLINE_PARAMS.some((key) => Object.hasOwn(args, key))) {
+    return args;
   }
-  return inherited;
+  const stripped = { ...args };
+  for (const key of PLAN_STEP_DEADLINE_PARAMS) {
+    delete stripped[key];
+  }
+  return stripped;
 }
 
 /** Apply the app ID contract after every per-node and whole-schema transformation. */

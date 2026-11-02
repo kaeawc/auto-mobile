@@ -42,15 +42,8 @@ export type ToolSelectionContext = {
   explicitObserveDeviceRead?: boolean;
   /** The request's transport deadline; an explicit `undefined` clears an inherited one. */
   requestDeadline?: RequestDeadline;
-  /**
-   * Trusted enclosing plan metadata, reattached after each step's schema parse. Its deadline fields
-   * now reach only provisioning's in-band reads; every other step reads `requestDeadline` (#15663).
-   */
+  /** Set while a plan runs: its steps inherit the request's deadline and use its progress. */
   planRequest?: {
-    deadlineMs?: unknown;
-    timeoutMs?: unknown;
-    startTime?: unknown;
-    liveDeadlineKey?: unknown;
     progress?: ProgressCallback;
   };
   routingSessionUuid?: string;
@@ -60,6 +53,11 @@ export type ToolSelectionContext = {
    * for a call with no originating connection.
    */
   callerMcpSessionId?: string;
+  /**
+   * The connection a top-level call implicitly autolocks and records for (#15663). Unlike
+   * `callerMcpSessionId`, an internal call (plan step, nested tool) never inherits it.
+   */
+  autolockMcpSessionId?: string;
   /** The connection key the call's per-connection device pin is stored under (#14385). */
   deviceConnectionKey?: string;
   /** Connection-bound ownership proof for read-only cross-device checks. */
@@ -162,6 +160,10 @@ export const runWithToolSelectionContext = async <T>(
 
 export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
   toolSelectionContext.getStore();
+
+/** The connection this top-level call autolocks and records for; absent inside internal calls. */
+export const currentAutolockMcpSessionId = (): string | undefined =>
+  toolSelectionContext.getStore()?.autolockMcpSessionId;
 
 /**
  * The tracked execution the current call runs under (#15663): set at MCP ingress and inherited by

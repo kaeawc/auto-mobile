@@ -10,6 +10,14 @@ When adding a script, wire it into a workflow, `package.json`, another script, o
 Python modules ending in `.py` under `scripts/github/` and `scripts/manual-test/python/` count as
 referenced through discovery when the root contains `pyproject.toml`, `requirements*.txt`, or `uv.lock`.
 
+## Android LMK Pressure Payload
+
+Run `bash scripts/android/build-lmk-pressure.sh` to build the native memory-pressure
+payload for `arm64-v8a` and `x86_64` with Android NDK API 26. NDK discovery checks
+`ANDROID_NDK_HOME`, `ANDROID_NDK_ROOT`, then the newest revision under the SDK's
+`ndk/` directory. Outputs are `build/lmk-pressure/<abi>/lmk_pressure`; set
+`LMK_PRESSURE_OUT` to override the output directory (relative to the current directory).
+
 ## MCP Context Management
 
 ### Context Estimation

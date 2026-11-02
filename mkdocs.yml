@@ -113,6 +113,7 @@ not_in_nav: |
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
   /decisions/mcp-sdk-v2-split-packages.md
+  /decisions/playwright-core-web-screenshots.md
   /decisions/prototype-embedded-request-routing.md
   /decisions/prototype-mock-backend.md
   /decisions/prototype-request-retrofit.md

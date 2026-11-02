@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  internalLiveDeadlineKey,
-  internalMcpRequestDeadlineMs,
   internalMcpSessionId,
   internalOneShotCli,
   internalOptionalOneShotCli,
@@ -11,7 +9,6 @@ import {
 describe("shared internal tool parameter readers", () => {
   test.each([
     ["__mcpSessionId", internalMcpSessionId],
-    ["__mcpLiveDeadlineKey", internalLiveDeadlineKey],
     ["__requesterSessionUuid", internalRequesterSessionUuid],
   ] as const)("%s reads strings without normalizing them", (key, read) => {
     expect(read({ [key]: "identity" })).toBe("identity");
@@ -19,16 +16,6 @@ describe("shared internal tool parameter readers", () => {
     expect(read({})).toBeUndefined();
     for (const value of [undefined, null, true, 42, {}, []]) {
       expect(read({ [key]: value })).toBeUndefined();
-    }
-  });
-
-  test("the request deadline reads numbers without imposing arithmetic policy", () => {
-    for (const value of [42, 0, -1, Infinity, NaN]) {
-      expect(internalMcpRequestDeadlineMs({ __mcpRequestDeadlineMs: value })).toBe(value);
-    }
-    expect(internalMcpRequestDeadlineMs({})).toBeUndefined();
-    for (const value of [undefined, null, true, "42", {}, []]) {
-      expect(internalMcpRequestDeadlineMs({ __mcpRequestDeadlineMs: value })).toBeUndefined();
     }
   });
 

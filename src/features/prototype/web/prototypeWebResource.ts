@@ -30,7 +30,7 @@ export interface PrototypeWebResource {
   readonly lastModified: number;
 }
 
-function parseRevision(value: string | undefined): number | undefined {
+export function parsePrototypeRevision(value: string | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -74,7 +74,7 @@ function shownRevision(
       `Unknown variant "${id}" for prototype "${query.id}". Variants: ${variantIds.join(", ")}.`,
     );
   }
-  return { id, revision: source.revision(id, parseRevision(query.revision)) };
+  return { id, revision: source.revision(id, parsePrototypeRevision(query.revision)) };
 }
 
 /**

@@ -1,10 +1,6 @@
 import type { ToolHandlerResult } from "../../toolRegistryTypes";
 import {
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-  INTERNAL_EXECUTION_START_TIME_PARAM,
-  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
 } from "../../../daemon/wire/constants";
@@ -59,7 +55,7 @@ export interface InvocationPlan {
  * place a parsed {@link CallContext} is written back in-band.
  */
 export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown> {
-  const { parsedParams, context, execution } = plan;
+  const { parsedParams, context } = plan;
   return {
     ...parsedParams,
     ...(plan.tool.selectsActiveDevice === true && plan.routingSessionUuid
@@ -69,18 +65,6 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
       ? { [INTERNAL_MCP_SESSION_PARAM]: plan.implicitAutolockMcpSessionId }
       : {}),
     ...(context.requestOneShotCli ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true } : {}),
-    // The transport deadline, also written in-band for provisioning, which still reads these keys;
-    // every other handler reads the ambient request deadline (`requestDeadlineOf`, #15663).
-    [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-    ...(context.requestTimeoutMs !== undefined
-      ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: context.requestTimeoutMs }
-      : {}),
-    ...(context.requestDeadlineMs !== undefined
-      ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: context.requestDeadlineMs }
-      : {}),
-    ...(context.requestLiveDeadlineKey !== undefined
-      ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: context.requestLiveDeadlineKey }
-      : {}),
     ...(context.requestAcceptanceDiscoveryOrder !== undefined
       ? { [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: context.requestAcceptanceDiscoveryOrder }
       : {}),
@@ -88,8 +72,8 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
 }
 
 /**
- * The request's transport deadline for the ambient call context (#15663): the same values
- * {@link buildHandlerParams} writes in-band, measured from this execution's start.
+ * The request's transport deadline for the ambient call context (#15663), measured from this
+ * execution's start. It is never written into the handler's arguments.
  */
 function requestDeadlineOf(plan: InvocationPlan): RequestDeadline {
   const { context, execution } = plan;
@@ -125,6 +109,7 @@ export async function invokeHandler(plan: InvocationPlan): Promise<ToolHandlerRe
         routingSessionUuid: plan.handlerRoutingSessionUuid,
         // #11469: nested internal calls and plan steps run for this daemon connection.
         callerMcpSessionId: plan.context.requestMcpSessionId,
+        autolockMcpSessionId: plan.implicitAutolockMcpSessionId,
         deviceConnectionKey: plan.bindingKey,
         ownsDeviceSession: (sessionUuid) => sessionToolBinding.ownsSession(sessionId, sessionUuid),
         execution: {

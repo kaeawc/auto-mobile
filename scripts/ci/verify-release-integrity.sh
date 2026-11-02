@@ -15,6 +15,9 @@
 #      the signed, notarized GitHub Release archive, for the same reason.
 #   5. ProtoViewer Android APK checksum — registry[0].protoViewerApkSha256 must
 #      pin the release-key-signed APK attached to the GitHub Release (#15301).
+#   6. deviceCondition memory-pressure payloads — registry[0].lmkPressureArm64Sha256
+#      and lmkPressureX8664Sha256 must pin the NDK binaries attached to the
+#      GitHub Release, which the client downloads and verifies (#16402).
 #
 # package.json is the canonical version source; every other value is checked
 # against the <version> argument (the git tag), which prepare-release keeps
@@ -124,6 +127,8 @@ protoviewer_apk_sha="$(bun "$RELEASE_READER" protoViewerApkSha256 "$RELEASE_TS")
 prototype_agent_sha="$(bun "$RELEASE_READER" prototypeAgentSha256 "$RELEASE_TS")"
 prototype_viewer_sha="$(bun "$RELEASE_READER" prototypeViewerSha256 "$RELEASE_TS")"
 network_filter_sha="$(bun "$RELEASE_READER" networkFilterSha256 "$RELEASE_TS")"
+lmk_pressure_arm64_sha="$(bun "$RELEASE_READER" lmkPressureArm64Sha256 "$RELEASE_TS")"
+lmk_pressure_x86_64_sha="$(bun "$RELEASE_READER" lmkPressureX8664Sha256 "$RELEASE_TS")"
 
 if [ "$runner_sha_target" != "xctest" ]; then
   errors+=("registry[0].runnerSha256Target must be 'xctest', got '${runner_sha_target:-missing}'")
@@ -194,6 +199,18 @@ else
   errors+=("registry[0].networkFilterSha256 must be a 64-char hex sha256, got '${network_filter_sha}'")
 fi
 
+if [[ "$lmk_pressure_arm64_sha" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "  OK  registry[0].lmkPressureArm64Sha256 populated"
+else
+  errors+=("registry[0].lmkPressureArm64Sha256 must be a 64-char hex sha256, got '${lmk_pressure_arm64_sha}'")
+fi
+
+if [[ "$lmk_pressure_x86_64_sha" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "  OK  registry[0].lmkPressureX8664Sha256 populated"
+else
+  errors+=("registry[0].lmkPressureX8664Sha256 must be a 64-char hex sha256, got '${lmk_pressure_x86_64_sha}'")
+fi
+
 if [ "${#errors[@]}" -gt 0 ]; then
   echo ""
   echo "ERROR: release integrity check failed for version '${EXPECTED}':"
@@ -202,7 +219,7 @@ if [ "${#errors[@]}" -gt 0 ]; then
   done
   echo ""
   echo "All manifests + the checksum registry + the git tag must name the same"
-  echo "version, and the iOS CtrlProxy plus ProtoViewer APK, screen-capture-helper, prototype-agent, prototype-viewer and network-filter checksums must be populated, before releasing."
+  echo "version, and the iOS CtrlProxy plus ProtoViewer APK, screen-capture-helper, prototype-agent, prototype-viewer, network-filter and lmk-pressure checksums must be populated, before releasing."
   exit 1
 fi
 

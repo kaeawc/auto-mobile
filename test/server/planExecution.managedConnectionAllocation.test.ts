@@ -1,4 +1,8 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 import { readToolResponse, toolJson, toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
@@ -151,17 +155,21 @@ describe("managed connection executePlan device labels (#11397)", () => {
     planContent: string,
     args: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> => {
+    // The socket connection reaches executePlan ambiently, as MCP ingress sets it (#15663).
+    const { connection, ...rest } = args;
+    const ambient = Object.hasOwn(args, "connection") ? (connection as string | undefined) : mcpA;
     const response = readToolResponse(
-      await ToolRegistry.getTool("executePlan")!.handler({
-        planContent,
-        startStep: 0,
-        platform: "ios",
-        sessionUuid: execA,
-        deviceAllocationTimeoutMs: 1_000,
-        abortStrategy: "immediate",
-        __mcpSessionId: mcpA,
-        ...args,
-      }),
+      await runWithToolSelectionContext({ autolockMcpSessionId: ambient }, () =>
+        ToolRegistry.getTool("executePlan")!.handler({
+          planContent,
+          startStep: 0,
+          platform: "ios",
+          sessionUuid: execA,
+          deviceAllocationTimeoutMs: 1_000,
+          abortStrategy: "immediate",
+          ...rest,
+        }),
+      ),
     );
     return response.structuredContent === undefined ? toolJson(response) : toolStructured(response);
   };
@@ -236,11 +244,28 @@ describe("managed connection executePlan device labels (#11397)", () => {
   );
 
   arranged(
+    "the socket id alone identifies the managed connection when the plan names no binding session",
+    async () => {
+      await sessionManager.createSession("outside-any-binding", free.deviceId, "ios");
+      sessionManager.setDeviceReadiness("outside-any-binding", "automationReady");
+      const result = await runPlan(PLAN, { sessionUuid: "outside-any-binding" });
+
+      expect(allocatorCalls).toEqual([]);
+      // Its binding grants only the slot device, so even label A is refused for this connection.
+      expect(result).toMatchObject({
+        code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
+        scopeKey: keyA.scopeKey,
+        deviceLabel: "A",
+      });
+    },
+  );
+
+  arranged(
     "labels declared only in the plan are refused the same way, with or without the socket id",
     async () => {
       const viaSocket = await runPlan(PLAN);
       // An internal caller carries no socket session id: the slot session identifies the connection.
-      const viaSession = await runPlan(PLAN, { __mcpSessionId: undefined });
+      const viaSession = await runPlan(PLAN, { connection: undefined });
 
       expect(allocatorCalls).toEqual([]);
       const refusal = { code: DEVICE_OUTSIDE_BROKER_GRANT_CODE, reason: "tool", deviceLabel: "B" };
@@ -401,6 +426,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
   describe("the binding session outlives the plan (#11421)", () => {
     const genericSession = "generic-session";
     let probed: string[];
+    let probedCallers: Array<string | undefined>;
 
     const planOf = (...lines: string[]): string => [...lines, ""].join("\n");
     const PROBE_PLAN = planOf(
@@ -418,12 +444,14 @@ describe("managed connection executePlan device labels (#11397)", () => {
 
     function arrangeNested2(): void {
       probed = [];
+      probedCallers = [];
       ToolRegistry.registerDeviceAware(
         "slotProbe",
         "Binding probe",
         z.object({}).passthrough(),
         async (device: BootedDevice) => {
           probed.push(device.deviceId);
+          probedCallers.push(getToolSelectionContext()?.callerMcpSessionId);
           return { success: true };
         },
       );
@@ -495,13 +523,20 @@ describe("managed connection executePlan device labels (#11397)", () => {
       await expectSlotSessionLive();
     });
 
+    arrangedNested2("a plan's steps run for the connection that called executePlan", async () => {
+      await sessionManager.createSession(genericSession, free.deviceId, "ios");
+      sessionManager.setDeviceReadiness(genericSession, "automationReady");
+      await runPlan(PROBE_PLAN, { sessionUuid: genericSession, connection: "mcp-socket-generic" });
+      expect(probedCallers).toEqual(["mcp-socket-generic"]);
+    });
+
     arrangedNested2("a generic connection keeps its caller-held session after a plan", async () => {
       await sessionManager.createSession(genericSession, free.deviceId, "ios");
       sessionManager.setDeviceReadiness(genericSession, "automationReady");
       await probe(genericSession);
       const result = await runPlan(PROBE_PLAN, {
         sessionUuid: genericSession,
-        __mcpSessionId: "mcp-socket-generic",
+        connection: "mcp-socket-generic",
       });
       expect(result).toMatchObject({ success: true, deviceId: free.deviceId });
       expect(sessionManager.peekSession(genericSession)?.assignedDevice).toBe(free.deviceId);
@@ -527,7 +562,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
 
         const result = await runPlan(PROBE_PLAN, {
           sessionUuid: genericSession,
-          __mcpSessionId: "mcp-socket-generic",
+          connection: "mcp-socket-generic",
         });
 
         expect(result).toMatchObject({ success: true, deviceId: free.deviceId });

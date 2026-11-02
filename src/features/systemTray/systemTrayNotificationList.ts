@@ -577,7 +577,10 @@ async function scanTrayNotificationPages(
   let swipes = 0;
   while (true) {
     signal?.throwIfAborted();
-    if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
+    if (
+      !observation?.viewHierarchy ||
+      !detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)
+    ) {
       throw new NotificationShadeNotOpenError(
         "Notification shade is not open; cannot list notifications.",
       );

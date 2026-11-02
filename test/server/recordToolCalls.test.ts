@@ -25,6 +25,11 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { toolField, toolIsError, toolJson, toolStructured } from "../helpers/toolResponse";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+
+/** Run `fn` as a top-level call made for MCP connection `connectionId`, as ingress does. */
+const asConnection = <T>(connectionId: string, fn: () => Promise<T>): Promise<T> =>
+  runWithToolSelectionContext({ autolockMcpSessionId: connectionId }, fn);
 
 isolateToolRegistry();
 
@@ -91,18 +96,18 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     const tool = ToolRegistry.getTool("recordToolCalls")!;
     // executeToolCall validates public args first, then injects internal params.
     const publicBegin = tool.schema.parse({ action: "begin" });
-    const a = await tool.handler({ ...publicBegin, __mcpSessionId: "A" });
-    const b = await tool.handler({ ...publicBegin, __mcpSessionId: "B" });
+    const a = await asConnection("A", () => tool.handler({ ...publicBegin }));
+    const b = await asConnection("B", () => tool.handler({ ...publicBegin }));
     expect(toolField(a, "success")).toBe(true);
     expect(toolField(b, "alreadyActive")).toBeUndefined();
     recordPlanCall(getToolCallRecorder({ connectionId: "A" })!, "tapOn", { text: "Only A" });
-    const statusB = await tool.handler({ action: "status", __mcpSessionId: "B" });
+    const statusB = await asConnection("B", () => tool.handler({ action: "status" }));
     expect(toolField(statusB, "stepCount")).toBe(0);
-    const endB = await tool.handler({ action: "end", __mcpSessionId: "B" });
+    const endB = await asConnection("B", () => tool.handler({ action: "end" }));
     expect(toolField(endB, "success")).toBe(false);
     expect(toolIsError(endB)).toBe(true);
     expect(toolStructured(endB)).toEqual(toolJson(endB));
-    const endA = await tool.handler({ action: "end", __mcpSessionId: "A" });
+    const endA = await asConnection("A", () => tool.handler({ action: "end" }));
     expect(toolField(endA, "success")).toBe(true);
     expect(toolIsError(endA)).toBe(false);
     expect(toolField(endA, "planContent")).toContain("Only A");
@@ -160,7 +165,7 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
   test("recordToolCalls end exports launchApp without transport metadata", async () => {
     serverConfig.setToolCallRecordingEnabled(true);
     const tool = ToolRegistry.getTool("recordToolCalls")!;
-    await tool.handler({ action: "begin", __mcpSessionId: "clean-export" });
+    await asConnection("clean-export", () => tool.handler({ action: "begin" }));
     recordPlanCall(getToolCallRecorder({ connectionId: "clean-export" })!, "launchApp", {
       appId: "com.android.settings",
       sessionUuid: "session",
@@ -168,11 +173,9 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
       __mcpRequestDeadlineMs: 1790948577851,
       __foo: "reserved",
     });
-    const result = await tool.handler({
-      action: "end",
-      planName: "clean-launch",
-      __mcpSessionId: "clean-export",
-    });
+    const result = await asConnection("clean-export", () =>
+      tool.handler({ action: "end", planName: "clean-launch" }),
+    );
     expect(toolField(result, "success")).toBe(true);
     expect(toolField(result, "planContent")).toContain("appId: com.android.settings");
     expect(toolField(result, "planContent")).not.toContain("__");

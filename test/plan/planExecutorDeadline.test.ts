@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
-import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  currentRequestDeadline,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createSetUIStateHandler } from "../../src/server/formTools";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
@@ -14,8 +17,6 @@ import {
 import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_EXECUTION_START_TIME_PARAM,
 } from "../../src/daemon/wire/constants";
 
 describe("plan internal request inheritance", () => {
@@ -34,27 +35,31 @@ describe("plan internal request inheritance", () => {
       "deadlineStep",
       "deadline aware step",
       z.object({}),
-      async (args, progress) => {
-        observed.push(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM]);
-        observed.push(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]);
-        observed.push(args[INTERNAL_EXECUTION_START_TIME_PARAM]);
-        observed.push(getLiveDeadlineMs(args[INTERNAL_LIVE_DEADLINE_KEY_PARAM]));
+      async (_args, progress) => {
+        // The step reads the request's deadline ambiently (#15663).
+        const requestDeadline = currentRequestDeadline();
+        observed.push(requestDeadline?.deadlineMs);
+        observed.push(requestDeadline?.timeoutMs);
+        observed.push(requestDeadline?.startTime);
+        observed.push(getLiveDeadlineMs(requestDeadline?.liveDeadlineKey ?? ""));
         timer.advanceTime(5_000);
         await progress?.(1, 2, "field completed");
-        observed.push(getLiveDeadlineMs(args[INTERNAL_LIVE_DEADLINE_KEY_PARAM]));
+        observed.push(getLiveDeadlineMs(requestDeadline?.liveDeadlineKey ?? ""));
         return { success: true };
       },
     );
     const result = await runWithToolSelectionContext(
       {
         planRequest: {
+          progress: async () => {
+            deadline.extendOnProgress(timer.now(), 10_000);
+          },
+        },
+        requestDeadline: {
           deadlineMs: 10_000,
           timeoutMs: 10_000,
           startTime: 0,
           liveDeadlineKey: "plan-deadline",
-          progress: async () => {
-            deadline.extendOnProgress(timer.now(), 10_000);
-          },
         },
       },
       () =>
@@ -99,7 +104,7 @@ describe("plan internal request inheritance", () => {
     );
     await runWithToolSelectionContext(
       {
-        planRequest: { deadlineMs: 80_000, liveDeadlineKey: "plan-deadline", progress },
+        planRequest: { progress },
         // The enclosing request's deadline, as MCP ingress sets it (#15663).
         requestDeadline: { deadlineMs: 80_000, liveDeadlineKey: "plan-deadline" },
       },
@@ -115,38 +120,46 @@ describe("plan internal request inheritance", () => {
   test("step-supplied metadata cannot replace the enclosing request", async () => {
     const calls: unknown[] = [];
     ToolRegistry.register("deadlineStep", "step", z.object({}).passthrough(), async (args) => {
-      calls.push(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM], args[INTERNAL_LIVE_DEADLINE_KEY_PARAM]);
+      calls.push(
+        currentRequestDeadline()?.deadlineMs,
+        currentRequestDeadline()?.liveDeadlineKey,
+        args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM],
+        args[INTERNAL_LIVE_DEADLINE_KEY_PARAM],
+      );
       return { success: true };
     });
-    await runWithToolSelectionContext({ planRequest: { deadlineMs: 42 } }, () =>
-      createDefaultPlanExecutor(new FakeTimer()).executePlan(
-        {
-          name: "spoof",
-          mcpVersion: "1.0",
-          steps: [
-            {
-              tool: "deadlineStep",
-              params: {
-                [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 999_999,
-                [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "other-request",
+    await runWithToolSelectionContext(
+      { planRequest: {}, requestDeadline: { deadlineMs: 42 } },
+      () =>
+        createDefaultPlanExecutor(new FakeTimer()).executePlan(
+          {
+            name: "spoof",
+            mcpVersion: "1.0",
+            steps: [
+              {
+                tool: "deadlineStep",
+                params: {
+                  [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 999_999,
+                  [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "other-request",
+                },
               },
-            },
-          ],
-        },
-        0,
-      ),
+            ],
+          },
+          0,
+        ),
     );
-    expect(calls).toEqual([42, undefined]);
+    // The step runs under the request's deadline; the plan's keys never reach its args.
+    expect(calls).toEqual([42, undefined, undefined, undefined]);
   });
 
   test("concurrent internal calls keep request context isolated and leave plain calls unchanged", async () => {
-    ToolRegistry.register("deadlineStep", "step", z.object({}), async (args) => {
+    ToolRegistry.register("deadlineStep", "step", z.object({}), async () => {
       await Promise.resolve();
-      return args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+      return currentRequestDeadline()?.deadlineMs;
     });
     const results = await Promise.all(
       [1, 2].map((deadlineMs) =>
-        runWithToolSelectionContext({ planRequest: { deadlineMs } }, () =>
+        runWithToolSelectionContext({ planRequest: {}, requestDeadline: { deadlineMs } }, () =>
           ToolRegistry.callInternal("deadlineStep", {}),
         ),
       ),

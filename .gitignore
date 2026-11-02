@@ -6,6 +6,7 @@ node_modules
 .turbo
 /coverage
 /dist
+/build/
 /venv
 /test_screenshots
 logs/

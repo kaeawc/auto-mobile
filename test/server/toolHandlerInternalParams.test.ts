@@ -249,7 +249,7 @@ describe("handler internal metadata regression guard", () => {
     expect(args).toMatchObject(metadata);
   });
 
-  test("provisionDevice argument seam strips full metadata and preserves session/CLI marker/deadline", () => {
+  test("provisionDevice argument seam strips full metadata, keeps session/CLI marker, takes the request's deadline", () => {
     const args = Object.freeze({
       device: {
         platform: "ios" as const,
@@ -261,15 +261,35 @@ describe("handler internal metadata regression guard", () => {
       },
       ...metadata,
     });
-    expect(parseProvisionDeviceArgs(args)).toEqual({
-      device: args.device,
-      boot: true,
-      readiness: "automation",
-      __mcpSessionId: "session",
-      // The one-shot CLI marker is preserved like the connection identity (#11096).
-      __oneShotCli: true,
-      __mcpRequestDeadlineMs: 90_000,
-    });
+    // The deadline comes from the request, never from an in-band key in the args (#15663).
+    expect(parseProvisionDeviceArgs(args, { deadlineMs: 90_000, liveDeadlineKey: "live" })).toEqual(
+      {
+        device: args.device,
+        boot: true,
+        readiness: "automation",
+        __mcpSessionId: "session",
+        // The one-shot CLI marker is preserved like the connection identity (#11096).
+        __oneShotCli: true,
+        transportDeadlineMs: 90_000,
+        liveDeadlineKey: "live",
+      },
+    );
+    expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("transportDeadlineMs");
     expect(args).toMatchObject(metadata);
+  });
+
+  test("provisionDevice ignores a caller-supplied deadline in favour of the request's", () => {
+    const args = {
+      device: {
+        platform: "android" as const,
+        name: "Pixel",
+        spec: { runtime: "android-35", deviceType: "pixel_8" },
+      },
+      transportDeadlineMs: 1,
+      liveDeadlineKey: "caller",
+    };
+    const parsed = parseProvisionDeviceArgs(args, { deadlineMs: 90_000 });
+    expect(parsed.transportDeadlineMs).toBe(90_000);
+    expect(parsed).not.toHaveProperty("liveDeadlineKey");
   });
 });

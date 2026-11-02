@@ -140,7 +140,7 @@ export function prototypeHostTypeName(id: string): string {
 }
 
 /** Asset ids a spec references, by kind, sorted (images first). */
-function referencedAssets(spec: ShownSpecJson): { id: string; kind: "image" | "font" }[] {
+export function referencedAssets(spec: ShownSpecJson): { id: string; kind: "image" | "font" }[] {
   const { images, fonts } = collectPrototypeAssetReferences(spec);
   return [
     ...[...images].sort().map((id) => ({ id, kind: "image" as const })),
@@ -216,7 +216,12 @@ async function resolvePlatform(
   return platform;
 }
 
-function assetPath(platform: NativePrototypePlatform, directory: string, file: string): string {
+/** Where an asset or spec file goes in the app, relative to the project root. */
+export function assetPath(
+  platform: NativePrototypePlatform,
+  directory: string,
+  file: string,
+): string {
   return platform === "android"
     ? `app/src/main/assets/prototypes/${directory}/${file}`
     : `Prototypes/${directory}/${file}`;
@@ -248,7 +253,11 @@ function nativeAssets(
   });
 }
 
-function library(platform: NativePrototypePlatform, version: string): NativePrototypeLibrary {
+/** The renderer library to add: a Gradle coordinate or a Swift package. */
+export function library(
+  platform: NativePrototypePlatform,
+  version: string,
+): NativePrototypeLibrary {
   return platform === "android"
     ? { gradle: `${PROTOTYPE_COMPOSE_ARTIFACT}:${version}` }
     : {
@@ -318,7 +327,9 @@ function hostFiles(
  * Swift compares strings by Unicode canonical equivalence, so ids like "é" and "e\u0301" are one
  * key there and the generated dictionary literal would trap at launch. Refuse them instead.
  */
-function rejectSwiftEquivalentIds(assets: readonly NativePrototypeAsset[]): void {
+export function rejectSwiftEquivalentIds(
+  assets: readonly Pick<NativePrototypeAsset, "id" | "kind">[],
+): void {
   const seen = new Map<string, string>();
   for (const asset of assets) {
     const key = `${asset.kind}:${asset.id.normalize("NFC")}`;
@@ -332,6 +343,20 @@ function rejectSwiftEquivalentIds(assets: readonly NativePrototypeAsset[]): void
   }
 }
 
+/** Refuses a spec the native renderers cannot draw (custom AGSL shaders). */
+export function rejectUnexportableSpec(
+  spec: ShownSpecJson,
+  platform: NativePrototypePlatform,
+): void {
+  if (requiredPrototypeCapabilities(spec).includes("prototype_custom_shaders_v1")) {
+    throw new ActionableError(
+      platform === "ios"
+        ? "Custom AGSL shaders are Android only; remove style.shader before exporting for iOS."
+        : "Native prototype export does not support style.shader yet; the Compose renderer has no custom shader runtime. Remove style.shader before exporting.",
+    );
+  }
+}
+
 /** Builds the native-code payload for one prototype. */
 export async function readNativePrototype(
   params: Record<string, string | undefined>,
@@ -341,13 +366,7 @@ export async function readNativePrototype(
   const requested = parsePlatform(params.platform);
   const resolved = await resolvePrototype(sources, id, params.deviceId);
   const platform = await resolvePlatform(sources, requested, resolved);
-  if (requiredPrototypeCapabilities(resolved.spec).includes("prototype_custom_shaders_v1")) {
-    throw new ActionableError(
-      platform === "ios"
-        ? "Custom AGSL shaders are Android only; remove style.shader before exporting for iOS."
-        : "Native prototype export does not support style.shader yet; the Compose renderer has no custom shader runtime. Remove style.shader before exporting.",
-    );
-  }
+  rejectUnexportableSpec(resolved.spec, platform);
   const version = sources.libraryVersion();
   const capabilities = requiredPrototypeCapabilities(resolved.spec);
   const assets = nativeAssets(platform, id, resolved);

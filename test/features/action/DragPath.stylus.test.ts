@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DragPath } from "../../../src/features/action/DragPath";
+import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "../../../src/features/action/gestureTransportTimeout";
+import { instrumentationTimeoutMs } from "../../../src/features/action/pointer/instrumentationDispatch";
 import type {
   PointerEnvironment,
   PointerRequest,
@@ -124,6 +126,7 @@ describe("dragPath with a stylus pointer (#13099)", () => {
   });
 
   test("a path that cannot fit the request budget with the instrumentation overhead is refused", async () => {
+    const neededMs = instrumentationTimeoutMs(4000) + LONG_PRESS_TIMEOUT_HEADROOM_MS;
     const route = new FakePointerInjector("instrumentation");
     const drag = create(android, route, ["stylus_input_v1"]);
     await expect(
@@ -137,7 +140,9 @@ describe("dragPath with a stylus pointer (#13099)", () => {
         },
         { deadlineMs: 10_000 },
       ),
-    ).rejects.toThrow(/does not fit the remaining request budget/);
+    ).rejects.toThrow(
+      `dragPath duration 4000 ms does not fit the remaining request budget (10000 ms; needs ${neededMs} ms including dispatch headroom)`,
+    );
     expect(route.injected).toEqual([]);
   });
 

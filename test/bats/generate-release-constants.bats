@@ -699,3 +699,69 @@ PY
   [ "$(read_field_for_version 99.99.99 protoViewerApkSha256 "${TEST_ROOT}/src/constants/release.ts")" = "4444444444444444444444444444444444444444444444444444444444444444" ]
   [ "$(read_field_for_version 0.0.88 apkSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$before_older" ]
 }
+
+# --- lmk-pressure binaries (#16402) ---
+
+LMK_ARM_SHA="4444444444444444444444444444444444444444444444444444444444444444"
+LMK_X86_SHA="5555555555555555555555555555555555555555555555555555555555555555"
+
+@test "writes both lmk-pressure checksums into the new registry entry in release mode" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
+    PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    LMK_PRESSURE_ARM64_SHA256="$LMK_ARM_SHA" \
+    LMK_PRESSURE_X86_64_SHA256="$LMK_X86_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(read_field_for_version 99.99.99 lmkPressureArm64Sha256 "${TEST_ROOT}/src/constants/release.ts")" = "$LMK_ARM_SHA" ]
+  [ "$(read_field_for_version 99.99.99 lmkPressureX8664Sha256 "${TEST_ROOT}/src/constants/release.ts")" = "$LMK_X86_SHA" ]
+}
+
+@test "refreshes lmk-pressure checksums for an already-registered version that predates them" {
+  run env \
+    RELEASE_VERSION="0.0.46" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    PROTOTYPE_AGENT_SHA256="$PROTOTYPE_SHA" \
+    PROTOTYPE_VIEWER_SHA256="$VIEWER_SHA" \
+    PROTOVIEWER_APK_SHA256="$PV_APK_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    LMK_PRESSURE_ARM64_SHA256="$LMK_ARM_SHA" \
+    LMK_PRESSURE_X86_64_SHA256="$LMK_X86_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(read_field_for_version 0.0.46 lmkPressureArm64Sha256 "${TEST_ROOT}/src/constants/release.ts")" = "$LMK_ARM_SHA" ]
+  [ "$(read_field_for_version 0.0.46 lmkPressureX8664Sha256 "${TEST_ROOT}/src/constants/release.ts")" = "$LMK_X86_SHA" ]
+}
+
+@test "writes NIGHTLY_CHECKSUM_ENTRY lmk-pressure checksums in checksum-only mode" {
+  run env \
+    LMK_PRESSURE_ARM64_SHA256="$LMK_ARM_SHA" \
+    LMK_PRESSURE_X86_64_SHA256="$LMK_X86_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(read_field_for_version nightly lmkPressureArm64Sha256 "${TEST_ROOT}/src/constants/release.ts")" = "$LMK_ARM_SHA" ]
+  [ "$(read_field_for_version nightly lmkPressureX8664Sha256 "${TEST_ROOT}/src/constants/release.ts")" = "$LMK_X86_SHA" ]
+}
+
+@test "rejects a malformed LMK_PRESSURE_ARM64_SHA256" {
+  run env LMK_PRESSURE_ARM64_SHA256="not-a-sha" bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LMK_PRESSURE_ARM64_SHA256 must be a valid SHA256"* ]]
+}
+
+@test "rejects a malformed LMK_PRESSURE_X86_64_SHA256" {
+  run env LMK_PRESSURE_X86_64_SHA256="ABC" bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LMK_PRESSURE_X86_64_SHA256 must be a valid SHA256"* ]]
+}

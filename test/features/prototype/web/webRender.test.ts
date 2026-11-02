@@ -445,7 +445,12 @@ describe("prototype web still (#16346)", () => {
       ).map((element) => element.attrs.title);
     expect(iconsOf({ type: "listItem", headline: "Wifi", leadingIcon: "wifi" })).toEqual(["wifi"]);
     expect(
-      iconsOf({ type: "textField", stateKey: "q", leadingIcon: "search", trailingIcon: "close" }),
+      iconsOf({
+        type: "textField",
+        stateKey: "q",
+        leadingIcon: "search",
+        trailingIcon: { icon: "close", label: "Clear" },
+      }),
     ).toEqual(["search", "close"]);
   });
 
@@ -501,6 +506,21 @@ describe("prototype web still (#16346)", () => {
     const wrapper = row.children[0] as WebElement;
     expect(wrapper.style).toMatchObject({ flex: "1 1 0", "flex-direction": "column" });
     expect(byTag({ element: row }, "field")[0]!.style).not.toHaveProperty("flex");
+  });
+
+  test("an explicit wrap-width root keeps its content width in its window", () => {
+    const layerOf = (placement: Record<string, unknown>) =>
+      find(
+        renderPrototypeStill({
+          ...reference,
+          window: { placement },
+          root: { type: "column", testTag: "root", children: [], style: { width: "wrap" } },
+        }).element,
+        (element) => element.attrs["data-window"] !== undefined,
+      )[0]!;
+    expect(layerOf({ type: "fullscreen" }).style["align-items"]).toBe("flex-start");
+    const sheet = layerOf({ type: "sheet", edge: "bottom", height: 200 });
+    expect((sheet.children[0] as WebElement).style["align-items"]).toBe("flex-start");
   });
 
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {

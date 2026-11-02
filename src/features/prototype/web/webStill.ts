@@ -39,13 +39,28 @@ const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
   bottomEnd: ["end", "end"],
 };
 
-const LAYER = { position: "absolute", inset: "0", display: "flex", "flex-direction": "column" };
+// Window content start-aligns, so an explicit `wrap` root keeps its content width; a filling root
+// stretches itself.
+const LAYER = {
+  position: "absolute",
+  inset: "0",
+  display: "flex",
+  "flex-direction": "column",
+  "align-items": "flex-start",
+};
 
 function sheetWindow(placement: Raw, children: WebElement[]): WebElement {
   const height = typeof placement.height === "number" ? placement.height : 0;
   const sheet = el(
     "div",
-    { style: { display: "flex", "flex-direction": "column", height: `${height}px` } },
+    {
+      style: {
+        display: "flex",
+        "flex-direction": "column",
+        "align-items": "flex-start",
+        height: `${height}px`,
+      },
+    },
     children,
   );
   const edge = placement.edge === "top" ? "flex-start" : "flex-end";

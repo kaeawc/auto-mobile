@@ -464,7 +464,7 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
   ];
 }
 
-const textField: NodeRenderer = (node, scope) => {
+const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
   const error = node.errorWhen !== undefined && decide(node.errorWhen, scope.condition) === true;
   const { attrs, style } = base(node, scope, {
@@ -483,7 +483,8 @@ const textField: NodeRenderer = (node, scope) => {
   const field = el("div", { attrs: { ...attrs, role: "textbox" }, style: inner }, [
     ...namedIcon(node.leadingIcon, scope),
     el("span", { style: { flex: "1 1 auto" } }, [shown]),
-    ...namedIcon(node.trailingIcon, scope),
+    // The trailing slot is an {icon, label} action, like an app-bar action.
+    ...appBarIcons([node.trailingIcon], scope, path),
   ]);
   return caption.length === 0
     ? field

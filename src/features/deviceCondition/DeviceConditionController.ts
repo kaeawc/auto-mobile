@@ -1,4 +1,5 @@
-import { logger } from "../../utils/logger";
+import { logger as defaultLogger } from "../../utils/logger";
+import type { Logger } from "../../utils/loggerValues";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { OwedResetError } from "./OwedResetError";
 import {
@@ -76,6 +77,7 @@ export class DeviceConditionController {
     private readonly resolveInjector: (
       key: DeviceConditionKey,
     ) => DeviceConditionInjector | undefined,
+    private readonly logger: Pick<Logger, "warn"> = defaultLogger,
   ) {}
 
   /** Keys with a reset or discovery still owed; registered resets come first. */
@@ -157,7 +159,7 @@ export class DeviceConditionController {
         });
         this.recoveryFailures.delete(change.key);
       }
-      logger.warn(
+      this.logger.warn(
         `[deviceCondition] applying ${change.key}=${change.value} failed: ${errorMessage(error)}`,
         error,
       );
@@ -182,7 +184,7 @@ export class DeviceConditionController {
         });
       }
     } catch (error) {
-      logger.warn(`[deviceCondition] recovering ${key} failed: ${errorMessage(error)}`, error);
+      this.logger.warn(`[deviceCondition] recovering ${key} failed: ${errorMessage(error)}`, error);
       this.recoveryFailures.set(key, errorMessage(error));
     }
   }
@@ -222,7 +224,7 @@ export class DeviceConditionController {
         await entry.reset(signal);
         this.drop(entry);
       } catch (error) {
-        logger.warn(`[deviceCondition] clearing ${key} failed: ${errorMessage(error)}`, error);
+        this.logger.warn(`[deviceCondition] clearing ${key} failed: ${errorMessage(error)}`, error);
         return { key, status: "unsupported", detail: `Failed to clear: ${errorMessage(error)}` };
       }
     }
@@ -259,7 +261,7 @@ export class DeviceConditionController {
           failures.push({ key: entry.key, error: "reset ran but the device did not read clean" });
         }
       } catch (error) {
-        logger.warn(
+        this.logger.warn(
           `[deviceCondition] reset for ${entry.key} failed: ${errorMessage(error)}`,
           error,
         );

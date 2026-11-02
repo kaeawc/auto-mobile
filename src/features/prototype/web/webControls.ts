@@ -2,7 +2,7 @@ import { record, type Raw } from "../prototypeTemplate";
 import { defaultFillAxes, filling, linkedPagerPage } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
-import { cssColor } from "./webStyle";
+import { cssColor, textCss } from "./webStyle";
 
 type Css = Record<string, string>;
 
@@ -99,9 +99,7 @@ function chipBody(
         height: "32px",
         "padding-inline": selected ? "8px 16px" : "16px",
         "border-radius": "8px",
-        "font-size": "14px",
-        "font-weight": "500",
-        "line-height": "20px",
+        ...textCss({ textStyle: "labelLarge" }, scope.style),
         border: selected ? "1px solid transparent" : `1px solid ${outline}`,
         ...roles,
         // An authored foreground wins over the Material role, as on the devices.
@@ -318,9 +316,7 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
     "span",
     {
       style: {
-        "font-size": "12px",
-        "line-height": "16px",
-        "font-weight": "500",
+        ...textCss({ textStyle: "labelMedium" }, scope.style),
         ...(labelColor ? { color: labelColor } : {}),
       },
     },
@@ -405,8 +401,7 @@ function tab(item: NavItem, selected: boolean, layout: TabLayout) {
         gap: "2px",
         "min-height": layout.icons ? "72px" : "48px",
         "padding-inline": "16px",
-        "font-size": "14px",
-        "font-weight": "500",
+        ...textCss({ textStyle: "titleSmall" }, scope.style),
         ...(layout.scrollable
           ? { flex: "0 0 auto", "min-width": "90px" }
           : { flex: "1 1 0", "min-width": "0" }),

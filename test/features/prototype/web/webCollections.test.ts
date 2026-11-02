@@ -476,6 +476,50 @@ describe("web still chips and sliders (#16382)", () => {
     expect(byPart(chip, "chip")[0]!.style.color).toBe("rgba(255,0,0,1)");
   });
 
+  test("control labels follow the theme's type scale", () => {
+    const scaled = renderPrototypeStill(
+      rootOf(
+        {
+          type: "column",
+          children: [
+            { type: "chip", testTag: "chip", label: "X" },
+            { type: "bottomNav", testTag: "nav", items: [{ label: "A" }, { label: "B" }] },
+            { type: "tabBar", testTag: "tabs", items: [{ label: "A" }, { label: "B" }] },
+          ],
+        },
+        { theme: { typography: { scale: 2 } } },
+      ),
+    ).element;
+    expect(byPart(byTag(scaled, "chip")[0]!, "chip")[0]!.style).toMatchObject({
+      "font-size": "28px",
+      "line-height": "40px",
+    });
+    const navLabel = find(byTag(scaled, "nav")[0]!, (e) => e.style["font-size"] !== undefined)[0]!;
+    expect(navLabel.style["font-size"]).toBe("24px");
+    const tab = find(byTag(scaled, "tabs")[0]!, (e) => e.attrs.role === "tab")[0]!;
+    expect(tab.style["font-size"]).toBe("28px");
+  });
+
+  test("an unsized column around an unsized column passes a slider's fill up to its parent", () => {
+    const outer = byTag(
+      renderPrototypeStill(
+        rootOf({
+          type: "column",
+          style: { width: "fill" },
+          children: [
+            {
+              type: "column",
+              testTag: "outer",
+              children: [{ type: "column", children: [{ type: "slider", stateKey: "v" }] }],
+            },
+          ],
+        }),
+      ).element,
+      "outer",
+    )[0]!;
+    expect(outer.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+  });
+
   test("a chip whose enabledWhen is false draws disabled", () => {
     const chip = byNode(
       renderPrototypeStill(

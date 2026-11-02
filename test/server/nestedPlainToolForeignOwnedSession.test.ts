@@ -1,6 +1,5 @@
 import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod/v4";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -17,7 +16,6 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { planCallerContext } from "../../src/server/planCallerIdentity";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
@@ -74,10 +72,7 @@ describe("a nested plain control call naming a session another connection owns (
   let probeRuns: string[];
 
   const serving = <T>(connection: string | undefined, run: () => Promise<T>): Promise<T> =>
-    runWithToolSelectionContext(
-      planCallerContext(connection ? { [INTERNAL_MCP_SESSION_PARAM]: connection } : {}),
-      run,
-    );
+    runWithToolSelectionContext({ callerMcpSessionId: connection }, run);
   /** The error a nested call rejects with, or undefined when it ran. */
   const nested = (
     connection: string | undefined,

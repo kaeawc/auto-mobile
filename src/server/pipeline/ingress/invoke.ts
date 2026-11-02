@@ -109,6 +109,7 @@ export async function invokeHandler(plan: InvocationPlan): Promise<ToolHandlerRe
         routingSessionUuid: plan.handlerRoutingSessionUuid,
         // #11469: nested internal calls and plan steps run for this daemon connection.
         callerMcpSessionId: plan.context.requestMcpSessionId,
+        autolockMcpSessionId: plan.implicitAutolockMcpSessionId,
         deviceConnectionKey: plan.bindingKey,
         ownsDeviceSession: (sessionUuid) => sessionToolBinding.ownsSession(sessionId, sessionUuid),
         execution: {

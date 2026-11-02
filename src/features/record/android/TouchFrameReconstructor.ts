@@ -51,6 +51,8 @@ export class TouchFrameReconstructor {
   private nodeTool: PointerToolType | undefined;
   private readonly heldButtons = new Set<StylusButton>();
   private readonly hover = new PenHoverTracker();
+  /** All samples made synchronously while processing a line use that line's kernel clock. */
+  private kernelAtMs = 0;
 
   constructor(
     private readonly options: {
@@ -73,14 +75,15 @@ export class TouchFrameReconstructor {
    */
   feedLine(line: string, arrivedAt: number): RawTouchFrame | GestureEvent | null {
     // Match: "[timestamp] EV_TYPE   EVENT_CODE   value"
-    const match = line.match(/^\[\s*[\d.]+\]\s+(\S+)\s+(\S+)\s+(\S+)\s*$/);
+    const match = line.match(/^\[\s*(\d+(?:\.\d+)?)\]\s+(\S+)\s+(\S+)\s+(\S+)\s*$/);
     if (!match) {
       return null;
     }
 
-    const evType = match[1];
-    const evCode = match[2];
-    const evValue = match[3];
+    this.kernelAtMs = Number(match[1]) * 1000;
+    const evType = match[2];
+    const evCode = match[3];
+    const evValue = match[4];
 
     if (evType === "EV_ABS") {
       return this.handleAbsEvent(evCode, evValue, arrivedAt);
@@ -171,7 +174,7 @@ export class TouchFrameReconstructor {
       return;
     }
     if (this.isMtPenHovering(slot)) {
-      this.hover.slotHovering(slot.slotId, slot, arrivedAt);
+      this.hover.slotHovering(slot.slotId, slot, arrivedAt, this.kernelAtMs);
     } else {
       this.hover.slotTouching(slot.slotId);
     }
@@ -367,7 +370,7 @@ export class TouchFrameReconstructor {
   private observePenSample(slot: TouchSlot, arrivedAt: number): void {
     this.observePenSlot(slot, arrivedAt);
     if (this.options.singleTouch && this.nodeTool && slot.trackingId < 0) {
-      this.hover.penHovering(slot, arrivedAt);
+      this.hover.penHovering(slot, arrivedAt, this.kernelAtMs);
     }
   }
 
@@ -433,7 +436,13 @@ export class TouchFrameReconstructor {
   /** Keep endpoints and pressure changes; compact older time samples before reaching the tool cap. */
   private samplePen(slot: TouchSlot, arrivedAt: number): ReadonlyArray<PenSample> {
     let path = this.penPaths.get(slot.slotId) ?? [];
-    const sample = { x: slot.x, y: slot.y, pressure: slot.pressure, arrivedAt };
+    const sample = {
+      x: slot.x,
+      y: slot.y,
+      pressure: slot.pressure,
+      arrivedAt,
+      kernelAtMs: this.kernelAtMs,
+    };
     // Every pressure change is initially retained. At the cap, halve the temporal resolution
     // of older samples while preserving the first point and pressure extrema; always append the latest.
     if (path.length >= GESTURE_THRESHOLDS.PEN_MAX_SAMPLES) {

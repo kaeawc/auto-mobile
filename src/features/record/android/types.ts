@@ -29,6 +29,8 @@ export interface PenSample {
   y: number;
   pressure: number;
   arrivedAt: number;
+  /** Node-local kernel event time in milliseconds; independent of stdout delivery. */
+  kernelAtMs?: number;
 }
 
 export interface HoverSample {
@@ -36,6 +38,8 @@ export interface HoverSample {
   y: number;
   distance: number;
   arrivedAt: number;
+  /** Node-local kernel event time in milliseconds; independent of stdout delivery. */
+  kernelAtMs?: number;
 }
 
 export interface TouchSlot {

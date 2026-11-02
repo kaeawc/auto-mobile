@@ -94,6 +94,7 @@ export class GetEventReader implements GestureEmitter {
               ? samples.map((sample) => ({
                   ...mapping.toScreenPoint(sample.x, sample.y),
                   arrivedAt: sample.arrivedAt,
+                  ...(sample.kernelAtMs === undefined ? {} : { kernelAtMs: sample.kernelAtMs }),
                   distance: Math.min(
                     1,
                     Math.max(0, (sample.distance - range.min) / (range.max - range.min)),

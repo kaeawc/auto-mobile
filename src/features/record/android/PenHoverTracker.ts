@@ -47,20 +47,20 @@ export class PenHoverTracker {
     return episode && !episode.touched ? hoverEvent(toolType, arrivedAt, episode) : null;
   }
 
-  slotHovering(slotId: number, slot: TouchSlot, arrivedAt: number): void {
+  slotHovering(slotId: number, slot: TouchSlot, arrivedAt: number, kernelAtMs?: number): void {
     if (!this.slotEpisodes.has(slotId)) {
       this.slotEpisodes.set(slotId, { touched: false, samples: [] });
     }
-    this.sample(this.slotEpisodes.get(slotId)!, slot, arrivedAt);
+    this.sample(this.slotEpisodes.get(slotId)!, slot, arrivedAt, kernelAtMs);
   }
 
-  penHovering(slot: TouchSlot, arrivedAt: number): void {
+  penHovering(slot: TouchSlot, arrivedAt: number, kernelAtMs?: number): void {
     if (this.nodeEpisode) {
-      this.sample(this.nodeEpisode, slot, arrivedAt);
+      this.sample(this.nodeEpisode, slot, arrivedAt, kernelAtMs);
     }
   }
 
-  private sample(episode: Episode, slot: TouchSlot, arrivedAt: number): void {
+  private sample(episode: Episode, slot: TouchSlot, arrivedAt: number, kernelAtMs?: number): void {
     if (
       episode.touched ||
       !Number.isFinite(slot.x) ||
@@ -73,7 +73,13 @@ export class PenHoverTracker {
     if (episode.samples.length >= GESTURE_THRESHOLDS.PEN_MAX_SAMPLES) {
       episode.samples = episode.samples.filter((_, index) => index === 0 || index % 2 === 1);
     }
-    episode.samples.push({ x: slot.x, y: slot.y, distance: slot.distance, arrivedAt });
+    episode.samples.push({
+      x: slot.x,
+      y: slot.y,
+      distance: slot.distance,
+      arrivedAt,
+      ...(kernelAtMs === undefined ? {} : { kernelAtMs }),
+    });
   }
 
   slotTouching(slotId: number): void {

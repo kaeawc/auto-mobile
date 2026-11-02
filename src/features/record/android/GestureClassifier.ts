@@ -265,6 +265,7 @@ export class GestureClassifier {
       const path = contact.path.map((sample) => ({
         ...contact.scaler.toScreenPoint(sample.x, sample.y),
         arrivedAt: sample.arrivedAt,
+        ...(sample.kernelAtMs === undefined ? {} : { kernelAtMs: sample.kernelAtMs }),
         pressure:
           Math.round(clamp01((sample.pressure - range.min) / (range.max - range.min)) * 1e4) / 1e4,
       }));

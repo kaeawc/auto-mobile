@@ -125,11 +125,15 @@ also reads pen data (**Source**):
   `"eraser"`): a tap or long press as `tapAt`, a swipe as `swipeAt`, never `tapOn` or `swipeOn`,
   which cannot say "stylus". Constant pressure is carried by the pointer. A stylus drag
   with a normalized pressure range of at least 0.05 becomes a `stroke`, exported as
-  `dragPath` with per-point pressure; constant-pressure drags deliberately remain `swipeAt`.
+  `dragPath` with per-point pressure and the pointer's mean pressure fallback, tilt and held
+  buttons; constant-pressure drags deliberately remain `swipeAt`.
   Contact and hover paths retain at most 100 samples, halving older temporal samples at
   the cap while preserving the first point, pressure extrema and the latest point.
   Coordinates use the mapping at contact down or hover entry; distance is normalized against its discovered
-  axis range. A pen gesture with no known position or path is left out with a warning
+  axis range. Segment durations use node-local kernel timestamps, falling back to host arrival
+  deltas when timestamps are absent, and are clamped to 1-5000 ms. A stroke whose exported
+  segments total more than the 20 second replay limit is omitted with a dedicated stop-result
+  warning. A pen gesture with no known position or path is left out with a warning
   on the stop result, which a salvaged stop keeps. An eraser gesture is exported with a warning
   because only a root `adb shell` with the `uinput` tool can replay it. A stylus double tap is exported with a warning because
   replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger

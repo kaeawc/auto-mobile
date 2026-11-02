@@ -83,10 +83,41 @@ class CtrlProxyServiceLifecycleTest {
   fun `stopping features that never started is a no-op`() {
     assertNull(service.storageSubscriptionManagerOrNull)
     assertNull(service.webSocketServerOrNull)
+    assertNull(service.rotationProvenanceOrNull)
 
+    service.stopDisplayTracking()
     service.stopStorageSubscription()
     service.stopWebSocketServer()
     service.stopLogcatForwarding()
     service.stopEventIngestion()
+  }
+
+  @Test
+  fun `starting display tracking creates the rotation tracker`() {
+    service.startDisplayTracking()
+
+    assertTrue(service.rotationProvenanceOrNull != null)
+    service.stopDisplayTracking()
+    assertNull(service.deviceStateRegistration)
+  }
+
+  @Test
+  fun `stopping display tracking closes the device-state registration`() {
+    var closed = false
+    service.deviceStateRegistration = AutoCloseable { closed = true }
+
+    service.stopDisplayTracking()
+
+    assertTrue(closed)
+    assertNull(service.deviceStateRegistration)
+  }
+
+  @Test
+  fun `a failing device-state unregister is contained and still forgotten`() {
+    service.deviceStateRegistration = AutoCloseable { error("unregister failed") }
+
+    service.stopDisplayTracking()
+
+    assertNull(service.deviceStateRegistration)
   }
 }

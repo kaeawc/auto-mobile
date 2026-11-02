@@ -403,8 +403,8 @@ class CtrlProxy : AccessibilityService() {
       deviceEventTransport(),
       timeProvider,
     )
-  private lateinit var rotationProvenance: RotationProvenanceTracker
-  private var deviceStateRegistration: AutoCloseable? = null
+  internal lateinit var rotationProvenance: RotationProvenanceTracker
+  internal var deviceStateRegistration: AutoCloseable? = null
   internal val navigationEventAccumulator = NavigationEventAccumulator()
   internal val sdkEventBatchProcessor by lazy {
     SdkEventBatchProcessor(
@@ -1325,7 +1325,7 @@ class CtrlProxy : AccessibilityService() {
 
   private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
-  private val displayTransitions =
+  internal val displayTransitions =
     DisplayTransitionRelay(
       object : DisplayTransitionRelay.Host {
         override fun launch(block: suspend () -> Unit) {
@@ -1378,16 +1378,7 @@ class CtrlProxy : AccessibilityService() {
     }
 
     try {
-      val displaySignal =
-        DisplayRotationChangeSignal(
-          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
-          onTransition = displayTransitions::onTransition,
-        )
-      rotationProvenance = RotationProvenanceTracker(displaySignal)
-      deviceStateRegistration =
-        DeviceStateTransitions.register(this) { state ->
-          displaySignal.emitDeviceState(state)
-        }
+      startDisplayTracking()
       overlayDrawer =
         OverlayDrawer(screenDimensionsProvider = { displayController.getScreenDimensions() })
       overlayManager =
@@ -1495,12 +1486,7 @@ class CtrlProxy : AccessibilityService() {
 
     unregisterReceivers()
 
-    if (::rotationProvenance.isInitialized) {
-      rotationProvenance.close()
-    }
-    runCatching { deviceStateRegistration?.close() }
-      .onFailure { Log.w(TAG, "Failed to unregister device-state listener", it) }
-    deviceStateRegistration = null
+    stopDisplayTracking()
 
     stopLogcatForwarding()
 
@@ -1544,6 +1530,10 @@ class CtrlProxy : AccessibilityService() {
     )
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
   }
+
+  /** The rotation tracker once [onServiceConnected] has created it; null before then. */
+  internal val rotationProvenanceOrNull: RotationProvenanceTracker?
+    get() = if (::rotationProvenance.isInitialized) rotationProvenance else null
 
   /** The WebSocket server once [onServiceConnected] has created it; null before then. */
   internal val webSocketServerOrNull: WebSocketServer?

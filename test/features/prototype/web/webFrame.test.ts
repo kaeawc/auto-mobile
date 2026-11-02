@@ -58,3 +58,13 @@ test("an iPhone hides its status bar in landscape; Android keeps it", () => {
 test("a frame without a navigation bar draws no handle", () => {
   expect(chrome(frameOf("iphone-se-3", "portrait"), "navBar")).toBeUndefined();
 });
+
+test("button navigation draws three visible marks", () => {
+  const nav = chrome(frameOf("small-phone", "portrait"), "navBar")!;
+  const buttons = nav.children[0] as WebElement;
+  expect(buttons.attrs["data-nav"]).toBe("buttons");
+  expect(buttons.children).toHaveLength(3);
+  for (const mark of buttons.children as WebElement[]) {
+    expect(mark.style.border).toBe("2px solid #000000");
+  }
+});

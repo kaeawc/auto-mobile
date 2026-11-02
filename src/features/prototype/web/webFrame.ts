@@ -93,6 +93,26 @@ function statusBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolea
   ];
 }
 
+/** Three-button navigation: generic back, home and recents marks, outlined in the bar colour. */
+function buttonNavigation(color: string): WebElement {
+  const mark = (radius: string) =>
+    el("span", {
+      style: {
+        display: "inline-block",
+        width: "14px",
+        height: "14px",
+        border: `2px solid ${color}`,
+        "border-radius": radius,
+        opacity: "0.6",
+      },
+    });
+  return el("span", { attrs: { "data-nav": "buttons" }, style: { display: "flex", gap: "64px" } }, [
+    mark("2px 50% 50% 2px"),
+    mark("50%"),
+    mark("2px"),
+  ]);
+}
+
 function navBar(frame: DeviceFrame, dark: boolean): WebElement[] {
   if (frame.navBar.type === "none") {
     return [];
@@ -108,9 +128,7 @@ function navBar(frame: DeviceFrame, dark: boolean): WebElement[] {
             opacity: "0.6",
           },
         })
-      : el("span", {
-          style: { width: "120px", height: "12px", opacity: "0.4", "border-radius": "6px" },
-        });
+      : buttonNavigation(dark ? "#ffffff" : "#000000");
   return [
     el(
       "div",

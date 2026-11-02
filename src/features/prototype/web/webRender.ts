@@ -312,6 +312,8 @@ const scroll: NodeRenderer = (node, scope, path) => {
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "flex-direction": horizontal ? "row" : "column",
+    // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
+    "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
   });
   const inner = child(scope, {
@@ -591,8 +593,7 @@ const textField: NodeRenderer = (node, scope, path) => {
     "min-height": "56px",
     padding: "0 16px",
     gap: "12px",
-    "border-radius": "4px",
-    border: `1px solid ${cssColor(error ? "error" : "outline", scope.style) ?? "currentColor"}`,
+    ...fieldChrome(node, error, scope),
     ...(empty ? { opacity: "0.7" } : {}),
     ...disabled.css,
   });
@@ -619,6 +620,24 @@ const textField: NodeRenderer = (node, scope, path) => {
         ...caption,
       ]);
 };
+
+/**
+ * Material text-field chrome. `filled` (the native default) is a tinted container with a bottom
+ * indicator; `outlined` is a full outline. Either turns to the error colour on a decidable error.
+ */
+function fieldChrome(node: Raw, error: boolean, scope: WebRenderScope): Record<string, string> {
+  if (node.variant === "outlined") {
+    const outline = cssColor(error ? "error" : "outline", scope.style) ?? "currentColor";
+    return { "border-radius": "4px", border: `1px solid ${outline}` };
+  }
+  const indicator = cssColor(error ? "error" : "onSurfaceVariant", scope.style) ?? "currentColor";
+  const container = cssColor("surfaceContainerHighest", scope.style);
+  return {
+    "border-radius": "4px 4px 0 0",
+    "border-bottom": `1px solid ${indicator}`,
+    ...(container ? { "background-color": container } : {}),
+  };
+}
 
 /** A switch track or checkbox box, drawn from whether its state is on. */
 function toggleMark(role: "switch" | "checkbox", on: boolean, scope: WebRenderScope): WebElement {

@@ -774,6 +774,41 @@ describe("prototype web still (#16346)", () => {
     expect(toHtml(rich)).toContain("background-color:rgba(255,0,0,1)");
   });
 
+  test("a text field draws filled chrome by default and an outline when outlined", () => {
+    const fieldOf = (variant?: string) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "textField", testTag: "f", stateKey: "q", ...(variant ? { variant } : {}) },
+        }),
+        "f",
+      )[0]!.style;
+    expect(fieldOf()).toHaveProperty("border-bottom");
+    expect(fieldOf()).toHaveProperty("background-color");
+    expect(fieldOf()).not.toHaveProperty("border");
+    expect(fieldOf("outlined")).toHaveProperty("border");
+    expect(fieldOf("outlined")).not.toHaveProperty("background-color");
+  });
+
+  test("a scroll start-aligns wrap-sized content", () => {
+    const scroll = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "scroll",
+          testTag: "s",
+          child: {
+            type: "column",
+            style: { width: "wrap" },
+            children: [{ type: "text", text: "Hi" }],
+          },
+        },
+      }),
+      "s",
+    )[0]!;
+    expect(scroll.style["align-items"]).toBe("flex-start");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

@@ -359,6 +359,28 @@ describe("prototype web still (#16346)", () => {
     ).toBe("calc(0px + var(--safe-top))");
   });
 
+  test("a top app bar draws its navigation icon and actions around the title", () => {
+    const bar = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "topAppBar",
+          testTag: "bar",
+          title: "Inbox",
+          navigationIcon: { icon: "arrow_back", label: "Back" },
+          actions: [{ icon: "search", label: "Search" }],
+        },
+      }),
+      "bar",
+    )[0]!;
+    const slots = find(bar, (element) => element.attrs["aria-label"] !== undefined);
+    expect(slots.map((element) => element.attrs["aria-label"])).toEqual(["Back", "Search"]);
+    expect(
+      find(bar, (element) => element.attrs.title !== undefined).map((e) => e.attrs.title),
+    ).toEqual(["arrow_back", "search"]);
+    expect(textOf(bar)).toBe("Inbox");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

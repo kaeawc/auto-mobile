@@ -340,7 +340,24 @@ const button: NodeRenderer = (node, scope) => {
   return el("div", { attrs: role, style }, [bound(node.label, scope)]);
 };
 
-const topAppBar: NodeRenderer = (node, scope) => {
+/** App-bar navigation and action slots draw as icon placeholders labelled with their action. */
+function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: string): WebElement[] {
+  return slots.flatMap((slot) => {
+    const action = record(slot);
+    if (typeof action?.icon !== "string") {
+      return [];
+    }
+    const glyph = icon({ type: "icon", name: action.icon }, scope, path);
+    const label = typeof action.label === "string" ? bound(action.label, scope) : action.icon;
+    return [
+      el("span", { attrs: { role: "button", "aria-label": label }, style: { padding: "12px" } }, [
+        glyph,
+      ]),
+    ];
+  });
+}
+
+const topAppBar: NodeRenderer = (node, scope, path) => {
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "align-items": "center",
@@ -352,7 +369,13 @@ const topAppBar: NodeRenderer = (node, scope) => {
     "align-self": "stretch",
     ...roleCss(scope, "surface", "onSurface"),
   });
-  return el("div", { attrs: { ...attrs, role: "heading" }, style }, [bound(node.title, scope)]);
+  const actions = Array.isArray(node.actions) ? node.actions : [];
+  const title = el("span", { style: { flex: "1 1 auto" } }, [bound(node.title, scope)]);
+  return el("div", { attrs: { ...attrs, role: "heading" }, style }, [
+    ...appBarIcons([node.navigationIcon], scope, path),
+    title,
+    ...appBarIcons(actions, scope, path),
+  ]);
 };
 
 const textField: NodeRenderer = (node, scope) => {

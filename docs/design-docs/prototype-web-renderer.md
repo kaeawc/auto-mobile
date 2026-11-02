@@ -40,7 +40,8 @@ the host, so the page's script only switches between views it was given and neve
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
-  `listItem` (with its trailing switch, checkbox or icon). A button whose `enabledWhen` is decidably
+  `listItem` (with its trailing switch, checkbox or icon). A top app bar draws its navigation icon
+  and actions as icon placeholders labelled with their action. A button whose `enabledWhen` is decidably
   false draws disabled. Icons draw as a tinted square titled with the icon name, because the glyph set is not
   inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.

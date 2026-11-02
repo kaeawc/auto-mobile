@@ -564,6 +564,96 @@
     }
   },
   {
+    "name": "ambient",
+    "title": "Change Ambient Power State",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Wear OS power-state change: enter sends KEYCODE_SLEEP, exit sends KEYCODE_WAKEUP, then reads wakefulness once. Enter succeeds on Dozing or Asleep; exit succeeds on Awake. Wear exposes no ambient readback, so success does not prove ambient mode. Hardware wake by tilt or touch is untested.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["enter", "exit"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["enter", "exit"]
+        },
+        "wakefulness": {
+          "type": "string",
+          "enum": ["Awake", "Asleep", "Dozing"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "action", "message"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appLifecycle",
     "title": "Control App Lifecycle",
     "annotations": {
@@ -9381,6 +9471,7 @@
               "accessibilityAction",
               "accessibilityAudit",
               "accessibilityFocus",
+              "ambient",
               "appLifecycle",
               "audit",
               "backgroundWork",
@@ -9543,6 +9634,7 @@
               "accessibilityAction",
               "accessibilityAudit",
               "accessibilityFocus",
+              "ambient",
               "appLifecycle",
               "audit",
               "backgroundWork",
@@ -40977,6 +41069,7 @@
               "accessibilityAction",
               "accessibilityAudit",
               "accessibilityFocus",
+              "ambient",
               "appLifecycle",
               "audit",
               "backgroundWork",
@@ -53647,6 +53740,7 @@
             "accessibilityAction",
             "accessibilityAudit",
             "accessibilityFocus",
+            "ambient",
             "appLifecycle",
             "audit",
             "backgroundWork",
@@ -53771,6 +53865,7 @@
               "accessibilityAction",
               "accessibilityAudit",
               "accessibilityFocus",
+              "ambient",
               "appLifecycle",
               "audit",
               "backgroundWork",

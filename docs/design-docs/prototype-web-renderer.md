@@ -43,7 +43,10 @@ the host, so the page's script only switches between views it was given and neve
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
   `listItem` (with its trailing switch, checkbox or icon). A top app bar draws its navigation icon
   and actions as icon placeholders labelled with their action. A button whose `enabledWhen` is decidably
-  false draws disabled. Icons draw as a tinted square titled with the icon name, because the glyph set is not
+  false draws disabled. A text field shows `errorText` with error colours when `errorWhen` is
+  decidably true, and otherwise its `supportingText`. A spacer with no width, height or weight
+  fills its line, and a line around one grows to its parent's size on its unsized axes, as a
+  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted square titled with the icon name, because the glyph set is not
   inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a

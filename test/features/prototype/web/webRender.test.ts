@@ -393,6 +393,50 @@ describe("prototype web still (#16346)", () => {
     expect(textOf(bar)).toBe("Inbox");
   });
 
+  test("a text field shows its error text only when errorWhen decidably holds", () => {
+    const fieldOf = (failed: boolean, extra: Record<string, unknown> = {}) =>
+      renderPrototypeStill({
+        ...reference,
+        state: { failed, email: "a@b" },
+        root: {
+          type: "textField",
+          testTag: "email",
+          stateKey: "email",
+          supportingText: "We never share it",
+          errorText: "Server error",
+          errorWhen: { key: "failed", equals: true },
+          ...extra,
+        },
+      }).element;
+    const alerts = (root: WebElement) => find(root, (element) => element.attrs.role === "alert");
+    expect(alerts(fieldOf(true)).map(textOf)).toEqual(["Server error"]);
+    expect(alerts(fieldOf(false))).toEqual([]);
+    expect(textOf(fieldOf(false))).toContain("We never share it");
+    expect(alerts(fieldOf(true, { errorWhen: { data: "/x", empty: true } }))).toEqual([]);
+  });
+
+  test("an unsized spacer fills its line, and the line grows to hold it", () => {
+    const spec = {
+      ...reference,
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "row",
+            testTag: "skeleton",
+            style: { height: { dp: 16 }, background: "#CCCCCC" },
+            children: [{ type: "spacer", testTag: "gap" }],
+          },
+          { type: "spacer", testTag: "sized", style: { height: { dp: 8 } } },
+        ],
+      },
+    };
+    const still = renderPrototypeStill(spec);
+    expect(byTag(still, "skeleton")[0]!.style).toMatchObject({ width: "100%", height: "16px" });
+    expect(byTag(still, "gap")[0]!.style).toMatchObject({ flex: "1 1 auto" });
+    expect(byTag(still, "sized")[0]!.style).not.toHaveProperty("flex");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

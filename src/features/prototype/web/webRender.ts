@@ -175,9 +175,35 @@ function renderOrSkip(node: unknown, scope: WebRenderScope, path: string): WebCh
   return rendered ? [rendered] : [];
 }
 
+/** A spacer with no width, height or weight fills its parent, as the native spacer does. */
+function isUnsizedSpacer(node: unknown): boolean {
+  const raw = record(node);
+  const style = record(raw?.style) ?? {};
+  return (
+    raw?.type === "spacer" &&
+    style.width === undefined &&
+    style.height === undefined &&
+    style.weight === undefined
+  );
+}
+
+/** Missing width and height default to `fill`, without touching authored sizes. */
+function fillMissing(node: Raw): Raw {
+  const style = record(node.style) ?? {};
+  return { ...node, style: { width: "fill", height: "fill", ...style } };
+}
+
+function spacerFilled(node: Raw): Raw {
+  return isUnsizedSpacer(node) ? fillMissing(node) : node;
+}
+
 const line =
   (axis: "row" | "column"): NodeRenderer =>
-  (node, scope, path) => {
+  (raw, scope, path) => {
+    // A wrap-sized line around a filling spacer grows to its parent, as a Compose parent does
+    // around a fillMaxSize child; otherwise it would shrink to nothing.
+    const node =
+      Array.isArray(raw.children) && raw.children.some(isUnsizedSpacer) ? fillMissing(raw) : raw;
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     return el("div", { attrs, style }, children(node, inner, path));
@@ -250,7 +276,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
   return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
 
-const spacer: NodeRenderer = (node, scope) => el("div", base(node, scope));
+const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node), scope));
 
 const divider: NodeRenderer = (node, scope) => {
   const vertical = node.orientation === "vertical";
@@ -382,29 +408,58 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
   ]);
 };
 
-const textField: NodeRenderer = (node, scope) => {
+/** The typed value (masked when secure), or the placeholder when the field is empty. */
+function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: boolean } {
   // A state key inside a repeat may hold item placeholders, which bind first.
   const key = typeof node.stateKey === "string" ? bound(node.stateKey, scope) : undefined;
   const value = key === undefined ? undefined : scope.condition.state[key];
-  const typed = typeof value === "string" && value !== "" ? value : undefined;
+  if (typeof value !== "string" || value === "") {
+    return { shown: bound(node.placeholder ?? node.label, scope), empty: true };
+  }
   // A secure field never shows its value, as the native password transformation does.
   const secure = node.secure === true || node.keyboardType === "password";
-  const shown =
-    typed === undefined
-      ? bound(node.placeholder ?? node.label, scope)
-      : secure
-        ? "•".repeat([...typed].length)
-        : typed;
+  return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
+}
+
+/** As on the devices: a decidable error shows errorText, else the supporting text. */
+function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElement[] {
+  const caption = error ? (node.errorText ?? node.supportingText) : node.supportingText;
+  if (typeof caption !== "string") {
+    return [];
+  }
+  const color = cssColor(error ? "error" : "onSurfaceVariant", scope.style);
+  return [
+    el(
+      "span",
+      {
+        attrs: error ? { role: "alert" } : {},
+        style: { "font-size": "12px", padding: "0 16px", ...(color ? { color } : {}) },
+      },
+      [bound(caption, scope)],
+    ),
+  ];
+}
+
+const textField: NodeRenderer = (node, scope) => {
+  const { shown, empty } = fieldValue(node, scope);
+  const error = node.errorWhen !== undefined && decide(node.errorWhen, scope.condition) === true;
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "align-items": "center",
     "min-height": "56px",
     padding: "0 16px",
     "border-radius": "4px",
-    border: `1px solid ${cssColor("outline", scope.style) ?? "currentColor"}`,
-    ...(typed === undefined ? { opacity: "0.7" } : {}),
+    border: `1px solid ${cssColor(error ? "error" : "outline", scope.style) ?? "currentColor"}`,
+    ...(empty ? { opacity: "0.7" } : {}),
   });
-  return el("div", { attrs: { ...attrs, role: "textbox" }, style }, [shown]);
+  const field = el("div", { attrs: { ...attrs, role: "textbox" }, style }, [shown]);
+  const caption = fieldCaption(node, error, scope);
+  return caption.length === 0
+    ? field
+    : el("div", { style: { display: "flex", "flex-direction": "column", gap: "4px" } }, [
+        field,
+        ...caption,
+      ]);
 };
 
 /** A switch track or checkbox box, drawn from whether its state is on. */

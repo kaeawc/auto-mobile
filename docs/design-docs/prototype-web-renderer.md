@@ -38,6 +38,8 @@ the host, so the page's script only switches between views it was given and neve
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill` (inside a box grid, only on its own axis), `{dp}`, `weight`, padding (logical
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
+- **Typography.** `theme.typography` scales every type-scale role and sets its family, as the
+  native theme does.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
   accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
   roles unpainted. Unpainted screen regions show a checkerboard. An explicit `theme.mode` of
@@ -62,10 +64,12 @@ the host, so the page's script only switches between views it was given and neve
   inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
-  generic status bar, the cutout and the navigation handle (or three generic button marks). Landscape swaps the screen size, uses
+  generic status bar, the cutout and the navigation handle (or three generic button marks, which move to
+  the right edge in landscape when the frame reserves that inset). Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
-  `windowInsetsPadding`, an edge an ancestor already applied adds nothing more (`ime` adds nothing,
+  `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own
+  padding on that edge (`ime` adds nothing,
   since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. A top app bar takes no inset
   of its own, as on the devices: it clears the status bar only through `safeAreaPadding`.

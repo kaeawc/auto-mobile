@@ -6,7 +6,7 @@ import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import { renderDeviceFrame, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
-import { cssColor } from "./webStyle";
+import { cssColor, themeTypography } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
 const STILL_LOCALE = "en-US";
@@ -144,7 +144,12 @@ function stillScope(
   const authored = record(spec.theme)?.mode;
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
-    style: { mode, palette: prototypeRolePalette(expanded, mode), parentAxis: "column" },
+    style: {
+      mode,
+      palette: prototypeRolePalette(expanded, mode),
+      parentAxis: "column",
+      typography: themeTypography(expanded),
+    },
     condition: { state: record(spec.state) ?? {}, platform },
     data: spec.data,
     spec,

@@ -7,6 +7,25 @@ export interface WebStyleContext {
   readonly palette: ReadonlyMap<string, Rgba>;
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
+  /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
+  readonly typography?: { readonly scale: number; readonly fontFamily?: string };
+}
+
+const THEME_FONT_FAMILY: Readonly<Record<string, string>> = {
+  sans: "sans-serif",
+  serif: "serif",
+  mono: "monospace",
+};
+
+/** theme.typography as the native prototypeTypography reads it: a role scale and a family. */
+export function themeTypography(spec: unknown): WebStyleContext["typography"] {
+  const typography = record(record(record(spec)?.theme)?.typography);
+  if (!typography) {
+    return undefined;
+  }
+  const scale = typeof typography.scale === "number" ? typography.scale : 1;
+  const family = THEME_FONT_FAMILY[String(typography.fontFamily)];
+  return { scale, ...(family ? { fontFamily: family } : {}) };
 }
 
 type Css = Record<string, string>;
@@ -147,11 +166,19 @@ const TYPE_SCALE: Readonly<Record<string, [number, number, number]>> = {
   labelSmall: [11, 16, 500],
 };
 
-function typographyRole(style: Raw): Css {
+function typographyRole(style: Raw, context: WebStyleContext): Css {
   const role = typeof style.textStyle === "string" ? TYPE_SCALE[style.textStyle] : undefined;
-  return role
-    ? { "font-size": px(role[0]), "line-height": px(role[1]), "font-weight": String(role[2]) }
-    : {};
+  if (!role) {
+    return {};
+  }
+  const scale = context.typography?.scale ?? 1;
+  const family = context.typography?.fontFamily;
+  return {
+    "font-size": px(role[0] * scale),
+    "line-height": px(role[1] * scale),
+    "font-weight": String(role[2]),
+    ...(family ? { "font-family": family } : {}),
+  };
 }
 
 /** Text styles inherit in CSS as they do down a native text tree. */
@@ -174,7 +201,7 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
     return {};
   }
   // The role's typography first; explicit size, weight and line height override it.
-  const css: Css = typographyRole(style);
+  const css: Css = typographyRole(style, context);
   const color = cssColor(style.color, context);
   if (color) {
     css.color = color;

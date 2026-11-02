@@ -68,3 +68,11 @@ test("button navigation draws three visible marks", () => {
     expect(mark.style.border).toBe("2px solid #000000");
   }
 });
+
+test("landscape button navigation sits on the right edge the frame reserves; gestures stay at the bottom", () => {
+  const side = chrome(frameOf("small-phone", "landscape"), "navBar")!;
+  expect(side.style).toMatchObject({ right: "0", top: "0", width: "48px" });
+  expect(side.style).not.toHaveProperty("height");
+  const bottom = chrome(frameOf("iphone-16", "landscape"), "navBar")!;
+  expect(bottom.style).toMatchObject({ bottom: "0", left: "0" });
+});

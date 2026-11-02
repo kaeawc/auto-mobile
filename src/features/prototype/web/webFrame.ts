@@ -94,7 +94,7 @@ function statusBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolea
 }
 
 /** Three-button navigation: generic back, home and recents marks, outlined in the bar colour. */
-function buttonNavigation(color: string): WebElement {
+function buttonNavigation(color: string, side: boolean): WebElement {
   const mark = (radius: string) =>
     el("span", {
       style: {
@@ -106,14 +106,41 @@ function buttonNavigation(color: string): WebElement {
         opacity: "0.6",
       },
     });
-  return el("span", { attrs: { "data-nav": "buttons" }, style: { display: "flex", gap: "64px" } }, [
-    mark("2px 50% 50% 2px"),
-    mark("50%"),
-    mark("2px"),
-  ]);
+  return el(
+    "span",
+    {
+      attrs: { "data-nav": "buttons" },
+      style: {
+        display: "flex",
+        gap: "64px",
+        "flex-direction": side ? "column" : "row",
+      },
+    },
+    [mark("2px 50% 50% 2px"), mark("50%"), mark("2px")],
+  );
 }
 
-function navBar(frame: DeviceFrame, dark: boolean): WebElement[] {
+/**
+ * Where the navigation chrome sits: along the bottom, or (button navigation in landscape, where
+ * the frame reserves the right-hand inset) down the right edge.
+ */
+function navOnSide(frame: DeviceFrame, orientation: WebOrientation): boolean {
+  // Gesture handles stay at the bottom; a landscape right inset there is the cutout, not navigation.
+  return (
+    frame.navBar.type === "buttons" &&
+    orientation === "landscape" &&
+    frame.safeArea.landscape.right > 0
+  );
+}
+
+function navPlacement(heightDp: number, side: boolean): Record<string, string> {
+  const size = px(heightDp);
+  return side
+    ? { top: "0", bottom: "0", right: "0", width: size, "flex-direction": "column" }
+    : { left: "0", right: "0", bottom: "0", height: size };
+}
+
+function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean): WebElement[] {
   if (frame.navBar.type === "none") {
     return [];
   }
@@ -128,7 +155,7 @@ function navBar(frame: DeviceFrame, dark: boolean): WebElement[] {
             opacity: "0.6",
           },
         })
-      : buttonNavigation(dark ? "#ffffff" : "#000000");
+      : buttonNavigation(dark ? "#ffffff" : "#000000", navOnSide(frame, orientation));
   return [
     el(
       "div",
@@ -136,10 +163,7 @@ function navBar(frame: DeviceFrame, dark: boolean): WebElement[] {
         attrs: { "data-chrome": "navBar", "aria-hidden": "true" },
         style: {
           position: "absolute",
-          left: "0",
-          right: "0",
-          bottom: "0",
-          height: px(frame.navBar.heightDp),
+          ...navPlacement(frame.navBar.heightDp, navOnSide(frame, orientation)),
           display: "flex",
           "align-items": "center",
           "justify-content": "center",
@@ -188,7 +212,7 @@ export function renderDeviceFrame(
       content,
       ...statusBar(frame, orientation, options.dark),
       ...cutout(frame, orientation),
-      ...navBar(frame, options.dark),
+      ...navBar(frame, orientation, options.dark),
     ],
   );
   return el(

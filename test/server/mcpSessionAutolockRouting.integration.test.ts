@@ -1,4 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -84,13 +85,18 @@ describe("MCP session autolock routing", () => {
     });
     await fixture.setup();
 
-    const capturedArgs = await callCaptureTool(fixture, {
-      value: "ok",
-      __mcpSessionId: "unix-socket-session",
-    });
+    let ambient: string | undefined;
+    const capturedArgs = await callCaptureTool(
+      fixture,
+      { value: "ok", __mcpSessionId: "unix-socket-session" },
+      () => {
+        ambient = currentAutolockMcpSessionId();
+      },
+    );
 
     expect(capturedArgs.value).toBe("ok");
     expect(capturedArgs.__mcpSessionId).toBe("unix-socket-session");
+    expect(ambient).toBe("unix-socket-session");
   });
 
   test("tracks proxy-injected MCP sessions under their autolock key", async () => {
@@ -416,9 +422,13 @@ describe("MCP session autolock routing", () => {
     });
     await fixture.setup();
 
-    const capturedArgs = await callCaptureTool(fixture, { value: "ok" });
+    let ambient: string | undefined;
+    const capturedArgs = await callCaptureTool(fixture, { value: "ok" }, () => {
+      ambient = currentAutolockMcpSessionId();
+    });
 
     expect(capturedArgs.value).toBe("ok");
     expect(capturedArgs.__mcpSessionId).toBe("direct-mcp-session");
+    expect(ambient).toBe("direct-mcp-session");
   });
 });

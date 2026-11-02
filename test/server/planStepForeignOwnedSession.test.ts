@@ -47,9 +47,8 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
 
   /** One step of a plan with no session of its own, as `executePlan` runs it for `connection`. */
   const runStep = (step: PlanStep, connection: string | undefined): Promise<StepExecutionResult> =>
-    runWithToolSelectionContext(
-      planCallerContext(connection ? { [INTERNAL_MCP_SESSION_PARAM]: connection } : {}),
-      () => executor.executeStep(step, { logPrefix: "[plan]", platform: "android" }),
+    runWithToolSelectionContext({ callerMcpSessionId: connection }, () =>
+      executor.executeStep(step, { logPrefix: "[plan]", platform: "android" }),
     );
 
   const refusalCode = (result: StepExecutionResult): unknown =>
@@ -215,14 +214,12 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
           platform: "android",
         });
 
-        const result = await runWithToolSelectionContext(
-          planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: OTHER }),
-          () =>
-            executor.executeStep(tap, {
-              logPrefix: "[plan]",
-              platform: "android",
-              sessionUuid: PLAN_SESSION,
-            }),
+        const result = await runWithToolSelectionContext({ callerMcpSessionId: OTHER }, () =>
+          executor.executeStep(tap, {
+            logPrefix: "[plan]",
+            platform: "android",
+            sessionUuid: PLAN_SESSION,
+          }),
         );
 
         expect(result.status).toBe("completed");
@@ -245,11 +242,10 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     );
 
     arranged("a call with no identity never clears the identity it inherited", async () => {
-      expect(planCallerContext({})).toEqual({});
+      expect(planCallerContext()).toEqual({});
 
-      const result = await runWithToolSelectionContext(
-        planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: OTHER }),
-        () => runStep(tap, undefined),
+      const result = await runWithToolSelectionContext({ callerMcpSessionId: OTHER }, () =>
+        runStep(tap, undefined),
       );
 
       expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
@@ -269,7 +265,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     ): Promise<StepExecutionResult> =>
       runWithToolSelectionContext(
         {
-          ...planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: OTHER }),
+          callerMcpSessionId: OTHER,
           routingSessionUuid: ambientSessionUuid,
         },
         () =>
@@ -365,10 +361,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
    */
   describe("a nested call made while serving a connection", () => {
     const nested = (run: () => Promise<unknown>, connection: string): Promise<unknown> =>
-      runWithToolSelectionContext(
-        planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: connection }),
-        run,
-      ).then(
+      runWithToolSelectionContext({ callerMcpSessionId: connection }, run).then(
         () => undefined,
         (error: unknown) => error,
       );

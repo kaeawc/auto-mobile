@@ -42,6 +42,7 @@ export function internalToolInvocationContext(
     args: sessionUuid && args.sessionUuid !== sessionUuid ? { ...args, sessionUuid } : args,
     tapAtPlanContext: options.tapAtPlanContext,
     requestDeadline: internalCallRequestDeadline(context, options),
+    autolockMcpSessionId: undefined,
     routingSessionUuid: sessionUuid,
     toolSelectionProfileUuid: context?.toolSelectionProfileUuid,
     sessionToolSelectionService:

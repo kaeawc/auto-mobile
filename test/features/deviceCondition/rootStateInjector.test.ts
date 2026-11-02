@@ -1,12 +1,14 @@
+import { ArtifactOwner } from "../../../src/features/deviceCondition/ArtifactOwner";
 import { describe, expect, test } from "bun:test";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeStubBuilder } from "../../fakes/FakeStubBuilder";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { DeviceConditionController } from "../../../src/features/deviceCondition/DeviceConditionController";
 import type { DeviceConditionInjector } from "../../../src/features/deviceCondition/DeviceConditionController";
 import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
 import {
   ROOT_ARTIFACT_PATHS,
-  createRootStateInjector,
+  createRootStateInjector as realCreateRootStateInjector,
   resolveRootStateInjector,
 } from "../../../src/features/deviceCondition/rootStateInjector";
 
@@ -25,7 +27,23 @@ function adbWith(responses: Record<string, string>): FakeAdbExecutor {
   for (const [pattern, stdout] of Object.entries(responses)) {
     adb.setCommandResponse(pattern, execResult(stdout));
   }
+  const execute = adb.execute.bind(adb);
+  adb.execute = async (args, options) => {
+    const result = await execute(args, options);
+    if (args[0] === "install" && !result.error && !result.stdout.includes("Failure")) {
+      adb.setCommandResponse(`pm list packages ${MAGISK}`, execResult(`package:${MAGISK}`));
+    }
+    if (args[0] === "uninstall" && !result.error && !result.stdout.includes("Failure")) {
+      adb.setCommandResponse(`pm list packages ${MAGISK}`, execResult(""));
+    }
+    return result;
+  };
   return adb;
+}
+
+const MAGISK = "com.topjohnwu.magisk";
+function createRootStateInjector(adb: FakeAdbExecutor, builder = new FakeStubBuilder()) {
+  return realCreateRootStateInjector(adb, undefined, undefined, builder);
 }
 
 const ROOTABLE = {
@@ -51,6 +69,122 @@ function failFirst(adb: FakeAdbExecutor, pattern: string, times: number): void {
 }
 
 describe("rootState injector (#14060)", () => {
+  test("installs the package stub and uninstalls it on reset, retaining the five paths", async () => {
+    const adb = adbWith(ROOTABLE);
+    const builder = new FakeStubBuilder();
+    const outcome = await createRootStateInjector(adb, builder).apply("rooted-detectable");
+    expect(builder.builds).toBe(1);
+    expect(builder.disposed).toBe(1);
+    expect(adb.getExecutedCommands()).toContain("install -r /fake/magisk.apk");
+    expect(ROOT_ARTIFACT_PATHS).toHaveLength(5);
+    await outcome.reset?.();
+    expect(adb.getExecutedCommands()).toContain(`uninstall ${MAGISK}`);
+  });
+
+  test("failed install rolls back, disposes the APK, and leaves nothing held", async () => {
+    const adb = adbWith(ROOTABLE);
+    adb.setCommandResponse("install -r", execResult("Failure [INSTALL_FAILED_INVALID_APK]"));
+    const builder = new FakeStubBuilder();
+    const artifacts = new ArtifactOwner();
+    const injector = realCreateRootStateInjector(adb, undefined, artifacts, builder);
+    await expect(injector.apply("rooted-detectable")).rejects.toThrow(/INSTALL_FAILED/);
+    for (const key of [...ROOT_ARTIFACT_PATHS, `package:${MAGISK}`]) {
+      expect(artifacts.plantedForOther({}, key)).toBe(false);
+    }
+    expect(builder.disposed).toBe(1);
+    expect(adb.getExecutedCommands()).toContain("unroot");
+    expect(await injector.isClean()).toBe(true);
+    const before = adb.getExecutedCommands().length;
+    await injector.apply("rooted-detectable").catch(() => undefined);
+    expect(adb.getExecutedCommands().slice(before)).toContain("install -r /fake/magisk.apk");
+  });
+
+  test("a pre-existing package is held and never rebuilt or removed", async () => {
+    const adb = adbWith({ ...ROOTABLE, [`pm list packages ${MAGISK}`]: `package:${MAGISK}` });
+    const builder = new FakeStubBuilder();
+    const outcome = await createRootStateInjector(adb, builder).apply("rooted-detectable");
+    await outcome.reset?.();
+    expect(builder.builds).toBe(0);
+    expect(adb.getExecutedCommands()).not.toContain(`uninstall ${MAGISK}`);
+  });
+
+  test("isClean detects a remaining package even when the five files are gone", async () => {
+    const adb = adbWith(ROOTABLE);
+    const injector = createRootStateInjector(adb);
+    await injector.apply("rooted-detectable");
+    // Fake file listings are empty. Only the installed package remains.
+    expect(await injector.isClean()).toBe(false);
+  });
+
+  test("a package that survives uninstall keeps reset owed and isClean false", async () => {
+    const adb = adbWith(ROOTABLE);
+    const injector = createRootStateInjector(adb);
+    const outcome = await injector.apply("rooted-detectable");
+    const execute = adb.execute.bind(adb);
+    adb.execute = async (args, options) => {
+      const result = await execute(args, options);
+      if (args[0] === "uninstall") {
+        adb.setCommandResponse(`pm list packages ${MAGISK}`, execResult(`package:${MAGISK}`));
+      }
+      return result;
+    };
+    await expect(outcome.reset?.()).rejects.toThrow(/left artifacts.*package:/);
+    expect(adb.getExecutedCommands()).toContain("shell setenforce 1");
+    expect(await injector.isClean()).toBe(false);
+    adb.execute = execute;
+    await outcome.reset?.();
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("package drift triggers a reinstall without stacking resets", async () => {
+    const adb = adbWith(ROOTABLE);
+    adb.setCommandResponseSequence("ls /system/xbin/su", [
+      execResult(""),
+      execResult(ALL_ARTIFACTS),
+      execResult(ALL_ARTIFACTS),
+      execResult(""),
+    ]);
+    adb.setCommandResponseSequence("getenforce", [
+      execResult("Enforcing"),
+      execResult("Permissive"),
+    ]);
+    const builder = new FakeStubBuilder();
+    const injector = createRootStateInjector(adb, builder);
+    const first = await injector.apply("rooted-detectable");
+    adb.setCommandResponse(`pm list packages ${MAGISK}`, execResult(""));
+    const second = await injector.apply("rooted-detectable");
+    expect(second.status).toBe("applied");
+    expect(second.reset).toBeUndefined();
+    expect(builder.builds).toBe(2);
+    await first.reset?.();
+  });
+
+  test("a failed SDK build rolls the file fixture back", async () => {
+    const adb = adbWith(ROOTABLE);
+    const injector = realCreateRootStateInjector(adb, undefined, undefined, {
+      build: async () => {
+        throw new Error("Install SDK build-tools and set ANDROID_HOME");
+      },
+    });
+    await expect(injector.apply("rooted-detectable")).rejects.toThrow(/ANDROID_HOME/);
+    expect(adb.getExecutedCommands()).toContain("unroot");
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("a package another fixture owns remains held until rootState releases it", async () => {
+    const adb = adbWith({ ...ROOTABLE, [`pm list packages ${MAGISK}`]: `package:${MAGISK}` });
+    const artifacts = new ArtifactOwner();
+    const otherToken = {};
+    artifacts.plant(otherToken, `package:${MAGISK}`);
+    const injector = realCreateRootStateInjector(adb, undefined, artifacts, new FakeStubBuilder());
+    const outcome = await injector.apply("rooted-detectable");
+    expect(artifacts.removableBy(otherToken, `package:${MAGISK}`)).toBe(false);
+    await outcome.reset?.();
+    expect(artifacts.removableBy(otherToken, `package:${MAGISK}`)).toBe(true);
+    expect(adb.getExecutedCommands()).not.toContain(`uninstall ${MAGISK}`);
+    expect(await injector.isClean()).toBe(true);
+  });
+
   test("refuses a production (Play) image with guidance toward real root", async () => {
     const adb = adbWith({ "getprop ro.debuggable": "0", "getprop ro.build.type": "user" });
     await expect(createRootStateInjector(adb).apply("rooted-detectable")).rejects.toThrow(

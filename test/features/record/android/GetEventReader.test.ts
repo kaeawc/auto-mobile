@@ -7,6 +7,7 @@ import { logger } from "../../../../src/utils/logger";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbProcess } from "../../../fakes/FakeAdbProcess";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { buildPenSampleStep } from "../../../../src/features/record/android/penSampleStep";
 
 // Format probes (hand-written, shape defined by TouchFrameReconstructor's regex;
 // not captured device output). Reused from TouchFrameReconstructor.test.ts.
@@ -79,6 +80,67 @@ function expectCleaned(proc: FakeAdbProcess): void {
 afterEach(() => mock.restore());
 
 describe("GetEventReader", () => {
+  test.each(["stroke", "hover"] as const)(
+    "preserves %s kernel timing through scaling when stdout batches frames",
+    async (type) => {
+      const adb = new ReaderAdb();
+      const proc = new FakeAdbProcess();
+      adb.spawn.mockResolvedValue(proc);
+      const reader = new GetEventReader({
+        adb,
+        timer: new FakeTimer(),
+        density: 1,
+        touchNode: {
+          path: "/dev/input/event5",
+          name: "pen",
+          kind: "pen",
+          axisXMin: 0,
+          axisXMax: 1000,
+          axisYMin: 0,
+          axisYMax: 1000,
+          pressureMin: 0,
+          pressureMax: 1000,
+          distanceRange: { min: 0, max: 1000 },
+        },
+        scaler: { toScreenPoint: (x, y) => ({ x: x * 2, y: y * 2 }) },
+      });
+      const events: GestureEvent[] = [];
+      reader.start((event) => events.push(event));
+      await Promise.resolve();
+      const lines = [
+        "[ 78826.389007] EV_KEY BTN_TOOL_PEN DOWN",
+        "[ 78826.389007] EV_ABS ABS_X 00000010",
+        "[ 78826.389007] EV_ABS ABS_Y 00000020",
+        "[ 78826.389007] EV_ABS ABS_PRESSURE 000000c8",
+        "[ 78826.389007] EV_ABS ABS_DISTANCE 00000064",
+        ...(type === "stroke" ? ["[ 78826.389007] EV_KEY BTN_TOUCH DOWN"] : []),
+        "[ 78826.389007] EV_SYN SYN_REPORT 00000000",
+        "[ 78826.489007] EV_ABS ABS_X 00000030",
+        "[ 78826.489007] EV_ABS ABS_PRESSURE 00000320",
+        "[ 78826.489007] EV_SYN SYN_REPORT 00000000",
+        ...(type === "stroke" ? ["[ 78826.499007] EV_KEY BTN_TOUCH UP"] : []),
+        "[ 78826.499007] EV_KEY BTN_TOOL_PEN UP",
+        "[ 78826.499007] EV_SYN SYN_REPORT 00000000",
+      ];
+      data(proc, lines.join("\n") + "\n");
+      reader.stop();
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe(type);
+      const samples = type === "stroke" ? events[0].path : events[0].hover;
+      expect(samples?.map((sample) => sample.arrivedAt)).toEqual([0, 0]);
+      expect(samples?.map((sample) => sample.kernelAtMs)).toEqual([78826389.007, 78826489.007]);
+      expect(buildPenSampleStep(events[0])?.params.points).toEqual([
+        { x: 32, y: 64, ...(type === "stroke" ? { pressure: 0.2 } : { distance: 0.1 }) },
+        {
+          x: 96,
+          y: 64,
+          ...(type === "stroke" ? { pressure: 0.8 } : { distance: 0.1 }),
+          durationMs: 100,
+        },
+      ]);
+    },
+  );
+
   test("spawns exact argv once while pending and running", async () => {
     const { adb, reader, onGesture } = setup();
     reader.start(onGesture);

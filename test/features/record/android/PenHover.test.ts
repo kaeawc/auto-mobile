@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
+import { GESTURE_THRESHOLDS } from "../../../../src/features/record/android/types";
 import type { GestureEvent } from "../../../../src/features/record/android/types";
 
 /** The hover events the reconstructor reports for a stream of `getevent -lt` lines. */
@@ -201,4 +202,20 @@ describe("a multitouch pen that hovers without ever touching (#13084)", () => {
 
     expect(hoverEvents([...HOVER_ONLY, ...again])).toHaveLength(2);
   });
+});
+
+test("hover sampling is bounded and retains the first and last positions", () => {
+  const lines = [
+    "[ 1.0] EV_KEY BTN_TOOL_PEN DOWN",
+    "[ 1.0] EV_ABS ABS_Y 00000064",
+    "[ 1.0] EV_ABS ABS_DISTANCE 00000080",
+  ];
+  for (let i = 0; i < 300; i++) {
+    lines.push(`[ 1.0] EV_ABS ABS_X ${i.toString(16)}`, SYN);
+  }
+  lines.push("[ 1.0] EV_KEY BTN_TOOL_PEN UP", SYN);
+  const [event] = hoverEvents(lines, { singleTouch: true });
+  expect(event.hover!.length).toBeLessThanOrEqual(GESTURE_THRESHOLDS.PEN_MAX_SAMPLES);
+  expect(event.hover![0]).toMatchObject({ x: 0, y: 100, distance: 128 });
+  expect(event.hover!.at(-1)).toMatchObject({ x: 299, y: 100, distance: 128 });
 });

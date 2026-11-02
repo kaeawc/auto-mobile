@@ -1,5 +1,7 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
+import { quoteForWindowsCmd } from "../../utils/android-cmdline-tools/SdkManagerClient";
+import { DefaultSystemDetection, type SystemDetection } from "../../utils/system/SystemDetection";
 import { adbCommand, shell } from "./injectorSupport";
 import { logger } from "../../utils/logger";
 import * as fs from "node:fs/promises";
@@ -42,6 +44,10 @@ export class DefaultMagiskStubBuilder implements MagiskStubBuilder {
     private readonly host: HostCommandExecutor = new DefaultHostCommandExecutor(),
     private readonly files: MagiskStubFiles = fs,
     private readonly sdkRoot = readEnvRaw(AMBIENT_ENV.ANDROID_HOME),
+    private readonly systemDetection: Pick<
+      SystemDetection,
+      "getCurrentPlatform"
+    > = new DefaultSystemDetection(),
   ) {}
 
   async build(signal?: AbortSignal): Promise<MagiskStubApk> {
@@ -65,8 +71,9 @@ export class DefaultMagiskStubBuilder implements MagiskStubBuilder {
       };
       const tools = await latest(join(this.sdkRoot, "build-tools"));
       const platform = await latest(join(this.sdkRoot, "platforms"));
-      const aapt = join(tools, "aapt2");
-      const signer = join(tools, "apksigner");
+      const windows = this.systemDetection.getCurrentPlatform() === "win32";
+      const aapt = join(tools, windows ? "aapt2.exe" : "aapt2");
+      const signer = join(tools, windows ? "apksigner.bat" : "apksigner");
       const androidJar = join(platform, "android.jar");
       await Promise.all([aapt, signer, androidJar].map((path) => this.files.access(path)));
       directory = await this.files.mkdtemp(join(tmpdir(), "automobile-magisk-stub-"));
@@ -76,6 +83,16 @@ export class DefaultMagiskStubBuilder implements MagiskStubBuilder {
       const keystore = join(directory, "throwaway.p12");
       await this.files.writeFile(manifest, MAGISK_STUB_MANIFEST);
       const run = async (file: string, args: string[]): Promise<void> => {
+        if (windows && file === signer) {
+          args = [
+            "/d",
+            "/v:off",
+            "/s",
+            "/c",
+            `"${[quoteForWindowsCmd(file), ...args.map(quoteForWindowsCmd)].join(" ")}"`,
+          ];
+          file = readEnvRaw(AMBIENT_ENV.COMSPEC) ?? "cmd.exe";
+        }
         const result = await this.host.executeCommand(file, args, { signal, timeoutMs: 30_000 });
         if (result.error) {
           throw new ActionableError(`rootState stub build failed: ${result.error}`);

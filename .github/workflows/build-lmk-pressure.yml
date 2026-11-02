@@ -1,0 +1,112 @@
+name: "Build lmk-pressure binaries"
+
+# Builds the deviceCondition memory-pressure payload (`android/lmk-pressure/`,
+# #16329) for arm64-v8a and x86_64 with the runner's Android NDK and uploads
+# both binaries as one artifact (#16402). Prepare Release pins their sha256 in
+# the checksum registry from this build and Release attaches the same bytes, so
+# no second build has to reproduce them. The in-job rebuild still proves the
+# build is deterministic for one NDK revision. Pull requests run it to keep the
+# payload building.
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: "Commit or tag to build; defaults to the caller SHA"
+        required: false
+        type: string
+        default: ""
+      upload-artifact:
+        description: "Whether to upload the built binaries as a workflow artifact"
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded artifact"
+        required: false
+        type: number
+        default: 7
+    outputs:
+      arm64_sha256:
+        description: "SHA256 of the arm64-v8a binary"
+        value: ${{ jobs.build.outputs.arm64_sha256 }}
+      x86_64_sha256:
+        description: "SHA256 of the x86_64 binary"
+        value: ${{ jobs.build.outputs.x86_64_sha256 }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Build lmk-pressure binaries"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      arm64_sha256: ${{ steps.checksum.outputs.arm64_sha256 }}
+      x86_64_sha256: ${{ steps.checksum.outputs.x86_64_sha256 }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
+
+      # The hosted Ubuntu image ships an NDK and exports ANDROID_NDK_HOME, which
+      # build-lmk-pressure.sh uses first. Record its revision for provenance.
+      - name: "Show Android NDK revision"
+        run: |
+          set -euo pipefail
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-}"
+          grep '^Pkg.Revision' "${ANDROID_NDK_HOME:?ANDROID_NDK_HOME is not set on this runner}/source.properties"
+
+      - name: "Build binaries"
+        env:
+          LMK_PRESSURE_OUT: build/lmk-pressure
+        run: bash scripts/android/build-lmk-pressure.sh
+
+      - name: "Verify each binary targets its ABI"
+        run: bash scripts/ci/verify-lmk-pressure-binaries.sh build/lmk-pressure
+
+      - name: "Calculate SHA256"
+        id: checksum
+        run: |
+          # pipefail so a failing sha256sum is not masked by a succeeding cut (#4684).
+          set -euo pipefail
+          arm64="$(sha256sum build/lmk-pressure/arm64-v8a/lmk_pressure | cut -d' ' -f1)"
+          x86_64="$(sha256sum build/lmk-pressure/x86_64/lmk_pressure | cut -d' ' -f1)"
+          echo "arm64_sha256=$arm64" >> "$GITHUB_OUTPUT"
+          echo "x86_64_sha256=$x86_64" >> "$GITHUB_OUTPUT"
+          echo "arm64-v8a SHA256: $arm64"
+          echo "x86_64 SHA256:    $x86_64"
+
+      - name: "Verify reproducible build"
+        env:
+          LMK_PRESSURE_OUT: build/lmk-pressure-rebuild
+        run: |
+          set -euo pipefail
+          bash scripts/android/build-lmk-pressure.sh
+          for abi in arm64-v8a x86_64; do
+            if ! cmp -s "build/lmk-pressure/$abi/lmk_pressure" "build/lmk-pressure-rebuild/$abi/lmk_pressure"; then
+              echo "ERROR: two builds of the $abi binary differ; the recorded checksum would not be reproducible." >&2
+              exit 1
+            fi
+          done
+          echo "Reproducible: two builds produced identical binaries."
+
+      - name: "Stage release asset names"
+        run: |
+          set -euo pipefail
+          cp build/lmk-pressure/arm64-v8a/lmk_pressure /tmp/automobile-lmk-pressure-arm64-v8a
+          cp build/lmk-pressure/x86_64/lmk_pressure /tmp/automobile-lmk-pressure-x86_64
+
+      - name: "Upload lmk-pressure binaries"
+        if: ${{ inputs.upload-artifact }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: lmk-pressure
+          path: |
+            /tmp/automobile-lmk-pressure-arm64-v8a
+            /tmp/automobile-lmk-pressure-x86_64
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error

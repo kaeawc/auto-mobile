@@ -83,7 +83,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper prototype-agent prototype-viewer network-filter; do
+  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar lmk-pressure screen-capture-helper prototype-agent prototype-viewer network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -309,6 +309,7 @@
     .github/workflows/build-control-proxy-apk.yml \
     .github/workflows/build-protoviewer-apk.yml \
     .github/workflows/build-video-server-jar.yml \
+    .github/workflows/build-lmk-pressure.yml \
     .github/workflows/build-screen-capture-helper.yml \
     .github/workflows/build-prototype-agent.yml \
     .github/workflows/build-prototype-viewer.yml; do
@@ -414,6 +415,32 @@
   grep -Fq '"network-filter"' "$release"
   grep -Fq "/tmp/automobile-network-filter-macos-universal.zip" "$release"
   grep -Fq "entry.networkFilterSha256" "$release"
+}
+
+@test "prepare-release records, verifies, and ships both lmk-pressure binaries (#16402)" {
+  local prepare=".github/workflows/prepare-release.yml"
+  local release=".github/workflows/release.yml"
+  grep -Fq "uses: ./.github/workflows/build-lmk-pressure.yml" "$prepare"
+  grep -Fq "LMK_PRESSURE_ARM64_SHA256: \${{ needs.build-candidate-lmk-pressure.outputs.arm64_sha256 }}" "$prepare"
+  grep -Fq "LMK_PRESSURE_X86_64_SHA256: \${{ needs.build-candidate-lmk-pressure.outputs.x86_64_sha256 }}" "$prepare"
+  grep -Fq "verify-artifact-sha256.sh /tmp/automobile-lmk-pressure-arm64-v8a lmkpressurearm64" "$prepare"
+  grep -Fq "verify-artifact-sha256.sh /tmp/automobile-lmk-pressure-x86_64 lmkpressurex8664" "$prepare"
+  grep -Fq '"lmk-pressure"' "$prepare"
+  grep -Fq '"lmk-pressure"' "$release"
+  grep -Fq "entry.lmkPressureArm64Sha256" "$release"
+  grep -Fq "entry.lmkPressureX8664Sha256" "$release"
+  grep -Fq "/tmp/automobile-lmk-pressure-arm64-v8a" "$release"
+  grep -Fq "/tmp/automobile-lmk-pressure-x86_64" "$release"
+}
+
+@test "lmk-pressure builder checks ELF targets and reproducibility, and uploads both binaries (#16402)" {
+  local workflow=".github/workflows/build-lmk-pressure.yml"
+  grep -Fq "bash scripts/ci/verify-lmk-pressure-binaries.sh build/lmk-pressure" "$workflow"
+  grep -Fq "name: Verify reproducible build" "$workflow" || grep -Fq 'name: "Verify reproducible build"' "$workflow"
+  grep -Fq "name: lmk-pressure" "$workflow"
+  grep -Fq "/tmp/automobile-lmk-pressure-arm64-v8a" "$workflow"
+  grep -Fq "/tmp/automobile-lmk-pressure-x86_64" "$workflow"
+  grep -Fq "uses: ./.github/workflows/build-lmk-pressure.yml" .github/workflows/pull_request.yml
 }
 
 @test "network-filter builder packs with ditto, exposes the archive sha256, and uploads it" {

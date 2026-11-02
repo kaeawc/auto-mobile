@@ -50,7 +50,10 @@ export interface WebRenderScope {
   readonly unsupported: UnsupportedWebNode[];
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
-  /** Values only text placeholders read, never control state: a pager's `page` and `pageCount`. */
+  /**
+   * A pager's `page` and `pageCount`: text placeholders and presentation conditions (`visibleWhen`,
+   * `styleWhen`) read them, as on the devices; control state never does.
+   */
   readonly textLocals?: Readonly<Record<string, unknown>>;
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
@@ -272,7 +275,7 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
     (current, instance) => bindStructure(current, path, instance),
     record(entry) ?? {},
   );
-  if (bound.visibleWhen !== undefined && !conditionHolds(bound.visibleWhen, scope.condition)) {
+  if (bound.visibleWhen !== undefined && !conditionHolds(bound.visibleWhen, presentation(scope))) {
     return [];
   }
   const styled = { ...bound, style: resolvedStyle(bound, scope) };
@@ -982,6 +985,13 @@ function bindStructure(node: Raw, path: string, instance: Instance): Raw {
   });
 }
 
+/** The condition scope `visibleWhen` and `styleWhen` read: spec state with any pager locals over it. */
+function presentation(scope: WebRenderScope): ConditionScope {
+  return scope.textLocals
+    ? { ...scope.condition, state: { ...scope.condition.state, ...scope.textLocals } }
+    : scope.condition;
+}
+
 /**
  * The node's style with every `styleWhen` entry whose condition holds merged over it in authored
  * order, as the devices resolve it. An entry the still cannot decide is not applied.
@@ -990,7 +1000,7 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
   const entries = Array.isArray(node.styleWhen) ? node.styleWhen : [];
   return entries.reduce<Raw | undefined>((style, entry) => {
     const when = record(entry);
-    return when && decide(when.when, scope.condition) === true
+    return when && decide(when.when, presentation(scope)) === true
       ? { ...style, ...record(when.style) }
       : style;
   }, record(node.style));
@@ -1011,7 +1021,7 @@ export function renderWebNode(
     (current, instance) => bindStructure(current, path, instance),
     authored,
   );
-  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, scope.condition)) {
+  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(scope))) {
     return undefined;
   }
   const styled: Raw = { ...raw, style: resolvedStyle(raw, scope) };

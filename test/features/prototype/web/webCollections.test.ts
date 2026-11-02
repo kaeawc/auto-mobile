@@ -137,6 +137,41 @@ describe("web still pager (#16382)", () => {
     expect(tabs.map((tab) => tab.attrs["aria-selected"])).toEqual(["true", "false"]);
   });
 
+  test("visibleWhen and styleWhen inside a page read the pager's page, not global state", () => {
+    const still = renderPrototypeStill(
+      rootOf(
+        {
+          type: "pager",
+          id: "p",
+          stateKey: "page_index",
+          children: [
+            { type: "text", text: "first" },
+            {
+              type: "column",
+              children: [
+                {
+                  type: "text",
+                  testTag: "shown",
+                  text: "on two",
+                  visibleWhen: { key: "page", equals: 2 },
+                },
+                {
+                  type: "text",
+                  testTag: "styled",
+                  text: "styled",
+                  styleWhen: [{ when: { key: "page", equals: 2 }, style: { color: "#FF0000" } }],
+                },
+              ],
+            },
+          ],
+        },
+        { state: { page: 0, page_index: 1 } },
+      ),
+    ).element;
+    expect(byTag(still, "shown")).toHaveLength(1);
+    expect(byTag(still, "styled")[0]!.style.color).toBe("rgba(255,0,0,1)");
+  });
+
   test("applies peek padding and a fixed page size on the pager's axis", () => {
     const pager = byNode(
       renderPrototypeStill(

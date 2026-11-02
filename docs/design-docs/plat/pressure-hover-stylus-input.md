@@ -135,9 +135,12 @@ also reads pen data (**Source**):
   the cap while preserving the first point, pressure extrema and the latest point.
   Coordinates use the mapping at contact down or hover entry; distance is normalized against its discovered
   axis range. Segment durations use node-local kernel timestamps, falling back to host arrival
-  deltas when timestamps are absent, and are clamped to 1-5000 ms. A stroke whose exported
-  segments total more than the 20 second replay limit is omitted with a dedicated stop-result
-  warning. A pen gesture with no known position or path is left out with a warning
+  deltas when timestamps are absent. Elapsed offsets are rounded once; samples within the same
+  millisecond are coalesced, and gaps over 5000 ms are split with linear position and pressure/distance
+  interpolation. If splitting exceeds 100 points, the shortest adjacent segments are merged while
+  retaining endpoints, pen extrema and elapsed time. A stroke or hover whose unrounded elapsed
+  time exceeds the 20 second replay limit is omitted with a dedicated stop-result warning.
+  A pen gesture with no known position or path is left out with a warning
   on the stop result, which a salvaged stop keeps. An eraser gesture is exported with a warning
   because only a root `adb shell` with the `uinput` tool can replay it. A stylus double tap is exported with a warning because
   replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger

@@ -40949,6 +40949,10 @@
             }
           ]
         },
+        "lowRam": {
+          "description": "Android only: use 1024 MB of AVD RAM before boot. Omitted or false preserves existing RAM defaults. Explicit device.spec.configuration.memoryMb must equal 1024 when true; unavailable for API 30+ Play Store images, which require at least 2048 MB.",
+          "type": "boolean"
+        },
         "boot": {
           "description": "Boot the resolved device after creation or adoption",
           "default": true,

@@ -60,6 +60,7 @@ import {
   STORAGE_DEFAULT_SLICE,
   STORAGE_SLICE,
   judgeStorageReport,
+  judgeCoreDataQuery,
   judgeUnreachableStorageReport,
 } from "./storageSlice";
 import {
@@ -435,10 +436,25 @@ export async function readStorageCapabilities(
 async function judgeStorage(
   manifest: SdkContractManifest,
   deviceId: string,
+  sessionUuid: string,
 ): Promise<ContractFinding[]> {
   const findings = judgeStorageReport(manifest, await readStorageCapabilities(deviceId));
   if (manifest.scenario !== STORAGE_SLICE) {
     return findings;
+  }
+  for (const queryCase of ["limited", "all", "unknown-entity"] as const) {
+    const outcome = await invokeTool(
+      "sqlQuery",
+      {
+        appId: PLAYGROUND_BUNDLE_ID,
+        store: `ContractQuery-${manifest.runId}`,
+        entity: queryCase === "unknown-entity" ? "UnknownContractEntity" : "Item",
+        ...(queryCase === "limited" ? { limit: "2" } : {}),
+        platform: "ios",
+      },
+      sessionUuid,
+    );
+    findings.push(...judgeCoreDataQuery(queryCase, outcome));
   }
   await new SimCtlClient().terminateApp(PLAYGROUND_BUNDLE_ID, deviceId).catch(() => undefined);
   return [
@@ -462,7 +478,7 @@ async function judgeScenario(
     return judgeObservationCases(manifest, live.observationOutcomes ?? new Map());
   }
   if (scenario === STORAGE_SLICE || scenario === STORAGE_DEFAULT_SLICE) {
-    return judgeStorage(manifest, live.deviceId);
+    return judgeStorage(manifest, live.deviceId, live.sessionUuid);
   }
   const expected =
     scenario === FAULT_SLICE ? expectedFaultRecords(manifest, manifest.runId) : manifest.network;

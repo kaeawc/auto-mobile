@@ -43,6 +43,8 @@ Set a condition by passing its value. Pass `"unset"` to clear it, or `{ "reset":
 | `faults.clearPackageData`             | Clears an app's data                                                                                                                        | No: one-shot, cannot be undone                            |
 | `vehicle.motion`, `vehicle.nightMode` | Automotive vehicle state; see [Android Automotive OS](android-automotive.md)                                                                | Yes                                                       |
 
+`rootState` needs a non-Play image booted with `-writable-system`, which keeps `/system` writable. Without it, apply returns `unsupported` with guidance to boot with `-writable-system`. After the daemon stops with the fixture applied, the next `unset` or `reset` on the device removes the planted files and restores SELinux.
+
 A condition the device cannot apply comes back `unsupported` with a `detail` reason, and the call reports `success: false`. The call's other changes still apply.
 
 ## Compound faults

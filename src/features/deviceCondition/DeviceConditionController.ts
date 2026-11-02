@@ -36,6 +36,8 @@ export interface DeviceConditionInjector {
   ): Promise<DeviceConditionApplyOutcome>;
   /** Read whether the key is back to its clean baseline; used to verify restore. */
   isClean(signal?: AbortSignal): Promise<boolean>;
+  /** Best-effort discovery of an abandoned fixture; absent for other injectors. */
+  recover?(signal?: AbortSignal): Promise<NonNullable<DeviceConditionApplyOutcome["reset"]> | null>;
 }
 
 export interface DeviceConditionApplyOutcome {
@@ -97,7 +99,7 @@ export class DeviceConditionController {
       restore = await this.restore(signal);
     }
     for (const change of deviceConditionChanges(input)) {
-      changeResults.push(await this.applyChange(change, signal));
+      changeResults.push(await this.applyChange(change, signal, input.reset === true));
     }
     const failed = changeResults.some((result) => result.status === "unsupported");
     return {
@@ -112,9 +114,10 @@ export class DeviceConditionController {
   private async applyChange(
     change: DeviceConditionChange,
     signal?: AbortSignal,
+    recoveryAttempted = false,
   ): Promise<DeviceConditionChangeResult> {
     if (change.value === DEVICE_CONDITION_UNSET) {
-      return this.clearKey(change.key, signal);
+      return this.clearKey(change.key, signal, recoveryAttempted);
     }
     const injector = this.resolveInjector(change.key);
     if (!injector) {
@@ -156,6 +159,26 @@ export class DeviceConditionController {
     }
   }
 
+  /** A restarted daemon has no registered reset for abandoned root fixture files. */
+  private async recoverRootReset(signal?: AbortSignal): Promise<void> {
+    if (this.resets.some((entry) => entry.key === "rootState")) {
+      return;
+    }
+    try {
+      const injector = this.resolveInjector("rootState");
+      const reset = await injector?.recover?.(signal);
+      if (injector && reset) {
+        this.resets.push({
+          key: "rootState",
+          reset,
+          isClean: (s) => injector.isClean(s),
+        });
+      }
+    } catch (error) {
+      logger.warn(`[deviceCondition] recovering rootState failed: ${errorMessage(error)}`, error);
+    }
+  }
+
   /**
    * Run and drop every reset registered for one key, newest first; a key with none is
    * `unchanged`. An injector cannot always tell whether the controller still holds its earlier
@@ -165,7 +188,11 @@ export class DeviceConditionController {
   private async clearKey(
     key: DeviceConditionKey,
     signal?: AbortSignal,
+    recoveryAttempted = false,
   ): Promise<DeviceConditionChangeResult> {
+    if (key === "rootState" && !recoveryAttempted) {
+      await this.recoverRootReset(signal);
+    }
     const entries = this.resets.filter((entry) => entry.key === key);
     if (entries.length === 0) {
       return { key, status: "unchanged" };
@@ -191,6 +218,7 @@ export class DeviceConditionController {
   async restore(signal?: AbortSignal): Promise<DeviceConditionRestoreReport> {
     const restored: DeviceConditionKey[] = [];
     const failures: DeviceConditionRestoreFailure[] = [];
+    await this.recoverRootReset(signal);
     // Reverse order: the last condition applied is undone first.
     for (const entry of [...this.resets].reverse()) {
       try {

@@ -139,6 +139,96 @@ export async function listExisting(
   );
 }
 
+function rootArtifactLister(
+  adb: AdbExecutor,
+  magisk: ReturnType<typeof createMagiskPackageArtifact>,
+): (paths: string[], signal?: AbortSignal) => Promise<Set<string>> {
+  return async (paths: string[], signal?: AbortSignal): Promise<Set<string>> => {
+    const existing = await listExisting(
+      adb,
+      paths.filter((path) => path !== magisk.key),
+      signal,
+    );
+    if (paths.includes(magisk.key) && (await magisk.present(signal))) {
+      existing.add(magisk.key);
+    }
+    return existing;
+  };
+}
+
+async function rootStateIsClean(
+  adb: AdbExecutor,
+  owner: {
+    held: Set<string>;
+    artifacts: ArtifactOwner;
+    artifactToken: object;
+    selinux: SelinuxOwner;
+    selinuxToken: object;
+  },
+  listArtifacts: (paths: string[], signal?: AbortSignal) => Promise<Set<string>>,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const owed = [...owner.held].filter((path) =>
+    owner.artifacts.removableBy(owner.artifactToken, path),
+  );
+  if (owed.length > 0) {
+    try {
+      if ((await listArtifacts(owed, signal)).size > 0) {
+        return false;
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        throw toActionableError(error, "rootState clean check aborted");
+      }
+      // A read that cannot run cannot show the device is clean, so report it as not clean.
+      logger.warn(`rootState clean check could not list artifacts: ${errorMessage(error)}`, error);
+      return false;
+    }
+  }
+  return !owner.selinux.has(owner.selinuxToken) && (await owner.selinux.isClean(adb, signal));
+}
+
+/** Recover only known file stubs; existing packages cannot be identified safely. */
+async function recoverRootArtifacts(
+  adb: AdbExecutor,
+  owner: {
+    held: Set<string>;
+    planted: Set<string>;
+    artifacts: ArtifactOwner;
+    artifactToken: object;
+    selinux: SelinuxOwner;
+    selinuxToken: object;
+  },
+  existing: Set<string>,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const matches: string[] = [];
+  for (const path of ROOT_ARTIFACT_PATHS) {
+    if (!existing.has(path) || owner.held.has(path)) {
+      continue;
+    }
+    // Keep raw stdout: shell() trims whitespace that distinguishes a real file from our stub.
+    const result = await adb.execute(["shell", "cat", path], { signal });
+    if (result.error) {
+      throw new ActionableError(`rootState could not read ${path}: ${result.error}`);
+    }
+    const content = result.stdout.replace(/\r\n?/g, "\n");
+    const stub = STUB_SCRIPT.replaceAll("\\n", "\n");
+    if (content === stub || content === stub.slice(0, -1)) {
+      matches.push(path);
+    }
+  }
+  if (matches.length > 0) {
+    await owner.selinux.recover(owner.selinuxToken);
+    for (const path of matches) {
+      owner.artifacts.plant(owner.artifactToken, path);
+      owner.held.add(path);
+      owner.planted.add(path);
+    }
+  }
+  return matches;
+}
+
 export function createRootStateInjector(
   adb: AdbExecutor,
   selinux = new SelinuxOwner(),
@@ -147,17 +237,7 @@ export function createRootStateInjector(
 ): DeviceConditionInjector {
   const magisk = createMagiskPackageArtifact(adb, stubBuilder);
   const packageArtifact = magisk.key;
-  const listArtifacts = async (paths: string[], signal?: AbortSignal): Promise<Set<string>> => {
-    const existing = await listExisting(
-      adb,
-      paths.filter((path) => path !== packageArtifact),
-      signal,
-    );
-    if (paths.includes(packageArtifact) && (await magisk.present(signal))) {
-      existing.add(packageArtifact);
-    }
-    return existing;
-  };
+  const listArtifacts = rootArtifactLister(adb, magisk);
   const selinuxToken = {};
   const artifactToken = {};
   // Every artifact this fixture depends on, planted here or already present. Shared with
@@ -165,12 +245,30 @@ export function createRootStateInjector(
   const held = new Set<string>();
   // True while this fixture is applied and its reset is owed; a repeat apply is then coalesced.
   let active = false;
-  // Only artifacts WE planted. A userdebug image ships a real su; it is never overwritten here
-  // and never deleted by reset.
+  // Only artifacts we planted or recognised by their exact stub content. A real userdebug su
+  // is never overwritten or deleted by reset.
   const planted = new Set<string>();
+  const recovery = { held, planted, artifacts, artifactToken, selinux, selinuxToken };
+  const probeLeftovers = async (paths: readonly string[], signal?: AbortSignal): Promise<void> => {
+    try {
+      await recoverRootArtifacts(adb, recovery, await listExisting(adb, paths, signal), signal);
+    } catch (error) {
+      // Discovery is optional; no ownership is acquired until every content read succeeds.
+      logger.warn(`rootState recovery probe failed: ${errorMessage(error)}`, error);
+    }
+  };
   // One reset serves every apply, so repeat applies never stack separate cleanups. It is
   // defined here, before any mutation, so every later failure can undo it.
-  const reset = async (resetSignal?: AbortSignal): Promise<void> => {
+  const reset = async (resetSignal?: AbortSignal, sweep = true): Promise<void> => {
+    if (sweep) {
+      await probeLeftovers(
+        ROOT_ARTIFACT_PATHS.filter((path) => !held.has(path)),
+        resetSignal,
+      );
+    }
+    if (held.size === 0 && !selinux.has(selinuxToken)) {
+      return;
+    }
     // Re-acquire the privileges the cleanup needs: an earlier reset (or a reboot) may
     // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
     await ensureRootAdb(adb, resetSignal);
@@ -205,6 +303,16 @@ export function createRootStateInjector(
     planted.clear();
     active = false;
   };
+  const recoverReset = async (signal?: AbortSignal) => {
+    // A live apply already gave its controller the reset; another caller cannot take it.
+    if (active) {
+      return null;
+    }
+    await probeLeftovers(ROOT_ARTIFACT_PATHS, signal);
+    return held.size > 0 || selinux.has(selinuxToken)
+      ? (resetSignal?: AbortSignal) => reset(resetSignal, false)
+      : null;
+  };
   // Every artifact the fixture depends on, not only those it planted: a file another fixture
   // planted can be removed under it.
   const artifactsStillThere = async (signal?: AbortSignal): Promise<boolean> => {
@@ -217,6 +325,7 @@ export function createRootStateInjector(
     !selinux.has(selinuxToken) || /permissive/i.test(await shell(adb, ["getenforce"], signal));
   return {
     key: "rootState",
+    recover: recoverReset,
     async apply(value, signal): Promise<DeviceConditionApplyOutcome> {
       if (value !== ROOTED_DETECTABLE) {
         rejectValue("rootState", value, [ROOTED_DETECTABLE]);
@@ -233,9 +342,8 @@ export function createRootStateInjector(
       // Both reads happen before the first mutation, so a failed probe changes nothing.
       const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
       const hadPackage = await magisk.present(signal);
-      if (!selinux.has(selinuxToken)) {
-        await selinux.capture(adb, selinuxToken, signal);
-      }
+      const leftovers = await recoverRootArtifacts(adb, recovery, existing, signal);
+      await selinux.capture(adb, selinuxToken, signal);
       const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
       try {
         await remountWritable(adb, signal);
@@ -276,7 +384,7 @@ export function createRootStateInjector(
         // The reset registered by the original apply still covers this fixture.
         return { status: "applied", detail: "rooted-detectable fixture re-applied after drift" };
       }
-      const kept = ROOT_ARTIFACT_PATHS.length - toPlant.length;
+      const kept = ROOT_ARTIFACT_PATHS.length - toPlant.length - leftovers.length;
       return {
         status: "applied",
         detail:
@@ -286,27 +394,7 @@ export function createRootStateInjector(
         reset,
       };
     },
-    async isClean(signal): Promise<boolean> {
-      const owed = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
-      if (owed.length > 0) {
-        try {
-          if ((await listArtifacts(owed, signal)).size > 0) {
-            return false;
-          }
-        } catch (error) {
-          if (signal?.aborted) {
-            throw toActionableError(error, "rootState clean check aborted");
-          }
-          // A read that cannot run cannot show the device is clean, so report it as not clean.
-          logger.warn(
-            `rootState clean check could not list artifacts: ${errorMessage(error)}`,
-            error,
-          );
-          return false;
-        }
-      }
-      return !selinux.has(selinuxToken) && (await selinux.isClean(adb, signal));
-    },
+    isClean: (signal) => rootStateIsClean(adb, recovery, listArtifacts, signal),
   };
 }
 

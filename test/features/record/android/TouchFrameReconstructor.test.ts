@@ -25,6 +25,30 @@ function isFrame(x: RawTouchFrame | GestureEvent): x is RawTouchFrame {
   return "activeSlots" in x;
 }
 
+test("pen samples retain kernel timestamps when frames arrive together", () => {
+  const reconstructor = new TouchFrameReconstructor({ singleTouch: true });
+  const frames: RawTouchFrame[] = [];
+  for (const line of [
+    "[ 78826.389007] EV_KEY BTN_TOUCH DOWN",
+    "[ 78826.389007] EV_ABS ABS_X 00000010",
+    "[ 78826.389007] EV_ABS ABS_Y 00000020",
+    "[ 78826.389007] EV_ABS ABS_PRESSURE 00000020",
+    "[ 78826.389007] EV_SYN SYN_REPORT 00000000",
+    "[ 78826.489007] EV_ABS ABS_X 00000030",
+    "[ 78826.489007] EV_ABS ABS_PRESSURE 00000080",
+    "[ 78826.489007] EV_SYN SYN_REPORT 00000000",
+  ]) {
+    const frame = reconstructor.feedLine(line, 500);
+    if (frame && isFrame(frame)) {
+      frames.push(frame);
+    }
+  }
+  expect(frames[1].activeSlots[0].path).toEqual([
+    { x: 16, y: 32, pressure: 32, arrivedAt: 500, kernelAtMs: 78826389.007 },
+    { x: 48, y: 32, pressure: 128, arrivedAt: 500, kernelAtMs: 78826489.007 },
+  ]);
+});
+
 // ---------------------------------------------------------------------------
 // Test fixtures — realistic getevent -lt output
 // ---------------------------------------------------------------------------

@@ -73,6 +73,25 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     recorder = new DualTrackRecorder(device, gestures, a11y, { timer });
   });
 
+  test("stop warns when a known stylus stroke exceeds the replay duration limit", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "stroke",
+      toolType: "stylus",
+      arrivedAt: timer.now(),
+      path: Array.from({ length: 31 }, (_, index) => ({
+        x: index,
+        y: 20,
+        pressure: index / 30,
+        arrivedAt: index * 1000,
+      })),
+    });
+    const result = await recorder.stop();
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("20 second")]);
+    expect(result.exportWarnings?.[0]).not.toContain("without a known position or path");
+  });
+
   test("a stylus tap over an element is a tapAt with a pointer, never a tapOn", async () => {
     await recorder.start();
     a11y.emit({ type: "tap", timestamp: timer.now(), element: BUTTON });
@@ -318,7 +337,7 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     ]);
   });
 
-  test("a hover is not exported, and the stop result says it was dropped", async () => {
+  test("a hover without a known position is not exported and warns", async () => {
     await recorder.start();
     gestures.emit({ type: "hover", arrivedAt: timer.now(), toolType: "stylus" });
 
@@ -326,6 +345,20 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
 
     expect(result.steps).toEqual([]);
     expect(result.exportWarnings).toEqual([expect.stringContaining("hover")]);
+  });
+
+  test("a positioned hover without distance warns instead of exporting a touch", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "hover",
+      arrivedAt: timer.now(),
+      toolType: "stylus",
+      screenX: 10,
+      screenY: 20,
+    });
+    const result = await recorder.stop();
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("hover distance")]);
   });
 
   test("hovers next to a tap warn once and leave the tap exported", async () => {

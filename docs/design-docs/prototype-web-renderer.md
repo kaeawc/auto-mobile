@@ -1,7 +1,55 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the page, the still renderer and the device frame registry.
+document covers the resource that serves it, spec revisions, the page, the still renderer and the
+device frame registry.
+
+## Resource
+
+`automobile:prototype/{id}/web{?frame,revision,variant}` (`text/html`) is registered in
+`src/server/prototypeResources.ts` and read by `readPrototypeWebResource` in
+`src/features/prototype/web/prototypeWebResource.ts`.
+
+- **Variants.** The page's variants are the ids whose latest revision carries the same
+  `variant.group` as `{id}`'s, in first-seen order, labelled by `variant.label`; an id without a
+  group is the only variant, labelled by its id. `variant` (default `{id}`) picks the one shown
+  first and must be in that set.
+- **Revision and frame.** `revision` (default the latest) is a kept revision of the variant shown
+  first. `frame` defaults to `defaultDeviceFrameId` of the platform that showed that revision, else
+  `pixel-9`.
+- **Errors.** An unknown id lists the known ids; an evicted revision names the oldest kept; an
+  unknown revision lists the kept ones; an unknown frame or variant lists the valid ones. All are
+  `ActionableError`s.
+- **Read result.** `_meta` is `{revision, deviceRevision?, revisions, variants, frame, sha256,
+  rendererVersion}`; `rendererVersion` is the server release version.
+- **Listing.** Each known id gets a concrete resource `automobile:prototype/{id}/web` named
+  `prototype-{id}-web`, titled `{id} (web)`, registered when its first revision appears and
+  unregistered when the id is evicted; each change sends `list_changed`. List entries carry no
+  `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
+  `_meta`.
+- **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
+  `resources/updated` for the parameter-free URI of the id, of each id in its variant group, and of
+  each id in the group it left (or was evicted from), in revision order. The concrete resource matches subscriptions
+  exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
+
+## Spec revisions
+
+`PrototypeSpecRevisions` (`src/features/prototype/prototypeSpecRevisions.ts`) is fed by
+`PrototypeShownSpecs`, so a revision exists exactly when the shown-spec mirror accepts a spec:
+
+- `endShow` storing a spec records a `show`; refused, superseded and poisoned shows, and shows the
+  mirror leaves untracked (persisted `/data`), record nothing. `commitPatch` committing records a
+  `patch` with the reply's `revision` as `deviceRevision`. Device data writes record nothing.
+- Numbers start at 1 per id and never repeat, even after the id is evicted. Each revision keeps a
+  copy of the spec, the platform of the device, the host clock time and the variant. A show states
+  its `variant` afresh (none leaves the group); a patch keeps the id's last one. `variant` is
+  host-only and never sent to the device.
+- Bounds: the last `MAX_PROTOTYPE_SPEC_REVISIONS` (20) per id, and `MAX_PROTOTYPE_SPEC_REVISION_BYTES`
+  (32 MiB) of spec JSON across ids. Over the byte cap the oldest non-latest revision goes first;
+  when only latest revisions remain, the least recently revised other id is dropped whole. Each id
+  whose history shrinks this way gets a `pruned` event, and each id dropped whole an `evicted` one.
+- The daemon keeps one store for the process (`daemonPrototypeSpecRevisions`), outliving any one
+  prototype host; a host with injected state gets its own. Nothing is persisted across restarts.
 
 ## Page
 
@@ -23,10 +71,10 @@ it inlined per variant.
   no storage, cookies or URL changes. It must stay at or below 150 KB.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
-- **Budget.** The page is at most 2 MiB. Each variant's latest revision is always kept; older
-  revisions are added newest first while they fit, after measuring the shell (head, toolbar, full
-  history list and script). If the latest revisions alone do not fit, the build fails with an
-  `ActionableError` naming the largest view.
+- **Budget.** The page is at most 2 MiB. Each variant's latest revision and the revision shown
+  first are always kept; older revisions are added newest first while they fit, after measuring the
+  shell (head, toolbar, full history list and script). If the kept revisions alone do not fit, the
+  build fails with an `ActionableError` naming the largest view.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Still renderer

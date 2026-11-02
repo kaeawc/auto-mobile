@@ -62,6 +62,8 @@ export interface ResourceContent {
 interface ResourceMetadata {
   uri: string;
   name: string;
+  /** Human-readable display name for resources/list. */
+  title?: string;
   description?: string;
   mimeType?: string;
   handler: ResourceHandler;
@@ -99,7 +101,9 @@ interface TemplateRegistration<Handler> {
 }
 
 // What a caller supplies when registering a fixed-URI resource, beyond its URI and name.
-type ResourceRegistration = Omit<TemplateRegistration<ResourceHandler>, "paginationParams">;
+type ResourceRegistration = Omit<TemplateRegistration<ResourceHandler>, "paginationParams"> & {
+  title?: string;
+};
 type ResourceTemplateRegistration = TemplateRegistration<ResourceTemplateHandler>;
 type ContextualResourceTemplateRegistration =
   TemplateRegistration<ContextualResourceTemplateHandler>;
@@ -327,10 +331,17 @@ class ResourceRegistryClass {
   register(
     uri: string,
     name: string,
-    { description, mimeType, handler }: ResourceRegistration,
+    { title, description, mimeType, handler }: ResourceRegistration,
   ): void {
     ListChangedBroadcaster.invalidate("resources");
-    this.resources.set(uri, { uri, name, description, mimeType, handler });
+    this.resources.set(uri, {
+      uri,
+      name,
+      ...(title === undefined ? {} : { title }),
+      description,
+      mimeType,
+      handler,
+    });
   }
 
   // Register a new resource template (RFC 6570 URI template)
@@ -423,6 +434,7 @@ class ResourceRegistryClass {
     return Array.from(this.resources.values()).map((resource) => ({
       uri: resource.uri,
       name: resource.name,
+      ...(resource.title === undefined ? {} : { title: resource.title }),
       description: resource.description,
       mimeType: resource.mimeType,
     }));

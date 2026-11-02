@@ -12,7 +12,7 @@ import {
   type Instance,
   type Raw,
 } from "../prototypeTemplate";
-import { conditionHolds, type ConditionScope } from "./webCondition";
+import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
@@ -340,33 +340,40 @@ const textField: NodeRenderer = (node, scope) => {
   return el("div", { attrs: { ...attrs, role: "textbox" }, style }, [shown]);
 };
 
+/** A switch track or checkbox box, drawn from whether its state is on. */
+function toggleMark(role: "switch" | "checkbox", on: boolean, scope: WebRenderScope): WebElement {
+  return role === "switch"
+    ? el("span", {
+        style: {
+          width: "52px",
+          height: "32px",
+          "border-radius": "16px",
+          "flex-shrink": "0",
+          ...roleCss(scope, on ? "primary" : "surfaceContainerHighest", "onPrimary"),
+        },
+      })
+    : el("span", {
+        style: {
+          width: "18px",
+          height: "18px",
+          "border-radius": "2px",
+          "flex-shrink": "0",
+          border: `2px solid ${cssColor(on ? "primary" : "onSurfaceVariant", scope.style) ?? "currentColor"}`,
+          ...(on ? roleCss(scope, "primary", "onPrimary") : {}),
+        },
+      });
+}
+
+/** Whether a toggle's state key, with repeat placeholders bound first, holds `true`. */
+function isOn(stateKey: unknown, scope: WebRenderScope): boolean {
+  const key = typeof stateKey === "string" ? bound(stateKey, scope) : undefined;
+  return key !== undefined && scope.condition.state[key] === true;
+}
+
 const toggle =
   (role: "switch" | "checkbox"): NodeRenderer =>
   (node, scope) => {
-    // A state key inside a repeat may hold item placeholders, which bind first.
-    const key = typeof node.stateKey === "string" ? bound(node.stateKey, scope) : undefined;
-    const on = key !== undefined && scope.condition.state[key] === true;
-    const mark =
-      role === "switch"
-        ? el("span", {
-            style: {
-              width: "52px",
-              height: "32px",
-              "border-radius": "16px",
-              "flex-shrink": "0",
-              ...roleCss(scope, on ? "primary" : "surfaceContainerHighest", "onPrimary"),
-            },
-          })
-        : el("span", {
-            style: {
-              width: "18px",
-              height: "18px",
-              "border-radius": "2px",
-              "flex-shrink": "0",
-              border: `2px solid ${cssColor(on ? "primary" : "onSurfaceVariant", scope.style) ?? "currentColor"}`,
-              ...(on ? roleCss(scope, "primary", "onPrimary") : {}),
-            },
-          });
+    const on = isOn(node.stateKey, scope);
     const { attrs, style } = base(node, scope, {
       display: "flex",
       "align-items": "center",
@@ -375,7 +382,7 @@ const toggle =
     });
     return el("div", { attrs: { ...attrs, role, "aria-checked": String(on) }, style }, [
       bound(node.label, scope),
-      mark,
+      toggleMark(role, on, scope),
     ]);
   };
 
@@ -394,11 +401,30 @@ const card: NodeRenderer = (node, scope, path) => {
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
+/** A list item's trailing switch, checkbox or icon, drawn from spec state. */
+function trailing(node: Raw, scope: WebRenderScope): WebChild[] {
+  const entry = record(node.trailing);
+  if (entry?.type === "switch" || entry?.type === "checkbox") {
+    const on = isOn(entry.stateKey, scope);
+    return [
+      el(
+        "span",
+        { attrs: { role: entry.type, "aria-checked": String(on) }, style: { display: "flex" } },
+        [toggleMark(entry.type, on, scope)],
+      ),
+    ];
+  }
+  if (entry?.type === "icon") {
+    return [icon({ type: "icon", name: entry.name }, scope, "")];
+  }
+  return [];
+}
+
 const listItem: NodeRenderer = (node, scope) => {
   const { attrs, style } = base(node, scope, {
     display: "flex",
-    "flex-direction": "column",
-    "justify-content": "center",
+    "align-items": "center",
+    gap: "16px",
     "min-height": "56px",
     padding: "8px 16px",
     "align-self": "stretch",
@@ -411,9 +437,14 @@ const listItem: NodeRenderer = (node, scope) => {
             bound(node.supporting, scope),
           ]),
         ];
+  const texts = el(
+    "div",
+    { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
+    [el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]), ...supporting],
+  );
   return el("div", { attrs: { ...attrs, role: "listitem" }, style }, [
-    el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]),
-    ...supporting,
+    texts,
+    ...trailing(node, scope),
   ]);
 };
 
@@ -453,6 +484,20 @@ function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement
 }
 
 /** One node and its subtree, or undefined when its `visibleWhen` does not hold. */
+/**
+ * The node's style with every `styleWhen` entry whose condition holds merged over it in authored
+ * order, as the devices resolve it. An entry the still cannot decide is not applied.
+ */
+function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
+  const entries = Array.isArray(node.styleWhen) ? node.styleWhen : [];
+  return entries.reduce<Raw | undefined>((style, entry) => {
+    const when = record(entry);
+    return when && decide(when.when, scope.condition) === true
+      ? { ...style, ...record(when.style) }
+      : style;
+  }, record(node.style));
+}
+
 export function renderWebNode(
   node: unknown,
   scope: WebRenderScope,
@@ -471,6 +516,7 @@ export function renderWebNode(
   if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, scope.condition)) {
     return undefined;
   }
-  const renderer = WEB_NODE_RENDERERS[String(raw.type)];
-  return renderer ? renderer(raw, scope, path) : placeholder(raw, scope, path);
+  const styled: Raw = { ...raw, style: resolvedStyle(raw, scope) };
+  const renderer = WEB_NODE_RENDERERS[String(styled.type)];
+  return renderer ? renderer(styled, scope, path) : placeholder(styled, scope, path);
 }

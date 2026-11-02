@@ -45,7 +45,8 @@ function any(decisions: Decision[]): Decision {
   return decisions.includes(undefined) ? undefined : false;
 }
 
-function decide(condition: unknown, scope: ConditionScope): Decision {
+/** The condition's value, or undefined when the still render cannot decide it. */
+export function decide(condition: unknown, scope: ConditionScope): Decision {
   const raw = record(condition);
   if (!raw) {
     return undefined;

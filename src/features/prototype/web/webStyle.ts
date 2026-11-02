@@ -124,12 +124,39 @@ const TEXT_ALIGN: Readonly<Record<string, string>> = {
   justify: "justify",
 };
 
+/** The Material 3 type scale both devices use for `style.textStyle`: size, line height, weight. */
+const TYPE_SCALE: Readonly<Record<string, [number, number, number]>> = {
+  displayLarge: [57, 64, 400],
+  displayMedium: [45, 52, 400],
+  displaySmall: [36, 44, 400],
+  headlineLarge: [32, 40, 400],
+  headlineMedium: [28, 36, 400],
+  headlineSmall: [24, 32, 400],
+  titleLarge: [22, 28, 400],
+  titleMedium: [16, 24, 500],
+  titleSmall: [14, 20, 500],
+  bodyLarge: [16, 24, 400],
+  bodyMedium: [14, 20, 400],
+  bodySmall: [12, 16, 400],
+  labelLarge: [14, 20, 500],
+  labelMedium: [12, 16, 500],
+  labelSmall: [11, 16, 500],
+};
+
+function typographyRole(style: Raw): Css {
+  const role = typeof style.textStyle === "string" ? TYPE_SCALE[style.textStyle] : undefined;
+  return role
+    ? { "font-size": px(role[0]), "line-height": px(role[1]), "font-weight": String(role[2]) }
+    : {};
+}
+
 /** Text styles inherit in CSS as they do down a native text tree. */
 export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
-  const css: Css = {};
   if (!style) {
-    return css;
+    return {};
   }
+  // The role's typography first; explicit size, weight and line height override it.
+  const css: Css = typographyRole(style);
   const color = cssColor(style.color, context);
   if (color) {
     css.color = color;

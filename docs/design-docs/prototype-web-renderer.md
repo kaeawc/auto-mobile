@@ -25,6 +25,9 @@ the host, so the page's script only switches between views it was given and neve
   each axis it leaves unsized, as on devices; a sheet is `height` dp at its `edge`; a floating window
   sits at its `gravity`, moved by its `offset`.
 - **Style precedence.** A control's default styling applies first and the spec's own style wins.
+  `styleWhen` entries whose condition holds merge over `style` in authored order; an entry the
+  still cannot decide is not applied. `textStyle` resolves to the Material 3 type scale before
+  explicit `textSize`, `fontWeight` and `lineHeight`.
 - **Layout.** Rows and columns are flex lines that start-align children on the cross axis unless
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill`, `{dp}`, `weight`, padding (logical
@@ -34,7 +37,7 @@ the host, so the page's script only switches between views it was given and neve
   roles unpainted. Unpainted screen regions show a checkerboard.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
-  `listItem`. Icons draw as a tinted square titled with the icon name, because the glyph set is not
+  `listItem` (with its trailing switch, checkbox or icon). Icons draw as a tinted square titled with the icon name, because the glyph set is not
   inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a

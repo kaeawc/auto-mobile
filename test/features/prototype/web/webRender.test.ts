@@ -237,6 +237,59 @@ describe("prototype web still (#16346)", () => {
     expect(rootOf({ type: "floating", gravity: "center" })).not.toHaveProperty("flex");
   });
 
+  test("applies matching styleWhen entries in order and skips undecidable ones", () => {
+    const spec = {
+      ...reference,
+      state: { picked: true },
+      root: {
+        type: "text",
+        testTag: "styled",
+        text: "x",
+        style: { color: "#FF0000" },
+        styleWhen: [
+          { when: { key: "picked", equals: true }, style: { color: "#00FF00" } },
+          { when: { data: "/feed", empty: true }, style: { color: "#0000FF" } },
+        ],
+      },
+    };
+    expect(byTag(renderPrototypeStill(spec), "styled")[0]!.style.color).toBe("rgba(0,255,0,1)");
+  });
+
+  test("draws a list item's trailing control from spec state", () => {
+    const spec = {
+      ...reference,
+      state: { notify: true },
+      root: {
+        type: "listItem",
+        testTag: "row",
+        headline: "Notifications",
+        trailing: { type: "switch", stateKey: "notify" },
+      },
+    };
+    const row = byTag(renderPrototypeStill(spec), "row")[0]!;
+    expect(find(row, (element) => element.attrs.role === "switch")[0]!.attrs["aria-checked"]).toBe(
+      "true",
+    );
+  });
+
+  test("resolves a typography role before explicit text overrides", () => {
+    const styleOf = (style: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "text", testTag: "t", text: "x", style },
+        }),
+        "t",
+      )[0]!.style;
+    expect(styleOf({ textStyle: "headlineLarge" })).toMatchObject({
+      "font-size": "32px",
+      "line-height": "40px",
+    });
+    expect(styleOf({ textStyle: "headlineLarge", textSize: 18 })).toMatchObject({
+      "font-size": "18px",
+    });
+  });
+
   for (const frame of ["pixel-9", "iphone-16"]) {
     for (const orientation of ["portrait", "landscape"] as const) {
       test(`snapshot on ${frame} in ${orientation}`, () => {

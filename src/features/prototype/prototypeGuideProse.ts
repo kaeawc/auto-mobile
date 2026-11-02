@@ -492,8 +492,11 @@ same key on a tabBar/bottomNav for simple shared selection, and read it in \`sty
 on a row of dot boxes outside the pager. Two pagers cannot share a key; binding inside
 repeat templates is refused. \`setPage\` writes the same selection.
 A pager may also declare
-\`indicator: "dots"\` (default \`none\`): page dots below the pages, with the current page filled;
-they need the same capability. A carousel has no page index, event or \`setPage\` target; use a
+\`indicator: "dots"\` (default \`none\`): page dots with the current page filled.
+\`indicatorPlacement\` is \`over\` or \`below\` and applies only with \`indicator: "dots"\`.
+When omitted, Android defaults to \`over\` and iOS to \`below\`. \`below\` places a row under
+horizontal pages or a column beside vertical pages; \`over\` overlays the bottom or end edge.
+Both fields need the same capability. A carousel has no page index, event or \`setPage\` target; use a
 \`pager\` when the page matters.
 
 A \`box\`, \`row\`, \`column\`, \`flow\`, \`grid\` or \`carousel\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and

@@ -187,6 +187,7 @@
     "open-url-modes.json",
     "open-url-schemes.json",
     "pager-indicator-dots.json",
+    "pager-indicator-placement.json",
     "pager-options.json",
     "pager-state-key-indicator.json",
     "platform-audio-recorder.json",
@@ -1242,6 +1243,7 @@
     "pager-axis.json",
     "pager-default-axis-in-horizontal-scroll.json",
     "pager-horizontal-in-horizontal-scroll.json",
+    "pager-indicator-placement-unknown.json",
     "pager-indicator-unknown.json",
     "pager-page-size-bad-string.json",
     "pager-page-size-zero.json",
@@ -2674,6 +2676,7 @@
     "on-appear.json": ["prototype_timers_v1"],
     "opaque-json-keys.json": [],
     "pager-indicator-dots.json": ["prototype_carousel_v1"],
+    "pager-indicator-placement.json": ["prototype_carousel_v1"],
     "pager-options.json": ["prototype_pager_options_v1"],
     "pager-state-key-indicator.json": ["prototype_pager_state_key_v1"],
     "platform-call.json": [

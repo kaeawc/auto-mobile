@@ -931,9 +931,12 @@ pager; plain pagers expose only the current page on both.
 
 ## Carousel and pager indicator (not device-verified)
 
-`prototype_carousel_v1` gates two #12071 additions. A pager may declare `indicator: "dots"` (default
-`none`): dots laid out below horizontal pages or beside vertical pages, with the current page filled;
-plain circles, decoration only, hidden from accessibility. A `carousel` is a horizontally scrolling,
+`prototype_carousel_v1` gates carousels and pager indicator fields. A pager may declare
+`indicator: "dots"` (default `none`) and `indicatorPlacement: "over" | "below"`.
+Placement applies only with dots; otherwise it is accepted and ignored. iOS defaults to `below`:
+a row below horizontal pages or a column beside vertical pages. `over` preserves the full page size
+and overlays the bottom or end edge, inset 8 pt. Android defaults to `over`. The current page is
+filled; plain circles are hidden from accessibility and hit testing. A `carousel` is a horizontally scrolling,
 snapping row, one item per child (at least one; `repeat` expands like `row`); `itemWidth` (dp, > 0,
 <= 10000) required; `variant` `multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` dp >= 0. No
 page index, event or `setPage` target (use a `pager` if the page matters). The host refuses a show on a

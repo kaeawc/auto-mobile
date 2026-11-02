@@ -1,6 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +46,36 @@ internal fun pagerIndicatorDots(
     val along = index * step - span / 2
     if (vertical) PrototypeDot(width - inset - radius, height / 2 + along)
     else PrototypeDot(width / 2 + along, height - inset - radius)
+  }
+}
+
+/** Android keeps its existing overlay unless the spec explicitly asks for space after the pages. */
+internal fun pagerIndicatorBelow(placement: String?): Boolean = placement == "below"
+
+internal data class PrototypePagerIndicator(val style: String?, val placement: String?)
+
+@Composable
+internal fun PrototypePagerIndicatorLayout(
+  pager: PagerState,
+  vertical: Boolean,
+  indicator: PrototypePagerIndicator,
+  modifier: Modifier,
+  pages: @Composable (Modifier) -> Unit,
+) {
+  if (indicator.style != "dots") {
+    pages(modifier)
+  } else if (!pagerIndicatorBelow(indicator.placement)) {
+    pages(modifier.pagerIndicator(pager, vertical))
+  } else if (vertical) {
+    Row(modifier) {
+      pages(Modifier.weight(1f).fillMaxHeight())
+      Box(Modifier.width(22.dp).fillMaxHeight().pagerIndicator(pager, true))
+    }
+  } else {
+    Column(modifier) {
+      pages(Modifier.weight(1f).fillMaxWidth())
+      Box(Modifier.height(22.dp).fillMaxWidth().pagerIndicator(pager, false))
+    }
   }
 }
 

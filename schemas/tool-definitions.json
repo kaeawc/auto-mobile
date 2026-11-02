@@ -36960,6 +36960,10 @@
                       "type": "string",
                       "enum": ["none", "dots"]
                     },
+                    "indicatorPlacement": {
+                      "type": "string",
+                      "enum": ["over", "below"]
+                    },
                     "children": {
                       "type": "array",
                       "items": {

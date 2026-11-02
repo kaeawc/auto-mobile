@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
@@ -17,6 +18,13 @@ class PrototypeCarouselTest {
 
   private fun spec(root: PrototypeNode) =
     PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
+
+  @Test
+  fun `placement defaults to overlay and below reserves space after pages`() {
+    assertFalse(pagerIndicatorBelow(null))
+    assertFalse(pagerIndicatorBelow("over"))
+    assertTrue(pagerIndicatorBelow("below"))
+  }
 
   @Test
   fun `a horizontal indicator centres the dots near the bottom edge`() {

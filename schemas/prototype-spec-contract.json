@@ -12274,6 +12274,13 @@
               },
               "optional": true
             },
+            "indicatorPlacement": {
+              "rule": {
+                "kind": "enum",
+                "values": ["over", "below"]
+              },
+              "optional": true
+            },
             "stateKey": {
               "rule": {
                 "kind": "key"

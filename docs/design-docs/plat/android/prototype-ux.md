@@ -3587,10 +3587,12 @@ to the resolved runtime count. Shared fixtures define host validation behavior.
 
 ## Carousel and pager indicator (not device-verified)
 
-`prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
-(default `none`): Android draws page dots over the pager (a centred row at the bottom, or a column at
-the end edge for a vertical pager); iOS lays them out below horizontal pages or beside vertical pages.
-The current page is filled. The dots are decoration and add no semantics node.
+`prototype_carousel_v1` gates carousels and pager indicator fields. A pager may declare
+`indicator: "dots"` (default `none`) and `indicatorPlacement: "over" | "below"`.
+Placement applies only with dots; otherwise it is accepted and ignored. Android defaults to `over`:
+a centred row at the bottom or a column at the end edge, inset 8 dp, preserving the full page size.
+`below` gives pages the remaining space and places a centred row under horizontal pages or a column
+beside vertical pages. iOS defaults to `below`. The current page is filled; dots add no semantics node.
 
 A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
 `repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is

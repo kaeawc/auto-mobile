@@ -69,7 +69,7 @@ interface RegisteredReset {
 export class DeviceConditionController {
   /** Applied resets, in application order; restore runs them in reverse. */
   private readonly resets: RegisteredReset[] = [];
-  /** Discovery failures remain cleanup obligations until a successful probe. */
+  /** Discovery failures remain cleanup obligations until a successful probe or registered reset. */
   private readonly recoveryFailures = new Map<DeviceConditionKey, string>();
 
   constructor(
@@ -139,6 +139,7 @@ export class DeviceConditionController {
           reset: outcome.reset,
           isClean: (s) => injector.isClean(s),
         });
+        this.recoveryFailures.delete(change.key);
       }
       return {
         key: change.key,
@@ -154,6 +155,7 @@ export class DeviceConditionController {
           reset: error.owedReset,
           isClean: (s) => injector.isClean(s),
         });
+        this.recoveryFailures.delete(change.key);
       }
       logger.warn(
         `[deviceCondition] applying ${change.key}=${change.value} failed: ${errorMessage(error)}`,
@@ -203,16 +205,16 @@ export class DeviceConditionController {
     if ((key === "rootState" || key === "faults.memoryPressure") && !recoveryAttempted) {
       await this.recoverReset(key, signal);
     }
-    const recoveryFailure = this.recoveryFailures.get(key);
-    if (recoveryFailure !== undefined) {
-      return {
-        key,
-        status: "unsupported",
-        detail: this.recoveryFailureDetail(key, recoveryFailure),
-      };
-    }
     const entries = this.resets.filter((entry) => entry.key === key);
     if (entries.length === 0) {
+      const recoveryFailure = this.recoveryFailures.get(key);
+      if (recoveryFailure !== undefined) {
+        return {
+          key,
+          status: "unsupported",
+          detail: this.recoveryFailureDetail(key, recoveryFailure),
+        };
+      }
       return { key, status: "unchanged" };
     }
     for (const entry of entries.reverse()) {
@@ -224,6 +226,7 @@ export class DeviceConditionController {
         return { key, status: "unsupported", detail: `Failed to clear: ${errorMessage(error)}` };
       }
     }
+    this.recoveryFailures.delete(key);
     return { key, status: "cleared" };
   }
 
@@ -239,7 +242,9 @@ export class DeviceConditionController {
     await this.recoverReset("rootState", signal);
     await this.recoverReset("faults.memoryPressure", signal);
     for (const [key, message] of this.recoveryFailures) {
-      failures.push({ key, error: this.recoveryFailureDetail(key, message) });
+      if (!this.resets.some((entry) => entry.key === key)) {
+        failures.push({ key, error: this.recoveryFailureDetail(key, message) });
+      }
     }
     // Reverse order: the last condition applied is undone first.
     for (const entry of [...this.resets].reverse()) {
@@ -249,6 +254,7 @@ export class DeviceConditionController {
         if (clean) {
           restored.push(entry.key);
           this.drop(entry);
+          this.recoveryFailures.delete(entry.key);
         } else {
           failures.push({ key: entry.key, error: "reset ran but the device did not read clean" });
         }

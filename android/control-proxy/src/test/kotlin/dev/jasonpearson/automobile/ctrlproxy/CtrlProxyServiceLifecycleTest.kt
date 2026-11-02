@@ -2,9 +2,9 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -31,12 +31,14 @@ class CtrlProxyServiceLifecycleTest {
     if (!destroyed) controller.destroy()
   }
 
-  private fun storageManager() =
-    StorageSubscriptionManager(
+  private fun storageManager(): StorageSubscriptionManager {
+    val dispatcher = UnconfinedTestDispatcher()
+    return StorageSubscriptionManager(
       service,
-      ioDispatcher = Dispatchers.Unconfined,
-      scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+      ioDispatcher = dispatcher,
+      scope = CoroutineScope(SupervisorJob() + dispatcher),
     )
+  }
 
   private fun StorageSubscriptionManager.isDestroyed() =
     subscribe("com.example.app", "prefs").exceptionOrNull()?.message ==

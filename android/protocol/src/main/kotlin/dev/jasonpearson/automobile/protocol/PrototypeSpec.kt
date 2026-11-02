@@ -67,29 +67,6 @@ object PrototypeRepeatSerializer :
   }
 }
 
-/**
- * One swipe-revealed button: [label] is its text and accessibility name, [role] `destructive`
- * selects error colours, [color] (hex or theme role) overrides the background.
- */
-@Serializable
-data class PrototypeSwipeAction(
-  val label: String,
-  val icon: String? = null,
-  val role: String? = null,
-  val color: String? = null,
-  val onTap: List<PrototypeAction>,
-)
-
-/**
- * `start` is revealed by a right swipe, `end` by a left swipe; [fullSwipe] runs the first entry.
- */
-@Serializable
-data class PrototypeSwipeActions(
-  val start: List<PrototypeSwipeAction>? = null,
-  val end: List<PrototypeSwipeAction>? = null,
-  val fullSwipe: Boolean? = null,
-)
-
 /** Fixed column count or adaptive minimum cell width in dp; preserves the untagged wire union. */
 @Serializable(with = PrototypeGridColumnsSerializer::class)
 sealed class PrototypeGridColumns {
@@ -137,25 +114,6 @@ data class PrototypeLinkifyOptions(
   val onTap: JsonArray,
 )
 
-@Serializable
-data class PrototypeTextSpan(
-  val text: String,
-  val style: PrototypeTextSpanStyle? = null,
-  val onTap: List<PrototypeAction>? = null,
-)
-
-@Serializable
-data class PrototypeTextSpanStyle(
-  val color: PrototypeModeValue? = null,
-  val fontWeight: Int? = null,
-  val fontStyle: String? = null,
-  val textDecoration: String? = null,
-  val textSize: Double? = null,
-  val letterSpacing: Double? = null,
-  val fontFamily: PrototypeFontFamily? = null,
-  val background: PrototypeModeValue? = null,
-)
-
 /**
  * The displayed text, with each authored text field resolved by the same caller-supplied binder.
  */
@@ -192,16 +150,6 @@ object PrototypeMenuItemSerializer :
       PrototypeMenuDivider -> buildJsonObject { put("type", "divider") }
     }
 }
-
-/** One chart series: the `/data` array at [path], its points' [y] and optional [x] members. */
-@Serializable
-data class PrototypeChartSeries(
-  val path: String,
-  val x: String? = null,
-  val y: String,
-  val label: String,
-  val color: PrototypeModeValue? = null,
-)
 
 @Serializable data class PrototypePagerPeek(val start: Double? = null, val end: Double? = null)
 
@@ -289,25 +237,6 @@ data class PrototypeSpecThemeColors(
   val dark: Map<String, String>? = null,
 )
 
-/** `scale` multiplies every Material type role; `fontFamily` is sans, serif or mono. */
-@Serializable
-data class PrototypeSpecThemeTypography(
-  val scale: Double? = null,
-  val fontFamily: String? = null,
-)
-
-/** `corner` picks one of the Material corner families (none, small, medium, large, full). */
-@Serializable data class PrototypeSpecThemeShapes(val corner: String? = null)
-
-@Serializable
-data class PrototypeSpecTheme(
-  val mode: String? = null,
-  val colors: PrototypeSpecThemeColors? = null,
-  val typography: PrototypeSpecThemeTypography? = null,
-  val shapes: PrototypeSpecThemeShapes? = null,
-  val design: String? = null,
-)
-
 @Serializable
 data class PrototypeSpec(
   val id: String,
@@ -355,9 +284,6 @@ data class PrototypeRequires(
 
 /** One declared permission: a canonical [name] and the [purpose] shown to the user. */
 @Serializable data class PrototypePermissionRequirement(val name: String, val purpose: String)
-
-/** Root `platform`: action lists keyed by `<module>.<event>`. */
-@Serializable data class PrototypePlatformHandlers(val on: Map<String, List<PrototypeAction>>)
 
 @Serializable
 enum class PrototypeValidateOn {

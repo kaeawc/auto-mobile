@@ -12,7 +12,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Input.** The spec after component expansion, with its own `state` and `data`. The stack shows
   its `start` screen. No action, timer or `request` runs.
 - **Text.** `{data:/pointer}` placeholders bind first (a missing or non-scalar value is empty),
-  then repeat items, then a bare `{key}`, which reads spec state, then a top-level `derive` entry. Repeat placeholders
+  then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a
+  top-level `derive` entry. Repeat placeholders
   bind each item (a literal `items` array or a data pointer), including the repeat's own `derive`
   fields, through the same binding contract the devices use (`bindNodeFields`): text and spans,
   nested conditions with typed operands, and state keys. A spans-only text node renders each span

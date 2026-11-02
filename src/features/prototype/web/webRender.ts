@@ -52,11 +52,15 @@ type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebEleme
 const MAX_WEB_REPEAT_ITEMS = 200;
 
 /** Bare `{key}` placeholders read spec state, then top-level derived values; others stay literal. */
+/** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
 function bindBare(text: string, scope: WebRenderScope): string {
-  return text.replace(/\{([^{}]+)\}/g, (whole, name: string) => {
-    if (Object.hasOwn(scope.condition.state, name)) {
-      return renderScalar(scope.condition.state[name]);
+  return text.replace(/\{([^{}]+)\}/g, (whole, inner: string) => {
+    if (!inner.startsWith("derived:")) {
+      return Object.hasOwn(scope.condition.state, inner)
+        ? renderScalar(scope.condition.state[inner])
+        : whole;
     }
+    const name = inner.slice("derived:".length);
     const derive = record(scope.spec.derive);
     return derive && Object.hasOwn(derive, name)
       ? resolvePrototypeDerived(scope.spec as Parameters<typeof resolvePrototypeDerived>[0], name, {

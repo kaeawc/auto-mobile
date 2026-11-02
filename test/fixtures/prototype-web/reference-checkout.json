@@ -52,7 +52,7 @@
           { "type": "checkbox", "stateKey": "agree", "label": "I agree" },
           {
             "type": "text",
-            "text": "Total {totalText}",
+            "text": "Total {derived:totalText}",
             "style": { "textSize": 20, "fontWeight": 600, "color": "primary" }
           },
           { "type": "progress", "id": "spend" },

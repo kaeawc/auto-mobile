@@ -290,6 +290,18 @@ describe("prototype web still (#16346)", () => {
     });
   });
 
+  test("reads top-level derived values only through the derived: namespace", () => {
+    const text = (value: string) =>
+      textOf(
+        byTag(
+          renderPrototypeStill({ ...reference, root: { type: "text", testTag: "t", text: value } }),
+          "t",
+        )[0]!,
+      );
+    expect(text("{derived:totalText}")).toBe("$42.50");
+    expect(text("{totalText}")).toBe("{totalText}");
+  });
+
   test("binds data-pointer placeholders in text", () => {
     const spec = {
       ...reference,

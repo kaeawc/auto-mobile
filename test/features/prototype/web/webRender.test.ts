@@ -584,6 +584,42 @@ describe("prototype web still (#16346)", () => {
     expect(line.style["background-color"]).toBe("rgba(255,0,0,1)");
   });
 
+  test("a text field keeps its label above a value or placeholder", () => {
+    const field = (state: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state,
+          root: {
+            type: "textField",
+            testTag: "f",
+            stateKey: "email",
+            label: "Work email",
+            ...extra,
+          },
+        }),
+        "f",
+      )[0]!;
+    const labels = (element: WebElement) =>
+      find(element, (child) => child.attrs["data-slot"] === "label").map(textOf);
+    expect(labels(field({ email: "ada@example.com" }))).toEqual(["Work email"]);
+    expect(textOf(field({ email: "ada@example.com" }))).toContain("ada@example.com");
+    expect(labels(field({ email: "" }, { placeholder: "you@work" }))).toEqual(["Work email"]);
+    expect(labels(field({ email: "" }))).toEqual([]);
+    expect(textOf(field({ email: "" }))).toBe("Work email");
+  });
+
+  test("a sheet spans the screen width", () => {
+    const layer = find(
+      renderPrototypeStill({
+        ...reference,
+        window: { placement: { type: "sheet", edge: "bottom", height: 200 } },
+      }).element,
+      (element) => element.attrs["data-window"] === "sheet",
+    )[0]!;
+    expect((layer.children[0] as WebElement).style["align-self"]).toBe("stretch");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

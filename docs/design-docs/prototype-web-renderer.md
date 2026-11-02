@@ -26,7 +26,7 @@ the host, so the page's script only switches between views it was given and neve
   string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
   condition counts as true, so a node is never hidden on a guess.
 - **Window.** Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
-  each axis it leaves unsized, as on devices; a sheet is `height` dp at its `edge`; a floating window
+  each axis it leaves unsized, as on devices; a sheet spans the screen width, `height` dp tall at its `edge`; a floating window
   sits at its `gravity`, moved by its `offset`.
 - **Style precedence.** A control's default styling applies first and the spec's own style wins.
   `styleWhen` entries whose condition holds merge over `style` in authored order; an entry the
@@ -48,7 +48,8 @@ the host, so the page's script only switches between views it was given and neve
   and actions as icon placeholders labelled with their action. A button, switch, checkbox, text field or
   list item whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, and text decorations map to CSS. A text field shows `errorText` with error colours when `errorWhen` is
-  decidably true, and otherwise its `supportingText`; a captioned field's wrapper takes its size,
+  decidably true, and otherwise its `supportingText`; its label floats above a value or placeholder, and sits in an
+  otherwise empty field; a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted square titled with the icon name, because the glyph set is not

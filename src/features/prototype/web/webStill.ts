@@ -58,6 +58,8 @@ function sheetWindow(placement: Raw, children: WebElement[]): WebElement {
         display: "flex",
         "flex-direction": "column",
         "align-items": "flex-start",
+        // A sheet spans the screen width (native MATCH_PARENT); its content keeps start alignment.
+        "align-self": "stretch",
         height: `${height}px`,
       },
     },

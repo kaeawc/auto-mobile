@@ -442,6 +442,23 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
   return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
 }
 
+/**
+ * A Material field's label sits inside an empty field with no placeholder (fieldValue draws it
+ * there); once the field holds a value or shows a placeholder, the label floats above it.
+ */
+function floatingLabel(node: Raw, empty: boolean, scope: WebRenderScope): WebElement[] {
+  if (typeof node.label !== "string" || (empty && node.placeholder === undefined)) {
+    return [];
+  }
+  return [
+    el(
+      "span",
+      { attrs: { "data-slot": "label" }, style: { "font-size": "12px", opacity: "0.8" } },
+      [bound(node.label, scope)],
+    ),
+  ];
+}
+
 /** CSS a parent's layout reads from its child: size, flex share, cross-axis alignment, grid cell. */
 const PARENT_FACING = new Set([
   "width",
@@ -507,7 +524,10 @@ const textField: NodeRenderer = (node, scope, path) => {
     { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner },
     [
       ...namedIcon(node.leadingIcon, scope),
-      el("span", { style: { flex: "1 1 auto" } }, [shown]),
+      el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
+        ...floatingLabel(node, empty, scope),
+        shown,
+      ]),
       // The trailing slot is an {icon, label} action, like an app-bar action.
       ...appBarIcons([node.trailingIcon], scope, path),
     ],

@@ -201,7 +201,7 @@ interface RootStateOwner {
   packageArtifact: string;
 }
 
-/** Recover exact file stubs and a package whose fixture marker was verified. */
+/** Recover unclaimed exact file stubs and a package whose fixture marker was verified. */
 async function recoverRootArtifacts({
   adb,
   owner,
@@ -216,10 +216,13 @@ async function recoverRootArtifacts({
   markedPackage?: string;
 }): Promise<string[]> {
   const matches: string[] = [];
-  for (const path of ROOT_ARTIFACT_PATHS) {
-    if (!existing.has(path) || owner.held.has(path)) {
-      continue;
-    }
+  const candidates = ROOT_ARTIFACT_PATHS.filter(
+    (path) =>
+      existing.has(path) &&
+      !owner.held.has(path) &&
+      !owner.artifacts.heldByOther(owner.artifactToken, path),
+  );
+  for (const path of candidates) {
     // Keep raw stdout: shell() trims whitespace that distinguishes a real file from our stub.
     const result = await adb.execute(["shell", "cat", path], { signal });
     if (result.error) {
@@ -231,7 +234,11 @@ async function recoverRootArtifacts({
       matches.push(path);
     }
   }
-  if (markedPackage) {
+  if (
+    markedPackage &&
+    !owner.held.has(markedPackage) &&
+    !owner.artifacts.heldByOther(owner.artifactToken, markedPackage)
+  ) {
     matches.push(markedPackage);
   }
   if (matches.length > 0) {
@@ -351,7 +358,7 @@ export function createRootStateInjector(
   // Only artifacts we planted or recognised by exact stub content or the package marker. A real userdebug su
   // is never overwritten or deleted by reset.
   const planted = new Set<string>();
-  const recovery: RootStateOwner = {
+  const owner: RootStateOwner = {
     held,
     planted,
     artifacts,
@@ -366,7 +373,7 @@ export function createRootStateInjector(
     if (sweep) {
       await probeLeftovers(
         adb,
-        recovery,
+        owner,
         ROOT_ARTIFACT_PATHS.filter((path) => !held.has(path)),
         resetSignal,
       );
@@ -416,7 +423,7 @@ export function createRootStateInjector(
     if (active) {
       return null;
     }
-    await probeLeftovers(adb, recovery, ROOT_ARTIFACT_PATHS, signal);
+    await probeLeftovers(adb, owner, ROOT_ARTIFACT_PATHS, signal);
     return held.size > 0 || selinux.has(selinuxToken)
       ? (resetSignal?: AbortSignal) => reset(resetSignal, false)
       : null;
@@ -447,10 +454,11 @@ export function createRootStateInjector(
       ) {
         return { status: "unchanged", detail: "rooted-detectable fixture is already applied" };
       }
-      // Both reads happen before the first mutation, so a failed probe changes nothing.
-      const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
-      const hadPackage = await magisk.present(signal);
-      const leftovers = await recoverRootArtifacts({ adb, owner: recovery, existing, signal });
+      // Discovery happens before the first mutation, so a failed probe changes nothing.
+      const existing = await listArtifacts([...ROOT_ARTIFACT_PATHS, packageArtifact], signal);
+      const hadPackage = existing.has(packageArtifact);
+      const markedPackage = await readMarkedPackage(adb, packageArtifact, existing, signal);
+      const leftovers = await recoverRootArtifacts({ adb, owner, existing, signal, markedPackage });
       await selinux.capture(adb, selinuxToken, signal);
       const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
       try {
@@ -466,7 +474,7 @@ export function createRootStateInjector(
           held.add(path);
         }
         await plantArtifacts(adb, toPlant, planted, signal);
-        await applyMarkedPackage(adb, recovery, magisk, { hadPackage, signal });
+        await applyMarkedPackage(adb, owner, magisk, { hadPackage, signal });
       } catch (error) {
         try {
           await reset();
@@ -485,7 +493,9 @@ export function createRootStateInjector(
         // The reset registered by the original apply still covers this fixture.
         return { status: "applied", detail: "rooted-detectable fixture re-applied after drift" };
       }
-      const kept = ROOT_ARTIFACT_PATHS.length - toPlant.length - leftovers.length;
+      const kept = ROOT_ARTIFACT_PATHS.filter(
+        (path) => existing.has(path) && !leftovers.includes(path),
+      ).length;
       return {
         status: "applied",
         detail:
@@ -495,7 +505,7 @@ export function createRootStateInjector(
         reset,
       };
     },
-    isClean: (signal) => rootStateIsClean(adb, recovery, listArtifacts, signal),
+    isClean: (signal) => rootStateIsClean(adb, owner, listArtifacts, signal),
   };
 }
 

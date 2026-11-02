@@ -1,5 +1,6 @@
 import { SelinuxOwner } from "../../../src/features/deviceCondition/SelinuxOwner";
 import { ArtifactOwner } from "../../../src/features/deviceCondition/ArtifactOwner";
+import { createIntegrityStateInjector } from "../../../src/features/deviceCondition/integrityStateInjector";
 import { describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -203,6 +204,49 @@ describe("rootState injector (#14060)", () => {
     expect(state.permissive).toBe(false);
   });
 
+  test("apply and reset preserve Permissive with su stubs held by a live integrity injector", async () => {
+    const { adb, files, state } = adbWithFiles({});
+    const selinux = new SelinuxOwner();
+    const artifacts = new ArtifactOwner();
+    const integrity = createIntegrityStateInjector(adb, selinux, artifacts);
+    const integrityOutcome = await integrity.apply("apply", undefined, {
+      signals: { "su-binary": "on" },
+    });
+    expect(integrityOutcome.status).toBe("applied");
+    expect(selinux.owned).toBe(false);
+    const liveFiles = [...files];
+    expect(liveFiles).toHaveLength(2);
+    const root = realCreateRootStateInjector(adb, selinux, artifacts, new FakeStubBuilder());
+    const outcome = await root.apply("rooted-detectable");
+    expect(outcome.reset).toBeFunction();
+    await outcome.reset?.();
+    expect(state.permissive).toBe(true);
+    expect([...files]).toEqual(liveFiles);
+    expect(await root.isClean()).toBe(true);
+    await integrityOutcome.reset?.();
+    expect(files.size).toBe(0);
+    expect(state.permissive).toBe(true);
+  });
+
+  test("recovery leaves su stubs held by a live integrity injector unclaimed", async () => {
+    const { adb, files, state } = adbWithFiles({});
+    const selinux = new SelinuxOwner();
+    const artifacts = new ArtifactOwner();
+    const integrity = createIntegrityStateInjector(adb, selinux, artifacts);
+    const outcome = await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    expect(outcome.status).toBe("applied");
+    const liveFiles = [...files];
+    expect(liveFiles).toHaveLength(2);
+    const root = realCreateRootStateInjector(adb, selinux, artifacts, new FakeStubBuilder());
+    expect(await root.recover?.()).toBeNull();
+    expect(selinux.owned).toBe(false);
+    expect([...files]).toEqual(liveFiles);
+    expect(state.permissive).toBe(true);
+    await outcome.reset?.();
+    expect(files.size).toBe(0);
+    expect(state.permissive).toBe(true);
+  });
+
   test("a second controller cannot recover a live fixture owned by the first", async () => {
     const { adb, files, state } = adbWithFiles({}, false);
     const injector = createRootStateInjector(adb);
@@ -322,6 +366,32 @@ describe("rootState injector (#14060)", () => {
       commands.indexOf("install -r /fake/magisk.apk"),
     );
   });
+
+  for (const marked of [true, false]) {
+    test(`fresh apply and reset ${marked ? "remove a marked" : "preserve an unmarked"} leftover package`, async () => {
+      const initial = Object.fromEntries(
+        ROOT_ARTIFACT_PATHS.map((path) => [path, "#!/system/bin/sh\nexit 1\n"]),
+      );
+      const { adb, files } = adbWithFiles({
+        ...initial,
+        ...(marked ? { [MAGISK_MARKER]: "" } : {}),
+      });
+      adb.setCommandResponse(`pm list packages ${MAGISK}`, execResult(`package:${MAGISK}`));
+      const builder = new FakeStubBuilder();
+      const injector = createRootStateInjector(adb, builder);
+      const outcome = await injector.apply("rooted-detectable");
+      expect(outcome.reset).toBeFunction();
+      expect(builder.builds).toBe(0);
+      await outcome.reset?.();
+      expect(adb.getExecutedCommands().includes(`uninstall ${MAGISK}`)).toBe(marked);
+      expect((await adb.execute(["shell", "pm", "list", "packages", MAGISK])).stdout).toBe(
+        marked ? "" : `package:${MAGISK}`,
+      );
+      expect(files.has(MAGISK_MARKER)).toBe(false);
+      expect(files.size).toBe(0);
+      expect(await injector.isClean()).toBe(true);
+    });
+  }
 
   test("a fresh injector recovers the marked package after the file stubs are gone", async () => {
     const { adb, files, state } = adbWithFiles({ [MAGISK_MARKER]: "" });

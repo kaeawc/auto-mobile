@@ -4,14 +4,21 @@
 # and follows each event through CtrlProxy, the daemon's iOS client and the MCP network
 # resources. A failure names the boundary that disagreed. First build the runner with
 # bash scripts/ios/ctrl-proxy-build-for-testing.sh using AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA.
-# Then start the private daemon with that same path and AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true,
-# then run this suite. The daemon reads runner selection at its own start; do not rebuild afterward.
+# Start the private daemon with that same path and either AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true
+# or AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true plus AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256
+# pinned to the checkout xctest executable and AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest.
+# Then run this suite; the daemon reads runner selection at startup, so do not rebuild afterward.
 
 set -euo pipefail
 
-if [[ "${AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD:-}" != true || -z "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-}" ]]; then
-    echo 'error: requires AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true and nonempty AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA in the environment.' >&2
-    echo 'Source the private daemon env: source "<batch-dir>/daemon1/env.sh"; ensure it exports both variables, and start the private daemon with that env before running this suite.' >&2
+if [[ -z "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-}" ]] ||
+    [[ "${AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD:-}" != true && ! (
+        "${AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD:-}" == true &&
+        "${AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256:-}" =~ ^[0-9A-Fa-f]{64}$ &&
+        "${AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET:-}" == xctest
+    ) ]]; then
+    echo 'error: requires nonempty AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA and either local build (AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true) or a pinned checkout runner (AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true, AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=64-hex SHA, AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest).' >&2
+    echo 'Source the private daemon env: source "<batch-dir>/daemon1/env.sh"; ensure it exports the selected configuration, and start the private daemon with that env before running this suite.' >&2
     exit 2
 fi
 

@@ -13,6 +13,9 @@ setup() {
   REPORT="${BATS_TEST_TMPDIR}/report.json"
   export AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${BATS_TEST_TMPDIR}/runner derived data"
   unset AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD
+  unset AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD
+  unset AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256
+  unset AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET
 
   xcodebuild() {
     printf 'playground:%s\n' "$*" >> "$INVOCATION_FILE"
@@ -80,4 +83,67 @@ setup() {
   [[ "$calls" == *$'bun:--device\nbun:'"${DEVICE}"* ]]
   [[ "$calls" == *$'bun:--app\nbun:'*"/Build/Products/Debug-iphonesimulator/Playground.app"* ]]
   [[ "$calls" == *$'bun:--report\nbun:'"${REPORT}"* ]]
+}
+
+@test "accepts a checkout runner pinned to the xctest executable" {
+  export AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789ABCDEF
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest
+  mkdir -p "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app"
+  run bash "$SCRIPT" "$DEVICE" "$REPORT"
+  [ "$status" -eq 0 ]
+  calls="$(< "$INVOCATION_FILE")"
+  [[ "$calls" == "xcrun:"*"playground:"*"bun:scripts/ios/sdk-contract/run.ts"* ]]
+}
+
+@test "rejects SKIP without a runner SHA before any work" {
+  mkdir -p "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app"
+  export AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest
+  run bash "$SCRIPT" "$DEVICE" "$REPORT"
+  [ "$status" -eq 2 ]
+  [ ! -e "$INVOCATION_FILE" ]
+}
+
+@test "rejects a runner SHA without SKIP before any work" {
+  mkdir -p "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app"
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789ABCDEF
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest
+  run bash "$SCRIPT" "$DEVICE" "$REPORT"
+  [ "$status" -eq 2 ]
+  [ ! -e "$INVOCATION_FILE" ]
+}
+
+@test "rejects a runner SHA without TARGET=xctest before any work" {
+  mkdir -p "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app"
+  export AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789ABCDEF
+  for target in '' runner XCTEST; do
+    export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET="$target"
+    run bash "$SCRIPT" "$DEVICE" "$REPORT"
+    [ "$status" -eq 2 ]
+    [ ! -e "$INVOCATION_FILE" ]
+  done
+}
+
+@test "rejects malformed runner SHAs before any work" {
+  mkdir -p "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app"
+  export AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest
+  for sha in short 0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789ABCDE 0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789ABCDEF0 0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789ABCDEg; do
+    export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256="$sha"
+    run bash "$SCRIPT" "$DEVICE" "$REPORT"
+    [ "$status" -eq 2 ]
+    [ ! -e "$INVOCATION_FILE" ]
+  done
+}
+
+@test "requires prebuilt runner products in pinned checkout mode" {
+  export AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=0123456789abcdef0123456789abcdef0123456789ABCDEF0123456789ABCDEF
+  export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest
+  run bash "$SCRIPT" "$DEVICE" "$REPORT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing prebuilt CtrlProxy runner"* ]]
+  [ ! -e "$INVOCATION_FILE" ]
 }

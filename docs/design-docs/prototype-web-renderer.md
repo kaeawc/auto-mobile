@@ -15,7 +15,8 @@ the host, so the page's script only switches between views it was given and neve
   `{data:/pointer}` placeholders bind (a missing or non-scalar value is empty),
   then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a
   top-level `derive` entry. Repeat placeholders
-  bind each item (a literal `items` array or a data pointer), including the repeat's own `derive`
+  bind each object item (a literal `items` array or a data pointer; scalar items are skipped
+  before indices are assigned, as on devices), including the repeat's own `derive`
   fields. Text binds once, in that order, so a substituted value is never read again as a
   placeholder. Nested conditions with typed operands and state keys bind through the devices' own
   field walk (`mapBindableFields`). A spans-only text node renders each span
@@ -48,7 +49,8 @@ the host, so the page's script only switches between views it was given and neve
   and actions as icon placeholders labelled with their action, and its `variant` sets its height,
   title size and title alignment. A button, switch, checkbox, text field or
   list item whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
-  its label, a divider paints its authored colour, and text decorations map to CSS. A text field shows `errorText` with error colours when `errorWhen` is
+  its label, a divider paints its authored colour, text decorations and built-in font
+  families map to CSS, and a span keeps its own background. A text field shows `errorText` with error colours when `errorWhen` is
   decidably true, and otherwise its `supportingText`; its label floats above a value or placeholder, and sits in an
   otherwise empty field; a multiline field keeps newlines and its `minLines`/`maxLines` (24 px
   lines); a captioned field's wrapper takes its size,

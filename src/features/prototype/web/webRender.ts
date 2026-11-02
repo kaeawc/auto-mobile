@@ -185,18 +185,18 @@ function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  return (Array.isArray(items) ? items.slice(0, MAX_WEB_REPEAT_ITEMS) : []).flatMap(
-    (item, index) => {
-      const values = record(item) ?? {};
-      const instance: Instance = {
-        binding: { alias, index: true },
-        values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
-        index,
-      };
-      const itemScope = child(scope, { instances: [...scope.instances, instance] });
-      return list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`));
-    },
-  );
+  // As on the devices, only object items repeat; scalars are skipped before indices are assigned.
+  const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
+  return rows.slice(0, MAX_WEB_REPEAT_ITEMS).flatMap((item, index) => {
+    const values = record(item) ?? {};
+    const instance: Instance = {
+      binding: { alias, index: true },
+      values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
+      index,
+    };
+    const itemScope = child(scope, { instances: [...scope.instances, instance] });
+    return list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`));
+  });
 }
 
 function renderOrSkip(node: unknown, scope: WebRenderScope, path: string): WebChild[] {
@@ -263,9 +263,13 @@ function textContent(node: Raw, scope: WebRenderScope): WebChild[] {
   }
   return node.spans.map((span) => {
     const entry = record(span) ?? {};
-    return el("span", { style: textCss(record(entry.style), scope.style) }, [
-      bound(entry.text, scope),
-    ]);
+    const style = record(entry.style);
+    const background = cssColor(style?.background, scope.style);
+    const css = {
+      ...textCss(style, scope.style),
+      ...(background ? { "background-color": background } : {}),
+    };
+    return el("span", { style: css }, [bound(entry.text, scope)]);
   });
 }
 

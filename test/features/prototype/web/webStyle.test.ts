@@ -101,3 +101,10 @@ test("inside a box grid, a width-only fill stretches horizontally only", () => {
   expect(css).not.toHaveProperty("align-self");
   expect(nodeCss({ height: "fill" }, context)).toMatchObject({ "align-self": "stretch" });
 });
+
+test("maps built-in font families to CSS", () => {
+  expect(textCss({ fontFamily: "serif" }, context)["font-family"]).toBe("serif");
+  expect(textCss({ fontFamily: "monospace" }, context)["font-family"]).toBe("monospace");
+  expect(textCss({ fontFamily: "sansSerif" }, context)["font-family"]).toBe("sans-serif");
+  expect(textCss({ fontFamily: "default" }, context)).not.toHaveProperty("font-family");
+});

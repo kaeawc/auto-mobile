@@ -745,6 +745,35 @@ describe("prototype web still (#16346)", () => {
     expect(labelOf({ contentDescription: "Old label" })).toBe("Old label");
   });
 
+  test("a repeat skips scalar items before assigning indices, as on devices", () => {
+    const spec = {
+      ...reference,
+      data: { items: [12, true, { title: "Ada" }] },
+      root: {
+        type: "column",
+        testTag: "list",
+        repeat: { as: "item", items: { path: "/items" } },
+        children: [{ type: "text", text: "{index}: {item.title}" }],
+      },
+    };
+    expect(textOf(byTag(renderPrototypeStill(spec), "list")[0]!)).toBe("0: Ada");
+  });
+
+  test("a span keeps its own background", () => {
+    const rich = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "text",
+          testTag: "w",
+          spans: [{ text: "Warning", style: { background: "#FF0000" } }],
+        },
+      }),
+      "w",
+    )[0]!;
+    expect(toHtml(rich)).toContain("background-color:rgba(255,0,0,1)");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

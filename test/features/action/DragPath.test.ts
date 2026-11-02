@@ -10,6 +10,8 @@ import {
   resolveDragPathPoints,
 } from "../../../src/features/action/dragPathPlan";
 import { runDragPathStroke, type StrokeClient } from "../../../src/features/action/dragPathStroke";
+import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "../../../src/features/action/gestureTransportTimeout";
+import { instrumentationTimeoutMs } from "../../../src/features/action/pointer/instrumentationDispatch";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { dragPathSchema } from "../../../src/server/dragPathTool";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -191,15 +193,19 @@ describe("dragPathTimeline", () => {
 
 describe("assertDragPathFitsRequestBudget", () => {
   test("accepts the exact gesture ceiling even with dispatch overhead", () => {
-    expect(() => assertDragPathFitsRequestBudget(20_000, undefined, 15_000)).not.toThrow();
-    expect(() => assertDragPathFitsRequestBudget(20_000, 37_000, 15_000)).not.toThrow();
+    const overheadMs = instrumentationTimeoutMs(20_000) - 20_000;
+    const neededMs = instrumentationTimeoutMs(20_000) + LONG_PRESS_TIMEOUT_HEADROOM_MS;
+    expect(() => assertDragPathFitsRequestBudget(20_000, undefined, overheadMs)).not.toThrow();
+    expect(() => assertDragPathFitsRequestBudget(20_000, neededMs, overheadMs)).not.toThrow();
   });
 
   test("adds dispatch overhead only to the request budget and names the gesture duration", () => {
-    expect(() => assertDragPathFitsRequestBudget(15_000, 31_999, 15_000)).toThrow(
-      "dragPath duration 15000 ms does not fit the remaining request budget (31999 ms; needs 32000 ms including dispatch headroom)",
+    const overheadMs = instrumentationTimeoutMs(15_000) - 15_000;
+    const neededMs = instrumentationTimeoutMs(15_000) + LONG_PRESS_TIMEOUT_HEADROOM_MS;
+    expect(() => assertDragPathFitsRequestBudget(15_000, neededMs - 1, overheadMs)).toThrow(
+      `dragPath duration 15000 ms does not fit the remaining request budget (${neededMs - 1} ms; needs ${neededMs} ms including dispatch headroom)`,
     );
-    expect(() => assertDragPathFitsRequestBudget(15_000, 32_000, 15_000)).not.toThrow();
+    expect(() => assertDragPathFitsRequestBudget(15_000, neededMs, overheadMs)).not.toThrow();
   });
 
   test("rejects a path over the hard ceiling", () => {
@@ -371,7 +377,9 @@ describe("DragPath", () => {
         })),
       ];
       const options = dragPathSchema.parse({ points, pointer: { toolType: "stylus" } });
-      const result = await drag.execute(options, { deadlineMs: durationMs + 17_000 });
+      const result = await drag.execute(options, {
+        deadlineMs: instrumentationTimeoutMs(durationMs) + LONG_PRESS_TIMEOUT_HEADROOM_MS,
+      });
       expect(result.success).toBe(true);
       expect(result.plannedDurationMs).toBe(durationMs);
       expect(route.injected).toHaveLength(1);

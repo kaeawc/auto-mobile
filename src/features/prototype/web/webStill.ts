@@ -6,7 +6,7 @@ import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import { renderDeviceFrame, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
-import { cssColor, themeTypography } from "./webStyle";
+import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
 const STILL_LOCALE = "en-US";
@@ -170,6 +170,18 @@ function stillScope(
   };
 }
 
+/**
+ * The theme's `background` role (else `surface`); a seed or device scheme leaves both unresolved,
+ * so the Material 3 baseline background for the mode stands in.
+ */
+function screenBackground(style: WebStyleContext): string {
+  return (
+    cssColor("background", style) ??
+    cssColor("surface", style) ??
+    cssColor("background", { ...style, palette: prototypeRolePalette({}, style.mode) })!
+  );
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
@@ -186,7 +198,7 @@ export function renderPrototypeStill(
   const element = renderDeviceFrame(
     frame,
     options.orientation ?? "portrait",
-    { dark, textColor },
+    { dark, textColor, background: screenBackground(scope.style) },
     placed(expanded, root),
   );
   return { element, frame: frame.id, unsupportedNodes: scope.unsupported };

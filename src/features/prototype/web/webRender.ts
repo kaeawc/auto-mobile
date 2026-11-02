@@ -422,18 +422,31 @@ const divider: NodeRenderer = (node, scope) => {
   );
 };
 
+/** The first letter of an icon's name, so a placeholder reads as that icon; none without a name. */
+function iconInitial(name: unknown): string {
+  const letter = typeof name === "string" ? /[a-z0-9]/i.exec(name)?.[0] : undefined;
+  return letter ? letter.toUpperCase() : "";
+}
+
 const icon: NodeRenderer = (node, scope) => {
-  // The Material glyph set is not inlined, so an icon draws as a tinted shape titled with its name.
+  // The Material glyph set is not inlined, so an icon draws as a tinted ring around its name's
+  // initial, titled with the full name.
   const { attrs, style } = base(node, scope, {
-    display: "inline-block",
+    display: "inline-flex",
+    "align-items": "center",
+    "justify-content": "center",
     width: "24px",
     height: "24px",
+    border: "2px solid currentColor",
     "border-radius": "6px",
-    "background-color": "currentColor",
-    opacity: "0.6",
+    "font-size": "11px",
+    "font-weight": "700",
+    "line-height": "1",
     "flex-shrink": "0",
   });
-  return el("span", { attrs: { ...attrs, title: String(node.name ?? ""), role: "img" }, style });
+  return el("span", { attrs: { ...attrs, title: String(node.name ?? ""), role: "img" }, style }, [
+    iconInitial(node.name),
+  ]);
 };
 
 const image: NodeRenderer = (node, scope, path) => {
@@ -742,18 +755,46 @@ function fieldChrome(node: Raw, error: boolean, scope: WebRenderScope): Record<s
   };
 }
 
+/**
+ * A Material 3 switch: a 52x32 track with a thumb at the end when on (24 px, onPrimary on primary)
+ * and at the start when off (16 px, outline on surfaceContainerHighest inside an outline border).
+ */
+function switchMark(on: boolean, scope: WebRenderScope): WebElement {
+  const outline = cssColor("outline", scope.style) ?? "currentColor";
+  const thumb = el("span", {
+    attrs: { "data-part": "thumb" },
+    style: {
+      width: on ? "24px" : "16px",
+      height: on ? "24px" : "16px",
+      "border-radius": "50%",
+      "background-color": on ? (cssColor("onPrimary", scope.style) ?? "#fff") : outline,
+      ...(on ? { "margin-inline-start": "auto" } : {}),
+    },
+  });
+  return el(
+    "span",
+    {
+      style: {
+        display: "flex",
+        "align-items": "center",
+        "box-sizing": "border-box",
+        width: "52px",
+        height: "32px",
+        padding: on ? "0 4px" : "0 6px",
+        "border-radius": "16px",
+        "flex-shrink": "0",
+        border: `2px solid ${on ? "transparent" : outline}`,
+        ...roleCss(scope, on ? "primary" : "surfaceContainerHighest", "onPrimary"),
+      },
+    },
+    [thumb],
+  );
+}
+
 /** A switch track or checkbox box, drawn from whether its state is on. */
 function toggleMark(role: "switch" | "checkbox", on: boolean, scope: WebRenderScope): WebElement {
   return role === "switch"
-    ? el("span", {
-        style: {
-          width: "52px",
-          height: "32px",
-          "border-radius": "16px",
-          "flex-shrink": "0",
-          ...roleCss(scope, on ? "primary" : "surfaceContainerHighest", "onPrimary"),
-        },
-      })
+    ? switchMark(on, scope)
     : el("span", {
         style: {
           width: "18px",
@@ -785,10 +826,14 @@ const toggle =
       ...disabled.css,
     });
     const semantics = { ...attrs, role, "aria-checked": String(on), ...disabled.attrs };
-    return el("div", { attrs: semantics, style }, [
-      bound(node.label, scope),
-      toggleMark(role, on, scope),
-    ]);
+    const label = typeof node.label === "string" ? [bound(node.label, scope)] : [];
+    const mark = toggleMark(role, on, scope);
+    // As on both devices, a switch's label leads its track and a checkbox's box leads its label.
+    return el(
+      "div",
+      { attrs: semantics, style },
+      role === "switch" ? [...label, mark] : [mark, ...label],
+    );
   };
 
 const card: NodeRenderer = (node, scope, path) => {

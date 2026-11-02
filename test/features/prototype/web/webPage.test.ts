@@ -196,3 +196,39 @@ describe("prototype web page (#16346)", () => {
     );
   });
 });
+
+describe("prototype web page chrome (#16382)", () => {
+  const page = buildPrototypeWebPage(input);
+  const style = (html: string) => html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
+
+  test("a page with only one revision shows no revision history", () => {
+    const single = buildPrototypeWebPage({ ...input, variants: [input.variants[1]!] });
+    expect(controls(single.html)).not.toContain("revisions");
+    expect(controls(page.html)).toContain("revisions");
+  });
+
+  test("a page whose older revisions were dropped shows no revision history", () => {
+    const both = buildPrototypeWebPage({ ...input, variants: [input.variants[0]!] });
+    const full = Buffer.byteLength(both.html);
+    const trimmed = buildPrototypeWebPage({
+      ...input,
+      variants: [input.variants[0]!],
+      maxBytes: full - 1,
+    });
+    expect(trimmed.inlinedRevisions).toEqual({ a: [2] });
+    expect(controls(trimmed.html)).not.toContain("revisions");
+  });
+
+  test("a narrow viewport stacks the history below the stage", () => {
+    const css = style(page.html);
+    const narrow = css.slice(css.indexOf("@media (max-width:"));
+    expect(narrow).toContain("[data-main]{flex-direction:column}");
+    expect(narrow).toContain("[data-control=revisions]{width:auto");
+  });
+
+  test("says the preview is static", () => {
+    const note = page.html.slice(page.html.indexOf("data-note"), page.html.indexOf("<script"));
+    expect(note).toContain("Static preview");
+    expect(note).toContain("taps do nothing");
+  });
+});

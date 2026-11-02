@@ -176,14 +176,11 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
   ];
 }
 
-/** Transparent screen regions show a checkerboard, so an unpainted area reads as unpainted. */
-const UNPAINTED = "repeating-conic-gradient(#d9d9d9 0% 25%, #f2f2f2 0% 50%) 0 0 / 16px 16px";
-
 /** A device frame around the screen content, with status bar, cutout and navigation handle. */
 export function renderDeviceFrame(
   frame: DeviceFrame,
   orientation: WebOrientation,
-  options: { dark: boolean; textColor: string },
+  options: { dark: boolean; textColor: string; background: string },
   content: WebElement,
 ): WebElement {
   const { width, height } = screenSize(frame, orientation);
@@ -198,7 +195,9 @@ export function renderDeviceFrame(
         height: px(height),
         overflow: "hidden",
         "border-radius": px(frame.cornerRadiusDp),
-        background: UNPAINTED,
+        // Both devices paint nothing behind a window, so the app below shows through; a still has no
+        // app below, so the theme's background stands in for it.
+        "background-color": options.background,
         color: options.textColor,
         "font-family": "system-ui, -apple-system, Roboto, sans-serif",
         "font-size": "14px",

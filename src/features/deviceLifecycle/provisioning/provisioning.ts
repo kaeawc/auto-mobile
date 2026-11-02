@@ -29,7 +29,6 @@ import {
 } from "../core/contracts";
 import { type TeardownToolResponse } from "../teardown/teardownContracts";
 import { provisionDeviceSchema } from "../core/schemas";
-import { LOW_RAM_MEMORY_MB } from "../../../utils/provisionDeviceSpecSchemas";
 
 export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {
   if (error instanceof ProvisionDeviceError) {
@@ -206,12 +205,6 @@ export function parseProvisionDeviceArgs(
   delete publicInput.rollbackOnRetryableReadiness;
   delete publicInput.discardSnapshotOnExit;
   const parsed = provisionDeviceSchema.parse(publicInput);
-  if (parsed.lowRam === true && parsed.device.platform === "android") {
-    parsed.device.spec.configuration = {
-      ...parsed.device.spec.configuration,
-      memoryMb: LOW_RAM_MEMORY_MB,
-    };
-  }
   return {
     ...parsed,
     ...(input.rollbackOnRetryableReadiness === false

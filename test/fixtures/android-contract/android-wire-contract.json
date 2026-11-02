@@ -4935,6 +4935,12 @@
         "hasDefault": true
       },
       {
+        "name": "attentionLoop",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "kind",
         "type": "string",
         "nullable": false,
@@ -5149,7 +5155,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -5295,7 +5301,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -5465,7 +5471,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -5673,7 +5679,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -5831,7 +5837,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -5991,6 +5997,12 @@
       {
         "name": "keyframes",
         "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "attentionLoop",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
       },
@@ -6197,7 +6209,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -6349,7 +6361,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -6519,6 +6531,12 @@
         "hasDefault": true
       },
       {
+        "name": "attentionLoop",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "player",
         "type": "string",
         "nullable": false,
@@ -6665,7 +6683,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -6835,7 +6853,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -7005,7 +7023,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -7181,7 +7199,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -7339,7 +7357,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -10993,7 +11011,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -11175,7 +11193,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -11321,7 +11339,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -11537,7 +11555,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -11715,7 +11733,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -11881,7 +11899,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -12051,7 +12069,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -12209,7 +12227,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -12379,7 +12397,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -12571,7 +12589,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -12777,7 +12795,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -12949,6 +12967,12 @@
       {
         "name": "keyframes",
         "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "attentionLoop",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
       },
@@ -13135,7 +13159,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -13287,7 +13311,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -13451,7 +13475,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -13689,7 +13713,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -13887,7 +13911,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -14195,7 +14219,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -14359,7 +14383,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -14573,7 +14597,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -14761,7 +14785,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -14913,7 +14937,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -15141,7 +15165,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -15329,7 +15353,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -15493,7 +15517,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -15633,7 +15657,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -15831,7 +15855,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -16019,7 +16043,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -16183,7 +16207,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -16443,7 +16467,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -16627,7 +16651,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -16803,7 +16827,7 @@
         "hasDefault": true
       },
       {
-        "name": "loop",
+        "name": "attentionLoop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
@@ -17001,6 +17025,12 @@
       {
         "name": "keyframes",
         "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "attentionLoop",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
         "nullable": true,
         "hasDefault": true
       },

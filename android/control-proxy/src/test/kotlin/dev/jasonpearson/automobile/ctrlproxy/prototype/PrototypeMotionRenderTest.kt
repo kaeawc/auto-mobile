@@ -288,6 +288,8 @@ class PrototypeMotionRenderTest {
       root =
         PrototypeColumnNode(
           testTag = "container",
+          // A fullscreen root fills the window unless sized (#16190); the size must follow content.
+          style = PrototypeStyle(width = PrototypeDimension.Wrap, height = PrototypeDimension.Wrap),
           children =
             listOf(
               PrototypeBoxNode(
@@ -351,7 +353,8 @@ class PrototypeMotionRenderTest {
     setDurationScale(0f)
     val runtime =
       show(
-        sizeSpec().copy(root = PrototypeTextNode(text = "Hi", attentionLoop = PrototypeLoop("spin", 400))),
+        sizeSpec()
+          .copy(root = PrototypeTextNode(text = "Hi", attentionLoop = PrototypeLoop("spin", 400))),
       )
     compose.mainClock.advanceTimeByFrame()
     assertEquals(PrototypeMotionState.Settled, runtime.motionActivity.snapshot())

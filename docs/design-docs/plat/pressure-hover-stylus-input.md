@@ -105,7 +105,11 @@ also reads pen data (**Source**):
 
 - **Pen nodes.** `InputNodeDiscovery.ts` finds the touch node and any separate
   single-touch pen node (`ABS_X`/`ABS_Y` plus `BTN_TOOL_PEN` or `BTN_TOOL_RUBBER`), and
-  `GetEventReader` runs one `getevent -lt` process per node.
+  `GetEventReader` runs one `getevent -lt` process per node. An all-node `getevent -lt`
+  monitor watches add/remove notifications throughout recording. Added nodes are probed
+  with `getevent -lp <path>`; only pen-kind nodes get a reader and a timeline following
+  the current display geometry. Removal stops that reader and cancels pending discovery.
+  Monitor or pen-reader failure is logged while finger recording continues.
 - **Pen state.** `TouchFrameReconstructor.ts` tracks `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`/
   `BTN_TOOL_RUBBER`, `BTN_TOUCH`, `BTN_STYLUS`/`BTN_STYLUS2`, `ABS_TILT_X`/`ABS_TILT_Y` and
   `ABS_DISTANCE`/`ABS_MT_DISTANCE`. A pen in range without contact is hover and never

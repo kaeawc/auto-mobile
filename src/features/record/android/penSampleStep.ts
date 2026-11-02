@@ -19,11 +19,11 @@ function segmentDurationMs(
   return Math.min(DRAG_PATH_SEGMENT_MAX_MS, Math.max(DRAG_PATH_SEGMENT_MIN_MS, Math.round(delta)));
 }
 
-/** Whether an otherwise exportable stylus stroke's clamped segments exceed replay's budget. */
+/** Whether an otherwise exportable sampled stylus gesture's clamped segments exceed replay's budget. */
 export function penStrokeExceedsReplayLimit(gesture: GestureEvent): boolean {
-  const samples = gesture.path;
+  const samples = gesture.type === "stroke" ? gesture.path : gesture.hover;
   if (
-    gesture.type !== "stroke" ||
+    (gesture.type !== "stroke" && gesture.type !== "hover") ||
     gesture.toolType !== "stylus" ||
     hasUnknownAxes(gesture) ||
     !samples ||

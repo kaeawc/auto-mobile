@@ -123,7 +123,13 @@ export class TouchFrameReconstructor {
             // before the slot is reused, so the new id starts a fresh contact.
             const ended = this.endedByReplacement(slot, arrivedAt);
             // The old id's episode ends like a release, so a hover that never touched is reported.
-            this.emitHover(this.hover.slotReleased(slot.slotId, slot.toolType, arrivedAt));
+            this.emitHover(
+              this.hover.slotReleased(
+                slot.slotId,
+                this.withPenState({ ...slot }).toolType,
+                arrivedAt,
+              ),
+            );
             slot.trackingId = value;
             return ended;
           }
@@ -165,7 +171,9 @@ export class TouchFrameReconstructor {
       this.releasedSlots.add(slot.slotId);
       slot.trackingId = -1;
     }
-    this.emitHover(this.hover.slotReleased(slot.slotId, slot.toolType, arrivedAt));
+    this.emitHover(
+      this.hover.slotReleased(slot.slotId, this.withPenState({ ...slot }).toolType, arrivedAt),
+    );
   }
 
   /** Tells the hover tracker whether a tracked multitouch pen slot is hovering or touching. */

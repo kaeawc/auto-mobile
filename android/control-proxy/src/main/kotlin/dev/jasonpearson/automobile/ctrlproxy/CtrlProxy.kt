@@ -87,8 +87,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -419,8 +417,8 @@ class CtrlProxy : AccessibilityService() {
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
   internal lateinit var webSocketServer: WebSocketServer
-  private val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
-  private val deviceEvents =
+  internal val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
+  internal val deviceEvents =
     DeviceEventBroadcaster(
       object : DeviceEventTransport {
         override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
@@ -439,8 +437,8 @@ class CtrlProxy : AccessibilityService() {
     )
   private lateinit var rotationProvenance: RotationProvenanceTracker
   private var deviceStateRegistration: AutoCloseable? = null
-  private val navigationEventAccumulator = NavigationEventAccumulator()
-  private val sdkEventBatchProcessor by lazy {
+  internal val navigationEventAccumulator = NavigationEventAccumulator()
+  internal val sdkEventBatchProcessor by lazy {
     SdkEventBatchProcessor(
       scope = serviceScope,
       navigationEventAccumulator = navigationEventAccumulator,
@@ -1255,17 +1253,17 @@ class CtrlProxy : AccessibilityService() {
     )
 
   // Job for collecting navigation event updates
-  private var navigationEventJob: Job? = null
+  internal var navigationEventJob: Job? = null
 
   // Job for collecting storage change events
-  private var storageChangeJob: Job? = null
+  internal var storageChangeJob: Job? = null
 
   // Storage subscription manager for SharedPreferences inspection
-  private lateinit var storageSubscriptionManager: StorageSubscriptionManager
+  internal lateinit var storageSubscriptionManager: StorageSubscriptionManager
 
   // Logcat reader for automatic log capture
-  private var logcatReader: LogcatReader? = null
-  private var logEventBuffer: BoundedLogBuffer? = null
+  internal var logcatReader: LogcatReader? = null
+  internal var logEventBuffer: BoundedLogBuffer? = null
 
   private val commandReceiver =
     CommandReceiver(
@@ -1483,93 +1481,13 @@ class CtrlProxy : AccessibilityService() {
 
       hierarchyController.start()
 
-      // Initialize storage subscription manager for SharedPreferences inspection
-      storageSubscriptionManager = StorageSubscriptionManager(this, scope = serviceScope)
-      Log.d(TAG, "Storage subscription manager initialized")
+      startStorageSubscription()
 
-      // Subscribe to storage change events and broadcast them
-      storageChangeJob =
-        storageSubscriptionManager.changeEvents
-          .onEach { event ->
-            Log.d(
-              TAG,
-              "Storage change: ${event.packageName}:${event.fileName} key=${event.key}",
-            )
-            storageController.broadcastStorageChange(event)
-          }
-          .launchIn(serviceScope)
+      startWebSocketServer()
 
-      // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
-      try {
-        val queuedHandler = queuedMessageHandler()
-        val sessions = clientSessionRouter(queuedHandler, prototypeController)
-        webSocketServer =
-          WebSocketServer(
-            port = 8765,
-            platform = prototypePlatform,
-            scope = serviceScope,
-            options =
-              WebSocketServerOptions(
-                messageHandler = queuedHandler,
-                onClientDisconnected = sessions::onClientDisconnected,
-                onClientCountChanged = sessions::onClientCountChanged,
-                onPrototypeResponse = hostPrototypeHttp::onResponse,
-                onClientConnected = sessions::onClientConnected,
-                onPermanentStartFailure = { disableSelf() },
-              ),
-          )
-        webSocketLifecycle.replace(webSocketServer)
-        webSocketServer.start()
-      } catch (e: Exception) {
-        Log.e(TAG, "Error initializing WebSocket server during service connection", e)
-        disableSelf()
-      }
+      startEventIngestion()
 
-      // Receivers may enqueue into the processor's bounded channel during bind retries. Do not
-      // drain it, or publish accumulator events, until the listener can deliver them.
-      serviceScope.launch {
-        startEventIngestionWhenReady(
-          isRunning = { webSocketServer.isRunning() },
-          pause = { kotlinx.coroutines.delay(50L) },
-        ) {
-          navigationEventAccumulator.initialize()
-          Log.d(TAG, "Navigation event accumulator initialized")
-          navigationEventJob =
-            navigationEventAccumulator.latestEvent
-              .onEach { event ->
-                if (event != null) {
-                  Log.d(TAG, "Navigation event: ${event.destination} at ${event.timestamp}")
-                  deviceEvents.navigationEvent(event)
-                }
-              }
-              .launchIn(serviceScope)
-          sdkEventBatchProcessor.start()
-          Log.d(TAG, "SDK event batch processor started")
-        }
-      }
-
-      // Start logcat reader for automatic log capture. Gate parsing on a connected client so a
-      // chatty device is not regex-parsed while nobody is consuming logs.
-      val logBuffer = BoundedLogBuffer(capacity = 128, stats = workStats)
-      logEventBuffer = logBuffer
-      serviceScope.launch {
-        logBuffer.drainTo(
-          isRunning = { ::webSocketServer.isInitialized && webSocketServer.isRunning() },
-          broadcast = { webSocketServer.broadcast(it) },
-          onFailure = { Log.w(TAG, "Error broadcasting log event", it) },
-        )
-      }
-      logcatReader =
-        LogcatReader(
-          onLogEvent = {},
-          tryDeliver = logBuffer::offer,
-          hasConsumer = {
-            ::webSocketServer.isInitialized && webSocketServer.getConnectionCount() > 0
-          },
-          stats = workStats,
-        )
-      logcatReader?.start()
-      Log.d(TAG, "Logcat reader started")
+      startLogcatForwarding()
 
       Log.d(TAG, "AutoMobile Accessibility Service connected successfully")
     } catch (e: Exception) {
@@ -1577,35 +1495,6 @@ class CtrlProxy : AccessibilityService() {
       // Service will continue running even if some initialization fails
     }
   }
-
-  private fun clientSessionRouter(
-    queuedHandler: QueuedWebSocketMessageHandler,
-    prototypes: PrototypeController,
-  ) =
-    ClientSessionRouter(
-      object : ClientSessionRouter.Host<WebSocketServer.ConnectedClient> {
-        override fun dropQueuedCommands(client: WebSocketServer.ConnectedClient) =
-          queuedHandler.disconnect(client)
-
-        override fun cancelGestureStreams(client: WebSocketServer.ConnectedClient) =
-          gestureController.cancelStreamsOwnedBy(client)
-
-        override fun failHostRequests(client: WebSocketServer.ConnectedClient?) =
-          hostPrototypeHttp.onHostLost(client)
-
-        override fun launch(block: suspend () -> Unit) {
-          serviceScope.launch { block() }
-        }
-
-        override suspend fun prototypeClientCountChanged(count: Int, observerSession: Int) {
-          prototypes.onClientCountChanged(count, observerSession)
-        }
-
-        override suspend fun prototypeClientConnected() {
-          prototypes.onClientConnected()
-        }
-      },
-    )
 
   /**
    * Registers a receiver for broadcasts sent from other processes (the SDK in an app under test,

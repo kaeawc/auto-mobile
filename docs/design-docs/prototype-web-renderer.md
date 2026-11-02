@@ -1,7 +1,55 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the page, the still renderer and the device frame registry.
+document covers the resource that serves it, spec revisions, the page, the still renderer and the
+device frame registry.
+
+## Resource
+
+`automobile:prototype/{id}/web{?frame,revision,variant}` (`text/html`) is registered in
+`src/server/prototypeResources.ts` and read by `readPrototypeWebResource` in
+`src/features/prototype/web/prototypeWebResource.ts`.
+
+- **Variants.** The page's variants are the ids whose latest revision carries the same
+  `variant.group` as `{id}`'s, in first-seen order, labelled by `variant.label`; an id without a
+  group is the only variant, labelled by its id. `variant` (default `{id}`) picks the one shown
+  first and must be in that set.
+- **Revision and frame.** `revision` (default the latest) is a kept revision of the variant shown
+  first. `frame` defaults to `defaultDeviceFrameId` of the platform that showed that revision, else
+  `pixel-9`.
+- **Errors.** An unknown id lists the known ids; an evicted revision names the oldest kept; an
+  unknown revision lists the kept ones; an unknown frame or variant lists the valid ones. All are
+  `ActionableError`s.
+- **Read result.** `_meta` is `{revision, deviceRevision?, revisions, variants, frame, sha256,
+  rendererVersion}`; `rendererVersion` is the server release version.
+- **Listing.** Each known id gets a concrete resource `automobile:prototype/{id}/web` named
+  `prototype-{id}-web`, titled `{id} (web)`, registered when its first revision appears and
+  unregistered when the id is evicted; each change sends `list_changed`. List entries carry no
+  `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
+  `_meta`.
+- **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
+  `resources/updated` for the parameter-free URI of the id, of each id in its variant group, and of
+  each id in the group it left (or was evicted from), in revision order. The concrete resource matches subscriptions
+  exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
+
+## Spec revisions
+
+`PrototypeSpecRevisions` (`src/features/prototype/prototypeSpecRevisions.ts`) is fed by
+`PrototypeShownSpecs`, so a revision exists exactly when the shown-spec mirror accepts a spec:
+
+- `endShow` storing a spec records a `show`; refused, superseded and poisoned shows, and shows the
+  mirror leaves untracked (persisted `/data`), record nothing. `commitPatch` committing records a
+  `patch` with the reply's `revision` as `deviceRevision`. Device data writes record nothing.
+- Numbers start at 1 per id and never repeat, even after the id is evicted. Each revision keeps a
+  copy of the spec, the platform of the device, the host clock time and the variant. A show states
+  its `variant` afresh (none leaves the group); a patch keeps the id's last one. `variant` is
+  host-only and never sent to the device.
+- Bounds: the last `MAX_PROTOTYPE_SPEC_REVISIONS` (20) per id, and `MAX_PROTOTYPE_SPEC_REVISION_BYTES`
+  (32 MiB) of spec JSON across ids. Over the byte cap the oldest non-latest revision goes first;
+  when only latest revisions remain, the least recently revised other id is dropped whole. Each id
+  whose history shrinks this way gets a `pruned` event, and each id dropped whole an `evicted` one.
+- The daemon keeps one store for the process (`daemonPrototypeSpecRevisions`), outliving any one
+  prototype host; a host with injected state gets its own. Nothing is persisted across restarts.
 
 ## Page
 
@@ -14,16 +62,19 @@ it inlined per variant.
   are `hidden`.
 - **Controls.** Only four: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
   double-click to fit), a variant select (only with more than one variant) and the revision
-  history (newest first, `r<N> · show|patch`). Controls are buttons and a select with labels.
+  history (newest first, `r<N> · show|patch`; only when some variant has more than one revision
+  in the page). Controls are buttons and a select with labels. A toolbar note says the preview is
+  static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
+  history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
   self-contained. It only shows and hides views and moves the stage; UI state stays in memory, with
   no storage, cookies or URL changes. It must stay at or below 150 KB.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
-- **Budget.** The page is at most 2 MiB. Each variant's latest revision is always kept; older
-  revisions are added newest first while they fit, after measuring the shell (head, toolbar, full
-  history list and script). If the latest revisions alone do not fit, the build fails with an
-  `ActionableError` naming the largest view.
+- **Budget.** The page is at most 2 MiB. Each variant's latest revision and the revision shown
+  first are always kept; older revisions are added newest first while they fit, after measuring the
+  shell (head, toolbar, full history list and script). If the kept revisions alone do not fit, the
+  build fails with an `ActionableError` naming the largest view.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Still renderer
@@ -66,7 +117,9 @@ the host, so the page's script only switches between views it was given and neve
   native theme does.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
   accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
-  roles unpainted. Unpainted screen regions show a checkerboard. An explicit `theme.mode` of
+  roles unpainted. Both devices paint nothing behind a window, so the app below shows through;
+  the still has no app below, so the screen paints the theme's `background` role (else `surface`),
+  or the Material 3 baseline background for the mode when the scheme leaves both unresolved. An explicit `theme.mode` of
   `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
@@ -84,8 +137,10 @@ the host, so the page's script only switches between views it was given and neve
   lines); a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
-  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted square titled with the icon name, because the glyph set is not
-  inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
+  titled with the name, because the glyph set is not inlined. A switch draws its label before a
+  Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
+  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle (or three generic button marks, which move to
@@ -95,8 +150,9 @@ the host, so the page's script only switches between views it was given and neve
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own
   padding on that edge (`ime` adds nothing,
   since the still has no keyboard). Safe areas are exposed as
-  `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. A top app bar takes no inset
-  of its own, as on the devices: it clears the status bar only through `safeAreaPadding`.
+  `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. Both devices draw a
+  window's content edge to edge and a top app bar takes no inset of its own, so it clears the
+  status bar only through `safeAreaPadding`.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

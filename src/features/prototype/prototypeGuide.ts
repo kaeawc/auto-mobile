@@ -38,6 +38,7 @@ import {
 } from "./prototypeGuideProseMore";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
+import { MAX_PROTOTYPE_SPEC_REVISIONS } from "./prototypeSpecRevisions";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 
 /** Resource URIs served by the prototype authoring guide. */
@@ -218,6 +219,16 @@ function renderNativeCode(): string {
   ].join("\n");
 }
 
+function renderWebPreview(): string {
+  return [
+    "## Web preview and alternatives",
+    "",
+    `Read \`automobile:prototype/<id>/web\` for a shown prototype as one self-contained HTML page: the prototype in a device frame with rotate, zoom, a variant switcher and its revision history. Optional \`frame\` (a device frame id; default the showing platform's), \`revision\` (default the latest) and \`variant\`. Revision 1 is the first acknowledged show; each later show of the id and each landed patch adds one; device state edits do not. The last ${MAX_PROTOTYPE_SPEC_REVISIONS} revisions per id are kept. Subscribe to the URI without parameters to hear every new revision.`,
+    "",
+    "To present design alternatives side by side, show each under its own id with `variant: {group, label}` using one `group` (host-side only; the device shows whatever was shown last). The web page of any id in the group offers every alternative by `label`. Describe them in chat and ask the user which they prefer.",
+  ].join("\n");
+}
+
 function renderWindow(): string {
   const placement = definitions.placement.variants ?? {};
   return [
@@ -339,6 +350,7 @@ export function renderPrototypeGuide(): string {
     renderIcons(),
     renderPlatformDifferences(),
     renderNativeCode(),
+    renderWebPreview(),
     `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}\n\n${GUIDE_NOTIFICATIONS}`,
     GUIDE_COST,
     GUIDE_ERRORS,

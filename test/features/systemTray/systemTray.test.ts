@@ -51,6 +51,15 @@ import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 import { wireCapture } from "../../helpers/wireCapture";
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon";
+import { BudgetedIosLockStateProbe } from "../../../src/features/observe/ios/BudgetedIosLockStateProbe";
+import { CachedIosLockStateProbe } from "../../../src/features/observe/ios/CachedIosLockStateProbe";
+import { applyIosLockStateReading } from "../../../src/features/observe/ios/IosLockStateProbe";
+import type { SystemTrayObserver } from "../../../src/features/systemTray/helpers/dependencies";
+import { ios26SettingsClosed, ios26TrayOpenSettings } from "./iosTrayObservationFixture";
+import { SystemTray } from "../../../src/features/systemTray/SystemTray";
+import { createNotificationUIDetector } from "../../../src/features/systemTray/createNotificationUIDetector";
+import { getSystemTrayDependencies } from "../../../src/features/systemTray/helpers/dependencies";
+import { hasMatchableNotificationContent } from "../../../src/features/systemTray/helpers/runtime";
 
 isolateToolRegistry();
 
@@ -478,6 +487,40 @@ describe("systemTray post-tap observation", () => {
 describe("systemTray find", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
+  });
+
+  test("matches Android notification shade rows over the keyguard", async () => {
+    const tray = createTrayHierarchy("Locked Notification");
+    const observation: ObserveResult = {
+      ...createObservation({
+        ...tray,
+        hierarchy: {
+          node: {
+            $: {
+              "resource-id": "com.android.systemui:id/notification_panel",
+              packageName: SYSTEM_TRAY_PACKAGE,
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            },
+            node: [tray.hierarchy.node!],
+          },
+        },
+      }),
+      deviceLock: { locked: true, keyguardShowing: true },
+    };
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      adbFactory: () => new SequencedFakeAdbExecutor([1000]),
+      observeScreenFactory: () => new SequencedObserveScreen([observation]),
+    });
+
+    const detector = createNotificationUIDetector(device, getSystemTrayDependencies);
+    expect(hasMatchableNotificationContent(detector, observation)).toBe(true);
+
+    const result = await waitForNotificationMatch(device, { title: "Locked Notification" }, [], {
+      awaitTimeoutMs: 0,
+    });
+    expect(result.match).not.toBeNull();
+    expect(result.match?.candidate.node.$?.text).toBe("Locked Notification");
   });
 
   test("waits for the tray to open before matching", async () => {
@@ -4323,6 +4366,366 @@ describe("systemTray automatic terminal evidence", () => {
 describe("iOS systemTray open/close", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
+  });
+
+  describe("captured iOS 26.5 tray over Settings", () => {
+    const test = warmedTests(() => {
+      resetSystemTrayDependencies();
+      ToolRegistry.clearTools();
+    });
+
+    test.each([1, 2, 3])(
+      "open refreshes cached app lock state (opens after invalidation %s)",
+      async (opensAt) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        const invalidated: string[] = [];
+        observer.setObserveResult(() => {
+          const locked = invalidated.length >= opensAt;
+          return {
+            ...ios26SettingsClosed,
+            deviceLock: { locked, keyguardShowing: locked },
+          };
+        });
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          iosLockStateInvalidator: {
+            invalidate: (deviceId) => {
+              expect(client.swipeCalls).toHaveLength(1);
+              invalidated.push(deviceId);
+            },
+          },
+          observeScreenFactory: () => observer,
+        });
+        const result = await new SystemTray(iosDevice).execute({
+          action: "open",
+          awaitTimeout: 500,
+        });
+        expect(result.payload.success).toBe(true);
+        expect(result.payload.message).toBe("Opened system tray");
+        const observation = result.payload.observation as
+          | Pick<ObserveResult, "deviceLock">
+          | undefined;
+        expect(observation?.deviceLock).toEqual({
+          locked: true,
+          keyguardShowing: true,
+        });
+        expect(invalidated).toEqual(Array(opensAt).fill(iosDevice.deviceId));
+        expect(observer.getExecuteCallCount()).toBe(1 + opensAt);
+        expect(timer.getSleepHistory()).toEqual(Array(opensAt - 1).fill(250));
+        expect(client.swipeCalls).toHaveLength(1);
+      },
+    );
+
+    test("open verifies the swipe using lock state", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(() =>
+        client.swipeCalls.length > 0 ? ios26TrayOpenSettings : ios26SettingsClosed,
+      );
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      registerInteractionTools();
+      const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(iosDevice, {
+        action: "open",
+        platform: "ios",
+        awaitTimeout: 500,
+      });
+      const payload = toolJson(response);
+      expect(payload.success).toBe(true);
+      expect(payload.skipped).toBe(false);
+      expect(payload.message).toBe("Opened system tray");
+      expect(client.swipeCalls).toHaveLength(1);
+      const swipe = client.swipeCalls[0];
+      expect(swipe.y2 > swipe.y1).toBe(true);
+    });
+
+    // Derived observations model partial lock updates and uncertain foregrounds;
+    // the captured fixture files remain verbatim.
+    test.each([
+      ["Settings restored", ios26SettingsClosed, true],
+      [
+        "SpringBoard restored",
+        {
+          ...createIosObservation(capturedIosHomeIconHierarchy),
+          deviceLock: { locked: false, keyguardShowing: false },
+          activeWindow: { appId: "com.apple.springboard", activityName: "", layoutSeqSum: 0 },
+        },
+        true,
+      ],
+      ["overlay remains", ios26TrayOpenSettings, false],
+      [
+        "locked remains",
+        { ...ios26SettingsClosed, deviceLock: { locked: true, keyguardShowing: false } },
+        false,
+      ],
+      [
+        "keyguard remains",
+        { ...ios26SettingsClosed, deviceLock: { locked: false, keyguardShowing: true } },
+        false,
+      ],
+      ["lock unknown", { ...ios26SettingsClosed, deviceLock: undefined }, false],
+      ["foreground unknown", { ...ios26SettingsClosed, activeWindow: undefined }, false],
+      ["hierarchy unknown", { ...ios26SettingsClosed, viewHierarchy: undefined }, false],
+      [
+        "other foreground",
+        {
+          ...ios26SettingsClosed,
+          activeWindow: { appId: "com.example.other", activityName: "", layoutSeqSum: 0 },
+        },
+        false,
+      ],
+      [
+        "other hierarchy",
+        {
+          ...ios26SettingsClosed,
+          viewHierarchy: {
+            ...ios26SettingsClosed.viewHierarchy!,
+            packageName: "com.example.other",
+          },
+        },
+        false,
+      ],
+    ] satisfies Array<[string, ObserveResult, boolean]>)(
+      "close over Settings verifies %s",
+      async (_name, terminal, success) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        let homeCalls = 0;
+        observer.setObserveResult(() =>
+          homeCalls > 0 || client.swipeCalls.length > 0 ? terminal : ios26TrayOpenSettings,
+        );
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          pressHomeFactory: async () => {
+            homeCalls++;
+            return { success: true };
+          },
+          observeScreenFactory: () => observer,
+        });
+        const result = await new SystemTray(iosDevice).execute({
+          action: "close",
+          awaitTimeout: 500,
+        });
+        expect(result.payload.success).toBe(success);
+        expect(result.payload.message).toBe(
+          success
+            ? "Closed system tray (collapsed notification shade)"
+            : "Failed to close system tray: the tray remained open",
+        );
+        expect(homeCalls).toBe(1);
+        expect(client.swipeCalls).toHaveLength(0);
+      },
+    );
+
+    test.each([2, 3, undefined])(
+      "open bounds settling reads when the first read exhausts the timeout (opens at %s)",
+      async (opensAt) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        let postSwipeReads = 0;
+        let lastRead: ObserveResult = ios26SettingsClosed;
+        observer.setObserveResult(() => {
+          if (client.swipeCalls.length === 0) {
+            return ios26SettingsClosed;
+          }
+          postSwipeReads++;
+          // Model a slow extraction consuming the original polling deadline.
+          if (postSwipeReads === 1) {
+            timer.advanceTime(500);
+          }
+          lastRead =
+            opensAt !== undefined && postSwipeReads >= opensAt
+              ? ios26TrayOpenSettings
+              : {
+                  ...ios26SettingsClosed,
+                  deviceLock: undefined,
+                  observationId: `settle-${postSwipeReads}`,
+                };
+          return lastRead;
+        });
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          observeScreenFactory: () => observer,
+        });
+        const result = await new SystemTray(iosDevice).execute({
+          action: "open",
+          awaitTimeout: 500,
+        });
+        expect(result.payload.success).toBe(opensAt !== undefined);
+        expect(result.payload.message).toBe(
+          opensAt !== undefined
+            ? "Opened system tray"
+            : "Failed to open system tray: the tray remained closed",
+        );
+        expect(result.payload.observation).toEqual(lastRead);
+        expect(postSwipeReads).toBe(opensAt ?? 3);
+        expect(observer.getExecuteCallCount()).toBe(1 + (opensAt ?? 3));
+        expect(timer.getSleepHistory()).toEqual(Array((opensAt ?? 3) - 1).fill(250));
+        expect(client.swipeCalls).toHaveLength(1);
+        expect(client.swipeCalls[0].y1).toBe(5);
+      },
+    );
+
+    test.each(["find", "tap", "dismiss"] as const)(
+      "%s never matches app-owned Settings content under the lock-only tray signal",
+      async (action) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        observer.setObserveResult(() => ios26TrayOpenSettings);
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          observeScreenFactory: () => observer,
+        });
+        await expect(
+          new SystemTray(iosDevice).execute({
+            action,
+            notification: { title: "General" },
+            awaitTimeout: 500,
+          }),
+        ).rejects.toThrow("Notification not found after 500ms");
+        expect(client.tapCalls).toHaveLength(0);
+        expect(client.swipeCalls).toHaveLength(0);
+      },
+    );
+
+    test("open keeps a slow shared lock probe alive across polls until it reports locked", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      let probeStarts = 0;
+      const cache = new CachedIosLockStateProbe(
+        {
+          read: async () => {
+            probeStarts++;
+            await timer.sleep(900);
+            return { kind: "known", lock: { locked: true, keyguardShowing: true } };
+          },
+        },
+        timer,
+      );
+      const budgeted = new BudgetedIosLockStateProbe(cache, timer);
+      const observer: SystemTrayObserver = {
+        execute: async () => {
+          const result: ObserveResult = { ...ios26SettingsClosed };
+          applyIosLockStateReading(result, await budgeted.read(iosDevice.deviceId));
+          return result;
+        },
+      };
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        iosLockStateInvalidator: cache,
+        observeScreenFactory: () => observer,
+      });
+      const result = await ensureSystemTrayOpen(iosDevice, 5000);
+      expect(result.opened).toBe(true);
+      expect(result.observation?.deviceLock).toEqual({ locked: true, keyguardShowing: true });
+      expect(probeStarts).toBe(2);
+      expect(client.swipeCalls).toHaveLength(1);
+    });
+
+    test("list over the lock-only app tray is rejected before any row is read", async () => {
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(() => ios26TrayOpenSettings);
+      setSystemTrayDependencies({
+        timer: new FakeTimer(),
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      await expect(
+        new SystemTray(iosDevice).execute({
+          action: "list",
+          notification: { appId: "com.apple.Preferences" },
+          awaitTimeout: 500,
+        }),
+      ).rejects.toThrow("supported only on Android");
+      expect(observer.getExecuteCallCount()).toBe(0);
+      expect(client.tapCalls).toHaveLength(0);
+      expect(client.swipeCalls).toHaveLength(0);
+    });
+
+    test("already open over Settings skips the gesture", async () => {
+      const observer = new SequencedObserveScreen([ios26TrayOpenSettings]);
+      const client = new FakeIosClient();
+      setSystemTrayDependencies({
+        timer: new FakeTimer(),
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      const result = await ensureSystemTrayOpen(iosDevice, 500);
+      expect(result.skipped).toBe(true);
+      expect(client.swipeCalls).toHaveLength(0);
+      expect(observer.getExecuteCallCount()).toBe(1);
+    });
+
+    test("SpringBoard hierarchy opens without invalidating lock state on retries", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new SequencedObserveScreen([
+        createIosObservation(capturedIosHomeIconHierarchy),
+        createIosObservation(capturedIosHomeIconHierarchy),
+        createIosObservation(createIosNotificationCenterHierarchy("Test")),
+      ]);
+      const invalidated: string[] = [];
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        iosLockStateInvalidator: {
+          invalidate: (deviceId) => {
+            invalidated.push(deviceId);
+          },
+        },
+        observeScreenFactory: () => observer,
+      });
+      const result = await ensureSystemTrayOpen(iosDevice, 500);
+      expect(result.opened).toBe(true);
+      expect(invalidated).toEqual([iosDevice.deviceId]);
+      expect(client.swipeCalls).toHaveLength(1);
+      expect(observer.getExecuteCallCount()).toBe(3);
+    });
+
+    test("legacy SpringBoard Notification Center still closes with a swipe", async () => {
+      const client = new FakeIosClient();
+      const observer = new SequencedObserveScreen([
+        createIosObservation(createIosNotificationCenterHierarchy("Test")),
+        ios26SettingsClosed,
+      ]);
+      let homeCalls = 0;
+      setSystemTrayDependencies({
+        timer: new FakeTimer(),
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+        pressHomeFactory: async () => {
+          homeCalls++;
+          return { success: true };
+        },
+      });
+      const result = await ensureSystemTrayClosed(iosDevice, 500);
+      expect(result.closed).toBe(true);
+      expect(homeCalls).toBe(0);
+      expect(client.swipeCalls).toHaveLength(1);
+      expect(client.swipeCalls[0]).toMatchObject({ x1: 195, y1: 548, x2: 195, y2: 67 });
+    });
   });
 
   describe("captured iOS 27 Notification Center", () => {

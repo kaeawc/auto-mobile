@@ -2,6 +2,7 @@ import { prototypeDataPointerTokens } from "./prototypeData";
 import { applyPrototypeDataWrite } from "./prototypeDataWrite";
 import type { PrototypeDataWriteEvent } from "./prototypeDataWriteEvent";
 import type { PrototypeData } from "./prototypeSpec";
+import type { PrototypeSpecRevisionRecorder, PrototypeSpecVariant } from "./prototypeSpecRevisions";
 
 export type ShownSpecJson = Readonly<Record<string, unknown>>;
 export type ShownSpecRead =
@@ -52,10 +53,20 @@ interface DeviceSpecs {
   open: Map<number, PendingShow>;
   poisonedThrough: number;
 }
+/** What an acknowledged show reports to {@link PrototypeShownSpecs.endShow}. */
+interface AcceptedShow {
+  id: string;
+  spec?: ShownSpecJson;
+  replaceOthers?: boolean;
+  variant?: PrototypeSpecVariant;
+}
 /** Tracks acknowledged device specs, forgetting outcomes whose wire order is indeterminate. */
 export class PrototypeShownSpecs {
   private sequence = 0;
   private readonly devices = new Map<string, DeviceSpecs>();
+
+  /** `revisions` hears each show and patch this mirror accepts, as spec revisions (#16345). */
+  constructor(private readonly revisions?: PrototypeSpecRevisionRecorder) {}
 
   beginShow(
     deviceId: string,
@@ -89,7 +100,7 @@ export class PrototypeShownSpecs {
   endShow(
     deviceId: string,
     ticket: number,
-    shown?: { id: string; spec?: ShownSpecJson; replaceOthers?: boolean },
+    shown?: AcceptedShow,
     refusal?: "typed" | "indeterminate",
   ): void {
     const state = this.devices.get(deviceId);
@@ -112,23 +123,32 @@ export class PrototypeShownSpecs {
       return;
     }
     if (shown && ticket > state.poisonedThrough) {
-      if (shown.replaceOthers !== false) {
-        state.entries.clear();
-        state.dataWrites.clear();
-      }
-      // No spec means the device may have restored stored `/data` the host cannot see: untracked
-      // until the next show.
-      if (shown.spec) {
-        state.entries.set(shown.id, structuredClone(shown.spec));
-      } else {
-        state.entries.delete(shown.id);
-      }
-      // A show makes its spec's data authoritative again, so earlier device writes are void.
-      state.dataWrites.delete(shown.id);
+      this.storeShown(state, shown);
     } else {
       state.entries.clear();
       state.dataWrites.clear();
     }
+  }
+
+  private storeShown(state: DeviceSpecs, shown: AcceptedShow): void {
+    if (shown.replaceOthers !== false) {
+      state.entries.clear();
+      state.dataWrites.clear();
+    }
+    // No spec means the device may have restored stored `/data` the host cannot see: untracked
+    // until the next show.
+    if (shown.spec) {
+      state.entries.set(shown.id, structuredClone(shown.spec));
+      this.revisions?.recordShow(shown.id, {
+        spec: shown.spec,
+        platform: state.platform,
+        variant: shown.variant,
+      });
+    } else {
+      state.entries.delete(shown.id);
+    }
+    // A show makes its spec's data authoritative again, so earlier device writes are void.
+    state.dataWrites.delete(shown.id);
   }
 
   read(deviceId: string, id: string): ShownSpecRead {
@@ -158,15 +178,26 @@ export class PrototypeShownSpecs {
     return (this.devices.get(deviceId)?.issued ?? 0) > version;
   }
 
-  commitPatch(deviceId: string, id: string, version: number, spec: ShownSpecJson): boolean {
+  /** `deviceRevision` is the device revision the patch reply reported, recorded with the spec revision. */
+  commitPatch(
+    deviceId: string,
+    id: string,
+    version: number,
+    patched: { spec: ShownSpecJson; deviceRevision?: number },
+  ): boolean {
     const state = this.devices.get(deviceId);
     if (!state) {
       return false;
     }
     const committed = state.open.size === 0 && state.epoch === version && state.entries.has(id);
     if (committed) {
-      state.entries.set(id, structuredClone(spec));
+      state.entries.set(id, structuredClone(patched.spec));
       state.epoch = ++this.sequence;
+      this.revisions?.recordPatch(id, {
+        spec: patched.spec,
+        platform: state.platform,
+        deviceRevision: patched.deviceRevision,
+      });
     } else {
       this.abandon(deviceId);
     }

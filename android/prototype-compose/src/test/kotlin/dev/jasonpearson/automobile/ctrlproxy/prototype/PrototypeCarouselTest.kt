@@ -69,6 +69,13 @@ class PrototypeCarouselTest {
   }
 
   @Test
+  fun `unbounded space never weights pages even when their default size fills`() {
+    val fill = prototypePageFill(PrototypeStyle())
+    assertFalse(pagerIndicatorPagesUseWeight(vertical = false, fill = fill, bounded = false))
+    assertFalse(pagerIndicatorPagesUseWeight(vertical = true, fill = fill, bounded = false))
+  }
+
+  @Test
   fun `a horizontal indicator centres the dots near the bottom edge`() {
     val dots = pagerIndicatorDots(3, false, 200f, 100f, 3f, 8f, 8f)
     assertEquals(listOf(86f, 100f, 114f), dots.map { it.x })

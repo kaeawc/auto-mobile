@@ -126,7 +126,7 @@
     "loop": "bash scripts/validate-loop.sh"
   },
   "dependencies": {
-    "@borewit/text-codec": "0.2.2",
+    "@borewit/text-codec": "0.2.3",
     "@emnapi/runtime": "1.11.3",
     "@img/colour": "1.1.0",
     "@jimp/core": "1.6.1",

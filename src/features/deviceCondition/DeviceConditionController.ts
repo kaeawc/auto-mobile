@@ -1,4 +1,5 @@
-import { logger } from "../../utils/logger";
+import { logger as defaultLogger } from "../../utils/logger";
+import type { Logger } from "../../utils/loggerValues";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { OwedResetError } from "./OwedResetError";
 import {
@@ -36,7 +37,7 @@ export interface DeviceConditionInjector {
   ): Promise<DeviceConditionApplyOutcome>;
   /** Read whether the key is back to its clean baseline; used to verify restore. */
   isClean(signal?: AbortSignal): Promise<boolean>;
-  /** Best-effort discovery of an abandoned fixture; absent for other injectors. */
+  /** Discover an abandoned fixture; reject if discovery cannot confirm its state. */
   recover?(signal?: AbortSignal): Promise<NonNullable<DeviceConditionApplyOutcome["reset"]> | null>;
 }
 
@@ -69,21 +70,26 @@ interface RegisteredReset {
 export class DeviceConditionController {
   /** Applied resets, in application order; restore runs them in reverse. */
   private readonly resets: RegisteredReset[] = [];
+  /** Discovery failures remain cleanup obligations until a successful probe or registered reset. */
+  private readonly recoveryFailures = new Map<DeviceConditionKey, string>();
 
   constructor(
     private readonly resolveInjector: (
       key: DeviceConditionKey,
     ) => DeviceConditionInjector | undefined,
+    private readonly logger: Pick<Logger, "warn"> = defaultLogger,
   ) {}
 
-  /** Keys with a reset still owed, in application order. */
+  /** Keys with a reset or discovery still owed; registered resets come first. */
   activeKeys(): DeviceConditionKey[] {
     // A key can hold more than one reset (see clearKey); it is still one active condition.
-    return [...new Set(this.resets.map((entry) => entry.key))];
+    return [
+      ...new Set([...this.resets.map((entry) => entry.key), ...this.recoveryFailures.keys()]),
+    ];
   }
 
   hasActiveConditions(): boolean {
-    return this.resets.length > 0;
+    return this.resets.length > 0 || this.recoveryFailures.size > 0;
   }
 
   /**
@@ -135,6 +141,7 @@ export class DeviceConditionController {
           reset: outcome.reset,
           isClean: (s) => injector.isClean(s),
         });
+        this.recoveryFailures.delete(change.key);
       }
       return {
         key: change.key,
@@ -150,8 +157,9 @@ export class DeviceConditionController {
           reset: error.owedReset,
           isClean: (s) => injector.isClean(s),
         });
+        this.recoveryFailures.delete(change.key);
       }
-      logger.warn(
+      this.logger.warn(
         `[deviceCondition] applying ${change.key}=${change.value} failed: ${errorMessage(error)}`,
         error,
       );
@@ -159,24 +167,30 @@ export class DeviceConditionController {
     }
   }
 
-  /** A restarted daemon has no registered reset for abandoned root fixture files. */
-  private async recoverRootReset(signal?: AbortSignal): Promise<void> {
-    if (this.resets.some((entry) => entry.key === "rootState")) {
+  /** A restarted daemon has no registered resets for abandoned device fixtures. */
+  private async recoverReset(key: DeviceConditionKey, signal?: AbortSignal): Promise<void> {
+    if (this.resets.some((entry) => entry.key === key)) {
       return;
     }
     try {
-      const injector = this.resolveInjector("rootState");
+      const injector = this.resolveInjector(key);
       const reset = await injector?.recover?.(signal);
+      this.recoveryFailures.delete(key);
       if (injector && reset) {
         this.resets.push({
-          key: "rootState",
+          key,
           reset,
           isClean: (s) => injector.isClean(s),
         });
       }
     } catch (error) {
-      logger.warn(`[deviceCondition] recovering rootState failed: ${errorMessage(error)}`, error);
+      this.logger.warn(`[deviceCondition] recovering ${key} failed: ${errorMessage(error)}`, error);
+      this.recoveryFailures.set(key, errorMessage(error));
     }
+  }
+
+  private recoveryFailureDetail(key: DeviceConditionKey, message: string): string {
+    return `Could not check the device for an abandoned ${key} fixture (${message}). Reconnect the device and run reset again, or release the session to retry.`;
   }
 
   /**
@@ -190,11 +204,19 @@ export class DeviceConditionController {
     signal?: AbortSignal,
     recoveryAttempted = false,
   ): Promise<DeviceConditionChangeResult> {
-    if (key === "rootState" && !recoveryAttempted) {
-      await this.recoverRootReset(signal);
+    if ((key === "rootState" || key === "faults.memoryPressure") && !recoveryAttempted) {
+      await this.recoverReset(key, signal);
     }
     const entries = this.resets.filter((entry) => entry.key === key);
     if (entries.length === 0) {
+      const recoveryFailure = this.recoveryFailures.get(key);
+      if (recoveryFailure !== undefined) {
+        return {
+          key,
+          status: "unsupported",
+          detail: this.recoveryFailureDetail(key, recoveryFailure),
+        };
+      }
       return { key, status: "unchanged" };
     }
     for (const entry of entries.reverse()) {
@@ -202,10 +224,11 @@ export class DeviceConditionController {
         await entry.reset(signal);
         this.drop(entry);
       } catch (error) {
-        logger.warn(`[deviceCondition] clearing ${key} failed: ${errorMessage(error)}`, error);
+        this.logger.warn(`[deviceCondition] clearing ${key} failed: ${errorMessage(error)}`, error);
         return { key, status: "unsupported", detail: `Failed to clear: ${errorMessage(error)}` };
       }
     }
+    this.recoveryFailures.delete(key);
     return { key, status: "cleared" };
   }
 
@@ -218,7 +241,13 @@ export class DeviceConditionController {
   async restore(signal?: AbortSignal): Promise<DeviceConditionRestoreReport> {
     const restored: DeviceConditionKey[] = [];
     const failures: DeviceConditionRestoreFailure[] = [];
-    await this.recoverRootReset(signal);
+    await this.recoverReset("rootState", signal);
+    await this.recoverReset("faults.memoryPressure", signal);
+    for (const [key, message] of this.recoveryFailures) {
+      if (!this.resets.some((entry) => entry.key === key)) {
+        failures.push({ key, error: this.recoveryFailureDetail(key, message) });
+      }
+    }
     // Reverse order: the last condition applied is undone first.
     for (const entry of [...this.resets].reverse()) {
       try {
@@ -227,18 +256,23 @@ export class DeviceConditionController {
         if (clean) {
           restored.push(entry.key);
           this.drop(entry);
+          this.recoveryFailures.delete(entry.key);
         } else {
           failures.push({ key: entry.key, error: "reset ran but the device did not read clean" });
         }
       } catch (error) {
-        logger.warn(
+        this.logger.warn(
           `[deviceCondition] reset for ${entry.key} failed: ${errorMessage(error)}`,
           error,
         );
         failures.push({ key: entry.key, error: errorMessage(error) });
       }
     }
-    return { restored, failures, verifiedClean: failures.length === 0 && this.resets.length === 0 };
+    return {
+      restored,
+      failures,
+      verifiedClean: failures.length === 0 && !this.hasActiveConditions(),
+    };
   }
 
   private drop(entry: RegisteredReset): void {

@@ -348,6 +348,7 @@ describe("package faults in the request and resolver", () => {
         .deviceCondition,
     );
     expect(deviceCondition).toContain("clearPackageData");
+    expect(deviceCondition).toContain('"memoryPressure"');
     // Reusing one zod instance for two fields emits a $ref the embedded schema cannot resolve.
     expect(deviceCondition).not.toContain("$ref");
   });

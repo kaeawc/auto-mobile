@@ -310,6 +310,30 @@ async function removeMarkedPackage(
   return false;
 }
 
+async function discoverLeftovers(
+  adb: AdbExecutor,
+  owner: RootStateOwner,
+  paths: readonly string[],
+  signal?: AbortSignal,
+): Promise<void> {
+  // Batch package discovery with the file listing: a clean device needs one shell read.
+  const existing = owner.held.has(owner.packageArtifact)
+    ? await listExisting(adb, paths, signal)
+    : new Set(
+        (
+          await shell(
+            adb,
+            ["ls", ...paths, "2>/dev/null;", "pm", "list", "packages", MAGISK_PACKAGE],
+            signal,
+          )
+        )
+          .split("\n")
+          .filter((line) => line !== ""),
+      );
+  const markedPackage = await readMarkedPackage(adb, owner.packageArtifact, existing, signal);
+  await recoverRootArtifacts({ adb, owner, existing, signal, markedPackage });
+}
+
 async function probeLeftovers(
   adb: AdbExecutor,
   owner: RootStateOwner,
@@ -317,24 +341,9 @@ async function probeLeftovers(
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    // Batch package discovery with the file listing: a clean device needs one shell read.
-    const existing = owner.held.has(owner.packageArtifact)
-      ? await listExisting(adb, paths, signal)
-      : new Set(
-          (
-            await shell(
-              adb,
-              ["ls", ...paths, "2>/dev/null;", "pm", "list", "packages", MAGISK_PACKAGE],
-              signal,
-            )
-          )
-            .split("\n")
-            .filter((line) => line !== ""),
-        );
-    const markedPackage = await readMarkedPackage(adb, owner.packageArtifact, existing, signal);
-    await recoverRootArtifacts({ adb, owner, existing, signal, markedPackage });
+    await discoverLeftovers(adb, owner, paths, signal);
   } catch (error) {
-    // Discovery is optional; no ownership is acquired until every content read succeeds.
+    // The reset sweep is best-effort; cleanup still runs for artifacts already owned.
     logger.warn(`rootState recovery probe failed: ${errorMessage(error)}`, error);
   }
 }
@@ -423,7 +432,7 @@ export function createRootStateInjector(
     if (active) {
       return null;
     }
-    await probeLeftovers(adb, owner, ROOT_ARTIFACT_PATHS, signal);
+    await discoverLeftovers(adb, owner, ROOT_ARTIFACT_PATHS, signal);
     return held.size > 0 || selinux.has(selinuxToken)
       ? (resetSignal?: AbortSignal) => reset(resetSignal, false)
       : null;

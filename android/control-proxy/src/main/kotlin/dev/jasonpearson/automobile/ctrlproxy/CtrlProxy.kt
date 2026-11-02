@@ -432,12 +432,12 @@ class CtrlProxy : AccessibilityService() {
   internal val hostPrototypeHttp =
     HostPrototypeHttpClient(
       PrototypeHostLink { frame ->
-        if (::webSocketServer.isInitialized) webSocketServer.sendToHost(frame) else null
+        webSocketServerOrNull?.sendToHost(frame)
       },
       cancelLink = { target, frame ->
         // A connection that has since closed is skipped by sendToClient.
-        if (::webSocketServer.isInitialized && target is WebSocketServer.ConnectedClient) {
-          webSocketServer.sendToClient(target, frame)
+        if (target is WebSocketServer.ConnectedClient) {
+          webSocketServerOrNull?.sendToClient(target, frame)
         }
       },
     )
@@ -468,7 +468,7 @@ class CtrlProxy : AccessibilityService() {
     PrototypeAssetStore(
       PrototypeAssetDirectory(File(cacheDir, "prototype-assets")),
       session = {
-        if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
+        webSocketObserverGeneration()
       },
       fileWorker = Dispatchers.IO.asExecutor(),
     )
@@ -788,7 +788,7 @@ class CtrlProxy : AccessibilityService() {
           override fun connectionCount() = webSocketServer.getConnectionCount()
 
           override fun releaseRequestOwner(requestId: String?) {
-            if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
+            webSocketServerOrNull?.releaseRequestOwner(requestId)
           }
 
           override suspend fun broadcastHierarchyWithPerf(
@@ -848,11 +848,9 @@ class CtrlProxy : AccessibilityService() {
     InteractionEventController(
       host =
         object : InteractionEventController.Host {
-          override fun connectionCount() =
-            if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+          override fun connectionCount() = webSocketConnectionCount()
 
-          override fun observerSessionGeneration() =
-            if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
+          override fun observerSessionGeneration() = webSocketObserverGeneration()
 
           override fun isServerRunning() = isWebSocketRunning()
 
@@ -1184,8 +1182,7 @@ class CtrlProxy : AccessibilityService() {
 
         override fun advanceFrameContext() = frameContextGate.advance()
 
-        override fun connectionCount() =
-          if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+        override fun connectionCount() = webSocketConnectionCount()
 
         override fun recordInteraction(event: AccessibilityEvent, dispatch: InteractionDispatch) =
           interactionEventController.record(event, dispatch)
@@ -1553,6 +1550,13 @@ class CtrlProxy : AccessibilityService() {
 
   /** Whether the WebSocket server exists and is accepting connections. */
   internal fun isWebSocketRunning(): Boolean = webSocketServerOrNull?.isRunning() == true
+
+  /** Connected clients; zero before the WebSocket server exists. */
+  internal fun webSocketConnectionCount(): Int = webSocketServerOrNull?.getConnectionCount() ?: 0
+
+  /** The observer session generation; zero before the WebSocket server exists. */
+  internal fun webSocketObserverGeneration(): Int =
+    webSocketServerOrNull?.observerSessionGeneration() ?: 0
 
   /**
    * The storage subscription manager once [onServiceConnected] has created it; null before then.

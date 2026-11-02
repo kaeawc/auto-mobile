@@ -26,7 +26,10 @@ export interface DeviceClaim {
   updatedAtMs: number;
 }
 
-/** The row a compare-and-set judged: its owner and the write that put it there. */
+/**
+ * The row a compare-and-set judged: its owner and the write that put it there. Two writes by one
+ * owner within the same millisecond share `updatedAtMs`, so they are not told apart.
+ */
 export type DeviceClaimVersion = Pick<DeviceClaim, "pid" | "ownerToken" | "updatedAtMs">;
 
 /** The host-wide `device_claims` table: it decides Android and iOS claims (#11811 step d). */
@@ -494,12 +497,11 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
       return;
     }
     if (held && !ours && (await this.heldByLiveForeignOwner(held, intent))) {
-      // The table names a live owner the claim files did not: it keeps the row (#11811 step d).
-      logger.warn(
-        `[DeviceClaims] Not recording the claim on ${deviceId}: the host-wide table names live owner pid ${held.pid}`,
+      // The table names a live owner the claim files did not (#11811 step d): it keeps the row for
+      // now, and a retry records this claim once that row is gone. The file still decides it.
+      throw new Error(
+        `the row names live owner pid ${held.pid}; the claim file decides this claim until it is gone`,
       );
-      this.dropIntent(deviceId, intent);
-      return;
     }
     // A compare-and-set, never a blind write: a row that changed since it was read is re-judged.
     if (!(await store.replaceIf(held, this.claimRowFor(deviceId, intent, held)))) {

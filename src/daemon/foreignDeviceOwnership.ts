@@ -570,6 +570,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       this.owners.set(deviceId, decision.ownerPid);
       return false;
     }
+    // "unpublished" (no writable claim directory) is the pre-claims fallback: the table alone decides.
     if ((await this.claimFile(deviceId, owner)) === "refused") {
       // A daemon deciding by the files took the device meanwhile: give the table's claim back.
       this.claimMirror?.released(deviceId, owner);
@@ -681,7 +682,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
 
   release(deviceId: string): void {
     const owner = { pid: this.selfPid, ownerToken: this.ownerToken };
-    // A table-decided claim has no file; the table row goes either way (#11811 step d).
+    // The table row and the claim file both go (#11811 step d).
     this.claimMirror?.released(deviceId, owner);
     const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
     if (path === undefined) {

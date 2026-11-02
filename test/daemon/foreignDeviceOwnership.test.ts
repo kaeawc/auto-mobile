@@ -909,7 +909,7 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
   });
 
-  test("a claim the files decided while the table was unavailable never displaces a live table owner", async () => {
+  test("a claim the files decided while the table was unavailable never displaces a live table owner, and is recorded once that row is gone", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const files = new FakeOwnershipFiles();
@@ -937,7 +937,7 @@ describe("the host-wide claims mirror (#11811 b)", () => {
         store: () => (open ? store : undefined),
         timer,
         generationOf: () => undefined,
-        retryDelaysMs: [10],
+        retryDelaysMs: [10, 10],
       });
       ownership.attachClaimMirror(mirror);
       expect(await ownership.claim(DEVICE)).toBe(true);
@@ -946,6 +946,12 @@ describe("the host-wide claims mirror (#11811 b)", () => {
       timer.advanceTime(10);
       await mirror.idle();
       expect((await store.get("android", DEVICE))?.pid).toBe(PEER_PID);
+
+      // The peer releases: the next retry records the claim the file decided.
+      await store.release("android", DEVICE, { pid: PEER_PID, ownerToken: "peer-token" });
+      timer.advanceTime(10);
+      await mirror.idle();
+      expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
     } finally {
       warn.mockRestore();
     }

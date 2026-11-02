@@ -636,11 +636,6 @@ struct StyleWhen: Decodable {
     let style: Style
 }
 
-/// The image's pinch, pan and double-tap zoom bounds, validated by the shared contract.
-struct PrototypeImageZoomable: Decodable {
-    let maxScale: Double
-}
-
 struct PrototypeRouteEntry: Decodable, Sendable {
     let screen: String
     let params: [String: JSONValue]?

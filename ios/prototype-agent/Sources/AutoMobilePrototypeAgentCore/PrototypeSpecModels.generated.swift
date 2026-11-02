@@ -170,6 +170,11 @@ struct Animate: Codable, Equatable, Sendable {
     let tempo: String?
 }
 
+/// An image's zoom range: 1 up to `maxScale` (1..8).
+struct PrototypeImageZoomable: Decodable {
+    let maxScale: Double
+}
+
 struct RadioOption: Codable, Equatable, Sendable {
     let value: String
     let label: String

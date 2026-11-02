@@ -26,6 +26,7 @@ import {
 import { isStabilityDiffEmpty } from "../../observe/SettleObserve";
 import { SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS } from "../notificationHints";
 import type { SystemTrayCall, SystemTrayNotificationArgs } from "../systemTrayTypes";
+import { hasIosAppNotificationCoverSheet } from "../IosNotificationUIDetector";
 import { getDetector, getSystemTrayDependencies, type SystemTrayObserver } from "./dependencies";
 import {
   collectNotificationCandidates,
@@ -37,6 +38,10 @@ import { findBestNotificationMatch } from "./matching";
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 
 export const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
+
+// A slow first extraction can exhaust the timeout before iOS lock state settles.
+// Guarantee at most two supplemental reads over an app, without repeating the swipe.
+const IOS_APP_TRAY_MIN_OPEN_OBSERVATIONS = 3;
 
 // When waiting for a notification, re-issue the shade expand (at most this often) if the
 // shade is found closed. A high-importance notification that re-posts (e.g. a persistent
@@ -217,34 +222,59 @@ export const waitForSystemTrayOpen = async (
   throwIfAborted(signal);
   let observation = await observeSystemTray(observeScreen, minTimestamp, signal);
 
-  while (timer.now() - startTime < awaitTimeoutMs) {
+  const isIosAppObservation = (candidate: ObserveResult): boolean => {
+    const packageName = candidate.viewHierarchy?.packageName;
+    return (
+      detector.device.platform === "ios" && !!packageName && !packageName.includes("springboard")
+    );
+  };
+  const minimumObservations = isIosAppObservation(observation)
+    ? IOS_APP_TRAY_MIN_OPEN_OBSERVATIONS
+    : 1;
+  let observations = 1;
+  while (timer.now() - startTime < awaitTimeoutMs || observations < minimumObservations) {
     throwIfAborted(signal);
-    if (detector.isTrayOpen(observation.viewHierarchy)) {
+    if (detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)) {
       return observation;
     }
+    const remainingMs = awaitTimeoutMs - (timer.now() - startTime);
     await sleep(
-      Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, awaitTimeoutMs - (timer.now() - startTime)),
+      remainingMs > 0
+        ? Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs)
+        : SYSTEM_TRAY_POLL_INTERVAL_MS,
       signal,
     );
     throwIfAborted(signal);
+    if (isIosAppObservation(observation)) {
+      // A settling unlocked read can otherwise stay cached throughout these retries.
+      detector.invalidateLockState?.();
+    }
     observation = await observeSystemTray(observeScreen, minTimestamp, signal);
+    observations++;
   }
 
   return observation;
 };
 
 const waitForSystemTrayClosed = async (
-  detector: NotificationUIDetector,
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
-  { awaitTimeoutMs, signal }: { awaitTimeoutMs: number; signal?: AbortSignal },
+  {
+    awaitTimeoutMs,
+    signal,
+    isClosed,
+  }: {
+    awaitTimeoutMs: number;
+    signal?: AbortSignal;
+    isClosed: (observation: ObserveResult) => boolean;
+  },
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
   let observation = await observeSystemTray(observeScreen, minTimestamp, signal);
 
   while (timer.now() - startTime < awaitTimeoutMs) {
-    if (!detector.isTrayOpen(observation.viewHierarchy)) {
+    if (isClosed(observation)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS, signal);
@@ -281,7 +311,7 @@ export const ensureSystemTrayOpen = async (
     minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
     observation =
       initialObservation ?? (await observeSystemTray(observeScreen, minTimestamp, signal));
-    if (detector.isTrayOpen(observation.viewHierarchy)) {
+    if (detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)) {
       return { observation, opened: false, skipped: true, minTimestamp };
     }
   }
@@ -296,7 +326,10 @@ export const ensureSystemTrayOpen = async (
 
   return {
     observation: awaitedObservation ?? observation,
-    opened: detector.isTrayOpen((awaitedObservation ?? observation)?.viewHierarchy),
+    opened: detector.isTrayOpen(
+      (awaitedObservation ?? observation)?.viewHierarchy,
+      (awaitedObservation ?? observation)?.deviceLock,
+    ),
     skipped: false,
     minTimestamp,
   };
@@ -319,21 +352,46 @@ export const ensureSystemTrayClosed = async (
 
   let minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
   const observation = await observeSystemTray(observeScreen, minTimestamp, signal);
-  if (!detector.isTrayOpen(observation.viewHierarchy)) {
+  if (!detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)) {
     return { observation, closed: false, skipped: true, minTimestamp };
   }
+
+  const appCoverSheetPackage =
+    device.platform === "ios" &&
+    hasIosAppNotificationCoverSheet(observation.viewHierarchy, observation.deviceLock)
+      ? observation.viewHierarchy?.packageName
+      : undefined;
+  const isClosed = (candidate: ObserveResult): boolean => {
+    if (detector.isTrayOpen(candidate.viewHierarchy, candidate.deviceLock)) {
+      return false;
+    }
+    if (!appCoverSheetPackage) {
+      return true;
+    }
+    // Absence of tray nodes is insufficient in an app-owned tree. Both lock
+    // flags and both foreground identities must confirm return to the app/home.
+    const isRestoredApp = (appId?: string) =>
+      appId === appCoverSheetPackage || appId === "com.apple.springboard";
+    return (
+      candidate.deviceLock?.locked === false &&
+      candidate.deviceLock.keyguardShowing === false &&
+      isRestoredApp(candidate.activeWindow?.appId) &&
+      isRestoredApp(candidate.viewHierarchy?.packageName)
+    );
+  };
 
   await collapseSystemTray(detector, observation, signal);
   minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
 
-  const awaitedObservation = await waitForSystemTrayClosed(detector, observeScreen, minTimestamp, {
+  const awaitedObservation = await waitForSystemTrayClosed(observeScreen, minTimestamp, {
     awaitTimeoutMs,
     signal,
+    isClosed,
   });
 
   return {
     observation: awaitedObservation ?? observation,
-    closed: !detector.isTrayOpen((awaitedObservation ?? observation).viewHierarchy),
+    closed: isClosed(awaitedObservation ?? observation),
     skipped: false,
     minTimestamp,
   };
@@ -429,7 +487,7 @@ export const waitForNotificationMatch = async (
   while (true) {
     throwIfAborted(signal);
     const viewHierarchy = observation.viewHierarchy;
-    if (viewHierarchy && detector.isTrayOpen(viewHierarchy)) {
+    if (viewHierarchy && detector.isTrayOpen(viewHierarchy, observation.deviceLock)) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
         return { observation, match };

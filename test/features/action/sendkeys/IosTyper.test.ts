@@ -75,6 +75,114 @@ function harness() {
 
 const longText = "a".repeat(3 * IOS_TEXT_CHUNK_CODE_POINTS + IOS_TEXT_CHUNK_CODE_POINTS / 2);
 
+test("the first chunk replaces selected text and the remaining chunk is sent", async () => {
+  const h = harness();
+  h.state.value = "prefixSELECTEDsuffix";
+  const text = "😀".repeat(1500);
+  const insert = h.deps.insert;
+  h.deps.insert = async (chunk, options) => {
+    const result = await insert(chunk, options);
+    if (h.inserts.length === 1) {
+      h.state.value = `prefix${chunk}suffix`;
+    }
+    return result;
+  };
+  expect(await h.typer.executeIosType(text, "insert")).toEqual({
+    success: true,
+    resolvedMode: "xcuiTypeText",
+  });
+  expect(h.inserts.map(({ text: chunk }) => Array.from(chunk).length)).toEqual([1000, 500]);
+  expect(h.inserts.map(({ text: chunk }) => chunk).join("")).toBe(text);
+  expect(h.state.value).toBe(`prefix${"😀".repeat(1000)}suffix${"😀".repeat(500)}`);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test.each(["missing character", "altered prefix"])(
+  "a first-chunk selection replacement with a %s still fails",
+  async (mismatch) => {
+    const h = harness();
+    h.state.value = "prefixSELECTEDsuffix";
+    const insert = h.deps.insert;
+    h.deps.insert = async (chunk, options) => {
+      const result = await insert(chunk, options);
+      h.state.value =
+        mismatch === "missing character" ? `prefix${chunk.slice(1)}suffix` : `Prefix${chunk}suffix`;
+      return result;
+    };
+    const result = await h.typer.executeIosType("a".repeat(1500), "insert");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not fully appended");
+    expect(result.error).toContain("chunk 1 of 2 failed; 0 code points committed");
+    expect(h.inserts).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  },
+);
+
+test("a later chunk replacing text still fails verification", async () => {
+  const h = harness();
+  h.state.value = "prefixSELECTEDsuffix";
+  const insert = h.deps.insert;
+  h.deps.insert = async (chunk, options) => {
+    const before = h.state.value;
+    const result = await insert(chunk, options);
+    if (h.inserts.length === 2) {
+      h.state.value = before.replace("SELECTED", chunk);
+    }
+    return result;
+  };
+  const result = await h.typer.executeIosType(longText, "insert");
+  expect(result).toMatchObject({ success: false, partialApplication: true, retryable: false });
+  expect(result.error).toContain("not fully appended");
+  expect(result.error).toContain("chunk 2 of 4 failed; 1000 code points committed");
+  expect(h.inserts).toHaveLength(2);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+for (const operation of ["insert", "replace"] as const) {
+  test.each([2, 3])(
+    `${operation} reports committed progress when chunk %s throws`,
+    async (failed) => {
+      const h = harness();
+      const insert = h.deps.insert;
+      let markedPartial = 0;
+      h.deps.markPartialAfterMutation = (result) => {
+        markedPartial++;
+        return markPartialAfterMutation(result);
+      };
+      h.deps.insert = async (chunk, options) => {
+        if (h.inserts.length + 1 === failed) {
+          h.inserts.push({ text: chunk, options });
+          throw new Error("page navigated during typing");
+        }
+        return insert(chunk, options);
+      };
+      const result = await h.typer.executeIosType(longText, operation);
+      expect(result).toMatchObject({ success: false, partialApplication: true, retryable: false });
+      expect(result.error).toBe(
+        `page navigated during typing iOS chunk ${failed} of 4 failed; ${(failed - 1) * 1000} code points committed in fully successful chunks.`,
+      );
+      expect(h.inserts).toHaveLength(failed);
+      expect(h.state.value).toBe("a".repeat((failed - 1) * 1000));
+      expect(markedPartial).toBe(operation === "replace" ? 1 : 0);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  test(`${operation} still throws when the first chunk insert throws`, async () => {
+    const h = harness();
+    h.deps.insert = async (text, options) => {
+      h.inserts.push({ text, options });
+      throw new Error("first insert failed");
+    };
+    await expect(h.typer.executeIosType(longText, operation)).rejects.toThrow(
+      "first insert failed",
+    );
+    expect(h.inserts).toHaveLength(1);
+    expect(h.state.value).toBe("");
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+}
+
 test("single-chunk insert retains the transport warning", async () => {
   const h = harness();
   const insert = h.deps.insert;

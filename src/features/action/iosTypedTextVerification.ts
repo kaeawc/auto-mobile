@@ -56,16 +56,22 @@ export const IOS_FOCUSED_VALUE_READ_WINDOW = 512;
 
 const IOS_FOCUSED_VALUE_READ_WINDOW_WARNING = `iOS typed text result was not verified: the focused field value fills the ${IOS_FOCUSED_VALUE_READ_WINDOW}-character read window, so a change past it cannot be seen.`;
 
-/** Full insertion at any caret position, preserving all previously observed text. */
-function isIosChunkInsertion(text: string, before: string, after: string): boolean {
-  if (after.length !== before.length + text.length) {
+/** Full insertion at any caret position; only the first chunk may replace selected text. */
+function isIosChunkInsertion(
+  text: string,
+  before: string,
+  after: string,
+  firstChunk: boolean,
+): boolean {
+  const replacedLength = before.length + text.length - after.length;
+  if (replacedLength < 0 || (!firstChunk && replacedLength !== 0)) {
     return false;
   }
   for (let index = after.indexOf(text); index !== -1; index = after.indexOf(text, index + 1)) {
     if (after.slice(0, index) !== before.slice(0, index)) {
       return false;
     }
-    if (after.slice(index + text.length) === before.slice(index)) {
+    if (after.slice(index + text.length) === before.slice(index + replacedLength)) {
       return true;
     }
   }
@@ -76,6 +82,7 @@ function compareIosChunkAppend(
   text: string,
   before: string,
   after: string,
+  firstChunk: boolean,
 ): IosTypedTextVerificationResult {
   // An exact window may hide the append, including the chunk that first fills it.
   // Wider readable values still allow the full insertion check below.
@@ -92,7 +99,7 @@ function compareIosChunkAppend(
     };
   }
   // A suffix alone is insufficient: earlier repeated characters can hide a partial append.
-  return isIosChunkInsertion(text, before, after)
+  return isIosChunkInsertion(text, before, after, firstChunk)
     ? { success: true }
     : {
         success: false,
@@ -100,19 +107,31 @@ function compareIosChunkAppend(
       };
 }
 
+export interface IosTypedTextVerificationOptions {
+  verifyAppend: boolean;
+  firstChunk?: boolean;
+}
+
 /** Literal Unicode characters in order; intervening mask characters are allowed. */
 export function compareIosTypedText(
   text: string,
   before: FocusedTextField = { secure: false },
   after: FocusedTextField = { secure: false },
-  verifyAppend = false,
+  options: boolean | IosTypedTextVerificationOptions = false,
 ): IosTypedTextVerificationResult {
   if (before.secure || after.secure) {
     return { success: true, warning: "iOS typed text check skipped for a secure field." };
   }
+  const verifyAppend = typeof options === "boolean" ? options : options.verifyAppend;
   return (
-    (verifyAppend ? compareIosChunkField(text, before, after) : undefined) ??
-    compareIosNonSecureTypedText(text, before, after)
+    (verifyAppend
+      ? compareIosChunkField(
+          text,
+          before,
+          after,
+          typeof options !== "boolean" && options.firstChunk === true,
+        )
+      : undefined) ?? compareIosNonSecureTypedText(text, before, after)
   );
 }
 
@@ -120,6 +139,7 @@ function compareIosChunkField(
   text: string,
   before: FocusedTextField,
   after: FocusedTextField,
+  firstChunk: boolean,
 ): IosTypedTextVerificationResult | undefined {
   if (
     before.identity !== undefined &&
@@ -138,13 +158,13 @@ function compareIosChunkField(
       (id) =>
         Object.hasOwn(nativeAfter, id) &&
         nativeBefore[id] !== nativeAfter[id] &&
-        isIosChunkInsertion(text, nativeBefore[id], nativeAfter[id]),
+        isIosChunkInsertion(text, nativeBefore[id], nativeAfter[id], firstChunk),
     )
   ) {
     return { success: true };
   }
   if (before.value !== undefined && after.value !== undefined && !isIosTokenField(before, after)) {
-    return compareIosChunkAppend(text, before.value, after.value);
+    return compareIosChunkAppend(text, before.value, after.value, firstChunk);
   }
   return undefined;
 }
@@ -366,14 +386,15 @@ export async function verifyIosTypedText(
   text: string,
   before: FocusedTextField | undefined,
   read: IosTypedTextRead,
-  verifyAppend = false,
+  options: boolean | IosTypedTextVerificationOptions = false,
 ): Promise<IosTypedTextVerificationResult & { after: FocusedTextField | undefined }> {
   const { timer, signal } = read;
+  const verifyAppend = typeof options === "boolean" ? options : options.verifyAppend;
   if (before?.secure && !verifyAppend) {
     return { ...compareIosTypedText(text, before, undefined), after: before };
   }
   let after = await readIosTypedTextField(read, { includeIdentity: verifyAppend });
-  let result = compareIosTypedText(text, before, after, verifyAppend);
+  let result = compareIosTypedText(text, before, after, options);
   // A recipient/token field can settle after the keystrokes land; re-read it, bounded, before
   // reporting that nothing was typed.
   const settleDeadline = timer.now() + IOS_TOKEN_SETTLE_MAX_MS;
@@ -385,7 +406,7 @@ export async function verifyIosTypedText(
       { includeIdentity: verifyAppend },
       Math.max(0, settleDeadline - timer.now()),
     );
-    result = compareIosTypedText(text, before, after, verifyAppend);
+    result = compareIosTypedText(text, before, after, options);
   }
   return { ...result, after };
 }

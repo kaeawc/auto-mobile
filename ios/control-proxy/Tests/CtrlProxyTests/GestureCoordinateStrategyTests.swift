@@ -75,6 +75,62 @@ final class GestureCoordinateStrategyTests: XCTestCase {
         XCTAssertTrue(hasMultiPanelMismatch(app: GestureSize(width: 679.001, height: 466), screen: folded.screen))
     }
 
+    func testFullFrameAppKeepsSinglePanelReason() {
+        let geometry = GestureCoordinateGeometry(
+            app: folded.screen, screen: folded.screen, observation: folded.screen, rotation: 0,
+            appOrigin: .zero, screenOrigin: .zero, applicationDisplayId: nil
+        )
+        let selection = GestureCoordinateSelection.choose(point: .zero, geometry: geometry)
+        XCTAssertEqual(selection.reason, "singlePanel")
+        XCTAssertEqual(selection.strategy, .legacy)
+    }
+
+    func testLetterboxedMainScreenSelectionUsesExplicitReason() {
+        let size = GestureSize(width: 375, height: 667)
+        let point = GesturePoint(x: 187, y: 333)
+        for displayId in [UInt64?.none, 0] {
+            let geometry = GestureCoordinateGeometry(
+                app: size, screen: folded.screen, observation: size, rotation: 0,
+                appOrigin: .zero, applicationDisplayId: displayId
+            )
+            let selection = GestureCoordinateSelection.choose(point: point, geometry: geometry)
+            XCTAssertFalse(geometry.multiPanelMismatch)
+            XCTAssertEqual(selection.strategy, .legacy)
+            XCTAssertEqual(selection.reason, "appOnMainScreen")
+            XCTAssertEqual(selection.offset, point)
+            XCTAssertFalse(selection.isForced)
+            let forced = GestureCoordinateSelection.choose(point: point, geometry: geometry, forced: .legacy)
+            XCTAssertEqual(forced.reason, "forced")
+            XCTAssertTrue(forced.isForced)
+        }
+    }
+
+    func testMainScreenRuleRequiresMatchingOriginAndNoWindowTranslation() throws {
+        let size = GestureSize(width: 375, height: 585)
+        let translation = try XCTUnwrap(windowedAppTranslation(
+            appOrigin: .zero, appSize: size, windowOrigin: GesturePoint(x: 230, y: 255), windowSize: size
+        ))
+        let windowed = GestureCoordinateGeometry(
+            app: size, screen: GestureSize(width: 834, height: 1210), observation: size, rotation: 0,
+            appOrigin: .zero, windowTranslation: translation
+        )
+        let selection = GestureCoordinateSelection.choose(point: .zero, geometry: windowed)
+        XCTAssertTrue(windowed.multiPanelMismatch)
+        XCTAssertEqual(selection.strategy, .legacy)
+        XCTAssertEqual(selection.reason, "mappingUndefined(rotation=0,geometryOrPoint)")
+        XCTAssertEqual(selection.windowTranslation(translation), translation)
+        for origin in [GesturePoint?.none, GesturePoint(x: 10, y: 20), GesturePoint(x: .nan, y: 0)] {
+            let geometry = GestureCoordinateGeometry(
+                app: size, screen: folded.screen, observation: size, rotation: 0, appOrigin: origin
+            )
+            XCTAssertTrue(geometry.multiPanelMismatch)
+            XCTAssertEqual(
+                GestureCoordinateSelection.choose(point: .zero, geometry: geometry).reason,
+                "mappingUndefined(rotation=0,geometryOrPoint)"
+            )
+        }
+    }
+
     func testCapturedUnfoldedPointMapsToInnerPortraitFrame() throws {
         let mapped = try XCTUnwrap(GestureCoordinateSelection.mappedOffset(
             point: GesturePoint(x: 443, y: 202), geometry: unfolded, strategy: .appRelative

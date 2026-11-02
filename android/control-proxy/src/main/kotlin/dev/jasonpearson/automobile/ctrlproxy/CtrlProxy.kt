@@ -276,7 +276,7 @@ class CtrlProxy : AccessibilityService() {
     ServiceScopeGuard(
       emitScope = { serviceScope },
       broadcastResponse = { response ->
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+        if (isWebSocketRunning()) {
           webSocketServer.broadcast(response)
         }
       },
@@ -317,7 +317,7 @@ class CtrlProxy : AccessibilityService() {
     AsyncActionRunner(
       scope = serviceScope,
       broadcastResponse = { response ->
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+        if (isWebSocketRunning()) {
           webSocketServer.broadcast(response)
         }
       },
@@ -336,7 +336,7 @@ class CtrlProxy : AccessibilityService() {
   internal val resultBroadcaster =
     ResultBroadcaster(
       broadcastError = { response ->
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+        if (isWebSocketRunning()) {
           webSocketServer.broadcast(response)
         }
       },
@@ -348,32 +348,12 @@ class CtrlProxy : AccessibilityService() {
    */
   private val hierarchyExtractFrames =
     HierarchyExtractFrameSender(
-      transport =
-        object : HierarchyExtractFrameSender.Transport {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override suspend fun broadcastExternallyCorrelated(frame: ErrorResponse) =
-            webSocketServer.broadcastExternallyCorrelatedResponse(frame)
-
-          override suspend fun broadcast(frame: ErrorResponse) = webSocketServer.broadcast(frame)
-        },
+      transport = hierarchyExtractTransport(),
       resultBroadcaster = resultBroadcaster,
     )
   private val resultSender: ResultSender =
     GuardedResultSender(
-      transport =
-        object : GuardedResultSender.Transport {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-          override fun flushPerfTiming() = perfProvider.flush()
-
-          override suspend fun sendFrame(frame: String) = webSocketServer.broadcast(frame)
-
-          override suspend fun send(response: WebSocketResponse) =
-            webSocketServer.broadcast(response)
-
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+      transport = guardedResultTransport(),
       resultBroadcaster = resultBroadcaster,
     )
   private val recompositionStore = RecompositionStore()
@@ -414,25 +394,13 @@ class CtrlProxy : AccessibilityService() {
   }
   private val jsonLenient = Json { ignoreUnknownKeys = true }
 
-  private val perfProvider = PerfProvider.instance
+  internal val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
   internal lateinit var webSocketServer: WebSocketServer
   internal val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
   internal val deviceEvents =
     DeviceEventBroadcaster(
-      object : DeviceEventTransport {
-        override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-        override fun connectionCount() = webSocketServer.getConnectionCount()
-
-        override suspend fun broadcast(message: String) = webSocketServer.broadcast(message)
-
-        override suspend fun broadcast(
-          response: WebSocketResponse,
-          mode: WebSocketServer.BroadcastMode,
-          waitForClient: Boolean,
-        ) = webSocketServer.broadcast(response, mode, waitForClient)
-      },
+      deviceEventTransport(),
       timeProvider,
     )
   private lateinit var rotationProvenance: RotationProvenanceTracker
@@ -489,14 +457,7 @@ class CtrlProxy : AccessibilityService() {
   }
   internal val prototypeResultSink =
     PrototypeResultBroadcaster(
-      object : PrototypeResultTransport {
-        override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
-
-        override suspend fun broadcastFrame(buildFrame: () -> String) =
-          webSocketServer.broadcastWithPerf { _ ->
-            buildFrame()
-          }
-      },
+      prototypeResultTransport(),
       resultBroadcaster,
       AndroidPrototypeScreenShapeSource(this),
     )
@@ -577,7 +538,7 @@ class CtrlProxy : AccessibilityService() {
     ScreenshotRequestHandler(
       host =
         object : ScreenshotRequestHandler.Host {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+          override fun isRunning() = isWebSocketRunning()
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
 
@@ -716,7 +677,7 @@ class CtrlProxy : AccessibilityService() {
       timeProvider = timeProvider,
       responseSender =
         object : StorageController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+          override fun isRunning() = isWebSocketRunning()
 
           override suspend fun broadcast(message: String) {
             webSocketServer.broadcast(message)
@@ -822,8 +783,7 @@ class CtrlProxy : AccessibilityService() {
 
           override fun accessibilityTool() = deviceInfoController.getAccessibilityTool()
 
-          override fun isServerRunning() =
-            ::webSocketServer.isInitialized && webSocketServer.isRunning()
+          override fun isServerRunning() = isWebSocketRunning()
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
 
@@ -894,8 +854,7 @@ class CtrlProxy : AccessibilityService() {
           override fun observerSessionGeneration() =
             if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
 
-          override fun isServerRunning() =
-            ::webSocketServer.isInitialized && webSocketServer.isRunning()
+          override fun isServerRunning() = isWebSocketRunning()
 
           override suspend fun broadcast(message: String) {
             webSocketServer.broadcast(message)
@@ -1087,7 +1046,7 @@ class CtrlProxy : AccessibilityService() {
             )
 
           override fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
-            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+            if (isWebSocketRunning()) {
               serviceScope.launch { webSocketServer.broadcast(result) }
             }
           }
@@ -1292,7 +1251,7 @@ class CtrlProxy : AccessibilityService() {
       jsonLenient = jsonLenient,
       frameMetricsStore = frameMetricsStore,
       scope = serviceScope,
-      isRunning = { ::webSocketServer.isInitialized && webSocketServer.isRunning() },
+      isRunning = { isWebSocketRunning() },
       broadcast = { response -> webSocketServer.broadcast(response) },
     )
 
@@ -1382,8 +1341,7 @@ class CtrlProxy : AccessibilityService() {
           prototypeController.onDisplayTransition(displayId, removed)
         }
 
-        override fun isServerRunning() =
-          ::webSocketServer.isInitialized && webSocketServer.isRunning()
+        override fun isServerRunning() = isWebSocketRunning()
 
         override suspend fun broadcast(frame: String) = webSocketServer.broadcast(frame)
       },
@@ -1593,6 +1551,9 @@ class CtrlProxy : AccessibilityService() {
   internal val webSocketServerOrNull: WebSocketServer?
     get() = if (::webSocketServer.isInitialized) webSocketServer else null
 
+  /** Whether the WebSocket server exists and is accepting connections. */
+  internal fun isWebSocketRunning(): Boolean = webSocketServerOrNull?.isRunning() == true
+
   /**
    * The storage subscription manager once [onServiceConnected] has created it; null before then.
    */
@@ -1618,9 +1579,7 @@ class CtrlProxy : AccessibilityService() {
           ConnectionReplyDependencies(
             reply = ::replyToQueuedCommand,
             hasRequestOwner = { requestId ->
-              ::webSocketServer.isInitialized &&
-                webSocketServer.isRunning() &&
-                webSocketServer.hasRequestOwner(requestId)
+              isWebSocketRunning() && webSocketServer.hasRequestOwner(requestId)
             },
           ),
         logging =
@@ -1645,7 +1604,7 @@ class CtrlProxy : AccessibilityService() {
     response: WebSocketResponse,
     routing: QueuedReplyRouting,
   ) {
-    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+    if (isWebSocketRunning()) {
       if (
         routing == QueuedReplyRouting.OWNER &&
           requestId != null &&

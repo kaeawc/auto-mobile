@@ -5,6 +5,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { readToolResponse, toolIsError, toolStructured, toolText } from "../helpers/toolResponse";
 import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
+import { underRequestDeadline } from "../helpers/requestDeadline";
 import { afterEach, describe, expect, spyOn } from "bun:test";
 import {
   type InteractionToolDependencies,
@@ -153,8 +154,9 @@ describe("tapAnyHandler (registered handler wiring)", () => {
           return fakeResult({ success: true });
         },
       });
-      const internalArgs = { ...args, __mcpRequestDeadlineMs: deadline };
-      await tapAnyHandler(fakeDevice, internalArgs, { deps: interactionDeps });
+      await underRequestDeadline({ deadlineMs: deadline }, () =>
+        tapAnyHandler(fakeDevice, args, { deps: interactionDeps }),
+      );
       expect(received).toBe(deadline);
     },
   );
@@ -167,12 +169,13 @@ describe("tapAnyHandler (registered handler wiring)", () => {
     const action = new TapAnyElement(device, adb, { timer });
     interactionDeps.tapAnyElementFactory = () => action;
 
-    const internalArgs = {
-      action: "longPress" as const,
-      duration: 20000,
-      __mcpRequestDeadlineMs: timer.now() + 5000,
-    };
-    const response = await tapAnyHandler(device, internalArgs, { deps: interactionDeps });
+    const response = await underRequestDeadline({ deadlineMs: timer.now() + 5000 }, () =>
+      tapAnyHandler(
+        device,
+        { action: "longPress" as const, duration: 20000 },
+        { deps: interactionDeps },
+      ),
+    );
     const error =
       "Failed to tap clickable element: longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started. Increase the request timeout or use a shorter duration.";
     expect(toolIsError(response)).toBe(true);
@@ -378,9 +381,9 @@ describe("rotateHandler (registered handler wiring)", () => {
       receivedOptions = options;
       return { execute: async () => fakeResult({ success: true }) };
     };
-    const internalArgs = { ...args, __mcpRequestDeadlineMs: 12345 };
-
-    await rotateHandler(fakeDevice, internalArgs, { deps: interactionDeps });
+    await underRequestDeadline({ deadlineMs: 12345 }, () =>
+      rotateHandler(fakeDevice, args, { deps: interactionDeps }),
+    );
 
     expect(receivedOptions?.deadlineMs).toBe(12345);
   });

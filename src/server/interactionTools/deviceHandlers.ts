@@ -167,7 +167,7 @@ export async function rotateHandler(
       args.sessionUuid && device.platform === "android"
         ? defaultDaemonContext.sessionManager()
         : undefined;
-    const deadlineMs = resolveTransportDeadlineMs(args);
+    const deadlineMs = resolveTransportDeadlineMs();
     const rotate = (deps.rotateFactory ?? defaultRotateFactory)(device, {
       ...(deadlineMs === undefined ? {} : { deadlineMs }),
       sessionRotation: (mutation) =>

@@ -9,7 +9,10 @@ import {
   INTERNAL_ONE_SHOT_CLI_PARAM,
 } from "../../../daemon/wire/constants";
 import { getSessionToolSelectionService } from "../../../features/toolSelection/SessionToolSelectionService";
-import { runWithToolSelectionContext } from "../../../features/toolSelection/toolSelectionContext";
+import {
+  type RequestDeadline,
+  runWithToolSelectionContext,
+} from "../../../features/toolSelection/toolSelectionContext";
 import { runWithTextRequestContext } from "../../../features/action/textTransportTimeout";
 import type { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { runWithAbortSignal } from "../../../utils/AbortContext";
@@ -66,32 +69,36 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
       ? { [INTERNAL_MCP_SESSION_PARAM]: plan.implicitAutolockMcpSessionId }
       : {}),
     ...(context.requestOneShotCli ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true } : {}),
+    // The transport deadline, also written in-band for provisioning, which still reads these keys;
+    // every other handler reads the ambient request deadline (`requestDeadlineOf`, #15663).
     [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-    // Forwarded back onto the handler params (rather than only used locally)
-    // so a handler that needs the ACTUAL transport deadline, not a fresh
-    // internal budget, can recover it: this value plus `execution.startTime` is
-    // the absolute wall-clock deadline of the current request. Only present on
-    // a daemon-forwarded call; absent on a direct call, which a handler must
-    // treat as "no transport deadline known" (issue #6222 P1; the handler
-    // built by `createSetUIStateHandler` is the first consumer).
     ...(context.requestTimeoutMs !== undefined
       ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: context.requestTimeoutMs }
       : {}),
-    // The daemon's own capture-time-anchored absolute deadline, when present.
-    // Forwarded unchanged so a handler can prefer it over recomputing
-    // `execution.startTime + requestTimeoutMs`, which would re-grant whatever
-    // time this dispatch/admission step itself consumed (issue #6222 review).
     ...(context.requestDeadlineMs !== undefined
       ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: context.requestDeadlineMs }
       : {}),
-    // Same daemon-only provenance as `requestTimeoutMs`: lets the
-    // `createSetUIStateHandler` handler resolve the LIVE (possibly progress-extended) deadline via
-    // `liveDeadlineRegistry` instead of only this frozen snapshot (issue #6222).
     ...(context.requestLiveDeadlineKey !== undefined
       ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: context.requestLiveDeadlineKey }
       : {}),
     ...(context.requestAcceptanceDiscoveryOrder !== undefined
       ? { [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: context.requestAcceptanceDiscoveryOrder }
+      : {}),
+  };
+}
+
+/**
+ * The request's transport deadline for the ambient call context (#15663): the same values
+ * {@link buildHandlerParams} writes in-band, measured from this execution's start.
+ */
+function requestDeadlineOf(plan: InvocationPlan): RequestDeadline {
+  const { context, execution } = plan;
+  return {
+    startTime: execution.startTime,
+    ...(context.requestTimeoutMs !== undefined ? { timeoutMs: context.requestTimeoutMs } : {}),
+    ...(context.requestDeadlineMs !== undefined ? { deadlineMs: context.requestDeadlineMs } : {}),
+    ...(context.requestLiveDeadlineKey !== undefined
+      ? { liveDeadlineKey: context.requestLiveDeadlineKey }
       : {}),
   };
 }
@@ -127,6 +134,7 @@ export async function invokeHandler(plan: InvocationPlan): Promise<ToolHandlerRe
           },
           ...sessionExecutionMetadataOf(execution),
         },
+        requestDeadline: requestDeadlineOf(plan),
         // A routing session already carries its own base/label union in
         // ToolRegistry. Carry only a distinct connection profile so it
         // cannot suppress that derived-label resolution.

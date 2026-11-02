@@ -105,11 +105,10 @@ export function bindingAccessFor(state: TargetResolution) {
 }
 
 export function toolContextSessionOptions(state: TargetResolution) {
-  const { args } = state.input;
   const { platform } = state;
   return {
     keepScreenAwake: state.keepScreenAwake,
-    requestDeadlineMs: resolveTransportDeadlineMs(args),
+    requestDeadlineMs: resolveTransportDeadlineMs(),
     platform: platform === "android" || platform === "ios" ? platform : undefined,
     // #6227: the persisted/daemon-session path must honor a tool's declared
     // deviceReadiness the same way the legacy/no-session path below does

@@ -10,7 +10,10 @@ import {
   elementIdTextFieldsSchema,
   validateElementIdTextSelector,
 } from "../models/elementSelectorSchemas";
-import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../daemon/wire/constants";
+import {
+  currentRequestDeadline,
+  type RequestDeadline,
+} from "../features/toolSelection/toolSelectionContext";
 import { resolveTransportDeadlineMs } from "./transportDeadline";
 import { getLiveDeadlineMs, subscribeLiveDeadline } from "../daemon/liveDeadlineRegistry";
 
@@ -96,27 +99,21 @@ export interface FormToolDependencies {
 /**
  * Resolve a getter for the LIVE (possibly progress-extended) transport
  * deadline, when the daemon registered one for this exact request (issue
- * #6222 P1 reopen). `__mcpLiveDeadlineKey` is only ever present on a
- * daemon-forwarded, progress-capable call (see `INTERNAL_LIVE_DEADLINE_KEY_PARAM`
- * and `liveDeadlineRegistry`) -- absent, this returns `undefined` and
+ * #6222 P1 reopen). The live key is only ever present on a daemon-forwarded,
+ * progress-capable call (see `INTERNAL_LIVE_DEADLINE_KEY_PARAM` and
+ * `liveDeadlineRegistry`) -- absent, this returns `undefined` and
  * `SetUIState.execute()` falls back to the frozen `transportDeadlineMs`
  * snapshot from {@link resolveTransportDeadlineMs}.
  */
-function resolveLiveDeadlineKey(args: unknown): string | undefined {
-  if (!args || typeof args !== "object") {
-    return undefined;
-  }
-  const key = (args as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
-  if (typeof key !== "string" || key.length === 0) {
-    return undefined;
-  }
-  return key;
+function resolveLiveDeadlineKey(requestDeadline: RequestDeadline | undefined): string | undefined {
+  const key = requestDeadline?.liveDeadlineKey;
+  return typeof key === "string" && key.length > 0 ? key : undefined;
 }
 
 export function resolveLiveTransportDeadlineGetter(
-  args: unknown,
+  requestDeadline: RequestDeadline | undefined = currentRequestDeadline(),
 ): (() => number | undefined) | undefined {
-  const key = resolveLiveDeadlineKey(args);
+  const key = resolveLiveDeadlineKey(requestDeadline);
   return key === undefined ? undefined : () => getLiveDeadlineMs(key);
 }
 
@@ -127,9 +124,9 @@ export function resolveLiveTransportDeadlineGetter(
  * #6283). `undefined` whenever {@link resolveLiveTransportDeadlineGetter} is.
  */
 export function resolveLiveTransportDeadlineSubscriber(
-  args: unknown,
+  requestDeadline: RequestDeadline | undefined = currentRequestDeadline(),
 ): LiveDeadlineSubscriber | undefined {
-  const key = resolveLiveDeadlineKey(args);
+  const key = resolveLiveDeadlineKey(requestDeadline);
   return key === undefined ? undefined : (listener) => subscribeLiveDeadline(key, listener);
 }
 
@@ -143,9 +140,9 @@ export function createSetUIStateHandler({
     signal?: AbortSignal,
   ) => {
     const setUIState = setUIStateFactory(device);
-    const transportDeadlineMs = resolveTransportDeadlineMs(args);
-    const getLiveTransportDeadlineMs = resolveLiveTransportDeadlineGetter(args);
-    const subscribeLiveTransportDeadline = resolveLiveTransportDeadlineSubscriber(args);
+    const transportDeadlineMs = resolveTransportDeadlineMs();
+    const getLiveTransportDeadlineMs = resolveLiveTransportDeadlineGetter();
+    const subscribeLiveTransportDeadline = resolveLiveTransportDeadlineSubscriber();
 
     const result = await setUIState.execute(
       {

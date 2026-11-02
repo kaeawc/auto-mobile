@@ -67,7 +67,7 @@ import { SystemTray } from "../features/systemTray/SystemTray";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import { dismissKeyboardAfterSendKeys } from "../features/action/dismissKeyboardAfterSendKeys";
 import { serverConfig } from "../utils/ServerConfig";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/wire/constants";
+import { currentRequestDeadline } from "../features/toolSelection/toolSelectionContext";
 import { assertActiveWindowWaitForSupportedOnPlatform, waitForObservation } from "./observeTools";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { displayWaitInventory } from "../utils/deviceMatcher";
@@ -799,9 +799,7 @@ export const createWakeAndUnlockHandler =
     signal?: AbortSignal,
   ) => {
     const wakeAndUnlock = (deps.wakeAndUnlockFactory ?? defaultWakeAndUnlockFactory)(device);
-    const transportDeadlineMs = (args as Record<string, unknown>)[
-      INTERNAL_MCP_REQUEST_DEADLINE_PARAM
-    ];
+    const transportDeadlineMs = currentRequestDeadline()?.deadlineMs;
     const result = await wakeAndUnlock.execute(args.pin, {
       deadlineMs: typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
       signal,

@@ -98,7 +98,11 @@ describe("plan internal request inheritance", () => {
         ),
     );
     await runWithToolSelectionContext(
-      { planRequest: { deadlineMs: 80_000, liveDeadlineKey: "plan-deadline", progress } },
+      {
+        planRequest: { deadlineMs: 80_000, liveDeadlineKey: "plan-deadline", progress },
+        // The enclosing request's deadline, as MCP ingress sets it (#15663).
+        requestDeadline: { deadlineMs: 80_000, liveDeadlineKey: "plan-deadline" },
+      },
       () =>
         createDefaultPlanExecutor(new FakeTimer()).executePlan(
           { name: "form", mcpVersion: "1.0", steps: [{ tool: "deadlineForm", params: {} }] },

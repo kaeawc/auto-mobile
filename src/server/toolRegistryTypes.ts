@@ -23,6 +23,7 @@ import type { Environment } from "../daemon/poolConfig";
 import { type Timer } from "../utils/SystemTimer";
 
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
+import type { RequestDeadline } from "../features/toolSelection/toolSelectionContext";
 
 import { ExecutionTargetResolver } from "./pipeline/executionTarget";
 import { AuditRunner } from "./pipeline/audit";
@@ -67,6 +68,11 @@ export interface InternalToolCallOptions {
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
+  /**
+   * The transport deadline this call runs under, outside a plan (#15663). Inside a plan every
+   * internal call inherits the request's; otherwise an internal call has none unless given one.
+   */
+  requestDeadline?: RequestDeadline;
 }
 
 /** `ToolRegistry.callInternal`'s trailing request: handler progress/abort plus routing options. */
@@ -82,6 +88,8 @@ export interface InternalToolInvocationContext {
   routingSessionUuid?: string;
   toolSelectionProfileUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
+  /** Always present, so a call outside a plan never inherits a deadline it was not given. */
+  requestDeadline: RequestDeadline | undefined;
 }
 
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,

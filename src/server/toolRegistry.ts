@@ -24,7 +24,6 @@ import "./featureWiring";
 import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
 
 import { runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
-import { executionTracker } from "../daemon/executionTracker";
 import {
   ListChangedBroadcaster,
   type ServerRegistrationOptions,
@@ -59,6 +58,8 @@ import {
   assertInternalCallWithinBrokerGrant,
   deviceAwareHandlerArgs,
   deviceCallRecording,
+  clearSessionlessAutolockAttribution,
+  runWithDeviceCallRequestDeadline,
   invokeResolvedDeviceHandler,
   refuseInternalControlOnForeignOwnedSession,
   sessionDisplayPinnedHandler,
@@ -391,126 +392,120 @@ export class ToolRegistryClass {
       // rather than reverting to the base session.
       const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext, name);
       const toolCallRecording = deviceCallRecording(name, selectionContext);
-      return runRecordedToolCall(this.toolCallRepository, this.timer, name, {
-        sessionUuid:
-          typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
-        handler: async (recording, toolStartMs) => {
-          await assertSessionBrokerToolCall(name, true, handlerArgs);
-          const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
-            name,
-            args: handlerArgs,
-            options,
-            deviceReadiness: this.deviceReadiness,
-            signal,
-            timer: this.timer,
-          });
-          recording.deviceId = resolvedTarget.device?.deviceId;
-          signal?.throwIfAborted();
-          recording.sessionUuid = resolvedTarget.sessionUuid;
-          // Under an MCP task, keep this session alive until the task settles (#4668).
-          holdSessionForCurrentTask(recording.sessionUuid);
-          if (
-            selectionContext?.execution &&
-            !selectionContext.deviceAwareDispatch &&
-            !recording.sessionUuid
-          ) {
-            executionTracker.setResolvedAutolockSessionUuid(
-              selectionContext.execution.executionId,
-              undefined,
-            );
-          }
-          const captures = postActionCaptures(signal, resolvedTarget.internalCall, name);
-          return await runWithToolSelectionContext(
-            // Bind the ROUTING session, not the selection profile, so
-            // nested calls re-inject the correct derived routing UUID.
-            {
-              deviceAwareDispatch: true,
-              // Per call (#15663): always set, so a nested call never inherits this one's.
-              toolCallRecording,
-              routingSessionUuid: resolvedTarget.sessionUuid,
-              toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
-              // Handlers read this to stay on their read-only path (observe, snapshotOf).
-              explicitObserveDeviceRead:
-                (selectionContext?.explicitObserveDeviceRead === true &&
-                  !handlerArgs.sessionUuid) ||
-                resolvedTarget.deviceRead !== undefined,
-            },
-            captures(async () => {
-              let succeeded = false;
-              try {
-                let response: unknown;
-                if (!resolvedTarget.shouldResolveDevice) {
-                  if (!options.nonDeviceHandler) {
-                    throw new ActionableError(`Tool ${name} requires a device.`);
+      // Device-aware handlers measure the request deadline from this execution's start (#15663).
+      return runWithDeviceCallRequestDeadline(selectionContext, () =>
+        runRecordedToolCall(this.toolCallRepository, this.timer, name, {
+          sessionUuid:
+            typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
+          handler: async (recording, toolStartMs) => {
+            await assertSessionBrokerToolCall(name, true, handlerArgs);
+            const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
+              name,
+              args: handlerArgs,
+              options,
+              deviceReadiness: this.deviceReadiness,
+              signal,
+              timer: this.timer,
+            });
+            recording.deviceId = resolvedTarget.device?.deviceId;
+            signal?.throwIfAborted();
+            recording.sessionUuid = resolvedTarget.sessionUuid;
+            // Under an MCP task, keep this session alive until the task settles (#4668).
+            holdSessionForCurrentTask(recording.sessionUuid);
+            clearSessionlessAutolockAttribution(selectionContext, recording.sessionUuid);
+            const captures = postActionCaptures(signal, resolvedTarget.internalCall, name);
+            return await runWithToolSelectionContext(
+              // Bind the ROUTING session, not the selection profile, so
+              // nested calls re-inject the correct derived routing UUID.
+              {
+                deviceAwareDispatch: true,
+                // Per call (#15663): always set, so a nested call never inherits this one's.
+                toolCallRecording,
+                routingSessionUuid: resolvedTarget.sessionUuid,
+                toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
+                // Handlers read this to stay on their read-only path (observe, snapshotOf).
+                explicitObserveDeviceRead:
+                  (selectionContext?.explicitObserveDeviceRead === true &&
+                    !handlerArgs.sessionUuid) ||
+                  resolvedTarget.deviceRead !== undefined,
+              },
+              captures(async () => {
+                let succeeded = false;
+                try {
+                  let response: unknown;
+                  if (!resolvedTarget.shouldResolveDevice) {
+                    if (!options.nonDeviceHandler) {
+                      throw new ActionableError(`Tool ${name} requires a device.`);
+                    }
+                    response = await options.nonDeviceHandler(handlerArgs, progress, signal);
+                  } else if (resolvedTarget.device !== undefined) {
+                    response = await invokeResolvedDeviceHandler({
+                      target: { ...resolvedTarget, device: resolvedTarget.device },
+                      name,
+                      args: handlerArgs,
+                      handler: pinnedHandler,
+                      progress,
+                      signal,
+                      auditRunner: this.auditRunner,
+                      mutationRecording: this.mutationRecording,
+                      navigationRecorder: this.navigationToolCallRecorder,
+                      traits,
+                      isResponseFailure: this.isResponseFailure,
+                    });
+                    if (resolvedTarget.deviceRead) {
+                      signal?.throwIfAborted();
+                      resolvedTarget.deviceRead.assertAuthorized(resolvedTarget.device);
+                    }
                   }
-                  response = await options.nonDeviceHandler(handlerArgs, progress, signal);
-                } else if (resolvedTarget.device !== undefined) {
-                  response = await invokeResolvedDeviceHandler({
-                    target: { ...resolvedTarget, device: resolvedTarget.device },
+
+                  // A late device-loss abort cannot replace a completed success.
+                  // A resolved failure can have swallowed device-loss cancellation,
+                  // so it is checked after the response is finalized below.
+
+                  const afterToolCallResult = await this.afterToolCall.handle({
+                    name,
+                    traits,
+                    outputSchema: this.getToolOutputSchema(name),
+                    args: handlerArgs,
+                    device: resolvedTarget.device,
+                    internalCall: resolvedTarget.internalCall,
+                    response,
+                    sessionUuid: resolvedTarget.sessionUuid,
+                    shouldResolveDevice: resolvedTarget.shouldResolveDevice,
+                    signal,
+                    timer: this.timer,
+                    toolStartMs,
+                  });
+                  recording.durationMs = afterToolCallResult.durationMs;
+                  if (this.isResponseFailure(afterToolCallResult.finalizedResponse)) {
+                    throwDeviceLostFromAbortSignal(signal);
+                  }
+                  succeeded = !this.isResponseFailure(afterToolCallResult.finalizedResponse);
+                  recording.outcome = toolCallOutcome(afterToolCallResult, name, succeeded);
+                  return afterToolCallResult.finalizedResponse;
+                } catch (error) {
+                  recording.executionError = { error };
+                  throwDeviceLostFromAbortSignal(signal);
+                  const transportFailure = findDeviceTransportUnavailable(error);
+                  if (transportFailure) {
+                    // Record the typed code (device_transport_unavailable), not the wrapper.
+                    recording.executionError = { error: transportFailure };
+                  }
+                  throw toolExecutionError(error, name, resolvedTarget.device);
+                } finally {
+                  await this.afterPlanLifecycle({
+                    ...resolvedTarget,
                     name,
                     args: handlerArgs,
-                    handler: pinnedHandler,
-                    progress,
-                    signal,
-                    auditRunner: this.auditRunner,
-                    mutationRecording: this.mutationRecording,
-                    navigationRecorder: this.navigationToolCallRecorder,
-                    traits,
-                    isResponseFailure: this.isResponseFailure,
+                    nestedInPlan: selectionContext?.planRequest !== undefined,
+                    succeeded,
                   });
-                  if (resolvedTarget.deviceRead) {
-                    signal?.throwIfAborted();
-                    resolvedTarget.deviceRead.assertAuthorized(resolvedTarget.device);
-                  }
                 }
-
-                // A late device-loss abort cannot replace a completed success.
-                // A resolved failure can have swallowed device-loss cancellation,
-                // so it is checked after the response is finalized below.
-
-                const afterToolCallResult = await this.afterToolCall.handle({
-                  name,
-                  traits,
-                  outputSchema: this.getToolOutputSchema(name),
-                  args: handlerArgs,
-                  device: resolvedTarget.device,
-                  internalCall: resolvedTarget.internalCall,
-                  response,
-                  sessionUuid: resolvedTarget.sessionUuid,
-                  shouldResolveDevice: resolvedTarget.shouldResolveDevice,
-                  signal,
-                  timer: this.timer,
-                  toolStartMs,
-                });
-                recording.durationMs = afterToolCallResult.durationMs;
-                if (this.isResponseFailure(afterToolCallResult.finalizedResponse)) {
-                  throwDeviceLostFromAbortSignal(signal);
-                }
-                succeeded = !this.isResponseFailure(afterToolCallResult.finalizedResponse);
-                recording.outcome = toolCallOutcome(afterToolCallResult, name, succeeded);
-                return afterToolCallResult.finalizedResponse;
-              } catch (error) {
-                recording.executionError = { error };
-                throwDeviceLostFromAbortSignal(signal);
-                const transportFailure = findDeviceTransportUnavailable(error);
-                if (transportFailure) {
-                  // Record the typed code (device_transport_unavailable), not the wrapper.
-                  recording.executionError = { error: transportFailure };
-                }
-                throw toolExecutionError(error, name, resolvedTarget.device);
-              } finally {
-                await this.afterPlanLifecycle({
-                  ...resolvedTarget,
-                  name,
-                  args: handlerArgs,
-                  nestedInPlan: selectionContext?.planRequest !== undefined,
-                  succeeded,
-                });
-              }
-            }),
-          );
-        },
-      });
+              }),
+            );
+          },
+        }),
+      );
     };
 
     this.tools.set(name, {

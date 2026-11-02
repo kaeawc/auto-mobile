@@ -7,12 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { createSetUIStateHandler } from "../../src/server/formTools";
-import {
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_EXECUTION_START_TIME_PARAM,
-  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../../src/daemon/wire/constants";
+import { underRequestDeadline } from "../helpers/requestDeadline";
 import {
   registerLiveDeadline,
   unregisterLiveDeadline,
@@ -56,14 +51,10 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       }),
     });
 
-    const argsWithInternalParams = {
-      ...baseArgs,
-      [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
-      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
-      [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey,
-    };
-
-    await setUIStateHandler(androidDevice, argsWithInternalParams);
+    await underRequestDeadline(
+      { startTime: executionStartTime, timeoutMs: remainingMs, liveDeadlineKey: liveKey },
+      () => setUIStateHandler(androidDevice, baseArgs),
+    );
 
     expect(capturedTransportDeadlineMs).toBe(executionStartTime + remainingMs);
     expect(capturedGetLiveTransportDeadlineMs).toBeDefined();
@@ -110,9 +101,8 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       }),
     });
 
-    await setUIStateHandler(
-      androidDevice,
-      Object.assign({}, baseArgs, { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey }),
+    await underRequestDeadline({ liveDeadlineKey: liveKey }, () =>
+      setUIStateHandler(androidDevice, baseArgs),
     );
 
     let notified = 0;
@@ -157,21 +147,18 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       }),
     });
 
-    const argsWithLiveKeyOnly = {
-      ...baseArgs,
-      [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey,
-    };
-
-    await setUIStateHandler(androidDevice, argsWithLiveKeyOnly);
+    await underRequestDeadline({ liveDeadlineKey: liveKey }, () =>
+      setUIStateHandler(androidDevice, baseArgs),
+    );
 
     expect(capturedGetLiveTransportDeadlineMs).toBeDefined();
     expect(capturedGetLiveTransportDeadlineMs?.()).toBeUndefined();
   });
 
-  test("prefers the anchored __mcpRequestDeadlineMs over recomputing startTime + remainingMs (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", async () => {
+  test("prefers the anchored deadline over recomputing startTime + remainingMs (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", async () => {
     // Simulate dispatch/admission delay between when the daemon captured the
     // remaining budget (executionStartTime here is the LATER, post-dispatch
-    // timestamp `INTERNAL_EXECUTION_START_TIME_PARAM` carries) and when it
+    // timestamp the request deadline's `startTime` carries) and when it
     // actually captured `remainingMs` moments earlier -- the anchored
     // deadline must win regardless of that gap.
     const anchoredDeadlineMs = 5_000;
@@ -188,14 +175,10 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       }),
     });
 
-    const argsWithBothParams = {
-      ...baseArgs,
-      [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
-      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
-      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: anchoredDeadlineMs,
-    };
-
-    await setUIStateHandler(androidDevice, argsWithBothParams);
+    await underRequestDeadline(
+      { startTime: executionStartTime, timeoutMs: remainingMs, deadlineMs: anchoredDeadlineMs },
+      () => setUIStateHandler(androidDevice, baseArgs),
+    );
 
     // Naively recomputing from startTime + remainingMs would yield 14_000 --
     // LATER than the daemon's real outer abort. The anchored value must win.
@@ -217,13 +200,9 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
       }),
     });
 
-    const argsWithLegacyParamsOnly = {
-      ...baseArgs,
-      [INTERNAL_EXECUTION_START_TIME_PARAM]: executionStartTime,
-      [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: remainingMs,
-    };
-
-    await setUIStateHandler(androidDevice, argsWithLegacyParamsOnly);
+    await underRequestDeadline({ startTime: executionStartTime, timeoutMs: remainingMs }, () =>
+      setUIStateHandler(androidDevice, baseArgs),
+    );
 
     expect(capturedTransportDeadlineMs).toBe(executionStartTime + remainingMs);
   });

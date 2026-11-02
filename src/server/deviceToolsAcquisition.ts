@@ -32,6 +32,10 @@ import {
   resolveLiveTransportDeadlineGetter,
   resolveLiveTransportDeadlineSubscriber,
 } from "./formTools";
+import {
+  currentRequestDeadline,
+  type RequestDeadline,
+} from "../features/toolSelection/toolSelectionContext";
 import { reserveAndroidStartupLease } from "./deviceToolsStartupLease";
 import type { createBootAndPrepareDevice } from "./deviceToolsStartDevice";
 import {
@@ -62,11 +66,14 @@ import {
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
 /** Cap acquisition budgets using the live, anchored, or legacy transport contract. */
-export function acquisitionDeadlineMs(rawArgs: unknown, requestedDeadlineMs: number): number {
+export function acquisitionDeadlineMs(
+  requestDeadline: RequestDeadline | undefined,
+  requestedDeadlineMs: number,
+): number {
   return Math.min(
     requestedDeadlineMs,
-    resolveLiveTransportDeadlineGetter(rawArgs)?.() ??
-      resolveTransportDeadlineMs(rawArgs) ??
+    resolveLiveTransportDeadlineGetter(requestDeadline)?.() ??
+      resolveTransportDeadlineMs(requestDeadline) ??
       Number.POSITIVE_INFINITY,
   );
 }
@@ -88,7 +95,6 @@ export const ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS = 3 * ABORT_SETTLEMENT_GRACE
  * succeeds late does not bind a session.
  */
 export async function runWithAcquisitionDeadline<T>(
-  rawArgs: unknown,
   requestedDeadlineMs: number,
   signal: AbortSignal | undefined,
   {
@@ -99,7 +105,9 @@ export async function runWithAcquisitionDeadline<T>(
     operation: (deadlineMs: number, signal: AbortSignal, stage: AcquisitionStage) => Promise<T>;
   },
 ): Promise<T> {
-  const live = resolveLiveTransportDeadlineGetter(rawArgs)?.() !== undefined;
+  // Read once: the live deadline re-arms from a callback outside this call's context.
+  const requestDeadline = currentRequestDeadline();
+  const live = resolveLiveTransportDeadlineGetter(requestDeadline)?.() !== undefined;
   const timer = getDeviceToolsDependencies().timer;
   const stage: AcquisitionStage = { current: "starting acquisition" };
   // Cancels the preparation; `expired` ends the caller's wait on it.
@@ -135,7 +143,7 @@ export async function runWithAcquisitionDeadline<T>(
   };
   const armDeadline = (): void => {
     clearTimeouts();
-    const remainingMs = acquisitionDeadlineMs(rawArgs, requestedDeadlineMs) - timer.now();
+    const remainingMs = acquisitionDeadlineMs(requestDeadline, requestedDeadlineMs) - timer.now();
     if (!Number.isFinite(remainingMs)) {
       return;
     }
@@ -152,7 +160,7 @@ export async function runWithAcquisitionDeadline<T>(
     );
   };
   const unsubscribe = live
-    ? resolveLiveTransportDeadlineSubscriber(rawArgs)?.(armDeadline)
+    ? resolveLiveTransportDeadlineSubscriber(requestDeadline)?.(armDeadline)
     : undefined;
   armDeadline();
   try {
@@ -165,7 +173,7 @@ export async function runWithAcquisitionDeadline<T>(
     return await raceWithDeadline(
       () =>
         operation(
-          live ? requestedDeadlineMs : acquisitionDeadlineMs(rawArgs, requestedDeadlineMs),
+          live ? requestedDeadlineMs : acquisitionDeadlineMs(requestDeadline, requestedDeadlineMs),
           operationSignal,
           stage,
         ),
@@ -691,7 +699,6 @@ async function getAndroidHandler(
         ...oneShotCli,
       };
   return await runWithAcquisitionDeadline(
-    rawArgs,
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
     {
@@ -744,7 +751,6 @@ async function getAppleHandler(
     args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
   const startedAtMs = getDeviceToolsDependencies().timer.now();
   return await runWithAcquisitionDeadline(
-    rawArgs,
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
     {

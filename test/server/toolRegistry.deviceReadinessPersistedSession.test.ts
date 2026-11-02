@@ -19,7 +19,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 import type { DeviceSession } from "../../src/db/types";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/wire/constants";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -162,11 +162,14 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       { handler: async () => ({ success: true }), deviceReadiness: "booted" },
     );
     const call = (deadline?: number) =>
-      ToolRegistry.getTool("restartDeadlineProbe")!.handler({
-        sessionUuid,
-        platform: "android",
-        ...(deadline === undefined ? {} : { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadline }),
-      });
+      runWithToolSelectionContext(
+        { requestDeadline: deadline === undefined ? undefined : { deadlineMs: deadline } },
+        () =>
+          ToolRegistry.getTool("restartDeadlineProbe")!.handler({
+            sessionUuid,
+            platform: "android",
+          }),
+      );
     return { timer, persistence, persisted, targets, call, incidents, manager, pool };
   }
 

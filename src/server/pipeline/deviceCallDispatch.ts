@@ -37,6 +37,7 @@ import {
 import {
   currentExecution,
   getToolSelectionContext,
+  runWithToolSelectionContext,
   type ToolCallRecordingContext,
 } from "../../features/toolSelection/toolSelectionContext";
 import {
@@ -95,8 +96,9 @@ export function markDeviceCallKind(executionId: string, toolName: string, readOn
 }
 
 /**
- * The routing session, and the execution start a transport-deadline fallback still reads in-band
- * (`resolveTransportDeadlineMs`). The execution id is ambient only (#15663).
+ * The routing session, and the execution start still written in-band for provisioning's deadline
+ * reads until they move to the ambient request deadline (#15663). Other readers use the ambient
+ * call context.
  */
 function withAmbientDeviceContext(
   args: Record<string, unknown>,
@@ -149,6 +151,34 @@ export function deviceAwareHandlerArgs(
     nonBlankSessionUuid(routingSession),
     context?.execution,
   );
+}
+
+/**
+ * When the outermost device-aware call of an execution resolved no session, clear the execution's
+ * resolved autolock session. A call nested in a device-aware dispatch leaves it as it is.
+ */
+export function clearSessionlessAutolockAttribution(
+  context: ReturnType<typeof getToolSelectionContext>,
+  resolvedSessionUuid: string | undefined,
+): void {
+  if (context?.execution && !context.deviceAwareDispatch && !resolvedSessionUuid) {
+    executionTracker.setResolvedAutolockSessionUuid(context.execution.executionId, undefined);
+  }
+}
+
+/**
+ * The request deadline a device-aware handler runs under (#15663): the inherited one, measured
+ * from the current execution's start, which the deadline fallback (`timeout + start`) reads.
+ */
+export function runWithDeviceCallRequestDeadline<T>(
+  context: ReturnType<typeof getToolSelectionContext>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const requestDeadline = context?.requestDeadline;
+  const startTime = context?.execution?.startTime;
+  return requestDeadline && startTime !== undefined && requestDeadline.startTime !== startTime
+    ? runWithToolSelectionContext({ requestDeadline: { ...requestDeadline, startTime } }, fn)
+    : fn();
 }
 
 /**

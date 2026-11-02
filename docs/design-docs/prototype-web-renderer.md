@@ -40,8 +40,8 @@ the host, so the page's script only switches between views it was given and neve
   top-level `derive` entry. Repeat placeholders
   bind each object item (a literal `items` array or a data pointer; scalar items are skipped
   before indices are assigned, as on devices), including the repeat's own `derive`
-  fields. Text binds once, in that order, so a substituted value is never read again as a
-  placeholder. Nested conditions with typed operands and state keys bind through the devices' own
+  fields. Text binds once, in that order: every inserted data or repeat value is shielded until binding
+  ends, so it is never read again as a placeholder. Nested conditions with typed operands and state keys bind through the devices' own
   field walk (`mapBindableFields`). A spans-only text node renders each span
   with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a
   caller-supplied clock (default 0), so derived relative times are fixed.
@@ -61,7 +61,7 @@ the host, so the page's script only switches between views it was given and neve
   lines that start-align children on the cross axis unless
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill` (inside a box grid, only on its own axis), `{dp}`, `weight`, padding (logical
-  start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
+  start and end), corner radius (per-corner radii are logical, so RTL mirrors them), border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
 - **Typography.** `theme.typography` scales every type-scale role and sets its family, as the
   native theme does.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the

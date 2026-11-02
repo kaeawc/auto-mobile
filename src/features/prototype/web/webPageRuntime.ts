@@ -14,7 +14,36 @@ export function prototypeWebZoomScale(current: number, requested: number): numbe
   return Math.max(lower, Math.min(4, requested));
 }
 
-export function prototypeWebPageRuntime(zoomScale: typeof prototypeWebZoomScale): void {
+/**
+ * The fitted scale: the frame fills 95% of the viewport, capped at 400%, however small the viewport
+ * (so the whole frame stays visible). An empty viewport has nothing to fit and falls back to 100%,
+ * so zooming can still recover.
+ */
+export function prototypeWebFitScale(
+  viewport: { width: number; height: number },
+  frame: { width: number; height: number },
+): number {
+  const scale = Math.min(viewport.width / frame.width, viewport.height / frame.height);
+  return Number.isFinite(scale) && scale > 0 ? Math.min(4, scale * 0.95) : 1;
+}
+
+/** The zoom factor one wheel step applies; a horizontal-only gesture (no vertical delta) is none. */
+export function prototypeWebWheelFactor(deltaY: number): number | undefined {
+  if (deltaY === 0) {
+    return undefined;
+  }
+  return deltaY < 0 ? 1.1 : 1 / 1.1;
+}
+
+/** The pure rules the runtime is handed as arguments, so they are unit-tested and inlined with it. */
+export interface PrototypeWebRuntimeRules {
+  readonly zoomScale: typeof prototypeWebZoomScale;
+  readonly fitScale: typeof prototypeWebFitScale;
+  readonly wheelFactor: typeof prototypeWebWheelFactor;
+}
+
+export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
+  const { zoomScale, fitScale: fitted, wheelFactor } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -47,11 +76,10 @@ export function prototypeWebPageRuntime(zoomScale: typeof prototypeWebZoomScale)
     if (!frame) {
       return 1;
     }
-    const scale = Math.min(
-      viewport.clientWidth / frame.offsetWidth,
-      viewport.clientHeight / frame.offsetHeight,
+    return fitted(
+      { width: viewport.clientWidth, height: viewport.clientHeight },
+      { width: frame.offsetWidth, height: frame.offsetHeight },
     );
-    return Math.max(0.1, Math.min(4, scale * 0.95));
   };
   const apply = () => {
     const shown = current();
@@ -105,8 +133,13 @@ export function prototypeWebPageRuntime(zoomScale: typeof prototypeWebZoomScale)
   viewport.addEventListener(
     "wheel",
     (event) => {
+      // Only vertical wheel input zooms; a horizontal-only gesture passes through.
+      const factor = wheelFactor(event.deltaY);
+      if (factor === undefined) {
+        return;
+      }
       event.preventDefault();
-      zoomTo(state.scale * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
+      zoomTo(state.scale * factor);
     },
     { passive: false },
   );

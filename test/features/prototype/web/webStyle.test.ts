@@ -36,9 +36,14 @@ test("weight shares the parent's main axis", () => {
 test("corner radius accepts numbers, shape tokens and per-corner objects", () => {
   expect(nodeCss({ cornerRadius: "medium" }, context)["border-radius"]).toBe("12px");
   expect(nodeCss({ cornerRadius: 6 }, context)["border-radius"]).toBe("6px");
-  expect(nodeCss({ cornerRadius: { topStart: 8 } }, context)["border-radius"]).toBe(
-    "8px 0px 0px 0px",
-  );
+  // Per-corner radii are logical, so an RTL window mirrors them.
+  expect(nodeCss({ cornerRadius: { topStart: 8 } }, context)).toMatchObject({
+    "border-start-start-radius": "8px",
+    "border-start-end-radius": "0px",
+    "border-end-end-radius": "0px",
+    "border-end-start-radius": "0px",
+  });
+  expect(nodeCss({ cornerRadius: { topStart: 8 } }, context)).not.toHaveProperty("border-radius");
 });
 
 test("padding uses logical start and end", () => {

@@ -8,7 +8,6 @@ import { sortedReaddirEntriesSync } from "../../src/utils/io";
 // TS) and reports a launcher call whose *command position* is `tar` together with an extract flag,
 // whether written as a shell string, argv-first, array-first, via `const` argv, a spread, or a
 // static string concatenation.
-export const SOURCE_ROOT = "src";
 export const OWNER = "src/utils/ArchiveExtractor.ts";
 // Files allowed to run tar extraction outside the owner, each with a concrete reason. Keep empty
 // unless a production diagnostic genuinely cannot use the owner.

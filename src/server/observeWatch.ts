@@ -283,10 +283,3 @@ const runnerTvosScreenshotSource: WatchScreenshotSource = {
     return Buffer.from(data, "base64");
   },
 };
-
-export type TvosScreenshotSource = WatchScreenshotSource;
-export type TvosObserveDependencies = WatchObserveDependencies;
-export const simctlTvosScreenshotSource = simctlWatchScreenshotSource;
-export const observeTvos = observeWatch;
-export const assertTvosObserveOptions = (args: ObserveArgs, displayKey: string): void =>
-  assertWatchObserveOptions(args, displayKey, "tvos");

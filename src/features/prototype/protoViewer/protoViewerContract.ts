@@ -125,7 +125,6 @@ export type ProtoViewerWireResult = z.infer<typeof protoViewerWireResultSchema>;
 export type ProtoViewerResult = z.infer<typeof workResultSchema>;
 
 /** Twin: ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeMcp*.swift. */
-export const PROTOVIEWER_IOS_SCHEME = "automobile-proto";
 export const PROTOVIEWER_IOS_MCP_FOLDER = "Library/Application Support/ProtoViewer/mcp";
 export const PROTOVIEWER_INBOX_FOLDER = "inbox";
 export const PROTOVIEWER_RESULTS_FOLDER = "results";

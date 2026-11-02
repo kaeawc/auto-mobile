@@ -6,7 +6,58 @@ import {
   collectWindowTruncations,
   captureFidelityTruncationReasons,
   isHostOutputTruncationReason,
+  normalizeHierarchyOptionalFields,
 } from "../../../src/features/observe/truncationReasons";
+import { isViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { buildObserveResult } from "../../helpers/observeFixture";
+
+describe("hierarchy optional list normalization", () => {
+  for (const fields of [{ windows: null }, {}, { windows: null, contentHiddenRegions: null }]) {
+    test(`normalizes ${JSON.stringify(fields)} like empty lists for observe snapshots`, () => {
+      const wire: unknown = {
+        hierarchy: {},
+        frameContext: "frame-1",
+        nativeScale: 1,
+        ...fields,
+      };
+      if (!isViewHierarchyResult(wire)) {
+        throw new Error("Expected hierarchy wire fixture");
+      }
+      const normalized = normalizeHierarchyOptionalFields(wire);
+      const emptyLists = normalizeHierarchyOptionalFields({
+        hierarchy: {},
+        frameContext: "frame-1",
+        nativeScale: 1,
+        windows: [],
+        contentHiddenRegions: [],
+      });
+      expect(collectWindowTruncations(normalized.windows)).toEqual(
+        collectWindowTruncations(emptyLists.windows),
+      );
+      const capture = (viewHierarchy: typeof normalized) => {
+        const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator("ref"));
+        return store.capture(
+          "tv-device",
+          buildObserveResult({
+            updatedAt: 0,
+            rotation: 0,
+            screenSize: { width: 1920, height: 1080 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy,
+          }),
+        );
+      };
+      expect(capture(normalized)).toEqual(capture(emptyLists));
+      expect(capture(normalized).status).toBe("captured");
+      expect(normalized.windows).toBeUndefined();
+      expect(normalized.contentHiddenRegions).toBeUndefined();
+      expect(wire).toMatchObject(fields);
+    });
+  }
+});
 
 describe("window truncation vocabulary", () => {
   test("windowTruncations vocabulary maps the known capture codes to meanings", () => {

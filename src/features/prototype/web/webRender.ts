@@ -81,17 +81,34 @@ export function bound(text: unknown, scope: WebRenderScope): string {
   if (typeof text !== "string") {
     return "";
   }
-  // Data placeholders bind first, then repeat items, then state, as the devices bind text.
+  // Data placeholders bind first, then repeat items, then state, as the devices bind text. Every
+  // inserted value is shielded until the end, so it is never read again as a placeholder.
   const data = bindPrototypeDataText(text, (pointer) => {
     const value = resolvePrototypeDataPointer(scope.data, pointer);
     return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-      ? renderScalar(value)
+      ? shield(renderScalar(value))
       : "";
   });
   const items = [...scope.instances]
     .reverse()
-    .reduce((value, instance) => bindText(value, instance), data);
-  return bindBare(items, scope);
+    .reduce((value, instance) => bindText(value, shieldedInstance(instance)), data);
+  return unshield(bindBare(items, scope));
+}
+
+/** Braces in an inserted value become private-use stand-ins until binding is done. */
+const OPEN = "\uE000";
+const CLOSE = "\uE001";
+const shield = (value: string) => value.replaceAll("{", OPEN).replaceAll("}", CLOSE);
+const unshield = (value: string) => value.replaceAll(OPEN, "{").replaceAll(CLOSE, "}");
+
+function shieldedInstance(instance: Instance): Instance {
+  const values = Object.fromEntries(
+    Object.entries(instance.values).map(([key, value]) => [
+      key,
+      typeof value === "string" ? shield(value) : value,
+    ]),
+  );
+  return { ...instance, values };
 }
 
 const SAFE_AREA_EDGES: Readonly<Record<string, [string, string]>> = {
@@ -189,26 +206,33 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
   };
 }
 
-function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
-  const list = Array.isArray(node.children) ? node.children : [];
-  const repeat = record(node.repeat);
-  if (!repeat) {
-    return list.flatMap((entry, index) => renderOrSkip(entry, scope, `${path}.children[${index}]`));
-  }
-  // Items are a literal array or a pointer into the spec's data.
+/**
+ * A repeat's rows: a literal array or a pointer into the spec's data. As on the devices, only
+ * object items repeat (scalars are skipped before indices are assigned), up to the item cap.
+ */
+function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
   const itemsPath = record(repeat.items)?.path;
   const items = Array.isArray(repeat.items)
     ? repeat.items
     : typeof itemsPath === "string"
       ? resolvePrototypeDataPointer(scope.data, itemsPath)
       : undefined;
+  const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
+  return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
+}
+
+function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
+  const list = Array.isArray(node.children) ? node.children : [];
+  const repeat = record(node.repeat);
+  if (!repeat) {
+    return list.flatMap((entry, index) => renderOrSkip(entry, scope, `${path}.children[${index}]`));
+  }
+  const rows = repeatRows(repeat, scope);
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  // As on the devices, only object items repeat; scalars are skipped before indices are assigned.
-  const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
-  return rows.slice(0, MAX_WEB_REPEAT_ITEMS).flatMap((item, index) => {
+  return rows.flatMap((item, index) => {
     const values = record(item) ?? {};
     const instance: Instance = {
       binding: { alias, index: true },
@@ -258,6 +282,15 @@ function fillsAsSpacer(entry: unknown, scope: WebRenderScope, path: string): boo
   return isUnsizedSpacer({ ...bound, style: resolvedStyle(bound, scope) });
 }
 
+/** A line grows when it renders a filling spacer; a repeat with no rows renders none. */
+function lineFills(raw: Raw, scope: WebRenderScope, path: string): boolean {
+  const repeat = record(raw.repeat);
+  if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope).length === 0)) {
+    return false;
+  }
+  return raw.children.some((entry) => fillsAsSpacer(entry, scope, path));
+}
+
 function spacerFilled(node: Raw): Raw {
   return isUnsizedSpacer(node) ? fillMissing(node) : node;
 }
@@ -267,10 +300,7 @@ const line =
   (raw, scope, path) => {
     // A wrap-sized line around a filling spacer grows to its parent, as a Compose parent does
     // around a fillMaxSize child; otherwise it would shrink to nothing.
-    const node =
-      Array.isArray(raw.children) && raw.children.some((entry) => fillsAsSpacer(entry, scope, path))
-        ? fillMissing(raw)
-        : raw;
+    const node = lineFills(raw, scope, path) ? fillMissing(raw) : raw;
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     return el("div", { attrs, style }, children(node, inner, path));
@@ -499,6 +529,25 @@ const APP_BAR_VARIANTS: Readonly<Record<string, { height: number; title: number 
   large: { height: 152, title: 36 },
 };
 
+/**
+ * An expanded bar's title takes its own line below the icons; a center-aligned title is centred
+ * on the whole bar, whatever slots sit beside it; a small bar's title fills the space between.
+ */
+function appBarTitleStyle(variant: string, expanded: boolean): Record<string, string> {
+  if (expanded) {
+    return { order: "1", "flex-basis": "100%", "padding-bottom": "16px" };
+  }
+  return variant === "centerAligned"
+    ? {
+        position: "absolute",
+        left: "0",
+        right: "0",
+        "text-align": "center",
+        "pointer-events": "none",
+      }
+    : { flex: "1 1 auto" };
+}
+
 const topAppBar: NodeRenderer = (node, scope, path) => {
   const variant = typeof node.variant === "string" ? node.variant : "small";
   const size = APP_BAR_VARIANTS[variant] ?? APP_BAR_VARIANTS.small!;
@@ -514,18 +563,21 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
     "padding-inline": "16px",
     "font-size": `${size.title}px`,
     "align-self": "stretch",
+    position: "relative",
     ...roleCss(scope, "surface", "onSurface"),
   });
   const actions = Array.isArray(node.actions) ? node.actions : [];
-  const titleStyle: Record<string, string> = expanded
-    ? { order: "1", "flex-basis": "100%", "padding-bottom": "16px" }
-    : { flex: "1 1 auto", ...(variant === "centerAligned" ? { "text-align": "center" } : {}) };
-  const title = el("span", { style: titleStyle }, [bound(node.title, scope)]);
+  const title = el("span", { style: appBarTitleStyle(variant, expanded) }, [
+    bound(node.title, scope),
+  ]);
   return el("div", { attrs: { ...attrs, role: "heading" }, style }, [
     ...appBarIcons([node.navigationIcon], scope, path),
     title,
-    // An expanded bar's title takes its own line, so a spacer keeps the actions at the end.
-    ...(expanded ? [el("span", { style: { flex: "1 1 auto" } })] : []),
+    // When the title leaves the flow (its own line, or centred on the bar), a spacer keeps the
+    // actions at the end.
+    ...(expanded || variant === "centerAligned"
+      ? [el("span", { style: { flex: "1 1 auto" } })]
+      : []),
     ...appBarIcons(actions, scope, path),
   ]);
 };
@@ -585,6 +637,7 @@ const PARENT_FACING = new Set([
   "align-self",
   "grid-area",
   "min-width",
+  "max-width",
   "margin",
 ]);
 
@@ -746,14 +799,22 @@ function namedIcon(name: unknown, scope: WebRenderScope): WebElement[] {
   return typeof name === "string" ? [icon({ type: "icon", name }, scope, "")] : [];
 }
 
-function trailing(node: Raw, scope: WebRenderScope): WebChild[] {
+function trailing(
+  node: Raw,
+  scope: WebRenderScope,
+  disabledAttrs: Record<string, string>,
+): WebChild[] {
   const entry = record(node.trailing);
   if (entry?.type === "switch" || entry?.type === "checkbox") {
     const on = isOn(entry.stateKey, scope);
     return [
       el(
         "span",
-        { attrs: { role: entry.type, "aria-checked": String(on) }, style: { display: "flex" } },
+        {
+          // A disabled list item disables its trailing control too.
+          attrs: { role: entry.type, "aria-checked": String(on), ...disabledAttrs },
+          style: { display: "flex" },
+        },
         [toggleMark(entry.type, on, scope)],
       ),
     ];
@@ -791,7 +852,7 @@ const listItem: NodeRenderer = (node, scope) => {
   return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
     ...namedIcon(node.leadingIcon, scope),
     texts,
-    ...trailing(node, scope),
+    ...trailing(node, scope, disabled.attrs),
   ]);
 };
 

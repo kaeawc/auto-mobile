@@ -8,7 +8,11 @@ import {
   PROTOTYPE_WEB_RUNTIME,
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
-import { prototypeWebZoomScale } from "../../../../src/features/prototype/web/webPageRuntime";
+import {
+  prototypeWebFitScale,
+  prototypeWebWheelFactor,
+  prototypeWebZoomScale,
+} from "../../../../src/features/prototype/web/webPageRuntime";
 
 const reference = JSON.parse(
   readFileSync(
@@ -70,6 +74,29 @@ describe("prototype web page (#16346)", () => {
     expect(prototypeWebZoomScale(0.38, 0.38 * 1.25)).toBeCloseTo(0.475);
   });
 
+  test("fit keeps the whole frame visible in a tiny viewport and recovers from an empty one", () => {
+    const frame = { width: 1000, height: 2000 };
+    expect(prototypeWebFitScale({ width: 50, height: 50 }, frame)).toBeCloseTo(0.025 * 0.95);
+    expect(prototypeWebFitScale({ width: 0, height: 0 }, frame)).toBe(1);
+    expect(prototypeWebFitScale({ width: 9000, height: 9000 }, frame)).toBe(4);
+  });
+
+  test("only vertical wheel input zooms", () => {
+    expect(prototypeWebWheelFactor(0)).toBeUndefined();
+    expect(prototypeWebWheelFactor(-3)).toBe(1.1);
+    expect(prototypeWebWheelFactor(3)).toBeCloseTo(1 / 1.1);
+  });
+
+  test("the inlined runtime carries every rule it is handed", () => {
+    for (const rule of [
+      "prototypeWebZoomScale",
+      "prototypeWebFitScale",
+      "prototypeWebWheelFactor",
+    ]) {
+      expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
+    }
+  });
+
   test("keeps the runtime within its budget", () => {
     expect(Buffer.byteLength(PROTOTYPE_WEB_RUNTIME)).toBeLessThanOrEqual(
       MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
@@ -114,8 +141,25 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {
-    const small = buildPrototypeWebPage({ ...input, maxBytes: page.html.length - 1000 });
+    const maxBytes = Buffer.byteLength(page.html) - 1000;
+    const small = buildPrototypeWebPage({ ...input, maxBytes });
     expect(small.inlinedRevisions.a).toEqual([2]);
+    expect(Buffer.byteLength(small.html)).toBeLessThanOrEqual(maxBytes);
+  });
+
+  test("a page that exactly fits its budget keeps every revision", () => {
+    const exact = buildPrototypeWebPage({ ...input, maxBytes: Buffer.byteLength(page.html) });
+    expect(exact.inlinedRevisions).toEqual(page.inlinedRevisions);
+    expect(exact.html).toBe(page.html);
+  });
+
+  test("a variant with no revisions is not offered in the switcher", () => {
+    const withEmpty = buildPrototypeWebPage({
+      ...input,
+      variants: [...input.variants, { id: "empty", label: "Empty", revisions: [] }],
+    });
+    expect(withEmpty.html).not.toContain('value="empty"');
+    expect(withEmpty.html).toContain('value="b"');
   });
 
   test("refuses when even the latest revisions do not fit, naming the largest view", () => {

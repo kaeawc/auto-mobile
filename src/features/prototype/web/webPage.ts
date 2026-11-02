@@ -4,7 +4,12 @@ import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import type { WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
-import { prototypeWebPageRuntime, prototypeWebZoomScale } from "./webPageRuntime";
+import {
+  prototypeWebFitScale,
+  prototypeWebPageRuntime,
+  prototypeWebWheelFactor,
+  prototypeWebZoomScale,
+} from "./webPageRuntime";
 import { renderPrototypeStill } from "./webStill";
 import type { UnsupportedWebNode } from "./webRender";
 
@@ -49,7 +54,7 @@ export interface PrototypeWebPage {
 }
 
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
-export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})(${prototypeWebZoomScale.toString()});`;
+export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()} });`;
 export const MAX_PROTOTYPE_WEB_RUNTIME_BYTES = 150 * 1024;
 export const MAX_PROTOTYPE_WEB_PAGE_BYTES = 2 * 1024 * 1024;
 
@@ -128,13 +133,15 @@ function toolbar(input: PrototypeWebPageInput, chosen: PrototypeWebVariant): Web
     el("button", { attrs: { type: "button", "data-control": control, "aria-label": label } }, [
       text,
     ]);
+  // A variant with no revisions has nothing to show, so it is not offered.
+  const selectable = input.variants.filter((variant) => variant.revisions.length > 0);
   const variants =
-    input.variants.length > 1
+    selectable.length > 1
       ? [
           el(
             "select",
             { attrs: { "data-control": "variant", "aria-label": "Variant" } },
-            input.variants.map((variant) =>
+            selectable.map((variant) =>
               el(
                 "option",
                 {
@@ -164,6 +171,31 @@ function toolbar(input: PrototypeWebPageInput, chosen: PrototypeWebVariant): Web
   );
 }
 
+function historyEntry(variant: string, revision: { revision: number; operation: string }) {
+  return el("li", {}, [
+    el(
+      "button",
+      {
+        attrs: {
+          type: "button",
+          "data-revision-for": variant,
+          "data-revision-value": String(revision.revision),
+          "aria-pressed": "false",
+        },
+      },
+      [`r${revision.revision} · ${revision.operation}`],
+    ),
+  ]);
+}
+
+/** The bytes one revision's history entry adds to the page. */
+function historyEntryBytes(input: PrototypeWebPageInput, variant: string, revision: number) {
+  const entry = input.variants
+    .find((candidate) => candidate.id === variant)
+    ?.revisions.find((candidate) => candidate.revision === revision);
+  return entry ? Buffer.byteLength(toHtml(historyEntry(variant, entry))) : 0;
+}
+
 function revisionHistory(
   input: PrototypeWebPageInput,
   included: (variant: string, revision: number) => boolean,
@@ -172,22 +204,7 @@ function revisionHistory(
     [...variant.revisions]
       .reverse()
       .filter((revision) => included(variant.id, revision.revision))
-      .map((revision) =>
-        el("li", {}, [
-          el(
-            "button",
-            {
-              attrs: {
-                type: "button",
-                "data-revision-for": variant.id,
-                "data-revision-value": String(revision.revision),
-                "aria-pressed": "false",
-              },
-            },
-            [`r${revision.revision} · ${revision.operation}`],
-          ),
-        ]),
-      ),
+      .map((revision) => historyEntry(variant.id, revision)),
   );
   return el(
     "ul",
@@ -206,14 +223,19 @@ function isLatest(input: PrototypeWebPageInput, group: readonly RenderedView[]):
 const groupBytes = (group: readonly RenderedView[]) =>
   group.reduce((sum, view) => sum + Buffer.byteLength(view.html), 0);
 
+/** The first view is shown, so its `hidden` attribute is dropped from the page. */
+const HIDDEN_ATTRIBUTE_BYTES = Buffer.byteLength(' hidden=""');
+
 /**
  * Every variant's latest revision, then older revisions newest first while they fit. The budget
- * is the page limit minus the shell (head, toolbar, full history list and script).
+ * is the page limit minus the shell (head, toolbar, script and the latest revisions' history
+ * entries); an older revision costs its views plus its own history entry, so the budget counts
+ * exactly what the final page holds.
  */
 function budgetedViews(input: PrototypeWebPageInput, frame: string, shellBytes: number) {
   const groups = input.variants.flatMap((variant) => renderViews(input, frame, variant));
   const limit = input.maxBytes ?? MAX_PROTOTYPE_WEB_PAGE_BYTES;
-  const budget = limit - shellBytes;
+  const budget = limit - shellBytes + HIDDEN_ATTRIBUTE_BYTES;
   const latest = groups.filter((group) => isLatest(input, group));
   let used = latest.reduce((sum, group) => sum + groupBytes(group), 0);
   if (used > budget) {
@@ -225,9 +247,11 @@ function budgetedViews(input: PrototypeWebPageInput, frame: string, shellBytes: 
   const older = groups.filter((group) => !isLatest(input, group));
   const kept = new Set(latest);
   for (const group of older) {
-    if (used + groupBytes(group) <= budget) {
+    const cost =
+      groupBytes(group) + historyEntryBytes(input, group[0]!.variant, group[0]!.revision);
+    if (used + cost <= budget) {
       kept.add(group);
-      used += groupBytes(group);
+      used += cost;
     }
   }
   // Keep the page's own order: variants in input order, revisions newest first.
@@ -270,14 +294,14 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),
   ).id;
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
-  // The shell with every revision listed bounds what the views may use.
+  // The shell lists only the latest revisions, which are always kept; older entries are charged
+  // to their own revision in the budget.
+  const latestRevision = (variant: string, revision: number) =>
+    input.variants.some(
+      (entry) => entry.id === variant && entry.revisions.at(-1)?.revision === revision,
+    );
   const shellBytes = Buffer.byteLength(
-    pageHtml(
-      input,
-      shown,
-      "",
-      revisionHistory(input, () => true),
-    ),
+    pageHtml(input, shown, "", revisionHistory(input, latestRevision)),
   );
   const groups = budgetedViews(input, frame, shellBytes);
   const views = groups.flat();

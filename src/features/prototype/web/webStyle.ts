@@ -67,12 +67,14 @@ function dimension(css: Css, axis: "width" | "height", value: unknown, context: 
   }
 }
 
-function corners(value: unknown): string | undefined {
+function corners(value: unknown): Css | undefined {
   if (typeof value === "number") {
-    return px(value);
+    return { "border-radius": px(value) };
   }
   if (typeof value === "string") {
-    return SHAPE_TOKENS[value] === undefined ? undefined : px(SHAPE_TOKENS[value]!);
+    return SHAPE_TOKENS[value] === undefined
+      ? undefined
+      : { "border-radius": px(SHAPE_TOKENS[value]!) };
   }
   const shape = record(value);
   if (!shape) {
@@ -80,9 +82,13 @@ function corners(value: unknown): string | undefined {
   }
   const corner = (name: string) =>
     px(typeof shape[name] === "number" ? (shape[name] as number) : 0);
-  return [corner("topStart"), corner("topEnd"), corner("bottomEnd"), corner("bottomStart")].join(
-    " ",
-  );
+  // Logical corners follow the element's direction, so an RTL window mirrors them.
+  return {
+    "border-start-start-radius": corner("topStart"),
+    "border-start-end-radius": corner("topEnd"),
+    "border-end-end-radius": corner("bottomEnd"),
+    "border-end-start-radius": corner("bottomStart"),
+  };
 }
 
 function boxStyle(css: Css, style: Raw, context: WebStyleContext) {
@@ -103,7 +109,7 @@ function boxStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
   const radius = corners(style.cornerRadius);
   if (radius) {
-    css["border-radius"] = radius;
+    Object.assign(css, radius);
     css.overflow = "hidden";
   }
   const border = record(style.border);

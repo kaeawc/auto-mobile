@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <grp.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,6 +10,26 @@
 static int usage(const char *program) {
     fprintf(stderr, "Usage: %s <MiB> [max-seconds] (MiB: 1..16384; max-seconds: 1..86400)\n", program);
     return 2;
+}
+
+/* AID_SHELL: the user adbd runs as when it is not root. */
+#define SHELL_ID 2000
+
+/*
+ * Started by a rooted adbd, drop to the shell user so the payload's owner never depends on
+ * rootState: after `adb unroot` the shell must still be able to signal it. No su is involved,
+ * because rootState may plant inert su stubs.
+ */
+static int drop_root(void) {
+    if (geteuid() != 0) {
+        return 0;
+    }
+    const gid_t groups[] = {SHELL_ID};
+    if (setgroups(1, groups) == -1 || setgid(SHELL_ID) == -1 || setuid(SHELL_ID) == -1) {
+        perror("drop root");
+        return -1;
+    }
+    return 0;
 }
 
 static void stop(int signal_number) {
@@ -43,6 +64,10 @@ int main(int argc, char **argv) {
         if (errno != 0 || max_seconds < 1 || max_seconds > 86400) {
             return usage(argv[0]);
         }
+    }
+
+    if (drop_root() == -1) {
+        return 1;
     }
 
     struct sigaction action = {0};

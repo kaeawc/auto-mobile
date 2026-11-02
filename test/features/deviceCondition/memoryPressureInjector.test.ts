@@ -73,6 +73,12 @@ class PressureDevice extends FakeAdbExecutor {
   readonly argv: string[][] = [];
   readonly files = new Set<string>();
   readonly processes = new Map<string, string>();
+  /** The UID that started each process: a non-root shell gets EPERM killing a root one. */
+  readonly owners = new Map<string, string>();
+  /** adbd's UID: "0" after `adb root`, "2000" (shell) otherwise. */
+  uid = "2000";
+  /** The payload binary drops to the shell user when started as root (#16407); old builds did not. */
+  dropsRoot = true;
   abi = "x86_64";
   mem = meminfo;
   logs = killLines;
@@ -119,7 +125,8 @@ class PressureDevice extends FakeAdbExecutor {
     if (this.reuseBeforeKill) {
       this.processes.set(pid, "/system/bin/unrelated");
     }
-    if (!this.ignoreKill && this.processes.get(pid) === BIN) {
+    const permitted = this.uid === "0" || this.owners.get(pid) !== "0";
+    if (!this.ignoreKill && permitted && this.processes.get(pid) === BIN) {
       this.processes.delete(pid);
     }
     return result();
@@ -150,15 +157,29 @@ class PressureDevice extends FakeAdbExecutor {
     if (command === `shell chmod 755 ${BIN}`) {
       return result();
     }
+    if (command === `shell cat ${PID}`) {
+      return result(this.files.has(PID) ? this.pidContents : "");
+    }
+    if (command === "shell grep ^Uid: /proc/4321/status") {
+      const owner = this.owners.get("4321");
+      return result(
+        this.processes.has("4321") && owner ? `Uid:\t${owner}\t${owner}\t${owner}\t${owner}` : "",
+      );
+    }
     return this.payload(command);
+  }
+
+  private launch(owner: string): ExecResult {
+    this.files.add(PID);
+    this.files.add(OUT);
+    this.processes.set("4321", BIN);
+    this.owners.set("4321", owner);
+    return result();
   }
 
   private payload(command: string): ExecResult {
     if (command.startsWith(`shell nohup ${BIN} `)) {
-      this.files.add(PID);
-      this.files.add(OUT);
-      this.processes.set("4321", BIN);
-      return result();
+      return this.launch(this.uid === "0" && !this.dropsRoot ? "0" : "2000");
     }
     if (command === `shell cat ${OUT} 2>/dev/null; true`) {
       if (this.exitAfterReady) {
@@ -262,6 +283,8 @@ test("happy apply has exact ordered shell/push sequence, waits using FakeTimer a
     `shell nohup ${BIN} 1484 1800 >${OUT} 2>&1 </dev/null & echo $! > ${PID}`,
     `shell cat ${OUT} 2>/dev/null; true`,
     `shell cat ${OUT} 2>/dev/null; true`,
+    `shell cat ${PID}`,
+    "shell grep ^Uid: /proc/4321/status",
     "shell logcat -d -b all -t '11-02 10:15:50.000'",
     "shell logcat -d -b all -t '11-02 10:15:50.000'",
     scan,
@@ -719,4 +742,32 @@ test("a failed release verification surfaces as an error, not a silent skip (#16
   });
   await expect(injector.apply("on")).rejects.toThrow("checksum verification failed");
   expect(h.device.argv.some((args) => args[0] === "push")).toBe(false);
+});
+
+test("a payload started under a rooted adbd can still be stopped after unroot (#16407)", async () => {
+  const h = harness();
+  h.device.uid = "0";
+  const applied = await h.injector.apply("on");
+  expect(applied.status).toBe("applied");
+  // No su: rootState may plant inert su stubs, so the payload drops to the shell user itself.
+  expect(h.device.commands.some((command) => command.includes(" su "))).toBe(false);
+  expect(h.device.owners.get("4321")).toBe("2000");
+
+  // Clearing rootState runs `adb unroot`; the reset then runs as the shell user.
+  h.device.uid = "2000";
+  await applied.reset!();
+
+  expectClean(h.device);
+});
+
+test("a root-owned payload from an older build is refused while adbd can still stop it", async () => {
+  const h = harness();
+  h.device.uid = "0";
+  h.device.dropsRoot = false;
+
+  await expect(h.injector.apply("on")).rejects.toThrow(
+    "memory pressure payload runs as uid 0, not the shell user; rebuild it",
+  );
+
+  expectClean(h.device);
 });

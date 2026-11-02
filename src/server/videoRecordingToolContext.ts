@@ -14,9 +14,10 @@ import {
 } from "./lifecycleDeviceOwnership";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { defaultDaemonContext } from "../daemon/daemonContext";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  currentConnectionMcpSessionId,
+} from "../features/toolSelection/toolSelectionContext";
 
 /**
  * Narrow device-detection seam used by {@link resolveTargetDevices} when a call targets
@@ -163,11 +164,8 @@ export const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
   },
 };
 
-export function mcpSessionIdOf(args: VideoRecordingArgs): string | undefined {
-  const value: unknown = Reflect.get(args, INTERNAL_MCP_SESSION_PARAM);
-  return typeof value === "string" && value.length > 0
-    ? value
-    : getToolSelectionContext()?.callerMcpSessionId;
+export function mcpSessionIdOf(_args: VideoRecordingArgs): string | undefined {
+  return currentConnectionMcpSessionId();
 }
 
 export function recordingStartOwner(

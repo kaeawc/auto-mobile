@@ -267,8 +267,9 @@ export class DragPath extends BaseVisualChange {
   ): Promise<DragPathResult> {
     // Cold start and teardown of the instrumentation count against the request budget too.
     assertDragPathFitsRequestBudget(
-      plan.totalMs + INSTRUMENTATION_OVERHEAD_MS,
+      plan.totalMs,
       call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
+      INSTRUMENTATION_OVERHEAD_MS,
     );
     const authored = options.points;
     const waypoints = plan.vertices.map((vertex, index) => ({

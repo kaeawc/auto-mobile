@@ -137,7 +137,9 @@ describe("dragPath with a stylus pointer (#13099)", () => {
         },
         { deadlineMs: 10_000 },
       ),
-    ).rejects.toThrow(/does not fit the remaining request budget/);
+    ).rejects.toThrow(
+      "dragPath duration 4000 ms does not fit the remaining request budget (10000 ms; needs 21000 ms including dispatch headroom)",
+    );
     expect(route.injected).toEqual([]);
   });
 

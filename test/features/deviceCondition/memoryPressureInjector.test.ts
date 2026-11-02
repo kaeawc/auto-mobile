@@ -199,6 +199,8 @@ function harness(device = new PressureDevice()) {
   timer.enableAutoAdvance();
   const options = {
     timer,
+    // Isolated from the developer's own AUTOMOBILE_LMK_PRESSURE_DIR.
+    env: {},
     resolveBinaryPath: (abi: string) => `/fake/${abi}/lmk_pressure`,
     binaryExists: () => true,
   };
@@ -314,6 +316,7 @@ test("unknown ABI, missing binary and too-small memory are unsupported before pu
     createMemoryPressureInjector(missing.device, {
       ...missing.options,
       binaryExists: () => false,
+      releaseBinary: async () => null,
     }).apply("on"),
   ).rejects.toThrow(
     "bash scripts/android/build-lmk-pressure.sh or set AUTOMOBILE_LMK_PRESSURE_DIR",
@@ -670,6 +673,75 @@ test("untrusted PID-file contents cannot become shell syntax or a process-group 
     expectClean(h.device);
     expect(h.device.commands.some((command) => command.includes("then kill"))).toBe(false);
   }
+});
+
+test("without a local build the released binary for the device ABI is pushed (#16402)", async () => {
+  const h = harness();
+  const requested: string[] = [];
+  const injector = createMemoryPressureInjector(h.device, {
+    ...h.options,
+    binaryExists: () => false,
+    releaseBinary: async (abi) => {
+      requested.push(abi);
+      return `/cache/lmk-pressure/${abi}/lmk_pressure`;
+    },
+  });
+  const applied = await injector.apply("on");
+  expect(requested).toEqual(["x86_64"]);
+  expect(h.device.argv.find((args) => args[0] === "push")).toEqual([
+    "push",
+    "/cache/lmk-pressure/x86_64/lmk_pressure",
+    BIN,
+  ]);
+  await applied.reset?.();
+});
+
+test("a local build wins over the release download (#16402)", async () => {
+  const h = harness();
+  let downloaded = false;
+  const injector = createMemoryPressureInjector(h.device, {
+    ...h.options,
+    releaseBinary: async () => {
+      downloaded = true;
+      return "/cache/never";
+    },
+  });
+  const applied = await injector.apply("on");
+  expect(downloaded).toBe(false);
+  expect(h.device.argv.find((args) => args[0] === "push")?.[1]).toBe("/fake/x86_64/lmk_pressure");
+  await applied.reset?.();
+});
+
+test("an explicit directory without the binary is unsupported and never downloads (#16402)", async () => {
+  const h = harness();
+  let downloaded = false;
+  const injector = createMemoryPressureInjector(h.device, {
+    timer: h.timer,
+    env: { AUTOMOBILE_LMK_PRESSURE_DIR: "/custom pressure" },
+    binaryExists: () => false,
+    releaseBinary: async () => {
+      downloaded = true;
+      return "/cache/never";
+    },
+  });
+  await expect(injector.apply("on")).rejects.toThrow(
+    `missing pressure binary ${join("/custom pressure", "x86_64", "lmk_pressure")}`,
+  );
+  expect(downloaded).toBe(false);
+  expect(h.device.argv.some((args) => args[0] === "push")).toBe(false);
+});
+
+test("a failed release verification surfaces as an error, not a silent skip (#16402)", async () => {
+  const h = harness();
+  const injector = createMemoryPressureInjector(h.device, {
+    ...h.options,
+    binaryExists: () => false,
+    releaseBinary: async () => {
+      throw new Error("x86_64 memory-pressure binary checksum verification failed");
+    },
+  });
+  await expect(injector.apply("on")).rejects.toThrow("checksum verification failed");
+  expect(h.device.argv.some((args) => args[0] === "push")).toBe(false);
 });
 
 test("a payload started under a rooted adbd can still be stopped after unroot (#16407)", async () => {

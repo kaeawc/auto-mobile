@@ -21,6 +21,7 @@ import type {
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
 import { adbCommand, createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
+import { LmkPressureBinaryProvider } from "./lmkPressureBinaryProvider";
 
 export const MEMORY_PRESSURE_BINARY = "/data/local/tmp/automobile-lmk-pressure";
 export const MEMORY_PRESSURE_PID = `${MEMORY_PRESSURE_BINARY}.pid`;
@@ -83,6 +84,11 @@ export interface MemoryPressureOptions {
   timer?: Timer;
   resolveBinaryPath?: (abi: string) => string;
   binaryExists?: (path: string) => boolean | Promise<boolean>;
+  /**
+   * The checksum-verified release binary for an ABI, or null when the pinned
+   * release has none (#16402). Defaults to the shared release download cache.
+   */
+  releaseBinary?: (abi: "arm64-v8a" | "x86_64") => Promise<string | null>;
 }
 
 /** Only argv[0] equal to our exact executable is owned; substrings and reused PIDs are not. */
@@ -256,15 +262,27 @@ class MemoryPressureFixture {
     if (abi !== "arm64-v8a" && abi !== "x86_64") {
       unsupported(`memoryPressure does not support ABI ${abi}`);
     }
+    const env = this.options.env ?? process.env;
     const path = this.options.resolveBinaryPath
       ? this.options.resolveBinaryPath(abi)
-      : resolveBinaryPath(abi, this.options.env ?? process.env);
-    if (!(await (this.options.binaryExists ?? existsSync)(path))) {
-      unsupported(
-        `missing pressure binary ${path}; run bash scripts/android/build-lmk-pressure.sh or set AUTOMOBILE_LMK_PRESSURE_DIR`,
-      );
+      : resolveBinaryPath(abi, env);
+    if (await (this.options.binaryExists ?? existsSync)(path)) {
+      return path;
     }
-    return path;
+    // An explicit directory is the user's choice: report it rather than download around it.
+    if (!readEnvTrimmed(ENV.LMK_PRESSURE_DIR, env)) {
+      // The on-disk cache is shared, so a provider per apply does not re-download.
+      const released = await (
+        this.options.releaseBinary ??
+        ((wanted) => new LmkPressureBinaryProvider({ env }).ensure(wanted))
+      )(abi);
+      if (released) {
+        return released;
+      }
+    }
+    return unsupported(
+      `missing pressure binary ${path} and no released binary for this AutoMobile version; run bash scripts/android/build-lmk-pressure.sh or set AUTOMOBILE_LMK_PRESSURE_DIR`,
+    );
   }
 
   private async applyNow(

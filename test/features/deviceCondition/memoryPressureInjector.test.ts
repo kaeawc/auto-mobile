@@ -1,5 +1,9 @@
-import { expect, test } from "bun:test";
-import { createDefaultInjectorResolver } from "../../../src/features/deviceCondition/DeviceConditionRegistry";
+import { expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
+import {
+  DeviceConditionRegistry,
+  createDefaultInjectorResolver,
+} from "../../../src/features/deviceCondition/DeviceConditionRegistry";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 import { readFileSync } from "node:fs";
@@ -436,6 +440,43 @@ test("recovery after a daemon restart cleans live processes and leftovers, inclu
     await recovered?.();
     expectClean(h.device);
     expect(await fresh.recover?.()).toBeNull();
+  }
+});
+
+test("failed restart discovery retains the registry slot for session cleanup and a later reset", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const h = harness();
+    await h.injector.apply("on");
+    const registry = new DeviceConditionRegistry(
+      createDefaultInjectorResolver({
+        ...h.options,
+        adbFactory: { create: () => h.device },
+      }),
+      h.timer,
+    );
+    const owner = { sessionUuid: "pressure-session", deviceId: android.deviceId, device: android };
+    h.device.failOn = `shell ls ${PID}`;
+    const failed = await registry.apply(owner, { reset: true });
+    expect(failed.success).toBe(false);
+    expect(failed.restore?.verifiedClean).toBe(false);
+    expect(failed.restore?.failures).toContainEqual({
+      key: "faults.memoryPressure",
+      error:
+        "Could not check the device for an abandoned faults.memoryPressure fixture (fake transport failed). Reconnect the device and run reset again, or release the session to retry.",
+    });
+    expect(registry.hasActiveConditions(owner)).toBe(true);
+    await expect(registry.restoreSession(owner.sessionUuid)).resolves.toEqual([false]);
+    expect(registry.hasActiveConditions(owner)).toBe(true);
+    expect(h.device.processes.get("4321")).toBe(BIN);
+    h.device.failOn = undefined;
+    const retried = await registry.apply(owner, { reset: true });
+    expect(retried.success).toBe(true);
+    expect(retried.restore?.verifiedClean).toBe(true);
+    expectClean(h.device);
+    expect(registry.hasActiveConditions(owner)).toBe(false);
+  } finally {
+    warn.mockRestore();
   }
 });
 

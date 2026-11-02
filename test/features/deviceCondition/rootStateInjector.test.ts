@@ -138,46 +138,79 @@ describe("rootState injector (#14060)", () => {
   });
 
   for (const failingRead of ["ls", "cat"] as const) {
-    test(`a failed ${failingRead} recovery probe leaves unset and restore unchanged`, async () => {
-      const initial = {
-        "/system/xbin/su": "#!/system/bin/sh\nexit 1\n",
-        "/system/bin/su": "#!/system/bin/sh\nexit 1\n",
-      };
-      const { adb, files } = adbWithFiles(initial);
-      const execute = adb.execute.bind(adb);
-      adb.execute = async (args, options) => {
-        // Let the first cat match before the second throws: adoption must be atomic.
-        if (args[1] === failingRead && (failingRead === "ls" || args[2] === "/system/bin/su")) {
-          throw new Error("probe unavailable");
+    test(`a failed ${failingRead} recovery probe stays active until a successful retry`, async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const initial = {
+          "/system/xbin/su": "#!/system/bin/sh\nexit 1\n",
+          "/system/bin/su": "#!/system/bin/sh\nexit 1\n",
+        };
+        const { adb, files, state } = adbWithFiles(initial);
+        let failing = true;
+        const execute = adb.execute.bind(adb);
+        adb.execute = async (args, options) => {
+          // Let the first cat match before the second throws: adoption must be atomic.
+          if (
+            failing &&
+            args[1] === failingRead &&
+            (failingRead === "ls" || args[2] === "/system/bin/su")
+          ) {
+            throw new Error("probe unavailable");
+          }
+          return execute(args, options);
+        };
+        const artifacts = new ArtifactOwner();
+        const selinux = new SelinuxOwner();
+        const injector = realCreateRootStateInjector(
+          adb,
+          selinux,
+          artifacts,
+          new FakeStubBuilder(),
+        );
+        const controller = new DeviceConditionController((key) =>
+          key === "rootState" ? injector : undefined,
+        );
+        const result = await controller.apply({ rootState: "unset" });
+        const detail =
+          "Could not check the device for an abandoned rootState fixture (probe unavailable). Reconnect the device and run reset again, or release the session to retry.";
+        expect(result.success).toBe(false);
+        expect(result.changes).toEqual([{ key: "rootState", status: "unsupported", detail }]);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          expect(await controller.restore()).toEqual({
+            restored: [],
+            failures: [{ key: "rootState", error: detail }],
+            verifiedClean: false,
+          });
         }
-        return execute(args, options);
-      };
-      const artifacts = new ArtifactOwner();
-      const selinux = new SelinuxOwner();
-      const injector = realCreateRootStateInjector(adb, selinux, artifacts, new FakeStubBuilder());
-      const controller = new DeviceConditionController((key) =>
-        key === "rootState" ? injector : undefined,
-      );
-      const result = await controller.apply({ rootState: "unset" });
-      expect(result.success).toBe(true);
-      expect(result.changes).toEqual([{ key: "rootState", status: "unchanged" }]);
-      expect(await controller.restore()).toEqual({
-        restored: [],
-        failures: [],
-        verifiedClean: true,
-      });
-      expect(await controller.restore()).toEqual({
-        restored: [],
-        failures: [],
-        verifiedClean: true,
-      });
-      expect(controller.hasActiveConditions()).toBe(false);
-      expect(selinux.owned).toBe(false);
-      expect(artifacts.plantedForOther({}, "/system/xbin/su")).toBe(false);
-      expect([...files]).toEqual(Object.entries(initial));
-      expect(adb.getExecutedCommands().every((command) => /^shell (ls|cat) /.test(command))).toBe(
-        true,
-      );
+        expect(controller.hasActiveConditions()).toBe(true);
+        expect(state.permissive).toBe(true);
+        expect(selinux.owned).toBe(false);
+        expect(artifacts.plantedForOther({}, "/system/xbin/su")).toBe(false);
+        expect([...files]).toEqual(Object.entries(initial));
+        expect(adb.getExecutedCommands().every((command) => /^shell (ls|cat) /.test(command))).toBe(
+          true,
+        );
+        failing = false;
+        // Exercise both retry entry points with the same ADB and injector.
+        if (failingRead === "ls") {
+          expect(await controller.restore()).toEqual({
+            restored: ["rootState"],
+            failures: [],
+            verifiedClean: true,
+          });
+        } else {
+          expect((await controller.apply({ rootState: "unset" })).changes).toEqual([
+            { key: "rootState", status: "cleared" },
+          ]);
+          expect((await controller.restore()).verifiedClean).toBe(true);
+        }
+        expect(files.size).toBe(0);
+        expect(state.permissive).toBe(false);
+        expect(selinux.owned).toBe(false);
+        expect(controller.hasActiveConditions()).toBe(false);
+      } finally {
+        warn.mockRestore();
+      }
     });
   }
 

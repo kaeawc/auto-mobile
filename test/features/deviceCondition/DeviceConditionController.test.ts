@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   DeviceConditionController,
   type DeviceConditionInjector,
   type DeviceConditionApplyOutcome,
 } from "../../../src/features/deviceCondition/DeviceConditionController";
+import { logger } from "../../../src/utils/logger";
 import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
 import type { DeviceConditionKey } from "../../../src/features/deviceCondition/DeviceConditionTypes";
 
@@ -15,6 +16,7 @@ class FakeInjector implements DeviceConditionInjector {
   failReset = false;
   failApply = false;
   failApplyWithOwedReset = false;
+  recover?: DeviceConditionInjector["recover"];
   constructor(readonly key: DeviceConditionKey) {}
 
   apply(value: string): Promise<DeviceConditionApplyOutcome> {
@@ -56,6 +58,73 @@ function controllerWith(injectors: Map<DeviceConditionKey, DeviceConditionInject
 }
 
 describe("DeviceConditionController (#14050)", () => {
+  test("failed recovery keeps reset unsuccessful and the key active until a dirty device is recovered", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const injector = new FakeInjector("faults.memoryPressure");
+      injector.recover = () => Promise.reject(new Error("device offline"));
+      const controller = controllerWith(new Map([[injector.key, injector]]));
+      const result = await controller.apply({ reset: true });
+      expect(result.success).toBe(false);
+      expect(result.restore).toEqual({
+        restored: [],
+        failures: [
+          {
+            key: injector.key,
+            error:
+              "Could not check the device for an abandoned faults.memoryPressure fixture (device offline). Reconnect the device and run reset again, or release the session to retry.",
+          },
+        ],
+        verifiedClean: false,
+      });
+      expect(controller.hasActiveConditions()).toBe(true);
+      expect(controller.activeKeys()).toEqual([injector.key]);
+      injector.clean = false;
+      injector.recover = async () => (await injector.apply("on")).reset ?? null;
+      const retried = await controller.apply({ reset: true });
+      expect(injector.resetCount).toBe(1);
+      expect(retried.success).toBe(true);
+      expect(retried.restore).toEqual({
+        restored: [injector.key],
+        failures: [],
+        verifiedClean: true,
+      });
+      expect(controller.hasActiveConditions()).toBe(false);
+      expect(controller.activeKeys()).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("failed recovery makes unset unsupported and a clean recovery clears the obligation", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const injector = new FakeInjector("faults.memoryPressure");
+      injector.recover = () => Promise.reject(new Error("device offline"));
+      const controller = controllerWith(new Map([[injector.key, injector]]));
+      const result = await controller.apply({ faults: { memoryPressure: "unset" } });
+      expect(result.success).toBe(false);
+      expect(result.changes).toEqual([
+        {
+          key: injector.key,
+          status: "unsupported",
+          detail:
+            "Could not check the device for an abandoned faults.memoryPressure fixture (device offline). Reconnect the device and run reset again, or release the session to retry.",
+        },
+      ]);
+      expect(controller.hasActiveConditions()).toBe(true);
+      injector.recover = () => Promise.resolve(null);
+      const retried = await controller.apply({ reset: true });
+      expect(retried.success).toBe(true);
+      expect(retried.restore).toEqual({ restored: [], failures: [], verifiedClean: true });
+      expect(injector.resetCount).toBe(0);
+      expect(controller.hasActiveConditions()).toBe(false);
+      expect(controller.activeKeys()).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("a condition with no injector is reported unsupported, not silently dropped", async () => {
     const controller = controllerWith(new Map());
     const result = await controller.apply({ faults: {}, rootState: "unset" });

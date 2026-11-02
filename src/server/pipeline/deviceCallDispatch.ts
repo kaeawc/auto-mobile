@@ -1,4 +1,3 @@
-import { INTERNAL_EXECUTION_START_TIME_PARAM } from "../../daemon/wire/constants";
 import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
@@ -95,27 +94,14 @@ export function markDeviceCallKind(executionId: string, toolName: string, readOn
   }
 }
 
-/**
- * The routing session, and the execution start still written in-band for provisioning's deadline
- * reads until they move to the ambient request deadline (#15663). Other readers use the ambient
- * call context.
- */
-function withAmbientDeviceContext(
+/** The ambient routing session, re-injected so a nested call keeps the outer call's (#4611). */
+function withAmbientRoutingSession(
   args: Record<string, unknown>,
   routingSessionUuid: string | undefined,
-  execution: { startTime: number } | undefined,
 ): Record<string, unknown> {
-  const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
-  const needsStartTime =
-    execution && args[INTERNAL_EXECUTION_START_TIME_PARAM] !== execution.startTime;
-  if (!needsRoutingSession && !needsStartTime) {
-    return args;
-  }
-  return {
-    ...args,
-    ...(needsRoutingSession ? { sessionUuid: routingSessionUuid } : {}),
-    ...(needsStartTime ? { [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime } : {}),
-  };
+  return routingSessionUuid && args.sessionUuid !== routingSessionUuid
+    ? { ...args, sessionUuid: routingSessionUuid }
+    : args;
 }
 
 /**
@@ -146,10 +132,9 @@ export function deviceAwareHandlerArgs(
     !args.sessionUuid
       ? undefined
       : context?.routingSessionUuid;
-  return withAmbientDeviceContext(
+  return withAmbientRoutingSession(
     withoutBlankSessionUuid(args),
     nonBlankSessionUuid(routingSession),
-    context?.execution,
   );
 }
 

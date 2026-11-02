@@ -3,6 +3,7 @@ import {
   type ProvisionDeviceCleanup,
 } from "../../src/features/deviceLifecycle/provisioning/provisioning";
 import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
+import { withWireDeadline } from "../helpers/requestDeadline";
 import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
 import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
 import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
@@ -4339,7 +4340,7 @@ describe("provisionDevice handler", () => {
     const awaited = provisionCancellationOutcomes
       .await("forwarded-call-key", 60_000, new FakeTimer())
       .then((outcome) => published.push(outcome));
-    const call = tool.handler(args, undefined, caller.signal);
+    const call = withWireDeadline(args, (rest) => tool.handler(rest, undefined, caller.signal));
     await Promise.resolve();
     caller.abort(new Error("client went away"));
     const response = await call;
@@ -6041,16 +6042,18 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
 
-    await tool.handler({
-      ...provisionTestArgs("android"),
-      boot: false,
-      readiness: "none",
-      timeoutMs: 100_000,
-      // The outer request originally had 165s (100s provisioning + 60s
-      // rollback + 5s response headroom); 20s elapsed in the socket queue.
-      __mcpRequestTimeoutMs: 145_000,
-      __mcpRequestDeadlineMs: 145_000,
-    });
+    await withWireDeadline(
+      {
+        ...provisionTestArgs("android"),
+        boot: false,
+        readiness: "none" as const,
+        timeoutMs: 100_000,
+        // The outer request originally had 165s (100s provisioning + 60s
+        // rollback + 5s response headroom); 20s elapsed in the socket queue.
+        __mcpRequestDeadlineMs: 145_000,
+      },
+      (args) => tool.handler(args),
+    );
 
     expect(provisionDeadlineMs).toBe(80_000);
   });

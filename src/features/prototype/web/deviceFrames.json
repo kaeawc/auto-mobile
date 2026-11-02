@@ -11,7 +11,7 @@
       "navBar": { "type": "gesture", "heightDp": 24 },
       "safeArea": {
         "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
-        "landscape": { "top": 0, "bottom": 24, "left": 48, "right": 0 }
+        "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
       },
       "frame": { "bezelDp": 10, "color": "#1b1b1b" },
       "source": {

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { DeviceOwnedByOtherDaemonError } from "../../models/DeviceOwnedByOtherDaemonError";
 import { extname, resolve } from "node:path";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { logger } from "../logger";
@@ -60,6 +61,8 @@ export interface EmulatorLaunchCoordinatorHost {
     signal?: AbortSignal,
   ): Promise<BootedDevice[]>;
   isAvdStarting(avdName: string): Promise<boolean>;
+  /** The serials live emulators of `avdName` advertise (`RunningAvdAdvertisementReader`). */
+  advertisedSerials(avdName: string): Promise<string[]>;
 }
 
 /** Owns one launch's lifecycle handle, cancellation, and the adopt-instead-of-spawn decision. */
@@ -224,12 +227,7 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
         { bypassDeviceListCache: true },
         signal,
       );
-      // Foreign placeholders carry no AVD name; the launcher's AVD lock still decides those.
-      if (runningEmulators.some((emulator) => emulator.foreignOwned && emulator.name === avdName)) {
-        throw new ActionableError(
-          `another daemon owns AVD '${avdName}'. Use another AVD or release it in that daemon before retrying.`,
-        );
-      }
+      await this.refuseAvdHeldByAnotherDaemon(avdName, runningEmulators);
       if (
         runningEmulators.some((emulator) => !emulator.foreignOwned && emulator.name === avdName)
       ) {
@@ -273,6 +271,31 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
       return false;
     } finally {
       perf.endOperation("checkAlreadyRunning");
+    }
+  }
+
+  /**
+   * Another daemon's emulator is listed without enrichment, so the scan usually cannot name its AVD
+   * (#16339). The emulator's own running-AVD advertisement maps the AVD to its serial; an AVD
+   * running on a serial another daemon holds is refused, typed, instead of waited on as "starting".
+   */
+  private async refuseAvdHeldByAnotherDaemon(
+    avdName: string,
+    runningEmulators: readonly BootedDevice[],
+  ): Promise<void> {
+    const foreign = runningEmulators.filter((emulator) => emulator.foreignOwned);
+    if (foreign.length === 0) {
+      return;
+    }
+    const named = foreign.find((emulator) => emulator.name === avdName);
+    const advertised = named ? [] : await this.host.advertisedSerials(avdName);
+    const held = named ?? foreign.find((emulator) => advertised.includes(emulator.deviceId));
+    if (held) {
+      throw new DeviceOwnedByOtherDaemonError(
+        held.deviceId,
+        undefined,
+        `It runs AVD '${avdName}'. Retry after that daemon releases it, or use another AVD.`,
+      );
     }
   }
 

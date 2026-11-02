@@ -1,6 +1,6 @@
 import { prototypeSpecForDevice } from "../prototypeComponents";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
-import { record } from "../prototypeTemplate";
+import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import { renderDeviceFrame, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
@@ -23,39 +23,67 @@ export interface PrototypeStill {
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
 }
 
-/** Window placement inside the screen: fullscreen fills it, a sheet sits at the bottom edge. */
-function placed(spec: unknown, content: WebElement | undefined): WebElement {
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  const layer = { position: "absolute", inset: "0", display: "flex", "flex-direction": "column" };
-  if (placement === "sheet") {
-    return el(
-      "div",
-      { attrs: { "data-window": "sheet" }, style: { ...layer, "justify-content": "flex-end" } },
-      content ? [content] : [],
-    );
-  }
-  if (placement === "floating") {
-    return el(
-      "div",
-      {
-        attrs: { "data-window": "floating" },
-        style: { ...layer, "align-items": "center", "justify-content": "center" },
-      },
-      content ? [content] : [],
-    );
-  }
+const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
+  topStart: ["start", "start"],
+  topCenter: ["start", "center"],
+  topEnd: ["start", "end"],
+  centerStart: ["center", "start"],
+  center: ["center", "center"],
+  centerEnd: ["center", "end"],
+  bottomStart: ["end", "start"],
+  bottomCenter: ["end", "center"],
+  bottomEnd: ["end", "end"],
+};
+
+const LAYER = { position: "absolute", inset: "0", display: "flex", "flex-direction": "column" };
+
+function sheetWindow(placement: Raw, children: WebElement[]): WebElement {
+  const height = typeof placement.height === "number" ? placement.height : 0;
+  const sheet = el(
+    "div",
+    { style: { display: "flex", "flex-direction": "column", height: `${height}px` } },
+    children,
+  );
+  const edge = placement.edge === "top" ? "flex-start" : "flex-end";
   return el(
     "div",
-    { attrs: { "data-window": "fullscreen" }, style: layer },
-    content ? [content] : [],
+    { attrs: { "data-window": "sheet" }, style: { ...LAYER, "justify-content": edge } },
+    [sheet],
+  );
+}
+
+function floatingWindow(placement: Raw, children: WebElement[]): WebElement {
+  const [vertical, horizontal] = GRAVITY_ALIGN[String(placement.gravity)] ?? ["center", "center"];
+  const offset = record(placement.offset);
+  const x = typeof offset?.x === "number" ? offset.x : 0;
+  const y = typeof offset?.y === "number" ? offset.y : 0;
+  const floating = el("div", { style: { transform: `translate(${x}px, ${y}px)` } }, children);
+  return el(
+    "div",
+    {
+      attrs: { "data-window": "floating" },
+      style: { ...LAYER, display: "grid", "align-items": vertical, "justify-items": horizontal },
+    },
+    [floating],
   );
 }
 
 /**
- * The prototype as a still screen inside a device frame (#16346): the spec's own state and data,
- * the stack's start screen, no actions run. Unsupported nodes draw as labelled placeholders and
- * are listed so the page never looks complete when it is not.
+ * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
+ * a floating window sits at its `gravity`, moved by its `offset`.
  */
+function placed(spec: unknown, content: WebElement | undefined): WebElement {
+  const placement = record(record(record(spec)?.window)?.placement) ?? {};
+  const children = content ? [content] : [];
+  if (placement.type === "sheet") {
+    return sheetWindow(placement, children);
+  }
+  if (placement.type === "floating") {
+    return floatingWindow(placement, children);
+  }
+  return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,

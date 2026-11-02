@@ -13,12 +13,17 @@ the host, so the page's script only switches between views it was given and neve
   its `start` screen. No action, timer or `request` runs.
 - **Text.** A bare `{key}` reads spec state, then a top-level `derive` entry. Repeat placeholders
   bind each item (a literal `items` array or a data pointer), including the repeat's own `derive`
-  fields. Control state keys bind repeat placeholders before reading state. Formatting uses `en-US`, `UTC` and a
+  fields, through the same binding contract the devices use (`bindNodeFields`): text and spans,
+  nested conditions with typed operands, and state keys. A spans-only text node renders each span
+  with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a
   caller-supplied clock (default 0), so derived relative times are fixed.
 - **Conditions.** `visibleWhen` evaluates `key` comparisons with `all`, `any` and `not` against
   spec state. Parts the still cannot decide (`data` and `platform` pointers, unknown keys, validity,
   string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
   condition counts as true, so a node is never hidden on a guess.
+- **Window.** Fullscreen fills the screen; a sheet is `height` dp at its `edge`; a floating window
+  sits at its `gravity`, moved by its `offset`.
+- **Style precedence.** A control's default styling applies first and the spec's own style wins.
 - **Layout.** Rows and columns are flex lines, a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill`, `{dp}`, `weight`, padding (logical
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.

@@ -4,7 +4,14 @@ import {
   resolvePrototypeDerived,
   type PrototypeFormatEnvironment,
 } from "../prototypeFormat";
-import { bindText, record, renderScalar, type Instance, type Raw } from "../prototypeTemplate";
+import {
+  bindNodeFields,
+  bindText,
+  record,
+  renderScalar,
+  type Instance,
+  type Raw,
+} from "../prototypeTemplate";
 import { conditionHolds, type ConditionScope } from "./webCondition";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
@@ -79,11 +86,12 @@ function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = 
   if (typeof node.contentDescription === "string") {
     attrs["aria-label"] = bound(node.contentDescription, scope);
   }
+  // Component defaults first, so the spec's own style wins, as on both devices.
   const style = {
+    ...extra,
     ...nodeCss(node.style, scope.style),
     ...textCss(record(node.style), scope.style),
     ...(scope.inBox ? { "grid-area": "cell" } : {}),
-    ...extra,
   };
   return { attrs, style };
 }
@@ -142,6 +150,19 @@ const box: NodeRenderer = (node, scope, path) => {
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
+/** A text node's content: its `text`, or each span with its own text style. */
+function textContent(node: Raw, scope: WebRenderScope): WebChild[] {
+  if (!Array.isArray(node.spans)) {
+    return [bound(node.text, scope)];
+  }
+  return node.spans.map((span) => {
+    const entry = record(span) ?? {};
+    return el("span", { style: textCss(record(entry.style), scope.style) }, [
+      bound(entry.text, scope),
+    ]);
+  });
+}
+
 const text: NodeRenderer = (node, scope) => {
   const maxLines = record(node.style)?.maxLines;
   const clamp: Record<string, string> =
@@ -154,7 +175,7 @@ const text: NodeRenderer = (node, scope) => {
         }
       : {};
   const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
-  return el("span", { attrs, style }, [bound(node.text, scope)]);
+  return el("span", { attrs, style }, textContent(node, scope));
 };
 
 const stack: NodeRenderer = (node, scope, path) => {
@@ -298,10 +319,15 @@ const textField: NodeRenderer = (node, scope) => {
   // A state key inside a repeat may hold item placeholders, which bind first.
   const key = typeof node.stateKey === "string" ? bound(node.stateKey, scope) : undefined;
   const value = key === undefined ? undefined : scope.condition.state[key];
+  const typed = typeof value === "string" && value !== "" ? value : undefined;
+  // A secure field never shows its value, as the native password transformation does.
+  const secure = node.secure === true || node.keyboardType === "password";
   const shown =
-    typeof value === "string" && value !== ""
-      ? value
-      : bound(node.placeholder ?? node.label, scope);
+    typed === undefined
+      ? bound(node.placeholder ?? node.label, scope)
+      : secure
+        ? "•".repeat([...typed].length)
+        : typed;
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "align-items": "center",
@@ -309,7 +335,7 @@ const textField: NodeRenderer = (node, scope) => {
     padding: "0 16px",
     "border-radius": "4px",
     border: `1px solid ${cssColor("outline", scope.style) ?? "currentColor"}`,
-    ...(typeof value === "string" && value !== "" ? {} : { opacity: "0.7" }),
+    ...(typed === undefined ? { opacity: "0.7" } : {}),
   });
   return el("div", { attrs: { ...attrs, role: "textbox" }, style }, [shown]);
 };
@@ -363,9 +389,6 @@ const card: NodeRenderer = (node, scope, path) => {
       node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
       "onSurface",
     ),
-    ...(record(node.style)?.cornerRadius === undefined
-      ? {}
-      : nodeCss({ cornerRadius: record(node.style)?.cornerRadius }, scope.style)),
   });
   const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
   return el("div", { attrs, style }, children(node, inner, path));
@@ -435,22 +458,19 @@ export function renderWebNode(
   scope: WebRenderScope,
   path: string,
 ): WebElement | undefined {
-  const raw = record(node);
-  if (!raw || typeof raw.type !== "string") {
+  const authored = record(node);
+  if (!authored || typeof authored.type !== "string") {
     return undefined;
   }
-  if (
-    raw.visibleWhen !== undefined &&
-    !conditionHolds(bindCondition(raw.visibleWhen, scope), scope.condition)
-  ) {
+  // Repeat placeholders bind through the same contract the devices use: text, spans, nested
+  // conditions with typed operands, and state keys.
+  const raw = scope.instances.reduce(
+    (current, instance) => bindNodeFields(current, path, instance),
+    authored,
+  );
+  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, scope.condition)) {
     return undefined;
   }
-  const renderer = WEB_NODE_RENDERERS[raw.type];
+  const renderer = WEB_NODE_RENDERERS[String(raw.type)];
   return renderer ? renderer(raw, scope, path) : placeholder(raw, scope, path);
-}
-
-/** A condition key written as a repeat placeholder resolves before evaluation. */
-function bindCondition(condition: unknown, scope: WebRenderScope): unknown {
-  const raw = record(condition);
-  return raw && typeof raw.key === "string" ? { ...raw, key: bound(raw.key, scope) } : condition;
 }

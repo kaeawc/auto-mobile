@@ -121,6 +121,102 @@ describe("prototype web still (#16346)", () => {
     expect(checked.map((element) => element.attrs["aria-checked"])).toEqual(["true", "false"]);
   });
 
+  test("renders a spans-only text node with each span's style", () => {
+    const spec = {
+      ...reference,
+      root: {
+        type: "text",
+        testTag: "rich",
+        spans: [{ text: "Hi {name}, " }, { text: "bold", style: { fontWeight: 700 } }],
+      },
+    };
+    const rich = byTag(renderPrototypeStill(spec), "rich")[0]!;
+    expect(textOf(rich)).toBe("Hi Ada, bold");
+    expect(toHtml(rich)).toContain('<span style="font-weight:700">bold</span>');
+  });
+
+  test("the spec's own style wins over a control's defaults", () => {
+    const spec = {
+      ...reference,
+      root: {
+        type: "button",
+        testTag: "pay",
+        label: "Pay",
+        onTap: [{ type: "setState", key: "agree", value: false }],
+        style: { color: "#FF0000", cornerRadius: 0, fontWeight: 900 },
+      },
+    };
+    expect(byTag(renderPrototypeStill(spec), "pay")[0]!.style).toMatchObject({
+      color: "rgba(255,0,0,1)",
+      "border-radius": "0px",
+      "font-weight": "900",
+    });
+  });
+
+  test("binds repeat placeholders inside nested conditions and typed operands", () => {
+    const spec = {
+      ...reference,
+      state: { selected_a: false, selected_b: true, current: "b" },
+      root: {
+        type: "column",
+        repeat: { as: "item", items: [{ id: "a" }, { id: "b" }] },
+        children: [
+          {
+            type: "text",
+            text: "nested {item.id}",
+            visibleWhen: { all: [{ key: "selected_{item.id}", equals: true }] },
+          },
+          {
+            type: "text",
+            text: "operand {item.id}",
+            visibleWhen: { key: "current", equals: "{item.id}" },
+          },
+        ],
+      },
+    };
+    const html = toHtml(renderPrototypeStill(spec).element);
+    expect(html).not.toContain("nested a");
+    expect(html).toContain("nested b");
+    expect(html).not.toContain("operand a");
+    expect(html).toContain("operand b");
+  });
+
+  test("masks a secure or password text field's value", () => {
+    const field = (extra: Record<string, unknown>) => ({
+      ...reference,
+      state: { password: "secret123" },
+      root: { type: "textField", testTag: "pw", stateKey: "password", ...extra },
+    });
+    for (const extra of [{ secure: true }, { keyboardType: "password" }]) {
+      const html = toHtml(renderPrototypeStill(field(extra)).element);
+      expect(html).not.toContain("secret123");
+      expect(textOf(byTag(renderPrototypeStill(field(extra)), "pw")[0]!)).toBe("•••••••••");
+    }
+  });
+
+  test("places a sheet at its edge with its height, and a floating window at its gravity", () => {
+    const windowOf = (placement: Record<string, unknown>) =>
+      find(
+        renderPrototypeStill({ ...reference, window: { placement } }).element,
+        (element) => element.attrs["data-window"] !== undefined,
+      )[0]!;
+    const top = windowOf({ type: "sheet", edge: "top", height: 200 });
+    expect(top.style["justify-content"]).toBe("flex-start");
+    expect((top.children[0] as { style: Record<string, string> }).style.height).toBe("200px");
+    expect(windowOf({ type: "sheet", edge: "bottom", height: 120 }).style["justify-content"]).toBe(
+      "flex-end",
+    );
+    const floating = windowOf({
+      type: "floating",
+      gravity: "bottomEnd",
+      offset: { x: -8, y: -16 },
+    });
+    expect(floating.style).toMatchObject({ "align-items": "end", "justify-items": "end" });
+    expect((floating.children[0] as { style: Record<string, string> }).style.transform).toBe(
+      "translate(-8px, -16px)",
+    );
+  });
+
   for (const frame of ["pixel-9", "iphone-16"]) {
     for (const orientation of ["portrait", "landscape"] as const) {
       test(`snapshot on ${frame} in ${orientation}`, () => {

@@ -216,6 +216,8 @@ function renderNativeCode(): string {
     "## Embedding in an app",
     "",
     `Read \`${PROTOTYPE_NATIVE_URI}?id=<id>\` (optional \`platform=android|ios\`, \`deviceId\`) for a shown or saved prototype as app code: the spec, its assets, a Jetpack Compose or SwiftUI host file that renders it with the published renderer library, the library coordinate to add, and the capabilities the spec needs. Asset bytes for saved prototypes come from \`${PROTOTYPE_NATIVE_ASSET_URI}?id=<id>&assetId=<asset>\`.`,
+    "",
+    "For one file to paste instead, read `automobile:prototype/<id>/compose` (Kotlin) or `automobile:prototype/<id>/swiftui` (Swift) for a shown prototype: the same host file with the spec inlined as a string constant, a header naming the library coordinate, required capabilities and each asset's URI (assets are not inlined), and a preview sized to `frame` (default `pixel-9` / `iphone-16`). `revision` picks a kept revision as for the web page.",
   ].join("\n");
 }
 

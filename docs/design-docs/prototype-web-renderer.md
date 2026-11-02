@@ -1,8 +1,8 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the resource that serves it, spec revisions, the page, the still renderer and the
-device frame registry.
+document covers the per-prototype resources (the page and the single-file Compose and SwiftUI
+sources), spec revisions, the page, the still renderer and the device frame registry.
 
 ## Resource
 
@@ -22,14 +22,30 @@ device frame registry.
   `ActionableError`s.
 - **Read result.** `_meta` is `{revision, deviceRevision?, revisions, variants, frame, sha256,
   rendererVersion}`; `rendererVersion` is the server release version.
-- **Listing.** Each known id gets a concrete resource `automobile:prototype/{id}/web` named
-  `prototype-{id}-web`, titled `{id} (web)`, registered when its first revision appears and
-  unregistered when the id is evicted; each change sends `list_changed`. List entries carry no
+- **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision}` (`text/x-kotlin`)
+  and `automobile:prototype/{id}/swiftui{?frame,revision}` (`text/x-swift`) are read by
+  `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render
+  the `automobile:prototype/native` host file (`nativePrototypeTemplates.ts`) with an `inline`
+  input: the spec JSON as a string constant (Kotlin splits it into joined literals of at most
+  16 384 characters to stay under the JVM's 65 535-byte constant limit), a header comment naming
+  the URI, revision, frame, library coordinate, required capabilities and, per referenced asset,
+  its bundle path and `automobile:prototype/native/asset?id=…&assetId=…` URI (assets are never
+  inlined), and a preview sized to the frame's screen (`@Preview(widthDp, heightDp)`, `#Preview`
+  with `.frame`). The native resource's output is unchanged without `inline`. Revision and errors
+  follow the web resource; `frame` defaults to `defaultDeviceFrameId` of the format's platform
+  (`pixel-9`, `iphone-16`), since the format fixes the platform. The shader and Swift-equivalent
+  asset id refusals are the native resource's. `_meta` is `{revision, deviceRevision?, revisions,
+  frame, sha256, rendererVersion}`.
+- **Listing.** Each known id gets concrete resources `automobile:prototype/{id}/{web,compose,swiftui}`
+  named `prototype-{id}-{format}`, titled `{id} (web)`, `{id} (Compose)` and `{id} (SwiftUI)`,
+  registered when its first revision appears and unregistered when the id is evicted; each change
+  sends `list_changed`. List entries carry no
   `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
   `_meta`.
 - **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
-  `resources/updated` for the parameter-free URI of the id, of each id in its variant group, and of
-  each id in the group it left (or was evicted from), in revision order. The concrete resource matches subscriptions
+  `resources/updated` for the parameter-free URI of every format of the id, and for the web URI of
+  each id in its variant group and of each id in the group it left (or was evicted from), in
+  revision order. The concrete resource matches subscriptions
   exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
 
 ## Spec revisions

@@ -22,7 +22,6 @@ import {
   refineAndroidSpec,
   watchProvisionDeviceSpecSchema,
   appleTvProvisionDeviceSpecSchema,
-  LOW_RAM_MEMORY_MB,
 } from "../../../utils/provisionDeviceSpecSchemas";
 import { NON_EMULATABLE_CAPABILITY_IDS, OEM_PERSONA_IDS } from "../../utility/OemPersonas";
 
@@ -463,12 +462,6 @@ const provisionDeviceResourcesField = deviceResourceConfigurationSchema
 
 /** provisionDevice's options after `device`, in their advertised order. */
 const provisionDeviceOptionFields = {
-  lowRam: z
-    .boolean()
-    .optional()
-    .describe(
-      "Android only: use 1024 MB of AVD RAM before boot. Omitted or false preserves existing RAM defaults. Explicit device.spec.configuration.memoryMb must equal 1024 when true; unavailable for API 30+ Play Store images, which require at least 2048 MB.",
-    ),
   boot: z
     .boolean()
     .default(true)
@@ -494,16 +487,11 @@ const provisionDeviceOptionFields = {
 };
 
 interface ProvisionDeviceRefinable {
-  lowRam?: boolean;
   resources?: unknown;
   enableTools?: unknown;
   boot?: boolean;
   readiness?: "automation" | "none";
-  device:
-    | z.output<typeof androidProvisionDevice>
-    | z.output<typeof iosProvisionDevice>
-    | z.output<typeof watchProvisionDevice>
-    | z.output<typeof appleTvProvisionDevice>;
+  device: { platform: string; spec: object };
 }
 
 /** The cross-field rules every provisionDevice request obeys, whatever its platform. */
@@ -511,7 +499,6 @@ function refineProvisionDeviceOptions(
   args: ProvisionDeviceRefinable,
   context: z.RefinementCtx,
 ): void {
-  refineLowRamOption(args, context);
   if (args.resources && args.boot === false) {
     context.addIssue({
       code: "custom",
@@ -554,45 +541,6 @@ export const provisionDeviceSchema = z
   })
   .strict()
   .superRefine(refineProvisionDeviceOptions);
-
-/** Validate the Android-only low-RAM recipe and its resolved memory configuration. */
-function refineLowRamOption(args: ProvisionDeviceRefinable, context: z.RefinementCtx): void {
-  if (args.device.platform !== "android") {
-    if (args.lowRam !== undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["lowRam"],
-        message: `lowRam is not supported on ${args.device.platform}.`,
-      });
-    }
-    return;
-  }
-  if (args.lowRam !== true) {
-    return;
-  }
-  const spec = args.device.spec;
-  if (spec.configuration?.memoryMb !== undefined) {
-    if (spec.configuration.memoryMb !== LOW_RAM_MEMORY_MB) {
-      context.addIssue({
-        code: "custom",
-        path: ["device", "spec", "configuration", "memoryMb"],
-        message: `lowRam requires memoryMb to equal ${LOW_RAM_MEMORY_MB}.`,
-      });
-    }
-    return;
-  }
-  // Validate the recipe's resolved RAM with the same rules as explicit RAM.
-  const resolved = androidProvisionDeviceRequestSpecSchema.safeParse({
-    ...spec,
-    configuration: { ...spec.configuration, memoryMb: LOW_RAM_MEMORY_MB },
-  });
-  if (resolved.success) {
-    return;
-  }
-  for (const issue of resolved.error.issues) {
-    context.addIssue({ ...issue, path: ["device", "spec", ...issue.path] });
-  }
-}
 
 /** The options a watch cannot honour: resources and tool grants need the automation runner. */
 function refineWatchProvisionOptions(

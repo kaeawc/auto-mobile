@@ -60,13 +60,7 @@ its facets does, so a result names exactly what it applied.
 
 ## Acquiring a device with a manufacturer profile
 
-`provisionDevice` takes an Android `device.spec.deviceProfile`. Independently of the
-manufacturer profile, Android provisioning accepts optional top-level `lowRam: true`
-to configure 1024 MB of AVD RAM before boot. If `device.spec.configuration.memoryMb`
-is also supplied, it must equal 1024. API 30+ Play Store images require at least
-2048 MB and reject this recipe; choose a compatible image. Omitting `lowRam` or
-passing `false` preserves existing RAM defaults. iOS, watchOS and tvOS refuse this
-argument. For a manufacturer profile, pass:
+`provisionDevice` takes an Android `device.spec.deviceProfile`:
 
 ```ts
 provisionDevice({

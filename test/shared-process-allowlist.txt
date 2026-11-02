@@ -1343,7 +1343,6 @@ test/features/retryBehaviorConstants.test.ts
 test/features/screen-stream/IosScreenCaptureHelper.test.ts
 test/features/screen-stream/IosScreenCaptureHelperCapability.test.ts
 test/features/screen-stream/IosSimulatorCaptureHelperPool.test.ts
-test/features/screen-stream/LatestFrameQueue.test.ts
 test/features/screen-stream/encodedVideoFrameProtocol.test.ts
 test/features/screen-stream/frameProtocol.property.test.ts
 test/features/screen-stream/frameProtocol.test.ts

@@ -14,18 +14,12 @@ import {
   type HostProcessExecutor,
 } from "../../utils/HostCommandExecutor";
 import {
-  type DecodedFrame,
   type DecodedAudio,
   type DecodedEncodedVideo,
   FrameDecoder,
   type MalformedFrameError,
 } from "./frameProtocol";
-import { LatestFrameQueue, type FrameQueueMetrics } from "./LatestFrameQueue";
 
-export { type FrameQueueMetrics } from "./LatestFrameQueue";
-
-/** Fixed bound for the one decoded BGRA frame waiting for delivery. */
-export const IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 /** Prefix used by the helper to send JSON queue snapshots over stderr. */
 export const NATIVE_FRAME_METRICS_PREFIX = "automobile-frame-metrics:";
 /**
@@ -75,7 +69,7 @@ export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => 
 /**
  * In-helper H.264 encode settings (issue #4789). Present on a capture target
  * requests the helper's `--encode h264` mode (420v capture + VTCompressionSession
- * Annex-B output) instead of streaming raw BGRA. The bitrate *policy* stays here
+ * Annex-B output), the only video the helper emits. The bitrate *policy* stays here
  * in the supervisor — the helper only carries the chosen flag and does the
  * pre-encode pixel arithmetic (scale + bitrate) it alone knows. Mirrors the Swift
  * `CommandLineOptions.EncodeSettings` (issue #4788).
@@ -119,10 +113,6 @@ export interface IosScreenCaptureHelperOptions {
   target: CaptureTarget;
   /** Override the spawner for tests. Defaults to `child_process.spawn`. */
   spawner?: HelperSpawner;
-  /** Clock seam for queue-age metrics. */
-  now?: () => number;
-  /** Scheduling seam for tests and embedders with a controlled event loop. */
-  frameDeliveryScheduler?: FrameDeliveryScheduler;
   /** Timer seam for shutdown escalation tests. */
   timer?: Timer;
   /** Time to allow graceful helper shutdown before escalating to SIGKILL. */
@@ -147,9 +137,7 @@ export interface IosScreenCaptureReadiness {
 }
 
 export interface IosScreenCaptureHelperEvents {
-  frame: (frame: DecodedFrame) => void;
   idle: (info: { windowID: number }) => void;
-  frameMetrics: (metrics: FrameQueueMetrics) => void;
   captureMetrics: (metrics: NativeFrameMetrics) => void;
   audio: (audio: DecodedAudio) => void;
   encodedVideo: (video: DecodedEncodedVideo) => void;
@@ -161,10 +149,6 @@ export interface IosScreenCaptureHelperEvents {
   readiness: (status: IosScreenCaptureReadiness) => void;
   exit: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   error: (error: Error) => void;
-}
-
-export interface FrameDeliveryScheduler {
-  schedule(callback: () => void): void;
 }
 
 /** Snapshot emitted by the Swift writer's bounded stdout handoff. */
@@ -180,13 +164,13 @@ export interface NativeFrameMetrics {
 
 /**
  * Spawns and supervises the Swift `screen-capture-helper` binary, forwarding
- * decoded BGRA frames to listeners.
+ * decoded encoded-video records and audio to listeners.
  *
  *     const helper = new IosScreenCaptureHelper({
  *       binaryPath,
  *       target: { kind: "simulator", windowID: 12345 },
  *     });
- *     helper.on("frame", frame => …);
+ *     helper.on("encodedVideo", video => …);
  *     helper.start();
  *     …
  *     await helper.stop();
@@ -199,15 +183,12 @@ export class IosScreenCaptureHelper extends EventEmitter {
   private readonly stopGraceMs: number;
   private readonly processGroupKiller: HelperProcessGroupKiller;
   private readonly decoder = new FrameDecoder();
-  private readonly frameQueue: LatestFrameQueue;
-  private readonly frameDeliveryScheduler: FrameDeliveryScheduler;
   private process: HelperProcess | null = null;
   private controlChannelErrored = false;
   private readonly helperCapabilities = new Set<string>();
   private stderrBuffer = "";
   private exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | null =
     null;
-  private frameDeliveryScheduled = false;
 
   private readonly nativeHelperRegistry?: NativeHelperTracker;
 
@@ -220,11 +201,6 @@ export class IosScreenCaptureHelper extends EventEmitter {
     this.timer = options.timer ?? defaultTimer;
     this.stopGraceMs = options.stopGraceMs ?? IOS_HELPER_STOP_GRACE_MS;
     this.processGroupKiller = options.processGroupKiller ?? defaultProcessGroupKiller;
-    this.frameQueue = new LatestFrameQueue({
-      maxFrameBytes: IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES,
-      now: options.now ?? Date.now,
-    });
-    this.frameDeliveryScheduler = options.frameDeliveryScheduler ?? immediateFrameDeliveryScheduler;
   }
 
   override on<E extends keyof IosScreenCaptureHelperEvents>(
@@ -243,11 +219,6 @@ export class IosScreenCaptureHelper extends EventEmitter {
 
   get isRunning(): boolean {
     return this.process !== null && this.process.exitCode === null && !this.process.killed;
-  }
-
-  /** Snapshot of the bounded decoded-frame handoff. */
-  getFrameMetrics(): FrameQueueMetrics {
-    return this.frameQueue.metrics();
   }
 
   /** Throws if already started — instances are single-shot. */
@@ -272,17 +243,11 @@ export class IosScreenCaptureHelper extends EventEmitter {
 
     proc.stdout.on("data", (chunk) => {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const frames = this.decoder.push(buf, {
+      this.decoder.push(buf, {
         onMalformed: (err) => this.emit("malformed", err),
         onAudio: (audio) => this.emit("audio", audio),
-        onFrame: (frame) => this.enqueueFrame(frame),
         onEncodedVideo: (video) => this.emit("encodedVideo", video),
       });
-      // `onFrame` keeps the decoder from allocating an array for a coalesced
-      // stdout chunk. Preserve the fallback return path for direct decoder use.
-      for (const frame of frames) {
-        this.enqueueFrame(frame);
-      }
     });
 
     proc.stderr.on("data", (chunk) => {
@@ -374,33 +339,6 @@ export class IosScreenCaptureHelper extends EventEmitter {
     this.stderrBuffer = lines.pop() ?? "";
     for (const line of lines) {
       this.handleStderrLine(line);
-    }
-  }
-
-  private enqueueFrame(frame: DecodedFrame): void {
-    if (!this.frameQueue.enqueue(frame)) {
-      this.emit("frameMetrics", this.frameQueue.metrics());
-      return;
-    }
-    this.emit("frameMetrics", this.frameQueue.metrics());
-    if (this.frameDeliveryScheduled) {
-      return;
-    }
-    this.frameDeliveryScheduled = true;
-    this.frameDeliveryScheduler.schedule(() => this.deliverLatestFrame());
-  }
-
-  private deliverLatestFrame(): void {
-    this.frameDeliveryScheduled = false;
-    const frame = this.frameQueue.take();
-    if (frame === null) {
-      return;
-    }
-    this.emit("frame", frame);
-    this.emit("frameMetrics", this.frameQueue.metrics());
-    if (this.frameQueue.metrics().queueDepth === 1) {
-      this.frameDeliveryScheduled = true;
-      this.frameDeliveryScheduler.schedule(() => this.deliverLatestFrame());
     }
   }
 
@@ -532,8 +470,6 @@ export class IosScreenCaptureHelper extends EventEmitter {
     proc.stdout.removeAllListeners();
     proc.stderr.removeAllListeners();
     proc.removeAllListeners();
-    this.frameQueue.clear();
-    this.frameDeliveryScheduled = false;
     if (this.process === proc) {
       this.process = null;
     }
@@ -661,12 +597,6 @@ function isNullableNumber(value: unknown): value is number | null {
 function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
-
-const immediateFrameDeliveryScheduler: FrameDeliveryScheduler = {
-  schedule(callback): void {
-    setImmediate(callback);
-  },
-};
 
 export const IOS_HELPER_STOP_GRACE_MS = 2_000;
 

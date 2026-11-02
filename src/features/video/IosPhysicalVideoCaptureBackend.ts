@@ -8,15 +8,11 @@ import {
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import {
-  DefaultFfmpegClient,
-  type FfmpegClient,
-  type FfmpegProcess,
-} from "../../utils/media/FfmpegClient";
+import { DefaultFfmpegClient, type FfmpegClient } from "../../utils/media/FfmpegClient";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { IosScreenCaptureHelper } from "../screen-stream/IosScreenCaptureHelper";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
-import type { DecodedFrame } from "../screen-stream/frameProtocol";
+import type { DecodedEncodedVideo } from "../screen-stream/frameProtocol";
 import {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
   readScreenCaptureHelperEnvOverride,
@@ -41,18 +37,12 @@ import {
   type VideoCaptureConfig,
 } from "./VideoRecorderService";
 import {
-  BGRA_BYTES_PER_PIXEL,
-  buildRawVideoFfmpegArgs,
-  clampCaptureFps,
-  evenFloor,
-  gapFillLimit,
+  buildDeviceEncodeSettings,
+  buildEncodedCopyFfmpegArgs,
   HELPER_STDERR_TAIL,
   IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS,
-  MAX_BUFFERED_FRAMES,
+  IOS_PHYSICAL_MUXER_MAX_BUFFERED_BYTES,
   normalizeUdid,
-  packFrame,
-  SOFTWARE_H264_ENCODER,
-  VIDEOTOOLBOX_H264_ENCODER,
 } from "./iosPhysicalVideoEncoding";
 export { parseCaptureDeviceList } from "./HelperCaptureDeviceLister";
 export {
@@ -63,26 +53,20 @@ export {
   type PhysicalIosCaptureHelperFactory,
   type ScreenCaptureHelperEnsurer,
 } from "./IosPhysicalVideoCaptureTypes";
-export {
-  buildRawVideoFfmpegArgs,
-  clampCaptureFps,
-  MAX_CAPTURE_FPS,
-  packFrame,
-  SOFTWARE_H264_ENCODER,
-  VIDEOTOOLBOX_H264_ENCODER,
-} from "./iosPhysicalVideoEncoding";
+export { buildDeviceEncodeSettings, buildEncodedCopyFfmpegArgs } from "./iosPhysicalVideoEncoding";
 
 /**
  * `xcrun devicectl` has no screen-recording verb and `simctl io recordVideo` is
  * Simulator-only, so physical-iOS capture goes through the Swift
  * `screen-capture-helper`: CoreMediaIO exposes the USB-connected device as a
- * muxed `AVCaptureDevice`, the helper streams its BGRA frames to stdout, and
- * this backend pipes them into `ffmpeg -f rawvideo` for H.264 encoding.
+ * muxed `AVCaptureDevice`, and the helper encodes it to H.264 in-process
+ * (`--encode h264`). This backend stream-copies those Annex-B records into an
+ * MP4 with `ffmpeg -c copy`, so no pixels cross the pipe and ffmpeg never
+ * re-encodes.
  *
  * Structurally this mirrors {@link FfmpegVideoProcessingBackend}'s Android path
- * (`adb exec-out screenrecord -` → ffmpeg stdin); the difference is the input
- * format, and that raw frames carry no geometry, so ffmpeg cannot be spawned
- * until the first frame pins `-video_size` (issue #2504).
+ * (`adb exec-out screenrecord -` → ffmpeg stdin). ffmpeg is spawned at the first
+ * keyframe, the earliest point a stream copy can start.
  */
 export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   private readonly ffmpegClient: FfmpegClient;
@@ -127,57 +111,36 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
 
     const { abortSignal } = config;
     throwIfCaptureStartAborted(abortSignal);
-    const encoderName = await this.resolveEncoder(abortSignal);
+    await this.ensureFfmpegAvailable(abortSignal);
     throwIfCaptureStartAborted(abortSignal);
     const binaryPath = await this.resolveHelperBinary(abortSignal);
     throwIfCaptureStartAborted(abortSignal);
     const uniqueId = await this.resolveCaptureUniqueId(binaryPath, device, abortSignal);
     throwIfCaptureStartAborted(abortSignal);
 
-    const captureFps = clampCaptureFps(config.fps);
-    if (captureFps !== config.fps) {
-      logger.warn(
-        `[IosPhysicalVideo] requested ${config.fps} fps is not supported for physical capture; ` +
-          `recording at ${captureFps} fps instead.`,
-      );
-    }
-    // Everything downstream — pacing, gap fill, trailing padding and the ffmpeg
-    // `-framerate` label — must read the SAME rate, or the encoded timeline
-    // stops matching the timestamps it is labelled with.
-    const captureConfig: VideoCaptureConfig = {
-      ...config,
-      fps: captureFps,
-      // yuv420p accepts only even dimensions. Keep the effective configuration
-      // aligned with the scale filter that the encoder will actually apply,
-      // while `buildRawVideoFfmpegArgs()` still uses the native frame geometry
-      // for rawvideo's input `-video_size`.
-      resolution: config.resolution
-        ? {
-            width: evenFloor(config.resolution.width),
-            height: evenFloor(config.resolution.height),
-          }
-        : undefined,
-    };
-
     const state: CaptureState = {
-      encoderName,
       framesWritten: 0,
       framesDropped: 0,
-      framesPacedOut: 0,
-      framesGapFilled: 0,
-      framesGapTruncated: 0,
-      pendingWrites: [],
       stopRequested: false,
       helperExitWasRequested: false,
       helperStderr: [],
     };
     const helper = this.createHelper({
       binaryPath,
-      target: { kind: "device", deviceId: uniqueId },
+      target: { kind: "device", deviceId: uniqueId, encode: buildDeviceEncodeSettings(config) },
     });
 
     helper.on("stderr", (line) => {
       state.helperStderr.push(line);
+      if (state.helperStderr.length > HELPER_STDERR_TAIL) {
+        state.helperStderr.shift();
+      }
+    });
+    helper.on("malformed", (error) => {
+      // A helper that predates `--encode h264` streams raw frames, which decode as
+      // malformed records. Keep the reason so the "no frames" failure names it
+      // instead of blaming the USB trust prompt.
+      state.helperStderr.push(`malformed record from the helper (${error.reason})\n`);
       if (state.helperStderr.length > HELPER_STDERR_TAIL) {
         state.helperStderr.shift();
       }
@@ -208,18 +171,18 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       }
       logger.warn(`[IosPhysicalVideo] capture helper error: ${errorMessage(error)}`);
     });
-    helper.on("frame", (frame) => this.onFrame(frame, state, captureConfig));
+    helper.on("encodedVideo", (video) => this.onEncodedVideo(video, state, config));
 
     const handle: RecordingHandle = {
-      recordingId: captureConfig.recordingId,
-      outputPath: captureConfig.outputPath,
-      startedAt: captureConfig.startedAt,
-      effectiveConfig: captureConfig,
+      recordingId: config.recordingId,
+      outputPath: config.outputPath,
+      startedAt: config.startedAt,
+      effectiveConfig: config,
       backendHandle: {
         kind: "ios-physical",
         helper,
         state,
-        config: captureConfig,
+        config,
       } satisfies IosPhysicalBackendHandle,
     };
 
@@ -325,20 +288,11 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     backendHandle: IosPhysicalBackendHandle,
     stopRequestedAtMs: number,
   ): Promise<RecordingResult> {
-    const { state, config } = backendHandle;
+    const { state } = backendHandle;
     const encoder = state.encoder;
     if (!encoder) {
       throw new ActionableError(this.buildNoFramesMessage(state));
     }
-
-    this.padTrailingStall(state, config.fps, stopRequestedAtMs);
-    if (encoder.stdin) {
-      // Only MAX_BUFFERED_FRAMES fit synchronously, so with real frame sizes most
-      // of the padding is still queued here. Let the encoder drain it before
-      // closing stdin, or the recording ends short by exactly that padding.
-      await this.drainPendingWrites(state, encoder.stdin);
-    }
-    this.discardPendingWrites(state);
 
     // Closing stdin is what makes ffmpeg write the moov atom; a SIGKILL here
     // would leave an unplayable file, so wait for a clean exit instead.
@@ -363,7 +317,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
         "The finalized physical iOS recording is missing or contains zero bytes.",
       );
     }
-    this.logCaptureAccounting(state, config, handle);
+    this.logCaptureAccounting(state, handle);
 
     return {
       recordingId: handle.recordingId,
@@ -407,313 +361,93 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
   }
 
-  private onFrame(frame: DecodedFrame, state: CaptureState, config: VideoCaptureConfig): void {
-    const { width, height } = frame.header;
-    if (!state.geometry) {
-      state.geometry = { width, height };
-      state.frameBytes = width * height * BGRA_BYTES_PER_PIXEL;
-      this.startEncoder(state, config, width, height);
-    } else if (state.geometry.width !== width || state.geometry.height !== height) {
-      // rawvideo has no per-frame geometry: a differently sized frame would be
-      // read as a shifted picture for the rest of the file, so drop it.
-      state.framesDropped += 1;
-      return;
-    }
-
-    const encoder = state.encoder;
-    if (!encoder?.stdin || encoder.stdin.writableEnded) {
-      state.framesDropped += 1;
-      return;
-    }
-    // Backlog is checked BEFORE admission on purpose. Frames arrive from an
-    // event emitter, so there is no upstream backpressure to apply and buffering
-    // would grow without bound — but consuming the pacing slot for a frame that
-    // never reaches stdin would silently shorten the timeline. Dropping before
-    // admission leaves the slot owed, so the next frame pads it as a gap.
-    if (this.isBackloggedForAdmission(state, encoder.stdin)) {
-      state.framesDropped += 1;
-      return;
-    }
-
-    const copies = this.admitForPacing(frame, state, config.fps);
-    if (copies === 0) {
-      return;
-    }
-
-    this.writeFrameCopies(frame, state, encoder.stdin, copies);
-  }
-
   /**
-   * Queue the frame's own slot, preceded by repeats of the previous picture for
-   * any slots the capture gap skipped. Padding with the NEW frame would move a
-   * visual transition earlier than it actually happened.
-   *
-   * Writes go through a queue so bounded padding survives the encoder consuming
-   * stdin asynchronously: a synchronous truncate would collapse almost every gap
-   * once frames are big enough to fill the pipe buffer in one write.
+   * The encoded stream is muxed by stream copy, so ffmpeg can only join it at an
+   * IDR: records before the first keyframe cannot be decoded and are dropped. The
+   * first keyframe carries the SPS/PPS ffmpeg's raw H.264 demuxer needs to probe
+   * the stream, so spawning waits for it.
    */
-  private writeFrameCopies(
-    frame: DecodedFrame,
-    state: CaptureState,
-    stdin: NonNullable<FfmpegProcess["stdin"]>,
-    copies: number,
-  ): void {
-    const payload = packFrame(frame);
-    const pads = copies - 1;
-    if (pads > 0) {
-      state.pendingWrites.push({ payload: state.lastPayload ?? payload, count: pads });
-    }
-    state.pendingWrites.push({ payload, count: 1 });
-    state.lastPayload = payload;
-    state.lastWriteAtMs = this.now();
-    this.flushPendingWrites(state, stdin);
-  }
-
-  /** Drain the write queue up to the buffered-frame budget. */
-  private flushPendingWrites(
-    state: CaptureState,
-    stdin: NonNullable<FfmpegProcess["stdin"]>,
-  ): void {
-    if (stdin.writableEnded) {
-      state.pendingWrites = [];
-      return;
-    }
-    while (state.pendingWrites.length > 0 && !this.isEncoderCongested(state, stdin)) {
-      const next = state.pendingWrites[0];
-      stdin.write(next.payload);
-      state.framesWritten += 1;
-      next.count -= 1;
-      if (next.count === 0) {
-        state.pendingWrites.shift();
-      }
-    }
-  }
-
-  /**
-   * Wait for the encoder to consume everything still queued, bounded by the
-   * finalization timeout so a wedged ffmpeg cannot hang the stop.
-   */
-  private async drainPendingWrites(
-    state: CaptureState,
-    stdin: NonNullable<FfmpegProcess["stdin"]>,
-  ): Promise<void> {
-    this.flushPendingWrites(state, stdin);
-    if (state.pendingWrites.length === 0 || stdin.writableEnded) {
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = (): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.timer.clearTimeout(timeout);
-        stdin.off("drain", onDrain);
-        stdin.off("close", finish);
-        resolve();
-      };
-      const onDrain = (): void => {
-        // The encoder-start listener flushes first; this only observes the result.
-        if (state.pendingWrites.length === 0) {
-          finish();
-        }
-      };
-      const timeout = this.timer.setTimeout(() => {
-        logger.warn(
-          "[IosPhysicalVideo] encoder did not consume the queued padding before the finalize timeout; " +
-            "the recording will be short by the remainder.",
-        );
-        finish();
-      }, this.encoderFinalizeTimeoutMs);
-      stdin.on("drain", onDrain);
-      stdin.once("close", finish);
-    });
-  }
-
-  /**
-   * Give up on writes still queued when the recording ends: they would land
-   * after the encoder's input closed. Counted so the shortfall is reported.
-   */
-  private discardPendingWrites(state: CaptureState): void {
-    const owed = state.pendingWrites.reduce((total, entry) => total + entry.count, 0);
-    if (owed > 0) {
-      state.framesGapTruncated += owed;
-      state.pendingWrites = [];
-    }
-  }
-
-  /**
-   * True when the encoder already holds {@link MAX_BUFFERED_FRAMES} frames of
-   * input. Deliberately not `writableNeedDrain` — see {@link MAX_BUFFERED_FRAMES}.
-   */
-  private isEncoderCongested(
-    state: CaptureState,
-    stdin: NonNullable<FfmpegProcess["stdin"]>,
-  ): boolean {
-    const frameBytes = state.frameBytes;
-    if (!frameBytes) {
-      return stdin.writableNeedDrain;
-    }
-    return stdin.writableLength >= frameBytes * MAX_BUFFERED_FRAMES;
-  }
-
-  /**
-   * Admission-side backlog check. Stricter than {@link isEncoderCongested}: the
-   * buffered-frame budget only measures the stream, so consuming one buffered
-   * write drops it back under the limit while older padding is still queued.
-   * Admitting there would append a new multi-megabyte payload — plus its gap
-   * fill — faster than the encoder drains, so a slow encoder could grow the
-   * queue without bound. A frame rejected here leaves its slot owed, and the
-   * next admitted frame pads it.
-   */
-  private isBackloggedForAdmission(
-    state: CaptureState,
-    stdin: NonNullable<FfmpegProcess["stdin"]>,
-  ): boolean {
-    return state.pendingWrites.length > 0 || this.isEncoderCongested(state, stdin);
-  }
-
-  /**
-   * Hold the declared cadence. AVFoundation device capture is deliberately not
-   * FPS-throttled by the helper (`DeviceCaptureSession.deviceFPS` documents
-   * this), so a device pushing 30 or 60 fps into a `-framerate 15` rawvideo
-   * stream would timestamp every frame at 15 fps — the recording would play back
-   * 2-4x slow and `-t` would cut it short. Admit a frame only once its capture
-   * timestamp reaches the next scheduled slot.
-   */
-  private admitForPacing(frame: DecodedFrame, state: CaptureState, fps: number): number {
-    const intervalMs = 1000 / fps;
-    const timestampMs = frame.header.timestampMs;
-    if (state.nextFrameDueMs === undefined) {
-      state.nextFrameDueMs = timestampMs + intervalMs;
-      return 1;
-    }
-    if (timestampMs < state.nextFrameDueMs) {
-      state.framesPacedOut += 1;
-      return 0;
-    }
-
-    // Advance the EXISTING deadline by the slots that elapsed, rather than
-    // rebasing it on this frame's timestamp. Rebasing loses the fraction of a
-    // slot the frame arrived late, and with integer-millisecond capture
-    // timestamps that compounds: a 30fps source (0, 33, 66, 100, ...) paced to
-    // 15fps (66.67ms) would miss 66 by 0.67ms, admit 100, and rebase from there
-    // — settling at 10fps while ffmpeg still labels the result 15fps, so the
-    // recording plays ~1.5x fast and ends a third short.
-    const elapsedSlots = Math.floor((timestampMs - state.nextFrameDueMs) / intervalMs) + 1;
-    const missedSlots = elapsedSlots - 1;
-    const maxGapFill = gapFillLimit(fps);
-
-    // Slots that elapsed with nothing to encode: a helper stall, or a device
-    // that idles while the screen is static. `-framerate` gives every written
-    // frame a contiguous fixed-rate timestamp, so skipping those slots would
-    // compress real time — a 5s freeze would play back in a fraction of a
-    // second, and a duration-capped recording would end early. Repeat the frame
-    // to keep the encoded timeline on wall clock.
-    if (missedSlots > maxGapFill) {
-      // Padding an arbitrarily long stall would write unbounded duplicate frames,
-      // so very long gaps stay compressed; the recording is shorter than wall
-      // clock by the excess, which the warning names. Time was deliberately
-      // dropped here, so the schedule restarts from this frame.
-      state.framesGapTruncated += missedSlots - maxGapFill;
-      state.framesGapFilled += maxGapFill;
-      state.nextFrameDueMs = timestampMs + intervalMs;
-      return maxGapFill + 1;
-    }
-
-    state.framesGapFilled += missedSlots;
-    state.nextFrameDueMs += elapsedSlots * intervalMs;
-    return elapsedSlots;
-  }
-
-  /**
-   * Pad the interval between the last delivered frame and `stop()`. A device
-   * whose screen is static (or a helper that stalled) delivers nothing during
-   * that window, so without this the file ends at the last frame's slot — one
-   * frame followed by a 500ms wait would encode ~0.1s of video. Wall clock is
-   * used rather than capture timestamps, which are in the helper's own timebase,
-   * and the boundary is when stop was REQUESTED — see {@link stop}.
-   */
-  private padTrailingStall(state: CaptureState, fps: number, stopRequestedAtMs: number): void {
-    const payload = state.lastPayload;
-    const lastWriteAtMs = state.lastWriteAtMs;
-    if (!payload || lastWriteAtMs === undefined) {
-      return;
-    }
-    const intervalMs = 1000 / fps;
-    const elapsedSlots = Math.floor((stopRequestedAtMs - lastWriteAtMs) / intervalMs);
-    if (elapsedSlots <= 0) {
-      return;
-    }
-    const maxGapFill = gapFillLimit(fps);
-    const pads = Math.min(elapsedSlots, maxGapFill);
-    if (elapsedSlots > pads) {
-      state.framesGapTruncated += elapsedSlots - pads;
-    }
-    state.framesGapFilled += pads;
-    state.pendingWrites.push({ payload, count: pads });
-  }
-
-  private startEncoder(
+  private onEncodedVideo(
+    video: DecodedEncodedVideo,
     state: CaptureState,
     config: VideoCaptureConfig,
-    width: number,
-    height: number,
   ): void {
-    const args = buildRawVideoFfmpegArgs(config, width, height, state.encoderName);
+    if (state.stopRequested && !state.encoder) {
+      return;
+    }
+    if (!state.encoder) {
+      if (!video.keyframe) {
+        state.framesDropped += 1;
+        return;
+      }
+      this.startEncoder(state, config);
+    }
+    const stdin = state.encoder?.stdin;
+    if (!stdin || stdin.writableEnded) {
+      state.framesDropped += 1;
+      return;
+    }
+    // A stalled muxer (e.g. blocked output storage) must not let the daemon retain
+    // the whole stream. Shed records, and since P-frames after a gap are
+    // undecodable, resume only at a keyframe once the buffer has drained.
+    if (stdin.writableLength > IOS_PHYSICAL_MUXER_MAX_BUFFERED_BYTES) {
+      state.awaitingKeyframe = true;
+    }
+    if (state.awaitingKeyframe) {
+      if (!video.keyframe || stdin.writableNeedDrain) {
+        state.framesDropped += 1;
+        return;
+      }
+      state.awaitingKeyframe = false;
+    }
+    stdin.write(video.payload);
+    state.framesWritten += 1;
+  }
+
+  private startEncoder(state: CaptureState, config: VideoCaptureConfig): void {
+    const args = buildEncodedCopyFfmpegArgs(config);
     logger.info(
-      `[IosPhysicalVideo] starting encoder: ${this.ffmpegClient.binaryPath} ${args.join(" ")}`,
+      `[IosPhysicalVideo] starting muxer: ${this.ffmpegClient.binaryPath} ${args.join(" ")}`,
     );
     const started = this.ffmpegClient.start({
       args,
-      context: "physical iOS screen recording encoder",
+      context: "physical iOS screen recording muxer",
       stdio: ["pipe", "pipe", "pipe"],
     });
     state.encoder = started.process;
     state.encoderTracker = started.tracker;
-    const stdin = started.process.stdin;
-    stdin?.on("drain", () => {
-      // The encoder consumed a frame: release whatever padding is still owed.
-      this.flushPendingWrites(state, stdin);
-    });
     started.process.stdin?.on("error", (error: Error) => {
       // ffmpeg exiting first closes stdin; the helper keeps writing until it is
       // stopped, so EPIPE here is expected rather than a fault to surface.
-      logger.debug(`[IosPhysicalVideo] encoder stdin error (expected on encoder exit): ${error}`);
+      logger.debug(`[IosPhysicalVideo] muxer stdin error (expected on muxer exit): ${error}`);
     });
   }
 
-  /** One place for the per-recording frame accounting, all of it diagnostic. */
-  private logCaptureAccounting(
-    state: CaptureState,
-    config: VideoCaptureConfig,
-    handle: RecordingHandle,
-  ): void {
+  /** One place for the per-recording record accounting, all of it diagnostic. */
+  private logCaptureAccounting(state: CaptureState, handle: RecordingHandle): void {
     logger.info(
-      `[IosPhysicalVideo] recording ${handle.recordingId} wrote ${state.framesWritten} frame(s) to ${handle.outputPath}.`,
+      `[IosPhysicalVideo] recording ${handle.recordingId} wrote ${state.framesWritten} encoded record(s) to ${handle.outputPath}.`,
     );
     if (state.framesDropped > 0) {
-      logger.warn(
-        `[IosPhysicalVideo] dropped ${state.framesDropped} frame(s) whose geometry differed from the locked ` +
-          `${state.geometry?.width}x${state.geometry?.height} capture size, or arrived while the encoder was congested.`,
-      );
-    }
-    if (state.framesPacedOut > 0) {
       logger.debug(
-        `[IosPhysicalVideo] paced out ${state.framesPacedOut} frame(s) to hold the requested cadence.`,
+        `[IosPhysicalVideo] dropped ${state.framesDropped} encoded record(s) that arrived before the first keyframe or while the muxer stalled.`,
       );
     }
-    if (state.framesGapFilled > 0) {
-      logger.debug(
-        `[IosPhysicalVideo] repeated ${state.framesGapFilled} frame(s) to keep capture gaps at their real duration.`,
-      );
-    }
-    if (state.framesGapTruncated > 0) {
-      logger.warn(
-        `[IosPhysicalVideo] ${state.framesGapTruncated} gap slot(s) were left unpadded, so the recording is ` +
-          `about ${(state.framesGapTruncated / config.fps).toFixed(1)}s shorter than the wall-clock capture.`,
+  }
+
+  /**
+   * ffmpeg is the only external prerequisite left on this path: the helper
+   * encodes, so there is no encoder to select, only a binary that must exist.
+   */
+  private async ensureFfmpegAvailable(signal?: AbortSignal): Promise<void> {
+    try {
+      await waitForCaptureStart(this.ffmpegClient.probe({ signal }), signal);
+    } catch (error) {
+      throwIfCaptureStartAborted(signal);
+      throw new ActionableError(
+        "FFmpeg is not available. Please install FFmpeg to use video recording.\n" +
+          "  macOS: brew install ffmpeg\n" +
+          `Error: ${errorMessage(error)}`,
       );
     }
   }
@@ -811,41 +545,6 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
         `Failed to abandon physical iOS recording start: ${failures.map(errorMessage).join("; ")}`,
       );
     }
-  }
-
-  /**
-   * Doubles as the ffmpeg availability check. VideoToolbox is present on every
-   * supported macOS host, but a self-built ffmpeg can lack it, so fall back to
-   * software encoding rather than failing the recording.
-   */
-  private async resolveEncoder(signal?: AbortSignal): Promise<string> {
-    let encoders: string[];
-    try {
-      encoders = (await waitForCaptureStart(this.ffmpegClient.probe({ signal }), signal)).encoders;
-    } catch (error) {
-      throwIfCaptureStartAborted(signal);
-      throw new ActionableError(
-        "FFmpeg is not available. Please install FFmpeg to use video recording.\n" +
-          "  macOS: brew install ffmpeg\n" +
-          `Error: ${errorMessage(error)}`,
-      );
-    }
-    if (encoders.includes(VIDEOTOOLBOX_H264_ENCODER)) {
-      return VIDEOTOOLBOX_H264_ENCODER;
-    }
-    if (!encoders.includes(SOFTWARE_H264_ENCODER)) {
-      // Blindly naming an absent encoder would only fail once the first frame
-      // spawns ffmpeg, and stop() would then report "no frames captured" — the
-      // wrong cause entirely. Fail here, before the helper is started.
-      throw new ActionableError(
-        `This FFmpeg build exposes neither ${VIDEOTOOLBOX_H264_ENCODER} nor ${SOFTWARE_H264_ENCODER}, ` +
-          "so a physical iOS recording cannot be encoded. Install an FFmpeg with H.264 support (macOS: brew install ffmpeg).",
-      );
-    }
-    logger.warn(
-      `[IosPhysicalVideo] ${VIDEOTOOLBOX_H264_ENCODER} unavailable; falling back to software ${SOFTWARE_H264_ENCODER}.`,
-    );
-    return SOFTWARE_H264_ENCODER;
   }
 
   private buildNoFramesMessage(state: CaptureState): string {

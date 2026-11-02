@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import {
   type DecodedAudio,
   type DecodedEncodedVideo,
-  type DecodedFrame,
   encodeEncodedVideoHeader,
   ENCODED_VIDEO_HEIGHT_BASE,
   ENCODED_VIDEO_HEIGHT_MASK,
@@ -48,22 +47,19 @@ function drain(
   decoder: FrameDecoder,
   chunk: Buffer,
 ): {
-  frames: DecodedFrame[];
   audio: DecodedAudio[];
   video: DecodedEncodedVideo[];
   malformed: MalformedFrameError[];
 } {
-  const frames: DecodedFrame[] = [];
   const audio: DecodedAudio[] = [];
   const video: DecodedEncodedVideo[] = [];
   const malformed: MalformedFrameError[] = [];
   decoder.push(chunk, {
     onMalformed: (err) => malformed.push(err),
     onAudio: (a) => audio.push(a),
-    onFrame: (f) => frames.push(f),
     onEncodedVideo: (v) => video.push(v),
   });
-  return { frames, audio, video, malformed };
+  return { audio, video, malformed };
 }
 
 describe("encoded-video golden vectors (issue #4787)", () => {
@@ -88,8 +84,7 @@ describe("encoded-video golden vectors (issue #4787)", () => {
     test(`decoding the ${name} record surfaces it distinctly with identical fields`, () => {
       const record = byName(name);
       const out = drain(new FrameDecoder(), Buffer.from(record.recordHex, "hex"));
-      // Distinct from raw frames and audio: only the encoded-video callback fires.
-      expect(out.frames).toHaveLength(0);
+      // Distinct from audio: only the encoded-video callback fires.
       expect(out.audio).toHaveLength(0);
       expect(out.malformed).toHaveLength(0);
       expect(out.video).toHaveLength(1);
@@ -115,16 +110,14 @@ describe("encoded-video golden vectors (issue #4787)", () => {
   test("the corrupted record alone yields no decoded video and reports the checksum mismatch", () => {
     const out = drain(new FrameDecoder(), Buffer.from(golden.resync.corruptedRecordHex, "hex"));
     expect(out.video).toHaveLength(0);
-    expect(out.frames).toHaveLength(0);
     expect(out.malformed).toHaveLength(1);
     expect(out.malformed[0].reason).toBe("header_checksum_mismatch");
   });
 
-  test("an encoded-video header is never mistaken for audio or a raw frame", () => {
+  test("an encoded-video header is never mistaken for audio", () => {
     const record = byName("keyframe");
     const out = drain(new FrameDecoder(), Buffer.from(record.recordHex, "hex"));
     expect(out.audio).toHaveLength(0);
-    expect(out.frames).toHaveLength(0);
     expect(out.video).toHaveLength(1);
   });
 });

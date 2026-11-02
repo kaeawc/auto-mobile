@@ -17,6 +17,77 @@ import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/
 
 const noFocusPrefix = "iOS nothing was typed: no text field has focus.";
 
+test.each([
+  { text: "abc", before: "prefixSELECTEDsuffix", after: "prefixabcsuffix" },
+  { text: "abc", before: "SELECTEDsuffix", after: "abcsuffix" },
+  { text: "abc", before: "prefixSELECTED", after: "prefixabc" },
+  { text: "abc", before: "SELECTED", after: "abc" },
+  { text: "abc", before: "abcSELECTEDsuffix", after: "abcabcsuffix" },
+  { text: "😀", before: "prefixSELECTEDsuffix", after: "prefix😀suffix" },
+])(
+  "only the first chunk accepts a selected range replacement ($before)",
+  ({ text, before, after }) => {
+    const previous = { secure: false, value: before };
+    const current = { secure: false, value: after };
+    expect(
+      compareIosTypedText(text, previous, current, { verifyAppend: true, firstChunk: true }),
+    ).toEqual({
+      success: true,
+    });
+    expect(
+      compareIosTypedText(text, previous, current, { verifyAppend: true, firstChunk: false })
+        .success,
+    ).toBe(false);
+    expect(compareIosTypedText(text, previous, current, true).success).toBe(false);
+  },
+);
+
+test("first-chunk replacement must retain the full chunk and surrounding text", () => {
+  const before = { secure: false, value: "prefixSELECTEDsuffix" };
+  for (const value of [
+    "prefixabsuffix",
+    "Prefixabcsuffix",
+    "prefixabcSuffix",
+    "prefix!abcsuffix",
+  ]) {
+    expect(
+      compareIosTypedText(
+        "abc",
+        before,
+        { secure: false, value },
+        { verifyAppend: true, firstChunk: true },
+      ).success,
+    ).toBe(false);
+  }
+});
+
+test.each([false, true])(
+  "unchanged chunk values still report nothing typed (first=%s)",
+  (firstChunk) => {
+    const field = { secure: false, value: "prefixabcsuffix" };
+    expect(compareIosTypedText("abc", field, field, { verifyAppend: true, firstChunk })).toEqual({
+      success: false,
+      error: "iOS nothing was typed: the focused field value is unchanged.",
+    });
+  },
+);
+
+test("native editable snapshots share the first-chunk-only replacement check", () => {
+  const before = {
+    secure: false,
+    value: "web",
+    nativeEditableValues: { field: "prefixSELECTEDsuffix" },
+  };
+  const after = { secure: false, value: "web", nativeEditableValues: { field: "prefixabcsuffix" } };
+  expect(
+    compareIosTypedText("abc", before, after, { verifyAppend: true, firstChunk: true }),
+  ).toEqual({ success: true });
+  expect(
+    compareIosTypedText("abc", before, after, { verifyAppend: true, firstChunk: false }).success,
+  ).toBe(false);
+  expect(compareIosTypedText("abc", before, after, true).success).toBe(false);
+});
+
 test("chunk verification rejects a partial repeated-character append despite an existing prefix", () => {
   const before = "x".repeat(100) + "a".repeat(1000);
   const result = compareIosTypedText(

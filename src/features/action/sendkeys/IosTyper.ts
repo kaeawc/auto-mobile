@@ -1,12 +1,14 @@
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import type { Timer } from "../../../utils/SystemTimer";
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
 import {
   explainIosIndeterminateText,
   readIosTypedTextField,
   readIosTypedTextFocus,
   verifyIosTypedText,
   type IosTypedTextRead,
+  type IosTypedTextVerificationOptions,
 } from "../iosTypedTextVerification";
 import {
   assessIosTextToolBudget,
@@ -27,7 +29,7 @@ import type {
 
 interface IosChunkRead extends IosTypedTextRead {
   deadlineMs: number | undefined;
-  verifyAppend?: boolean;
+  verification?: IosTypedTextVerificationOptions;
 }
 
 interface IosTypingPreparation {
@@ -176,14 +178,25 @@ export class IosTyper {
         index > 0
           ? this.chunkInterruption(read.signal, targetIdentity, before?.identity)
           : undefined;
-      const typed =
-        interruption !== undefined
-          ? {
-              result: { success: false, error: interruption },
-              after: before,
-              insertWarning: undefined,
-            }
-          : await this.typeChunk(chunk, before, { ...read, verifyAppend: true });
+      let typed;
+      try {
+        typed =
+          interruption !== undefined
+            ? {
+                result: { success: false, error: interruption },
+                after: before,
+              }
+            : await this.typeChunk(chunk, before, {
+                ...read,
+                verification: { verifyAppend: true, firstChunk: index === 0 },
+              });
+      } catch (error) {
+        if (index === 0) {
+          throw error;
+        }
+        logger.warn("[SendKeys] iOS chunk failed after committed text", error);
+        typed = { result: { success: false, error: errorMessage(error) }, after: before };
+      }
       result = typed.result;
       before = typed.after;
       warnings.add(typed.insertWarning);
@@ -267,7 +280,7 @@ export class IosTyper {
       text,
       before,
       read,
-      read.verifyAppend,
+      read.verification,
     );
     return { result: verification, after, insertWarning: result.warning };
   }

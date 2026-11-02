@@ -65,6 +65,11 @@ test("rows arrange and align along their axes", () => {
   });
 });
 
+test("a line start-aligns its children on the cross axis by default, as on devices", () => {
+  expect(lineCss("column", {})["align-items"]).toBe("flex-start");
+  expect(lineCss("row", undefined)["align-items"]).toBe("flex-start");
+});
+
 test("a box aligns its children on one grid cell", () => {
   expect(boxLayoutCss({ alignment: "bottomEnd" })).toMatchObject({
     "align-items": "end",

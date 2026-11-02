@@ -187,11 +187,10 @@ export function lineCss(axis: "row" | "column", style: unknown): Css {
   if (typeof raw?.spacing === "number") {
     css.gap = px(raw.spacing);
   }
-  const alignment = typeof raw?.alignment === "string" ? raw.alignment : undefined;
-  if (alignment) {
-    const cross = axis === "row" ? verticalPart(alignment) : horizontalPart(alignment);
-    css["align-items"] = cross;
-  }
+  // Both devices start-align a line's children on the cross axis unless `alignment` says
+  // otherwise; CSS would stretch them. Fill-sized children stretch themselves.
+  const alignment = typeof raw?.alignment === "string" ? raw.alignment : "topStart";
+  css["align-items"] = axis === "row" ? verticalPart(alignment) : horizontalPart(alignment);
   return css;
 }
 

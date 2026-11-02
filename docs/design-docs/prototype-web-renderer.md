@@ -24,7 +24,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Window.** Fullscreen fills the screen; a sheet is `height` dp at its `edge`; a floating window
   sits at its `gravity`, moved by its `offset`.
 - **Style precedence.** A control's default styling applies first and the spec's own style wins.
-- **Layout.** Rows and columns are flex lines, a box is a one-cell grid aligned by
+- **Layout.** Rows and columns are flex lines that start-align children on the cross axis unless
+  `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill`, `{dp}`, `weight`, padding (logical
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the

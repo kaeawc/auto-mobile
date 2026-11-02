@@ -448,11 +448,16 @@ const textField: NodeRenderer = (node, scope) => {
     "align-items": "center",
     "min-height": "56px",
     padding: "0 16px",
+    gap: "12px",
     "border-radius": "4px",
     border: `1px solid ${cssColor(error ? "error" : "outline", scope.style) ?? "currentColor"}`,
     ...(empty ? { opacity: "0.7" } : {}),
   });
-  const field = el("div", { attrs: { ...attrs, role: "textbox" }, style }, [shown]);
+  const field = el("div", { attrs: { ...attrs, role: "textbox" }, style }, [
+    ...namedIcon(node.leadingIcon, scope),
+    el("span", { style: { flex: "1 1 auto" } }, [shown]),
+    ...namedIcon(node.trailingIcon, scope),
+  ]);
   const caption = fieldCaption(node, error, scope);
   return caption.length === 0
     ? field
@@ -524,6 +529,11 @@ const card: NodeRenderer = (node, scope, path) => {
 };
 
 /** A list item's trailing switch, checkbox or icon, drawn from spec state. */
+/** An icon slot named by an icon name, drawn with the icon placeholder; nothing when absent. */
+function namedIcon(name: unknown, scope: WebRenderScope): WebElement[] {
+  return typeof name === "string" ? [icon({ type: "icon", name }, scope, "")] : [];
+}
+
 function trailing(node: Raw, scope: WebRenderScope): WebChild[] {
   const entry = record(node.trailing);
   if (entry?.type === "switch" || entry?.type === "checkbox") {
@@ -565,6 +575,7 @@ const listItem: NodeRenderer = (node, scope) => {
     [el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]), ...supporting],
   );
   return el("div", { attrs: { ...attrs, role: "listitem" }, style }, [
+    ...namedIcon(node.leadingIcon, scope),
     texts,
     ...trailing(node, scope),
   ]);

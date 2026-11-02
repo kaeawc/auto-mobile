@@ -1,4 +1,5 @@
 import { prototypeSpecForDevice } from "../prototypeComponents";
+import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
@@ -6,6 +7,9 @@ import { renderDeviceFrame, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import { cssColor } from "./webStyle";
+
+/** The still renders in one fixed locale, so the same spec renders the same bytes. */
+const STILL_LOCALE = "en-US";
 
 export interface PrototypeStillOptions {
   /** A device frame id; defaults to the platform's default frame. */
@@ -115,7 +119,7 @@ function stillScope(
     condition: { state: record(spec.state) ?? {}, platform },
     data: spec.data,
     spec,
-    format: { locale: "en-US", timeZone: "UTC", nowMs: options.nowMs ?? 0 },
+    format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
     instances: [],
     inBox: false,
     unsupported: [],
@@ -129,7 +133,8 @@ export function renderPrototypeStill(
   const frame = deviceFrameOrThrow(
     options.frame ?? defaultDeviceFrameId(options.platform ?? "android"),
   );
-  const expanded = prototypeSpecForDevice(spec);
+  // Components expand, then string tables resolve for the still's fixed locale, as on devices.
+  const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
   const scope = stillScope(expanded, options, frame.platform);
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";

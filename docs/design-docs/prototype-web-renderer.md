@@ -11,7 +11,8 @@ the host, so the page's script only switches between views it was given and neve
 
 - **Input.** The spec after component expansion, with its own `state` and `data`. The stack shows
   its `start` screen. No action, timer or `request` runs.
-- **Text.** `{data:/pointer}` placeholders bind first (a missing or non-scalar value is empty),
+- **Text.** String-table translations resolve first, in the still's fixed `en-US` locale. Then
+  `{data:/pointer}` placeholders bind (a missing or non-scalar value is empty),
   then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a
   top-level `derive` entry. Repeat placeholders
   bind each item (a literal `items` array or a data pointer), including the repeat's own `derive`
@@ -41,7 +42,8 @@ the host, so the page's script only switches between views it was given and neve
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
-  `listItem` (with its trailing switch, checkbox or icon). A top app bar draws its navigation icon
+  `listItem` (with its leading icon and its trailing switch, checkbox or icon). A text field draws
+  its leading and trailing icons. A top app bar draws its navigation icon
   and actions as icon placeholders labelled with their action. A button whose `enabledWhen` is decidably
   false draws disabled. A text field shows `errorText` with error colours when `errorWhen` is
   decidably true, and otherwise its `supportingText`. A spacer with no width, height or weight

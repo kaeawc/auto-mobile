@@ -437,6 +437,30 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(still, "sized")[0]!.style).not.toHaveProperty("flex");
   });
 
+  test("draws list-item and text-field icon slots", () => {
+    const iconsOf = (root: Record<string, unknown>) =>
+      find(
+        renderPrototypeStill({ ...reference, root }).element,
+        (element) => element.attrs.role === "img",
+      ).map((element) => element.attrs.title);
+    expect(iconsOf({ type: "listItem", headline: "Wifi", leadingIcon: "wifi" })).toEqual(["wifi"]);
+    expect(
+      iconsOf({ type: "textField", stateKey: "q", leadingIcon: "search", trailingIcon: "close" }),
+    ).toEqual(["search", "close"]);
+  });
+
+  test("resolves string-table translations before binding text", () => {
+    const spec = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "../../../fixtures/prototype-spec/valid/strings-and-semantics.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    const html = toHtml(renderPrototypeStill(spec).element);
+    expect(html).not.toContain("{t:");
+    expect(html).toContain("2 items");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

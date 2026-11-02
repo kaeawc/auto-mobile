@@ -62,6 +62,12 @@ export const DEVICES_ENV = {
     min: 1,
     doc: "Positive integer cap on concurrently booted iOS simulators.",
   },
+  LMK_PRESSURE_DIR: {
+    name: "AUTOMOBILE_LMK_PRESSURE_DIR",
+    kind: "path",
+    default: "build/lmk-pressure under the package root",
+    doc: "Directory containing per-ABI Android memory-pressure binaries.",
+  },
   NETWORK_FILTER_APP_PATH: {
     name: "AUTOMOBILE_NETWORK_FILTER_APP_PATH",
     kind: "path",

@@ -159,23 +159,23 @@ export class DeviceConditionController {
     }
   }
 
-  /** A restarted daemon has no registered reset for abandoned root fixture files. */
-  private async recoverRootReset(signal?: AbortSignal): Promise<void> {
-    if (this.resets.some((entry) => entry.key === "rootState")) {
+  /** A restarted daemon has no registered resets for abandoned device fixtures. */
+  private async recoverReset(key: DeviceConditionKey, signal?: AbortSignal): Promise<void> {
+    if (this.resets.some((entry) => entry.key === key)) {
       return;
     }
     try {
-      const injector = this.resolveInjector("rootState");
+      const injector = this.resolveInjector(key);
       const reset = await injector?.recover?.(signal);
       if (injector && reset) {
         this.resets.push({
-          key: "rootState",
+          key,
           reset,
           isClean: (s) => injector.isClean(s),
         });
       }
     } catch (error) {
-      logger.warn(`[deviceCondition] recovering rootState failed: ${errorMessage(error)}`, error);
+      logger.warn(`[deviceCondition] recovering ${key} failed: ${errorMessage(error)}`, error);
     }
   }
 
@@ -190,8 +190,8 @@ export class DeviceConditionController {
     signal?: AbortSignal,
     recoveryAttempted = false,
   ): Promise<DeviceConditionChangeResult> {
-    if (key === "rootState" && !recoveryAttempted) {
-      await this.recoverRootReset(signal);
+    if ((key === "rootState" || key === "faults.memoryPressure") && !recoveryAttempted) {
+      await this.recoverReset(key, signal);
     }
     const entries = this.resets.filter((entry) => entry.key === key);
     if (entries.length === 0) {
@@ -218,7 +218,8 @@ export class DeviceConditionController {
   async restore(signal?: AbortSignal): Promise<DeviceConditionRestoreReport> {
     const restored: DeviceConditionKey[] = [];
     const failures: DeviceConditionRestoreFailure[] = [];
-    await this.recoverRootReset(signal);
+    await this.recoverReset("rootState", signal);
+    await this.recoverReset("faults.memoryPressure", signal);
     // Reverse order: the last condition applied is undone first.
     for (const entry of [...this.resets].reverse()) {
       try {

@@ -52019,6 +52019,11 @@
                   "enum": ["unplug", "low", "full", "unset"],
                   "description": "Battery fault via `dumpsys battery` (unplug / low 15% / full), or unset."
                 },
+                "memoryPressure": {
+                  "type": "string",
+                  "enum": ["on", "unset"],
+                  "description": "Hold anonymous memory until Android lmkd kills background apps. Unsupported if no kill follows. Needs a built pressure binary or AUTOMOBILE_LMK_PRESSURE_DIR; reset stops the payload and removes its files. Or unset."
+                },
                 "lowPower": {
                   "type": "string",
                   "enum": ["on", "unset"],

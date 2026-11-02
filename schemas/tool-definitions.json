@@ -45328,6 +45328,10 @@
         "reason": {
           "type": "string"
         },
+        "warningCode": {
+          "type": "string",
+          "enum": ["not_watch", "traits_unavailable"]
+        },
         "warning": {
           "description": "Set when the device is not confirmed to be a watch; the input is still sent",
           "type": "string"

@@ -98,6 +98,7 @@ describe("rotaryScroll tool", () => {
     expect(watchChecks).toEqual(["emulator-5554"]);
     expect(json.success).toBe(true);
     expect(json).not.toHaveProperty("warning");
+    expect(json).not.toHaveProperty("warningCode");
   });
 
   test("a non-watch device still scrolls but the result warns", async () => {
@@ -105,7 +106,10 @@ describe("rotaryScroll tool", () => {
     const json = toolJson(await handler(android, { delta: 2 }));
     expect(calls).toEqual([2]);
     expect(json.success).toBe(true);
-    expect(json.warning).toContain("does not announce a watch build");
+    expect(json.warningCode).toBe("not_watch");
+    expect(json.warning).toContain("not a Wear OS watch");
+    expect(json.warning).toContain("swipeOn");
+    expect(json.warning).toContain("wearos_small_round");
     expect(rotaryScrollResultSchema.safeParse(json).success).toBe(true);
   });
 
@@ -113,7 +117,19 @@ describe("rotaryScroll tool", () => {
     const { handler, calls } = setup(scrolled, "unreadable");
     const json = toolJson(await handler(android, { delta: 2 }));
     expect(calls).toEqual([2]);
+    expect(json.warningCode).toBe("traits_unavailable");
     expect(json.warning).toContain("Could not read the device traits");
+    expect(json.warning).toContain("watch status is unknown");
+    expect(json.warning).toContain("observe");
+    expect(json.warning).toContain("listDevices (formFactor)");
+    expect(rotaryScrollResultSchema.safeParse(json).success).toBe(true);
+  });
+
+  test("warning codes are limited to known watch warnings", () => {
+    expect(
+      rotaryScrollResultSchema.safeParse({ ...scrolled, message: "Scrolled", warningCode: "other" })
+        .success,
+    ).toBe(false);
   });
 
   test("delta must be a non-zero integer within the cap", () => {

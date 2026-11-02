@@ -259,7 +259,7 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .enum(["on", DEVICE_CONDITION_UNSET])
           .optional()
           .describe(
-            "Hold anonymous memory until Android lmkd kills background apps. Unsupported if no kill follows. Needs a built pressure binary or AUTOMOBILE_LMK_PRESSURE_DIR; reset stops the payload and removes its files. Or unset.",
+            "Hold anonymous memory until Android lmkd kills background apps. Unsupported if no kill follows. Uses a local build or AUTOMOBILE_LMK_PRESSURE_DIR, else downloads the checksum-verified release binary; reset stops the payload and removes its files. Or unset.",
           ),
         lowPower: z
           .enum(["on", DEVICE_CONDITION_UNSET])

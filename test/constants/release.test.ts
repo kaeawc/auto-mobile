@@ -35,6 +35,9 @@ import {
   resolvePrototypeViewerUrl,
   resolveNetworkFilterChecksum,
   resolveNetworkFilterUrl,
+  LMK_PRESSURE_ASSET_FILENAMES,
+  resolveLmkPressureChecksum,
+  resolveLmkPressureUrl,
   resolveScreenCaptureHelperChecksum,
   resolveScreenCaptureHelperUrl,
   resolveVideoJarChecksum,
@@ -813,6 +816,52 @@ describe("prototype-viewer release delivery (#12255)", function () {
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const checksum = entry.prototypeViewerSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
+  });
+});
+
+describe("lmk-pressure release delivery (#16402)", function () {
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "0.0.90",
+      apkSha256: "apk90",
+      ipaSha256: "ipa90",
+      runnerSha256: "runner90",
+      lmkPressureArm64Sha256: "arm90",
+      lmkPressureX8664Sha256: "x8690",
+    },
+    { version: "0.0.89", apkSha256: "apk89", ipaSha256: "ipa89", runnerSha256: "runner89" },
+  ];
+
+  test("uses one fixed release asset name per ABI", function () {
+    expect(LMK_PRESSURE_ASSET_FILENAMES).toEqual({
+      "arm64-v8a": "automobile-lmk-pressure-arm64-v8a",
+      x86_64: "automobile-lmk-pressure-x86_64",
+    });
+  });
+
+  test("builds a version-pinned release URL for each ABI", function () {
+    expect(resolveLmkPressureUrl("arm64-v8a", {}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.90/automobile-lmk-pressure-arm64-v8a`,
+    );
+    expect(resolveLmkPressureUrl("x86_64", {}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.90/automobile-lmk-pressure-x86_64`,
+    );
+  });
+
+  test("resolves each ABI's own checksum and leaves pre-delivery releases unverifiable", function () {
+    expect(resolveLmkPressureChecksum("arm64-v8a", {}, registry)).toBe("arm90");
+    expect(resolveLmkPressureChecksum("x86_64", {}, registry)).toBe("x8690");
+    expect(resolveLmkPressureChecksum("x86_64", { AUTOMOBILE_VERSION: "0.0.89" }, registry)).toBe(
+      "",
+    );
+  });
+
+  test("registry lmk-pressure checksums are empty or SHA-256 values", function () {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      for (const checksum of [entry.lmkPressureArm64Sha256, entry.lmkPressureX8664Sha256]) {
+        expect((checksum ?? "") === "" || /^[a-f0-9]{64}$/.test(checksum ?? "")).toBe(true);
+      }
     }
   });
 });

@@ -35,7 +35,7 @@ function argsFor(timeoutMs: number | undefined, mcpDeadlineMs: number | undefine
     boot: true,
     readiness: "automation",
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    ...(mcpDeadlineMs !== undefined ? { __mcpRequestDeadlineMs: mcpDeadlineMs } : {}),
+    ...(mcpDeadlineMs !== undefined ? { transportDeadlineMs: mcpDeadlineMs } : {}),
   } as ProvisionDeviceArgs;
 }
 

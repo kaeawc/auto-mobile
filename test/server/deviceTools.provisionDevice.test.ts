@@ -6050,7 +6050,6 @@ describe("provisionDevice handler", () => {
         timeoutMs: 100_000,
         // The outer request originally had 165s (100s provisioning + 60s
         // rollback + 5s response headroom); 20s elapsed in the socket queue.
-        __mcpRequestTimeoutMs: 145_000,
         __mcpRequestDeadlineMs: 145_000,
       },
       (args) => tool.handler(args),

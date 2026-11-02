@@ -277,4 +277,19 @@ describe("handler internal metadata regression guard", () => {
     expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("transportDeadlineMs");
     expect(args).toMatchObject(metadata);
   });
+
+  test("provisionDevice ignores a caller-supplied deadline in favour of the request's", () => {
+    const args = {
+      device: {
+        platform: "android" as const,
+        name: "Pixel",
+        spec: { runtime: "android-35", deviceType: "pixel_8" },
+      },
+      transportDeadlineMs: 1,
+      liveDeadlineKey: "caller",
+    };
+    const parsed = parseProvisionDeviceArgs(args, { deadlineMs: 90_000 });
+    expect(parsed.transportDeadlineMs).toBe(90_000);
+    expect(parsed).not.toHaveProperty("liveDeadlineKey");
+  });
 });

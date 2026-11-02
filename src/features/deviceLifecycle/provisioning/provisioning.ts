@@ -207,6 +207,8 @@ export function parseProvisionDeviceArgs(
   deleteInternalToolParams(publicInput);
   delete publicInput.rollbackOnRetryableReadiness;
   delete publicInput.discardSnapshotOnExit;
+  delete publicInput.transportDeadlineMs;
+  delete publicInput.liveDeadlineKey;
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,

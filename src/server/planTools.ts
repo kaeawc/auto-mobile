@@ -15,7 +15,6 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { holdTaskDeviceLeases } from "./tasks/runAsTask";
 import { planCallerContext } from "./planCallerIdentity";
-import {} from "../daemon/wire/constants";
 
 const testMetadataSchema = z.object({
   testClass: z.string(),

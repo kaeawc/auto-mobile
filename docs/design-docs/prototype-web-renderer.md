@@ -122,7 +122,8 @@ nothing at runtime drives a browser.
 - **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
   and on pull requests that touch the web renderer, its reference fixtures, the check, or
   `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux
-  Chromium build; when the runner renders differently, the job uploads the
+  Chromium build, whose text anti-aliasing other machines may not match, so a local run can fail on
+  pixels alone; when the runner renders differently, the job uploads the
   `prototype-web-screenshots` artifact, and adopting it means reviewing its PNGs and copying those
   other than `*.diff.png` into the golden directory.
 

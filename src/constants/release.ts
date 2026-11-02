@@ -86,6 +86,15 @@ export interface ReleaseChecksumEntry {
    * by release automation (scripts/generate-release-constants.sh), never by hand.
    */
   networkFilterSha256?: string;
+  /**
+   * SHA-256 of the arm64-v8a `deviceCondition` memory-pressure payload
+   * (`automobile-lmk-pressure-arm64-v8a`, built from `android/lmk-pressure/` with
+   * the NDK, #16402). Optional so releases predating its delivery stay valid;
+   * filled by release automation, never by hand.
+   */
+  lmkPressureArm64Sha256?: string;
+  /** SHA-256 of the x86_64 memory-pressure payload (`automobile-lmk-pressure-x86_64`, #16402). */
+  lmkPressureX8664Sha256?: string;
 }
 
 /**

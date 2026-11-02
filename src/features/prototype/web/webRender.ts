@@ -67,6 +67,7 @@ export interface WebRenderKit {
   readonly roleCss: typeof roleCss;
   readonly disabledState: typeof disabledState;
   readonly renderNode: typeof renderWebNode;
+  readonly safeAreaEdges: typeof safeAreaEdges;
 }
 
 /** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
@@ -968,6 +969,7 @@ const KIT: WebRenderKit = {
   roleCss,
   disabledState,
   renderNode: renderWebNode,
+  safeAreaEdges,
 };
 
 export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {

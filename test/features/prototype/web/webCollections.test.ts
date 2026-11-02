@@ -85,6 +85,27 @@ describe("web still pager (#16382)", () => {
     expect(vertical.style).toMatchObject({ "flex-direction": "column", right: "8px" });
   });
 
+  test("page content binds the pager's one-based page and page count", () => {
+    const pager = byNode(
+      renderPrototypeStill(
+        rootOf(
+          {
+            type: "pager",
+            id: "p",
+            stateKey: "page_index",
+            children: [
+              { type: "text", text: "Page {page} of {pageCount}" },
+              { type: "text", text: "Page {page} of {pageCount}" },
+            ],
+          },
+          { state: { page_index: 1 } },
+        ),
+      ).element,
+      "pager",
+    )[0]!;
+    expect(textOf(pager)).toBe("Page 2 of 2");
+  });
+
   test("applies peek padding and a fixed page size on the pager's axis", () => {
     const pager = byNode(
       renderPrototypeStill(
@@ -300,6 +321,19 @@ describe("web still navigation bars (#16382)", () => {
       "bar",
     )[0]!;
     expect(JSON.stringify(consumed.style)).not.toContain("--safe-bottom");
+  });
+
+  test("a bottom nav keeps an authored IME-only edge apart from its own bottom inset", () => {
+    const bar = nav("bottomNav", { safeAreaPadding: { edges: ["top"], types: ["ime"] } });
+    expect(bar.style["padding-bottom"]).toContain("var(--safe-bottom)");
+    expect(JSON.stringify(bar.style)).not.toContain("--safe-top");
+  });
+
+  test("a bottom nav asking for its bottom inset itself takes it only once", () => {
+    const bar = nav("bottomNav", {
+      safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
+    });
+    expect(bar.style["padding-bottom"]!.match(/--safe-bottom/g)).toHaveLength(1);
   });
 
   test("a tab bar marks the selected tab with the primary colour and indicator", () => {

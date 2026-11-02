@@ -345,17 +345,19 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
   );
 }
 
-/** Android's NavigationBar pads its bottom edge by the system bar, as iOS does, unless taken above. */
-function withBottomInset(node: Raw): Raw {
-  const safe = record(node.safeAreaPadding);
-  const edges = Array.isArray(safe?.edges) ? safe.edges.map(String) : [];
-  const types = Array.isArray(safe?.types) ? safe.types : [];
+/**
+ * Android's NavigationBar pads its bottom edge by the system bar, as iOS does, on top of the
+ * spec's own safeAreaPadding, unless an ancestor or that padding already took the bottom edge.
+ */
+function withBottomInset(node: Raw, scope: WebRenderScope, kit: WebRenderKit, style: Css): Css {
+  const taken =
+    (scope.consumedInsets ?? []).includes("bottom") || kit.safeAreaEdges(node).includes("bottom");
+  if (taken) {
+    return style;
+  }
   return {
-    ...node,
-    safeAreaPadding: {
-      edges: [...new Set([...edges, "bottom"])],
-      types: types.some((type) => type !== "ime") ? types : ["systemBars"],
-    },
+    ...style,
+    "padding-bottom": `calc(${style["padding-bottom"] ?? "0px"} + var(--safe-bottom))`,
   };
 }
 
@@ -365,12 +367,13 @@ const bottomNavRenderer =
   (node, scope) => {
     const items = navItems(node, scope, kit);
     const selected = navSelection(node, items.length, scope, kit);
-    const { attrs, style } = barBase(withBottomInset(node), scope, kit, {
+    const { attrs, style: barStyle } = barBase(node, scope, kit, {
       "min-height": "80px",
       gap: "8px",
       "padding-inline": "8px",
       ...kit.roleCss(scope, "surfaceContainer", "onSurface"),
     });
+    const style = withBottomInset(node, scope, kit, barStyle);
     return el(
       "div",
       { attrs: { ...attrs, role: "tablist" }, style },

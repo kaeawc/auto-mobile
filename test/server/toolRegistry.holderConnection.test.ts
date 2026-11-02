@@ -225,6 +225,22 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
   );
 
   arranged(
+    "the holder's tapOn {deviceId} runs attributed to its session, so a release sees it in flight",
+    async () => {
+      const inFlight: boolean[] = [];
+      tools.setBody(async () => {
+        inFlight.push(executionTracker.hasActiveAutolockSessionExecutions(HOLDER));
+        return { success: true };
+      });
+
+      await fromConnection(HOLDER_CONNECTION, "tapOn", { deviceId: held.deviceId, text: "Go" });
+
+      expect(inFlight).toEqual([true]);
+      expect(executionTracker.hasActiveAutolockSessionExecutions(HOLDER)).toBe(false);
+    },
+  );
+
+  arranged(
     "another connection's tapOn {deviceId} is refused, never drives the device and is not use",
     async () => {
       const before = lastUsedAt();

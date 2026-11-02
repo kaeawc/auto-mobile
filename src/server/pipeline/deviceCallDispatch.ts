@@ -1,4 +1,4 @@
-import { internalExecutionId, internalExecutionStartTime } from "../internalToolParams";
+import { INTERNAL_EXECUTION_START_TIME_PARAM } from "../../daemon/wire/constants";
 import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
@@ -35,6 +35,7 @@ import {
   TOOL_CALL_REMEDY,
 } from "../../daemon/inputDeviceOwnership";
 import {
+  currentExecution,
   getToolSelectionContext,
   type ToolCallRecordingContext,
 } from "../../features/toolSelection/toolSelectionContext";
@@ -93,28 +94,25 @@ export function markDeviceCallKind(executionId: string, toolName: string, readOn
   }
 }
 
+/**
+ * The routing session, and the execution start a transport-deadline fallback still reads in-band
+ * (`resolveTransportDeadlineMs`). The execution id is ambient only (#15663).
+ */
 function withAmbientDeviceContext(
   args: Record<string, unknown>,
   routingSessionUuid: string | undefined,
-  execution: { executionId: string; startTime: number } | undefined,
+  execution: { startTime: number } | undefined,
 ): Record<string, unknown> {
   const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
-  const needsExecution =
-    execution &&
-    (internalExecutionId(args) !== execution.executionId ||
-      internalExecutionStartTime(args) !== execution.startTime);
-  if (!needsRoutingSession && !needsExecution) {
+  const needsStartTime =
+    execution && args[INTERNAL_EXECUTION_START_TIME_PARAM] !== execution.startTime;
+  if (!needsRoutingSession && !needsStartTime) {
     return args;
   }
   return {
     ...args,
     ...(needsRoutingSession ? { sessionUuid: routingSessionUuid } : {}),
-    ...(needsExecution
-      ? {
-          __executionId: execution!.executionId,
-          __executionStartTime: execution!.startTime,
-        }
-      : {}),
+    ...(needsStartTime ? { [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime } : {}),
   };
 }
 
@@ -146,12 +144,11 @@ export function deviceAwareHandlerArgs(
     !args.sessionUuid
       ? undefined
       : context?.routingSessionUuid;
-  const handlerArgs = withAmbientDeviceContext(
+  return withAmbientDeviceContext(
     withoutBlankSessionUuid(args),
     nonBlankSessionUuid(routingSession),
     context?.execution,
   );
-  return handlerArgs;
 }
 
 /**
@@ -615,9 +612,10 @@ export async function invokeResolvedDeviceHandler(input: {
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
+  const execution = currentExecution();
   deviceActionClock.recordDispatch(
-    internalExecutionId(args),
-    internalExecutionStartTime(args),
+    execution?.executionId,
+    execution?.startTime,
     target.device.deviceId,
   );
   const withdraw = navigationRecorder.record(name, args, target.device, {

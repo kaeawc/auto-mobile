@@ -181,12 +181,13 @@ the host, so the page's script only switches between views it was given and neve
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
   would reveal are not drawn. Its `dots` indicator is a row of 6 px dots, 8 px apart, the current one
   in `onSurface` and the rest at 0.38 opacity, 8 px above its bottom edge (a vertical pager: a column
-  8 px from its right edge), or centred in a 22 px strip when `below`. A grid is a CSS grid of equal
+  8 px from its right edge), or centred in a 22 px strip when `below`, unless a fixed height (a
+  vertical pager: width) under 44 px leaves no room for it, when it overlays as Android does. A grid is a CSS grid of equal
   columns with `spacing` between columns and `runSpacing` (else `spacing`) between rows; a child
   spans its `span` clamped to the columns, takes the cell's width and sits at the top of its row. An
   adaptive grid fits `floor((width + spacing) / (minWidth + spacing))` columns to the screen width,
   so its tracks and clamped spans agree. A carousel draws its items in a clipped row at `itemWidth`,
-  `itemSpacing` apart, each masked with a 28 px corner; it does not resize items as multi-browse or
+  `itemSpacing` apart, each masked with a 28 px corner, and keeps an empty slot for a hidden child; it does not resize items as multi-browse or
   hero keylines do. A bottom nav is an 80 px `surfaceContainer` bar whose items draw their icon in a
   64x32 pill (`secondaryContainer` when selected) over a 12 px label, and it pads its bottom edge by
   the safe area, as both devices' navigation bars do, unless an ancestor already applied it. A tab bar
@@ -204,7 +205,7 @@ the host, so the page's script only switches between views it was given and neve
   slider draws its label above a 16 px track, `primary` up to the value and `secondaryContainer`
   after it with a stop dot at its end, and a 4x44 px `primary` thumb at the value: its numeric
   state, else 0, snapped to `step` and clamped to `min`..`max`. A pager fills both axes, and a grid,
-  carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column or card
+  carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column, box or card
   around such a child grows on that axis, as a Compose parent does around a `fillMax` child. A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
   and actions as icon placeholders labelled with their action, and its `variant` sets its height,

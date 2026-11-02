@@ -9,6 +9,9 @@ type Css = Record<string, string>;
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 const dp = (value: unknown): number => (typeof value === "number" && value > 0 ? value : 0);
 
+/** The strip Android reserves for dots placed below a pager (its height, or width if vertical). */
+const DOT_STRIP = 22;
+
 export type WebAxis = "width" | "height";
 
 /** The axes a node fills when it leaves them unsized, as its native Compose layout does. */
@@ -160,8 +163,8 @@ function pagerDots(
       ? { position: "absolute", top: "0", bottom: "0", right: "8px" }
       : { position: "absolute", left: "0", right: "0", bottom: "8px" }
     : layout.vertical
-      ? { width: "22px", "align-self": "stretch", "flex-shrink": "0" }
-      : { height: "22px", "align-self": "stretch", "flex-shrink": "0" };
+      ? { width: px(DOT_STRIP), "align-self": "stretch", "flex-shrink": "0" }
+      : { height: px(DOT_STRIP), "align-self": "stretch", "flex-shrink": "0" };
   return el(
     "div",
     {
@@ -170,6 +173,15 @@ function pagerDots(
     },
     dots,
   );
+}
+
+/**
+ * Whether a pager can reserve the dot strip: Android draws the dots over the pages when a fixed
+ * cross-axis size (height, or width for a vertical pager) leaves less than another strip for them.
+ */
+function canReserveStrip(node: Raw, vertical: boolean): boolean {
+  const extent = record(record(node.style)?.[vertical ? "width" : "height"])?.dp;
+  return typeof extent !== "number" || extent - DOT_STRIP >= DOT_STRIP;
 }
 
 /**
@@ -184,7 +196,7 @@ export const pagerRenderer =
     const pages = Array.isArray(node.children) ? node.children : [];
     const page = pagerPage(node, scope, kit);
     const dots = node.indicator === "dots" && pages.length > 0;
-    const over = node.indicatorPlacement !== "below";
+    const over = node.indicatorPlacement !== "below" || !canReserveStrip(node, vertical);
     const { attrs, style } = kit.base(node, scope, {
       display: "flex",
       "flex-direction": vertical ? "row" : "column",

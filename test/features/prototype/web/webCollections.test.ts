@@ -85,6 +85,34 @@ describe("web still pager (#16382)", () => {
     expect(vertical.style).toMatchObject({ "flex-direction": "column", right: "8px" });
   });
 
+  test("overlays dots placed below when the pager is too small to reserve a strip", () => {
+    const indicatorOf = (extra: Spec) =>
+      byPart(
+        byNode(
+          renderPrototypeStill(
+            rootOf({
+              type: "pager",
+              id: "p",
+              indicator: "dots",
+              indicatorPlacement: "below",
+              children: [{ type: "text", text: "A" }],
+              ...extra,
+            }),
+          ).element,
+          "pager",
+        )[0]!,
+        "indicator",
+      )[0]!;
+    // Android reserves the strip only when another strip's worth (44dp in all) remains for pages.
+    expect(indicatorOf({ style: { height: { dp: 30 } } }).style).toMatchObject({
+      position: "absolute",
+      bottom: "8px",
+    });
+    expect(indicatorOf({ style: { height: { dp: 44 } } }).style).toMatchObject({ height: "22px" });
+    const vertical = indicatorOf({ axis: "vertical", style: { width: { dp: 43 } } });
+    expect(vertical.style).toMatchObject({ position: "absolute", right: "8px" });
+  });
+
   test("page content binds the pager's one-based page and page count", () => {
     const pager = byNode(
       renderPrototypeStill(

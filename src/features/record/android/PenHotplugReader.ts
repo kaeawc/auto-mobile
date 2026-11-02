@@ -4,20 +4,30 @@ import type {
 } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import type { Timer } from "../../../utils/SystemTimer";
 import { parseInputNodeChange, parseInputNodes } from "./InputNodeDiscovery";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
 import type { GestureEmitter, GestureEvent } from "./types";
 
+// Allow the final frames to drain across independent pipes, beyond uinput's 50 ms removal delay.
+export const PEN_REMOVAL_SETTLE_MS = 250;
+
+interface PenReader extends GestureEmitter {
+  readonly isRunning: boolean;
+}
+
 interface PenTrack {
   controller: AbortController;
-  reader?: GestureEmitter;
+  reader?: PenReader;
+  settleTimer?: NodeJS.Timeout;
 }
 
 interface PenHotplugReaderOptions {
   adb: AdbExecutor;
-  primary: { node: TouchInputNode; reader: GestureEmitter };
+  timer: Timer;
+  primary: { node: TouchInputNode; reader: PenReader };
   penNodes: readonly TouchInputNode[];
-  createPenReader(node: TouchInputNode): GestureEmitter;
+  createPenReader(node: TouchInputNode): PenReader;
 }
 
 /**
@@ -41,12 +51,15 @@ export class PenHotplugReader implements GestureEmitter {
     const generation = ++this.generation;
     const { primary } = this.opts;
     if (primary.node.kind === "pen") {
-      this.pens.set(primary.node.path, {
+      const track: PenTrack = {
         controller: new AbortController(),
         reader: primary.reader,
-      });
+      };
+      this.pens.set(primary.node.path, track);
+      this.startPen(primary.node, track, onGesture, onError);
+    } else {
+      primary.reader.start(onGesture, onError);
     }
-    primary.reader.start(onGesture, onError);
     for (const node of this.opts.penNodes) {
       const track: PenTrack = { controller: new AbortController() };
       this.pens.set(node.path, track);
@@ -59,8 +72,9 @@ export class PenHotplugReader implements GestureEmitter {
     node: TouchInputNode,
     track: PenTrack,
     onGesture: (event: GestureEvent) => void,
+    onError?: (error: Error) => void,
   ): void {
-    track.reader = this.opts.createPenReader(node);
+    track.reader ??= this.opts.createPenReader(node);
     track.reader.start(
       (event) => {
         if (this.pens.get(node.path) === track) {
@@ -71,7 +85,12 @@ export class PenHotplugReader implements GestureEmitter {
         if (this.pens.get(node.path) !== track) {
           return;
         }
-        this.removePen(node.path);
+        const removing = track.settleTimer !== undefined;
+        this.finalizePen(node.path, track);
+        if (onError && !removing) {
+          onError(error);
+          return;
+        }
         logger.warn(
           `[PenHotplugReader] pen node ${node.path} stopped; finger recording continues: ${error.message}`,
           error,
@@ -81,6 +100,10 @@ export class PenHotplugReader implements GestureEmitter {
   }
 
   private async addPen(path: string, onGesture: (event: GestureEvent) => void): Promise<void> {
+    const previous = this.pens.get(path);
+    if (previous?.settleTimer !== undefined) {
+      this.finalizePen(path, previous);
+    }
     // The primary touch node is deliberately fixed for the recording's lifetime.
     if (
       this.pens.has(path) ||
@@ -121,9 +144,30 @@ export class PenHotplugReader implements GestureEmitter {
 
   private removePen(path: string): void {
     const track = this.pens.get(path);
+    if (!track || track.settleTimer !== undefined) {
+      return;
+    }
+    if (!track.reader?.isRunning) {
+      this.finalizePen(path, track);
+      return;
+    }
+    track.settleTimer = this.opts.timer.setTimeout(
+      () => this.finalizePen(path, track),
+      PEN_REMOVAL_SETTLE_MS,
+    );
+  }
+
+  private finalizePen(path: string, track: PenTrack): void {
+    if (this.pens.get(path) !== track) {
+      return;
+    }
     this.pens.delete(path);
-    track?.controller.abort();
-    track?.reader?.stop();
+    if (track.settleTimer !== undefined) {
+      this.opts.timer.clearTimeout(track.settleTimer);
+      track.settleTimer = undefined;
+    }
+    track.controller.abort();
+    track.reader?.stop();
   }
 
   private async monitor(
@@ -143,7 +187,10 @@ export class PenHotplugReader implements GestureEmitter {
       return;
     }
     if (generation !== this.generation) {
-      child.on("error", () => {});
+      child.on("error", (error: Error) => {
+        // The child is already being torn down; late errors are expected and safe to swallow.
+        logger.debug("[PenHotplugReader] late error from stale hotplug monitor", error);
+      });
       child.kill();
       return;
     }
@@ -177,7 +224,10 @@ export class PenHotplugReader implements GestureEmitter {
         child.kill();
       }
     };
-    const ignoreError = (): void => {};
+    const ignoreError = (error: Error): void => {
+      // The child is already being torn down; late errors are expected and safe to swallow.
+      logger.debug("[PenHotplugReader] late error after hotplug monitor cleanup", error);
+    };
     const failed = (reason: string): void => {
       cleanup();
       logger.warn(
@@ -199,8 +249,8 @@ export class PenHotplugReader implements GestureEmitter {
     this.running = false;
     ++this.generation;
     this.stopMonitor?.();
-    for (const path of this.pens.keys()) {
-      this.removePen(path);
+    for (const [path, track] of this.pens) {
+      this.finalizePen(path, track);
     }
     this.opts.primary.reader.stop();
   }

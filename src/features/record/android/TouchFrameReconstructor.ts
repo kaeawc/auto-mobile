@@ -20,6 +20,14 @@ const KEY_TO_BUTTON: Record<string, GestureEvent["button"]> = {
   KEY_APPSELECT: "recent",
 };
 
+// Linux input.h tool values printed symbolically by getevent -lt; MT_TOOL_MAX is a bound.
+const MT_TOOL_VALUES: Readonly<Record<string, number>> = {
+  MT_TOOL_FINGER: 0,
+  MT_TOOL_PEN: 1,
+  MT_TOOL_PALM: 2,
+  MT_TOOL_DIAL: 10,
+};
+
 /**
  * State machine that processes `getevent -lt` text output one line at a time
  * and emits RawTouchFrame snapshots on SYN_REPORT events.
@@ -105,7 +113,9 @@ export class TouchFrameReconstructor {
   }
 
   private handleAbsEvent(evCode: string, evValue: string, arrivedAt: number): RawTouchFrame | null {
-    const value = parseInt(evValue, 16);
+    const value =
+      (evCode === "ABS_MT_TOOL_TYPE" ? MT_TOOL_VALUES[evValue] : undefined) ??
+      parseInt(evValue, 16);
 
     switch (evCode) {
       case "ABS_MT_SLOT":
@@ -210,7 +220,7 @@ export class TouchFrameReconstructor {
   private handlePenAbsEvent(evCode: string, value: number): void {
     switch (evCode) {
       case "ABS_MT_TOOL_TYPE":
-        // MT_TOOL_FINGER (0) is the default and stays absent; MT_TOOL_PEN (1) is a stylus.
+        // Only MT_TOOL_PEN (1) is a stylus; finger, palm and dial retain the non-pen path.
         if (value === 1) {
           this.getOrCreateSlot().toolType = "stylus";
         } else {
@@ -284,14 +294,15 @@ export class TouchFrameReconstructor {
   }
 
   private setNodeTool(tool: PointerToolType, pressed: boolean, arrivedAt: number): void {
+    if (!pressed && this.nodeTool !== tool && this.nodeTool !== undefined) {
+      return;
+    }
+    this.endHoversOnToolChange(pressed ? tool : undefined, arrivedAt);
     if (pressed) {
       this.nodeTool = tool;
       if (this.options.singleTouch) {
         this.hover.penEntered();
       }
-      return;
-    }
-    if (this.nodeTool !== tool && this.nodeTool !== undefined) {
       return;
     }
     // undefined: the tool key went down before recording started and was never replayed.
@@ -300,6 +311,20 @@ export class TouchFrameReconstructor {
     if (this.options.singleTouch) {
       this.handleSingleTouchContact(false);
       this.emitHover(this.hover.penLeft(tool, arrivedAt));
+    }
+  }
+
+  private endHoversOnToolChange(nextTool: PointerToolType | undefined, arrivedAt: number): void {
+    if (this.options.singleTouch || (this.nodeTool ?? "stylus") === (nextTool ?? "stylus")) {
+      return;
+    }
+    // End each tracked hover with its old tool before the node-wide tool changes its meaning.
+    for (const slot of this.slots.values()) {
+      if (slot.trackingId >= 0 && this.isMtPenHovering(slot)) {
+        this.emitHover(
+          this.hover.slotReleased(slot.slotId, this.withPenState({ ...slot }).toolType, arrivedAt),
+        );
+      }
     }
   }
 

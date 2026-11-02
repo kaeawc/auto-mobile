@@ -48,6 +48,10 @@ export class GetEventReader implements GestureEmitter {
     this.timer = opts.timer ?? defaultTimer;
   }
 
+  get isRunning(): boolean {
+    return this.children.size > 0;
+  }
+
   start(onGesture: (event: GestureEvent) => void, onError?: (err: Error) => void): void {
     if (this.children.size > 0 || this.starting) {
       return;

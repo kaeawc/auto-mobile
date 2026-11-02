@@ -221,19 +221,48 @@ describe("pen contacts", () => {
     });
   });
 
-  test("an MT pen reports toolType from ABS_MT_TOOL_TYPE and pressure from ABS_MT_PRESSURE", () => {
-    const lines = [
-      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
-      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
-      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
-      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
-      "[  1.0] EV_ABS    ABS_MT_PRESSURE      00000080",
-      "[  1.0] EV_SYN    SYN_REPORT           00000000",
-      "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
-      "[  1.1] EV_SYN    SYN_REPORT           00000000",
-    ];
-    const { gestures } = run(lines, { range: { min: 0, max: 255 } });
-    expect(gestures[0]).toMatchObject({ toolType: "stylus", pressure: { normalized: true } });
+  test.each(["00000001", "MT_TOOL_PEN"])(
+    "an MT pen reports toolType from ABS_MT_TOOL_TYPE %s and pressure from ABS_MT_PRESSURE",
+    (toolType) => {
+      const lines = [
+        "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+        `[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     ${toolType}`,
+        "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+        "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+        "[  1.0] EV_ABS    ABS_MT_PRESSURE      00000080",
+        "[  1.0] EV_SYN    SYN_REPORT           00000000",
+        "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+        "[  1.1] EV_SYN    SYN_REPORT           00000000",
+      ];
+      const { gestures } = run(lines, { range: { min: 0, max: 255 } });
+      expect(gestures[0]).toMatchObject({ toolType: "stylus", pressure: { normalized: true } });
+    },
+  );
+
+  test.each([
+    "MT_TOOL_FINGER",
+    "MT_TOOL_PALM",
+    "MT_TOOL_DIAL",
+    "MT_TOOL_MAX",
+    "00000000",
+    "00000002",
+    "0000000a",
+    "0000000f",
+  ])("MT tool %s clears a previous pen without taking node-wide eraser state", (toolType) => {
+    const { frames } = run([
+      "[  1.0] EV_ABS ABS_MT_TRACKING_ID 00000001",
+      "[  1.0] EV_ABS ABS_MT_TOOL_TYPE 00000001",
+      `[  1.0] EV_ABS ABS_MT_TOOL_TYPE ${toolType}`,
+      "[  1.0] EV_KEY BTN_TOOL_RUBBER DOWN",
+      "[  1.0] EV_ABS ABS_MT_DISTANCE 00000005",
+      "[  1.0] EV_ABS ABS_MT_POSITION_X 000001a4",
+      "[  1.0] EV_ABS ABS_MT_POSITION_Y 000002b0",
+      "[  1.0] EV_ABS ABS_TILT_X 00000010",
+      "[  1.0] EV_SYN SYN_REPORT 00000000",
+    ]);
+    expect(frames[0].activeSlots).toHaveLength(1);
+    expect(frames[0].activeSlots[0].toolType).toBeUndefined();
+    expect(frames[0].activeSlots[0].tiltX).toBeUndefined();
   });
 
   test("BTN_TOOL_RUBBER turns an MT pen contact into an eraser", () => {

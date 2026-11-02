@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DualTrackRecorder } from "../../../../src/features/record/android/DualTrackRecorder";
 import { GetEventReader } from "../../../../src/features/record/android/GetEventReader";
 import { parseInputNodes } from "../../../../src/features/record/android/InputNodeDiscovery";
+import { PEN_REMOVAL_SETTLE_MS } from "../../../../src/features/record/android/PenHotplugReader";
 import type {
   A11ySource,
   DisplayChange,
@@ -138,11 +139,14 @@ async function setup({ present = false, monitorFailure = false, penOnly = false 
     send(monitor, penAdd);
     await settle();
   };
-  const feedStroke = (): void => {
+  const feedStroke = (beforeRelease?: () => void): void => {
     let previous = captureFrames(stroke)[0].deviceMs;
     for (const frame of captureFrames(stroke)) {
       timer.advanceTime(frame.deviceMs - previous);
       previous = frame.deviceMs;
+      if (frame.text.includes("BTN_TOUCH") && frame.text.includes("UP")) {
+        beforeRelease?.();
+      }
       send(pen, frame.text.replaceAll(`${penPath}: `, ""));
     }
   };
@@ -166,12 +170,25 @@ async function setup({ present = false, monitorFailure = false, penOnly = false 
 }
 
 describe("recording a hotplugged uinput pen", () => {
-  test("a pen added after start uses captured axes and emits a stroke with point pressures", async () => {
+  test("removal before buffered release frames still records the stroke", async () => {
+    const ctx = await setup();
+    await ctx.add();
+    ctx.feedStroke(() => {
+      ctx.send(ctx.monitor, penRemove);
+      ctx.timer.advanceTime(50);
+    });
+    expect(ctx.gestures).toHaveLength(1);
+    expect(ctx.gestures[0]?.type).toBe("stroke");
+    expect((await ctx.recorder.stop({ hostOnly: true })).steps[0]?.tool).toBe("dragPath");
+  });
+
+  test("release frames before removal preserve captured axes and stroke pressures", async () => {
     const ctx = await setup();
     expect(ctx.penSpawns()).toBe(0);
     await ctx.add();
     expect(ctx.penSpawns()).toBe(1);
     ctx.feedStroke();
+    ctx.send(ctx.monitor, penRemove);
     expect(ctx.gestures).toHaveLength(1);
     const gesture = ctx.gestures[0];
     expect(gesture.type).toBe("stroke");
@@ -188,12 +205,93 @@ describe("recording a hotplugged uinput pen", () => {
     await ctx.add();
     expect(ctx.penSpawns()).toBe(1);
     ctx.send(ctx.monitor, penRemove);
+    ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS);
     expect(ctx.pen.killed).toBe(true);
     ctx.feedStroke();
     ctx.pen.emit("error", new Error("late removed-node error"));
     expect(ctx.gestures).toEqual([]);
     expect(ctx.touch.killed).toBe(false);
   });
+
+  test("the settle bound kills the reader and duplicate removal does not extend it", async () => {
+    const ctx = await setup();
+    await ctx.add();
+    ctx.send(ctx.monitor, penRemove);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(1);
+    ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS - 1);
+    expect(ctx.pen.killed).toBe(false);
+    ctx.send(ctx.monitor, penRemove);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(1);
+    ctx.timer.advanceTime(1);
+    expect(ctx.pen.killed).toBe(true);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("stop during the settle window kills the reader and cancels finalization", async () => {
+    const ctx = await setup();
+    await ctx.add();
+    const kill = spyOn(ctx.pen, "kill");
+    ctx.send(ctx.monitor, penRemove);
+    expect(ctx.pen.killed).toBe(false);
+    await ctx.recorder.stop({ hostOnly: true });
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
+    ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS);
+    expect(kill).toHaveBeenCalledTimes(1);
+    ctx.feedStroke();
+    expect(ctx.gestures).toEqual([]);
+  });
+
+  for (const penOnly of [false, true]) {
+    test.each(["error", "exit"] as const)(
+      `reader %s during removal finalizes early (pen-only: ${penOnly})`,
+      async (event) => {
+        const ctx = await setup({ penOnly });
+        if (!penOnly) {
+          await ctx.add();
+        }
+        ctx.send(ctx.monitor, penRemove);
+        expect(ctx.timer.getPendingTimeoutCount()).toBe(1);
+        if (event === "error") {
+          ctx.pen.emit("error", new Error("removed node"));
+        } else {
+          ctx.pen.emit("exit", 0, null);
+        }
+        expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
+        expect(ctx.pen.stdout.listenerCount("data")).toBe(0);
+        expect(ctx.recorder.touchTrackFailure).toBeUndefined();
+        const next = new FakeAdbProcess();
+        ctx.adb.spawn.mockResolvedValueOnce(next);
+        await ctx.add();
+        ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS);
+        expect(next.killed).toBe(false);
+      },
+    );
+
+    test(`an add during removal replaces the old reader (pen-only: ${penOnly})`, async () => {
+      const ctx = await setup({ penOnly });
+      if (!penOnly) {
+        await ctx.add();
+      }
+      ctx.send(ctx.monitor, penRemove);
+      ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS - 1);
+      const next = new FakeAdbProcess();
+      ctx.adb.spawn.mockResolvedValueOnce(next);
+      await ctx.add();
+      expect(ctx.pen.killed).toBe(true);
+      expect(ctx.penSpawns()).toBe(2);
+      expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
+      ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS);
+      expect(next.killed).toBe(false);
+      ctx.feedStroke();
+      expect(ctx.gestures).toEqual([]);
+      for (const frame of captureFrames(stroke)) {
+        ctx.timer.advanceTime(16);
+        ctx.send(next, frame.text.replaceAll(`${penPath}: `, ""));
+      }
+      expect(ctx.gestures[0]?.type).toBe("stroke");
+    });
+  }
 
   test("a virtio multitouch add is probed but never starts a pen reader", async () => {
     const ctx = await setup();
@@ -236,6 +334,7 @@ describe("recording a hotplugged uinput pen", () => {
     ctx.feedStroke();
     expect(ctx.gestures[0]?.type).toBe("stroke");
     ctx.send(ctx.monitor, penRemove);
+    ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS);
     expect(ctx.pen.killed).toBe(true);
   });
 
@@ -247,6 +346,7 @@ describe("recording a hotplugged uinput pen", () => {
     await settle();
     expect(execute).toHaveBeenCalledTimes(1);
     ctx.send(ctx.monitor, penRemove);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
     pending.resolve(result(capabilities));
     await settle();
     expect(ctx.penSpawns()).toBe(0);
@@ -259,8 +359,11 @@ describe("recording a hotplugged uinput pen", () => {
     await ctx.add();
     expect(ctx.penSpawns()).toBe(1);
     ctx.send(ctx.monitor, penRemove);
+    expect(ctx.timer.getPendingTimeoutCount()).toBe(0);
     pending.resolve(ctx.pen);
     await settle();
+    expect(ctx.pen.killed).toBe(true);
+    ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS);
     expect(ctx.pen.killed).toBe(true);
     ctx.feedStroke();
     expect(ctx.gestures).toEqual([]);
@@ -357,6 +460,7 @@ describe("recording a hotplugged uinput pen", () => {
   test("a pen-only primary is removed and can return at the same path", async () => {
     const ctx = await setup({ penOnly: true });
     ctx.send(ctx.monitor, penRemove);
+    ctx.timer.advanceTime(PEN_REMOVAL_SETTLE_MS);
     expect(ctx.pen.killed).toBe(true);
     ctx.feedStroke();
     expect(ctx.gestures).toEqual([]);

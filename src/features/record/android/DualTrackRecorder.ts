@@ -705,6 +705,7 @@ export class DualTrackRecorder {
     });
     const reader = new PenHotplugReader({
       adb,
+      timer: this.timer,
       primary: { node, reader: primary },
       penNodes: touch ? pen : pen.slice(1),
       createPenReader: (penNode) => {
@@ -721,13 +722,12 @@ export class DualTrackRecorder {
           density,
           timer: this.timer,
         });
-        return {
-          start: (onGesture, onError) => penReader.start(onGesture, onError),
-          stop: () => {
-            penReader.stop();
-            stopFollowing();
-          },
+        const stopReader = penReader.stop.bind(penReader);
+        penReader.stop = () => {
+          stopReader();
+          stopFollowing();
         };
+        return penReader;
       },
     });
     return withTimelineGeometry(reader, timeline, this.timer);

@@ -129,9 +129,98 @@ describe("a multitouch pen that hovers without ever touching (#13084)", () => {
       ),
       "utf8",
     );
+    // Inspect the captured MT declaration before the node-wide eraser key refines it.
+    const reconstructor = new TouchFrameReconstructor();
+    for (const line of capture.split("\n").slice(0, 2)) {
+      reconstructor.feedLine(line, 1000);
+    }
+    expect(reconstructor.feedLine(SYN, 1000)).toMatchObject({
+      activeSlots: [{ toolType: "stylus" }],
+    });
     const events = hoverEvents(capture.split("\n"), { singleTouch: false });
     expect(events.some((event) => event.toolType === "stylus")).toBe(false);
     expect(events.map(buildPenSampleStep).filter((step) => step !== null)).toEqual([]);
+  });
+
+  test("switching to rubber mid-hover exports the preceding stylus samples separately", () => {
+    // No capture switches tools in one tracked hover. Compose the captured stylus distance
+    // (adapted to the MT axis) and MT eraser key with the existing numeric hover helper.
+    const eraserTransition = readFileSync(
+      join(
+        __dirname,
+        "../../../fixtures/android-uinput-pen/hover-eraser-multitouch-sendevent-getevent-lt-emulator-5610.txt",
+      ),
+      "utf8",
+    )
+      .split("\n")
+      .find((line) => line.includes("BTN_TOOL_RUBBER") && line.includes("DOWN"))!;
+    const hoverDistance = readFileSync(
+      join(
+        __dirname,
+        "../../../fixtures/android-uinput-pen/hover-stylus-getevent-lt-emulator-5610.txt",
+      ),
+      "utf8",
+    )
+      .split("\n")
+      .find((line) => line.includes("ABS_DISTANCE"))!
+      .replace("/dev/input/event12: ", "")
+      .replace("ABS_DISTANCE", "ABS_MT_DISTANCE");
+    const events = hoverEvents([
+      ...HOVER_ONLY.slice(0, 2),
+      hoverDistance,
+      ...HOVER_ONLY.slice(3, -2),
+      eraserTransition,
+      "[  1.16] EV_ABS ABS_MT_POSITION_X 000001c0",
+      "[  1.16] EV_SYN SYN_REPORT 00000000",
+      ...HOVER_ONLY.slice(-2),
+      "[  1.2] EV_KEY BTN_TOOL_RUBBER UP",
+    ]);
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "hover",
+      toolType: "stylus",
+      hover: [
+        { x: 420, y: 688 },
+        { x: 432, y: 688 },
+      ],
+    });
+    expect(buildPenSampleStep(events[0])).toMatchObject({
+      tool: "hoverAt",
+      params: {
+        toolType: "stylus",
+        points: [
+          { x: 420, y: 688 },
+          { x: 432, y: 688 },
+        ],
+      },
+    });
+    expect(events[1]).toMatchObject({
+      type: "hover",
+      toolType: "eraser",
+      hover: [{ x: 448, y: 688 }],
+    });
+    const eraserStep = buildPenSampleStep(events[1]);
+    expect(eraserStep).toBeNull();
+    expect(exportLossWarning(events[1], eraserStep)).toContain("nothing was exported");
+  });
+
+  test("switching back from rubber ends the eraser hover before resuming stylus sampling", () => {
+    const events = hoverEvents([
+      "[  1.0] EV_KEY BTN_TOOL_RUBBER DOWN",
+      ...HOVER_ONLY.slice(0, -2),
+      "[  1.15] EV_KEY BTN_TOOL_RUBBER DOWN", // Repeated key state must not split the episode.
+      "[  1.15] EV_KEY BTN_TOOL_PEN UP", // An unrelated tool release must not change the eraser.
+      "[  1.15] EV_KEY BTN_TOOL_RUBBER UP",
+      "[  1.16] EV_ABS ABS_MT_POSITION_X 000001c0",
+      "[  1.16] EV_SYN SYN_REPORT 00000000",
+      ...HOVER_ONLY.slice(-2),
+    ]);
+    expect(events.map((event) => event.toolType)).toEqual(["eraser", "stylus"]);
+    expect(events[0].hover).toHaveLength(2);
+    expect(buildPenSampleStep(events[0])).toBeNull();
+    expect(events[1].hover).toHaveLength(1);
+    expect(buildPenSampleStep(events[1])).toMatchObject({ tool: "hoverAt" });
   });
 
   test.each(["release", "replacement"] as const)(

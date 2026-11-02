@@ -491,6 +491,8 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
   return el("div", { attrs: { ...attrs, role: "heading" }, style }, [
     ...appBarIcons([node.navigationIcon], scope, path),
     title,
+    // An expanded bar's title takes its own line, so a spacer keeps the actions at the end.
+    ...(expanded ? [el("span", { style: { flex: "1 1 auto" } })] : []),
     ...appBarIcons(actions, scope, path),
   ]);
 };

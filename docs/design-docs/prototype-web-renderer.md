@@ -26,7 +26,8 @@ the host, so the page's script only switches between views it was given and neve
   spec state. Parts the still cannot decide (`data` and `platform` pointers, unknown keys, validity,
   string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
   condition counts as true, so a node is never hidden on a guess.
-- **Window.** Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
+- **Window.** An explicit `window.layoutDirection` sets the content's `dir` (the frame is never
+  mirrored). Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
   each axis it leaves unsized, as on devices; a sheet spans the screen width, `height` dp tall at its `edge`; a floating window
   sits at its `gravity`, moved by its `offset`.
 - **Style precedence.** A control's default styling applies first and the spec's own style wins.

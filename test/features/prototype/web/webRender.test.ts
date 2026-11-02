@@ -809,6 +809,34 @@ describe("prototype web still (#16346)", () => {
     expect(scroll.style["align-items"]).toBe("flex-start");
   });
 
+  test("an expanded app bar keeps its actions at the trailing edge", () => {
+    const bar = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "topAppBar",
+          testTag: "bar",
+          title: "Inbox",
+          variant: "large",
+          navigationIcon: { icon: "arrow_back", label: "Back" },
+          actions: [{ icon: "search", label: "Search" }],
+        },
+      }),
+      "bar",
+    )[0]!;
+    const labels = bar.children.map((item) =>
+      typeof item === "string" ? item : (item.attrs["aria-label"] ?? item.style.flex ?? ""),
+    );
+    expect(labels).toEqual(["Back", "", "1 1 auto", "Search"]);
+  });
+
+  test("the window takes the spec's explicit layout direction; the frame does not", () => {
+    const still = renderPrototypeStill({ ...reference, window: { layoutDirection: "rtl" } });
+    const layer = find(still.element, (element) => element.attrs["data-window"] !== undefined)[0]!;
+    expect(layer.attrs.dir).toBe("rtl");
+    expect(still.element.attrs).not.toHaveProperty("dir");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

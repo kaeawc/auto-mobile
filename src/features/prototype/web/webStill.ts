@@ -110,7 +110,19 @@ function sizedRoot(spec: unknown): unknown {
  * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
  * a floating window sits at its `gravity`, moved by its `offset`.
  */
+/**
+ * The window's content with the spec's explicit layout direction, so rows, start/end alignment and
+ * logical padding follow it; the device chrome around it is never mirrored.
+ */
 function placed(spec: unknown, content: WebElement | undefined): WebElement {
+  const window = placedWindow(spec, content);
+  const direction = record(record(spec)?.window)?.layoutDirection;
+  return direction === "rtl" || direction === "ltr"
+    ? { ...window, attrs: { ...window.attrs, dir: direction } }
+    : window;
+}
+
+function placedWindow(spec: unknown, content: WebElement | undefined): WebElement {
   const placement = record(record(record(spec)?.window)?.placement) ?? {};
   const children = content ? [content] : [];
   if (placement.type === "sheet") {

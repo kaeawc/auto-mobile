@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -19,6 +19,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { heldSession } from "../helpers/disconnectMonitorDaemon";
+import { warmedTests } from "../helpers/warmedTests";
 
 // A phone reachable over USB and/or wireless adb (#11133).
 const USB = "R58N12ABCDE";
@@ -31,7 +32,9 @@ const ROWS: Record<string, string> = {
 };
 
 const timers: FakeTimer[] = [];
-afterEach(() => {
+// The file's first scenario pays the daemon's one-time module and construction cost; warm it
+// outside the per-test budget so the measured run times only the scenario itself.
+const test = warmedTests(() => {
   DaemonState.getInstance().reset();
   timers.splice(0).forEach((timer) => timer.reset());
   resetAdbDeviceListCache();

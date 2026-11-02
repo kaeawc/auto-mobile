@@ -51,8 +51,9 @@ export interface WebRenderScope {
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
   /**
-   * A pager's `page` and `pageCount`: text placeholders and presentation conditions (`visibleWhen`,
-   * `styleWhen`) read them, as on the devices; control state never does.
+   * A pager's `page` and `pageCount`: text placeholders and every condition (`visibleWhen`,
+   * `styleWhen`, `enabledWhen`, `errorWhen`) read them, as Android's local pager state does; a
+   * control's own value and a pager's selection never do.
    */
   readonly textLocals?: Readonly<Record<string, unknown>>;
   /** Safe-area edges an ancestor already applied. */
@@ -498,7 +499,7 @@ function disabledState(
   scope: WebRenderScope,
 ): { css: Record<string, string>; attrs: Record<string, string> } {
   const enabled =
-    node.enabledWhen === undefined || conditionHolds(node.enabledWhen, scope.condition);
+    node.enabledWhen === undefined || conditionHolds(node.enabledWhen, presentation(scope));
   return enabled
     ? { css: {}, attrs: {} }
     : { css: { opacity: "0.38" }, attrs: { "aria-disabled": "true" } };
@@ -703,7 +704,8 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
 
 const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
-  const error = node.errorWhen !== undefined && decide(node.errorWhen, scope.condition) === true;
+  const error =
+    node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
     display: "flex",
@@ -985,7 +987,7 @@ function bindStructure(node: Raw, path: string, instance: Instance): Raw {
   });
 }
 
-/** The condition scope `visibleWhen` and `styleWhen` read: spec state with any pager locals over it. */
+/** The scope every condition reads: spec state with any pager locals over it. */
 function presentation(scope: WebRenderScope): ConditionScope {
   return scope.textLocals
     ? { ...scope.condition, state: { ...scope.condition.state, ...scope.textLocals } }

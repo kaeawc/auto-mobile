@@ -232,7 +232,9 @@ const gridCell =
   (element: WebElement, authored: Raw): WebElement => {
     const span = typeof authored.span === "number" ? Math.trunc(authored.span) : 1;
     const style: Css = { ...element.style };
+    // Android measures the child at exactly its cell width, so neither width nor maxWidth narrows it.
     delete style.width;
+    delete style["max-width"];
     delete style.flex;
     if (style.height === "100%") {
       delete style.height;

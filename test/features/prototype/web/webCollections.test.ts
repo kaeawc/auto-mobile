@@ -172,6 +172,45 @@ describe("web still pager (#16382)", () => {
     expect(byTag(still, "styled")[0]!.style.color).toBe("rgba(255,0,0,1)");
   });
 
+  test("enabledWhen and errorWhen inside a page read the pager's page too", () => {
+    const still = renderPrototypeStill(
+      rootOf(
+        {
+          type: "pager",
+          id: "p",
+          stateKey: "p",
+          children: [
+            { type: "text", text: "first" },
+            {
+              type: "column",
+              children: [
+                {
+                  type: "chip",
+                  testTag: "chip",
+                  label: "Page {page}",
+                  enabledWhen: { key: "page", equals: 2 },
+                },
+                {
+                  type: "textField",
+                  testTag: "field",
+                  stateKey: "name",
+                  errorWhen: { key: "page", equals: 2 },
+                  errorText: "on page two",
+                },
+              ],
+            },
+          ],
+        },
+        { state: { page: 0, p: 1, name: "" } },
+      ),
+    ).element;
+    const chip = byTag(still, "chip")[0]!;
+    expect(textOf(chip)).toBe("Page 2");
+    expect(chip.attrs["aria-disabled"]).toBeUndefined();
+    const alerts = find(still, (element) => element.attrs.role === "alert");
+    expect(alerts.map(textOf)).toEqual(["on page two"]);
+  });
+
   test("applies peek padding and a fixed page size on the pager's axis", () => {
     const pager = byNode(
       renderPrototypeStill(
@@ -253,6 +292,23 @@ describe("web still pager (#16382)", () => {
 });
 
 describe("web still grid (#16382)", () => {
+  test("a grid cell fills its cell width even when the child authors a maxWidth", () => {
+    const grid = byNode(
+      renderPrototypeStill(
+        rootOf({
+          type: "grid",
+          columns: 2,
+          children: [
+            { type: "text", text: "A", style: { maxWidth: 20 } },
+            { type: "text", text: "B" },
+          ],
+        }),
+      ).element,
+      "grid",
+    )[0]!;
+    expect((grid.children[0] as WebElement).style).not.toHaveProperty("max-width");
+  });
+
   test("lays a fixed-column grid out with spans and spacing", () => {
     const still = renderPrototypeStill(fixture("grid-fixed-columns-span"));
     expect(still.unsupportedNodes).toEqual([]);

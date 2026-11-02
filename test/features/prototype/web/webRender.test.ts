@@ -321,6 +321,65 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(renderPrototypeStill(ime), "padded")[0]!.style["padding-bottom"]).toBe("8px");
   });
 
+  test("draws a button disabled only when its enabledWhen is decidably false", () => {
+    const buttonOf = (enabledWhen?: unknown) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { ready: false },
+          root: {
+            type: "button",
+            testTag: "go",
+            label: "Go",
+            ...(enabledWhen ? { enabledWhen } : {}),
+          },
+        }),
+        "go",
+      )[0]!;
+    const off = buttonOf({ key: "ready", equals: true });
+    expect(off.attrs["aria-disabled"]).toBe("true");
+    expect(off.style.opacity).toBe("0.38");
+    expect(buttonOf().attrs["aria-disabled"]).toBeUndefined();
+    expect(buttonOf({ key: "ready", equals: false }).style.opacity).toBeUndefined();
+    expect(buttonOf({ data: "/feed", empty: true }).attrs["aria-disabled"]).toBeUndefined();
+  });
+
+  test("a top app bar takes the safe area only from authored safeAreaPadding", () => {
+    const barOf = (extra: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "topAppBar", testTag: "bar", title: "T", ...extra },
+        }),
+        "bar",
+      )[0]!.style;
+    expect(JSON.stringify(barOf({}))).not.toContain("--safe-top");
+    expect(
+      barOf({ safeAreaPadding: { edges: ["top"], types: ["systemBars"] } })["padding-top"],
+    ).toBe("calc(0px + var(--safe-top))");
+  });
+
+  test("an explicit theme mode wins over the caller's; system falls back to it", () => {
+    const surface = (mode: string | undefined, option?: "light" | "dark") =>
+      byTag(
+        renderPrototypeStill(
+          {
+            ...reference,
+            theme: { ...(reference.theme as object), ...(mode ? { mode } : {}) },
+            root: { type: "column", testTag: "bg", children: [], style: { background: "surface" } },
+          },
+          option ? { mode: option } : {},
+        ),
+        "bg",
+      )[0]!.style["background-color"];
+    const light = surface(undefined, "light");
+    const dark = surface(undefined, "dark");
+    expect(light).not.toBe(dark);
+    expect(surface("dark")).toBe(dark);
+    expect(surface("light", "dark")).toBe(light);
+    expect(surface("system", "dark")).toBe(dark);
+  });
+
   for (const frame of ["pixel-9", "iphone-16"]) {
     for (const orientation of ["portrait", "landscape"] as const) {
       test(`snapshot on ${frame} in ${orientation}`, () => {

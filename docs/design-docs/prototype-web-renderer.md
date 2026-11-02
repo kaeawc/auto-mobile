@@ -35,10 +35,13 @@ the host, so the page's script only switches between views it was given and neve
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
   accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
-  roles unpainted. Unpainted screen regions show a checkerboard.
+  roles unpainted. Unpainted screen regions show a checkerboard. An explicit `theme.mode` of
+  `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
+  light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
-  `listItem` (with its trailing switch, checkbox or icon). Icons draw as a tinted square titled with the icon name, because the glyph set is not
+  `listItem` (with its trailing switch, checkbox or icon). A button whose `enabledWhen` is decidably
+  false draws disabled. Icons draw as a tinted square titled with the icon name, because the glyph set is not
   inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
@@ -46,8 +49,8 @@ the host, so the page's script only switches between views it was given and neve
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding (`ime` adds nothing,
   since the still has no keyboard). Safe areas are exposed as
-  `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`; a top app bar pads by
-  `--safe-top`.
+  `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. A top app bar takes no inset
+  of its own, as on the devices: it clears the status bar only through `safeAreaPadding`.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

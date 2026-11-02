@@ -106,8 +106,10 @@ function stillScope(
   options: PrototypeStillOptions,
   platform: "android" | "ios",
 ): WebRenderScope {
-  const mode = options.mode ?? "light";
   const spec = record(expanded) ?? {};
+  // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
+  const authored = record(spec.theme)?.mode;
+  const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
     style: { mode, palette: prototypeRolePalette(expanded, mode), parentAxis: "column" },
     condition: { state: record(spec.state) ?? {}, platform },

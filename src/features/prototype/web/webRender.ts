@@ -315,6 +315,8 @@ const BUTTON_ROLES: Readonly<Record<string, [string, string]>> = {
 };
 
 const button: NodeRenderer = (node, scope) => {
+  const enabled =
+    node.enabledWhen === undefined || conditionHolds(node.enabledWhen, scope.condition);
   const variant = typeof node.variant === "string" ? node.variant : "filled";
   const roles = BUTTON_ROLES[variant];
   const outline: Record<string, string> =
@@ -331,17 +333,20 @@ const button: NodeRenderer = (node, scope) => {
     "font-weight": "500",
     ...(roles ? roleCss(scope, roles[0], roles[1]) : roleCss(scope, "transparent", "primary")),
     ...outline,
+    // A button whose enabledWhen is decidably false draws disabled, as the native button does.
+    ...(enabled ? {} : { opacity: "0.38" }),
   });
-  return el("div", { attrs: { ...attrs, role: "button" }, style }, [bound(node.label, scope)]);
+  const role = { ...attrs, role: "button", ...(enabled ? {} : { "aria-disabled": "true" }) };
+  return el("div", { attrs: role, style }, [bound(node.label, scope)]);
 };
 
 const topAppBar: NodeRenderer = (node, scope) => {
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "align-items": "center",
-    // A Material top app bar pads for the status bar, so its title never sits under it.
-    "padding-top": "var(--safe-top)",
-    "min-height": "calc(64px + var(--safe-top))",
+    // Like the native bar, it takes no window insets of its own: status-bar clearance comes only
+    // from an authored safeAreaPadding.
+    "min-height": "64px",
     "padding-inline": "16px",
     "font-size": "22px",
     "align-self": "stretch",

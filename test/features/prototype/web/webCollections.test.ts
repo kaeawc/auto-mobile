@@ -1,0 +1,486 @@
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  toHtml,
+  type WebChild,
+  type WebElement,
+} from "../../../../src/features/prototype/web/webNodes";
+import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
+
+type Spec = Record<string, unknown>;
+
+const fixture = (name: string): Spec =>
+  JSON.parse(
+    readFileSync(
+      join(import.meta.dir, `../../../fixtures/prototype-spec/valid/${name}.json`),
+      "utf8",
+    ),
+  ) as Spec;
+
+function find(node: WebChild, predicate: (element: WebElement) => boolean): WebElement[] {
+  if (typeof node === "string") {
+    return [];
+  }
+  return [
+    ...(predicate(node) ? [node] : []),
+    ...node.children.flatMap((child) => find(child, predicate)),
+  ];
+}
+const textOf = (node: WebChild): string =>
+  typeof node === "string" ? node : node.children.map(textOf).join("");
+const byTag = (element: WebElement, tag: string) =>
+  find(element, (candidate) => candidate.attrs["data-testid"] === tag);
+const byNode = (element: WebElement, type: string) =>
+  find(element, (candidate) => candidate.attrs["data-node"] === type);
+const byPart = (element: WebElement, part: string) =>
+  find(element, (candidate) => candidate.attrs["data-part"] === part);
+const rootOf = (root: Spec, extra: Spec = {}) => ({ id: "s", root, ...extra });
+
+// Material 3 baseline light roles, as rgba() strings.
+const PRIMARY = "rgba(103,80,164,1)";
+const SECONDARY_CONTAINER = "rgba(232,222,248,1)";
+const OUTLINE_VARIANT = "rgba(202,196,208,1)";
+
+describe("web still pager (#16382)", () => {
+  test("draws only the initial page, filling the pager, with indicator dots over it", () => {
+    const still = renderPrototypeStill(fixture("pager-indicator-dots"));
+    expect(still.unsupportedNodes).toEqual([]);
+    const pager = byNode(still.element, "pager")[0]!;
+    expect(textOf(pager)).toBe("A");
+    const page = byPart(pager, "page")[0]!;
+    expect(page.style).toMatchObject({ flex: "1 1 auto", "align-self": "stretch" });
+    const dots = byPart(pager, "dot");
+    expect(dots).toHaveLength(2);
+    expect(dots[0]!.style).not.toHaveProperty("opacity");
+    expect(dots[1]!.style.opacity).toBe("0.38");
+    expect(byPart(pager, "indicator")[0]!.style.position).toBe("absolute");
+  });
+
+  test("opens at its state key's page, clamped and truncated as on the devices", () => {
+    const at = (page: number) => {
+      const spec = { ...fixture("pager-state-key-indicator"), state: { page } };
+      return textOf(byNode(renderPrototypeStill(spec).element, "pager")[0]!);
+    };
+    expect(at(0)).toBe("First");
+    expect(at(1)).toBe("Second");
+    expect(at(1.7)).toBe("Second");
+    expect(at(9)).toBe("Second");
+    expect(at(-3)).toBe("First");
+  });
+
+  test("draws no dots without an indicator, and a 22px strip when placed below", () => {
+    const pagerOf = (extra: Spec) =>
+      byNode(
+        renderPrototypeStill(
+          rootOf({ type: "pager", id: "p", children: [{ type: "text", text: "A" }], ...extra }),
+        ).element,
+        "pager",
+      )[0]!;
+    expect(byPart(pagerOf({}), "dot")).toEqual([]);
+    const strip = byPart(pagerOf({ indicator: "dots", indicatorPlacement: "below" }), "indicator");
+    expect(strip[0]!.style).toMatchObject({ height: "22px" });
+    expect(strip[0]!.style).not.toHaveProperty("position");
+    const vertical = byPart(pagerOf({ indicator: "dots", axis: "vertical" }), "indicator")[0]!;
+    expect(vertical.style).toMatchObject({ "flex-direction": "column", right: "8px" });
+  });
+
+  test("applies peek padding and a fixed page size on the pager's axis", () => {
+    const pager = byNode(
+      renderPrototypeStill(
+        rootOf({
+          type: "pager",
+          id: "p",
+          peek: { start: 24, end: 16 },
+          pageSize: { dp: 200 },
+          children: [{ type: "text", text: "A" }],
+        }),
+      ).element,
+      "pager",
+    )[0]!;
+    expect(pager.style).toMatchObject({
+      "padding-inline-start": "24px",
+      "padding-inline-end": "16px",
+    });
+    expect(byPart(pager, "page")[0]!.style).toMatchObject({ width: "200px" });
+  });
+
+  test("a tab bar linked to a pager selects the pager's page", () => {
+    const spec = fixture("template-tabbed-home");
+    const still = renderPrototypeStill(spec);
+    const tabs = find(byTag(still.element, "bottom_nav")[0]!, (e) => e.attrs.role === "tab");
+    expect(tabs.map((tab) => tab.attrs["aria-selected"])).toEqual(["true", "false", "false"]);
+    const linked = renderPrototypeStill(
+      rootOf(
+        {
+          type: "column",
+          children: [
+            {
+              type: "tabBar",
+              stateKey: "other",
+              pager: "p",
+              items: [{ label: "A" }, { label: "B" }],
+            },
+            {
+              type: "pager",
+              id: "p",
+              stateKey: "pg",
+              children: [
+                { type: "text", text: "A" },
+                { type: "text", text: "B" },
+              ],
+            },
+          ],
+        },
+        { state: { pg: 1, other: 0 } },
+      ),
+    ).element;
+    const selected = find(linked, (e) => e.attrs.role === "tab").map(
+      (t) => t.attrs["aria-selected"],
+    );
+    expect(selected).toEqual(["false", "true"]);
+  });
+});
+
+describe("web still grid (#16382)", () => {
+  test("lays a fixed-column grid out with spans and spacing", () => {
+    const still = renderPrototypeStill(fixture("grid-fixed-columns-span"));
+    expect(still.unsupportedNodes).toEqual([]);
+    const grid = byNode(still.element, "grid")[0]!;
+    expect(grid.style).toMatchObject({
+      display: "grid",
+      "grid-template-columns": "repeat(3, minmax(0, 1fr))",
+      "column-gap": "8px",
+      "row-gap": "16px",
+    });
+    const spans = grid.children.map((cell) => (cell as WebElement).style["grid-column"]);
+    expect(spans).toEqual(["span 2", "span 2", "span 3"]);
+  });
+
+  test("clamps spans to the column count, and row spacing defaults to spacing", () => {
+    const grid = byNode(
+      renderPrototypeStill(
+        rootOf({
+          type: "grid",
+          columns: 2,
+          style: { spacing: 4 },
+          children: [
+            { type: "text", text: "A", span: 5 },
+            { type: "text", text: "B" },
+          ],
+        }),
+      ).element,
+      "grid",
+    )[0]!;
+    expect(grid.style["row-gap"]).toBe("4px");
+    const spans = grid.children.map((cell) => (cell as WebElement).style["grid-column"]);
+    expect(spans).toEqual(["span 2", "span 1"]);
+  });
+
+  test("an adaptive grid fits minimum-width columns to the screen and clamps spans to them", () => {
+    const spec = fixture("grid-adaptive-min-width");
+    const gridOf = (orientation: "portrait" | "landscape") =>
+      byNode(renderPrototypeStill(spec, { frame: "pixel-9", orientation }).element, "grid")[0]!;
+    const portrait = gridOf("portrait");
+    // 411 dp wide: floor(411 / 100) = 4 columns, so a 12-column span fills one row.
+    expect(portrait.style["grid-template-columns"]).toBe("repeat(4, minmax(0, 1fr))");
+    expect(portrait.children.map((cell) => (cell as WebElement).style["grid-column"])).toEqual([
+      "span 4",
+      "span 4",
+    ]);
+    expect(textOf(portrait)).toBe("OneTwo");
+    // The root grid fills the window; its rows stay at the top instead of sharing the height.
+    expect(portrait.style["align-content"]).toBe("start");
+    expect((gridOf("landscape").children[0] as WebElement).style["grid-column"]).toBe("span 9");
+  });
+});
+
+describe("web still carousel (#16382)", () => {
+  test("draws its items in a clipped row at the item width and spacing", () => {
+    const still = renderPrototypeStill(fixture("carousel-multi-browse"));
+    expect(still.unsupportedNodes).toEqual([]);
+    const carousel = byNode(still.element, "carousel")[0]!;
+    expect(carousel.style).toMatchObject({
+      display: "flex",
+      "flex-direction": "row",
+      overflow: "hidden",
+      gap: "8px",
+    });
+    const items = byPart(carousel, "item");
+    expect(items.map(textOf)).toEqual(["One", "Two", "Three"]);
+    expect(items[0]!.style).toMatchObject({
+      flex: "0 0 186px",
+      "border-radius": "28px",
+      overflow: "hidden",
+    });
+  });
+
+  test("expands its repeat", () => {
+    const carousel = byNode(
+      renderPrototypeStill(fixture("carousel-hero-repeat")).element,
+      "carousel",
+    )[0]!;
+    expect(byPart(carousel, "item").length).toBeGreaterThan(1);
+  });
+});
+
+describe("web still navigation bars (#16382)", () => {
+  const nav = (type: string, extra: Spec = {}, state: Spec = {}) =>
+    byTag(
+      renderPrototypeStill(
+        rootOf(
+          {
+            type: "column",
+            children: [
+              {
+                type,
+                testTag: "bar",
+                stateKey: "tab",
+                items: [{ label: "Home", icon: "home" }, { label: "Search" }],
+                ...extra,
+              },
+            ],
+          },
+          { state },
+        ),
+      ).element,
+      "bar",
+    )[0]!;
+  const tabsOf = (bar: WebElement) => find(bar, (element) => element.attrs.role === "tab");
+
+  test("a bottom nav draws each item's icon and label, highlighting the state's item", () => {
+    const bar = nav("bottomNav", {}, { tab: 1 });
+    expect(bar.attrs.role).toBe("tablist");
+    expect(bar.style).toMatchObject({ "min-height": "80px", "align-self": "stretch" });
+    const tabs = tabsOf(bar);
+    expect(tabs.map((tab) => tab.attrs["aria-selected"])).toEqual(["false", "true"]);
+    expect(find(tabs[0]!, (element) => element.attrs.title === "home")).toHaveLength(1);
+    // An item without an icon draws the 24px placeholder square, as Android does.
+    expect(byPart(tabs[1]!, "placeholder")[0]!.style).toMatchObject({ width: "24px" });
+    expect(byPart(tabs[1]!, "indicator")[0]!.style["background-color"]).toBe(SECONDARY_CONTAINER);
+    expect(byPart(tabs[0]!, "indicator")[0]!.style).not.toHaveProperty("background-color");
+    expect(textOf(tabs[1]!)).toBe("Search");
+  });
+
+  test("a bottom nav pads its bottom edge by the safe area unless an ancestor took it", () => {
+    expect(nav("bottomNav").style["padding-bottom"]).toContain("var(--safe-bottom)");
+    const consumed = byTag(
+      renderPrototypeStill(
+        rootOf({
+          type: "column",
+          safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
+          children: [
+            { type: "bottomNav", testTag: "bar", items: [{ label: "A" }, { label: "B" }] },
+          ],
+        }),
+      ).element,
+      "bar",
+    )[0]!;
+    expect(JSON.stringify(consumed.style)).not.toContain("--safe-bottom");
+  });
+
+  test("a tab bar marks the selected tab with the primary colour and indicator", () => {
+    const bar = nav("tabBar", { items: [{ label: "One" }, { label: "Two" }] }, { tab: 1 });
+    expect(bar.style).toMatchObject({ "min-height": "48px" });
+    const tabs = tabsOf(bar);
+    expect(tabs.map((tab) => tab.attrs["aria-selected"])).toEqual(["false", "true"]);
+    expect(tabs[1]!.style.color).toBe(PRIMARY);
+    expect(tabs[1]!.style["box-shadow"]).toContain(PRIMARY);
+    expect(tabs[0]!.style).not.toHaveProperty("box-shadow");
+    expect(tabs.map(textOf)).toEqual(["One", "Two"]);
+  });
+
+  test("a tab bar with icons is 72px tall; a scrollable one starts after its edge padding", () => {
+    expect(nav("tabBar").style["min-height"]).toBe("72px");
+    const scrollable = nav("tabBar", { scrollable: true });
+    expect(scrollable.style).toMatchObject({ "padding-inline-start": "52px", overflow: "hidden" });
+    expect(tabsOf(scrollable)[0]!.style).toMatchObject({ "min-width": "90px" });
+  });
+
+  test("an item image falls back to its icon, or the placeholder, since assets are not inlined", () => {
+    const still = renderPrototypeStill(fixture("media-tab-item-data"));
+    expect(still.unsupportedNodes).toEqual([]);
+    const tabs = find(still.element, (element) => element.attrs.role === "tab");
+    expect(tabs.map((tab) => byPart(tab, "placeholder").length)).toEqual([1, 1]);
+  });
+});
+
+describe("web still icon buttons (#16382)", () => {
+  const iconButton = (extra: Spec = {}, state: Spec = {}) =>
+    byTag(
+      renderPrototypeStill(
+        rootOf(
+          {
+            type: "column",
+            children: [{ type: "iconButton", testTag: "b", icon: "favorite", ...extra }],
+          },
+          { state },
+        ),
+      ).element,
+      "b",
+    )[0]!;
+  const containerOf = (button: WebElement) => byPart(button, "container")[0]!;
+
+  test("draws the icon placeholder in a 40px circle inside a 48px target", () => {
+    const button = iconButton();
+    expect(button.attrs).toMatchObject({ role: "button", "aria-label": "favorite" });
+    expect(button.style).toMatchObject({ width: "48px", height: "48px" });
+    expect(containerOf(button).style).toMatchObject({
+      width: "40px",
+      height: "40px",
+      "border-radius": "50%",
+    });
+    expect(containerOf(button).style).not.toHaveProperty("background-color");
+    expect(find(button, (element) => element.attrs.title === "favorite")).toHaveLength(1);
+  });
+
+  test("filled, tonal and outlined variants take their Material 3 roles", () => {
+    expect(containerOf(iconButton({ variant: "filled" })).style["background-color"]).toBe(PRIMARY);
+    expect(containerOf(iconButton({ variant: "tonal" })).style["background-color"]).toBe(
+      SECONDARY_CONTAINER,
+    );
+    expect(containerOf(iconButton({ variant: "outlined" })).style.border).toBe(
+      `1px solid ${OUTLINE_VARIANT}`,
+    );
+  });
+
+  test("an authored label wins over the icon name, and enabledWhen false draws it disabled", () => {
+    const button = iconButton(
+      { contentDescription: "Like", enabledWhen: { key: "on", equals: true } },
+      { on: false },
+    );
+    expect(button.attrs).toMatchObject({ "aria-label": "Like", "aria-disabled": "true" });
+    expect(button.style.opacity).toBe("0.38");
+  });
+
+  test("the feed template's tonal like button draws", () => {
+    const still = renderPrototypeStill(fixture("template-feed-detail"));
+    expect(still.unsupportedNodes.map((node) => node.type)).not.toContain("iconButton");
+  });
+});
+
+describe("web still chips and sliders (#16382)", () => {
+  const still = renderPrototypeStill(fixture("material-slider-chip-card"));
+
+  test("the slider and chip fixture draws without placeholders", () => {
+    expect(still.unsupportedNodes).toEqual([]);
+  });
+
+  test("a chip without a state key is an outlined 32px assist chip", () => {
+    const chip = byTag(still.element, "add_label_chip")[0]!;
+    expect(chip.attrs.role).toBe("button");
+    const body = byPart(chip, "chip")[0]!;
+    expect(body.style).toMatchObject({
+      height: "32px",
+      "border-radius": "8px",
+      border: `1px solid ${OUTLINE_VARIANT}`,
+    });
+    expect(textOf(chip)).toBe("Add label");
+  });
+
+  test("a chip with a state key is a filter chip: tonal with a check when selected", () => {
+    const selected = byTag(still.element, "mon_chip")[0]!;
+    expect(selected.attrs).toMatchObject({ role: "checkbox", "aria-checked": "true" });
+    expect(byPart(selected, "chip")[0]!.style["background-color"]).toBe(SECONDARY_CONTAINER);
+    expect(find(selected, (element) => element.attrs.title === "check")).toHaveLength(1);
+    const row = byNode(still.element, "chip");
+    const tue = row.find((chip) => textOf(chip).includes("Tue"))!;
+    expect(tue.attrs["aria-checked"]).toBe("false");
+    expect(byPart(tue, "chip")[0]!.style.border).toBe(`1px solid ${OUTLINE_VARIANT}`);
+    expect(find(tue, (element) => element.attrs.title === "check")).toEqual([]);
+  });
+
+  test("a slider whose enabledWhen is false draws disabled", () => {
+    const slider = byNode(
+      renderPrototypeStill(
+        rootOf(
+          {
+            type: "slider",
+            stateKey: "v",
+            min: 0,
+            max: 1,
+            enabledWhen: { key: "on", equals: true },
+          },
+          { state: { on: false } },
+        ),
+      ).element,
+      "slider",
+    )[0]!;
+    expect(slider.attrs["aria-disabled"]).toBe("true");
+    expect(slider.style.opacity).toBe("0.38");
+  });
+
+  test("a chip whose enabledWhen is false draws disabled", () => {
+    const chip = byNode(
+      renderPrototypeStill(
+        rootOf(
+          { type: "chip", label: "X", enabledWhen: { key: "on", equals: true } },
+          { state: { on: false } },
+        ),
+      ).element,
+      "chip",
+    )[0]!;
+    expect(chip.attrs["aria-disabled"]).toBe("true");
+    expect(chip.style.opacity).toBe("0.38");
+  });
+
+  test("a slider draws its label, track and thumb at its state value", () => {
+    const slider = byTag(still.element, "volume_slider")[0]!;
+    expect(slider.attrs).toMatchObject({
+      role: "slider",
+      "aria-valuenow": "7",
+      "aria-valuemin": "0",
+      "aria-valuemax": "10",
+    });
+    expect(textOf(slider)).toBe("Volume");
+    expect(byPart(slider, "thumb")[0]!.style["inset-inline-start"]).toBe("calc(70% - 2px)");
+    expect(byPart(slider, "active")[0]!.style["background-color"]).toBe(PRIMARY);
+    expect(byPart(slider, "inactive")[0]!.style["background-color"]).toBe(SECONDARY_CONTAINER);
+    const snooze = byNode(still.element, "slider")[1]!;
+    expect(byPart(snooze, "thumb")[0]!.style["inset-inline-start"]).toBe("calc(20% - 2px)");
+  });
+
+  test("a slider value snaps to its step and clamps to its range; no value reads as min", () => {
+    const thumbAt = (state: Spec, step?: number) =>
+      byPart(
+        renderPrototypeStill(
+          rootOf(
+            { type: "slider", stateKey: "v", min: 10, max: 20, ...(step ? { step } : {}) },
+            { state },
+          ),
+        ).element,
+        "thumb",
+      )[0]!.style["inset-inline-start"];
+    expect(thumbAt({ v: 14.4 }, 2)).toBe("calc(40% - 2px)");
+    expect(thumbAt({ v: 99 })).toBe("calc(100% - 2px)");
+    expect(thumbAt({})).toBe("calc(0% - 2px)");
+  });
+
+  test("a card or line around a slider grows to its parent's width, as a Compose parent does", () => {
+    const card = byTag(still.element, "alarm_card")[0]!;
+    expect(card.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+    const line = byTag(
+      renderPrototypeStill(
+        rootOf({
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [{ type: "slider", stateKey: "v", min: 0, max: 1 }],
+            },
+          ],
+        }),
+      ).element,
+      "line",
+    )[0]!;
+    expect(line.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+    expect(line.style).not.toHaveProperty("flex");
+  });
+
+  test("the same input renders the same bytes", () => {
+    expect(toHtml(renderPrototypeStill(fixture("material-slider-chip-card")).element)).toBe(
+      toHtml(still.element),
+    );
+  });
+});

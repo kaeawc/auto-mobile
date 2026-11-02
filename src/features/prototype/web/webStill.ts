@@ -2,8 +2,8 @@ import { prototypeSpecForDevice } from "../prototypeComponents";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
-import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
-import { renderDeviceFrame, type WebOrientation } from "./webFrame";
+import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
@@ -147,7 +147,7 @@ function placedWindow(spec: unknown, content: WebElement | undefined): WebElemen
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
-  platform: "android" | "ios",
+  frame: DeviceFrame,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
@@ -160,13 +160,14 @@ function stillScope(
       parentAxis: "column",
       typography: themeTypography(expanded),
     },
-    condition: { state: record(spec.state) ?? {}, platform },
+    condition: { state: record(spec.state) ?? {}, platform: frame.platform },
     data: spec.data,
     spec,
     format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
     instances: [],
     inBox: false,
     unsupported: [],
+    screenWidth: screenSize(frame, options.orientation ?? "portrait").width,
   };
 }
 
@@ -191,7 +192,7 @@ export function renderPrototypeStill(
   );
   // Components expand, then string tables resolve for the still's fixed locale, as on devices.
   const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
-  const scope = stillScope(expanded, options, frame.platform);
+  const scope = stillScope(expanded, options, frame);
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");

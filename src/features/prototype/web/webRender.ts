@@ -13,7 +13,9 @@ import {
   type Instance,
   type Raw,
 } from "../prototypeTemplate";
+import { defaultFillAxes, filling, webCollectionRenderers, type WebAxis } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { webControlRenderers } from "./webControls";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
@@ -45,13 +47,27 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
+  readonly screenWidth: number;
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
   readonly ownInsets?: readonly string[];
 }
 
-type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
+export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
+
+/** The shared drawing helpers the control and collection renderers build on. */
+export interface WebRenderKit {
+  readonly base: typeof base;
+  readonly child: typeof child;
+  readonly children: typeof children;
+  readonly bound: typeof bound;
+  readonly icon: NodeRenderer;
+  readonly roleCss: typeof roleCss;
+  readonly disabledState: typeof disabledState;
+  readonly renderNode: typeof renderWebNode;
+}
 
 /** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
 const MAX_WEB_REPEAT_ITEMS = 200;
@@ -236,11 +252,21 @@ function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
   return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
 }
 
-function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
+/** Lets a container decorate each drawn child, given the child node it was drawn from. */
+export type WebCellDecorator = (element: WebElement, authored: Raw) => WebElement;
+
+export function children(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
   const list = Array.isArray(node.children) ? node.children : [];
   const repeat = record(node.repeat);
   if (!repeat) {
-    return list.flatMap((entry, index) => renderOrSkip(entry, scope, `${path}.children[${index}]`));
+    return list.flatMap((entry, index) =>
+      renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
+    );
   }
   const rows = repeatRows(repeat, scope);
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
@@ -255,13 +281,23 @@ function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
       index,
     };
     const itemScope = child(scope, { instances: [...scope.instances, instance] });
-    return list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`));
+    return list.flatMap((entry, at) =>
+      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
+    );
   });
 }
 
-function renderOrSkip(node: unknown, scope: WebRenderScope, path: string): WebChild[] {
+function renderOrSkip(
+  node: unknown,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
   const rendered = renderWebNode(node, scope, path);
-  return rendered ? [rendered] : [];
+  if (!rendered) {
+    return [];
+  }
+  return [cell ? cell(rendered, record(node) ?? {}) : rendered];
 }
 
 /** A spacer with no width, height or weight fills its parent, as the native spacer does. */
@@ -278,32 +314,37 @@ function isUnsizedSpacer(node: unknown): boolean {
 
 /** Missing width and height default to `fill`, without touching authored sizes. */
 function fillMissing(node: Raw): Raw {
-  const style = record(node.style) ?? {};
-  return { ...node, style: { width: "fill", height: "fill", ...style } };
+  return filling(node, ["width", "height"]);
 }
 
 /**
- * Whether a child is a visible spacer that will fill its line: its repeat placeholders bind, its
- * visibleWhen keeps it, and its style (with matching styleWhen entries) leaves it unsized.
+ * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
+ * fills by default (a slider's width, say). Its repeat placeholders bind, its visibleWhen must keep
+ * it, and its style includes matching styleWhen entries.
  */
-function fillsAsSpacer(entry: unknown, scope: WebRenderScope, path: string): boolean {
+function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): WebAxis[] {
   const bound = scope.instances.reduce(
     (current, instance) => bindStructure(current, path, instance),
     record(entry) ?? {},
   );
   if (bound.visibleWhen !== undefined && !conditionHolds(bound.visibleWhen, scope.condition)) {
-    return false;
+    return [];
   }
-  return isUnsizedSpacer({ ...bound, style: resolvedStyle(bound, scope) });
+  const styled = { ...bound, style: resolvedStyle(bound, scope) };
+  return isUnsizedSpacer(styled) ? ["width", "height"] : defaultFillAxes(styled);
 }
 
-/** A line grows when it renders a filling spacer; a repeat with no rows renders none. */
-function lineFills(raw: Raw, scope: WebRenderScope, path: string): boolean {
+/**
+ * The axes on which a container grows because a child fills them; a repeat with no rows renders
+ * no children.
+ */
+function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
   const repeat = record(raw.repeat);
   if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope).length === 0)) {
-    return false;
+    return [];
   }
-  return raw.children.some((entry) => fillsAsSpacer(entry, scope, path));
+  const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));
+  return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
 function spacerFilled(node: Raw): Raw {
@@ -313,9 +354,9 @@ function spacerFilled(node: Raw): Raw {
 const line =
   (axis: "row" | "column"): NodeRenderer =>
   (raw, scope, path) => {
-    // A wrap-sized line around a filling spacer grows to its parent, as a Compose parent does
-    // around a fillMaxSize child; otherwise it would shrink to nothing.
-    const node = lineFills(raw, scope, path) ? fillMissing(raw) : raw;
+    // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
+    // parent does around a fillMax child; otherwise it would shrink to nothing.
+    const node = filling(raw, lineFillAxes(raw, scope, path));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     return el("div", { attrs, style }, children(node, inner, path));
@@ -836,7 +877,9 @@ const toggle =
     );
   };
 
-const card: NodeRenderer = (node, scope, path) => {
+const card: NodeRenderer = (raw, scope, path) => {
+  // A card hugs its content, but grows like a line around a child that fills.
+  const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "flex-direction": "column",
@@ -916,6 +959,17 @@ const listItem: NodeRenderer = (node, scope) => {
   ]);
 };
 
+const KIT: WebRenderKit = {
+  base,
+  child,
+  children,
+  bound,
+  icon,
+  roleCss,
+  disabledState,
+  renderNode: renderWebNode,
+};
+
 export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   box,
   row: line("row"),
@@ -934,6 +988,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   checkbox: toggle("checkbox"),
   card,
   listItem,
+  ...webCollectionRenderers(KIT),
+  ...webControlRenderers(KIT),
 };
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {

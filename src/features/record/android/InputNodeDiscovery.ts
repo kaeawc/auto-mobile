@@ -82,6 +82,7 @@ function toNode(
   y: AbsoluteAxisInfo,
   { pressure, kind }: { pressure?: AbsoluteAxisInfo; kind: "touch" | "pen" },
 ): TouchInputNode {
+  const distance = device.abs.get(kind === "pen" ? 0x19 : 0x3b);
   const tiltX = device.abs.get(ABS_TILT_X);
   const tiltY = device.abs.get(ABS_TILT_Y);
   return {
@@ -92,6 +93,7 @@ function toNode(
     axisYMin: y.min,
     axisYMax: y.max,
     kind,
+    ...(distance && distance.max > distance.min ? { distanceRange: distance } : {}),
     ...(tiltX && tiltY ? { tiltAxes: { x: tiltX, y: tiltY } } : {}),
     ...(pressure && pressure.max > pressure.min
       ? { pressureMin: pressure.min, pressureMax: pressure.max }
@@ -105,6 +107,8 @@ const NAME_TO_CODE: Record<string, number> = {
   ABS_X: ABS_X,
   ABS_Y: ABS_Y,
   ABS_PRESSURE: ABS_PRESSURE,
+  ABS_DISTANCE: 0x19,
+  ABS_MT_DISTANCE: 0x3b,
   ABS_TILT_X: ABS_TILT_X,
   ABS_TILT_Y: ABS_TILT_Y,
   ABS_MT_POSITION_X: ABS_MT_POSITION_X,

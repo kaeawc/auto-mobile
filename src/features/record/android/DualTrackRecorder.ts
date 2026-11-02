@@ -11,6 +11,7 @@ import type {
 import { GESTURE_THRESHOLDS, pointerOf } from "./types";
 import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
 import { noteExportLoss } from "./penExportWarnings";
+import { buildPenSampleStep } from "./penSampleStep";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverInputNodes } from "./InputNodeDiscovery";
@@ -346,7 +347,9 @@ export class DualTrackRecorder {
     }
 
     if (gesture.type === "hover") {
-      noteExportLoss(this.exportWarnings, gesture, null);
+      const step = buildPenStep(gesture);
+      noteExportLoss(this.exportWarnings, gesture, step);
+      this.enqueueStep({ resolved: true, step: step ?? undefined });
       return;
     }
 
@@ -964,12 +967,16 @@ function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): Pla
 
 /**
  * A pen contact replays only as a coordinate step that carries its pointer: an element tap or a
- * swipe direction cannot say "stylus" or "eraser", so either would replay as a finger. A swipe keeps
- * only its endpoints.
+ * swipe direction cannot say "stylus" or "eraser", so either would replay as a finger. A constant-
+ * pressure swipe keeps its endpoints; a stroke retains its sampled pressure path. Hover uses the
+ * existing hoverAt `toolType` field (its strict schema has no `pointer` field).
  */
 function buildPenStep(gesture: GestureEvent): PlanStep | null {
   if (gesture.toolType !== "stylus" && gesture.toolType !== "eraser") {
     return null;
+  }
+  if (gesture.type === "stroke" || gesture.type === "hover") {
+    return buildPenSampleStep(gesture);
   }
   if (gesture.type === "swipe") {
     const endpoints = swipeEndpoints(gesture);

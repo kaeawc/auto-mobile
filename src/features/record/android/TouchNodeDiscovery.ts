@@ -23,6 +23,8 @@ export interface TouchInputNode {
   /** Pressure axis range from `getevent -p`, when the node reports one. */
   pressureMin?: number;
   pressureMax?: number;
+  /** Hover distance axis range, needed to export fractions of the digitizer range. */
+  distanceRange?: AbsoluteAxisInfo;
   /** Both tilt axes must be known before raw samples can be converted. */
   tiltAxes?: TiltAxes;
 }

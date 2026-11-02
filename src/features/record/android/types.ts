@@ -24,6 +24,20 @@ export interface GesturePressure {
   normalized: boolean;
 }
 
+export interface PenSample {
+  x: number;
+  y: number;
+  pressure: number;
+  arrivedAt: number;
+}
+
+export interface HoverSample {
+  x: number;
+  y: number;
+  distance: number;
+  arrivedAt: number;
+}
+
 export interface TouchSlot {
   slotId: number;
   /** -1 means the finger has been lifted */
@@ -33,6 +47,8 @@ export interface TouchSlot {
   /** raw sensor y coordinate */
   y: number;
   pressure: number;
+  /** Bounded raw pen contact history, absent on finger frames. */
+  path?: ReadonlyArray<PenSample>;
   /** Set only for pen contacts (ABS_MT_TOOL_TYPE pen or BTN_TOOL_PEN/RUBBER); absent for fingers. */
   toolType?: PointerToolType;
   /** Held stylus buttons (BTN_STYLUS / BTN_STYLUS2); absent when none. */
@@ -70,6 +86,7 @@ type GestureEventType =
   | "doubleTap"
   | "longPress"
   | "swipe"
+  | "stroke"
   | "pinch"
   | "pressButton"
   | "hover";
@@ -106,6 +123,11 @@ export interface GestureEvent {
   durationMs?: number;
   /** First release time for a classifier-produced doubleTap. */
   firstTapArrivedAt?: number;
+
+  /** Screen coordinates and normalized per-point pressure for a varying-pressure pen drag. */
+  path?: ReadonlyArray<PenSample>;
+  /** Screen coordinates and normalized distance for a hover-only episode. */
+  hover?: ReadonlyArray<HoverSample>;
 
   // swipe
   direction?: "up" | "down" | "left" | "right";
@@ -149,6 +171,9 @@ export function pointerOf(gesture: GestureEvent): PointerOption | undefined {
 /** Thresholds used for gesture classification (dp units where applicable) */
 export const GESTURE_THRESHOLDS = {
   TOUCH_SLOP_DP: 8,
+  // Constant-pressure pen drags deliberately remain swipeAt; only pressure curves need dragPath.
+  STROKE_PRESSURE_RANGE: 0.05,
+  PEN_MAX_SAMPLES: 100,
   LONG_PRESS_MS: 400,
   TAP_TIMEOUT_MS: 100,
   DOUBLE_TAP_MS: 300,

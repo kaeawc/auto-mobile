@@ -4,7 +4,9 @@ import type {
   GestureEvent,
   PointerToolType,
   StylusButton,
+  PenSample,
 } from "./types";
+import { GESTURE_THRESHOLDS } from "./types";
 import { PenHoverTracker } from "./PenHoverTracker";
 
 // Mapping from Linux key codes to AutoMobile button names
@@ -39,6 +41,7 @@ const KEY_TO_BUTTON: Record<string, GestureEvent["button"]> = {
 export class TouchFrameReconstructor {
   private slots: Map<number, TouchSlot> = new Map();
   private currentSlot = 0;
+  private readonly penPaths = new Map<number, PenSample[]>();
   private releasedSlots = new Set<number>();
   /** Slots reported as in contact in the previous frame. */
   private touchingSlots = new Set<number>();
@@ -163,12 +166,12 @@ export class TouchFrameReconstructor {
   }
 
   /** Tells the hover tracker whether a tracked multitouch pen slot is hovering or touching. */
-  private observePenSlot(slot: TouchSlot): void {
+  private observePenSlot(slot: TouchSlot, arrivedAt: number): void {
     if (this.options.singleTouch || slot.toolType === undefined || slot.trackingId < 0) {
       return;
     }
     if (this.isMtPenHovering(slot)) {
-      this.hover.slotHovering(slot.slotId);
+      this.hover.slotHovering(slot.slotId, slot, arrivedAt);
     } else {
       this.hover.slotTouching(slot.slotId);
     }
@@ -179,12 +182,17 @@ export class TouchFrameReconstructor {
     const activeSlots: TouchSlot[] = [];
     for (const [, slot] of this.slots) {
       if (slot.slotId !== replaced.slotId && slot.trackingId >= 0 && !this.isMtPenHovering(slot)) {
-        activeSlots.push(this.withPenState({ ...slot }));
+        const sample = this.withPenState({ ...slot });
+        if (sample.toolType) {
+          sample.path = this.samplePen(sample, arrivedAt);
+        }
+        activeSlots.push(sample);
       }
     }
     this.releasedSlots.delete(replaced.slotId);
     this.touchingSlots.delete(replaced.slotId);
     this.lastEmitted.delete(replaced.slotId);
+    this.penPaths.delete(replaced.slotId);
     return { arrivedAt, activeSlots, releasedSlots: [replaced.slotId] };
   }
 
@@ -238,6 +246,7 @@ export class TouchFrameReconstructor {
 
   private handleKeyEvent(evCode: string, pressed: boolean, arrivedAt: number): void {
     switch (evCode) {
+      case "BTN_DIGI": // getevent labels BTN_TOOL_PEN (0x140) this way on some kernels.
       case "BTN_TOOL_PEN":
         this.setNodeTool("stylus", pressed, arrivedAt);
         break;
@@ -322,10 +331,14 @@ export class TouchFrameReconstructor {
 
     const touching = new Set<number>();
     for (const [, slot] of this.slots) {
-      this.observePenSlot(slot);
+      this.observePenSample(slot, arrivedAt);
       if (slot.trackingId >= 0 && !this.isMtPenHovering(slot)) {
         touching.add(slot.slotId);
-        activeSlots.push(this.withPenState({ ...slot }));
+        const sample = this.withPenState({ ...slot });
+        if (sample.toolType) {
+          sample.path = this.samplePen(sample, arrivedAt);
+        }
+        activeSlots.push(sample);
         this.lastEmitted.set(slot.slotId, { x: slot.x, y: slot.y });
       } else if (
         this.releasedSlots.has(slot.slotId) ||
@@ -333,10 +346,13 @@ export class TouchFrameReconstructor {
       ) {
         // A tracked MT pen that lifts into hover ends its contact just like a release.
         releasedSlots.push(slot.slotId);
-        releasedFinalSamples.push(...this.takeFinalMove(slot));
+        releasedFinalSamples.push(...this.takeFinalMove(slot, arrivedAt));
       }
     }
 
+    for (const slotId of releasedSlots) {
+      this.penPaths.delete(slotId);
+    }
     this.releasedSlots.clear();
     this.touchingSlots = touching;
 
@@ -348,15 +364,31 @@ export class TouchFrameReconstructor {
       : { arrivedAt, activeSlots, releasedSlots };
   }
 
+  private observePenSample(slot: TouchSlot, arrivedAt: number): void {
+    this.observePenSlot(slot, arrivedAt);
+    if (this.options.singleTouch && this.nodeTool && slot.trackingId < 0) {
+      this.hover.penHovering(slot, arrivedAt);
+    }
+  }
+
   /**
    * A pen driver may send its last ABS_X/Y in the same packet as BTN_TOUCH UP, and an MT pen may
    * move while lifting into hover. Returns that final sample when the released slot moved since it
    * was last emitted, so the stroke keeps its real end point.
    */
-  private takeFinalMove(slot: TouchSlot): TouchSlot[] {
+  private takeFinalMove(slot: TouchSlot, arrivedAt: number): TouchSlot[] {
     const last = this.lastEmitted.get(slot.slotId);
     this.lastEmitted.delete(slot.slotId);
-    return last && (last.x !== slot.x || last.y !== slot.y) ? [this.withPenState({ ...slot })] : [];
+    if (!last || (last.x === slot.x && last.y === slot.y)) {
+      return [];
+    }
+    const final = this.withPenState({ ...slot });
+    const pressure = this.penPaths.get(slot.slotId)?.at(-1)?.pressure;
+    if (final.toolType && pressure !== undefined) {
+      // Release pressure describes the lifted pen, not its final contact position.
+      final.path = this.samplePen({ ...final, pressure }, arrivedAt);
+    }
+    return [final];
   }
 
   /**
@@ -396,6 +428,30 @@ export class TouchFrameReconstructor {
    */
   private isMtPenHovering(slot: TouchSlot): boolean {
     return !this.options.singleTouch && slot.toolType !== undefined && (slot.distance ?? 0) > 0;
+  }
+
+  /** Keep endpoints and pressure changes; compact older time samples before reaching the tool cap. */
+  private samplePen(slot: TouchSlot, arrivedAt: number): ReadonlyArray<PenSample> {
+    let path = this.penPaths.get(slot.slotId) ?? [];
+    const sample = { x: slot.x, y: slot.y, pressure: slot.pressure, arrivedAt };
+    // Every pressure change is initially retained. At the cap, halve the temporal resolution
+    // of older samples while preserving the first point and pressure extrema; always append the latest.
+    if (path.length >= GESTURE_THRESHOLDS.PEN_MAX_SAMPLES) {
+      const minimum = path.reduce(
+        (best, point, index) => (point.pressure < path[best].pressure ? index : best),
+        0,
+      );
+      const maximum = path.reduce(
+        (best, point, index) => (point.pressure > path[best].pressure ? index : best),
+        0,
+      );
+      path = path.filter(
+        (_, index) => index === 0 || index === minimum || index === maximum || index % 2 === 1,
+      );
+    }
+    path.push(sample);
+    this.penPaths.set(slot.slotId, path);
+    return [...path];
   }
 
   private getOrCreateSlot(): TouchSlot {

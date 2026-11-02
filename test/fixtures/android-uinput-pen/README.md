@@ -16,6 +16,8 @@ Stroke inputs:
 - Eraser tap at (540,1170), pressure 0.5.
 - Stylus swipe from (300,1400) to (300,900) over 800 ms, pressure 0.6.
 - Stylus hover over (300,900), (350,850), (400,800).
+- Stylus `dragPath` from (300,900) to (700,1200), four points with pressures
+  0.2, 0.4, 0.7 and 0.95 (`stroke-varying-pressure`).
 
 Additional stylus captures use the same device on 2026-11-01, with display geometry
 1080x2340, rotation 0. The tap point is (540,1170), pressure 0.5:

@@ -318,7 +318,7 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     ]);
   });
 
-  test("a hover is not exported, and the stop result says it was dropped", async () => {
+  test("a hover without a known position is not exported and warns", async () => {
     await recorder.start();
     gestures.emit({ type: "hover", arrivedAt: timer.now(), toolType: "stylus" });
 
@@ -326,6 +326,20 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
 
     expect(result.steps).toEqual([]);
     expect(result.exportWarnings).toEqual([expect.stringContaining("hover")]);
+  });
+
+  test("a positioned hover without distance warns instead of exporting a touch", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "hover",
+      arrivedAt: timer.now(),
+      toolType: "stylus",
+      screenX: 10,
+      screenY: 20,
+    });
+    const result = await recorder.stop();
+    expect(result.steps).toEqual([]);
+    expect(result.exportWarnings).toEqual([expect.stringContaining("hover distance")]);
   });
 
   test("hovers next to a tap warn once and leave the tap exported", async () => {

@@ -685,6 +685,15 @@ describe("web still chips and sliders (#16382)", () => {
     expect(navLabel.style["font-size"]).toBe("24px");
     const tab = find(byTag(scaled, "tabs")[0]!, (e) => e.attrs.role === "tab")[0]!;
     expect(tab.style["font-size"]).toBe("28px");
+    const slider = renderPrototypeStill(
+      rootOf(
+        { type: "slider", testTag: "s", stateKey: "v", label: "Volume" },
+        { theme: { typography: { scale: 2, fontFamily: "serif" } } },
+      ),
+    ).element;
+    const label = find(byTag(slider, "s")[0]!, (e) => e.style["font-size"] !== undefined)[0]!;
+    // A plain label takes Material 3's default text style, bodyLarge (16/24), scaled.
+    expect(label.style).toMatchObject({ "font-size": "32px", "font-family": "serif" });
   });
 
   test("an authored fill on a child grows its unsized parent like a default fill", () => {

@@ -227,7 +227,14 @@ const sliderRenderer =
       "aria-valuemax": String(max),
     };
     const label =
-      typeof node.label === "string" ? [el("span", {}, [kit.bound(node.label, scope)])] : [];
+      typeof node.label === "string"
+        ? // A plain label takes Material 3's default text style, as PrototypeComponentLabel does.
+          [
+            el("span", { style: textCss({ textStyle: "bodyLarge" }, scope.style) }, [
+              kit.bound(node.label, scope),
+            ]),
+          ]
+        : [];
     return el("div", { attrs: { ...attrs, ...semantics, ...disabled.attrs }, style }, [
       ...label,
       sliderTrack(fraction, scope),

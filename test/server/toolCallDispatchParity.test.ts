@@ -298,7 +298,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
   test("the live direct handler is the full dispatcher, not the SDK per-tool callback", async () => {
     await callThrough(direct.client, OK_TOOL, { count: 1 });
 
-    // Only the shared dispatcher's backend stamps the execution id; the SDK's
+    // Only the shared dispatcher's backend runs the handler under an execution; the SDK's
     // per-tool callback (shadowed) would have refused the call instead.
     expect(handlerArgs).toHaveLength(1);
     expect(typeof handlerExecutionIds[0]).toBe("string");

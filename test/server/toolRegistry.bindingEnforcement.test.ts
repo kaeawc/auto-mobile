@@ -1,4 +1,5 @@
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
+import { withWireConnection } from "../helpers/mcpConnection";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -57,8 +58,9 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
   let keyA: BindingKey;
   let timer: FakeTimer;
 
+  /** One top-level call; an `__mcpSessionId` in `args` is its ambient connection, as at MCP ingress. */
   const call = (name: string, args: Record<string, unknown>) =>
-    ToolRegistry.getTool(name)!.handler(args);
+    withWireConnection(args, (rest) => ToolRegistry.getTool(name)!.handler(rest));
 
   async function outcome(name: string, args: Record<string, unknown>): Promise<unknown> {
     try {

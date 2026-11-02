@@ -15,9 +15,7 @@ import {
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
-import {
-  currentConnectionMcpSessionId,
-} from "../features/toolSelection/toolSelectionContext";
+import { currentConnectionMcpSessionId } from "../features/toolSelection/toolSelectionContext";
 
 /**
  * Narrow device-detection seam used by {@link resolveTargetDevices} when a call targets

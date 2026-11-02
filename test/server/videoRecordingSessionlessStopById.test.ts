@@ -23,6 +23,7 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDevice
 import type { BootedDevice } from "../../src/models";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
 import { toolJson } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
 import { z } from "zod/v4";
 
 const videoRecording = createVideoRecordingToolsHarness();
@@ -49,9 +50,10 @@ describe("videoRecording stop by id from a caller with no session", () => {
   let owningConnection: string | undefined;
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
+  /** One top-level call; an `__mcpSessionId` in `args` is its ambient connection (#15663). */
   const outcome = (args: Record<string, unknown>) =>
     Promise.resolve()
-      .then(() => handler()(device, args))
+      .then(() => withWireConnection(args, (rest) => handler()(device, rest)))
       .then(
         (response) => ({ response, error: undefined as { code?: string } | undefined }),
         (error: { code?: string }) => ({ response: undefined, error }),

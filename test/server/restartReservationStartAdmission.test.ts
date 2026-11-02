@@ -37,6 +37,7 @@ import {
   settleByFakeEvents,
 } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
+import { withForwardedConnection } from "../helpers/mcpConnection";
 
 isolateEmptyToolRegistry();
 
@@ -232,11 +233,14 @@ describe("start admission and owner resume for restart reservations", () => {
     );
     manager.clearHistory();
     autolockWrites.length = 0;
-    // In-band deadline keys become the ambient request deadline, as at MCP ingress (#15663).
+    // In-band deadline keys become the ambient request deadline, and `__mcpSessionId` the call's
+    // ambient connection while staying in-band, as at MCP ingress (#15663).
     const call = (name: string, args: Record<string, unknown>, routingSessionUuid?: string) =>
-      withWireDeadline(args, (rest) =>
-        runWithToolSelectionContext({ routingSessionUuid }, () =>
-          ToolRegistry.getTool(name)!.handler(rest),
+      withForwardedConnection(args, (forwarded) =>
+        withWireDeadline(forwarded, (rest) =>
+          runWithToolSelectionContext({ routingSessionUuid }, () =>
+            ToolRegistry.getTool(name)!.handler(rest),
+          ),
         ),
       );
     const exact = platform === "android" ? { avdName: device.name } : { udid: device.deviceId };

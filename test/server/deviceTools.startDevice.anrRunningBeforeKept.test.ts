@@ -38,6 +38,7 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { asMcpConnection } from "../helpers/mcpConnection";
 
 const toolResponseSchema = z.object({
   isError: z.boolean().optional(),
@@ -724,11 +725,9 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
       await expect(start).rejects.toThrow("caller disconnected");
       const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
       const beforeSelection = { ...pool.getDevice(device.deviceId)! };
-      const refused = await select({
-        deviceId: device.deviceId,
-        sessionUuid: "other-session",
-        __mcpSessionId: "other-mcp",
-      }).then(
+      const refused = await asMcpConnection("other-mcp", () =>
+        select({ deviceId: device.deviceId, sessionUuid: "other-session" }),
+      ).then(
         () => undefined,
         (error: unknown) => error,
       );

@@ -18,6 +18,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 let policyReads = 0;
 const env = new Proxy<Record<string, string | undefined>>(
@@ -506,11 +507,14 @@ describe("ToolRegistry autolock session enforcement", () => {
     );
     const tool = ToolRegistry.getTool("implicitAutolockSession")!;
 
-    const response = await tool.handler({
-      platform: "android",
-      keepScreenAwake: false,
-      __mcpSessionId: "mcp-session-1",
-    });
+    const response = await withWireConnection(
+      {
+        platform: "android",
+        keepScreenAwake: false,
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     expect(response).toEqual({ success: true });
     expect(handledDevice?.deviceId).toBe(androidA.deviceId);
@@ -601,11 +605,14 @@ describe("ToolRegistry autolock session enforcement", () => {
     );
     const tool = ToolRegistry.getTool("implicitAutolockWithDeviceId")!;
 
-    const response = await tool.handler({
-      platform: "android",
-      deviceId: androidA.deviceId,
-      __mcpSessionId: "mcp-session-1",
-    });
+    const response = await withWireConnection(
+      {
+        platform: "android",
+        deviceId: androidA.deviceId,
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     expect(response).toEqual({ success: true });
     expect(handledDevice?.deviceId).toBe(androidA.deviceId);
@@ -636,11 +643,14 @@ describe("ToolRegistry autolock session enforcement", () => {
     const tool = registerTool("implicitAutolockDifferentDeviceId");
 
     await expect(
-      tool.handler({
-        platform: "android",
-        deviceId: androidB.deviceId,
-        __mcpSessionId: "mcp-session-1",
-      }),
+      withWireConnection(
+        {
+          platform: "android",
+          deviceId: androidB.deviceId,
+          __mcpSessionId: "mcp-session-1",
+        },
+        (args) => tool.handler(args),
+      ),
     ).rejects.toThrow("device 'emulator-5556' is held by another session");
   });
 });

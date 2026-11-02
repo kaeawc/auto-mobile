@@ -49,6 +49,7 @@ import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
 import { parseArgs } from "../../src/cli/parseArgs";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
+import { asMcpConnection } from "../helpers/mcpConnection";
 
 const videoRecording = createVideoRecordingToolsHarness();
 
@@ -626,17 +627,15 @@ describe("videoRecording tool segmentation branch", () => {
       const recordingId = await finalizeSingle("plan-base:pixel");
 
       const response = parse(
-        await handler()(
-          androidDevice,
-          stopArgs(recordingId, { sessionUuid: "proxy-session", __mcpSessionId: "mcp-owner" }),
+        await asMcpConnection("mcp-owner", () =>
+          handler()(androidDevice, stopArgs(recordingId, { sessionUuid: "proxy-session" })),
         ),
       );
       expect(idsOf(response)).toEqual([recordingId]);
       expect(seen[0]).toEqual(["mcp-owner", androidDevice.deviceId, "plan-base"]);
       await expect(
-        handler()(
-          androidDevice,
-          stopArgs(recordingId, { sessionUuid: "proxy-session", __mcpSessionId: "mcp-other" }),
+        asMcpConnection("mcp-other", () =>
+          handler()(androidDevice, stopArgs(recordingId, { sessionUuid: "proxy-session" })),
         ),
       ).rejects.toThrow("Failed to stop video recording");
     });
@@ -750,12 +749,11 @@ describe("videoRecording tool segmentation branch", () => {
         await fsPromises.writeFile(active.outputPath, "video-bytes");
 
         const response = parse(
-          await handler()(
-            androidDevice,
-            stopArgs(active.recordingId, {
-              sessionUuid: "proxy-bound-session",
-              __mcpSessionId: "mcp-owner",
-            }),
+          await asMcpConnection("mcp-owner", () =>
+            handler()(
+              androidDevice,
+              stopArgs(active.recordingId, { sessionUuid: "proxy-bound-session" }),
+            ),
           ),
         );
 
@@ -778,9 +776,8 @@ describe("videoRecording tool segmentation branch", () => {
         const stopsBefore = fakeBackend.stopCalls.length;
 
         await expect(
-          handler()(
-            androidDevice,
-            stopArgs(active.recordingId, { sessionUuid: "other-base", __mcpSessionId: "mcp-x" }),
+          asMcpConnection("mcp-x", () =>
+            handler()(androidDevice, stopArgs(active.recordingId, { sessionUuid: "other-base" })),
           ),
         ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
         expect(fakeBackend.stopCalls.length).toBe(stopsBefore);

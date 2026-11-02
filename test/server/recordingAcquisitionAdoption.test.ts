@@ -44,6 +44,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
 import { toolIsError, toolText } from "../helpers/toolResponse";
+import { asMcpConnection, withWireConnection } from "../helpers/mcpConnection";
 
 const videoRecording = createVideoRecordingToolsHarness();
 
@@ -259,13 +260,16 @@ describe("ownerless recording acquisition adoption", () => {
       ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
       expect(backend.stopCalls).toEqual([]);
       connectionOwner = "acquiring-connection";
-      const response = await handler()(device, {
-        action: "stop",
-        recordingId: recording.recordingId,
-        ...(requester === "holder"
-          ? { sessionUuid: "holder" }
-          : { __mcpSessionId: connectionOwner }),
-      });
+      const response = await withWireConnection(
+        {
+          action: "stop",
+          recordingId: recording.recordingId,
+          ...(requester === "holder"
+            ? { sessionUuid: "holder" }
+            : { __mcpSessionId: connectionOwner }),
+        },
+        (args) => handler()(device, args),
+      );
       expect(toolIsError(response)).not.toBe(true);
       expect(backend.stopCalls.map((call) => call.recordingId)).toEqual([recording.recordingId]);
     },
@@ -401,11 +405,9 @@ describe("ownerless recording acquisition adoption", () => {
         async () => {
           await manager.createSession("holder", device.deviceId, "android");
           connectionOwner = "acquiring-connection";
-          const response = await handler()(resolved, {
-            action: "start",
-            maxDuration,
-            __mcpSessionId: connectionOwner,
-          });
+          const response = await asMcpConnection(connectionOwner, () =>
+            handler()(resolved, { action: "start", maxDuration }),
+          );
           const started = JSON.parse(toolText(response));
           const recordingId: string = started.recordings.find(
             (record: { deviceId: string }) => record.deviceId === device.deviceId,

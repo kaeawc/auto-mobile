@@ -29,6 +29,7 @@ import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/pro
 import type { BootedDevice } from "../../src/models";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
 import { toolIsError, toolJson } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
 import { z } from "zod/v4";
 
 const videoRecording = createVideoRecordingToolsHarness();
@@ -158,8 +159,11 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
     const onHeld = await listActiveVideoRecordings({ deviceId: heldDevice.deviceId });
     expect(onHeld.map((record) => record.ownerSessionUuid ?? "(ownerless)")).toEqual([]);
   });
+  /** One top-level call; an `__mcpSessionId` in `args` is its ambient connection (#15663). */
   const response = async (args: Record<string, unknown>) =>
-    fanoutResultSchema.parse(toolJson(await handler()(freeDevice, args)));
+    fanoutResultSchema.parse(
+      toolJson(await withWireConnection(args, (rest) => handler()(freeDevice, rest))),
+    );
 
   test("start and bare stop report the skipped held device without its owner uuid", async () => {
     const started = await response({ action: "start" });

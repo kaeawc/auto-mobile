@@ -23,11 +23,14 @@ enum WatchCommandError: LocalizedError {
     case unsupported(String)
     case invalidRequest(String)
     case commandFailed(String)
+    case appNotForeground
 
     var errorDescription: String? {
         switch self {
         case let .unsupported(command): return "\(command) is unsupported on watchOS"
         case let .invalidRequest(message), let .commandFailed(message): return message
+        case .appNotForeground:
+            return "The watch runner app is not in the foreground; open it to observe its hierarchy."
         }
     }
 
@@ -36,6 +39,7 @@ enum WatchCommandError: LocalizedError {
         case .unsupported: return "unsupported_on_watchos"
         case .invalidRequest: return "invalid_request"
         case .commandFailed: return "command_failed"
+        case .appNotForeground: return "app_not_foreground"
         }
     }
 }

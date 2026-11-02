@@ -348,12 +348,13 @@ test.each([
   const warning = spyOn(logger, "warn");
   try {
     recorder.start();
-    recordPlanCall(recorder, "tapAt", {
-      ...params,
-      sessionUuid: "recording-session",
-      snapshotId: "ephemeral",
-      __tapAtRecordingContext: {},
-    });
+    recordPlanCall(
+      recorder,
+      "tapAt",
+      { ...params, sessionUuid: "recording-session", snapshotId: "ephemeral" },
+      {},
+      { tapAt: {} },
+    );
     const { steps, warnings } = recorder.stopWithWarnings();
     expect(steps).toEqual([{ tool: "tapAt", params }]);
     expect(steps[0]).not.toHaveProperty("geometry");

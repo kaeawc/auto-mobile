@@ -45,3 +45,5 @@ passes it through). These have no dedicated typed response model and are outside
 surface. `PerformanceUpdateResponse` is a separate push model, outside `ResponseType` and the
 request/response decoder. Clipboard uses the real `WebSocketResponse` envelope: it emits `text`
 but cannot emit `action`, so the host's empty-string fallback is explicitly pinned.
+
+- `runner-{0.0.88,checkout}-{sdk,storage}-capabilities.json`: four raw runner exchanges captured on 2026-11-01 from iOS 26.5 using the pinned 0.0.88 runner versus the checkout build.

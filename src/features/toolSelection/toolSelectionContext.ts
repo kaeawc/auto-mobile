@@ -5,6 +5,17 @@ import {
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionToolSelectionService } from "./SessionToolSelectionService";
 import type { ProgressCallback } from "../action/BaseVisualChange";
+import type { TapAtPlanContext } from "../../models/TapAtGeometry";
+import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
+
+/**
+ * What a device-aware call's handler resolved for the call recorder (#15663): a tapAt's geometry
+ * and a swipeAt's screen. Mutable: the handler fills it and the recorder reads it after the call.
+ */
+export interface ToolCallRecordingContext {
+  tapAt?: TapAtPlanContext;
+  swipeAt?: SwipeAtRecordingContext;
+}
 
 export type ToolSelectionContext = {
   /** A device-aware wrapper already owns this execution's session resolution (#11680). */
@@ -52,6 +63,13 @@ export type ToolSelectionContext = {
   routingBaseSessionUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled"> &
     Partial<Pick<SessionToolSelectionService, "setEnabled" | "deleteSession">>;
+  /**
+   * The geometry a plan step replays a tapAt against (#15663). Set by `callInternal` for that one
+   * call, so a nested call never inherits a step's geometry.
+   */
+  tapAtPlanContext?: TapAtPlanContext;
+  /** This device-aware call's recording context, set by its wrapper (#15663); never inherited. */
+  toolCallRecording?: ToolCallRecordingContext;
 };
 
 const toolSelectionContext = new AsyncLocalStorage<ToolSelectionContext>();
@@ -114,6 +132,14 @@ export const runWithToolSelectionContext = async <T>(
 
 export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
   toolSelectionContext.getStore();
+
+/**
+ * The tracked execution the current call runs under (#15663): set at MCP ingress and inherited by
+ * every nested call and plan step. Absent outside a tool call.
+ */
+export function currentExecution(): ToolSelectionContext["execution"] {
+  return getToolSelectionContext()?.execution;
+}
 
 /** Whether the current device-aware call runs on the read-only device path (#10830). */
 export function isSessionlessDeviceRead(): boolean {

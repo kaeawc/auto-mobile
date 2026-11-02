@@ -2,39 +2,44 @@ import { describe, expect, test } from "bun:test";
 import {
   adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
-  internalExecutionId,
-  internalExecutionStartTime,
   internalLiveDeadlineKey,
   internalMcpSessionId,
   internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
-  internalSwipeAtRecordingContext,
-  internalTapAtContext,
 } from "../../src/server/internalToolParams";
-import type { SwipeAtRecordingContext } from "../../src/models/SwipeAtOptions";
+import { deviceCallRecording } from "../../src/server/pipeline/deviceCallDispatch";
 import type { TapAtPlanContext } from "../../src/models/TapAtGeometry";
+import {
+  currentExecution,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
+
+describe("call execution identity (#15663)", () => {
+  test("is the ambient execution, inherited by a nested call", async () => {
+    const execution = { executionId: "exec-1", startTime: 42 };
+    const seen = await runWithToolSelectionContext({ execution }, () =>
+      runWithToolSelectionContext({ routingSessionUuid: "s1" }, async () => currentExecution()),
+    );
+    expect(seen).toBe(execution);
+  });
+
+  test("is absent outside a tool call, whatever the args carry", () => {
+    expect(currentExecution()).toBeUndefined();
+  });
+});
 
 describe("internal call identity readers", () => {
-  const args = { __executionId: "exec-1", __executionStartTime: 42, __mcpSessionId: "mcp-1" };
-
   test("read the in-band keys a handler's args carry", () => {
-    expect(internalExecutionId(args)).toBe("exec-1");
-    expect(internalExecutionStartTime(args)).toBe(42);
-    expect(internalMcpSessionId(args)).toBe("mcp-1");
+    expect(internalMcpSessionId({ __mcpSessionId: "mcp-1" })).toBe("mcp-1");
   });
 
   test("an absent key reads as absent", () => {
-    expect(internalExecutionId({})).toBeUndefined();
-    expect(internalExecutionStartTime({})).toBeUndefined();
     expect(internalMcpSessionId({})).toBeUndefined();
   });
 
   test("a value of the wrong type reads as absent", () => {
-    const wrong = { __executionId: 7, __executionStartTime: "42", __mcpSessionId: null };
-    expect(internalExecutionId(wrong)).toBeUndefined();
-    expect(internalExecutionStartTime(wrong)).toBeUndefined();
-    expect(internalMcpSessionId(wrong)).toBeUndefined();
+    expect(internalMcpSessionId({ __mcpSessionId: null })).toBeUndefined();
   });
 
   test("a blank connection identity is still a string, as the stages read it today", () => {
@@ -85,26 +90,18 @@ describe("provisioning handoff readers", () => {
   });
 });
 
-describe("coordinate gesture context readers", () => {
-  test("tapAt prefers the plan step's context over the recording one", () => {
+describe("coordinate gesture recording context (#15663)", () => {
+  test("a tapAt records into the plan step's geometry context, by reference", () => {
     const plan: TapAtPlanContext = {};
-    const recording: TapAtPlanContext = {};
-    expect(
-      internalTapAtContext({ __tapAtPlanContext: plan, __tapAtRecordingContext: recording }),
-    ).toBe(plan);
+    expect(deviceCallRecording("tapAt", { tapAtPlanContext: plan })?.tapAt).toBe(plan);
   });
 
-  test("tapAt falls back to the recording context, by reference so the handler can fill it", () => {
-    const recording: TapAtPlanContext = {};
-    expect(internalTapAtContext({ __tapAtRecordingContext: recording })).toBe(recording);
-    expect(internalTapAtContext({})).toBeUndefined();
+  test("a tapAt outside a plan step gets a fresh context the handler fills", () => {
+    expect(deviceCallRecording("tapAt", undefined)).toEqual({ tapAt: {} });
   });
 
-  test("swipeAt reads its recording context by reference", () => {
-    const recording: SwipeAtRecordingContext = {};
-    expect(internalSwipeAtRecordingContext({ __swipeAtRecordingContext: recording })).toBe(
-      recording,
-    );
-    expect(internalSwipeAtRecordingContext({})).toBeUndefined();
+  test("a swipeAt gets a fresh screen context and other tools record nothing extra", () => {
+    expect(deviceCallRecording("swipeAt", { tapAtPlanContext: {} })).toEqual({ swipeAt: {} });
+    expect(deviceCallRecording("tapOn", { tapAtPlanContext: {} })).toBeUndefined();
   });
 });

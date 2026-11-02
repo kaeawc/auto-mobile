@@ -301,6 +301,7 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
   const requests = requestWiring.createPrototypeRequestCoordinator(timer, mocks);
   const channels = channelWiring.createPrototypeChannelCoordinator(
     timer,
+    mocks,
     dependencies.channelExecutor,
   );
   const recorder = createTestSessionRecorder(dependencies, store);

@@ -3,14 +3,14 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
 import { spyOn } from "bun:test";
 import {
-  INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
 } from "../../src/daemon/wire/constants";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
-import { executionTracker } from "../../src/daemon/executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";
@@ -225,14 +225,14 @@ export class RealToolCallPath {
       { once: true },
     );
     try {
-      const result = await tool.handler(
-        {
-          ...args,
-          [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-          [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-        },
-        undefined,
-        combineRequestAbortSignals(execution.abortController.signal, requestSignal),
+      const result = await runWithToolSelectionContext(
+        { execution: sessionExecutionMetadataOf(execution) },
+        () =>
+          tool.handler(
+            { ...args, [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime },
+            undefined,
+            combineRequestAbortSignals(execution.abortController.signal, requestSignal),
+          ),
       );
       // The daemon's tool-call entry echoes the session the call was admitted under (#10974).
       return withAdmittedSessionEcho(result, execution.id);

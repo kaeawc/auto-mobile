@@ -472,6 +472,18 @@ struct Mixed: Codable, Equatable, Sendable {
     expect(swiftOnly.swift).toContain("struct PrototypePoint: Codable");
   });
 
+  test("image zoom preserves its Swift name, conformance and required Double field", () => {
+    const result = renderPrototypeSpecModels(contract, {
+      zoomable: prototypeModelSelection.zoomable,
+    });
+    expect(result.swift).toBe(`${header}
+/// An image's zoom range: 1 up to \`maxScale\` (1..8).
+struct PrototypeImageZoomable: Decodable {
+    let maxScale: Double
+}
+`);
+  });
+
   test.each(["ref", "color", "choice", "tagged", "record", "map", "screenMap", "data", "true"])(
     "refuses unsupported selected field kind %s with its definition and field",
     (kind) => {

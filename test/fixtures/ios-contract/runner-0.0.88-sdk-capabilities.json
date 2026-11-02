@@ -1,0 +1,24 @@
+{
+  "request": {
+    "type": "get_sdk_capabilities",
+    "requestId": "sdkCapabilities_5c91fda3-1e8c-46e6-a5bd-25814838b016"
+  },
+  "response": {
+    "available": true,
+    "bundleId": "dev.jasonpearson.automobile.Playground",
+    "capabilities": [
+      "database",
+      "hierarchy",
+      "highlight",
+      "magic_tap",
+      "network_error_simulation",
+      "network_fault_rules",
+      "network_mocking"
+    ],
+    "requestId": "sdkCapabilities_5c91fda3-1e8c-46e6-a5bd-25814838b016",
+    "success": true,
+    "timestamp": 1793572881519,
+    "totalTimeMs": 5,
+    "type": "sdk_capabilities_result"
+  }
+}

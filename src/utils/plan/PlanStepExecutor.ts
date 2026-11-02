@@ -4,6 +4,7 @@ import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import type { PlanStep } from "../../models/Plan";
+import type { TapAtPlanContext } from "../../models/TapAtGeometry";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { logger, type Logger } from "../logger";
@@ -52,6 +53,8 @@ export interface PlanStepTools<TTool extends PlanStepTool> {
       forPlan?: boolean;
       sessionUuid?: string;
       targetDevice?: BootedDevice;
+      /** The geometry a replayed tapAt step resolves against (#15663). */
+      tapAtPlanContext?: TapAtPlanContext;
     },
   ): Promise<unknown>;
 }
@@ -574,9 +577,6 @@ export class DefaultPlanStepExecutor<
         ? stripUndeclaredDeviceLabel(enhancedParams, tool.schema)
         : enhancedParams,
     );
-    if (step.tool === "tapAt" && step.geometry) {
-      parsedParams.__tapAtPlanContext = { geometry: step.geometry };
-    }
 
     if (context.deviceId) {
       ScreenshotJobTracker.cancelJob(context.deviceId);
@@ -596,6 +596,9 @@ export class DefaultPlanStepExecutor<
       forPlan: true,
       sessionUuid: context.sessionUuid,
       ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
+      ...(step.tool === "tapAt" && step.geometry
+        ? { tapAtPlanContext: { geometry: step.geometry } }
+        : {}),
     });
   }
 

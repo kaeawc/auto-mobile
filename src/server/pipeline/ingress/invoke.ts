@@ -1,7 +1,6 @@
 import type { ToolHandlerResult } from "../../toolRegistryTypes";
 import {
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-  INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -67,7 +66,6 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
       ? { [INTERNAL_MCP_SESSION_PARAM]: plan.implicitAutolockMcpSessionId }
       : {}),
     ...(context.requestOneShotCli ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true } : {}),
-    [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
     [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
     // Forwarded back onto the handler params (rather than only used locally)
     // so a handler that needs the ACTUAL transport deadline, not a fresh

@@ -111,13 +111,15 @@ class PrototypePlatformRuntimeTest {
     lock: Mutex = Mutex(),
     sink: suspend (PrototypeEvent) -> Unit = { events += it },
     inFlight: Int = PrototypePlatformDispatcher.MAX_IN_FLIGHT,
+    wallClock: () -> Long = { testScheduler.currentTime },
   ): PrototypeRuntime {
     var id = 0
     var seq = 0L
     return PrototypeRuntime(
         spec,
         sink = { sink(it) },
-        clock = { testScheduler.currentTime },
+        clock = wallClock,
+        monotonicMs = { testScheduler.currentTime },
         nextSequence = { ++seq },
         requestScope = backgroundScope,
         exclusively = { lock.withLock { it() } },
@@ -135,6 +137,72 @@ class PrototypePlatformRuntimeTest {
   private fun outcomes(events: List<PrototypeEvent>) = events.filter {
     it.name == PrototypePlatform.CALL_EVENT_NAME
   }
+
+  @Test
+  @Suppress("LongMethod") // One admission sequence covers argument, global-cap and rate gates.
+  fun `share rate limit skips argument and cap refusals and recovers with monotonic time`() =
+    runTest {
+      val release = CompletableDeferred<Unit>()
+      val module =
+        FakePlatformModule("share").apply {
+          execute = {
+            release.await()
+            PlatformCallResult.Success(JsonNull)
+          }
+        }
+      val events = mutableListOf<PrototypeEvent>()
+      val runtime =
+        runtime(
+          module,
+          events,
+          spec().copy(requires = PrototypeRequires(platform = listOf("share"))),
+          inFlight = 1,
+          wallClock = { -testScheduler.currentTime },
+        )
+      val share =
+        PrototypePlatformAction(
+          "share.open",
+          mapOf("text" to obj("value" to JsonPrimitive("hello"))),
+        )
+      fun lastError() = outcomes(events).last().payload!!.jsonObject["error"]!!.jsonObject
+
+      runtime.tap(share.copy(args = mapOf("text" to obj("value" to JsonPrimitive(42)))))
+      assertEquals(JsonPrimitive("invalid_args"), lastError()["code"])
+      runtime.tap(share.copy(args = mapOf("text" to obj("data" to JsonPrimitive("/missing")))))
+      assertEquals(JsonPrimitive("invalid_args"), lastError()["code"])
+      runtime.tap(share)
+      runCurrent()
+      runtime.tap(share)
+      assertEquals(JsonPrimitive("too_many_in_flight"), lastError()["code"])
+      assertEquals(
+        JsonPrimitive("At most 4 platform calls can be in flight"),
+        lastError()["message"],
+      )
+      assertEquals(1, module.calls.size)
+      release.complete(Unit)
+      runCurrent()
+      repeat(4) {
+        runtime.tap(share)
+        runCurrent()
+      }
+      assertEquals(5, module.calls.size)
+      runtime.tap(share)
+      runCurrent()
+      assertEquals(JsonPrimitive("too_many_in_flight"), lastError()["code"])
+      assertEquals(
+        JsonPrimitive("Rate limit exceeded for share: at most 5 calls per 10000 ms"),
+        lastError()["message"],
+      )
+      assertEquals(5, module.calls.size)
+      runtime.tap(share.copy(args = mapOf("text" to obj("value" to JsonPrimitive(42)))))
+      assertEquals(JsonPrimitive("invalid_args"), lastError()["code"])
+      advanceTimeBy(10001)
+      runtime.tap(share)
+      runCurrent()
+      assertEquals(6, module.calls.size)
+      assertFalse(outcomes(events).last().payload!!.jsonObject.containsKey("error"))
+      runtime.close()
+    }
 
   @Test
   fun `completion writes result metadata status event and follow ups in order`() = runTest {

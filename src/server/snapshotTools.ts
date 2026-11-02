@@ -1,5 +1,6 @@
 import {
   deviceSnapshotCaptureArgsShape,
+  deviceSnapshotDeleteArgsShape,
   deviceSnapshotRestoreArgsShape,
 } from "../models/deviceSnapshotArgsSchema";
 import { toActionableError } from "../models/ActionableError";
@@ -10,6 +11,7 @@ import { ActionableError, BootedDevice } from "../models";
 import { deviceSnapshotResultSchema } from "./deviceSnapshotToolOutputSchemas";
 import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import { captureDeviceSnapshot, restoreDeviceSnapshot } from "../daemon/deviceSnapshotManager";
+import { deleteDeviceSnapshot } from "../daemon/snapshotDeletion";
 import "./DeviceIncarnationInvalidator";
 
 /** Per-call VM snapshot budget: at most 30 minutes, safely below the timer overflow ceiling. */
@@ -32,9 +34,33 @@ export const deviceSnapshotSchema = z.discriminatedUnion("action", [
       })
       .strict(),
   ),
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        action: z.literal("delete"),
+        ...deviceSnapshotDeleteArgsShape,
+      })
+      .strict(),
+  ),
 ]);
 
 export type DeviceSnapshotToolArgs = z.infer<typeof deviceSnapshotSchema>;
+
+/** Delete a snapshot by name and report whether its data is gone or awaits its emulator (#14065). */
+async function deleteSnapshotResponse(
+  device: BootedDevice,
+  args: Extract<DeviceSnapshotToolArgs, { action: "delete" }>,
+) {
+  const result = await deleteDeviceSnapshot(device, args);
+  return createStructuredToolResponse({
+    message: result.deleted
+      ? `Snapshot '${result.snapshotName}' deleted`
+      : `Snapshot '${result.snapshotName}' will be deleted once its emulator is running`,
+    ...result,
+    deviceId: device.deviceId,
+    deviceName: device.name,
+  });
+}
 
 export function registerSnapshotTools() {
   const deviceSnapshotHandler = async (device: BootedDevice, args: DeviceSnapshotToolArgs) => {
@@ -88,6 +114,10 @@ export function registerSnapshotTools() {
         });
       }
 
+      if (args.action === "delete") {
+        return await deleteSnapshotResponse(device, args);
+      }
+
       // Exhaustive over the discriminated union (args is `never` here); kept
       // as a runtime guard for callers that bypass schema validation.
       throw new ActionableError(
@@ -100,7 +130,7 @@ export function registerSnapshotTools() {
 
   ToolRegistry.registerDeviceAware(
     "deviceSnapshot",
-    "Capture or restore device snapshot. An Android VM restore in daemon mode returns the new deviceSessionUuid; the previous device-session UUID is superseded by the restore.",
+    "Capture, restore or delete a device snapshot. An Android VM restore in daemon mode returns the new deviceSessionUuid; the previous device-session UUID is superseded by the restore.",
     deviceSnapshotSchema,
     {
       handler: deviceSnapshotHandler,

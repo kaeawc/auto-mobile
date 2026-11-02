@@ -78,7 +78,9 @@ class PrototypeDataBindingTest {
           PrototypeNodeMapping(
               spec.state.orEmpty(),
               emptyMap(),
-              fullscreenRoot = spec.window.placement is PrototypeFullscreenPlacement,
+              fillWindowRoot =
+                spec.window.placement is PrototypeFullscreenPlacement ||
+                  spec.window.placement is PrototypeSheetPlacement,
             )
             .map(root, "root"),
         ),

@@ -1,11 +1,12 @@
 import { recordPlanCall } from "../../helpers/recordPlanCall";
+import type { ToolCallRecordingContext } from "../../../src/features/toolSelection/toolSelectionContext";
 import { describe, expect, test } from "bun:test";
 import { ToolCallRecorder } from "../../../src/features/record/ToolCallRecorder";
 
-function record(tool: string, args: Record<string, unknown>) {
+function record(tool: string, args: Record<string, unknown>, recording?: ToolCallRecordingContext) {
   const recorder = new ToolCallRecorder();
   recorder.start();
-  recordPlanCall(recorder, tool, args);
+  recordPlanCall(recorder, tool, args, {}, recording);
   return recorder.stopWithWarnings();
 }
 
@@ -23,13 +24,16 @@ describe("recorded stylus pointer (#13081)", () => {
   });
 
   test("a swipeAt step keeps its pointer", () => {
-    const { steps } = record("swipeAt", {
-      from: { x: 0.1, y: 0.2 },
-      to: { x: 0.3, y: 0.4 },
-      coordinateSpace: "normalized",
-      pointer: { toolType: "stylus" },
-      __swipeAtRecordingContext: { screenSize: { width: 1080, height: 2400 } },
-    });
+    const { steps } = record(
+      "swipeAt",
+      {
+        from: { x: 0.1, y: 0.2 },
+        to: { x: 0.3, y: 0.4 },
+        coordinateSpace: "normalized",
+        pointer: { toolType: "stylus" },
+      },
+      { swipeAt: { screenSize: { width: 1080, height: 2400 } } },
+    );
 
     expect(steps).toHaveLength(1);
     expect(steps[0]?.params).toMatchObject({ pointer: { toolType: "stylus" } });

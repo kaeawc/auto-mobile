@@ -204,6 +204,10 @@ ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/PlanCorpus/** text eol=lf
 
 # Shared iOS wire contracts are compared across Swift and TypeScript.
 test/fixtures/ios-contract/*.json text eol=lf
+test/fixtures/ios-contract/runner-0.0.88-sdk-capabilities.json text eol=lf
+test/fixtures/ios-contract/runner-0.0.88-storage-capabilities.json text eol=lf
+test/fixtures/ios-contract/runner-checkout-sdk-capabilities.json text eol=lf
+test/fixtures/ios-contract/runner-checkout-storage-capabilities.json text eol=lf
 ios/control-proxy/Tests/CtrlProxyTests/Fixtures/sdk-health-*.json text eol=lf
 ios/control-proxy/Tests/CtrlProxyTests/Fixtures/recent-apps/*.txt text eol=lf
 test/fixtures/android-contract/*.json text eol=lf

@@ -418,6 +418,7 @@ function recordCompletedToolCall(
       name,
       args,
       traits,
+      getToolSelectionContext()?.toolCallRecording,
     );
   }
 }

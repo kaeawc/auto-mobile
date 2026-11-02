@@ -3,7 +3,11 @@ import SwiftUI
 @main
 struct CtrlProxyWatchApp: App {
     @State private var crown = 0.0
-    @FocusState private var crownFocused: Bool
+    private enum CrownFocus: Hashable {
+        case fixture, list
+    }
+
+    @FocusState private var crownFocus: CrownFocus?
 
     var body: some Scene {
         WindowGroup {
@@ -19,7 +23,15 @@ struct CtrlProxyWatchApp: App {
                             Text("watch-smoke-row")
                         }
                         .accessibilityIdentifier("watch-smoke-row")
+                        ForEach(1 ... 30, id: \.self) { row in
+                            Text("Scroll row \(row)")
+                                .accessibilityIdentifier("watch-scroll-row-\(row)")
+                                .onTapGesture { crownFocus = .list }
+                        }
                     }
+                    // Native List crown scrolling is active when focus leaves the value fixture.
+                    .focusable()
+                    .focused($crownFocus, equals: .list)
                 }
             }
         }
@@ -30,12 +42,13 @@ struct CtrlProxyWatchApp: App {
             Text("CtrlProxy Watch")
                 .accessibilityIdentifier("ctrlproxy-crown")
                 .focusable()
-                .focused($crownFocused)
+                .focused($crownFocus, equals: .fixture)
                 .digitalCrownRotation(
                     $crown, from: -1000, through: 1000, by: 0.1,
                     sensitivity: .high, isContinuous: true, isHapticFeedbackEnabled: false
                 )
-                .onAppear { crownFocused = true }
+                .onAppear { crownFocus = .fixture }
+                .onTapGesture { crownFocus = .fixture }
             Text("crown \(crown, format: .number.precision(.fractionLength(2)))")
                 .accessibilityIdentifier("ctrlproxy-crown-value")
                 .offset(y: 40)

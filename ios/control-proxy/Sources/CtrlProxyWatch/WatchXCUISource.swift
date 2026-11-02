@@ -74,6 +74,10 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     }
 
     func snapshot() throws -> SdkViewHierarchy {
+        // XCTest can retain this app's tree after Home even though the watch face is visible.
+        guard app.state == .runningForeground else {
+            throw WatchCommandError.appNotForeground
+        }
         let root = try app.snapshot()
         // XCUITest frames and gesture coordinates are points. No pixel scale is inferred.
         return SdkViewHierarchy(

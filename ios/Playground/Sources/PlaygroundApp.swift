@@ -7,7 +7,9 @@ struct PlaygroundApp: App {
         // Initialize AutoMobile SDK
         AutoMobileSDK.shared.initialize(bundleId: "dev.jasonpearson.automobile.Playground")
         // The host opts in to SwiftUI navigation capture.
-        AutoMobileNavigation.shared.registerSwiftUI()
+        if ProcessInfo.processInfo.environment[SdkContractLaunch.scenarioKey] != "navigation" {
+            AutoMobileNavigation.shared.registerSwiftUI()
+        }
 
         do {
             try PhotosAuthorizationProbe.writeLiveSnapshotToDocuments()
@@ -44,8 +46,11 @@ struct PlaygroundApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .autoMobileTheme()
+            if ProcessInfo.processInfo.environment[SdkContractLaunch.scenarioKey] == "navigation" {
+                Color.clear
+            } else {
+                ContentView().autoMobileTheme()
+            }
         }
     }
 }

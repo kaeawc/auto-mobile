@@ -5,6 +5,10 @@ import {
 import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 import { z } from "zod/v4";
 import {
   DefaultAfterToolCallHandler,
@@ -235,6 +239,56 @@ describe("ToolRegistry device-aware pipeline", () => {
     expect(response).toEqual({ success: true, finalized: true });
     expect(events).toEqual(["resolve", "audit", "handler", "after", "planLifecycle", "record"]);
   });
+
+  test.each([
+    ["swipeAt", undefined, { swipeAt: { screenSize: { width: 1, height: 2 } } }],
+    ["tapAt", { geometry: undefined }, { tapAt: { geometry: undefined, filled: true } }],
+  ] as const)(
+    "a device-aware %s hands its handler the recording context the recorder reads (#15663)",
+    async (name, tapAtPlanContext, expected) => {
+      const seenByAfter: unknown[] = [];
+      restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+        executionTargetResolver: {
+          async resolveExecutionTarget(input: any) {
+            return {
+              args: input.args,
+              baseSessionUuid: "session-1",
+              device,
+              internalCall: false,
+              sessionUuid: "session-1",
+              shouldResolveDevice: true,
+            };
+          },
+        },
+        auditRunner: {
+          async run(input: any) {
+            return input.handler(input.device, input.args, input.progress, input.signal);
+          },
+        },
+        afterToolCall: {
+          async handle() {
+            seenByAfter.push(getToolSelectionContext()?.toolCallRecording);
+            return { durationMs: 0, finalizedResponse: { success: true } };
+          },
+        },
+        planLifecycleManager: { afterExecution: async () => {} },
+      });
+      ToolRegistry.registerDeviceAware(name, name, z.object({}).passthrough(), async () => {
+        const recording = getToolSelectionContext()?.toolCallRecording;
+        if (recording?.swipeAt) {
+          recording.swipeAt.screenSize = { width: 1, height: 2 };
+        }
+        if (recording?.tapAt) {
+          Object.assign(recording.tapAt, { filled: true });
+        }
+        return { success: true };
+      });
+
+      await ToolRegistry.callInternal(name, { sessionUuid: "session-1" }, { tapAtPlanContext });
+
+      expect(seenByAfter).toEqual([expected]);
+    },
+  );
 
   test.each(["result", "throw"])(
     "executePlan keeps its passed result when app cleanup fails via %s",
@@ -757,6 +811,32 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     expect(b.planContent).toContain("Only B");
     expect(b.planContent).not.toContain("Only A");
     expect(b.planContent).not.toContain("__mcpSessionId");
+  });
+
+  test("a recorded swipeAt reads the screen its handler resolved from the call's context (#15663)", async () => {
+    const timer = new FakeTimer();
+    startToolCallRecording({ connectionId: "A", timer });
+    const handler = new DefaultAfterToolCallHandler();
+    await runWithToolSelectionContext(
+      { toolCallRecording: { swipeAt: { screenSize: { width: 1000, height: 2000 } } } },
+      () =>
+        handler.handle({
+          outputSchema: undefined,
+          sessionUuid: undefined,
+          name: "swipeAt",
+          args: { from: { x: 500, y: 1000 }, to: { x: 100, y: 500 }, __mcpSessionId: "A" },
+          traits: PLAN_RELEVANT,
+          device: undefined,
+          internalCall: false,
+          response: createStructuredToolResponse({ success: true }),
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: 0,
+        }),
+    );
+    const plan = stopToolCallRecording({ connectionId: "A", timer });
+    expect(plan.planContent).toContain("coordinateSpace: normalized");
+    expect(plan.planContent).toContain("x: 0.5");
   });
 
   test("configured artifact directory creates a writer and replaces observe output metadata", async () => {

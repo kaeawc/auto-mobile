@@ -217,7 +217,7 @@ describe("field helpers", () => {
 
 describe("judgeManifest", () => {
   const manifest: SdkContractManifest = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     bundleId: "dev.jasonpearson.automobile.Playground",
     runId: "run-1",
     scenario: "network",

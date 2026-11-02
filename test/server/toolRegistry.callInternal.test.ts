@@ -4,7 +4,12 @@ import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constants";
 import { ActionableError } from "../../src/models/ActionableError";
-import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { deviceActionClock } from "../../src/server/pipeline/deviceActionClock";
+import {
+  currentExecution,
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 
 /**
  * Unit guard for the `ToolRegistry.callInternal` seam (#3108).
@@ -170,7 +175,8 @@ describe("ToolRegistry.callInternal (#3108)", () => {
   });
 
   test("propagates outer execution metadata to a nested device-aware plan step", async () => {
-    const device = { name: "Pixel", deviceId: "emulator-5554", platform: "android" as const };
+    let seenExecution: ReturnType<typeof currentExecution>;
+    const device = { name: "Pixel", deviceId: "emulator-15663", platform: "android" as const };
     const originalRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
     const restore = ToolRegistry.setPipelineOverridesForTesting({
@@ -204,18 +210,25 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       ToolRegistry.registerDeviceAware("nestedStep", "Nested step", z.object({}), {
         handler: async (_device, args) => {
           captured.push({ args });
+          seenExecution = currentExecution();
           return SENTINEL;
         },
         planExecutable: true,
       });
 
+      // The outer call was admitted as a control call, so its dispatch moves the device's clock.
+      deviceActionClock.markControl("outer-execution");
       await runWithToolSelectionContext(
         { execution: { executionId: "outer-execution", startTime: 123 } },
         () => ToolRegistry.callInternal("nestedStep", {}, { forPlan: true }),
       );
+      expect(deviceActionClock.lastActionStartMs(device.deviceId)).toBe(123);
 
+      // The step runs under the outer execution ambiently; its id is not written in-band (#15663).
       expect(captured).toHaveLength(1);
-      expect(captured[0].args.__executionId).toBe("outer-execution");
+      expect(seenExecution).toMatchObject({ executionId: "outer-execution", startTime: 123 });
+      expect(captured[0].args).not.toHaveProperty("__executionId");
+      // Still in-band for the transport-deadline fallback until that moves too.
       expect(captured[0].args.__executionStartTime).toBe(123);
     } finally {
       restore();
@@ -280,6 +293,41 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
       expect(Object.keys(captured[0].args)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
       expect(captured[0].args.__mcpRequestTimeoutMs).toBe(20);
+    });
+  });
+
+  describe("a plan step's tapAt geometry (#15663)", () => {
+    test("reaches the call ambiently, never in its arguments", async () => {
+      const seen: unknown[] = [];
+      ToolRegistry.register("probe", "probe", schema, {
+        handler: async (args: Record<string, unknown>) => {
+          seen.push(getToolSelectionContext()?.tapAtPlanContext, Object.keys(args));
+          return SENTINEL;
+        },
+      });
+      const geometry = { geometry: undefined };
+
+      await ToolRegistry.callInternal("probe", { text: "a" }, { tapAtPlanContext: geometry });
+
+      expect(seen[0]).toBe(geometry);
+      expect(seen[1]).not.toContain("__tapAtPlanContext");
+    });
+
+    test("a nested call does not inherit the enclosing step's geometry", async () => {
+      const seen: unknown[] = [];
+      ToolRegistry.register("inner", "inner", schema, {
+        handler: async () => {
+          seen.push(getToolSelectionContext()?.tapAtPlanContext);
+          return SENTINEL;
+        },
+      });
+      ToolRegistry.register("outer", "outer", schema, {
+        handler: async () => ToolRegistry.callInternal("inner", {}),
+      });
+
+      await ToolRegistry.callInternal("outer", {}, { tapAtPlanContext: {} });
+
+      expect(seen).toEqual([undefined]);
     });
   });
 

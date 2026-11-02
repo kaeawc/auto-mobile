@@ -139,8 +139,10 @@ private struct DefaultPlaygroundDatabaseInspector: PlaygroundDatabaseInspecting 
 /// A real host-owned Core Data stack. Inspection uses this coordinator without saving.
 final class PlaygroundCoreDataFixture: CoreDataReadOnlyFetching, @unchecked Sendable {
     private let container: NSPersistentContainer
+    private let identifier: String
 
-    init(storeURL: URL) throws {
+    init(storeURL: URL, identifier: String = "PlaygroundItems") throws {
+        self.identifier = identifier
         let model = NSManagedObjectModel()
         let entity = NSEntityDescription()
         entity.name = "Item"
@@ -155,7 +157,7 @@ final class PlaygroundCoreDataFixture: CoreDataReadOnlyFetching, @unchecked Send
         quantity.isOptional = false
         entity.properties = [name, quantity]
         model.entities = [entity]
-        container = NSPersistentContainer(name: "PlaygroundItems", managedObjectModel: model)
+        container = NSPersistentContainer(name: identifier, managedObjectModel: model)
         // Add the app's SQLite store synchronously; all later reads reuse this coordinator.
         try container.persistentStoreCoordinator.addPersistentStore(
             ofType: NSSQLiteStoreType, configurationName: nil, at: storeURL,
@@ -179,8 +181,12 @@ final class PlaygroundCoreDataFixture: CoreDataReadOnlyFetching, @unchecked Send
         let fixture = try PlaygroundCoreDataFixture(
             storeURL: databaseURL.deletingLastPathComponent().appendingPathComponent("items.sqlite")
         )
-        DatabaseInspector.shared.registerCoreDataStore(CoreDataStoreRegistration(
-            identifier: "PlaygroundItems", modelVersion: "1", entities: ["Item"], fetcher: fixture
+        fixture.register()
+    }
+
+    func register(with inspector: DatabaseInspector = .shared) {
+        inspector.registerCoreDataStore(CoreDataStoreRegistration(
+            identifier: identifier, modelVersion: "1", entities: ["Item"], fetcher: self
         ))
     }
 

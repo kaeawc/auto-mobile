@@ -8,6 +8,7 @@ import { type ToolTransportRecovery } from "../daemon/toolTransportRecovery";
 
 import { DeviceReadiness, type DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
+import type { TapAtPlanContext } from "../models/TapAtGeometry";
 
 import { type DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 
@@ -61,6 +62,8 @@ export interface DeviceAwareToolHandler<T = Record<string, unknown>> {
 
 export interface InternalToolCallOptions {
   forPlan?: boolean;
+  /** A plan step's tapAt geometry, for this one call (#15663). */
+  tapAtPlanContext?: TapAtPlanContext;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -74,6 +77,8 @@ export interface InternalToolCallRequest extends InternalToolCallOptions {
 
 export interface InternalToolInvocationContext {
   args: Record<string, unknown>;
+  /** Always present, so a nested call replaces rather than inherits a step's geometry. */
+  tapAtPlanContext: TapAtPlanContext | undefined;
   routingSessionUuid?: string;
   toolSelectionProfileUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;

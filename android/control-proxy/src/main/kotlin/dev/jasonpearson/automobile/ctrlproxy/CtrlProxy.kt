@@ -17,7 +17,6 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.SystemClock
-import android.provider.Settings
 import android.util.Base64
 import android.util.Log
 import android.view.Display
@@ -31,7 +30,6 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
-import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
@@ -42,71 +40,41 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPinnedShortcutPlatform
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeScreenShapeSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
-import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
 import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundTracker
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHiddenCapture
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
-import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
-import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundOrUnscoped
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
-import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
-import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
-import dev.jasonpearson.automobile.protocol.PrototypeSpec
-import dev.jasonpearson.automobile.protocol.RequestCommitText
-import dev.jasonpearson.automobile.protocol.RequestDrag
-import dev.jasonpearson.automobile.protocol.RequestGestureEnd
-import dev.jasonpearson.automobile.protocol.RequestGestureStart
-import dev.jasonpearson.automobile.protocol.RequestGlobalAction
-import dev.jasonpearson.automobile.protocol.RequestHierarchy
-import dev.jasonpearson.automobile.protocol.RequestImeAction
-import dev.jasonpearson.automobile.protocol.RequestInsertText
-import dev.jasonpearson.automobile.protocol.RequestPinch
-import dev.jasonpearson.automobile.protocol.RequestScreenshot
-import dev.jasonpearson.automobile.protocol.RequestSetText
-import dev.jasonpearson.automobile.protocol.RequestSwipe
-import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
-import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
-import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.File
@@ -122,13 +90,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.put
-import okhttp3.OkHttpClient
 
 // AccessibilityEvent constants are inlined on every API level; preserve the subscribed values.
 private const val SPEECH_STATE_CHANGE_EVENT = 0x02000000 // TYPE_SPEECH_STATE_CHANGE, API 33.
@@ -169,7 +133,7 @@ internal fun findNodeByResourceIdOnRootDisplay(
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
  * automated testing and UI interaction.
  */
-class CtrlProxy : AccessibilityService(), CtrlProxyActions {
+class CtrlProxy : AccessibilityService() {
 
   companion object {
     private const val TAG = "CtrlProxy"
@@ -298,7 +262,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       ),
     )
   }
-  private val prototypePlatform by prototypePlatformDelegate
+  internal val prototypePlatform by prototypePlatformDelegate
 
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is
@@ -321,7 +285,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       logError = { message, error -> Log.e(TAG, message, error) },
     )
 
-  private val serviceScope: CoroutineScope =
+  internal val serviceScope: CoroutineScope =
     CoroutineScope(Dispatchers.IO + SupervisorJob() + serviceScopeGuard.handler)
 
   // Prototype cleanup must finish on Main even after serviceScope is cancelled during teardown.
@@ -335,7 +299,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
    * can emit a correlated error frame if the launch throws before a guarded result helper runs.
    */
-  private fun launchRequestScope(
+  internal fun launchRequestScope(
     requestId: String?,
     block: suspend CoroutineScope.() -> Unit,
   ): Job =
@@ -371,7 +335,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * running — there is then no socket to send the fallback on, so the awaiter falls back to its
    * timeout, the same as the double-failure tail. See [ResultBroadcaster].
    */
-  private val resultBroadcaster =
+  internal val resultBroadcaster =
     ResultBroadcaster(
       broadcastError = { response ->
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
@@ -417,7 +381,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
-  private val viewHierarchyExtractor =
+  internal val viewHierarchyExtractor =
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
@@ -454,7 +418,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
-  private lateinit var webSocketServer: WebSocketServer
+  internal lateinit var webSocketServer: WebSocketServer
   private val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
   private val deviceEvents =
     DeviceEventBroadcaster(
@@ -496,10 +460,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
-  private lateinit var prototypeController: PrototypeController
+  internal lateinit var prototypeController: PrototypeController
 
   /** `via: "host"` prototype requests: sent over the socket to the latest connected host. */
-  private val hostPrototypeHttp =
+  internal val hostPrototypeHttp =
     HostPrototypeHttpClient(
       PrototypeHostLink { frame ->
         if (::webSocketServer.isInitialized) webSocketServer.sendToHost(frame) else null
@@ -517,7 +481,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       action = { prototypeController.onConfigurationChanged() },
     )
   // Hides the prototype while another app is in front, restores it on return (#10261).
-  private val prototypeForeground by lazy {
+  internal val prototypeForeground by lazy {
     PrototypeForegroundTracker(
       CoroutinePrototypeScheduler(serviceScope),
       ownPackage = packageName,
@@ -525,7 +489,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       onChanged = { refreshPrototypeWindowNow() },
     )
   }
-  private val prototypeResultSink =
+  internal val prototypeResultSink =
     PrototypeResultBroadcaster(
       object : PrototypeResultTransport {
         override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
@@ -541,7 +505,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // Asset bytes live in the cache directory, never in the heap; cleared with the prototype session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
   // main-thread clear or lookup never touches the disk.
-  private val prototypeAssets by lazy {
+  internal val prototypeAssets by lazy {
     PrototypeAssetStore(
       PrototypeAssetDirectory(File(cacheDir, "prototype-assets")),
       session = {
@@ -551,7 +515,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   // Decoded bitmaps of stored assets, dropped as soon as the store replaces, removes or clears one.
-  private val prototypeImages by lazy {
+  internal val prototypeImages by lazy {
     PrototypeImageCache(prototypeAssets, BitmapPrototypeImageDecoder()).also { images ->
       // The store has one listener slot, so fan a change out to both caches.
       prototypeAssets.setChangeListener { ids ->
@@ -561,18 +525,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
   // Loaded custom fonts (`fontFamily: {asset}`), dropped when the store changes an asset.
-  private val prototypeFonts by lazy {
+  internal val prototypeFonts by lazy {
     PrototypeFontCache(prototypeAssets, ComposePrototypeFontLoader())
   }
   // Values a spec's storage block keeps across shows (#12522); writes are coalesced on the service
   // scope and hit the disk on IO.
-  private val prototypeStorage by lazy {
+  internal val prototypeStorage by lazy {
     PrototypeStoragePersistence(
       PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
       CoroutinePrototypeScheduler(serviceScope),
     )
   }
-  private val savedPrototypeController by lazy {
+  internal val savedPrototypeController by lazy {
     SavedPrototypeController(
       SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
       prototypeAssets,
@@ -586,16 +550,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
-  private val prototypeAssetController by lazy {
+  internal val prototypeAssetController by lazy {
     PrototypeAssetController(
       prototypeAssets,
       prototypeResultSink,
       PrototypeBase64Decoder { Base64.decode(it, Base64.DEFAULT) },
     )
   }
-  private lateinit var overlayManager: OverlayManager
+  internal lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
-  private val globalActionController by lazy {
+  internal val globalActionController by lazy {
     GlobalActionController(
       host =
         object : GlobalActionController.Host {
@@ -611,7 +575,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
     )
   }
-  private val screenshotRequests by lazy {
+  internal val screenshotRequests by lazy {
     ScreenshotRequestHandler(
       host =
         object : ScreenshotRequestHandler.Host {
@@ -682,7 +646,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
-  private val permissionController by lazy {
+  internal val permissionController by lazy {
     PermissionController(
       permissions = { permission, request ->
         permissionManager.getPermissionState(permission, request)
@@ -702,7 +666,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val deviceAdminComponent by lazy {
     ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
-  private val caCertificateController by lazy {
+  internal val caCertificateController by lazy {
     CaCertificateController(
       dependencies =
         CaCertificateDependencies(
@@ -730,7 +694,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val settingsController by lazy {
+  internal val settingsController by lazy {
     SettingsController(
       contentResolver = { contentResolver },
       perfProvider = perfProvider,
@@ -738,7 +702,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val packageController by lazy {
+  internal val packageController by lazy {
     PackageController(
       packageManager = { packageManager },
       currentUserId = CurrentUserId::current,
@@ -746,7 +710,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val storageController by lazy {
+  internal val storageController by lazy {
     StorageController(
       manager = { storageSubscriptionManager },
       asyncActionRunner = asyncActionRunner,
@@ -764,7 +728,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
-  private val appDiscovery by lazy {
+  internal val appDiscovery by lazy {
     AppDiscoveryController(
       source =
         object : AppDiscoveryController.Source {
@@ -794,7 +758,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
     )
   }
-  private val clipboardController by lazy {
+  internal val clipboardController by lazy {
     ClipboardController(
       clipboardManager = { clipboardManager },
       activeWindowRoot = { rootInActiveWindow },
@@ -825,7 +789,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
-  private val deviceInfoController by lazy {
+  internal val deviceInfoController by lazy {
     DeviceInfoController(
       context = this,
       serviceInfo = { serviceInfo },
@@ -949,7 +913,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       jsonCompact = jsonCompact,
     )
   }
-  private val nodeActionController by lazy {
+  internal val nodeActionController by lazy {
     NodeActionController(
       host =
         object : NodeActionController.Host {
@@ -982,7 +946,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val focusController by lazy {
+  internal val focusController by lazy {
     FocusController(
       host =
         object : FocusController.Host {
@@ -1032,7 +996,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Set text, insert text, IME actions and select all. Constructed eagerly (not `by lazy`) because
    * gesture, event and command paths invalidate its remembered insert caret from the first event.
    */
-  private val textInputController =
+  internal val textInputController =
     TextInputController(
       host =
         object : TextInputController.Host {
@@ -1072,7 +1036,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         ),
     )
   /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
-  private val imeController by lazy {
+  internal val imeController by lazy {
     ImeController(
       host =
         object : ImeController.Host {
@@ -1107,7 +1071,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   /** Recomposition tracking, network mock rules and error simulation broadcasts to the app. */
-  private val sdkControlController by lazy {
+  internal val sdkControlController by lazy {
     SdkControlController(
       host =
         object : SdkControlController.Host {
@@ -1137,7 +1101,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Tap, swipe, multi-finger, pinch, drag and streamed gestures plus their result frames, and the
    * dedicated gesture thread their callbacks run on.
    */
-  private val gestureController =
+  internal val gestureController =
     GestureController(
       host =
         object : GestureController.Host {
@@ -1174,7 +1138,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       gestureThreadFactory = { gestureThreadFactory() },
     )
   @Volatile private var lastWindowClassName: String? = null
-  private val frameContextGate =
+  internal val frameContextGate =
     FrameContextGate(
       epoch = UUID.randomUUID().toString(),
       asyncActionRunner = asyncActionRunner,
@@ -1182,7 +1146,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcast = { webSocketServer.broadcast(it) },
     )
 
-  private val staleFrames =
+  internal val staleFrames =
     StaleFrameRejector(
       isStale = frameContextGate::isStale,
       host =
@@ -1273,11 +1237,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
 
-  private val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
+  internal val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
   private fun currentFrameContext(): String = frameContextGate.current()
 
-  private val accessibilityFlags =
+  internal val accessibilityFlags =
     AccessibilityFlagsController(
       object : AccessibilityFlagsController.Host {
         override fun updateServiceFlags(compute: (currentFlags: Int) -> Int?): Boolean {
@@ -1434,7 +1398,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   // Lazy: needs the service context, and the controller built below outlives reconnects.
-  private val prototypeDisplays by lazy { AndroidPrototypeDisplays(this) }
+  internal val prototypeDisplays by lazy { AndroidPrototypeDisplays(this) }
 
   override fun onServiceConnected() {
     super.onServiceConnected()
@@ -1477,110 +1441,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
-        // Locks are shared safety facts; foreground suspension is request-local per surface.
-        val windowBlocked = { this@CtrlProxy.prototypeWindowBlocked() }
-        val createPrototypeHost = {
-          DefaultPrototypeHost(
-            context = this,
-            displayWindows = prototypeDisplays,
-            onWindowAttached = {
-              ownWindowTypeMemo.clear()
-              overlayManager.setPrototypeAttached(true)
-            },
-            onWindowLost = ::refreshPrototypeWindow,
-            isBlocked = windowBlocked,
-            imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
-            backScope = serviceScope,
-          )
-        }
-        prototypeController =
-          PrototypeController(
-            createPrototypeHost(),
-            prototypeResultSink,
-            onDismissed = {
-              ownWindowTypeMemo.clear()
-              withContext(Dispatchers.Main.immediate) {
-                overlayManager.setPrototypeAttached(false)
-              }
-            },
-            lifecycle =
-              PrototypeLifecycle(
-                CoroutinePrototypeScheduler(serviceScope),
-                isBlocked = windowBlocked,
-                observerSession = {
-                  if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
-                  else 0
-                },
-                clientCount = {
-                  // Unknown (server not up yet) counts as connected: never drop a prototype on a
-                  // guess.
-                  if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 1
-                },
-              ),
-            eventSink =
-              PrototypeEventSink { event ->
-                if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-                  resultBroadcaster.guard(null, "prototype_event") {
-                    webSocketServer.broadcastWithPerf { _ -> prototypeEventFrame(event) }
-                  }
-                }
-              },
-            storage = prototypeStorage,
-            backdropSupport =
-              PrototypeBackdropSupport {
-                // Cross-window blur can be switched off at runtime (battery saver, developer
-                // option).
-                Build.VERSION.SDK_INT >= PrototypeBackdrops.MIN_BLUR_SDK &&
-                  getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
-              },
-            windowOnScreen =
-              PrototypeWindowProbe(
-                sdkInt = Build.VERSION.SDK_INT,
-                source =
-                  object : PrototypeWindowProbe.Source<AccessibilityWindowInfo> {
-                    override fun legacyWindows(): List<AccessibilityWindowInfo>? = windows
-
-                    override fun displayWindows(displayId: Int) =
-                      viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId).windows
-
-                    override fun hasTitle(window: AccessibilityWindowInfo) =
-                      hasPrototypeTitle(window.type, window.title)
-
-                    override fun rootPackage(window: AccessibilityWindowInfo): String? {
-                      val root = window.root
-                      return try {
-                        root?.packageName?.toString()
-                      } finally {
-                        root?.recycle()
-                      }
-                    }
-                  },
-                ownPackage = packageName,
-                onFailure = { Log.d(TAG, "Could not determine prototype window visibility", it) },
-              ),
-            displays = prototypeDisplays,
-            clearAssets = { prototypeAssets.clear() },
-            hasAsset = { prototypeAssets.lookup(it) != null },
-            validateShaders = { validatePrototypeShaderUniforms(it, prototypeAssets::lookup) },
-            images = prototypeImages,
-            // The host grants this appop before showing a window.layer "app" prototype.
-            appLayerPermitted = {
-              Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Settings.canDrawOverlays(this)
-            },
-            packageName = packageName,
-            fonts = prototypeFonts,
-            foreground = prototypeForeground,
-            deviceAppearance = AndroidPrototypeDeviceAppearance(this),
-            deviceLocale = AndroidPrototypeDeviceLocale(this),
-            hostFactory = createPrototypeHost,
-            httpClients =
-              PrototypeHttpClients(
-                host = hostPrototypeHttp,
-                device = RetrofitPrototypeHttpClient(OkHttpClient()),
-              ),
-            requestScope = serviceScope,
-            platform = prototypePlatform,
-          )
+        prototypeController = createPrototypeController()
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
       }
@@ -1853,14 +1714,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
   }
 
-  // ===========================================================================
-  // CtrlProxyActions — inbound WebSocket commands dispatched by CtrlProxyMessageHandler.
-  // Each method delegates to the corresponding perform*/handle* implementation below.
-  // ===========================================================================
+  /** The WebSocket server once [onServiceConnected] has created it; null before then. */
+  internal val webSocketServerOrNull: WebSocketServer?
+    get() = if (::webSocketServer.isInitialized) webSocketServer else null
+
+  /** The inbound WebSocket commands, dispatched by [CtrlProxyMessageHandler]. */
+  internal val actions: CtrlProxyActions = CtrlProxyActionRouter(this)
 
   internal fun queuedMessageHandler(
     delegate: WebSocketMessageHandler =
-      CtrlProxyMessageHandler(actions = this, log = { Log.w(TAG, it) }),
+      CtrlProxyMessageHandler(actions = actions, log = { Log.w(TAG, it) }),
     scope: CoroutineScope = serviceScope,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     capacity: Int = INBOUND_COMMAND_CAPACITY,
@@ -1914,456 +1777,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override suspend fun requestHierarchy(request: RequestHierarchy) =
-    hierarchyController.requestHierarchy(request)
-
-  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
-    hierarchyController.requestHierarchyIfStale(sinceTimestamp, requestId)
-
-  override suspend fun setHierarchyInterval(intervalMs: Long?) =
-    hierarchyController.setHierarchyInterval(intervalMs)
-
-  override suspend fun requestScreenshot(request: RequestScreenshot) {
-    val requestId = request.requestId
-    val displayId = request.displayId
-    val hidePrototypes = request.hidePrototypes
-
-    screenshotRequests.broadcastScreenshot(requestId, displayId, hidePrototypes)
-  }
-
-  override suspend fun requestDoubleTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    frameContext: String?,
-    displayId: Int?,
-  ) {
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
-      return
-    gestureController.performTapCoordinates(
-      RequestTapCoordinates(
-        requestId = requestId,
-        x = x,
-        y = y,
-        duration = 50L,
-        frameContext = frameContext,
-        displayId = displayId,
-        doubleTap = true,
-      ),
-    )
-  }
-
-  override suspend fun requestTapCoordinates(request: RequestTapCoordinates) {
-    val requestId = request.requestId
-    val frameContext = request.frameContext
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
-      return
-    // A plain tap request is never a double tap; that arrives as its own request.
-    gestureController.performTapCoordinates(request.copy(doubleTap = false))
-  }
-
-  override suspend fun requestSwipe(request: RequestSwipe) {
-    val requestId = request.requestId
-    val frameContext = request.frameContext
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE))
-      return
-    gestureController.performSwipe(request)
-  }
-
-  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) =
-    gestureController.performTwoFingerSwipe(request)
-
-  override suspend fun requestDrag(request: RequestDrag) {
-    val requestId = request.requestId
-    val frameContext = request.frameContext
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG))
-      return
-    // The drag reads the resolved durations, so the legacy holdTime/duration fields need no copy.
-    gestureController.performDrag(request)
-  }
-
-  override suspend fun requestPinch(request: RequestPinch) = gestureController.performPinch(request)
-
-  override suspend fun requestGestureStart(request: RequestGestureStart) =
-    gestureController.startStream(request, requester = CommandOriginContext.currentClient())
-
-  override suspend fun requestGestureMove(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-  ) {
-    gestureController.moveStream(requestId, gestureId, x, y)
-  }
-
-  override suspend fun requestGestureEnd(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-    cancel: Boolean,
-  ) {
-    gestureController.endStream(
-      RequestGestureEnd(
-        requestId = requestId,
-        gestureId = gestureId,
-        x = x,
-        y = y,
-        cancel = cancel,
-      ),
-      requester = CommandOriginContext.currentClient(),
-    )
-  }
-
-  override suspend fun requestSetText(request: RequestSetText) {
-    val requestId = request.requestId
-    val text = request.text
-    val resourceId = request.resourceId
-    val dismissKeyboard = request.dismissKeyboard
-    val frameContext = request.frameContext
-
-    if (
-      staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)
-    )
-      return
-    textInputController.performSetText(requestId, text, resourceId, dismissKeyboard)
-  }
-
-  override suspend fun requestInsertTextState(requestId: String?) =
-    textInputController.handleInsertTextState(requestId)
-
-  override suspend fun requestInsertText(request: RequestInsertText) {
-    val requestId = request.requestId
-    val text = request.text
-    val expectedSuffix = request.expectedSuffix
-    val acceptsCaretNotPlaced = request.acceptsCaretNotPlaced
-    val precedingState = request.precedingState
-
-    textInputController.performInsertText(
-      requestId,
-      text,
-      expectedSuffix,
-      acceptsCaretNotPlaced,
-      precedingState,
-    )
-  }
-
-  override suspend fun requestCommitText(request: RequestCommitText) =
-    imeController.requestCommitText(request)
-
-  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
-    imeController.requestCancelImeCommit(requestId, targetRequestId)
-
-  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
-    imeController.requestSetKeyboardProfile(requestId, profileId)
-
-  override suspend fun requestListKeyboardProfiles(
-    requestId: String?,
-    supportedCatalogVersions: List<Int>,
-  ) = imeController.requestListKeyboardProfiles(requestId, supportedCatalogVersions)
-
-  override suspend fun requestImeAction(request: RequestImeAction) {
-    val requestId = request.requestId
-    val action = request.action
-    val frameContext = request.frameContext
-
-    if (
-      staleFrames.rejectStaleFrameContext(
-        requestId,
-        frameContext,
-        StaleFrameContextAction.IME_ACTION,
-      )
-    )
-      return
-    textInputController.performImeAction(requestId, action)
-  }
-
-  override suspend fun requestSelectAll(requestId: String?) =
-    textInputController.performSelectAll(requestId)
-
-  override suspend fun requestClickFocusedInput(requestId: String?) =
-    nodeActionController.clickFocusedInputRequest(requestId)
-
-  override suspend fun requestAction(
-    requestId: String?,
-    action: String,
-    resourceId: String?,
-    selector: NodeSelector?,
-    arguments: NodeActionArguments,
-  ) = nodeActionController.performNodeAction(requestId, action, resourceId, selector, arguments)
-
-  override suspend fun requestActivateAccessibilityLink(
-    requestId: String?,
-    text: String,
-    occurrence: Int,
-    selector: NodeSelector?,
-  ) = nodeActionController.performAccessibilityLinkActivation(requestId, text, occurrence, selector)
-
-  override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
-    clipboardController.performClipboard(requestId, action, text)
-
-  override suspend fun installCaCert(requestId: String?, certificate: String) =
-    caCertificateController.performInstallCaCertificate(requestId, certificate)
-
-  override suspend fun installCaCertFromPath(requestId: String?, devicePath: String) =
-    caCertificateController.performInstallCaCertificateFromPath(requestId, devicePath)
-
-  override suspend fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
-    caCertificateController.performRemoveCaCertificate(requestId, alias, certificate)
-
-  override suspend fun requestGlobalAction(request: RequestGlobalAction) {
-    val requestId = request.requestId
-    val action = request.action
-    val frameContext = request.frameContext
-
-    if (
-      staleFrames.rejectStaleFrameContext(
-        requestId,
-        frameContext,
-        StaleFrameContextAction.GLOBAL_ACTION,
-      )
-    )
-      return
-    globalActionController.performGlobalActionRequest(requestId, action)
-  }
-
-  override suspend fun validateFrameContext(requestId: String?, frameContext: String) =
-    frameContextGate.validate(requestId, frameContext)
-
-  override suspend fun requestDeviceInfo(requestId: String?) =
-    deviceInfoController.performDeviceInfoRequest(requestId)
-
-  override suspend fun getDeviceOwnerStatus(requestId: String?) =
-    caCertificateController.performGetDeviceOwnerStatus(requestId)
-
-  override suspend fun getPermission(
-    requestId: String?,
-    permission: String?,
-    requestPermission: Boolean?,
-  ) = permissionController.getPermission(requestId, permission, requestPermission)
-
-  override suspend fun setRecompositionTracking(enabled: Boolean) =
-    sdkControlController.setRecompositionTrackingEnabled(enabled)
-
-  override suspend fun setAccessibilityFlags(
-    includeNotImportantViews: Boolean,
-    reportViewIds: Boolean,
-    retrieveInteractiveWindows: Boolean,
-    occlusionEnabled: Boolean,
-  ) {
-    accessibilityFlags.apply(
-      includeNotImportantViews = includeNotImportantViews,
-      reportViewIds = reportViewIds,
-      retrieveInteractiveWindows = retrieveInteractiveWindows,
-      occlusionEnabled = occlusionEnabled,
-    )
-  }
-
-  override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
-    sdkControlController.broadcastNetworkMockRules(requestId, rulesJson)
-
-  override suspend fun setNetworkErrorSimulation(
-    enabled: Boolean,
-    errorType: String?,
-    limit: Int?,
-    expiresAtEpochMs: Long?,
-    remainingMs: Long?,
-  ) =
-    sdkControlController.broadcastNetworkErrorSimulation(
-      enabled,
-      errorType,
-      limit,
-      expiresAtEpochMs,
-      remainingMs,
-    )
-
-  override suspend fun getCurrentFocus(requestId: String?) =
-    focusController.handleGetCurrentFocus(requestId)
-
-  override suspend fun getTraversalOrder(requestId: String?) =
-    focusController.handleGetTraversalOrder(requestId)
-
-  override suspend fun addHighlight(
-    requestId: String?,
-    highlightId: String?,
-    shape: HighlightShape?,
-  ) = focusController.handleAddHighlight(requestId, highlightId, shape)
-
-  override suspend fun showPrototype(
-    requestId: String?,
-    spec: PrototypeSpec,
-    displayId: Int?,
-    reset: Boolean,
-    appearance: PrototypeAppearanceOverride?,
-    replaceOthers: Boolean,
-    locale: String?,
-  ) {
-    launchRequestScope(requestId) {
-      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers, locale)
-    }
-  }
-
-  override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
-    launchRequestScope(requestId) { prototypeController.dismiss(requestId, id, all) }
-  }
-
-  override suspend fun savePrototype(
-    requestId: String?,
-    spec: PrototypeSpec,
-    label: String,
-    icon: String?,
-  ) {
-    launchRequestScope(requestId) { savedPrototypeController.save(requestId, spec, label, icon) }
-  }
-
-  override suspend fun pinSavedPrototype(requestId: String?, id: String, icon: String?) {
-    launchRequestScope(requestId) { savedPrototypeController.pin(requestId, id, icon) }
-  }
-
-  override suspend fun listSavedPrototypes(requestId: String?) {
-    launchRequestScope(requestId) { savedPrototypeController.list(requestId) }
-  }
-
-  override suspend fun deleteSavedPrototype(requestId: String?, id: String) {
-    launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
-  }
-
-  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) {
-    launchRequestScope(requestId) { prototypeController.advanceClock(requestId, id, advanceTimeMs) }
-  }
-
-  override suspend fun clearPrototypeStorage(requestId: String?, id: String) {
-    launchRequestScope(requestId) { prototypeController.clearStorage(requestId, id) }
-  }
-
-  override suspend fun patchPrototype(
-    requestId: String?,
-    id: String,
-    baseRevision: Long?,
-    ops: JsonArray,
-  ) {
-    launchRequestScope(requestId) { prototypeController.patch(requestId, id, baseRevision, ops) }
-  }
-
-  override suspend fun inspectPrototypes(requestId: String?) {
-    launchRequestScope(requestId) { prototypeController.inspect(requestId) }
-  }
-
-  override suspend fun putPrototypeAsset(
-    requestId: String?,
-    id: String,
-    mimeType: String,
-    dataBase64: String,
-  ) {
-    launchRequestScope(requestId) {
-      prototypeAssetController.put(requestId, id, mimeType, dataBase64)
-    }
-  }
-
-  override suspend fun removePrototypeAsset(requestId: String?, id: String) {
-    launchRequestScope(requestId) { prototypeAssetController.remove(requestId, id) }
-  }
-
-  override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
-    storageController.handleListPreferenceFiles(requestId, packageName)
-
-  override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
-    storageController.handleGetPreferences(requestId, packageName, fileName)
-
-  override suspend fun resetKeystore(
-    requestId: String?,
-    packageName: String,
-    scope: String?,
-    alias: String?,
-  ) = appDiscovery.resetKeystore(requestId, packageName, scope, alias)
-
-  override suspend fun discoverKeystore(requestId: String?, packageName: String) =
-    appDiscovery.discoverKeystore(requestId, packageName)
-
-  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
-    appDiscovery.discoverSdkCapabilities(requestId, packageName, userId)
-
-  override suspend fun listDataStores(
-    requestId: String?,
-    packageName: String,
-    adapterName: String,
-  ) = storageController.handleListDataStores(requestId, packageName, adapterName)
-
-  override suspend fun getDataStore(
-    requestId: String?,
-    packageName: String,
-    adapterName: String,
-    storeName: String,
-  ) = storageController.handleGetDataStore(requestId, packageName, adapterName, storeName)
-
-  override suspend fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
-    storageController.handleSubscribeStorage(requestId, packageName, fileName)
-
-  override suspend fun unsubscribeStorage(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-  ) = storageController.handleUnsubscribeStorage(requestId, packageName, fileName)
-
-  override suspend fun getPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) = storageController.handleGetPreference(requestId, packageName, fileName, key)
-
-  override suspend fun setPreference(request: SetPreference) =
-    storageController.handleSetPreference(request)
-
-  override suspend fun removePreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) = storageController.handleRemovePreference(requestId, packageName, fileName, key)
-
-  override suspend fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
-    storageController.handleClearPreferences(requestId, packageName, fileName)
-
-  override suspend fun startRecording() {
-    // Accepted for wire compatibility; currently has no effect on the device.
-    Log.d(TAG, "Recording started")
-  }
-
-  override suspend fun stopRecording() {
-    // Accepted for wire compatibility; currently has no effect on the device.
-    Log.d(TAG, "Recording stopped")
-  }
-
-  override suspend fun requestSettingsGet(requestId: String?, namespace: String, key: String) =
-    settingsController.performSettingsRead(requestId, namespace, key)
-
-  override suspend fun requestSettingsPut(
-    requestId: String?,
-    namespace: String,
-    key: String,
-    value: String?,
-    valueType: String,
-  ) = settingsController.performSettingsWrite(requestId, namespace, key, value, valueType)
-
-  override suspend fun requestSettingsList(requestId: String?, namespace: String) =
-    settingsController.performSettingsList(requestId, namespace)
-
-  override suspend fun requestInstalledPackages(
-    requestId: String?,
-    includeSystem: Boolean,
-    userId: Int?,
-  ) = packageController.performInstalledPackages(requestId, includeSystem, userId)
-
-  override suspend fun requestPackageInfo(
-    requestId: String?,
-    packageName: String,
-    includePermissions: Boolean,
-  ) = packageController.performPackageInfo(requestId, packageName, includePermissions)
-
-  override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
-    packageController.performLaunchIntent(requestId, packageName)
-
   /** The application in front, from the accessibility windows; null when none qualifies. */
   private fun currentForegroundApp(): String? =
     prototypeForegroundOrUnscoped(
@@ -2403,7 +1816,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
-  private fun prototypeImeLiftPx(displayId: Int): Int {
+  internal fun prototypeImeLiftPx(displayId: Int): Int {
     val screen = displayController.getScreenDimensions(displayId) ?: return 0
     val windows =
       viewHierarchyExtractor.windowsForDisplay(this, displayId).map {
@@ -2418,7 +1831,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (::prototypeController.isInitialized) prototypeController.onConfigurationChanged()
   }
 
-  private fun refreshPrototypeWindow() {
+  internal fun refreshPrototypeWindow() {
     if (::prototypeController.isInitialized) {
       prototypeRefreshCoalescer.request()
     }

@@ -11,6 +11,8 @@ const PEN_PATH_UNKNOWN_WARNING =
 
 const PEN_STROKE_TOO_LONG_WARNING = `a stylus stroke was not exported because its duration exceeds the ${DRAG_PATH_MAX_TOTAL_MS / 1000} second replay limit; record a shorter stroke`;
 
+const PEN_HOVER_TOO_LONG_WARNING = `a stylus hover was not exported because its duration exceeds the ${DRAG_PATH_MAX_TOTAL_MS / 1000} second replay limit; record a shorter hover`;
+
 const HOVER_DROPPED_WARNING =
   "a pen hovered over the screen without touching it; no known position or hover distance was recorded, so nothing was exported for it";
 
@@ -31,7 +33,11 @@ export function exportLossWarning(
     return undefined;
   }
   if (gesture.type === "hover") {
-    return step ? undefined : HOVER_DROPPED_WARNING;
+    return step
+      ? undefined
+      : penStrokeExceedsReplayLimit(gesture)
+        ? PEN_HOVER_TOO_LONG_WARNING
+        : HOVER_DROPPED_WARNING;
   }
   if (!step) {
     return penStrokeExceedsReplayLimit(gesture)

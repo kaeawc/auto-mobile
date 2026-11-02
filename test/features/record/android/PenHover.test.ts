@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
+import { buildPenSampleStep } from "../../../../src/features/record/android/penSampleStep";
+import { exportLossWarning } from "../../../../src/features/record/android/penExportWarnings";
 import { GESTURE_THRESHOLDS } from "../../../../src/features/record/android/types";
 import type { GestureEvent } from "../../../../src/features/record/android/types";
 
@@ -116,6 +120,41 @@ describe("a multitouch pen that hovers without ever touching (#13084)", () => {
     "[  1.2] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
     SYN,
   ];
+
+  test("the verbatim eraser capture never emits a stylus hover", () => {
+    const capture = readFileSync(
+      join(
+        __dirname,
+        "../../../fixtures/android-uinput-pen/hover-eraser-multitouch-sendevent-getevent-lt-emulator-5610.txt",
+      ),
+      "utf8",
+    );
+    const events = hoverEvents(capture.split("\n"), { singleTouch: false });
+    expect(events.some((event) => event.toolType === "stylus")).toBe(false);
+    expect(events.map(buildPenSampleStep).filter((step) => step !== null)).toEqual([]);
+  });
+
+  test.each(["release", "replacement"] as const)(
+    "an eraser hover ending by %s is dropped with a warning instead of replaying as stylus",
+    (ending) => {
+      const lines = [
+        "[  1.0] EV_KEY BTN_TOOL_RUBBER DOWN",
+        ...HOVER_ONLY.slice(0, -2),
+        ending === "release"
+          ? "[  1.2] EV_ABS ABS_MT_TRACKING_ID ffffffff"
+          : "[  1.2] EV_ABS ABS_MT_TRACKING_ID 00000002",
+        "[  1.2] EV_KEY BTN_TOOL_RUBBER UP",
+        SYN,
+      ];
+      const events = hoverEvents(lines, { singleTouch: false });
+      expect(events).toHaveLength(1);
+      expect(events.some((event) => event.toolType === "stylus")).toBe(false);
+      expect(events[0]).toMatchObject({ type: "hover", toolType: "eraser" });
+      const step = buildPenSampleStep(events[0]);
+      expect(step).toBeNull();
+      expect(exportLossWarning(events[0], step)).toContain("nothing was exported");
+    },
+  );
 
   test("is reported once, when the pen's tracking id ends", () => {
     expect(hoverEvents(HOVER_ONLY)).toMatchObject([{ type: "hover", toolType: "stylus" }]);

@@ -77,6 +77,26 @@ describe("sampled pen plan export", () => {
     expect(buildPenSampleStep({ ...stroke(), path })).toBeNull();
   });
 
+  test("drops an over-budget hover and warns about the replay duration limit", () => {
+    const gesture: GestureEvent = {
+      type: "hover",
+      toolType: "stylus",
+      arrivedAt: 30000,
+      hover: Array.from({ length: 31 }, (_, index) => ({
+        x: index,
+        y: 20,
+        distance: 0.5,
+        arrivedAt: index * 1000,
+      })),
+    };
+    const step = buildPenSampleStep(gesture);
+    expect(step).toBeNull();
+    const warning = exportLossWarning(gesture, step);
+    expect(warning).toContain(`${DRAG_PATH_MAX_TOTAL_MS / 1000} second`);
+    expect(warning).toContain("hover");
+    expect(warning).toContain("not exported");
+  });
+
   test("exports a stroke exactly at the replay duration limit", () => {
     const path = Array.from({ length: 21 }, (_, index) => ({
       x: index,

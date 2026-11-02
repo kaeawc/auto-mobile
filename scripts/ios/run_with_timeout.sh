@@ -156,8 +156,11 @@ run_with_timeout() {
       status=124
     else
       # The watcher may be waiting on sleep; stop its whole group so the
-      # in-flight timer cannot outlive an early-finishing command.
-      kill -TERM -"${watcher_pid}" 2> /dev/null || kill "${watcher_pid}" 2> /dev/null || true
+      # in-flight timer cannot outlive an early-finishing command. Use KILL:
+      # a watcher that TERM reaches before its subshell has finished starting
+      # runs the caller's inherited EXIT trap, which ran a lane's cleanup twice
+      # (#16367). The watcher has nothing to clean up, and KILL runs no handler.
+      kill -KILL -"${watcher_pid}" 2> /dev/null || kill -KILL "${watcher_pid}" 2> /dev/null || true
       wait "${watcher_pid}" 2> /dev/null || true
       if [ -s "${fired_marker}" ]; then status=124; fi
     fi

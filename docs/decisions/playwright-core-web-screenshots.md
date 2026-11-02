@@ -10,8 +10,9 @@ Dependency: `playwright-core`
 The advisory `Prototype Web Screenshots` workflow loads the pages `buildPrototypeWebPage`
 produces in headless Chromium, asserts that they run cleanly offline and compares each screenshot
 with a golden. It drives Chromium through `playwright-core`, a devDependency pinned to an exact
-version: that version names the Chromium build the workflow installs, so a golden changes only
-when the dependency is bumped. `playwright-core` downloads no browser at package install time; the
+version: that version names the Chromium build the workflow installs, and goldens are trusted only
+from that Linux build. A golden changes when the rendered page changes and is regenerated with
+`--update`, or when the CI artifact's screenshots are adopted. `playwright-core` downloads no browser at package install time; the
 workflow installs one. Nothing in `src/` imports it, so there is still no headless browser at
 runtime. The pixel comparison reuses `diffPngs` (`pixelmatch` and `pngjs`, already direct
 dependencies).

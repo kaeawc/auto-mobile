@@ -103,7 +103,6 @@ function compareToGolden(entry: WebScreenshotCase, actual: Buffer): string | und
     return undefined;
   }
   if (!existsSync(entry.golden)) {
-    writeOutput(`${entry.name}.png`, actual);
     return `no golden at ${entry.golden}`;
   }
   const result = diffPngs(readFileSync(entry.golden), actual, {
@@ -111,11 +110,9 @@ function compareToGolden(entry: WebScreenshotCase, actual: Buffer): string | und
     pixelRatio: PIXEL_RATIO,
   });
   if (result === "size_mismatch") {
-    writeOutput(`${entry.name}.png`, actual);
     return "screenshot size differs from the golden";
   }
   if (!result.match) {
-    writeOutput(`${entry.name}.png`, actual);
     if (result.diffPng) {
       writeOutput(`${entry.name}.diff.png`, result.diffPng);
     }
@@ -159,6 +156,8 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
           await page.addStyleTag({ content: WEB_SCREENSHOT_FONT_CSS });
           await page.evaluate(() => document.fonts.ready.then(() => undefined));
           const screenshot = await page.screenshot({ animations: "disabled", caret: "hide" });
+          // Saved before any assertion, so a case that fails a functional check keeps its image.
+          writeOutput(`${entry.name}.png`, screenshot);
 
           await page.click('[data-control="rotate"]');
           const rotated = await shownView(page);

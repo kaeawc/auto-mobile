@@ -116,9 +116,9 @@ nothing at runtime drives a browser.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
   without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens. It needs the
   Chromium build of the pinned `playwright-core`:
-  `node_modules/.bin/playwright-core install --only-shell chromium`. A mismatch writes
-  `<case>.png` and `<case>.diff.png` to `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default
-  `scratch/prototype-web-screenshots/`).
+  `node_modules/.bin/playwright-core install --only-shell chromium`. Every case that reaches
+  capture writes `<case>.png`, and a pixel mismatch also `<case>.diff.png`, to
+  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`).
 - **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
   and on pull requests that touch the web renderer, its reference fixtures, the check, or
   `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux

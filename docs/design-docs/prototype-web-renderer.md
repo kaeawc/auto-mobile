@@ -12,11 +12,13 @@ the host, so the page's script only switches between views it was given and neve
 - **Input.** The spec after component expansion, with its own `state` and `data`. The stack shows
   its `start` screen. No action, timer or `request` runs.
 - **Text.** A bare `{key}` reads spec state, then a top-level `derive` entry. Repeat placeholders
-  bind each item, including the repeat's own `derive` fields. Formatting uses `en-US`, `UTC` and a
+  bind each item (a literal `items` array or a data pointer), including the repeat's own `derive`
+  fields. Control state keys bind repeat placeholders before reading state. Formatting uses `en-US`, `UTC` and a
   caller-supplied clock (default 0), so derived relative times are fixed.
-- **Conditions.** `visibleWhen` evaluates `key`, `platform`, `all`, `any` and `not` against spec
-  state. A condition the still cannot decide (data paths, validity, string operators) keeps the
-  node visible rather than hiding it on a guess.
+- **Conditions.** `visibleWhen` evaluates `key` comparisons with `all`, `any` and `not` against
+  spec state. Parts the still cannot decide (`data` and `platform` pointers, unknown keys, validity,
+  string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
+  condition counts as true, so a node is never hidden on a guess.
 - **Layout.** Rows and columns are flex lines, a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill`, `{dp}`, `weight`, padding (logical
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.

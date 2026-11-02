@@ -1,12 +1,15 @@
 import { record, type Raw } from "../prototypeTemplate";
 
-/** What a still render knows when it evaluates a condition: spec state and the target platform. */
+/** What a still render knows when it evaluates a condition: spec state only. */
 export interface ConditionScope {
   readonly state: Raw;
   readonly platform: "android" | "ios";
 }
 
-function compare(value: unknown, condition: Raw): boolean {
+/** `undefined` means the still render cannot decide. */
+type Decision = boolean | undefined;
+
+function compare(value: unknown, condition: Raw): Decision {
   if ("equals" in condition) {
     return value === condition.equals;
   }
@@ -24,33 +27,51 @@ function compare(value: unknown, condition: Raw): boolean {
       value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
     return isEmpty === condition.empty;
   }
-  // Text operators need values a still frame does not model; the node stays visible.
-  return true;
+  // Text operators need string semantics a still frame does not model.
+  return undefined;
 }
 
-/**
- * Whether a `visibleWhen` or `enabledWhen` condition holds. A condition the still render cannot
- * decide (data paths, unknown keys, validity) counts as true, so a node is never hidden by a guess.
- */
-export function conditionHolds(condition: unknown, scope: ConditionScope): boolean {
-  const raw = record(condition);
-  if (!raw) {
+function all(decisions: Decision[]): Decision {
+  if (decisions.includes(false)) {
+    return false;
+  }
+  return decisions.includes(undefined) ? undefined : true;
+}
+
+function any(decisions: Decision[]): Decision {
+  if (decisions.includes(true)) {
     return true;
   }
+  return decisions.includes(undefined) ? undefined : false;
+}
+
+function decide(condition: unknown, scope: ConditionScope): Decision {
+  const raw = record(condition);
+  if (!raw) {
+    return undefined;
+  }
   if (Array.isArray(raw.all)) {
-    return raw.all.every((entry) => conditionHolds(entry, scope));
+    return all(raw.all.map((entry) => decide(entry, scope)));
   }
   if (Array.isArray(raw.any)) {
-    return raw.any.some((entry) => conditionHolds(entry, scope));
+    return any(raw.any.map((entry) => decide(entry, scope)));
   }
   if (raw.not !== undefined) {
-    return !conditionHolds(raw.not, scope);
+    const inner = decide(raw.not, scope);
+    return inner === undefined ? undefined : !inner;
   }
-  if (raw.platform !== undefined) {
-    return compare(scope.platform, raw);
-  }
+  // `data` and `platform` are pointers into data and platform state the still does not model.
   if (typeof raw.key === "string" && Object.hasOwn(scope.state, raw.key)) {
     return compare(scope.state[raw.key], raw);
   }
-  return true;
+  return undefined;
+}
+
+/**
+ * Whether a `visibleWhen` or `enabledWhen` condition holds. Undecidable parts (data and platform
+ * pointers, unknown keys, validity, string operators) stay undecided through `all`, `any` and
+ * `not`, and only the whole condition falls back to true, so a node is never hidden by a guess.
+ */
+export function conditionHolds(condition: unknown, scope: ConditionScope): boolean {
+  return decide(condition, scope) ?? true;
 }

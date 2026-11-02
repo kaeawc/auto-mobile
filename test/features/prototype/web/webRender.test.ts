@@ -88,6 +88,39 @@ describe("prototype web still (#16346)", () => {
     ]);
   });
 
+  test("expands a literal repeat items array", () => {
+    const spec = {
+      ...reference,
+      root: {
+        type: "column",
+        testTag: "literal",
+        repeat: { as: "item", items: [{ t: "x" }, { t: "y" }] },
+        children: [{ type: "text", text: "{item.t}" }],
+      },
+    };
+    expect(textOf(byTag(renderPrototypeStill(spec), "literal")[0]!)).toBe("xy");
+  });
+
+  test("binds repeat placeholders in control state keys before reading state", () => {
+    const spec = {
+      ...reference,
+      state: { selected_a: true, selected_b: false, name_a: "Ada" },
+      root: {
+        type: "column",
+        repeat: { as: "item", items: [{ id: "a" }, { id: "b" }] },
+        children: [
+          { type: "checkbox", stateKey: "selected_{item.id}", label: "{item.id}" },
+          { type: "textField", stateKey: "name_{item.id}", placeholder: "Name" },
+        ],
+      },
+    };
+    const still = renderPrototypeStill(spec);
+    const fields = find(still.element, (element) => element.attrs.role === "textbox");
+    expect(fields.map(textOf)).toEqual(["Ada", "Name"]);
+    const checked = find(still.element, (element) => element.attrs.role === "checkbox");
+    expect(checked.map((element) => element.attrs["aria-checked"])).toEqual(["true", "false"]);
+  });
+
   for (const frame of ["pixel-9", "iphone-16"]) {
     for (const orientation of ["portrait", "landscape"] as const) {
       test(`snapshot on ${frame} in ${orientation}`, () => {

@@ -98,9 +98,13 @@ function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
   if (!repeat) {
     return list.flatMap((entry, index) => renderOrSkip(entry, scope, `${path}.children[${index}]`));
   }
+  // Items are a literal array or a pointer into the spec's data.
   const itemsPath = record(repeat.items)?.path;
-  const items =
-    typeof itemsPath === "string" ? resolvePrototypeDataPointer(scope.data, itemsPath) : undefined;
+  const items = Array.isArray(repeat.items)
+    ? repeat.items
+    : typeof itemsPath === "string"
+      ? resolvePrototypeDataPointer(scope.data, itemsPath)
+      : undefined;
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
@@ -291,7 +295,8 @@ const topAppBar: NodeRenderer = (node, scope) => {
 };
 
 const textField: NodeRenderer = (node, scope) => {
-  const key = typeof node.stateKey === "string" ? node.stateKey : undefined;
+  // A state key inside a repeat may hold item placeholders, which bind first.
+  const key = typeof node.stateKey === "string" ? bound(node.stateKey, scope) : undefined;
   const value = key === undefined ? undefined : scope.condition.state[key];
   const shown =
     typeof value === "string" && value !== ""
@@ -312,7 +317,8 @@ const textField: NodeRenderer = (node, scope) => {
 const toggle =
   (role: "switch" | "checkbox"): NodeRenderer =>
   (node, scope) => {
-    const key = typeof node.stateKey === "string" ? node.stateKey : undefined;
+    // A state key inside a repeat may hold item placeholders, which bind first.
+    const key = typeof node.stateKey === "string" ? bound(node.stateKey, scope) : undefined;
     const on = key !== undefined && scope.condition.state[key] === true;
     const mark =
       role === "switch"

@@ -40949,6 +40949,10 @@
             }
           ]
         },
+        "lowRam": {
+          "description": "Android only: use 1024 MB of AVD RAM before boot. Omitted or false preserves existing RAM defaults. Explicit device.spec.configuration.memoryMb must equal 1024 when true; unavailable for API 30+ Play Store images, which require at least 2048 MB.",
+          "type": "boolean"
+        },
         "boot": {
           "description": "Boot the resolved device after creation or adoption",
           "default": true,
@@ -52074,7 +52078,7 @@
                       "additionalProperties": false
                     }
                   ],
-                  "description": "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running. Nothing to reset; 'unset' is a no-op."
+                  "description": "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running; a foreground app must get a RUNNING_* level (RUNNING_MODERATE, RUNNING_LOW, RUNNING_CRITICAL) because Android refuses HIDDEN, BACKGROUND, MODERATE and COMPLETE for a foreground app. Nothing to reset; 'unset' is a no-op."
                 },
                 "clearPackageData": {
                   "anyOf": [

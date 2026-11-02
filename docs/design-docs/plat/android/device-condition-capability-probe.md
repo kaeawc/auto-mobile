@@ -46,23 +46,23 @@ per command. A row is `yes` when the command's output shows the subcommand or va
 there, and `no` otherwise, with the first output line kept as a note. Probe commands are
 read-only. A failing command is recorded in the matrix and never stops the script.
 
-| Capability                                                      | Probe                            | Used by                | Observed  |
-| --------------------------------------------------------------- | -------------------------------- | ---------------------- | --------- |
-| `ro.secure`, `ro.debuggable`                                    | `getprop`                        | #14060, #14062         | _pending_ |
-| SELinux mode                                                    | `getenforce`                     | #14060, #14062         | _pending_ |
-| `am send-trim-memory`, `am crash`                               | `am help`                        | #14068                 | _pending_ |
-| `dumpsys battery set/unplug/reset`                              | `dumpsys battery -h`             | #14063                 | _pending_ |
-| `thermalservice inject-temperature/override-status`             | `cmd thermalservice help`        | #14063                 | _pending_ |
-| `always_finish_activities`                                      | `settings get global`            | #14068                 | _pending_ |
-| `ro.boot.verifiedbootstate`, `ro.boot.flash.locked` naming      | `getprop`                        | #14062, #14074         | _pending_ |
-| Kernel release (GKI 2.0 for KernelSU)                           | `uname -r`                       | #14070                 | _pending_ |
-| Magisk                                                          | `magisk --path`                  | #14070                 | _pending_ |
-| `CONFIG_FAULT_INJECTION`, `CONFIG_NET_SCH_NETEM`                | `zcat /proc/config.gz`           | #14066                 | _pending_ |
-| debugfs `fail_*` knobs                                          | `ls -d /sys/kernel/debug/fail_*` | #14066                 | _pending_ |
-| `tc`                                                            | `which tc`                       | network shaping        | _pending_ |
-| `pm` subcommands                                                | `pm help`                        | #14069                 | _pending_ |
-| `toybox fallocate`, `toybox dd`                                 | `toybox`                         | #14066                 | _pending_ |
-| Console `rotate`, `power`, `sensor`, `network`, `finger`, `avd` | `adb emu help <verb>`            | #14057, #14063, #14065 | _pending_ |
+| Capability                                                      | Probe                            | Used by                | Observed                                                                                                                                                   |
+| --------------------------------------------------------------- | -------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ro.secure`, `ro.debuggable`                                    | `getprop`                        | #14060, #14062         | _pending_                                                                                                                                                  |
+| SELinux mode                                                    | `getenforce`                     | #14060, #14062         | _pending_                                                                                                                                                  |
+| `am send-trim-memory`, `am crash`                               | `am help`                        | #14068                 | Verified on Android 12L emulator (API 32): foreground accepts RUNNING_*; HIDDEN/BACKGROUND/MODERATE/COMPLETE refused; background accepts all seven levels. |
+| `dumpsys battery set/unplug/reset`                              | `dumpsys battery -h`             | #14063                 | _pending_                                                                                                                                                  |
+| `thermalservice inject-temperature/override-status`             | `cmd thermalservice help`        | #14063                 | _pending_                                                                                                                                                  |
+| `always_finish_activities`                                      | `settings get global`            | #14068                 | _pending_                                                                                                                                                  |
+| `ro.boot.verifiedbootstate`, `ro.boot.flash.locked` naming      | `getprop`                        | #14062, #14074         | _pending_                                                                                                                                                  |
+| Kernel release (GKI 2.0 for KernelSU)                           | `uname -r`                       | #14070                 | _pending_                                                                                                                                                  |
+| Magisk                                                          | `magisk --path`                  | #14070                 | _pending_                                                                                                                                                  |
+| `CONFIG_FAULT_INJECTION`, `CONFIG_NET_SCH_NETEM`                | `zcat /proc/config.gz`           | #14066                 | _pending_                                                                                                                                                  |
+| debugfs `fail_*` knobs                                          | `ls -d /sys/kernel/debug/fail_*` | #14066                 | _pending_                                                                                                                                                  |
+| `tc`                                                            | `which tc`                       | network shaping        | _pending_                                                                                                                                                  |
+| `pm` subcommands                                                | `pm help`                        | #14069                 | _pending_                                                                                                                                                  |
+| `toybox fallocate`, `toybox dd`                                 | `toybox`                         | #14066                 | _pending_                                                                                                                                                  |
+| Console `rotate`, `power`, `sensor`, `network`, `finger`, `avd` | `adb emu help <verb>`            | #14057, #14063, #14065 | _pending_                                                                                                                                                  |
 
 ## `capabilityProbe` helper (proposal)
 

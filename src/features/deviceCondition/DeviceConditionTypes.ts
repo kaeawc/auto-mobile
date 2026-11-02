@@ -320,7 +320,7 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .union([z.literal(DEVICE_CONDITION_UNSET), trimTargetSchema()])
           .optional()
           .describe(
-            "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running. Nothing to reset; 'unset' is a no-op.",
+            "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running; a foreground app must get a RUNNING_* level (RUNNING_MODERATE, RUNNING_LOW, RUNNING_CRITICAL) because Android refuses HIDDEN, BACKGROUND, MODERATE and COMPLETE for a foreground app. Nothing to reset; 'unset' is a no-op.",
           ),
         clearPackageData: z
           .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])

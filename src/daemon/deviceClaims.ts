@@ -26,7 +26,13 @@ export interface DeviceClaim {
   updatedAtMs: number;
 }
 
-/** The host-wide `device_claims` table. Step (b) only writes it beside the claim files. */
+/**
+ * The row a compare-and-set judged: its owner and the write that put it there. Two writes by one
+ * owner within the same millisecond share `updatedAtMs`, so they are not told apart.
+ */
+export type DeviceClaimVersion = Pick<DeviceClaim, "pid" | "ownerToken" | "updatedAtMs">;
+
+/** The host-wide `device_claims` table: it decides Android and iOS claims (#11811 step d). */
 export interface DeviceClaims {
   /**
    * The claim-file winner is recorded, replacing any earlier row for the device. A row written
@@ -34,6 +40,13 @@ export interface DeviceClaims {
    * claim must not replace the winner's row.
    */
   upsert(claim: DeviceClaim): Promise<void>;
+  /**
+   * The atomic claim (#11811 step d): writes `claim` only while the device's row is still the one
+   * the caller judged: no row when `expected` is undefined, else the row `expected` read (same
+   * owner and same `updatedAtMs`, so an owner that released and claimed again in between is a
+   * different row). Returns false when the row changed meanwhile, so of two racing writers one wins.
+   */
+  replaceIf(expected: DeviceClaimVersion | undefined, claim: DeviceClaim): Promise<boolean>;
   /** Removes the row only while `owner` still holds it; another owner's row is left alone. */
   release(
     platform: Platform,
@@ -46,9 +59,12 @@ export interface DeviceClaims {
   list(): Promise<DeviceClaim[]>;
 }
 
+type MirrorOwner = { pid: number; ownerToken: string; metadata?: string };
+
 /**
- * What the file-based ownership reports to the table once it has won or given up a claim. Calls
- * never block or fail the claim: the files stay authoritative until a later step (#11811 c).
+ * The ownership's view of the host-wide table. {@link acquire} lets the table decide a claim (#11811
+ * step d); {@link claimed} and {@link released} record a claim the files decided (watch and TV have
+ * no table, and a claim falls back to the files when no table can decide) and never block or fail it.
  */
 export interface DeviceClaimMirror {
   /**
@@ -60,14 +76,35 @@ export interface DeviceClaimMirror {
   /**
    * `stillHeld` re-checks the claim file before any later write of this claim (a retry, a backfill):
    * a daemon whose claim another daemon took over is never told, and must not write it back.
+   * The write is a compare-and-set; with `isLiveForeignOwner` it also never replaces a row a live
+   * foreign owner holds (#11811 step d), which keeps that owner's claim.
    */
   claimed(
     deviceId: string,
     owner: { pid: number; ownerToken: string; metadata?: string },
     stillHeld?: () => boolean,
+    isLiveForeignOwner?: (row: DeviceClaim) => Promise<boolean>,
   ): void;
   released(deviceId: string, owner: { pid: number; ownerToken: string }): void;
+  /**
+   * The claim itself, decided by the table (#11811 step d): `claimed` once the row names this
+   * owner, `refused` while a live foreign owner holds it, `unavailable` when no table can decide
+   * (no registry, a skipped one, a failed write), and the claim files decide instead.
+   */
+  acquire?(
+    deviceId: string,
+    owner: MirrorOwner,
+    isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
+  ): Promise<DeviceClaimAcquisition>;
 }
+
+export type DeviceClaimAcquisition =
+  | { outcome: "claimed" }
+  | { outcome: "refused"; ownerPid: number }
+  | { outcome: "unavailable" };
+
+/** Racing takers retry the judge-then-write this many times before refusing. */
+const ACQUIRE_ATTEMPTS = 3;
 
 export interface StoreDeviceClaimMirrorOptions {
   platform: Platform;
@@ -95,10 +132,12 @@ export const DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS: readonly number[] = [
 
 export const DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS = 2_000;
 
-type MirrorOwner = { pid: number; ownerToken: string; metadata?: string };
-
 interface MirrorIntent {
   kind: "claim" | "release";
+  /** Decided by the table, so it is written back only while no other owner has taken the row. */
+  acquired?: true;
+  /** A file-decided claim never replaces a row this says a live foreign owner holds. */
+  isLiveForeignOwner?: (row: DeviceClaim) => Promise<boolean>;
   owner: MirrorOwner;
   claimedAtMs: number;
   stillHeld?: () => boolean;
@@ -141,7 +180,12 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     this.intents.clear();
   }
 
-  claimed(deviceId: string, owner: MirrorOwner, stillHeld?: () => boolean): void {
+  claimed(
+    deviceId: string,
+    owner: MirrorOwner,
+    stillHeld?: () => boolean,
+    isLiveForeignOwner?: (row: DeviceClaim) => Promise<boolean>,
+  ): void {
     if (this.skipped) {
       return;
     }
@@ -155,6 +199,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
       owner,
       claimedAtMs: sameOwner ? held.claimedAtMs : this.options.timer.now(),
       ...(stillHeld === undefined ? {} : { stillHeld }),
+      ...(isLiveForeignOwner === undefined ? {} : { isLiveForeignOwner }),
     });
   }
 
@@ -163,6 +208,88 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
       return;
     }
     this.record(deviceId, { kind: "release", owner, claimedAtMs: this.options.timer.now() });
+  }
+
+  async acquire(
+    deviceId: string,
+    owner: MirrorOwner,
+    isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
+  ): Promise<DeviceClaimAcquisition> {
+    const store = this.skipped ? undefined : await this.readStore();
+    if (!store || this.skipped || this.disposed) {
+      return { outcome: "unavailable" };
+    }
+    try {
+      for (let attempt = 0; attempt < ACQUIRE_ATTEMPTS; attempt++) {
+        const decided = await this.acquireOnce(store, deviceId, owner, isLiveForeignOwner);
+        if (decided) {
+          return decided;
+        }
+      }
+      const winner = await store.get(this.options.platform, deviceId);
+      return winner ? { outcome: "refused", ownerPid: winner.pid } : { outcome: "unavailable" };
+    } catch (error) {
+      logger.warn(
+        `[DeviceClaims] Cannot claim ${deviceId} in the host-wide table; the claim files decide: ${errorMessage(error)}`,
+        error,
+      );
+      return { outcome: "unavailable" };
+    }
+  }
+
+  /** One judge-then-write; undefined when the row changed meanwhile and the caller should retry. */
+  private async acquireOnce(
+    store: DeviceClaims,
+    deviceId: string,
+    owner: MirrorOwner,
+    isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
+  ): Promise<DeviceClaimAcquisition | undefined> {
+    const row = await store.get(this.options.platform, deviceId);
+    const ours = row?.pid === owner.pid && row.ownerToken === owner.ownerToken;
+    if (row && !ours && (await this.isLiveOwner(row, isLiveForeignOwner))) {
+      return { outcome: "refused", ownerPid: row.pid };
+    }
+    const claimedAtMs = ours ? row.claimedAtMs : this.options.timer.now();
+    if (!(await store.replaceIf(row, this.claimRow(deviceId, owner, claimedAtMs)))) {
+      return undefined;
+    }
+    this.recordAcquired(deviceId, owner, claimedAtMs);
+    return { outcome: "claimed" };
+  }
+
+  /** A row whose process generation was reused is dead whatever its PID says. */
+  private async isLiveOwner(
+    row: DeviceClaim,
+    isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
+  ): Promise<boolean> {
+    if (row.processGenerationToken !== undefined && this.generationVerdict(row) === "different") {
+      return false;
+    }
+    return isLiveForeignOwner(row);
+  }
+
+  private generationVerdict(row: DeviceClaim): LockOwnerGenerationVerdict {
+    return (
+      this.options.generationVerdict?.(row.pid, row.processGenerationToken!) ??
+      defaultLockOwnerGenerationProbe.compare(row.pid, row.processGenerationToken!)
+    );
+  }
+
+  /** Track an acquired claim like a mirrored one, so release and registry reopening see it. */
+  private recordAcquired(deviceId: string, owner: MirrorOwner, claimedAtMs: number): void {
+    const previous = this.intents.get(deviceId);
+    if (previous) {
+      this.clearRetry(previous);
+    }
+    this.intents.set(deviceId, {
+      kind: "claim",
+      acquired: true,
+      owner,
+      claimedAtMs,
+      version: ++this.versions,
+      synced: true,
+      attempts: 0,
+    });
   }
 
   async read(deviceId: string): Promise<DeviceClaim | undefined> {
@@ -177,13 +304,8 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     if (this.skipped || !row) {
       return undefined;
     }
-    if (row.processGenerationToken !== undefined) {
-      const verdict =
-        this.options.generationVerdict?.(row.pid, row.processGenerationToken) ??
-        defaultLockOwnerGenerationProbe.compare(row.pid, row.processGenerationToken);
-      if (verdict === "different") {
-        return undefined;
-      }
+    if (row.processGenerationToken !== undefined && this.generationVerdict(row) === "different") {
+      return undefined;
     }
     return row;
   }
@@ -264,7 +386,10 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
 
   private record(
     deviceId: string,
-    intent: Pick<MirrorIntent, "kind" | "owner" | "claimedAtMs" | "stillHeld">,
+    intent: Pick<
+      MirrorIntent,
+      "kind" | "owner" | "claimedAtMs" | "stillHeld" | "isLiveForeignOwner"
+    >,
   ) {
     if (this.disposed || this.skipped) {
       return;
@@ -354,26 +479,74 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     }
   }
 
-  private issue(store: DeviceClaims, deviceId: string, intent: MirrorIntent): Promise<void> {
+  private async issue(store: DeviceClaims, deviceId: string, intent: MirrorIntent): Promise<void> {
     if (intent.kind === "release") {
       return store.release(this.options.platform, deviceId, intent.owner);
     }
-    const nowMs = this.options.timer.now();
-    const processGenerationToken = this.generationOf(intent.owner.pid);
-    return store.upsert({
+    const held = await store.get(this.options.platform, deviceId);
+    const ours = held?.pid === intent.owner.pid && held.ownerToken === intent.owner.ownerToken;
+    if (intent.acquired) {
+      // A table-decided claim is written back only where the row is still ours or gone: another
+      // owner that took the device meanwhile keeps it, and this intent is dropped.
+      if (
+        (held && !ours) ||
+        !(await store.replaceIf(held, this.claimRowFor(deviceId, intent, held)))
+      ) {
+        this.dropIntent(deviceId, intent);
+      }
+      return;
+    }
+    if (held && !ours && (await this.heldByLiveForeignOwner(held, intent))) {
+      // The table names a live owner the claim files did not (#11811 step d): it keeps the row for
+      // now, and a retry records this claim once that row is gone. The file still decides it.
+      throw new Error(
+        `the row names live owner pid ${held.pid}; the claim file decides this claim until it is gone`,
+      );
+    }
+    // A compare-and-set, never a blind write: a row that changed since it was read is re-judged.
+    if (!(await store.replaceIf(held, this.claimRowFor(deviceId, intent, held)))) {
+      throw new Error("the row changed while it was being written");
+    }
+  }
+
+  /** The intent's row, keeping the original claim time when the table already names this owner. */
+  private claimRowFor(
+    deviceId: string,
+    intent: MirrorIntent,
+    held: DeviceClaim | undefined,
+  ): DeviceClaim {
+    const ours = held?.pid === intent.owner.pid && held.ownerToken === intent.owner.ownerToken;
+    return this.claimRow(deviceId, intent.owner, ours ? held.claimedAtMs : intent.claimedAtMs);
+  }
+
+  private async heldByLiveForeignOwner(row: DeviceClaim, intent: MirrorIntent): Promise<boolean> {
+    return (
+      intent.isLiveForeignOwner !== undefined && this.isLiveOwner(row, intent.isLiveForeignOwner)
+    );
+  }
+
+  private dropIntent(deviceId: string, intent: MirrorIntent): void {
+    if (this.intents.get(deviceId) === intent) {
+      this.intents.delete(deviceId);
+    }
+  }
+
+  private claimRow(deviceId: string, owner: MirrorOwner, claimedAtMs: number): DeviceClaim {
+    const processGenerationToken = this.generationOf(owner.pid);
+    return {
       platform: this.options.platform,
       deviceId,
       kind: "allocation",
       ...(this.options.daemonSessionId === undefined
         ? {}
         : { daemonSessionId: this.options.daemonSessionId }),
-      pid: intent.owner.pid,
-      ownerToken: intent.owner.ownerToken,
+      pid: owner.pid,
+      ownerToken: owner.ownerToken,
       ...(processGenerationToken === undefined ? {} : { processGenerationToken }),
-      ...(intent.owner.metadata === undefined ? {} : { metadata: intent.owner.metadata }),
-      claimedAtMs: intent.claimedAtMs,
-      updatedAtMs: nowMs,
-    });
+      ...(owner.metadata === undefined ? {} : { metadata: owner.metadata }),
+      claimedAtMs,
+      updatedAtMs: this.options.timer.now(),
+    };
   }
 
   private confirm(deviceId: string, intent: MirrorIntent): void {

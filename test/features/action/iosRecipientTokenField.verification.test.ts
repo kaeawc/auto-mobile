@@ -107,7 +107,7 @@ describe("bounded settle wait", () => {
     timer.enableAutoAdvance();
     const { observer, state } = observerOf(token, token, trailing);
     const result = await verifyIosTypedText("ab", read(token), { observer, timer });
-    expect(result).toEqual({ success: true });
+    expect(result).toMatchObject({ success: true, after: read(trailing) });
     expect(state.reads).toBe(3);
   });
 

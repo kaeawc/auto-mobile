@@ -1,7 +1,10 @@
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultSendKeysCommandExecutor } from "../../../src/features/action/SendKeys";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
-import { compareIosTypedText } from "../../../src/features/action/iosTypedTextVerification";
+import {
+  compareIosTypedText,
+  IOS_FOCUSED_VALUE_READ_WINDOW,
+} from "../../../src/features/action/iosTypedTextVerification";
 import { expect, test } from "bun:test";
 import {
   typedObservation,
@@ -13,6 +16,86 @@ import type { ObserveResult } from "../../../src/models";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
 
 const noFocusPrefix = "iOS nothing was typed: no text field has focus.";
+
+test("chunk verification rejects a partial repeated-character append despite an existing prefix", () => {
+  const before = "x".repeat(100) + "a".repeat(1000);
+  const result = compareIosTypedText(
+    "a".repeat(1000),
+    { secure: false, value: before },
+    { secure: false, value: before + "a".repeat(500) },
+    true,
+  );
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("not fully appended");
+});
+
+test("chunk verification accepts a full repeated-character append", () => {
+  const before = "x".repeat(100) + "a".repeat(1000);
+  const chunk = "a".repeat(1000);
+  expect(
+    compareIosTypedText(
+      chunk,
+      { secure: false, value: before },
+      { secure: false, value: before + chunk },
+      true,
+    ),
+  ).toEqual({ success: true });
+});
+
+test.each(["a", "x"])("chunk verification warns for a saturated XCUI value window (%s)", (last) => {
+  const result = compareIosTypedText(
+    "a".repeat(1000),
+    { secure: false, value: "a".repeat(IOS_FOCUSED_VALUE_READ_WINDOW) },
+    { secure: false, value: last.repeat(IOS_FOCUSED_VALUE_READ_WINDOW) },
+    true,
+  );
+  expect(result.success).toBe(true);
+  expect(result.warning).toContain("not verified");
+  expect(result.warning).toBe(
+    "iOS typed text result was not verified: the focused field value fills the 512-character read window, so a change past it cannot be seen.",
+  );
+});
+
+test("the chunk that first fills the read window uses the single-shot warning once", () => {
+  const before = { secure: false, value: "old" };
+  const after = { secure: false, value: "a".repeat(IOS_FOCUSED_VALUE_READ_WINDOW) };
+  const chunk = "a".repeat(1000);
+  const singleShot = compareIosTypedText(chunk, before, after);
+  expect(singleShot.success).toBe(true);
+  expect(singleShot.warning).toContain("512-character read window");
+  expect(compareIosTypedText(chunk, before, after, true)).toEqual(singleShot);
+});
+
+test("readable chunk verification requires exactly the inserted chunk and preserves existing text", () => {
+  const before = { secure: false, value: "old" };
+  for (const value of ["oldab", "oldxyz", "old!abc", "NEWabc"]) {
+    expect(compareIosTypedText("abc", before, { secure: false, value }, true)).toEqual({
+      success: false,
+      error: "iOS typed text chunk was not fully appended to the focused field.",
+    });
+  }
+  expect(compareIosTypedText("abc", before, { secure: false, value: "oldabc" }, true)).toEqual({
+    success: true,
+  });
+});
+
+test.each([
+  { text: "a", before: "abac", after: "abaca" },
+  { text: "abc", before: "abcab", after: "abcabcab" },
+  { text: "😀", before: "😀x", after: "😀😀x" },
+])(
+  "chunk insertion verification handles repeated occurrences for $text",
+  ({ text, before, after }) => {
+    expect(
+      compareIosTypedText(
+        text,
+        { secure: false, value: before },
+        { secure: false, value: after },
+        true,
+      ),
+    ).toEqual({ success: true });
+  },
+);
 
 for (const operation of ["insert", "replace"] as const) {
   const name = operation === "insert" ? "append" : operation;
@@ -158,6 +241,25 @@ test("replacement compares against the field after clearing", async () => {
   expect(
     await h.executor.type({ action: "type", text: "123456", operation: "replace" }),
   ).toMatchObject({ success: true });
+});
+
+test("iOS executor exposes partial application and refuses replay after committed chunks", async () => {
+  let value = "";
+  let inserts = 0;
+  const h = createSendKeysHarness(ios, { execute: async () => typedObservation(value) });
+  h.client.insert = async (text) => {
+    if (++inserts === 3) {
+      return { success: false, error: "runner refused", retryable: true };
+    }
+    value += text;
+    return { success: true };
+  };
+  const result = await h.executor.type({ action: "type", text: "a".repeat(3500) });
+  expect(result).toMatchObject({ success: false, partialApplication: true, retryable: false });
+  expect(result.error).toContain("chunk 3 of 4");
+  expect(result.error).toContain("2000 code points committed");
+  expect(value).toBe("a".repeat(2000));
+  expect(inserts).toBe(3);
 });
 
 test("literal subsequence preserves case, punctuation, repeated characters and Unicode", () => {

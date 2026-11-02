@@ -67,6 +67,18 @@ function harness() {
 }
 
 describe("foreign Android inventory", () => {
+  test("named acquisition resolves only foreign AVD identity and preserves its ownership marker", async () => {
+    const { scanner, adb, names } = harness();
+    const result = await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [{ deviceId: "emulator-5554", name: "emulator-5554", platform: "android" }],
+      foreignSerials: new Set(["emulator-5554"]),
+      resolveForeignAvdNames: true,
+    });
+    expect(names).toEqual(["emulator-5554"]);
+    expect(result.devices[0]).toMatchObject({ name: "owned", foreignOwned: true });
+    expect(adb.getInteractionLog()).toEqual([]);
+  });
+
   test("skips all foreign emulator probes while enriching the owned emulator", async () => {
     const { scanner, factory, names, adb } = harness();
     const result = await scanner.getBootedDevicesWithDiagnostics(false, {

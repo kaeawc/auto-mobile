@@ -3,6 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
 import { ActionableError, type BootedDevice } from "../../models";
+import { DeviceOwnedByOtherDaemonError } from "../../models/DeviceOwnedByOtherDaemonError";
 import type { Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { AdbClient } from "./AdbClient";
@@ -214,6 +215,12 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       if (!deadlineReached) {
         polling.failure = { reason: signal.reason };
       }
+      return undefined;
+    }
+    if (error instanceof DeviceOwnedByOtherDaemonError) {
+      // A live foreign claim is an acquisition refusal, never a transient boot failure.
+      polling.failure = { reason: error };
+      polling.active = false;
       return undefined;
     }
     return readinessDiagnostic("device-discovery", error);
@@ -511,12 +518,26 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     return emulator;
   }
 
-  private selectReadinessEmulator(
+  private async assertNamedReadinessTargetUnclaimed(
     context: EmulatorReadinessContext,
-    runningEmulators: BootedDevice[],
+    deviceId: string | undefined,
+  ): Promise<void> {
+    if (!context.targetDeviceId && deviceId) {
+      await this.admissionGate.assertNotClaimedByForeignDaemon?.(deviceId, "android");
+    }
+  }
+
+  private async selectReadinessEmulator(
+    context: EmulatorReadinessContext,
+    devices: BootedDevice[],
     correlatedTargetDeviceId: string | undefined,
-  ): BootedDevice | undefined {
+  ): Promise<BootedDevice | undefined> {
     const { avdName, childProcess, state } = context;
+    // Named acquisition correlates foreign identity before the fresh claim decision. Explicit
+    // deviceId waits retain their existing path; their caller already applies the bind gate.
+    const runningEmulators = context.targetDeviceId
+      ? devices.filter((device) => !device.foreignOwned)
+      : devices;
     state.correlationFailure = undefined;
     if (runningEmulators.length > 0) {
       logger.debug(
@@ -533,6 +554,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       if (!emulator && !correlatedTargetDeviceId) {
         const correlation = this.host.findNamedEmulator(avdName, childProcess, runningEmulators);
         emulator = correlation.emulator;
+        await this.assertNamedReadinessTargetUnclaimed(context, emulator?.deviceId);
         state.correlationFailure = correlation.failure;
         state.resolvedTargetDeviceId = emulator?.deviceId;
         this.bindCorrelatedTarget(state.resolvedTargetDeviceId);
@@ -646,6 +668,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         deadlineMs: startTime + timeoutMs,
         targetDeviceId: correlatedTargetDeviceId,
         readinessOnly: true,
+        resolveForeignAvdNames: context.targetDeviceId === undefined,
       },
       signal,
     );
@@ -771,6 +794,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       childProcess,
       state.resolvedTargetDeviceId,
     );
+    await this.assertNamedReadinessTargetUnclaimed(context, correlatedTargetDeviceId);
     this.bindCorrelatedTarget(correlatedTargetDeviceId);
     cycle.correlatedTargetDeviceId = correlatedTargetDeviceId;
     const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
@@ -801,8 +825,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     const scanDiagnostic = relevantScanDiagnostic(scan, correlatedTargetDeviceId);
     retryUnresolvedReadinessNames(scan.devices, unresolvedNameSerials);
     state.lastDiagnostic = scanDiagnostic;
-    const runningEmulators = scan.devices.filter((device) => !device.foreignOwned);
-    logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
+    logger.debug(`Device scan complete - found ${scan.devices.length} running emulators`);
     const readinessTimeoutMs = Math.max(
       0,
       Math.min(READINESS_PROBE_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
@@ -811,9 +834,9 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       return "stop";
     }
 
-    const emulator = this.selectReadinessEmulator(
+    const emulator = await this.selectReadinessEmulator(
       context,
-      runningEmulators,
+      scan.devices,
       correlatedTargetDeviceId,
     );
     if (emulator && emulator.deviceId) {
@@ -823,7 +846,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       });
       return ready ? "ready" : "continue";
     }
-    if (runningEmulators.length > 0) {
+    if (scan.devices.length > 0) {
       logger.debug(`No suitable emulator found for '${avdName}' - will continue polling`);
     }
     return "continue";

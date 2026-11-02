@@ -45,6 +45,8 @@ export interface BootedDeviceScan {
 
 export interface BootedDeviceScanOptions {
   foreignSerials?: ReadonlySet<string>;
+  /** Named acquisition may read foreign AVD identity to apply the explicit-bind claim gate. */
+  resolveForeignAvdNames?: boolean;
   /** Resolve ownership after the single serial-only listing, before enrichment. */
   resolveForeignSerials?: (
     serials: readonly string[],
@@ -275,11 +277,11 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       const emulatorResults = await Promise.all(
         emulatorDevices.map((device) =>
           runWithTargetDeviceExecutionBinding(device.deviceId, options.targetDeviceId, async () => {
+            const nameTimeoutMs = Math.min(infoTimeoutMs, remainingScanMs());
             if (foreignSerials?.has(device.deviceId)) {
-              return { device: this.foreignDevice(device, options), diagnostic: undefined };
+              return this.scanForeignEmulator(device, options, nameTimeoutMs, signal);
             }
             const deadlineMs = this.deps.timer().now() + remainingScanMs();
-            const nameTimeoutMs = Math.min(infoTimeoutMs, remainingScanMs());
             const avdName =
               options.skipNameEnrichment || nameTimeoutMs <= 0
                 ? { name: "", diagnostic: undefined }
@@ -419,6 +421,24 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
     }
     return runningDevices;
+  }
+
+  private async scanForeignEmulator(
+    device: BootedDevice,
+    options: BootedDeviceScanOptions,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ device: BootedDevice; diagnostic?: ReadinessDiagnostic }> {
+    const foreign = this.foreignDevice(device, options);
+    if (!options.resolveForeignAvdNames || options.skipNameEnrichment || timeoutMs <= 0) {
+      return { device: foreign };
+    }
+    // Identity only: keep foreign ownership and skip all profile/readiness probes.
+    const avdName = await this.inventoryRunningAvdName(device, { options, timeoutMs, signal });
+    return {
+      device: { ...foreign, name: avdName.name || foreign.name },
+      diagnostic: avdName.diagnostic,
+    };
   }
 
   private foreignDevice(device: BootedDevice, options: BootedDeviceScanOptions): BootedDevice {

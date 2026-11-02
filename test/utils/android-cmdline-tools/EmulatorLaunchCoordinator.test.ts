@@ -16,6 +16,7 @@ import type {
 } from "../../../src/utils/android-cmdline-tools/EmulatorLauncher";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { DeviceOwnedByOtherDaemonError } from "../../../src/models/DeviceOwnedByOtherDaemonError";
 
 function child(): FakeChildProcess {
   const process = new FakeChildProcess(new FakeTimer());
@@ -62,7 +63,7 @@ class FakeReservations implements CoordinatorReservations {
   }
 }
 
-function setup(options: { posterExists?: boolean } = {}) {
+function setup(options: { posterExists?: boolean; claimError?: Error } = {}) {
   const launcher = new FakeLauncher();
   const reservations = new FakeReservations();
   const targets = new DefaultEmulatorLaunchTargets(() => ({
@@ -71,15 +72,24 @@ function setup(options: { posterExists?: boolean } = {}) {
   const timer = new FakeTimer();
   let booted: BootedDevice[] = [];
   let starting = false;
-  const coordinator = new DefaultEmulatorLaunchCoordinator({
-    timer: () => timer,
-    launcher: () => launcher,
-    reservations: () => reservations,
-    targets: () => targets,
-    posterFileSystem: () => ({ existsSync: () => options.posterExists ?? true }),
-    getBootedDevicesChecked: async () => booted,
-    isAvdStarting: async () => starting,
-  });
+  const coordinator = new DefaultEmulatorLaunchCoordinator(
+    {
+      timer: () => timer,
+      launcher: () => launcher,
+      reservations: () => reservations,
+      targets: () => targets,
+      posterFileSystem: () => ({ existsSync: () => options.posterExists ?? true }),
+      getBootedDevicesChecked: async () => booted,
+      isAvdStarting: async () => starting,
+    },
+    {
+      assertNotClaimedByForeignDaemon: async () => {
+        if (options.claimError) {
+          throw options.claimError;
+        }
+      },
+    },
+  );
   return {
     coordinator,
     launcher,
@@ -110,13 +120,14 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
     expect(spawned.killed).toBe(false);
   });
   test("refuses launching an AVD already owned by another daemon", async () => {
-    const { coordinator, launcher, setBooted } = setup();
+    const refusal = new DeviceOwnedByOtherDaemonError("emulator-5556", 42);
+    const { coordinator, launcher, setBooted } = setup({ claimError: refusal });
     setBooted([
       { name: "Pixel", platform: "android", deviceId: "emulator-5556", foreignOwned: true },
     ]);
     await expect(
       coordinator.adoptsExistingAvdLaunch("Pixel", new NoOpPerformanceTracker()),
-    ).rejects.toThrow(/another daemon.*Pixel/);
+    ).rejects.toBe(refusal);
     expect(launcher.calls).toHaveLength(0);
   });
 

@@ -22,6 +22,7 @@ import type {
   EmulatorPortReservations,
 } from "./EmulatorPortReservations";
 import { isUnknownEmulatorName } from "./emulatorReadinessEvaluation";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../deviceAdmissionGate";
 
 /** Any failure of a launch the caller cancelled is reported as that cancellation, with the spawned child. */
 function asLaunchCancellation(
@@ -80,7 +81,13 @@ export interface EmulatorLaunchCoordinator {
 }
 
 export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinator {
-  constructor(private readonly host: EmulatorLaunchCoordinatorHost) {}
+  constructor(
+    private readonly host: EmulatorLaunchCoordinatorHost,
+    private readonly admissionGate: Pick<
+      DeviceAdmissionGate,
+      "assertNotClaimedByForeignDaemon"
+    > = daemonDeviceAdmissionGate,
+  ) {}
 
   private resolveCameraPosterPath(posterPath?: string): string | undefined {
     const cameraPosterPath = posterPath === undefined ? undefined : resolve(posterPath);
@@ -221,18 +228,12 @@ export class DefaultEmulatorLaunchCoordinator implements EmulatorLaunchCoordinat
     try {
       const runningEmulators = await this.host.getBootedDevicesChecked(
         false,
-        { bypassDeviceListCache: true },
+        { bypassDeviceListCache: true, resolveForeignAvdNames: true },
         signal,
       );
-      // Foreign placeholders carry no AVD name; the launcher's AVD lock still decides those.
-      if (runningEmulators.some((emulator) => emulator.foreignOwned && emulator.name === avdName)) {
-        throw new ActionableError(
-          `another daemon owns AVD '${avdName}'. Use another AVD or release it in that daemon before retrying.`,
-        );
-      }
-      if (
-        runningEmulators.some((emulator) => !emulator.foreignOwned && emulator.name === avdName)
-      ) {
+      const running = runningEmulators.find((emulator) => emulator.name === avdName);
+      if (running) {
+        await this.admissionGate.assertNotClaimedByForeignDaemon?.(running.deviceId, "android");
         logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
         return true;
       }

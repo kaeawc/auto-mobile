@@ -278,14 +278,11 @@ function fillMissing(node: Raw): Raw {
  * it, and its style includes matching styleWhen entries.
  */
 function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): WebAxis[] {
-  const bound = scope.instances.reduce(
-    (current, instance) => bindStructure(current, path, instance),
-    record(entry) ?? {},
-  );
-  if (bound.visibleWhen !== undefined && !conditionHolds(bound.visibleWhen, presentation(scope))) {
+  const prepared = preparedNode(entry, scope, path);
+  if (!prepared) {
     return [];
   }
-  const styled = { ...bound, style: resolvedStyle(bound, scope) };
+  const { styled, scope: local } = prepared;
   if (isUnsizedSpacer(styled)) {
     return ["width", "height"];
   }
@@ -293,8 +290,8 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   // An authored `fill` grows the parent just as a default fill does (fillMax either way).
   const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
-  const inferred = GROWING_CONTAINERS.has(String(bound.type))
-    ? lineFillAxes(styled, scope, path).filter((axis) => style[axis] === undefined)
+  const inferred = GROWING_CONTAINERS.has(String(styled.type))
+    ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
     : defaultFillAxes(styled);
   return [...authored, ...inferred];
 }
@@ -1014,27 +1011,41 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
   }, record(node.style));
 }
 
+/**
+ * What rendering and parent fill inference both see of a node: its repeat placeholders bound
+ * (through the devices' own contract), a pager's locals set before its own conditions run, its
+ * `visibleWhen` (undefined when hidden) and its `styleWhen` merged. One path, so the two agree.
+ */
+function preparedNode(
+  node: unknown,
+  scope: WebRenderScope,
+  path: string,
+): { styled: Raw; scope: WebRenderScope } | undefined {
+  const authored = record(node);
+  if (!authored || typeof authored.type !== "string") {
+    return undefined;
+  }
+  const raw = scope.instances.reduce(
+    (current, instance) => bindStructure(current, path, instance),
+    authored,
+  );
+  const local = withPagerLocals(raw, scope, KIT);
+  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
+    return undefined;
+  }
+  return { styled: { ...raw, style: resolvedStyle(raw, local) }, scope: local };
+}
+
 export function renderWebNode(
   node: unknown,
   scope: WebRenderScope,
   path: string,
 ): WebElement | undefined {
-  const authored = record(node);
-  if (!authored || typeof authored.type !== "string") {
+  const prepared = preparedNode(node, scope, path);
+  if (!prepared) {
     return undefined;
   }
-  // Repeat placeholders bind through the same contract the devices use: text, spans, nested
-  // conditions with typed operands, and state keys.
-  const raw = scope.instances.reduce(
-    (current, instance) => bindStructure(current, path, instance),
-    authored,
-  );
-  // A pager's locals exist before its own conditions run, as on Android.
-  const local = withPagerLocals(raw, scope, KIT);
-  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
-    return undefined;
-  }
-  const styled: Raw = { ...raw, style: resolvedStyle(raw, local) };
+  const { styled, scope: local } = prepared;
   const own: WebRenderScope = { ...local, ownInsets: safeAreaEdges(styled) };
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
   return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);

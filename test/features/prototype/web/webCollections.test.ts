@@ -238,6 +238,41 @@ describe("web still pager (#16382)", () => {
     expect(textOf(pager[0]!)).toBe("second");
   });
 
+  test("a parent's fill inference sees a pager's locals, as rendering does", () => {
+    const wrapper = byTag(
+      renderPrototypeStill(
+        rootOf(
+          {
+            type: "column",
+            style: { width: "fill" },
+            children: [
+              {
+                type: "column",
+                testTag: "wrapper",
+                children: [
+                  {
+                    type: "pager",
+                    id: "p",
+                    stateKey: "selected",
+                    style: { height: { dp: 100 } },
+                    visibleWhen: { key: "page", equals: 2 },
+                    children: [
+                      { type: "text", text: "first" },
+                      { type: "slider", stateKey: "v" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          { state: { page: 0, selected: 1 } },
+        ),
+      ).element,
+      "wrapper",
+    )[0]!;
+    expect(wrapper.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+  });
+
   test("applies peek padding and a fixed page size on the pager's axis", () => {
     const pager = byNode(
       renderPrototypeStill(
@@ -413,7 +448,10 @@ describe("web still carousel (#16382)", () => {
       renderPrototypeStill(fixture("carousel-hero-repeat")).element,
       "carousel",
     )[0]!;
-    expect(byPart(carousel, "item").length).toBeGreaterThan(1);
+    const items = byPart(carousel, "item");
+    expect(items.length).toBeGreaterThan(1);
+    // Each repeat row binds its own item, not a copy of the first.
+    expect(new Set(items.map(textOf)).size).toBe(items.length);
   });
 });
 

@@ -16,8 +16,9 @@ the host, so the page's script only switches between views it was given and neve
   then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a
   top-level `derive` entry. Repeat placeholders
   bind each item (a literal `items` array or a data pointer), including the repeat's own `derive`
-  fields, through the same binding contract the devices use (`bindNodeFields`): text and spans,
-  nested conditions with typed operands, and state keys. A spans-only text node renders each span
+  fields. Text binds once, in that order, so a substituted value is never read again as a
+  placeholder. Nested conditions with typed operands and state keys bind through the devices' own
+  field walk (`mapBindableFields`). A spans-only text node renders each span
   with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a
   caller-supplied clock (default 0), so derived relative times are fixed.
 - **Conditions.** `visibleWhen` evaluates `key` comparisons with `all`, `any` and `not` against
@@ -46,7 +47,8 @@ the host, so the page's script only switches between views it was given and neve
   its leading and trailing icons. A top app bar draws its navigation icon
   and actions as icon placeholders labelled with their action. A button whose `enabledWhen` is decidably
   false draws disabled. A text field shows `errorText` with error colours when `errorWhen` is
-  decidably true, and otherwise its `supportingText`. A spacer with no width, height or weight
+  decidably true, and otherwise its `supportingText`; a captioned field's wrapper takes its size,
+  weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted square titled with the icon name, because the glyph set is not
   inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a

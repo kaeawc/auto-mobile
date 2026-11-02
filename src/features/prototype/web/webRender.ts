@@ -5,8 +5,9 @@ import {
   type PrototypeFormatEnvironment,
 } from "../prototypeFormat";
 import {
-  bindNodeFields,
   bindText,
+  bindTyped,
+  mapBindableFields,
   record,
   renderScalar,
   type Instance,
@@ -421,6 +422,29 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
   return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
 }
 
+/** CSS a parent's layout reads from its child: size, flex share, cross-axis alignment, grid cell. */
+const PARENT_FACING = new Set([
+  "width",
+  "height",
+  "flex",
+  "flex-shrink",
+  "align-self",
+  "grid-area",
+  "min-width",
+  "margin",
+]);
+
+function splitParentFacing(
+  style: Record<string, string>,
+): [Record<string, string>, Record<string, string>] {
+  const outer: Record<string, string> = {};
+  const inner: Record<string, string> = {};
+  for (const [key, value] of Object.entries(style)) {
+    (PARENT_FACING.has(key) ? outer : inner)[key] = value;
+  }
+  return [outer, inner];
+}
+
 /** As on the devices: a decidable error shows errorText, else the supporting text. */
 function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElement[] {
   const caption = error ? (node.errorText ?? node.supportingText) : node.supportingText;
@@ -453,15 +477,17 @@ const textField: NodeRenderer = (node, scope) => {
     border: `1px solid ${cssColor(error ? "error" : "outline", scope.style) ?? "currentColor"}`,
     ...(empty ? { opacity: "0.7" } : {}),
   });
-  const field = el("div", { attrs: { ...attrs, role: "textbox" }, style }, [
+  const caption = fieldCaption(node, error, scope);
+  // With a caption, the wrapper is what the parent lays out, so it takes the field's sizing.
+  const [outer, inner] = caption.length === 0 ? [{}, style] : splitParentFacing(style);
+  const field = el("div", { attrs: { ...attrs, role: "textbox" }, style: inner }, [
     ...namedIcon(node.leadingIcon, scope),
     el("span", { style: { flex: "1 1 auto" } }, [shown]),
     ...namedIcon(node.trailingIcon, scope),
   ]);
-  const caption = fieldCaption(node, error, scope);
   return caption.length === 0
     ? field
-    : el("div", { style: { display: "flex", "flex-direction": "column", gap: "4px" } }, [
+    : el("div", { style: { ...outer, display: "flex", "flex-direction": "column", gap: "4px" } }, [
         field,
         ...caption,
       ]);
@@ -618,6 +644,21 @@ function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement
 
 /** One node and its subtree, or undefined when its `visibleWhen` does not hold. */
 /**
+ * Binds a repeat instance into a node's conditions, typed operands and state keys, through the
+ * devices' own field walk. Text fields are left for `bound()`, so each text binds exactly once, in
+ * the device order (data, then repeat items, then state). Actions never run in a still, so their
+ * emit bindings stay as authored.
+ */
+function bindStructure(node: Raw, path: string, instance: Instance): Raw {
+  return mapBindableFields(node, path, (value, _at, kind) => {
+    if (kind === "text" || typeof value !== "string") {
+      return value;
+    }
+    return kind === "operand" ? bindTyped(value, instance) : bindText(value, instance);
+  });
+}
+
+/**
  * The node's style with every `styleWhen` entry whose condition holds merged over it in authored
  * order, as the devices resolve it. An entry the still cannot decide is not applied.
  */
@@ -643,7 +684,7 @@ export function renderWebNode(
   // Repeat placeholders bind through the same contract the devices use: text, spans, nested
   // conditions with typed operands, and state keys.
   const raw = scope.instances.reduce(
-    (current, instance) => bindNodeFields(current, path, instance),
+    (current, instance) => bindStructure(current, path, instance),
     authored,
   );
   if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, scope.condition)) {

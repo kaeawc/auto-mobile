@@ -461,6 +461,48 @@ describe("prototype web still (#16346)", () => {
     expect(html).toContain("2 items");
   });
 
+  test("binds repeated text once, and binds list-item text inside a repeat", () => {
+    const spec = {
+      ...reference,
+      root: {
+        type: "column",
+        repeat: { as: "item", items: [{ name: "{item.other}", other: "Ada" }] },
+        children: [
+          { type: "text", testTag: "once", text: "{item.name}" },
+          { type: "listItem", testTag: "row", headline: "{item.other}" },
+        ],
+      },
+    };
+    const still = renderPrototypeStill(spec);
+    expect(textOf(byTag(still, "once")[0]!)).toBe("{item.other}");
+    expect(textOf(byTag(still, "row")[0]!)).toBe("Ada");
+  });
+
+  test("a captioned text field's wrapper takes its sizing in the parent", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          children: [
+            {
+              type: "textField",
+              testTag: "field",
+              stateKey: "q",
+              supportingText: "Hint",
+              style: { width: "fill", weight: 1 },
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const wrapper = row.children[0] as WebElement;
+    expect(wrapper.style).toMatchObject({ flex: "1 1 0", "flex-direction": "column" });
+    expect(byTag({ element: row }, "field")[0]!.style).not.toHaveProperty("flex");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

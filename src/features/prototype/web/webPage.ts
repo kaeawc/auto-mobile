@@ -73,6 +73,9 @@ const PAGE_CSS = [
   "[data-view]{position:absolute;transform:translate(-50%,-50%)}",
   "[data-control=revisions]{width:180px;overflow:auto;border-left:1px solid #ccc;background:#fff;margin:0;padding:8px;list-style:none}",
   "[data-control=revisions] button{width:100%;text-align:start;margin-bottom:4px}",
+  "[data-note]{color:#5f5b66;font-size:12px}",
+  // A narrow window keeps the width for the stage and moves the history below it.
+  "@media (max-width:720px){[data-main]{flex-direction:column}[data-control=revisions]{width:auto;max-height:30vh;border-left:0;border-top:1px solid #ccc}}",
   "[hidden]{display:none!important}",
 ].join("");
 
@@ -167,6 +170,9 @@ function toolbar(input: PrototypeWebPageInput, chosen: PrototypeWebVariant): Web
       button("zoom-in", "Zoom in", "+"),
       button("zoom-fit", "Fit to window", "Fit"),
       ...variants,
+      el("span", { attrs: { "data-note": "" } }, [
+        "Static preview: taps do nothing; these controls switch pre-rendered views.",
+      ]),
     ],
   );
 }
@@ -196,16 +202,26 @@ function historyEntryBytes(input: PrototypeWebPageInput, variant: string, revisi
   return entry ? Buffer.byteLength(toHtml(historyEntry(variant, entry))) : 0;
 }
 
+/**
+ * The revision history, or nothing when no variant has more than one revision in the page, since
+ * a single entry has nothing to switch to. The shell is measured with the list always present, so
+ * an older revision that brings the list back never pushes the page over its budget.
+ */
 function revisionHistory(
   input: PrototypeWebPageInput,
   included: (variant: string, revision: number) => boolean,
-): WebElement {
-  const items = input.variants.flatMap((variant) =>
+  always = false,
+): WebElement | undefined {
+  const lists = input.variants.map((variant) =>
     [...variant.revisions]
       .reverse()
       .filter((revision) => included(variant.id, revision.revision))
       .map((revision) => historyEntry(variant.id, revision)),
   );
+  if (!always && !lists.some((list) => list.length > 1)) {
+    return undefined;
+  }
+  const items = lists.flat();
   return el(
     "ul",
     { attrs: { "data-control": "revisions", "aria-label": "Revision history" } },
@@ -278,9 +294,9 @@ function pageHtml(
   input: PrototypeWebPageInput,
   first: { variant: PrototypeWebVariant; revision: number },
   views: string,
-  history: WebElement,
+  history: WebElement | undefined,
 ): string {
-  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}">${toHtml(toolbar(input, first.variant))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${toHtml(history)}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
+  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}">${toHtml(toolbar(input, first.variant))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
   const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
@@ -304,7 +320,9 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     input.variants.some(
       (entry) => entry.id === variant && entry.revisions.at(-1)?.revision === revision,
     );
-  const shellBytes = Buffer.byteLength(pageHtml(input, shown, "", revisionHistory(input, pinned)));
+  const shellBytes = Buffer.byteLength(
+    pageHtml(input, shown, "", revisionHistory(input, pinned, true)),
+  );
   const groups = budgetedViews(input, frame, shellBytes, pinned);
   const views = groups.flat();
   const first = views.find(

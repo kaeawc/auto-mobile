@@ -26,6 +26,11 @@ function find(node: WebChild, predicate: (element: WebElement) => boolean): WebE
 }
 const textOf = (node: WebChild): string =>
   typeof node === "string" ? node : node.children.map(textOf).join("");
+/** Text outside icon placeholders, whose initials are drawing rather than label. */
+const labelOf = (node: WebChild): string =>
+  typeof node === "string" || node.attrs.role !== "img" ? labelText(node) : "";
+const labelText = (node: WebChild): string =>
+  typeof node === "string" ? node : node.children.map(labelOf).join("");
 const byTag = (still: { element: WebElement }, tag: string) =>
   find(still.element, (element) => element.attrs["data-testid"] === tag);
 
@@ -390,7 +395,7 @@ describe("prototype web still (#16346)", () => {
     expect(
       find(bar, (element) => element.attrs.title !== undefined).map((e) => e.attrs.title),
     ).toEqual(["arrow_back", "search"]);
-    expect(textOf(bar)).toBe("Inbox");
+    expect(labelOf(bar)).toBe("Inbox");
   });
 
   test("a text field shows its error text only when errorWhen decidably holds", () => {
@@ -555,7 +560,7 @@ describe("prototype web still (#16346)", () => {
       "save",
     )[0]!;
     expect((button.children[0] as WebElement).attrs.title).toBe("check");
-    expect(textOf(button)).toBe("Save");
+    expect(labelOf(button)).toBe("Save");
   });
 
   test("a span keeps its own text decoration", () => {
@@ -663,7 +668,7 @@ describe("prototype web still (#16346)", () => {
       "bar",
     )[0]!;
     const glyph = find(bar, (element) => element.attrs.title === "search")[0]!;
-    expect(glyph.style).toMatchObject({ display: "inline-block", width: "24px" });
+    expect(glyph.style).toMatchObject({ display: "inline-flex", width: "24px" });
   });
 
   test("a top app bar honours its variant's size and title alignment", () => {
@@ -1109,4 +1114,98 @@ describe("prototype web still (#16346)", () => {
       });
     }
   }
+});
+
+describe("prototype web still parity (#16382)", () => {
+  const screenOf = (spec: Record<string, unknown>, options: { mode?: "light" | "dark" } = {}) =>
+    find(
+      renderPrototypeStill(spec, options).element,
+      (element) => element.attrs["data-chrome"] === "screen",
+    )[0]!;
+  const bare = { id: "bare", root: { type: "column", children: [] } };
+
+  test("the screen paints the theme background, not a checkerboard", () => {
+    const screen = screenOf({ ...bare, theme: { colors: { background: "#123456" } } });
+    expect(screen.style["background-color"]).toBe("rgba(18,52,86,1)");
+    expect(toHtml(screen)).not.toContain("conic-gradient");
+  });
+
+  test("a seed or device scheme paints the Material 3 baseline background for the mode", () => {
+    const seeded = { ...bare, theme: { colors: { seed: "#336699" } } };
+    expect(screenOf(seeded).style["background-color"]).toBe("rgba(254,247,255,1)");
+    expect(screenOf(seeded, { mode: "dark" }).style["background-color"]).toBe("rgba(20,18,24,1)");
+    const device = { ...bare, theme: { colors: { source: "device" } } };
+    expect(screenOf(device).style["background-color"]).toBe("rgba(254,247,255,1)");
+  });
+
+  test("a top app bar without safeAreaPadding takes no status-bar inset, as on the devices", () => {
+    const bar = byTag(
+      renderPrototypeStill({ ...bare, root: { type: "topAppBar", testTag: "bar", title: "T" } }),
+      "bar",
+    )[0]!;
+    expect(JSON.stringify(bar.style)).not.toContain("--safe-top");
+  });
+
+  test("a card hugs its content unless its width is fill, as on the devices", () => {
+    const cardOf = (style?: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...bare,
+          root: {
+            type: "column",
+            children: [
+              { type: "card", testTag: "card", ...(style ? { style } : {}), children: [] },
+            ],
+          },
+        }),
+        "card",
+      )[0]!;
+    expect(cardOf().style).not.toHaveProperty("align-self");
+    expect(cardOf().style).not.toHaveProperty("width");
+    expect(cardOf({ width: "fill" }).style).toMatchObject({ "align-self": "stretch" });
+  });
+
+  const toggleOf = (type: string, on: boolean) =>
+    byTag(
+      renderPrototypeStill({
+        ...bare,
+        state: { on },
+        root: { type, testTag: "t", stateKey: "on", label: "Alarm" },
+      }),
+      "t",
+    )[0]!;
+
+  test("a switch draws a thumb at the end when on and at the start when off", () => {
+    const thumbOf = (on: boolean) =>
+      find(toggleOf("switch", on), (element) => element.attrs["data-part"] === "thumb")[0]!;
+    expect(thumbOf(true).style["margin-inline-start"]).toBe("auto");
+    expect(thumbOf(false).style).not.toHaveProperty("margin-inline-start");
+    expect(thumbOf(true).style.width).not.toBe(thumbOf(false).style.width);
+  });
+
+  test("a switch's label precedes its track and a checkbox's box precedes its label", () => {
+    expect(toggleOf("switch", true).children[0]).toBe("Alarm");
+    const checkbox = toggleOf("checkbox", true);
+    expect(typeof checkbox.children[0]).not.toBe("string");
+    expect(checkbox.children[1]).toBe("Alarm");
+  });
+
+  test("an icon placeholder shows its name's initial", () => {
+    const iconOf = (name?: string) =>
+      byTag(
+        renderPrototypeStill({
+          ...bare,
+          root: {
+            type: "column",
+            children: [{ type: "icon", testTag: "i", ...(name === undefined ? {} : { name }) }],
+          },
+        }),
+        "i",
+      )[0]!;
+    expect(textOf(iconOf("search"))).toBe("S");
+    expect(textOf(iconOf("_star"))).toBe("S");
+    expect(textOf(iconOf())).toBe("");
+    expect(iconOf("search").attrs.title).toBe("search");
+    expect(iconOf("search").style).toMatchObject({ width: "24px", height: "24px" });
+  });
 });

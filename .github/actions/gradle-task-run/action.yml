@@ -272,14 +272,15 @@ runs:
       run: |
         echo "prefix=${RUNNER_OS}-$(bash "${GITHUB_WORKSPACE}/scripts/ci/robolectric-jar-cache.sh" key "$CATALOG")" >> "$GITHUB_OUTPUT"
 
-    # One shared entry: the key ends in the run id so a save never collides,
+    # One shared entry: the key ends in the run id and attempt so a save never
+    # collides and a re-run can save the fuller set its first attempt missed,
     # and restore-keys picks the newest entry for this Robolectric version.
     - name: "Restore Robolectric jar cache"
       if: ${{ inputs.robolectric-jar-cache != '' }}
       uses: actions/cache/restore@v5.1.0
       with:
         path: ~/.m2/repository/org/robolectric/android-all-instrumented
-        key: ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-${{ github.run_id }}
+        key: ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
           ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-
 
@@ -323,7 +324,7 @@ runs:
       uses: actions/cache/save@v5.1.0
       with:
         path: ~/.m2/repository/org/robolectric/android-all-instrumented
-        key: ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-${{ github.run_id }}
+        key: ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: "Check if any JUnit tests reports were created"
       id: junit-reports-exist

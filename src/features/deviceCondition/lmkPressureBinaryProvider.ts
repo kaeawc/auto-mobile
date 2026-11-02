@@ -46,8 +46,6 @@ export interface LmkPressureBinaryProviderDeps {
  * the network, so an unverifiable binary is never pushed to a device.
  */
 export class LmkPressureBinaryProvider {
-  private static instance: LmkPressureBinaryProvider | null = null;
-
   private readonly fileSystem: LmkPressureFileSystem;
   private readonly cache: VerifiedArtifactCache;
   private readonly cacheDir: string;
@@ -71,11 +69,6 @@ export class LmkPressureBinaryProvider {
     this.expectedChecksum =
       deps.expectedChecksum ?? ((abi) => resolveLmkPressureChecksum(abi, this.env));
     this.releaseUrl = deps.releaseUrl ?? ((abi) => resolveLmkPressureUrl(abi, this.env));
-  }
-
-  static getInstance(): LmkPressureBinaryProvider {
-    LmkPressureBinaryProvider.instance ??= new LmkPressureBinaryProvider();
-    return LmkPressureBinaryProvider.instance;
   }
 
   /** Verified local path of the ABI's released binary, or null when none is pinned. */

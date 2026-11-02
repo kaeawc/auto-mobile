@@ -248,9 +248,10 @@ class MemoryPressureFixture {
     }
     // An explicit directory is the user's choice: report it rather than download around it.
     if (!readEnvTrimmed(ENV.LMK_PRESSURE_DIR, env)) {
+      // The on-disk cache is shared, so a provider per apply does not re-download.
       const released = await (
         this.options.releaseBinary ??
-        ((wanted) => LmkPressureBinaryProvider.getInstance().ensure(wanted))
+        ((wanted) => new LmkPressureBinaryProvider({ env }).ensure(wanted))
       )(abi);
       if (released) {
         return released;

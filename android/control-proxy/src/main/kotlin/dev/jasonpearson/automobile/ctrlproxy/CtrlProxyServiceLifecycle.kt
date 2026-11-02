@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.content.Context
+import android.hardware.display.DisplayManager
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
@@ -9,6 +11,26 @@ import kotlinx.coroutines.launch
 
 // The service's log tag, so the moved startup steps keep logging under it.
 private const val TAG = "CtrlProxy"
+
+/** Tracks display rotations and fold-posture changes for rotation provenance. */
+internal fun CtrlProxy.startDisplayTracking() {
+  val displaySignal =
+    DisplayRotationChangeSignal(
+      getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager,
+      onTransition = displayTransitions::onTransition,
+    )
+  rotationProvenance = RotationProvenanceTracker(displaySignal)
+  deviceStateRegistration =
+    DeviceStateTransitions.register(this) { state -> displaySignal.emitDeviceState(state) }
+}
+
+/** Stops display and fold-posture tracking; a failed unregister is logged, not thrown. */
+internal fun CtrlProxy.stopDisplayTracking() {
+  rotationProvenanceOrNull?.close()
+  runCatching { deviceStateRegistration?.close() }
+    .onFailure { Log.w(TAG, "Failed to unregister device-state listener", it) }
+  deviceStateRegistration = null
+}
 
 /** Starts SharedPreferences change tracking and forwards each change to connected clients. */
 internal fun CtrlProxy.startStorageSubscription() {

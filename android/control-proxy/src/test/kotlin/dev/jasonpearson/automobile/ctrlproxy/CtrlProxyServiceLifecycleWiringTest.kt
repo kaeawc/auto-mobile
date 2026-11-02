@@ -14,6 +14,7 @@ class CtrlProxyServiceLifecycleWiringTest {
     val body = onServiceConnectedBody()
     val steps =
       listOf(
+        "startDisplayTracking()",
         "createPrototypeController()",
         "prototypeAssets.purgeLeftovers()",
         "registerReceivers()",
@@ -48,6 +49,7 @@ class CtrlProxyServiceLifecycleWiringTest {
     val steps =
       listOf(
         "unregisterReceivers()",
+        "stopDisplayTracking()",
         "stopLogcatForwarding()",
         "hierarchyController.stop()",
         "stopEventIngestion()",

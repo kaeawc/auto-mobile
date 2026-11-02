@@ -68,6 +68,18 @@ export class IosSdkTextRouting {
 
   constructor(private readonly deps: IosSdkTextRoutingDeps) {}
 
+  /** Predicts web assignment for replace admission, before its clear refreshes the target. */
+  willAssignWebValue(): boolean {
+    return (
+      this.target !== undefined && isWebTarget(this.target) && this.deps.webRouter !== undefined
+    );
+  }
+
+  /** A successful web clear permits one whole-value assignment instead of typed appends. */
+  assignsWebValue(): boolean {
+    return this.willAssignWebValue() && this.outcomes.getStore()?.webCleared === true;
+  }
+
   /** The focused field's bridge identity, or undefined when it is not a bridge node. */
   setTarget(target: IosSdkTextTarget | undefined): void {
     this.target = target;

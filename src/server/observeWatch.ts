@@ -5,6 +5,7 @@ import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
 import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
+import { WatchRunnerError } from "../features/watch/WatchRunnerError";
 import { watchRunners } from "../features/watch/WatchRunnerRegistry";
 import { normalizeWatchHierarchy } from "../features/watch/WatchHierarchy";
 import path from "path";
@@ -34,6 +35,7 @@ import {
 import { screenshotFileName } from "../utils/screenshot/screenshotFormats";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
 import { createObserveResponse, type ObserveResponse } from "./observeResponse";
 import type { ObserveArgs } from "./observeTools";
 
@@ -162,7 +164,16 @@ async function watchHierarchyForObserve(
   const runner =
     platform === "watchos" ? (injectedRunner ?? watchRunners.get(device.deviceId)) : undefined;
   assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
-  return runner ? normalizeWatchHierarchy(await runner.hierarchy(signal)) : undefined;
+  try {
+    return runner ? normalizeWatchHierarchy(await runner.hierarchy(signal)) : undefined;
+  } catch (error) {
+    if (error instanceof WatchRunnerError && error.errorCode === "app_not_foreground") {
+      // A backgrounded fixture has no runner-visible hierarchy; its screenshot is still useful.
+      logger.debug("Watch runner app is not foreground; returning screenshot-only observation.");
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 /** Capture an Apple simulator screenshot, adding hierarchy for a connected watchOS or tvOS runner. */

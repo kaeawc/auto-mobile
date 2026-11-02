@@ -80,7 +80,7 @@ final class PrototypePagerOptionsTests: XCTestCase {
     }
 
     func testEverySharedInvalidPagerFixtureFailsWithItsPathAndMessage() throws {
-        XCTAssertEqual(invalidFixtures.count, 11)
+        XCTAssertEqual(invalidFixtures.count, 12)
         for (filename, fixture) in invalidFixtures {
             XCTAssertThrowsError(try fixture.decode(), filename) { error in
                 guard case let DecodingError.dataCorrupted(context) = error else {

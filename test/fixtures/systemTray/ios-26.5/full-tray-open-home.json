@@ -1,0 +1,593 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"observationId\":\"7f4c9431-e87c-4556-b760-0d3a84dcefd0\",\"deviceId\":\"45D48E06-E6AC-4894-B738-4EA7B6835D46\",\"display\":{\"key\":\"0\",\"role\":\"unknown\",\"posture\":\"unknown\",\"generation\":0},\"updatedAt\":1793630225868,\"screenSize\":{\"width\":402,\"height\":874,\"units\":\"points\"},\"systemInsets\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0},\"insets\":{\"available\":false,\"displayCutoutInfo\":{\"classification\":\"unknown\"},\"source\":\"unavailable\",\"units\":\"unknown\"},\"viewHierarchy\":{\"hierarchy\":{\"node\":{\"$\":{\"text\":\" \",\"class\":\"XCUIApplication\",\"bounds\":[0,0,402,874],\"view-id\":\"s2-df6b2569fcaff2e8\"},\"node\":[{\"$\":{\"resource-id\":\"SBCoverSheetWindow\",\"class\":\"UIWindow\",\"bounds\":[0,0,402,874],\"view-id\":\"SBCoverSheetWindow\"},\"node\":[{\"$\":{\"class\":\"UIScrollView\",\"bounds\":[0,0,402,874],\"scrollable\":\"true\",\"view-id\":\"s2-afc14e5319cb11fc\"},\"node\":[{\"$\":{\"class\":\"UIScrollView\",\"bounds\":[0,0,402,874],\"scrollable\":\"true\",\"view-id\":\"s2-2f141846333fad49\"},\"node\":[{\"$\":{\"class\":\"UIScrollView\",\"bounds\":[14,0,388,219],\"scrollable\":\"true\",\"view-id\":\"s2-bd2e83c81c8646a0\"},\"node\":[{\"$\":{\"class\":\"UIScrollView\",\"bounds\":[14,0,388,219],\"scrollable\":\"true\",\"view-id\":\"s2-190458cd80f36bb1\"},\"node\":[{\"$\":{\"resource-id\":\"ListCell\",\"class\":\"UIButton\",\"bounds\":[14,0,388,219],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"ListCell\"},\"node\":{\"$\":{\"resource-id\":\"ListCell.ContentView\",\"class\":\"UIView\",\"bounds\":[14,0,388,219],\"view-id\":\"ListCell.ContentView\"}}},{\"$\":{\"text\":\"Vertical scroll bar, 1 page\",\"class\":\"UIView\",\"bounds\":[355,47,385,219],\"view-id\":\"s2-edd1e9ee444fedac-1\"}}]},{\"$\":{\"text\":\"Vertical scroll bar, 1 page\",\"class\":\"UIView\",\"bounds\":[355,47,385,219],\"view-id\":\"s2-edd1e9ee444fedac-2\"}}]},{\"$\":{\"class\":\"UIScrollView\",\"bounds\":[14,667,388,746],\"scrollable\":\"true\",\"view-id\":\"s2-d6da62fa04a595a4\"},\"node\":[{\"$\":{\"class\":\"UIScrollView\",\"bounds\":[14,667,388,746],\"scrollable\":\"true\",\"view-id\":\"s2-f70857d6582aa49d\"},\"node\":[{\"$\":{\"text\":\"1 minute ago, Ready for Apple Intelligence, Time to experience the new personal intelligence system.\",\"resource-id\":\"ListCell\",\"class\":\"UIButton\",\"bounds\":[14,667,388,745],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"ListCell\"},\"node\":{\"$\":{\"resource-id\":\"ListCell.ContentView\",\"class\":\"UIView\",\"bounds\":[14,667,388,745],\"view-id\":\"ListCell.ContentView\"},\"node\":{\"$\":{\"text\":\"1 minute ago, Ready for Apple Intelligence, Time to experience the new personal intelligence system.\",\"resource-id\":\"NotificationShortLookView\",\"class\":\"UIView\",\"bounds\":[14,667,388,745],\"view-id\":\"NotificationShortLookView\"},\"node\":{\"$\":{\"resource-id\":\"ShortLook.Platter\",\"class\":\"UIView\",\"bounds\":[14,667,388,746],\"view-id\":\"ShortLook.Platter\"},\"node\":{\"$\":{\"resource-id\":\"ShortLook.Platter.Content\",\"class\":\"UIView\",\"bounds\":[14,667,388,746],\"view-id\":\"ShortLook.Platter.Content\"},\"node\":{\"$\":{\"text\":\"1 minute ago, Ready for Apple Intelligence, Time to experience the new personal intelligence system.\",\"resource-id\":\"ShortLook.Platter.Content.Seamless\",\"class\":\"UIButton\",\"bounds\":[14,667,388,746],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"ShortLook.Platter.Content.Seamless\"},\"node\":{\"$\":{\"resource-id\":\"ShortLook.Platter.Content.Seamless.CrossFade\",\"class\":\"UIView\",\"bounds\":[14,667,388,746],\"view-id\":\"ShortLook.Platter.Content.Seamless.CrossFade\"},\"node\":[{\"$\":{\"text\":\"Ready for Apple Intelligence\",\"resource-id\":\"NotificationTitle\",\"class\":\"UILabel\",\"bounds\":[78,678,317,696],\"role\":\"text\",\"view-id\":\"NotificationTitle\"}},{\"$\":{\"resource-id\":\"NotificationBody.TopAligned.originalMessage\",\"class\":\"UIView\",\"bounds\":[78,696,371,732],\"view-id\":\"NotificationBody.TopAligned.originalMessage\"},\"node\":{\"$\":{\"text\":\"Time to experience the new personal intelligence system.\",\"resource-id\":\"TextContent.Primary\",\"class\":\"UILabel\",\"bounds\":[78,696,371,732],\"role\":\"text\",\"view-id\":\"TextContent.Primary\"}}}]}}}}}}},{\"$\":{\"text\":\"Vertical scroll bar, 1 page\",\"class\":\"UIView\",\"bounds\":[355,667,385,746],\"view-id\":\"s2-edd1e9ee444fedac-3\"}}]},{\"$\":{\"text\":\"Vertical scroll bar, 1 page\",\"class\":\"UIView\",\"bounds\":[355,667,385,746],\"view-id\":\"s2-edd1e9ee444fedac-4\"}}]},{\"$\":{\"class\":\"UIScrollView\",\"bounds\":[14,754,388,763],\"scrollable\":\"true\",\"view-id\":\"s2-9c50464cb8e8a7a9\"},\"node\":{\"$\":{\"text\":\"Vertical scroll bar, 1 page\",\"class\":\"UIView\",\"bounds\":[355,754,385,763],\"view-id\":\"s2-edd1e9ee444fedac-5\"}}}]},{\"$\":{\"text\":\"Vertical scroll bar, 1 page\",\"class\":\"UIView\",\"bounds\":[369,55,399,818],\"view-id\":\"s2-edd1e9ee444fedac-6\"}}]},{\"$\":{\"resource-id\":\"lockscreen-date-view\",\"class\":\"UIView\",\"bounds\":[0,0,402,874],\"view-id\":\"lockscreen-date-view\"},\"node\":[{\"$\":{\"text\":\"Monday, November 2\",\"class\":\"UILabel\",\"bounds\":[50,72,352,108],\"role\":\"text\",\"view-id\":\"s2-531e9ec27f353130\"}},{\"$\":{\"text\":\"8:37 AM\",\"class\":\"UILabel\",\"bounds\":[57,89,340,232],\"role\":\"text\",\"view-id\":\"s2-45dfd9cca3219b4d\"}}]},{\"$\":{\"text\":\"Home indicator\",\"class\":\"UIView\",\"bounds\":[129,861,273,866],\"view-id\":\"s2-a98c831348621af1\"}}]},{\"$\":{\"text\":\"Cellular\",\"class\":\"UIView\",\"bounds\":[288,26,307,38],\"view-id\":\"s2-55febb7b5d2fd450\"}},{\"$\":{\"resource-id\":\"3 of 3 Wi-Fi bars\",\"class\":\"UIView\",\"bounds\":[315,26,332,38],\"view-id\":\"3 of 3 Wi-Fi bars\"}},{\"$\":{\"text\":\"100% battery power\",\"class\":\"UIView\",\"bounds\":[339,26,366,39],\"view-id\":\"s2-bcee4fb354cade76\"}}]}},\"packageName\":\"com.apple.springboard\",\"fallbackToSpringboard\":true,\"updatedAt\":1793630225868,\"windows\":[{\"bounds\":[0,0,402,874],\"id\":0,\"isActive\":true,\"isFocused\":true,\"type\":1}],\"screenScale\":3,\"screenWidth\":402,\"screenHeight\":874,\"nativeScale\":3,\"pixelWidth\":1206,\"pixelHeight\":2622,\"insets\":{\"available\":false,\"displayCutoutInfo\":{\"classification\":\"unknown\"},\"source\":\"unavailable\",\"units\":\"unknown\"},\"receivedAt\":1793630225869,\"fresh\":true,\"frameContext\":\"DAC1694F-BBA9-4D60-B53D-C20E5CF73C9C:1:8770c02eb45263c0\"},\"rotation\":0,\"activeWindow\":{\"appId\":\"com.apple.springboard\",\"activityName\":\"\",\"layoutSeqSum\":0},\"layoutWarnings\":{\"scope\":\"full\",\"warnings\":[]},\"freshness\":{\"actualTimestamp\":1793630225868,\"ageMs\":1,\"verified\":true,\"isFresh\":true},\"deviceLock\":{\"locked\":false,\"keyguardShowing\":false},\"screenshotOrientation\":\"native\",\"screenshotPath\":\"/Users/jason/.claude/orchestrate/kaeawc__auto-mobile/verifyq/n5-16378/batch/daemon1/data/screenshots/screenshot_1793630225870_45D48E06-E6AC-4894-B738-4EA7B6835D46-50ee276ef967_3c103123-f547-448f-97ff-b0d5caa6fe53.png\",\"screenshotExpiresAt\":1793630826071,\"screenshotSource\":\"fresh\",\"screenshotCaptureSource\":\"device\",\"screenshotCapturedAt\":\"2026-11-02T14:37:06.069Z\",\"screenshotAgeMs\":1.3505859375,\"screenshotFormat\":\"png\",\"screenshotMimeType\":\"image/png\",\"screenshotImageSize\":{\"width\":1206,\"height\":2622},\"screenshotPixelsPerNativeUnit\":{\"x\":3,\"y\":3},\"screenshotScaleProvenance\":\"native-scale-confirmed\",\"screenshotSettled\":true,\"observationScreenshotResourceUri\":\"automobile:observation/45D48E06-E6AC-4894-B738-4EA7B6835D46/7f4c9431-e87c-4556-b760-0d3a84dcefd0/screenshot\"}"
+    }
+  ],
+  "structuredContent": {
+    "observationId": "7f4c9431-e87c-4556-b760-0d3a84dcefd0",
+    "deviceId": "45D48E06-E6AC-4894-B738-4EA7B6835D46",
+    "display": {
+      "key": "0",
+      "role": "unknown",
+      "posture": "unknown",
+      "generation": 0
+    },
+    "updatedAt": 1793630225868,
+    "screenSize": {
+      "width": 402,
+      "height": 874,
+      "units": "points"
+    },
+    "systemInsets": {
+      "top": 0,
+      "right": 0,
+      "bottom": 0,
+      "left": 0
+    },
+    "insets": {
+      "available": false,
+      "displayCutoutInfo": {
+        "classification": "unknown"
+      },
+      "source": "unavailable",
+      "units": "unknown"
+    },
+    "viewHierarchy": {
+      "hierarchy": {
+        "node": {
+          "$": {
+            "text": " ",
+            "class": "XCUIApplication",
+            "bounds": [
+              0,
+              0,
+              402,
+              874
+            ],
+            "view-id": "s2-df6b2569fcaff2e8"
+          },
+          "node": [
+            {
+              "$": {
+                "resource-id": "SBCoverSheetWindow",
+                "class": "UIWindow",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ],
+                "view-id": "SBCoverSheetWindow"
+              },
+              "node": [
+                {
+                  "$": {
+                    "class": "UIScrollView",
+                    "bounds": [
+                      0,
+                      0,
+                      402,
+                      874
+                    ],
+                    "scrollable": "true",
+                    "view-id": "s2-afc14e5319cb11fc"
+                  },
+                  "node": [
+                    {
+                      "$": {
+                        "class": "UIScrollView",
+                        "bounds": [
+                          0,
+                          0,
+                          402,
+                          874
+                        ],
+                        "scrollable": "true",
+                        "view-id": "s2-2f141846333fad49"
+                      },
+                      "node": [
+                        {
+                          "$": {
+                            "class": "UIScrollView",
+                            "bounds": [
+                              14,
+                              0,
+                              388,
+                              219
+                            ],
+                            "scrollable": "true",
+                            "view-id": "s2-bd2e83c81c8646a0"
+                          },
+                          "node": [
+                            {
+                              "$": {
+                                "class": "UIScrollView",
+                                "bounds": [
+                                  14,
+                                  0,
+                                  388,
+                                  219
+                                ],
+                                "scrollable": "true",
+                                "view-id": "s2-190458cd80f36bb1"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "resource-id": "ListCell",
+                                    "class": "UIButton",
+                                    "bounds": [
+                                      14,
+                                      0,
+                                      388,
+                                      219
+                                    ],
+                                    "clickable": "true",
+                                    "role": "button",
+                                    "view-id": "ListCell"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "resource-id": "ListCell.ContentView",
+                                      "class": "UIView",
+                                      "bounds": [
+                                        14,
+                                        0,
+                                        388,
+                                        219
+                                      ],
+                                      "view-id": "ListCell.ContentView"
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "Vertical scroll bar, 1 page",
+                                    "class": "UIView",
+                                    "bounds": [
+                                      355,
+                                      47,
+                                      385,
+                                      219
+                                    ],
+                                    "view-id": "s2-edd1e9ee444fedac-1"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "text": "Vertical scroll bar, 1 page",
+                                "class": "UIView",
+                                "bounds": [
+                                  355,
+                                  47,
+                                  385,
+                                  219
+                                ],
+                                "view-id": "s2-edd1e9ee444fedac-2"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "$": {
+                            "class": "UIScrollView",
+                            "bounds": [
+                              14,
+                              667,
+                              388,
+                              746
+                            ],
+                            "scrollable": "true",
+                            "view-id": "s2-d6da62fa04a595a4"
+                          },
+                          "node": [
+                            {
+                              "$": {
+                                "class": "UIScrollView",
+                                "bounds": [
+                                  14,
+                                  667,
+                                  388,
+                                  746
+                                ],
+                                "scrollable": "true",
+                                "view-id": "s2-f70857d6582aa49d"
+                              },
+                              "node": [
+                                {
+                                  "$": {
+                                    "text": "1 minute ago, Ready for Apple Intelligence, Time to experience the new personal intelligence system.",
+                                    "resource-id": "ListCell",
+                                    "class": "UIButton",
+                                    "bounds": [
+                                      14,
+                                      667,
+                                      388,
+                                      745
+                                    ],
+                                    "clickable": "true",
+                                    "role": "button",
+                                    "view-id": "ListCell"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "resource-id": "ListCell.ContentView",
+                                      "class": "UIView",
+                                      "bounds": [
+                                        14,
+                                        667,
+                                        388,
+                                        745
+                                      ],
+                                      "view-id": "ListCell.ContentView"
+                                    },
+                                    "node": {
+                                      "$": {
+                                        "text": "1 minute ago, Ready for Apple Intelligence, Time to experience the new personal intelligence system.",
+                                        "resource-id": "NotificationShortLookView",
+                                        "class": "UIView",
+                                        "bounds": [
+                                          14,
+                                          667,
+                                          388,
+                                          745
+                                        ],
+                                        "view-id": "NotificationShortLookView"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "resource-id": "ShortLook.Platter",
+                                          "class": "UIView",
+                                          "bounds": [
+                                            14,
+                                            667,
+                                            388,
+                                            746
+                                          ],
+                                          "view-id": "ShortLook.Platter"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "resource-id": "ShortLook.Platter.Content",
+                                            "class": "UIView",
+                                            "bounds": [
+                                              14,
+                                              667,
+                                              388,
+                                              746
+                                            ],
+                                            "view-id": "ShortLook.Platter.Content"
+                                          },
+                                          "node": {
+                                            "$": {
+                                              "text": "1 minute ago, Ready for Apple Intelligence, Time to experience the new personal intelligence system.",
+                                              "resource-id": "ShortLook.Platter.Content.Seamless",
+                                              "class": "UIButton",
+                                              "bounds": [
+                                                14,
+                                                667,
+                                                388,
+                                                746
+                                              ],
+                                              "clickable": "true",
+                                              "role": "button",
+                                              "view-id": "ShortLook.Platter.Content.Seamless"
+                                            },
+                                            "node": {
+                                              "$": {
+                                                "resource-id": "ShortLook.Platter.Content.Seamless.CrossFade",
+                                                "class": "UIView",
+                                                "bounds": [
+                                                  14,
+                                                  667,
+                                                  388,
+                                                  746
+                                                ],
+                                                "view-id": "ShortLook.Platter.Content.Seamless.CrossFade"
+                                              },
+                                              "node": [
+                                                {
+                                                  "$": {
+                                                    "text": "Ready for Apple Intelligence",
+                                                    "resource-id": "NotificationTitle",
+                                                    "class": "UILabel",
+                                                    "bounds": [
+                                                      78,
+                                                      678,
+                                                      317,
+                                                      696
+                                                    ],
+                                                    "role": "text",
+                                                    "view-id": "NotificationTitle"
+                                                  }
+                                                },
+                                                {
+                                                  "$": {
+                                                    "resource-id": "NotificationBody.TopAligned.originalMessage",
+                                                    "class": "UIView",
+                                                    "bounds": [
+                                                      78,
+                                                      696,
+                                                      371,
+                                                      732
+                                                    ],
+                                                    "view-id": "NotificationBody.TopAligned.originalMessage"
+                                                  },
+                                                  "node": {
+                                                    "$": {
+                                                      "text": "Time to experience the new personal intelligence system.",
+                                                      "resource-id": "TextContent.Primary",
+                                                      "class": "UILabel",
+                                                      "bounds": [
+                                                        78,
+                                                        696,
+                                                        371,
+                                                        732
+                                                      ],
+                                                      "role": "text",
+                                                      "view-id": "TextContent.Primary"
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "$": {
+                                    "text": "Vertical scroll bar, 1 page",
+                                    "class": "UIView",
+                                    "bounds": [
+                                      355,
+                                      667,
+                                      385,
+                                      746
+                                    ],
+                                    "view-id": "s2-edd1e9ee444fedac-3"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "$": {
+                                "text": "Vertical scroll bar, 1 page",
+                                "class": "UIView",
+                                "bounds": [
+                                  355,
+                                  667,
+                                  385,
+                                  746
+                                ],
+                                "view-id": "s2-edd1e9ee444fedac-4"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "$": {
+                            "class": "UIScrollView",
+                            "bounds": [
+                              14,
+                              754,
+                              388,
+                              763
+                            ],
+                            "scrollable": "true",
+                            "view-id": "s2-9c50464cb8e8a7a9"
+                          },
+                          "node": {
+                            "$": {
+                              "text": "Vertical scroll bar, 1 page",
+                              "class": "UIView",
+                              "bounds": [
+                                355,
+                                754,
+                                385,
+                                763
+                              ],
+                              "view-id": "s2-edd1e9ee444fedac-5"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$": {
+                        "text": "Vertical scroll bar, 1 page",
+                        "class": "UIView",
+                        "bounds": [
+                          369,
+                          55,
+                          399,
+                          818
+                        ],
+                        "view-id": "s2-edd1e9ee444fedac-6"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$": {
+                    "resource-id": "lockscreen-date-view",
+                    "class": "UIView",
+                    "bounds": [
+                      0,
+                      0,
+                      402,
+                      874
+                    ],
+                    "view-id": "lockscreen-date-view"
+                  },
+                  "node": [
+                    {
+                      "$": {
+                        "text": "Monday, November 2",
+                        "class": "UILabel",
+                        "bounds": [
+                          50,
+                          72,
+                          352,
+                          108
+                        ],
+                        "role": "text",
+                        "view-id": "s2-531e9ec27f353130"
+                      }
+                    },
+                    {
+                      "$": {
+                        "text": "8:37 AM",
+                        "class": "UILabel",
+                        "bounds": [
+                          57,
+                          89,
+                          340,
+                          232
+                        ],
+                        "role": "text",
+                        "view-id": "s2-45dfd9cca3219b4d"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$": {
+                    "text": "Home indicator",
+                    "class": "UIView",
+                    "bounds": [
+                      129,
+                      861,
+                      273,
+                      866
+                    ],
+                    "view-id": "s2-a98c831348621af1"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "Cellular",
+                "class": "UIView",
+                "bounds": [
+                  288,
+                  26,
+                  307,
+                  38
+                ],
+                "view-id": "s2-55febb7b5d2fd450"
+              }
+            },
+            {
+              "$": {
+                "resource-id": "3 of 3 Wi-Fi bars",
+                "class": "UIView",
+                "bounds": [
+                  315,
+                  26,
+                  332,
+                  38
+                ],
+                "view-id": "3 of 3 Wi-Fi bars"
+              }
+            },
+            {
+              "$": {
+                "text": "100% battery power",
+                "class": "UIView",
+                "bounds": [
+                  339,
+                  26,
+                  366,
+                  39
+                ],
+                "view-id": "s2-bcee4fb354cade76"
+              }
+            }
+          ]
+        }
+      },
+      "packageName": "com.apple.springboard",
+      "fallbackToSpringboard": true,
+      "updatedAt": 1793630225868,
+      "windows": [
+        {
+          "bounds": [
+            0,
+            0,
+            402,
+            874
+          ],
+          "id": 0,
+          "isActive": true,
+          "isFocused": true,
+          "type": 1
+        }
+      ],
+      "screenScale": 3,
+      "screenWidth": 402,
+      "screenHeight": 874,
+      "nativeScale": 3,
+      "pixelWidth": 1206,
+      "pixelHeight": 2622,
+      "insets": {
+        "available": false,
+        "displayCutoutInfo": {
+          "classification": "unknown"
+        },
+        "source": "unavailable",
+        "units": "unknown"
+      },
+      "receivedAt": 1793630225869,
+      "fresh": true,
+      "frameContext": "DAC1694F-BBA9-4D60-B53D-C20E5CF73C9C:1:8770c02eb45263c0"
+    },
+    "rotation": 0,
+    "activeWindow": {
+      "appId": "com.apple.springboard",
+      "activityName": "",
+      "layoutSeqSum": 0
+    },
+    "layoutWarnings": {
+      "scope": "full",
+      "warnings": []
+    },
+    "freshness": {
+      "actualTimestamp": 1793630225868,
+      "ageMs": 1,
+      "verified": true,
+      "isFresh": true
+    },
+    "deviceLock": {
+      "locked": false,
+      "keyguardShowing": false
+    },
+    "screenshotOrientation": "native",
+    "screenshotPath": "/Users/jason/.claude/orchestrate/kaeawc__auto-mobile/verifyq/n5-16378/batch/daemon1/data/screenshots/screenshot_1793630225870_45D48E06-E6AC-4894-B738-4EA7B6835D46-50ee276ef967_3c103123-f547-448f-97ff-b0d5caa6fe53.png",
+    "screenshotExpiresAt": 1793630826071,
+    "screenshotSource": "fresh",
+    "screenshotCaptureSource": "device",
+    "screenshotCapturedAt": "2026-11-02T14:37:06.069Z",
+    "screenshotAgeMs": 1.3505859375,
+    "screenshotFormat": "png",
+    "screenshotMimeType": "image/png",
+    "screenshotImageSize": {
+      "width": 1206,
+      "height": 2622
+    },
+    "screenshotPixelsPerNativeUnit": {
+      "x": 3,
+      "y": 3
+    },
+    "screenshotScaleProvenance": "native-scale-confirmed",
+    "screenshotSettled": true,
+    "observationScreenshotResourceUri": "automobile:observation/45D48E06-E6AC-4894-B738-4EA7B6835D46/7f4c9431-e87c-4556-b760-0d3a84dcefd0/screenshot"
+  }
+}

@@ -1,4 +1,9 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
+import {
+  ios26SettingsClosed,
+  ios26TrayOpenHome,
+  ios26TrayOpenSettings,
+} from "./iosTrayObservationFixture";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { AndroidNotificationUIDetector } from "../../../src/features/systemTray/AndroidNotificationUIDetector";
@@ -345,6 +350,33 @@ describe("NotificationUIDetector", () => {
     });
 
     it.each([
+      ["tray over Settings", ios26TrayOpenSettings, true],
+      ["Settings baseline", ios26SettingsClosed, false],
+      ["tray from SpringBoard", ios26TrayOpenHome, true],
+    ] as const)("detects captured iOS 26.5 %s", (_name, observation, expected) => {
+      expect(capturedDetector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)).toBe(
+        expected,
+      );
+    });
+
+    it.each([
+      undefined,
+      { locked: true, keyguardShowing: false },
+      { locked: false, keyguardShowing: true },
+    ])("requires both lock signals over an app (%j)", (lock) => {
+      expect(capturedDetector.isTrayOpen(ios26TrayOpenSettings.viewHierarchy, lock)).toBe(false);
+    });
+
+    it("does not treat a lock signal without an app hierarchy as the tray", () => {
+      const lock = ios26TrayOpenSettings.deviceLock;
+      expect(capturedDetector.isTrayOpen(undefined, lock)).toBe(false);
+      expect(capturedDetector.isTrayOpen({ hierarchy: {} }, lock)).toBe(false);
+      expect(
+        capturedDetector.isTrayOpen({ hierarchy: {}, packageName: "com.apple.Preferences" }, lock),
+      ).toBe(false);
+    });
+
+    it.each([
       ["lock-screen", false],
       ["notification-center-empty", true],
       ["notification-center-notifications", true],
@@ -361,6 +393,11 @@ describe("NotificationUIDetector", () => {
         ),
       );
       expect(capturedDetector.isTrayOpen(hierarchy)).toBe(expected);
+      if (name === "lock-screen") {
+        expect(capturedDetector.isTrayOpen(hierarchy, ios26TrayOpenSettings.deviceLock)).toBe(
+          false,
+        );
+      }
     });
 
     it("detects the captured empty iOS 27 Notification Center", () => {
@@ -437,6 +474,56 @@ describe("NotificationUIDetector", () => {
       expect(detector.isTrayOpen(undefined)).toBe(false);
     });
 
+    for (const action of ["open", "close swipe", "close home"] as const) {
+      it.each(["success", "failure", "indeterminate", "throw"] as const)(
+        `invalidates lock state after ${action} (%s)`,
+        async (outcome) => {
+          const events: string[] = [];
+          const gesture = async (): Promise<IosGestureResult> => {
+            events.push("gesture started");
+            await Promise.resolve();
+            events.push("gesture finished");
+            if (outcome === "throw") {
+              throw new Error("transport failed");
+            }
+            return {
+              success: outcome === "success",
+              error: "gesture failed",
+              dispatched: true,
+              acknowledged: outcome !== "indeterminate",
+            };
+          };
+          const detector = new IosNotificationUIDetector(iosDevice, {
+            pressHome: gesture,
+            requestSwipe: gesture,
+            requestTapCoordinates: async () => ({ success: true }),
+            invalidateLockState: () => {
+              events.push("invalidated");
+            },
+            now: () => 0,
+          });
+          const result =
+            action === "open"
+              ? detector.expandTray(observationWithSize)
+              : detector.collapseTray(
+                  action === "close home" ? ios26TrayOpenSettings : observationWithSize,
+                );
+          if (outcome === "success") {
+            await result;
+          } else {
+            await expect(result).rejects.toThrow(
+              outcome === "throw"
+                ? "transport failed"
+                : outcome === "indeterminate"
+                  ? "indeterminate"
+                  : "Failed to",
+            );
+          }
+          expect(events).toEqual(["gesture started", "gesture finished", "invalidated"]);
+        },
+      );
+    }
+
     it("emits a downward swipe to open NotificationCenter", async () => {
       const swipes: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> =
         [];
@@ -469,6 +556,33 @@ describe("NotificationUIDetector", () => {
       expect(swipes.length).toBe(1);
       expect(swipes[0].y1).toBeGreaterThan(swipes[0].y2);
     });
+
+    it.each(["com.apple.Preferences", "com.apple.mobilesafari"])(
+      "closes the app cover sheet with HOME without swiping (%s)",
+      async (packageName) => {
+        let homeCalls = 0;
+        let swipeCalls = 0;
+        const detector = new IosNotificationUIDetector(iosDevice, {
+          pressHome: async () => {
+            homeCalls++;
+            return { success: true };
+          },
+          requestSwipe: async () => {
+            swipeCalls++;
+            return { success: true };
+          },
+          requestTapCoordinates: async () => ({ success: true }),
+          now: () => 0,
+        });
+        // Derived Safari identity exercises routing with the captured Settings tree.
+        await detector.collapseTray({
+          ...ios26TrayOpenSettings,
+          viewHierarchy: { ...ios26TrayOpenSettings.viewHierarchy!, packageName },
+        });
+        expect(homeCalls).toBe(1);
+        expect(swipeCalls).toBe(0);
+      },
+    );
 
     it.each([
       ["cover sheet", ios27NotificationCenterHierarchy, 1, 0],
@@ -727,6 +841,42 @@ describe("NotificationUIDetector", () => {
       const detector = createNotificationUIDetector(androidDevice, buildDeps);
       expect(detector).toBeInstanceOf(AndroidNotificationUIDetector);
       expect(detector.device).toBe(androidDevice);
+    });
+
+    it("does not invalidate iOS lock state for Android tray gestures", async () => {
+      const invalidated: string[] = [];
+      const deps: SystemTrayDependencies = {
+        ...buildDeps(),
+        iosLockStateInvalidator: {
+          invalidate: (deviceId) => {
+            invalidated.push(deviceId);
+          },
+        },
+      };
+      const detector = createNotificationUIDetector(androidDevice, () => deps);
+      await detector.expandTray();
+      await detector.collapseTray();
+      expect(invalidated).toEqual([]);
+    });
+
+    it("reads the overridden iOS lock invalidator lazily for the bound device", async () => {
+      const invalidated: string[] = [];
+      const deps: SystemTrayDependencies = {
+        ...buildDeps(),
+        iosLockStateInvalidator: {
+          invalidate: () => {
+            throw new Error("stale invalidator");
+          },
+        },
+      };
+      const detector = createNotificationUIDetector(iosDevice, () => deps);
+      deps.iosLockStateInvalidator = {
+        invalidate: (deviceId) => {
+          invalidated.push(deviceId);
+        },
+      };
+      await detector.expandTray(observationWithSize);
+      expect(invalidated).toEqual([iosDevice.deviceId]);
     });
     it("passes cancellation through to Android shade commands", async () => {
       const controller = new AbortController();

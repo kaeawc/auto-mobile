@@ -36,6 +36,7 @@ import {
   SYSTEM_TRAY_POLL_INTERVAL_MS,
   SYSTEM_TRAY_REEXPAND_INTERVAL_MS,
   ensureSystemTrayOpen,
+  hasMatchableNotificationContent,
   observeSystemTray,
   sleep,
   swipeElement,
@@ -222,7 +223,7 @@ const isReadableNotificationShade = (
   detector: NotificationUIDetector,
   observation: ObserveResult,
 ): boolean =>
-  detector.isTrayOpen(observation.viewHierarchy) &&
+  detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock) &&
   observation.freshness?.isFresh !== false &&
   observation.freshness?.verified !== false;
 
@@ -233,7 +234,7 @@ const classifyNotificationDismissal = (
   { appMatchTexts, candidate }: { appMatchTexts: string[]; candidate: ObserveResult },
 ): "dismissed" | "present" | "snapped-back" | "indeterminate" => {
   const hierarchy = candidate.viewHierarchy;
-  if (!hierarchy || !detector.isTrayOpen(hierarchy)) {
+  if (!hierarchy || !detector.isTrayOpen(hierarchy, candidate.deviceLock)) {
     return "indeterminate";
   }
   // The swiped row's own identity decides when it has one: a new matching
@@ -423,7 +424,7 @@ const waitForClearAllDismissal = async (
         break;
       }
       if (
-        !detector.isTrayOpen(observation.viewHierarchy) &&
+        !detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock) &&
         timer.now() - reexpandState.lastAttemptAtMs >= SYSTEM_TRAY_REEXPAND_INTERVAL_MS
       ) {
         reexpandState.lastAttemptAtMs = timer.now();
@@ -505,7 +506,9 @@ const readClearAllShadeOnce = async (
     throwIfAborted(signal);
     const readable = isReadableNotificationShade(detector, observation);
     const match =
-      readable && observation.viewHierarchy
+      readable &&
+      observation.viewHierarchy &&
+      hasMatchableNotificationContent(detector, observation)
         ? findBestNotificationMatch(observation.viewHierarchy, criteria, appMatchTexts)
         : null;
     if (match) {

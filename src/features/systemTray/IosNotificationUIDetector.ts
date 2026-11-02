@@ -31,6 +31,7 @@ export interface IosGestureResult {
 }
 
 export interface IosNotificationUIDetectorDeps {
+  invalidateLockState?(): void;
   pressHome?(): Promise<IosGestureResult>;
   requestSwipe(
     request: Pick<SwipeRequest, "x1" | "y1" | "x2" | "y2" | "duration">,
@@ -43,15 +44,32 @@ export interface IosNotificationUIDetectorDeps {
 const IOS_OPEN_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
 const IOS_CLOSE_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
 
+/** App-owned trees expose the cover sheet only through the accompanying lock state. */
+export function hasIosAppNotificationCoverSheet(
+  viewHierarchy?: ViewHierarchyResult,
+  deviceLock?: ObserveResult["deviceLock"],
+): boolean {
+  const packageName = viewHierarchy?.packageName ?? "";
+  return (
+    !!viewHierarchy &&
+    packageName.length > 0 &&
+    !packageName.includes("springboard") &&
+    !hierarchyShowsIosLockScreen(viewHierarchy) &&
+    getHierarchyRoots(viewHierarchy).some((root) => Object.keys(root).length > 0) &&
+    deviceLock?.locked === true &&
+    deviceLock.keyguardShowing === true
+  );
+}
+
 /**
  * iOS implementation of {@link NotificationUIDetector}. NotificationCenter
- * is hosted by SpringBoard, so the predicate first gates on the
- * observation's `packageName` containing "springboard" before scanning
- * for legacy NotificationCenter hints or the captured cover-sheet list structure.
+ * uses SpringBoard hierarchy hints or the captured cover-sheet list structure.
+ * On iOS 26.5 over an app, the hierarchy stays app-owned with no tray nodes;
+ * both lock-state flags identify the keyguard-style Notification Center overlay.
  *
  * Expand and legacy collapse use vertical swipes anchored at the screen's
- * mid-X and require `screenSize` from the most recent observation. The iOS 27
- * cover sheet collapses via HOME instead and does not require dimensions.
+ * mid-X and require `screenSize` from the most recent observation. Cover sheets
+ * collapse via HOME instead and do not require dimensions.
  */
 export class IosNotificationUIDetector implements NotificationUIDetector {
   readonly device: BootedDevice;
@@ -62,54 +80,78 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
     this.deps = deps;
   }
 
-  isTrayOpen(viewHierarchy?: ViewHierarchyResult): boolean {
+  isTrayOpen(
+    viewHierarchy?: ViewHierarchyResult,
+    deviceLock?: ObserveResult["deviceLock"],
+  ): boolean {
     if (!viewHierarchy) {
-      return false;
-    }
-    const packageName = viewHierarchy.packageName ?? "";
-    if (!packageName.includes("springboard")) {
       return false;
     }
     if (hierarchyShowsIosLockScreen(viewHierarchy)) {
       return false;
     }
+    const packageName = viewHierarchy.packageName ?? "";
     const rootNodes = getHierarchyRoots(viewHierarchy);
+    if (!packageName.includes("springboard")) {
+      // Captured iOS 26.5 tray-over-app observations retain the app tree and
+      // report both flags; the closed app baseline reports both false. Require
+      // app content so a lock signal alone never identifies Notification Center.
+      return hasIosAppNotificationCoverSheet(viewHierarchy, deviceLock);
+    }
     return rootNodes.some((root) => traverseForHint(root, nodeHasIosNotificationCenterHint));
   }
 
   async expandTray(observation?: ObserveResult): Promise<void> {
     const { width, height } = this.requireScreenSize(observation, "open");
-    const result = await this.deps.requestSwipe({
-      x1: Math.floor(width * 0.5),
-      y1: 5,
-      x2: Math.floor(width * 0.5),
-      y2: Math.floor(height * 0.7),
-      duration: IOS_OPEN_SWIPE_DURATION_MS,
-    });
-    this.requireGestureSuccess(result, "open Notification Center");
+    try {
+      const result = await this.deps.requestSwipe({
+        x1: Math.floor(width * 0.5),
+        y1: 5,
+        x2: Math.floor(width * 0.5),
+        y2: Math.floor(height * 0.7),
+        duration: IOS_OPEN_SWIPE_DURATION_MS,
+      });
+      this.requireGestureSuccess(result, "open Notification Center");
+    } finally {
+      // Even an unanswered or failed gesture may have changed the cover sheet.
+      this.invalidateLockState();
+    }
   }
 
   async collapseTray(observation?: ObserveResult): Promise<void> {
     if (
       observation?.viewHierarchy &&
-      hasIosCoverSheetNotificationCenter(observation.viewHierarchy)
+      (hasIosCoverSheetNotificationCenter(observation.viewHierarchy) ||
+        hasIosAppNotificationCoverSheet(observation.viewHierarchy, observation.deviceLock))
     ) {
       if (!this.deps.pressHome) {
         throw new ActionableError("Failed to close Notification Center: home press unavailable");
       }
-      const result = await this.deps.pressHome();
-      this.requireGestureSuccess(result, "close Notification Center");
+      try {
+        const result = await this.deps.pressHome();
+        this.requireGestureSuccess(result, "close Notification Center");
+      } finally {
+        this.invalidateLockState();
+      }
       return;
     }
     const { width, height } = this.requireScreenSize(observation, "close");
-    const result = await this.deps.requestSwipe({
-      x1: Math.floor(width * 0.5),
-      y1: Math.floor(height * 0.65),
-      x2: Math.floor(width * 0.5),
-      y2: Math.floor(height * 0.08),
-      duration: IOS_CLOSE_SWIPE_DURATION_MS,
-    });
-    this.requireGestureSuccess(result, "close Notification Center");
+    try {
+      const result = await this.deps.requestSwipe({
+        x1: Math.floor(width * 0.5),
+        y1: Math.floor(height * 0.65),
+        x2: Math.floor(width * 0.5),
+        y2: Math.floor(height * 0.08),
+        duration: IOS_CLOSE_SWIPE_DURATION_MS,
+      });
+      this.requireGestureSuccess(result, "close Notification Center");
+    } finally {
+      this.invalidateLockState();
+    }
+  }
+
+  invalidateLockState(): void {
+    this.deps.invalidateLockState?.();
   }
 
   async getObservationTimestamp(): Promise<number> {

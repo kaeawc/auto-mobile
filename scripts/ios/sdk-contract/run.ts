@@ -113,7 +113,18 @@ export function parseOptions(argv: readonly string[]): Options {
   return { deviceId, appPath, reportPath: value("--report") };
 }
 
-/** Tool calls use the auto-mobile CLI, as the other simulator-lane scripts do. */
+/** Resolve this checkout's built CLI and preserve the caller's argument order. */
+export function resolveCliCommand(
+  args: readonly string[],
+  execPath: string,
+): { command: string; args: string[] } {
+  return {
+    command: execPath,
+    args: [resolve(fileURLToPath(new URL("../../../dist/src/index.js", import.meta.url))), ...args],
+  };
+}
+
+/** Tool calls use this checkout's built auto-mobile CLI. */
 async function callTool(
   tool: string,
   args: Record<string, string | boolean>,
@@ -121,11 +132,15 @@ async function callTool(
 ): Promise<JsonRecord> {
   const flags = Object.entries(args).flatMap(([key, val]) => [`--${key}`, String(val)]);
   const session = sessionUuid ? ["--session-uuid", sessionUuid] : [];
-  const { stdout } = await execFileAsync(
-    "auto-mobile",
+  const cli = resolveCliCommand(
     ["--debug", "--embedded-sdk", "--cli", ...session, tool, ...flags],
-    { maxBuffer: 64 * 1024 * 1024, timeout: TOOL_TIMEOUT_MS, env: CLI_ENV },
+    process.execPath,
   );
+  const { stdout } = await execFileAsync(cli.command, cli.args, {
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TOOL_TIMEOUT_MS,
+    env: CLI_ENV,
+  });
   return parseToolOutput(stdout);
 }
 
@@ -148,7 +163,8 @@ async function invokeTool(
 
 async function releaseSession(sessionUuid: string): Promise<void> {
   try {
-    await execFileAsync("auto-mobile", ["--daemon", "release-session", sessionUuid], {
+    const cli = resolveCliCommand(["--daemon", "release-session", sessionUuid], process.execPath);
+    await execFileAsync(cli.command, cli.args, {
       env: { ...process.env, AUTOMOBILE_DAEMON_TIMEOUT_MS: "2000" },
       timeout: 30_000,
     });

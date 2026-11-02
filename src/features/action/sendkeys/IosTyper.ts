@@ -5,8 +5,15 @@ import {
   readIosTypedTextField,
   readIosTypedTextFocus,
   verifyIosTypedText,
+  type IosTypedTextRead,
 } from "../iosTypedTextVerification";
-import { getTextRequestDeadlineMs, resolveTextCtrlProxyTimeoutMs } from "../textTransportTimeout";
+import {
+  assessIosTextToolBudget,
+  getTextRequestDeadlineMs,
+  resolveTextCtrlProxyTimeoutMs,
+} from "../textTransportTimeout";
+import { isTextIndeterminateMessage } from "../TextIndeterminateError";
+import { splitIosTextChunks } from "./IosTextChunks";
 import type { FocusedTextField } from "../ClearText";
 import type { TypingSession } from "./TypingSession";
 import type {
@@ -16,6 +23,10 @@ import type {
   SendKeysTextClient,
   TextActionResult,
 } from "../SendKeys";
+
+interface IosChunkRead extends IosTypedTextRead {
+  deadlineMs: number | undefined;
+}
 
 export interface IosTyperDeps {
   session: TypingSession;
@@ -29,8 +40,8 @@ export interface IosTyperDeps {
 }
 
 /**
- * The iOS typing path: one XCUITest typeText delivery with optional replace-clear and a
- * read-back verification. Moved out of DefaultSendKeysCommandExecutor unchanged (#11840).
+ * The iOS typing path: bounded XCUITest appends with one optional replace-clear and
+ * read-back verification after each chunk.
  */
 export class IosTyper {
   constructor(private readonly deps: IosTyperDeps) {}
@@ -43,17 +54,106 @@ export class IosTyper {
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
+    const chunks = splitIosTextChunks(text);
+    const admissionDeadlineMs = getTextRequestDeadlineMs();
+    const codePoints = Array.from(text).length;
+    const budget = assessIosTextToolBudget(
+      codePoints,
+      chunks.length,
+      admissionDeadlineMs === undefined ? undefined : admissionDeadlineMs - this.deps.timer.now(),
+    );
+    if (budget.exceedsBudget) {
+      return {
+        success: false,
+        error: `iOS nothing was typed: ${codePoints} code points would take about ${Math.ceil(budget.estimatedMs / 1000)} s, exceeding the available typing budget. Please split the text into smaller sendKeys calls, or use setText / paste where available.`,
+        resolvedMode,
+      };
+    }
     const preparation = await this.prepareTyping(operation, signal, display);
     if (preparation.kind === "refused") {
       return preparation.result;
     }
     const { before, clearWarning } = preparation;
     this.deps.session.typingPasswordField = before?.secure === true;
-    signal?.throwIfAborted();
+    const read = {
+      observer: this.deps.observer,
+      timer: this.deps.timer,
+      signal,
+      display,
+      deadlineMs: getTextRequestDeadlineMs(),
+    };
+    if (chunks.length === 1) {
+      signal?.throwIfAborted();
+      const typed = await this.typeChunk(
+        text,
+        before,
+        read,
+        this.deps.targetLayer() !== "prototype",
+      );
+      return {
+        ...this.deps.withTextWarnings(
+          operation === "replace" && typed.insertFailed
+            ? this.deps.markPartialAfterMutation(typed.result)
+            : typed.result,
+          [clearWarning],
+        ),
+        resolvedMode,
+      };
+    }
+    return {
+      ...(await this.typeChunks(chunks, preparation, operation, read)),
+      resolvedMode,
+    };
+  }
 
-    // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
-    // requested cross-platform mode in metadata, but report the actual mechanism.
-    const deadlineMs = getTextRequestDeadlineMs();
+  private async typeChunks(
+    chunks: string[],
+    preparation: { before: FocusedTextField | undefined; clearWarning: string | undefined },
+    operation: SendKeysOperation,
+    read: IosChunkRead,
+  ): Promise<TextActionResult> {
+    let { before } = preparation;
+    const warnings = new Set([preparation.clearWarning]);
+    let committed = 0;
+    let result: TextActionResult = { success: true };
+    for (const [index, chunk] of chunks.entries()) {
+      read.signal?.throwIfAborted();
+      const typed = await this.typeChunk(chunk, before, read);
+      result = typed.result;
+      before = typed.after;
+      warnings.add(typed.insertWarning);
+      warnings.add(result.warning);
+      if (!result.success) {
+        if (operation === "replace") {
+          result = this.deps.markPartialAfterMutation(result);
+        }
+        result = {
+          ...result,
+          ...(isTextIndeterminateMessage(result.error) ? { retryable: false } : {}),
+          error: `${result.error ?? "iOS typing failed."} iOS chunk ${index + 1} of ${chunks.length} failed; ${committed} code points committed in fully successful chunks.`,
+        };
+        break;
+      }
+      committed += Array.from(chunk).length;
+    }
+    // The existing warning helper also includes result.warning, so remove the collected copy.
+    result = { ...result };
+    delete result.warning;
+    return this.deps.withTextWarnings(result, [...warnings]);
+  }
+
+  private async typeChunk(
+    text: string,
+    before: FocusedTextField | undefined,
+    read: IosChunkRead,
+    verify = true,
+  ): Promise<{
+    result: TextActionResult;
+    after: FocusedTextField | undefined;
+    insertWarning?: string;
+    insertFailed?: boolean;
+  }> {
+    const { deadlineMs, signal } = read;
     const result = await this.deps.insert(text, {
       ...(deadlineMs === undefined ? {} : { deadlineMs }),
       timeoutMs: resolveTextCtrlProxyTimeoutMs(
@@ -63,37 +163,20 @@ export class IosTyper {
       abortSignal: signal,
     });
     if (!result.success) {
-      const explained = {
-        ...result,
-        error: await explainIosIndeterminateText(result.error, text, before, {
-          observer: this.deps.observer,
-          timer: this.deps.timer,
-          signal,
-          display,
-        }),
-      };
       return {
-        ...this.deps.withTextWarnings(
-          operation === "replace" ? this.deps.markPartialAfterMutation(explained) : explained,
-          [clearWarning],
-        ),
-        resolvedMode,
+        result: {
+          ...result,
+          error: await explainIosIndeterminateText(result.error, text, before, read),
+        },
+        after: before,
+        insertFailed: true,
       };
     }
-    return {
-      ...this.deps.withTextWarnings(
-        this.deps.targetLayer() === "prototype"
-          ? result
-          : await verifyIosTypedText(text, before, {
-              observer: this.deps.observer,
-              timer: this.deps.timer,
-              signal,
-              display,
-            }),
-        [clearWarning],
-      ),
-      resolvedMode,
-    };
+    if (!verify) {
+      return { result, after: before };
+    }
+    const { after, ...verification } = await verifyIosTypedText(text, before, read);
+    return { result: verification, after, insertWarning: result.warning };
   }
 
   private async prepareTyping(

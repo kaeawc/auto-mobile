@@ -9,8 +9,8 @@ const TEXT_REPLY_HEADROOM_MS = 2000;
 
 // ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift:1347-1360
 // calls XCUIApplication.typeText with no
-// per-key cadence or overall typing budget. This conservative allowance needs
-// one simulator measurement; it is not a measured XCUITest rate.
+// per-key cadence or overall typing budget. Retain this conservative transport
+// allowance for compatibility; long-text admission uses the measured rate below.
 export const CONSERVATIVE_IOS_TEXT_PER_CODE_POINT_MS = 100;
 
 /** Deadline clamping takes precedence over the compatibility floor. */
@@ -32,6 +32,28 @@ export function resolveTextCtrlProxyTimeoutMs(
 
 /** Covers focus/clear and the final observation outside the text transport. */
 export const TEXT_MCP_REQUEST_HEADROOM_MS = 20_000;
+/** Measured XCUITest typing rate, used for long-text admission rather than transport timeouts. */
+export const IOS_TEXT_MEASURED_MS_PER_CODE_POINT = 16;
+export const IOS_TEXT_CHUNK_OVERHEAD_MS = 2000;
+export const IOS_TEXT_TOOL_BUDGET_MS = 600_000;
+
+/** Pure admission check; a single chunk retains the existing transport behavior. */
+export function assessIosTextToolBudget(
+  codePoints: number,
+  chunkCount: number,
+  remainingRequestBudgetMs?: number,
+): { estimatedMs: number; exceedsBudget: boolean } {
+  const estimatedMs =
+    codePoints * IOS_TEXT_MEASURED_MS_PER_CODE_POINT + chunkCount * IOS_TEXT_CHUNK_OVERHEAD_MS;
+  const budgetMs = Math.min(
+    IOS_TEXT_TOOL_BUDGET_MS,
+    remainingRequestBudgetMs === undefined
+      ? IOS_TEXT_TOOL_BUDGET_MS
+      : remainingRequestBudgetMs - TEXT_MCP_REQUEST_HEADROOM_MS,
+  );
+  return { estimatedMs, exceedsBudget: chunkCount > 1 && estimatedMs > budgetMs };
+}
+
 /** Return a terminal result before the enclosing request/safety-net timer fires. */
 export const TEXT_REQUEST_RESPONSE_MARGIN_MS = 1000;
 

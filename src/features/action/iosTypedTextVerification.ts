@@ -261,10 +261,10 @@ export async function verifyIosTypedText(
   text: string,
   before: FocusedTextField | undefined,
   read: IosTypedTextRead,
-): Promise<IosTypedTextVerificationResult> {
+): Promise<IosTypedTextVerificationResult & { after: FocusedTextField | undefined }> {
   const { timer, signal } = read;
   if (before?.secure) {
-    return compareIosTypedText(text, before, undefined);
+    return { ...compareIosTypedText(text, before, undefined), after: before };
   }
   let after = await readIosTypedTextField(read);
   let result = compareIosTypedText(text, before, after);
@@ -277,7 +277,7 @@ export async function verifyIosTypedText(
     after = await readIosTypedTextField(read, {}, Math.max(0, settleDeadline - timer.now()));
     result = compareIosTypedText(text, before, after);
   }
-  return result;
+  return { ...result, after };
 }
 
 /** Upper bound for the read that explains an unconfirmed typeText. */

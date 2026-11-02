@@ -21,6 +21,7 @@ import type {
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
 import { adbCommand, createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
+import { LmkPressureBinaryProvider } from "./lmkPressureBinaryProvider";
 
 export const MEMORY_PRESSURE_BINARY = "/data/local/tmp/automobile-lmk-pressure";
 export const MEMORY_PRESSURE_PID = `${MEMORY_PRESSURE_BINARY}.pid`;
@@ -34,6 +35,8 @@ const POLL_MS = 250;
 const READY_TIMEOUT_MS = 60_000;
 const KILL_WINDOW_MS = 15_000;
 const RESET_TIMEOUT_MS = 5_000;
+/** AID_SHELL: the user the payload always runs as, whether or not adbd is root. */
+const SHELL_UID = "2000";
 
 export function parseMemAvailableKb(text: string): number {
   const match = /^MemAvailable:\s+(\d+)\s+kB\s*$/m.exec(text);
@@ -81,6 +84,11 @@ export interface MemoryPressureOptions {
   timer?: Timer;
   resolveBinaryPath?: (abi: string) => string;
   binaryExists?: (path: string) => boolean | Promise<boolean>;
+  /**
+   * The checksum-verified release binary for an ABI, or null when the pinned
+   * release has none (#16402). Defaults to the shared release download cache.
+   */
+  releaseBinary?: (abi: "arm64-v8a" | "x86_64") => Promise<string | null>;
 }
 
 /** Only argv[0] equal to our exact executable is owned; substrings and reused PIDs are not. */
@@ -211,6 +219,27 @@ class MemoryPressureFixture {
     if (!ready) {
       unsupported(`memory pressure payload ${size} MiB did not become READY`);
     }
+    await this.requireShellOwner(signal);
+  }
+
+  /**
+   * The payload drops to the shell user when a rooted adbd starts it, so clearing rootState
+   * (`adb unroot`) never leaves a payload the shell cannot stop (#16407). A binary built before
+   * that drop stays root-owned; refuse it while adbd can still stop it.
+   */
+  private async requireShellOwner(signal?: AbortSignal): Promise<void> {
+    const pid = await shell(this.adb, ["cat", MEMORY_PRESSURE_PID], signal);
+    if (!/^[1-9]\d*$/.test(pid)) {
+      unsupported(`memory pressure payload wrote no PID (${pid || "empty"})`);
+    }
+    const status = await shell(this.adb, ["grep", "^Uid:", `/proc/${pid}/status`], signal);
+    const uid = status.split(/\s+/)[1];
+    // An exited payload has no status; the liveness check after the kill window reports it.
+    if (uid !== undefined && uid !== SHELL_UID) {
+      unsupported(
+        `memory pressure payload runs as uid ${uid}, not the shell user; rebuild it with bash scripts/android/build-lmk-pressure.sh`,
+      );
+    }
   }
 
   private async observeKills(since: string, signal?: AbortSignal): Promise<number> {
@@ -233,15 +262,27 @@ class MemoryPressureFixture {
     if (abi !== "arm64-v8a" && abi !== "x86_64") {
       unsupported(`memoryPressure does not support ABI ${abi}`);
     }
+    const env = this.options.env ?? process.env;
     const path = this.options.resolveBinaryPath
       ? this.options.resolveBinaryPath(abi)
-      : resolveBinaryPath(abi, this.options.env ?? process.env);
-    if (!(await (this.options.binaryExists ?? existsSync)(path))) {
-      unsupported(
-        `missing pressure binary ${path}; run bash scripts/android/build-lmk-pressure.sh or set AUTOMOBILE_LMK_PRESSURE_DIR`,
-      );
+      : resolveBinaryPath(abi, env);
+    if (await (this.options.binaryExists ?? existsSync)(path)) {
+      return path;
     }
-    return path;
+    // An explicit directory is the user's choice: report it rather than download around it.
+    if (!readEnvTrimmed(ENV.LMK_PRESSURE_DIR, env)) {
+      // The on-disk cache is shared, so a provider per apply does not re-download.
+      const released = await (
+        this.options.releaseBinary ??
+        ((wanted) => new LmkPressureBinaryProvider({ env }).ensure(wanted))
+      )(abi);
+      if (released) {
+        return released;
+      }
+    }
+    return unsupported(
+      `missing pressure binary ${path} and no released binary for this AutoMobile version; run bash scripts/android/build-lmk-pressure.sh or set AUTOMOBILE_LMK_PRESSURE_DIR`,
+    );
   }
 
   private async applyNow(

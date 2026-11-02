@@ -1143,6 +1143,41 @@ export function resolveNetworkFilterChecksum(
   return entryForPinnedVersion(env, registry)?.networkFilterSha256 ?? "";
 }
 
+/** Android ABIs the deviceCondition memory-pressure payload is released for (#16402). */
+export type LmkPressureAbi = "arm64-v8a" | "x86_64";
+
+/** Fixed GitHub Release asset name of each ABI's memory-pressure payload. */
+export const LMK_PRESSURE_ASSET_FILENAMES: Readonly<Record<LmkPressureAbi, string>> = {
+  "arm64-v8a": "automobile-lmk-pressure-arm64-v8a",
+  x86_64: "automobile-lmk-pressure-x86_64",
+};
+
+/** Download URL of one ABI's memory-pressure payload for the pinned version. */
+export function resolveLmkPressureUrl(
+  abi: LmkPressureAbi,
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    LMK_PRESSURE_ASSET_FILENAMES[abi],
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected SHA-256 of one ABI's memory-pressure payload; "" when the release predates it. */
+export function resolveLmkPressureChecksum(
+  abi: LmkPressureAbi,
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  const entry = entryForPinnedVersion(env, registry);
+  return (
+    (abi === "arm64-v8a" ? entry?.lmkPressureArm64Sha256 : entry?.lmkPressureX8664Sha256) ?? ""
+  );
+}
+
 /**
  * Concrete `@kaeawc/auto-mobile@<version>` install specifier for user-facing
  * advice. Never yields the floating `@latest` tag (which causes silent version

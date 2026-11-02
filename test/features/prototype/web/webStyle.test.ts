@@ -94,3 +94,10 @@ test("maps every text decoration to CSS", () => {
   expect(decoration("underlineLineThrough")).toBe("underline line-through");
   expect(decoration("none")).toBe("none");
 });
+
+test("inside a box grid, a width-only fill stretches horizontally only", () => {
+  const css = nodeCss({ width: "fill", height: "wrap" }, context);
+  expect(css).toMatchObject({ "justify-self": "stretch", width: "100%" });
+  expect(css).not.toHaveProperty("align-self");
+  expect(nodeCss({ height: "fill" }, context)).toMatchObject({ "align-self": "stretch" });
+});

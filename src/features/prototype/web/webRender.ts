@@ -442,6 +442,22 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
   return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
 }
 
+/** A multiline field keeps its newlines and its authored minLines and maxLines (24px lines). */
+function lineBounds(node: Raw): Record<string, string> {
+  if (node.multiline !== true) {
+    return {};
+  }
+  const css: Record<string, string> = { "white-space": "pre-wrap", "line-height": "24px" };
+  if (typeof node.minLines === "number") {
+    css["min-height"] = `${node.minLines * 24}px`;
+  }
+  if (typeof node.maxLines === "number") {
+    css["max-height"] = `${node.maxLines * 24}px`;
+    css.overflow = "hidden";
+  }
+  return css;
+}
+
 /**
  * A Material field's label sits inside an empty field with no placeholder (fieldValue draws it
  * there); once the field holds a value or shows a placeholder, the label floats above it.
@@ -526,7 +542,7 @@ const textField: NodeRenderer = (node, scope, path) => {
       ...namedIcon(node.leadingIcon, scope),
       el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
         ...floatingLabel(node, empty, scope),
-        shown,
+        el("span", { style: lineBounds(node) }, [shown]),
       ]),
       // The trailing slot is an {icon, label} action, like an app-bar action.
       ...appBarIcons([node.trailingIcon], scope, path),
@@ -593,6 +609,8 @@ const card: NodeRenderer = (node, scope, path) => {
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "flex-direction": "column",
+    // Material's ColumnScope keeps wrap-sized content at its own width.
+    "align-items": "flex-start",
     "border-radius": "12px",
     ...roleCss(
       scope,

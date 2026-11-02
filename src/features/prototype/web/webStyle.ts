@@ -34,8 +34,12 @@ function dimension(css: Css, axis: "width" | "height", value: unknown, context: 
   if (value === "fill") {
     if (mainAxis) {
       css.flex = "1 1 auto";
-    } else {
+    } else if (context.parentAxis) {
       css["align-self"] = "stretch";
+      css[axis] = "100%";
+    } else {
+      // A box lays children out on a grid, where each axis has its own self-alignment.
+      css[axis === "width" ? "justify-self" : "align-self"] = "stretch";
       css[axis] = "100%";
     }
   } else if (typeof record(value)?.dp === "number") {

@@ -620,6 +620,35 @@ describe("prototype web still (#16346)", () => {
     expect((layer.children[0] as WebElement).style["align-self"]).toBe("stretch");
   });
 
+  test("a multiline text field keeps newlines and its line bounds", () => {
+    const value = (multiline: boolean) =>
+      find(
+        renderPrototypeStill({
+          ...reference,
+          state: { note: "First line\nSecond line" },
+          root: { type: "textField", stateKey: "note", multiline, minLines: 2, maxLines: 4 },
+        }).element,
+        (element) => element.children.includes("First line\nSecond line"),
+      )[0]!.style;
+    expect(value(true)).toMatchObject({
+      "white-space": "pre-wrap",
+      "min-height": "48px",
+      "max-height": "96px",
+    });
+    expect(value(false)).not.toHaveProperty("white-space");
+  });
+
+  test("a card keeps wrap-sized children at their own width", () => {
+    const card = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: { type: "card", testTag: "card", children: [{ type: "button", label: "Go" }] },
+      }),
+      "card",
+    )[0]!;
+    expect(card.style["align-items"]).toBe("flex-start");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

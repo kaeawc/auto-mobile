@@ -32,9 +32,9 @@ the host, so the page's script only switches between views it was given and neve
   `styleWhen` entries whose condition holds merge over `style` in authored order; an entry the
   still cannot decide is not applied. `textStyle` resolves to the Material 3 type scale before
   explicit `textSize`, `fontWeight` and `lineHeight`.
-- **Layout.** Rows and columns are flex lines that start-align children on the cross axis unless
+- **Layout.** Rows, columns and cards are flex lines that start-align children on the cross axis unless
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
-  `style.alignment`, and stack screens fill the stack. `fill`, `{dp}`, `weight`, padding (logical
+  `style.alignment`, and stack screens fill the stack. `fill` (inside a box grid, only on its own axis), `{dp}`, `weight`, padding (logical
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
   accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
@@ -49,7 +49,8 @@ the host, so the page's script only switches between views it was given and neve
   list item whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, and text decorations map to CSS. A text field shows `errorText` with error colours when `errorWhen` is
   decidably true, and otherwise its `supportingText`; its label floats above a value or placeholder, and sits in an
-  otherwise empty field; a captioned field's wrapper takes its size,
+  otherwise empty field; a multiline field keeps newlines and its `minLines`/`maxLines` (24 px
+  lines); a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted square titled with the icon name, because the glyph set is not

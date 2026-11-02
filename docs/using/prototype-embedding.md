@@ -164,3 +164,29 @@ sample prototype on each platform: the Android host and assets, and the iOS spec
 checks refuse that address, loopback and `localhost`, so on iOS point the request at the machine's
 LAN address (private addresses are allowed on ports other than the daemon's) or serve it from a
 `PrototypeNetworkConfiguration(hostHandler:)`.
+
+## Preview as a web page
+
+To look at a prototype without a device or an app, read `automobile:prototype/<id>/web`. It is one
+self-contained HTML page (`text/html`, no network access) with the prototype in a device frame,
+rotate and zoom controls, and its revision history.
+
+| Parameter  | Meaning                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| `frame`    | A device frame id such as `pixel-9` or `iphone-16`. Defaults to the platform that showed the prototype. |
+| `revision` | A kept revision. Defaults to the latest.                                                                |
+| `variant`  | The prototype id of the alternative to show first (see below).                                          |
+
+Revision 1 is the first show of the id. Each later show and each patch that lands adds one; taps
+and typing on the device do not. The last 20 revisions are kept, and an older one is an error that
+names the oldest kept revision. The result's `_meta` reports `revision`, `deviceRevision` (the
+device's own counter for that patch), `revisions`, `variants`, `frame`, `sha256` and
+`rendererVersion`.
+
+`resources/list` lists `automobile:prototype/<id>/web` for every prototype shown in this daemon
+session. Subscribe to that URI, without parameters, to be told about every new revision; a
+subscription to a URI with `revision=` is never notified again.
+
+To compare design alternatives, show each under its own id with the same `variant` group, for
+example `variant: {group: "checkout", label: "Compact"}`. The web page of any of them offers every
+alternative in the group by its label. The device keeps showing whichever was shown last.

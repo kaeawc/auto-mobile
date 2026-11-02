@@ -277,6 +277,7 @@ async function performMutation(
       id: target.id,
       spec: authoredArgs.spec,
       replaceOthers: args.replaceOthers,
+      variant: args.variant,
       result,
     });
     retireObservation(dependencies.cacheInvalidator, device, result);

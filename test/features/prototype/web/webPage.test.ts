@@ -147,6 +147,28 @@ describe("prototype web page (#16346)", () => {
     expect(Buffer.byteLength(small.html)).toBeLessThanOrEqual(maxBytes);
   });
 
+  test("a requested older revision is kept within the budget like each latest", () => {
+    const [a, b] = input.variants;
+    const three = {
+      ...input,
+      variants: [
+        {
+          ...a!,
+          revisions: [
+            ...a!.revisions,
+            { revision: 3, operation: "patch" as const, spec: tiny("third") },
+          ],
+        },
+        b!,
+      ],
+    };
+    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 1000;
+    const pinned = buildPrototypeWebPage({ ...three, revision: 1, maxBytes });
+    expect(pinned.inlinedRevisions.a).toEqual([3, 1]);
+    expect(pinned.html).toContain('<body data-variant="a" data-revision="1">');
+    expect(Buffer.byteLength(pinned.html)).toBeLessThanOrEqual(maxBytes);
+  });
+
   test("a page that exactly fits its budget keeps every revision", () => {
     const exact = buildPrototypeWebPage({ ...input, maxBytes: Buffer.byteLength(page.html) });
     expect(exact.inlinedRevisions).toEqual(page.inlinedRevisions);
@@ -164,7 +186,7 @@ describe("prototype web page (#16346)", () => {
 
   test("refuses when even the latest revisions do not fit, naming the largest view", () => {
     expect(() => buildPrototypeWebPage({ ...input, maxBytes: 10 * 1024 })).toThrow(
-      /would exceed 10240 bytes even with only the latest revision of each variant\. Largest view: variant a revision 2/,
+      /would exceed 10240 bytes even with only the latest revision of each variant and the revision shown first\. Largest view: variant a revision 2/,
     );
   });
 

@@ -185,6 +185,7 @@ class PrototypeRuntime(
   platform: RuntimePlatform = RuntimePlatform.None,
   platformLimiter: PrototypeRequestLimiter =
     PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
+  monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -358,6 +359,7 @@ class PrototypeRuntime(
       ::publishModuleState,
       warn,
       platformLimiter,
+      monotonicMs,
     )
 
   /** Start streams only after the host has installed this runtime in its surface table. */

@@ -17,19 +17,19 @@ export const prototypeLoopSchema = z
 
 /** Counts authored attention loops, excluding shimmer, with the same budget on repeat expansion. */
 export function chargeLoopNode(node: Raw, counter: { loops?: number }, path: string) {
-  if (node.loop === undefined) {
+  if (node.attentionLoop === undefined) {
     return undefined;
   }
   counter.loops = (counter.loops ?? 0) + 1;
   return counter.loops > MAX_PROTOTYPE_LOOPS
-    ? { path: `${path}.loop`, message: "Loop node limit exceeded" }
+    ? { path: `${path}.attentionLoop`, message: "Loop node limit exceeded" }
     : undefined;
 }
 
 /** An authored transform must not displace the loop's identity rest pose. */
 export function prototypeLoopsError(nodes: readonly { value: Raw; path: string }[]) {
   for (const { value, path } of nodes) {
-    const effect = record(value.loop)?.effect;
+    const effect = record(value.attentionLoop)?.effect;
     if (effect !== "pulse" && effect !== "spin") {
       continue;
     }
@@ -41,7 +41,7 @@ export function prototypeLoopsError(nodes: readonly { value: Raw; path: string }
         : []),
     ];
     if (styles.some((style) => record(style)?.[field] !== undefined)) {
-      return { path: `${path}.loop`, message: `${effect} loop cannot set style.${field}` };
+      return { path: `${path}.attentionLoop`, message: `${effect} loop cannot set style.${field}` };
     }
   }
   return undefined;
@@ -49,8 +49,8 @@ export function prototypeLoopsError(nodes: readonly { value: Raw; path: string }
 export function prototypeLoopFields(spec: unknown): string[] {
   const fields: string[] = [];
   walkPrototypeNodes(spec, (node, path) => {
-    if (node.loop !== undefined) {
-      fields.push(`${path}.loop`);
+    if (node.attentionLoop !== undefined) {
+      fields.push(`${path}.attentionLoop`);
     }
   });
   return fields;

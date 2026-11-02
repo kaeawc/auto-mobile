@@ -9,13 +9,13 @@ import kotlinx.serialization.json.JsonObject
 internal object PrototypeLoopsRules {
   fun validate(context: PrototypeStateChecks.Context): PrototypeSpecError? {
     for ((node, path) in context.nodes) {
-      val effect = (node["loop"] as? JsonObject)?.text("effect") ?: continue
+      val effect = (node["attentionLoop"] as? JsonObject)?.text("effect") ?: continue
       val field = if (effect == "pulse") "scale" else "rotation"
       val styles =
         listOf(node["style"]) +
           (node["styleWhen"] as? JsonArray).orEmpty().map { (it as? JsonObject)?.get("style") }
       if (styles.any { (it as? JsonObject)?.containsKey(field) == true })
-        return fail("$path.loop", "$effect loop cannot set style.$field")
+        return fail("$path.attentionLoop", "$effect loop cannot set style.$field")
     }
     return null
   }

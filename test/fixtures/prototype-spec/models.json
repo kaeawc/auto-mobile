@@ -906,7 +906,7 @@
       "scale": 0.9,
       "alpha": 0.8
     },
-    "loop": {
+    "attentionLoop": {
       "effect": "spin",
       "periodMs": 800,
       "iterations": 2

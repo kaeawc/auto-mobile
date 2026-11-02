@@ -44,7 +44,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -52,6 +52,6 @@
       ]
     }
   },
-  "expectedPath": "root.children[0].loop",
+  "expectedPath": "root.children[0].attentionLoop",
   "expectedMessage": "Loop node limit exceeded"
 }

@@ -3580,7 +3580,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -3870,7 +3870,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -4153,7 +4153,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -4411,7 +4411,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -4688,7 +4688,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -4961,7 +4961,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -5252,7 +5252,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -5538,7 +5538,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -5816,7 +5816,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -6047,7 +6047,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -6430,7 +6430,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -6702,7 +6702,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -6971,7 +6971,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -7229,7 +7229,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -7505,7 +7505,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -7761,7 +7761,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -8032,7 +8032,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -8322,7 +8322,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -8579,7 +8579,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -8855,7 +8855,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -9107,7 +9107,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -9365,7 +9365,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -9615,7 +9615,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -9892,7 +9892,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -10130,7 +10130,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -10367,7 +10367,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -10618,7 +10618,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -10896,7 +10896,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -11147,7 +11147,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -11407,7 +11407,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -11682,7 +11682,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -11945,7 +11945,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -12241,7 +12241,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -12540,7 +12540,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -12815,7 +12815,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -13085,7 +13085,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -13363,7 +13363,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -13660,7 +13660,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -13876,7 +13876,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -14148,7 +14148,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -14427,7 +14427,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -14692,7 +14692,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -15017,7 +15017,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -15241,7 +15241,7 @@
               },
               "optional": true
             },
-            "loop": {
+            "attentionLoop": {
               "rule": {
                 "kind": "ref",
                 "name": "loop"
@@ -15469,6 +15469,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -15766,6 +15773,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -16088,6 +16102,13 @@
               },
               "optional": true
             },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
+            },
             "mapStyle": {
               "rule": {
                 "kind": "enum",
@@ -16386,6 +16407,13 @@
               },
               "optional": true
             },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
+            },
             "player": {
               "rule": {
                 "kind": "key"
@@ -16626,6 +16654,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },

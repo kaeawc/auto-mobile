@@ -1255,7 +1255,7 @@ advertise this capability, so host preflight refuses either authored field.
 ### Attention loops (`prototype_loops_v1`)
 
 (Android only, requires `prototype_loops_v1`) Any node accepts
-`loop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}`.
+`attentionLoop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}`.
 The period and finite count are integers; omitted iterations means infinite. Pulse scales
 1 → 1.08 → 1 per period; spin turns 0 → 360 degrees. Drawing changes without changing
 layout, reported bounds or touch targets. A pulse node must omit `style.scale`; a spin node
@@ -1271,7 +1271,7 @@ The runtime renews its capture hold in the controller’s window-metadata read p
 `prototypeMotion`. The hold uses an injected monotonic clock and a 1500 ms deadline; repeated
 reads extend it. Compose reads the deadline during drawing and invalidates the loop layer on
 renewal. Animation time continues through a hold, so a finite loop still completes on schedule.
-The first expanded node beyond `MAX_PROTOTYPE_LOOPS = 8` fails at `<node path>.loop` with
+The first expanded node beyond `MAX_PROTOTYPE_LOOPS = 8` fails at `<node path>.attentionLoop` with
 `Loop node limit exceeded`. Conflicting rest transforms fail at the same path.
 
 ### One-shot keyframes

@@ -11,7 +11,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }
@@ -19,7 +19,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }
@@ -27,7 +27,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }
@@ -35,7 +35,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }
@@ -43,7 +43,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }
@@ -51,7 +51,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }
@@ -59,7 +59,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }
@@ -67,7 +67,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }

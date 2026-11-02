@@ -40,7 +40,7 @@
       {
         "type": "text",
         "text": "Attention",
-        "loop": {
+        "attentionLoop": {
           "effect": "pulse",
           "periodMs": 800
         }

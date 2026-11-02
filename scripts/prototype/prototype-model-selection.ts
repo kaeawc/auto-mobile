@@ -73,7 +73,7 @@ export const prototypeModelSelection = {
     ...nodeModelOptions,
     kotlinBase: {
       ...nodeModelOptions.kotlinBase,
-      fields: [...nodeModelOptions.kotlinBase.fields, "keyframes", "loop"],
+      fields: [...nodeModelOptions.kotlinBase.fields, "keyframes", "attentionLoop"],
     },
   },
   routeEntry: { languages: ["kotlin"] },

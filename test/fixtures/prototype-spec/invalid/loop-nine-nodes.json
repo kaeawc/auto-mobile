@@ -12,7 +12,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -20,7 +20,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -28,7 +28,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -36,7 +36,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -44,7 +44,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -52,7 +52,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -60,7 +60,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -68,7 +68,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -76,7 +76,7 @@
         {
           "type": "text",
           "text": "Attention",
-          "loop": {
+          "attentionLoop": {
             "effect": "pulse",
             "periodMs": 800
           }
@@ -84,6 +84,6 @@
       ]
     }
   },
-  "expectedPath": "root.children[8].loop",
+  "expectedPath": "root.children[8].attentionLoop",
   "expectedMessage": "Loop node limit exceeded"
 }

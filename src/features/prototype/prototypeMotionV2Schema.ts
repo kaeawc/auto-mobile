@@ -7,7 +7,7 @@ import { imageAssetSchema } from "./prototypePresentationSchemas";
 
 /** Every node's `transition` and `animate` (#14208), spread into the common node shape. */
 export const prototypeMotionNodeShape = {
-  loop: prototypeLoopSchema.optional(),
+  attentionLoop: prototypeLoopSchema.optional(),
   keyframes: prototypeKeyframesSchema.optional(),
   transition: prototypeTransitionSchema.optional(),
   // Animates styleWhen-driven alpha, offset, scale, rotation, background and color.

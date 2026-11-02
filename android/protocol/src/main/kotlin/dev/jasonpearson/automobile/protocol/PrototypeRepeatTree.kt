@@ -174,8 +174,8 @@ internal object PrototypeRepeatTree {
         ++budget.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
     )
       return fail("$path.keyframes", "Keyframe node limit exceeded")
-    if ("loop" in node && ++budget.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
-      return fail("$path.loop", "Loop node limit exceeded")
+    if ("attentionLoop" in node && ++budget.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
+      return fail("$path.attentionLoop", "Loop node limit exceeded")
     PrototypeEffectRules.chargeExpanded(node, at, budget)?.let {
       return it
     }

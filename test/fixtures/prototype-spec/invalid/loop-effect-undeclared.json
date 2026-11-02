@@ -9,12 +9,12 @@
     "root": {
       "type": "text",
       "text": "Attention",
-      "loop": {
+      "attentionLoop": {
         "effect": "bounce",
         "periodMs": 800
       }
     }
   },
-  "expectedPath": "root.loop.effect",
+  "expectedPath": "root.attentionLoop.effect",
   "expectedMessage": "Invalid enum value"
 }

@@ -50,7 +50,7 @@ are available.
 ## Attention loops
 
 (Android only, requires \`prototype_loops_v1\`) Any node accepts
-\`loop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}\`.
+\`attentionLoop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}\`.
 The period and finite count are integers; omitted iterations means infinite. Pulse scales
 1 → 1.08 → 1 per period; spin turns 0 → 360 degrees. Drawing changes without changing
 layout, reported bounds or touch targets. A pulse node must omit \`style.scale\`; a spin node

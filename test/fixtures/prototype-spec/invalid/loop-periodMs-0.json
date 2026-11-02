@@ -9,12 +9,12 @@
     "root": {
       "type": "text",
       "text": "Attention",
-      "loop": {
+      "attentionLoop": {
         "effect": "pulse",
         "periodMs": 399
       }
     }
   },
-  "expectedPath": "root.loop.periodMs",
+  "expectedPath": "root.attentionLoop.periodMs",
   "expectedMessage": "Invalid number value"
 }

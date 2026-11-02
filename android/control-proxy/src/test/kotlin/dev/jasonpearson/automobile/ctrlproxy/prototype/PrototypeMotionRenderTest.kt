@@ -351,7 +351,7 @@ class PrototypeMotionRenderTest {
     setDurationScale(0f)
     val runtime =
       show(
-        sizeSpec().copy(root = PrototypeTextNode(text = "Hi", loop = PrototypeLoop("spin", 400))),
+        sizeSpec().copy(root = PrototypeTextNode(text = "Hi", attentionLoop = PrototypeLoop("spin", 400))),
       )
     compose.mainClock.advanceTimeByFrame()
     assertEquals(PrototypeMotionState.Settled, runtime.motionActivity.snapshot())

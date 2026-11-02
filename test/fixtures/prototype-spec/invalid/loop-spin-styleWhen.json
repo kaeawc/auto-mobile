@@ -9,7 +9,7 @@
     "root": {
       "type": "text",
       "text": "Attention",
-      "loop": {
+      "attentionLoop": {
         "effect": "spin",
         "periodMs": 800
       },
@@ -29,6 +29,6 @@
       "on": true
     }
   },
-  "expectedPath": "root.loop",
+  "expectedPath": "root.attentionLoop",
   "expectedMessage": "spin loop cannot set style.rotation"
 }

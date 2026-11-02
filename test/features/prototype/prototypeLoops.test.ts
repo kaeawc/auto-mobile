@@ -6,7 +6,7 @@ import {
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const loop = { effect: "pulse", periodMs: 400 };
-const label = { type: "text", text: "Hi", loop };
+const label = { type: "text", text: "Hi", attentionLoop: loop };
 const spec = (root: object) => ({
   id: "loops",
   window: { placement: { type: "fullscreen" } },
@@ -19,7 +19,7 @@ test("loop budget resets for every validation and excludes shimmer", () => {
     children: Array.from({ length: 8 }, () => ({
       type: "box",
       children: [],
-      loop,
+      attentionLoop: loop,
       style: { shimmer: true },
     })),
   };
@@ -28,9 +28,13 @@ test("loop budget resets for every validation and excludes shimmer", () => {
   expect(validatePrototypeSpec(spec(root)).success).toBe(true);
 });
 test("loop capability detection ignores opaque payloads", () => {
-  expect(prototypeLoopFields({ ...spec(label), data: { loop }, state: { loop: "pulse" } })).toEqual(
-    ["root.loop"],
-  );
+  expect(
+    prototypeLoopFields({
+      ...spec(label),
+      data: { attentionLoop: loop },
+      state: { attentionLoop: "pulse" },
+    }),
+  ).toEqual(["root.attentionLoop"]);
 });
 test("rest-pose errors follow structural errors on other nodes", () => {
   const result = validatePrototypeSpec(
@@ -38,12 +42,22 @@ test("rest-pose errors follow structural errors on other nodes", () => {
       type: "column",
       children: [
         { ...label, style: { scale: 1 } },
-        { ...label, loop: { ...loop, periodMs: 1 } },
+        { ...label, attentionLoop: { ...loop, periodMs: 1 } },
       ],
     }),
   );
   expect(result).toEqual({
     success: false,
-    error: { path: "root.children[1].loop.periodMs", message: "Invalid number value" },
+    error: { path: "root.children[1].attentionLoop.periodMs", message: "Invalid number value" },
   });
+});
+test("a videoPlayer's replay loop is not an attention loop", () => {
+  const video = {
+    type: "videoPlayer",
+    source: { sample: "colorBars" },
+    loop: true,
+    attentionLoop: loop,
+  };
+  expect(prototypeLoopFields(spec({ ...video, attentionLoop: undefined }))).toEqual([]);
+  expect(prototypeLoopFields(spec(video))).toEqual(["root.attentionLoop"]);
 });

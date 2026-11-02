@@ -8,7 +8,7 @@
   "root": {
     "type": "text",
     "text": "Attention",
-    "loop": {
+    "attentionLoop": {
       "effect": "spin",
       "periodMs": 800,
       "iterations": "infinite"

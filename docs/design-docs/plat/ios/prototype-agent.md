@@ -1250,7 +1250,7 @@ Motion v3 requirements, including node `press` and layout `animate`, are detecte
 does not advertise `prototype_motion_v3`; the host refuses motion v3 features until iOS advertises
 that capability.
 
-Node `loop: {effect: "pulse" | "spin", periodMs, iterations?}` is validated against the shared
+Node `attentionLoop: {effect: "pulse" | "spin", periodMs, iterations?}` is validated against the shared
 contract, including integer period 400–4000 ms, finite iterations 1–20 or `"infinite"`, the
 eight-node expanded-tree limit, and identity rest-pose conflicts in style and conditional styles.
 The agent renders no attention loops and does not advertise `prototype_loops_v1`; the host

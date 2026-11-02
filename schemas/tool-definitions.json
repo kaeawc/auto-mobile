@@ -31321,7 +31321,7 @@
                       "required": ["key", "as"],
                       "additionalProperties": false
                     },
-                    "loop": {
+                    "attentionLoop": {
                       "type": "object",
                       "properties": {
                         "effect": {
@@ -31948,8 +31948,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32093,8 +32093,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32192,8 +32192,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32286,8 +32286,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32396,8 +32396,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32499,6 +32499,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32623,8 +32626,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32787,8 +32790,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -32937,8 +32940,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33089,8 +33092,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33169,8 +33172,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33446,8 +33449,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33556,8 +33559,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33652,8 +33655,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33745,8 +33748,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33828,8 +33831,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33922,8 +33925,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34034,8 +34037,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34141,8 +34144,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34284,8 +34287,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34389,8 +34392,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34483,8 +34486,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34580,8 +34583,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34670,8 +34673,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34764,8 +34767,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34867,8 +34870,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34974,8 +34977,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35058,8 +35061,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35142,8 +35145,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35231,6 +35234,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35438,6 +35444,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35664,6 +35673,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35752,6 +35764,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35857,8 +35872,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35988,8 +36003,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36112,8 +36127,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36231,8 +36246,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36327,8 +36342,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36453,8 +36468,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36548,8 +36563,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36646,8 +36661,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36738,8 +36753,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36904,8 +36919,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37038,8 +37053,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37172,8 +37187,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37295,8 +37310,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37415,8 +37430,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37518,8 +37533,8 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
-                    "loop": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"

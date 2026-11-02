@@ -62,7 +62,7 @@ const COMMON_NODE_FIELDS = [
   "transition",
   "animate",
   "press",
-  "loop",
+  "attentionLoop",
   "anchor",
   "safeAreaPadding",
 ];

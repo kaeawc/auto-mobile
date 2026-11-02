@@ -338,7 +338,7 @@ internal object PrototypeStrictPolicy {
       "shimmer" to "loading_states",
       "effects" to "effects",
       "keyframes" to "keyframes",
-      "loop" to "loops",
+      "attentionLoop" to "loops",
       "sharedKey" to "shared_element",
     )
 
@@ -429,7 +429,7 @@ internal object PrototypeStrictPolicy {
             "series",
             "effects",
             "keyframes",
-            "loop",
+            "attentionLoop",
             "scrollLinked",
             "scrollTransition",
             "press",

@@ -9,7 +9,7 @@
     "root": {
       "type": "text",
       "text": "Attention",
-      "loop": {
+      "attentionLoop": {
         "effect": "pulse",
         "periodMs": 800
       },
@@ -29,6 +29,6 @@
       "on": true
     }
   },
-  "expectedPath": "root.loop",
+  "expectedPath": "root.attentionLoop",
   "expectedMessage": "pulse loop cannot set style.scale"
 }

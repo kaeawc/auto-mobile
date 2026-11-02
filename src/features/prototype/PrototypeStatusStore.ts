@@ -4,6 +4,10 @@ import { prototypeDegradedEffectsField, type DegradedEffect } from "./prototypeD
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
+import {
+  PrototypeSpecRevisions,
+  type PrototypeSpecRevisionRecorder,
+} from "./prototypeSpecRevisions";
 import type { PrototypeData } from "./prototypeSpec";
 import { applyPrototypeDataWrite } from "./prototypeDataWrite";
 import { prototypeDataWriteOf } from "./prototypeDataWriteEvent";
@@ -257,10 +261,16 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   // A marker left by a failed, thrown or superseded show is reset by the next dispatch of that id and dropped with the device.
   private readonly showDispatches = new Map<string, Map<string, boolean>>();
 
+  readonly shownSpecs: PrototypeShownSpecs;
+
+  /** `specRevisions` hears every show and patch the shown-spec mirror accepts (#16345). */
   constructor(
     private readonly clock: Pick<Timer, "now"> = defaultTimer,
     private readonly maxScopes: number = MAX_PROTOTYPE_STATUS_SCOPES,
-  ) {}
+    specRevisions: PrototypeSpecRevisionRecorder = new PrototypeSpecRevisions(clock),
+  ) {
+    this.shownSpecs = new PrototypeShownSpecs(specRevisions);
+  }
 
   status(scope: PrototypeScope): PrototypeStatus {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
@@ -425,8 +435,6 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     this.remember(key, stored);
     return structuredClone(entry);
   }
-
-  readonly shownSpecs = new PrototypeShownSpecs();
 
   /**
    * A `change` event reporting a device `/data` write (#12519) updates the host's spec copy and

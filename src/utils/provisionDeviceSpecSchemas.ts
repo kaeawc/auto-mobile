@@ -5,8 +5,6 @@ import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidS
 import { DISPLAY_CUTOUT_PREFERENCES } from "./displayCutout";
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
-/** Guest memory for the opt-in low-RAM Android AVD recipe. */
-export const LOW_RAM_MEMORY_MB = 1024;
 const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";
 const ANDROID_SYSTEM_IMAGE_PREFIX = "system-images;";
 

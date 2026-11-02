@@ -147,6 +147,28 @@ describe("prototype web page (#16346)", () => {
     expect(Buffer.byteLength(small.html)).toBeLessThanOrEqual(maxBytes);
   });
 
+  test("a requested older revision is kept within the budget like each latest", () => {
+    const [a, b] = input.variants;
+    const three = {
+      ...input,
+      variants: [
+        {
+          ...a!,
+          revisions: [
+            ...a!.revisions,
+            { revision: 3, operation: "patch" as const, spec: tiny("third") },
+          ],
+        },
+        b!,
+      ],
+    };
+    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 1000;
+    const pinned = buildPrototypeWebPage({ ...three, revision: 1, maxBytes });
+    expect(pinned.inlinedRevisions.a).toEqual([3, 1]);
+    expect(pinned.html).toContain('<body data-variant="a" data-revision="1">');
+    expect(Buffer.byteLength(pinned.html)).toBeLessThanOrEqual(maxBytes);
+  });
+
   test("a page that exactly fits its budget keeps every revision", () => {
     const exact = buildPrototypeWebPage({ ...input, maxBytes: Buffer.byteLength(page.html) });
     expect(exact.inlinedRevisions).toEqual(page.inlinedRevisions);
@@ -164,7 +186,7 @@ describe("prototype web page (#16346)", () => {
 
   test("refuses when even the latest revisions do not fit, naming the largest view", () => {
     expect(() => buildPrototypeWebPage({ ...input, maxBytes: 10 * 1024 })).toThrow(
-      /would exceed 10240 bytes even with only the latest revision of each variant\. Largest view: variant a revision 2/,
+      /would exceed 10240 bytes even with only the latest revision of each variant and the revision shown first\. Largest view: variant a revision 2/,
     );
   });
 
@@ -172,5 +194,41 @@ describe("prototype web page (#16346)", () => {
     expect(() => buildPrototypeWebPage({ ...input, variant: "z" })).toThrow(
       'Unknown or empty prototype variant "z". Variants: a, b',
     );
+  });
+});
+
+describe("prototype web page chrome (#16382)", () => {
+  const page = buildPrototypeWebPage(input);
+  const style = (html: string) => html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
+
+  test("a page with only one revision shows no revision history", () => {
+    const single = buildPrototypeWebPage({ ...input, variants: [input.variants[1]!] });
+    expect(controls(single.html)).not.toContain("revisions");
+    expect(controls(page.html)).toContain("revisions");
+  });
+
+  test("a page whose older revisions were dropped shows no revision history", () => {
+    const both = buildPrototypeWebPage({ ...input, variants: [input.variants[0]!] });
+    const full = Buffer.byteLength(both.html);
+    const trimmed = buildPrototypeWebPage({
+      ...input,
+      variants: [input.variants[0]!],
+      maxBytes: full - 1,
+    });
+    expect(trimmed.inlinedRevisions).toEqual({ a: [2] });
+    expect(controls(trimmed.html)).not.toContain("revisions");
+  });
+
+  test("a narrow viewport stacks the history below the stage", () => {
+    const css = style(page.html);
+    const narrow = css.slice(css.indexOf("@media (max-width:"));
+    expect(narrow).toContain("[data-main]{flex-direction:column}");
+    expect(narrow).toContain("[data-control=revisions]{width:auto");
+  });
+
+  test("says the preview is static", () => {
+    const note = page.html.slice(page.html.indexOf("data-note"), page.html.indexOf("<script"));
+    expect(note).toContain("Static preview");
+    expect(note).toContain("taps do nothing");
   });
 });

@@ -19,7 +19,7 @@ const frameOf = (id: string, orientation: "portrait" | "landscape") =>
   renderDeviceFrame(
     deviceFrameOrThrow(id),
     orientation,
-    { dark: false, textColor: "#000" },
+    { dark: false, textColor: "#000", background: "#fff" },
     el("div"),
   );
 

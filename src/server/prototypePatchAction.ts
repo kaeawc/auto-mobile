@@ -183,12 +183,10 @@ async function finishPatch(
   if (!result.success) {
     return { success: false, error: result.error ?? "The device refused the patch.", ...fields };
   }
-  const committed = deps.store.shownSpecs.commitPatch(
-    deviceId,
-    args.id,
-    read.version,
-    applied.spec,
-  );
+  const committed = deps.store.shownSpecs.commitPatch(deviceId, args.id, read.version, {
+    spec: applied.spec,
+    deviceRevision: fields.revision,
+  });
   if (committed) {
     deps.store.recordPatch(deviceId, args.id, {
       data: applied.validated.data,

@@ -73,8 +73,6 @@ export interface ProvisionDeviceArgs {
   boot: boolean;
   readiness: "automation" | "none";
   resources?: DeviceResourceConfiguration;
-  /** Android only; resolves AVD RAM to LOW_RAM_MEMORY_MB (#16265). */
-  lowRam?: boolean;
   timeoutMs?: number;
   __mcpSessionId?: string;
   /** Daemon-forwarded one-shot `--cli` marker (#11096). */

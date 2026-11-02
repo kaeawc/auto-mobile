@@ -51,6 +51,39 @@ function create(
 }
 
 describe("HoverAt routing and refusal", () => {
+  test("a 19 second uinput hover keeps pen setup time outside the gesture limit", async () => {
+    const route = new FakePointerInjector("uinput");
+    const points = [
+      { x: 1, y: 1 },
+      ...[5000, 5000, 5000, 4000].map((durationMs, i) => ({
+        x: i + 2,
+        y: i + 2,
+        durationMs,
+      })),
+    ];
+    const options = hoverAtSchema.parse({ points });
+    const result = await create(android, [route]).execute(options);
+    expect(result).toMatchObject({ success: true, route: "uinput", plannedDurationMs: 19_000 });
+    expect(route.injected).toHaveLength(1);
+    expect(route.injected[0].points).toEqual(points);
+  });
+
+  test("a 20100 ms uinput hover is refused before dispatch", async () => {
+    const route = new FakePointerInjector("uinput");
+    const points = [
+      { x: 1, y: 1 },
+      ...[5000, 5000, 5000, 5000, 100].map((durationMs, i) => ({
+        x: i + 2,
+        y: i + 2,
+        durationMs,
+      })),
+    ];
+    await expect(create(android, [route]).execute({ points })).rejects.toThrow(
+      "dragPath total duration 20100 ms exceeds the 20000 ms limit; shorten the segments or holds. No input was sent.",
+    );
+    expect(route.injected).toEqual([]);
+  });
+
   test("dispatches the resolved path through the route that supports hover", async () => {
     const injected: Parameters<PointerInjector["inject"]>[0][] = [];
     const route = new InstrumentationRoute(async (request) => void injected.push(request));
@@ -171,7 +204,9 @@ describe("HoverAt routing and refusal", () => {
     const uinput = new FakePointerInjector("uinput");
     await expect(
       create(android, [uinput]).execute({ points }, { deadlineMs: 3000 }),
-    ).rejects.toThrow(/request budget/);
+    ).rejects.toThrow(
+      "dragPath duration 100 ms does not fit the remaining request budget (3000 ms; needs 6150 ms including dispatch headroom)",
+    );
     expect(uinput.injected).toEqual([]);
     const instrumentation = new FakePointerInjector("instrumentation");
     const result = await create(android, [instrumentation]).execute(

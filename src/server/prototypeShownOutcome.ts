@@ -1,6 +1,7 @@
 import type { PrototypeResult } from "../features/observe/android/ctrlProxyProtocol";
 import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 import { prototypeStorageBlock } from "../features/prototype/prototypeStorage";
+import type { PrototypeSpecVariant } from "../features/prototype/prototypeSpecRevisions";
 
 /**
  * Results of a show that threw instead of being answered by the device (a transport failure or
@@ -25,9 +26,15 @@ export function shownSpecOutcome(outcome: {
   id?: string;
   spec?: unknown;
   replaceOthers?: boolean;
+  variant?: PrototypeSpecVariant;
   result: PrototypeResult;
 }): {
-  shown?: { id: string; spec?: ShownSpecJson; replaceOthers?: boolean };
+  shown?: {
+    id: string;
+    spec?: ShownSpecJson;
+    replaceOthers?: boolean;
+    variant?: PrototypeSpecVariant;
+  };
   refusal?: "typed" | "indeterminate";
 } {
   if (outcome.action !== "show") {
@@ -47,6 +54,7 @@ export function shownSpecOutcome(outcome: {
         id: outcome.id,
         spec: restores ? undefined : (outcome.spec as ShownSpecJson),
         replaceOthers: outcome.replaceOthers,
+        ...(outcome.variant ? { variant: outcome.variant } : {}),
       },
     };
   }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildPenSampleStep } from "../../../../src/features/record/android/penSampleStep";
 import { strokeRequest } from "../../../../src/features/action/pointer/richStylus";
+import { hoverAtSchema } from "../../../../src/server/hoverAtTool";
 import { dragPathSchema } from "../../../../src/server/dragPathTool";
 import type { GestureEvent } from "../../../../src/features/record/android/types";
 import { DRAG_PATH_MAX_TOTAL_MS } from "../../../../src/features/action/dragPathPlan";
@@ -111,18 +112,96 @@ describe("sampled pen plan export", () => {
     expect(exportLossWarning({ ...stroke(), path }, step)).toBeUndefined();
   });
 
-  test("checks the aggregate of clamped exported segments", () => {
-    const path = Array.from({ length: 5 }, (_, index) => ({
+  test.each([20000.1, 22500, 25000])(
+    "rejects a sparse %i ms stroke using elapsed kernel time",
+    (duration) => {
+      const gesture = {
+        ...stroke(),
+        path: [
+          { x: 10, y: 20, pressure: 0.2, arrivedAt: 500, kernelAtMs: 100000 },
+          { x: 30, y: 40, pressure: 0.8, arrivedAt: 500, kernelAtMs: 100000 + duration },
+        ],
+      };
+      const step = buildPenSampleStep(gesture);
+      expect(step).toBeNull();
+      expect(exportLossWarning(gesture, step)).toContain("exceeds the 20 second replay limit");
+    },
+  );
+
+  test("splits long retained gaps without losing duration or pressure interpolation", () => {
+    const gesture = {
+      ...stroke(),
+      path: [
+        { x: 10, y: 20, pressure: 0.2, arrivedAt: 0 },
+        { x: 70, y: 80, pressure: 0.8, arrivedAt: 18000 },
+      ],
+    };
+    const step = buildPenSampleStep(gesture);
+    const params = dragPathSchema.parse(step?.params);
+    expect(params.points.slice(1).reduce((total, point) => total + point.durationMs!, 0)).toBe(
+      18000,
+    );
+    expect(params.points).toHaveLength(5);
+    expect(params.points[2]).toMatchObject({ x: 40, y: 50, pressure: 0.5, durationMs: 4500 });
+    expect(exportLossWarning(gesture, step)).toBeUndefined();
+  });
+
+  test("rounds elapsed offsets without inflating sub-millisecond segments", () => {
+    const path = Array.from({ length: 100 }, (_, index) => ({
       x: index,
       y: 20,
-      pressure: index / 4,
-      arrivedAt: index * 10000,
+      pressure: index / 100,
+      arrivedAt: 500,
+      kernelAtMs: 100000 + index * 0.4,
     }));
-    const step = buildPenSampleStep({ ...stroke(), path });
-    const params = dragPathSchema.parse(step?.params);
-    expect(params.points.slice(1).map((point) => point.durationMs)).toEqual([
-      5000, 5000, 5000, 5000,
-    ]);
+    const params = dragPathSchema.parse(buildPenSampleStep({ ...stroke(), path })?.params);
+    expect(params.points.slice(1).reduce((total, point) => total + point.durationMs!, 0)).toBe(40);
+    expect(params.points.at(-1)?.x).toBe(99);
+  });
+
+  test.each([18000, 22500])("hover uses the same faithful %i ms timing", (duration) => {
+    const gesture: GestureEvent = {
+      type: "hover",
+      toolType: "stylus",
+      arrivedAt: 500,
+      hover: [
+        { x: 10, y: 20, distance: 0.2, arrivedAt: 500, kernelAtMs: 100000 },
+        { x: 70, y: 80, distance: 0.8, arrivedAt: 500, kernelAtMs: 100000 + duration },
+      ],
+    };
+    const step = buildPenSampleStep(gesture);
+    if (duration > DRAG_PATH_MAX_TOTAL_MS) {
+      expect(step).toBeNull();
+      expect(exportLossWarning(gesture, step)).toContain("hover");
+      expect(exportLossWarning(gesture, step)).toContain("exceeds the 20 second replay limit");
+    } else {
+      const params = hoverAtSchema.parse(step?.params);
+      expect(params.points.slice(1).reduce((total, point) => total + point.durationMs!, 0)).toBe(
+        duration,
+      );
+      expect(params.points[2].distance).toBe(0.5);
+      expect(exportLossWarning(gesture, step)).toBeUndefined();
+    }
+  });
+
+  test("splitting a long gap stays inside the point cap and preserves elapsed time", () => {
+    const path = Array.from({ length: 100 }, (_, index) => ({
+      x: index,
+      y: 20,
+      pressure: index / 100,
+      arrivedAt: index === 0 ? 0 : 19000 + index,
+    }));
+    path[0].pressure = 0.2;
+    path[2].pressure = 1;
+    path[3].pressure = 0;
+    const params = dragPathSchema.parse(buildPenSampleStep({ ...stroke(), path })?.params);
+    expect(params.points.slice(1).reduce((total, point) => total + point.durationMs!, 0)).toBe(
+      19099,
+    );
+    expect(params.points[0].x).toBe(0);
+    expect(params.points.at(-1)?.x).toBe(99);
+    expect(params.points.find((point) => point.x === 2)?.pressure).toBe(1);
+    expect(params.points.find((point) => point.x === 3)?.pressure).toBe(0);
   });
 
   test.each([0, -100])("clamps a %i ms kernel delta to the minimum segment duration", (delta) => {

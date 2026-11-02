@@ -1184,6 +1184,9 @@ jobs:
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
+          # Runs every Robolectric module, so it is the one job that saves the
+          # shared android-all jar cache the PR jobs restore (#16396).
+          robolectric-jar-cache: "save"
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Upload Kotlin Unit Test Reports on Failure"

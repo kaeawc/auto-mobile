@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/** Android-free source guard: onServiceConnected runs each startup step once, in order. */
-class CtrlProxyServiceStartupWiringTest {
+/** Android-free source guards: the service starts and tears down each feature once, in order. */
+class CtrlProxyServiceLifecycleWiringTest {
 
   @Test
   fun `onServiceConnected runs each startup step once and in order`() {
@@ -41,13 +41,36 @@ class CtrlProxyServiceStartupWiringTest {
     )
   }
 
-  private fun onServiceConnectedBody(): String {
+  @Test
+  fun `onDestroy stops each feature once and in order`() {
+    val body = functionBody("overridefunonDestroy(")
+    val steps =
+      listOf(
+        "releaseEach(",
+        "stopLogcatForwarding()",
+        "hierarchyController.stop()",
+        "stopEventIngestion()",
+        "stopStorageSubscription()",
+        "hierarchyController.resetDebouncer()",
+        "stopWebSocketServer()",
+        "teardownGestures(",
+      )
+    for (step in steps) {
+      assertEquals("$step must run exactly once", 1, body.split(step).size - 1)
+    }
+    val positions = steps.map(body::indexOf)
+    assertEquals("teardown steps must run in this order", positions.sorted(), positions)
+  }
+
+  private fun onServiceConnectedBody(): String = functionBody("overridefunonServiceConnected(")
+
+  private fun functionBody(signature: String): String {
     val source =
       KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText()).filterNot {
         it.isWhitespace()
       }
-    val start = source.indexOf("overridefunonServiceConnected(")
-    if (start < 0) fail("onServiceConnected not found in CtrlProxy.kt")
+    val start = source.indexOf(signature)
+    if (start < 0) fail("$signature not found in CtrlProxy.kt")
     val open = source.indexOf('{', start)
     return source.substring(open, KotlinSourceScan.matchBrace(source, open))
   }

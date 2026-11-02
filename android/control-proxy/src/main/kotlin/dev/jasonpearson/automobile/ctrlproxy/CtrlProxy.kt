@@ -1546,11 +1546,7 @@ class CtrlProxy : AccessibilityService() {
       .onFailure { Log.w(TAG, "Failed to unregister device-state listener", it) }
     deviceStateRegistration = null
 
-    // Stop logcat reader
-    logcatReader?.stop()
-    logcatReader = null
-    logEventBuffer?.channel?.close()
-    logEventBuffer = null
+    stopLogcatForwarding()
 
     if (::overlayDrawer.isInitialized) {
       overlayDrawer.destroy()
@@ -1572,24 +1568,14 @@ class CtrlProxy : AccessibilityService() {
     // Cancel hierarchy flow subscription
     hierarchyController.stop()
 
-    // Cancel navigation event flow subscription
-    navigationEventJob?.cancel()
+    stopEventIngestion()
 
-    // Cancel storage change flow subscription and clean up manager
-    storageChangeJob?.cancel()
-    if (::storageSubscriptionManager.isInitialized) {
-      storageSubscriptionManager.destroy()
-      Log.d(TAG, "Storage subscription manager destroyed")
-    }
+    stopStorageSubscription()
 
     // Reset debouncer
     hierarchyController.resetDebouncer()
 
-    // Stop WebSocket server
-    if (::webSocketServer.isInitialized) {
-      webSocketLifecycle.stop()
-      Log.d(TAG, "WebSocket server stopped")
-    }
+    stopWebSocketServer()
 
     // close dispatches each cancel lift before this callback quits the gesture thread. The
     // platform's result callback need not arrive: the router has already closed and resolved
@@ -1606,6 +1592,12 @@ class CtrlProxy : AccessibilityService() {
   /** The WebSocket server once [onServiceConnected] has created it; null before then. */
   internal val webSocketServerOrNull: WebSocketServer?
     get() = if (::webSocketServer.isInitialized) webSocketServer else null
+
+  /**
+   * The storage subscription manager once [onServiceConnected] has created it; null before then.
+   */
+  internal val storageSubscriptionManagerOrNull: StorageSubscriptionManager?
+    get() = if (::storageSubscriptionManager.isInitialized) storageSubscriptionManager else null
 
   /** The inbound WebSocket commands, dispatched by [CtrlProxyMessageHandler]. */
   internal val actions: CtrlProxyActions = CtrlProxyActionRouter(this)

@@ -29,6 +29,15 @@ internal fun CtrlProxy.startStorageSubscription() {
       .launchIn(serviceScope)
 }
 
+/** Stops forwarding storage changes and releases the subscription manager, if it was created. */
+internal fun CtrlProxy.stopStorageSubscription() {
+  storageChangeJob?.cancel()
+  storageSubscriptionManagerOrNull?.let {
+    it.destroy()
+    Log.d(TAG, "Storage subscription manager destroyed")
+  }
+}
+
 /** Creates and starts the WebSocket server; a failure to start disables the service. */
 @Suppress("TooGenericExceptionCaught") // Any construction failure leaves the service unusable.
 internal fun CtrlProxy.startWebSocketServer() {
@@ -59,6 +68,14 @@ internal fun CtrlProxy.startWebSocketServer() {
   }
 }
 
+/** Stops the WebSocket server, if it was created. */
+internal fun CtrlProxy.stopWebSocketServer() {
+  if (webSocketServerOrNull != null) {
+    webSocketLifecycle.stop()
+    Log.d(TAG, "WebSocket server stopped")
+  }
+}
+
 /** Starts navigation and SDK event ingestion once the WebSocket server can deliver events. */
 internal fun CtrlProxy.startEventIngestion() {
   // Receivers may enqueue into the processor's bounded channel during bind retries. Do not
@@ -85,6 +102,11 @@ internal fun CtrlProxy.startEventIngestion() {
   }
 }
 
+/** Stops publishing navigation events; the SDK batch processor ends with the service scope. */
+internal fun CtrlProxy.stopEventIngestion() {
+  navigationEventJob?.cancel()
+}
+
 /** Starts the logcat reader and forwards its bounded buffer to connected clients. */
 internal fun CtrlProxy.startLogcatForwarding() {
   // Start logcat reader for automatic log capture. Gate parsing on a connected client so a
@@ -107,6 +129,14 @@ internal fun CtrlProxy.startLogcatForwarding() {
     )
   logcatReader?.start()
   Log.d(TAG, "Logcat reader started")
+}
+
+/** Stops the logcat reader and closes its buffer, ending the forwarding loop. */
+internal fun CtrlProxy.stopLogcatForwarding() {
+  logcatReader?.stop()
+  logcatReader = null
+  logEventBuffer?.channel?.close()
+  logEventBuffer = null
 }
 
 private fun CtrlProxy.clientSessionRouter(

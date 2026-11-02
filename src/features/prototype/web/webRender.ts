@@ -1,4 +1,4 @@
-import { resolvePrototypeDataPointer } from "../prototypeData";
+import { bindPrototypeDataText, resolvePrototypeDataPointer } from "../prototypeData";
 import {
   projectPrototypeDerivedItem,
   resolvePrototypeDerived,
@@ -72,10 +72,45 @@ export function bound(text: unknown, scope: WebRenderScope): string {
   if (typeof text !== "string") {
     return "";
   }
+  // Data placeholders bind first, then repeat items, then state, as the devices bind text.
+  const data = bindPrototypeDataText(text, (pointer) => {
+    const value = resolvePrototypeDataPointer(scope.data, pointer);
+    return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+      ? renderScalar(value)
+      : "";
+  });
   const items = [...scope.instances]
     .reverse()
-    .reduce((value, instance) => bindText(value, instance), text);
+    .reduce((value, instance) => bindText(value, instance), data);
   return bindBare(items, scope);
+}
+
+const SAFE_AREA_EDGES: Readonly<Record<string, [string, string]>> = {
+  top: ["padding-top", "--safe-top"],
+  bottom: ["padding-bottom", "--safe-bottom"],
+  start: ["padding-inline-start", "--safe-left"],
+  end: ["padding-inline-end", "--safe-right"],
+};
+
+/**
+ * `safeAreaPadding` adds the frame's inset on each named edge to the node's own padding. System
+ * bars and the cutout both read the frame's safe area; the still has no keyboard, so `ime` adds
+ * nothing.
+ */
+function safeAreaCss(node: Raw, css: Record<string, string>): Record<string, string> {
+  const safe = record(node.safeAreaPadding);
+  const types = Array.isArray(safe?.types) ? safe.types : [];
+  if (!safe || !Array.isArray(safe.edges) || !types.some((type) => type !== "ime")) {
+    return css;
+  }
+  const padded = { ...css };
+  for (const edge of safe.edges) {
+    const target = SAFE_AREA_EDGES[String(edge)];
+    if (target) {
+      padded[target[0]] = `calc(${css[target[0]] ?? "0px"} + var(${target[1]}))`;
+    }
+  }
+  return padded;
 }
 
 function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = {}) {
@@ -93,7 +128,7 @@ function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = 
     ...textCss(record(node.style), scope.style),
     ...(scope.inBox ? { "grid-area": "cell" } : {}),
   };
-  return { attrs, style };
+  return { attrs, style: safeAreaCss(node, style) };
 }
 
 function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRenderScope {

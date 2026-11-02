@@ -290,6 +290,37 @@ describe("prototype web still (#16346)", () => {
     });
   });
 
+  test("binds data-pointer placeholders in text", () => {
+    const spec = {
+      ...reference,
+      data: { profile: { name: "Ada" } },
+      root: { type: "text", testTag: "hi", text: "Welcome {data:/profile/name}{data:/missing}" },
+    };
+    expect(textOf(byTag(renderPrototypeStill(spec), "hi")[0]!)).toBe("Welcome Ada");
+  });
+
+  test("adds the frame's safe area to the edges safeAreaPadding names", () => {
+    const spec = {
+      ...reference,
+      root: {
+        type: "column",
+        testTag: "padded",
+        children: [],
+        style: { padding: { bottom: 8 } },
+        safeAreaPadding: { edges: ["top", "bottom"], types: ["systemBars"] },
+      },
+    };
+    expect(byTag(renderPrototypeStill(spec), "padded")[0]!.style).toMatchObject({
+      "padding-top": "calc(0px + var(--safe-top))",
+      "padding-bottom": "calc(8px + var(--safe-bottom))",
+    });
+    const ime = {
+      ...spec,
+      root: { ...spec.root, safeAreaPadding: { edges: ["bottom"], types: ["ime"] } },
+    };
+    expect(byTag(renderPrototypeStill(ime), "padded")[0]!.style["padding-bottom"]).toBe("8px");
+  });
+
   for (const frame of ["pixel-9", "iphone-16"]) {
     for (const orientation of ["portrait", "landscape"] as const) {
       test(`snapshot on ${frame} in ${orientation}`, () => {

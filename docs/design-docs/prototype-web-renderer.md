@@ -11,7 +11,8 @@ the host, so the page's script only switches between views it was given and neve
 
 - **Input.** The spec after component expansion, with its own `state` and `data`. The stack shows
   its `start` screen. No action, timer or `request` runs.
-- **Text.** A bare `{key}` reads spec state, then a top-level `derive` entry. Repeat placeholders
+- **Text.** `{data:/pointer}` placeholders bind first (a missing or non-scalar value is empty),
+  then repeat items, then a bare `{key}`, which reads spec state, then a top-level `derive` entry. Repeat placeholders
   bind each item (a literal `items` array or a data pointer), including the repeat's own `derive`
   fields, through the same binding contract the devices use (`bindNodeFields`): text and spans,
   nested conditions with typed operands, and state keys. A spans-only text node renders each span
@@ -43,7 +44,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
-  landscape top inset is 0 (an iPhone) draws no status bar in landscape. Safe areas are exposed as
+  landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding (`ime` adds nothing,
+  since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`; a top app bar pads by
   `--safe-top`.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the

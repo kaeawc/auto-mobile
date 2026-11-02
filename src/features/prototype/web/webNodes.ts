@@ -26,7 +26,7 @@ function escapeText(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function escapeAttribute(text: string): string {
+export function escapeAttribute(text: string): string {
   return escapeText(text).replace(/"/g, "&quot;");
 }
 

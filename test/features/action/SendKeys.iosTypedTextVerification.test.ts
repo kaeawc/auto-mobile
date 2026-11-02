@@ -66,9 +66,9 @@ test("the chunk that first fills the read window uses the single-shot warning on
   expect(compareIosTypedText(chunk, before, after, true)).toEqual(singleShot);
 });
 
-test("readable chunk verification requires both full growth and the chunk suffix", () => {
+test("readable chunk verification requires exactly the inserted chunk and preserves existing text", () => {
   const before = { secure: false, value: "old" };
-  for (const value of ["oldab", "oldxyz"]) {
+  for (const value of ["oldab", "oldxyz", "old!abc", "NEWabc"]) {
     expect(compareIosTypedText("abc", before, { secure: false, value }, true)).toEqual({
       success: false,
       error: "iOS typed text chunk was not fully appended to the focused field.",
@@ -78,6 +78,24 @@ test("readable chunk verification requires both full growth and the chunk suffix
     success: true,
   });
 });
+
+test.each([
+  { text: "a", before: "abac", after: "abaca" },
+  { text: "abc", before: "abcab", after: "abcabcab" },
+  { text: "😀", before: "😀x", after: "😀😀x" },
+])(
+  "chunk insertion verification handles repeated occurrences for $text",
+  ({ text, before, after }) => {
+    expect(
+      compareIosTypedText(
+        text,
+        { secure: false, value: before },
+        { secure: false, value: after },
+        true,
+      ),
+    ).toEqual({ success: true });
+  },
+);
 
 for (const operation of ["insert", "replace"] as const) {
   const name = operation === "insert" ? "append" : operation;

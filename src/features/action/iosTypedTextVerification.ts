@@ -56,13 +56,29 @@ export const IOS_FOCUSED_VALUE_READ_WINDOW = 512;
 
 const IOS_FOCUSED_VALUE_READ_WINDOW_WARNING = `iOS typed text result was not verified: the focused field value fills the ${IOS_FOCUSED_VALUE_READ_WINDOW}-character read window, so a change past it cannot be seen.`;
 
+/** Full insertion at any caret position, preserving all previously observed text. */
+function isIosChunkInsertion(text: string, before: string, after: string): boolean {
+  if (after.length !== before.length + text.length) {
+    return false;
+  }
+  for (let index = after.indexOf(text); index !== -1; index = after.indexOf(text, index + 1)) {
+    if (after.slice(0, index) !== before.slice(0, index)) {
+      return false;
+    }
+    if (after.slice(index + text.length) === before.slice(index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function compareIosChunkAppend(
   text: string,
   before: string,
   after: string,
 ): IosTypedTextVerificationResult {
   // An exact window may hide the append, including the chunk that first fills it.
-  // Wider readable values still allow the full append check below.
+  // Wider readable values still allow the full insertion check below.
   if (after.length === IOS_FOCUSED_VALUE_READ_WINDOW) {
     return {
       success: true,
@@ -76,7 +92,7 @@ function compareIosChunkAppend(
     };
   }
   // A suffix alone is insufficient: earlier repeated characters can hide a partial append.
-  return after.length - before.length >= text.length && after.endsWith(text)
+  return isIosChunkInsertion(text, before, after)
     ? { success: true }
     : {
         success: false,
@@ -114,6 +130,18 @@ function compareIosChunkField(
       success: true,
       warning: "iOS typed text result was not verified: focus moved to another field.",
     };
+  }
+  const nativeBefore = before.nativeEditableValues ?? {};
+  const nativeAfter = after.nativeEditableValues ?? {};
+  if (
+    Object.keys(nativeBefore).some(
+      (id) =>
+        Object.hasOwn(nativeAfter, id) &&
+        nativeBefore[id] !== nativeAfter[id] &&
+        isIosChunkInsertion(text, nativeBefore[id], nativeAfter[id]),
+    )
+  ) {
+    return { success: true };
   }
   if (before.value !== undefined && after.value !== undefined && !isIosTokenField(before, after)) {
     return compareIosChunkAppend(text, before.value, after.value);

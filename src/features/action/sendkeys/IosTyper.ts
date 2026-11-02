@@ -30,6 +30,11 @@ interface IosChunkRead extends IosTypedTextRead {
   verifyAppend?: boolean;
 }
 
+interface IosTypingPreparation {
+  before: FocusedTextField | undefined;
+  clearWarning: string | undefined;
+}
+
 export interface IosTyperDeps {
   session: TypingSession;
   observer: SendKeysObserver;
@@ -60,7 +65,8 @@ export class IosTyper {
     const resolvedMode = "xcuiTypeText" as const;
     const chunks = splitIosTextChunks(text);
     const codePoints = Array.from(text).length;
-    const budget = this.assessTypingBudget(codePoints, chunks.length, operation);
+    const predictedWebAssignment = operation === "replace" && this.deps.willAssignWebValue?.();
+    const budget = this.assessTypingBudget(codePoints, predictedWebAssignment ? 1 : chunks.length);
     if (budget.exceedsBudget) {
       return {
         success: false,
@@ -72,8 +78,7 @@ export class IosTyper {
     if (preparation.kind === "refused") {
       return preparation.result;
     }
-    const { before, clearWarning } = preparation;
-    this.deps.session.typingPasswordField = before?.secure === true;
+    this.deps.session.typingPasswordField = preparation.before?.secure === true;
     const read = {
       observer: this.deps.observer,
       timer: this.deps.timer,
@@ -81,42 +86,80 @@ export class IosTyper {
       display,
       deadlineMs: getTextRequestDeadlineMs(),
     };
+    return {
+      ...(await this.typePreparedText(
+        { text, chunks, operation, predictedWebAssignment },
+        preparation,
+        read,
+      )),
+      resolvedMode,
+    };
+  }
+
+  private async typePreparedText(
+    request: {
+      text: string;
+      chunks: string[];
+      operation: SendKeysOperation;
+      predictedWebAssignment: boolean | undefined;
+    },
+    preparation: IosTypingPreparation,
+    read: IosChunkRead,
+  ): Promise<TextActionResult> {
+    const { text, chunks, operation, predictedWebAssignment } = request;
+    const { before, clearWarning } = preparation;
     if (chunks.length === 1 || (operation === "replace" && this.deps.assignsWebValue?.())) {
-      signal?.throwIfAborted();
+      read.signal?.throwIfAborted();
       const typed = await this.typeChunk(
         text,
         before,
         read,
         this.deps.targetLayer() !== "prototype",
       );
-      return {
-        ...this.deps.withTextWarnings(
-          operation === "replace" && typed.insertFailed
-            ? this.deps.markPartialAfterMutation(typed.result)
-            : typed.result,
-          [clearWarning, typed.insertWarning],
-        ),
-        resolvedMode,
-      };
+      return this.deps.withTextWarnings(
+        operation === "replace" && typed.insertFailed
+          ? this.deps.markPartialAfterMutation(typed.result)
+          : typed.result,
+        [clearWarning, typed.insertWarning],
+      );
     }
-    return {
-      ...(await this.typeChunks(chunks, preparation, operation, read)),
-      resolvedMode,
-    };
+    const refusal = predictedWebAssignment
+      ? this.refuseFallbackTyping(Array.from(text).length, chunks.length, clearWarning)
+      : undefined;
+    return refusal ?? this.typeChunks(chunks, preparation, operation, read);
   }
 
-  private assessTypingBudget(codePoints: number, chunkCount: number, operation: SendKeysOperation) {
+  private assessTypingBudget(codePoints: number, chunkCount: number) {
     const admissionDeadlineMs = getTextRequestDeadlineMs();
     return assessIosTextToolBudget(
       codePoints,
-      operation === "replace" && this.deps.willAssignWebValue?.() ? 1 : chunkCount,
+      chunkCount,
       admissionDeadlineMs === undefined ? undefined : admissionDeadlineMs - this.deps.timer.now(),
+    );
+  }
+
+  private refuseFallbackTyping(
+    codePoints: number,
+    chunkCount: number,
+    clearWarning: string | undefined,
+  ): TextActionResult | undefined {
+    const budget = this.assessTypingBudget(codePoints, chunkCount);
+    if (!budget.exceedsBudget) {
+      return undefined;
+    }
+    return this.deps.withTextWarnings(
+      this.deps.markPartialAfterMutation({
+        success: false,
+        retryable: false,
+        error: `iOS field was cleared and nothing was typed: ${codePoints} code points would take about ${Math.ceil(budget.estimatedMs / 1000)} s, exceeding the remaining typing budget after falling back to XCTest. Please split the text into smaller sendKeys calls, or use setText / paste where available.`,
+      }),
+      [clearWarning],
     );
   }
 
   private async typeChunks(
     chunks: string[],
-    preparation: { before: FocusedTextField | undefined; clearWarning: string | undefined },
+    preparation: IosTypingPreparation,
     operation: SendKeysOperation,
     read: IosChunkRead,
   ): Promise<TextActionResult> {

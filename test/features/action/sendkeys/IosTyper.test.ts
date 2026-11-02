@@ -333,6 +333,46 @@ test("a 3500-code-point web assignment bypasses the chunked typing budget and in
   expect(h.state).toMatchObject({ clears: 1, reads: 2, value: longText });
 });
 
+test.each([true, false])(
+  "post-clear budget uses elapsed time only for predicted web assignment=%s",
+  async (predicted) => {
+    const h = harness();
+    h.deps.willAssignWebValue = () => predicted && h.state.clears === 0;
+    h.deps.assignsWebValue = () => false;
+    const clear = h.deps.clear;
+    h.deps.clear = async () => {
+      const result = await clear();
+      h.timer.advanceTime(10_000);
+      return { ...result, warning: "clear warning" };
+    };
+    const result = await runWithTextRequestContext({ getDeadlineMs: () => 90_000 }, () =>
+      h.typer.executeIosType(longText, "replace"),
+    );
+    expect(result.success).toBe(!predicted);
+    expect(result.warning).toBe("clear warning");
+    expect(h.state.clears).toBe(1);
+    if (predicted) {
+      expect(result).toMatchObject({ partialApplication: true, retryable: false });
+      expect(result.error).toContain("field was cleared and nothing was typed");
+      expect(h.inserts).toEqual([]);
+    } else {
+      expect(h.inserts).toHaveLength(4);
+    }
+  },
+);
+
+test("a predicted web assignment that falls back within budget types all chunks", async () => {
+  const h = harness();
+  h.deps.willAssignWebValue = () => true;
+  h.deps.assignsWebValue = () => false;
+  const result = await runWithTextRequestContext({ getDeadlineMs: () => 120_000 }, () =>
+    h.typer.executeIosType(longText, "replace"),
+  );
+  expect(result.success).toBe(true);
+  expect(h.state).toMatchObject({ clears: 1, reads: 5, value: longText });
+  expect(h.inserts.map(({ text }) => text.length)).toEqual([1000, 1000, 1000, 500]);
+});
+
 test.each(["short", "😀".repeat(IOS_TEXT_CHUNK_CODE_POINTS)])(
   "one chunk retains a single insert and verification",
   async (text) => {

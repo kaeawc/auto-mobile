@@ -34,6 +34,8 @@ const POLL_MS = 250;
 const READY_TIMEOUT_MS = 60_000;
 const KILL_WINDOW_MS = 15_000;
 const RESET_TIMEOUT_MS = 5_000;
+/** AID_SHELL: the user the payload always runs as, whether or not adbd is root. */
+const SHELL_UID = "2000";
 
 export function parseMemAvailableKb(text: string): number {
   const match = /^MemAvailable:\s+(\d+)\s+kB\s*$/m.exec(text);
@@ -210,6 +212,27 @@ class MemoryPressureFixture {
     );
     if (!ready) {
       unsupported(`memory pressure payload ${size} MiB did not become READY`);
+    }
+    await this.requireShellOwner(signal);
+  }
+
+  /**
+   * The payload drops to the shell user when a rooted adbd starts it, so clearing rootState
+   * (`adb unroot`) never leaves a payload the shell cannot stop (#16407). A binary built before
+   * that drop stays root-owned; refuse it while adbd can still stop it.
+   */
+  private async requireShellOwner(signal?: AbortSignal): Promise<void> {
+    const pid = await shell(this.adb, ["cat", MEMORY_PRESSURE_PID], signal);
+    if (!/^[1-9]\d*$/.test(pid)) {
+      unsupported(`memory pressure payload wrote no PID (${pid || "empty"})`);
+    }
+    const status = await shell(this.adb, ["grep", "^Uid:", `/proc/${pid}/status`], signal);
+    const uid = status.split(/\s+/)[1];
+    // An exited payload has no status; the liveness check after the kill window reports it.
+    if (uid !== undefined && uid !== SHELL_UID) {
+      unsupported(
+        `memory pressure payload runs as uid ${uid}, not the shell user; rebuild it with bash scripts/android/build-lmk-pressure.sh`,
+      );
     }
   }
 

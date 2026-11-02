@@ -171,25 +171,26 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       await fixture.teardown();
     });
 
-    test("a legitimate __mcpRequestTimeoutMs is honored and reattached", async () => {
+    // Honored as the request's ambient deadline, never written back into the args (#15663).
+    test("a legitimate __mcpRequestTimeoutMs is honored as the request deadline", async () => {
       const { client } = fixture.getContext();
       const result = await client.callTool({
         name: TOOL,
         arguments: { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 12_345 },
       });
 
-      expect(toolField(result, "receivedTimeoutMs")).toBe(12_345);
+      expect(toolField(result, "receivedTimeoutMs")).toBeNull();
       expect(toolField(result, "ambientTimeoutMs")).toBe(12_345);
     });
 
-    test("a legitimate __mcpRequestDeadlineMs is honored and reattached", async () => {
+    test("a legitimate __mcpRequestDeadlineMs is honored as the request deadline", async () => {
       const { client } = fixture.getContext();
       const result = await client.callTool({
         name: TOOL,
         arguments: { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 98_765 },
       });
 
-      expect(toolField(result, "receivedDeadlineMs")).toBe(98_765);
+      expect(toolField(result, "receivedDeadlineMs")).toBeNull();
       expect(toolField(result, "ambientDeadlineMs")).toBe(98_765);
     });
 
@@ -241,8 +242,8 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         const result = await client.callTool({ name: STRICT_TOOL, arguments: argumentsWithKey });
 
         expect(result.isError ?? false).toBe(false);
-        // Trusted daemon metadata is deliberately reattached for deadline consumers.
-        expect(strictHandlerArgs).toHaveProperty(INTERNAL_LIVE_DEADLINE_KEY_PARAM, "live-key");
+        // Trusted daemon metadata reaches handlers ambiently, never in their args (#15663).
+        expect(strictHandlerArgs).not.toHaveProperty(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
         expect(stripInternalToolParams(strictHandlerArgs)).toEqual({ appId: "com.example" });
         expect(JSON.stringify(result)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
         expect(JSON.stringify(result)).not.toContain("live-key");

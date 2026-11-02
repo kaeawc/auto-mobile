@@ -5,6 +5,7 @@ struct DemosTab: View {
     @Environment(\.autoMobileTheme) private var theme
     @State private var shouldOpenTapAtTargets = false
     @State private var didCheckDeepLink = false
+    @State private var showStatusSheet = false
     /// Scene-stored so a restored scene reopens the State Restoration demo (#14098).
     @SceneStorage("demos.showStateRestoration") private var showStateRestoration = false
 
@@ -167,6 +168,20 @@ struct DemosTab: View {
                             description: "Fields that reject or hide pasted text",
                             icon: "doc.on.clipboard"
                         )
+                    }
+
+                    Button {
+                        showStatusSheet = true
+                    } label: {
+                        DemoRow(
+                            title: "Status Sheet",
+                            description: "Modal form with text field, editor, secure field",
+                            icon: "square.and.pencil"
+                        )
+                    }
+                    .accessibilityIdentifier("open_status_sheet")
+                    .sheet(isPresented: $showStatusSheet) {
+                        StatusSheetDemo()
                     }
 
                     NavigationLink {

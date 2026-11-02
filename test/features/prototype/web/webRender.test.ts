@@ -649,6 +649,102 @@ describe("prototype web still (#16346)", () => {
     expect(card.style["align-items"]).toBe("flex-start");
   });
 
+  test("an icon placeholder lays out at its size, even inside an action slot", () => {
+    const bar = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "topAppBar",
+          testTag: "bar",
+          title: "T",
+          actions: [{ icon: "search", label: "Search" }],
+        },
+      }),
+      "bar",
+    )[0]!;
+    const glyph = find(bar, (element) => element.attrs.title === "search")[0]!;
+    expect(glyph.style).toMatchObject({ display: "inline-block", width: "24px" });
+  });
+
+  test("a top app bar honours its variant's size and title alignment", () => {
+    const barOf = (variant: string) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "topAppBar", testTag: "bar", title: "T", variant },
+        }),
+        "bar",
+      )[0]!;
+    expect(barOf("large").style["min-height"]).toBe("152px");
+    expect(barOf("medium").style["font-size"]).toBe("28px");
+    expect((barOf("centerAligned").children[0] as WebElement).style["text-align"]).toBe("center");
+    expect(barOf("small").style["min-height"]).toBe("64px");
+  });
+
+  test("a hidden spacer does not make its line fill", () => {
+    const rowOf = (show: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { show },
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "row",
+                testTag: "r",
+                children: [{ type: "spacer", visibleWhen: { key: "show", equals: true } }],
+              },
+            ],
+          },
+        }),
+        "r",
+      )[0]!.style;
+    expect(rowOf(true)).toMatchObject({ flex: "1 1 auto" });
+    expect(rowOf(false)).not.toHaveProperty("flex");
+  });
+
+  test("a descendant asking for an inset an ancestor applied adds nothing more", () => {
+    const safe = { edges: ["top"], types: ["systemBars"] };
+    const still = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "column",
+        testTag: "outer",
+        safeAreaPadding: safe,
+        children: [
+          { type: "column", testTag: "inner", safeAreaPadding: safe, children: [] },
+          {
+            type: "column",
+            testTag: "bottom",
+            safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
+            children: [],
+          },
+        ],
+      },
+    });
+    expect(byTag(still, "outer")[0]!.style["padding-top"]).toBe("calc(0px + var(--safe-top))");
+    expect(byTag(still, "inner")[0]!.style).not.toHaveProperty("padding-top");
+    expect(byTag(still, "bottom")[0]!.style["padding-bottom"]).toBe(
+      "calc(0px + var(--safe-bottom))",
+    );
+  });
+
+  test("semantics.label wins over contentDescription for the accessible label", () => {
+    const labelOf = (extra: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "text", testTag: "t", text: "$5", ...extra },
+        }),
+        "t",
+      )[0]!.attrs["aria-label"];
+    expect(
+      labelOf({ semantics: { label: "Price five dollars" }, contentDescription: "Old label" }),
+    ).toBe("Price five dollars");
+    expect(labelOf({ contentDescription: "Old label" })).toBe("Old label");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

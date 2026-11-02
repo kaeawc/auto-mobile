@@ -45,7 +45,8 @@ the host, so the page's script only switches between views it was given and neve
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
   `listItem` (with its leading icon and its trailing switch, checkbox or icon). A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
-  and actions as icon placeholders labelled with their action. A button, switch, checkbox, text field or
+  and actions as icon placeholders labelled with their action, and its `variant` sets its height,
+  title size and title alignment. A button, switch, checkbox, text field or
   list item whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, and text decorations map to CSS. A text field shows `errorText` with error colours when `errorWhen` is
   decidably true, and otherwise its `supportingText`; its label floats above a value or placeholder, and sits in an
@@ -59,7 +60,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
-  landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding (`ime` adds nothing,
+  landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
+  `windowInsetsPadding`, an edge an ancestor already applied adds nothing more (`ime` adds nothing,
   since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. A top app bar takes no inset
   of its own, as on the devices: it clears the status bar only through `safeAreaPadding`.

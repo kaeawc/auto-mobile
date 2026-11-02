@@ -45,6 +45,10 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /** Safe-area edges an ancestor already applied. */
+  readonly consumedInsets?: readonly string[];
+  /** Safe-area edges the node being rendered applies, consumed for its descendants. */
+  readonly ownInsets?: readonly string[];
 }
 
 type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -102,16 +106,30 @@ const SAFE_AREA_EDGES: Readonly<Record<string, [string, string]>> = {
  * bars and the cutout both read the frame's safe area; the still has no keyboard, so `ime` adds
  * nothing.
  */
-function safeAreaCss(node: Raw, css: Record<string, string>): Record<string, string> {
+/** The edges a node's safeAreaPadding takes from the frame (none for `ime` alone). */
+export function safeAreaEdges(node: Raw): string[] {
   const safe = record(node.safeAreaPadding);
   const types = Array.isArray(safe?.types) ? safe.types : [];
   if (!safe || !Array.isArray(safe.edges) || !types.some((type) => type !== "ime")) {
-    return css;
+    return [];
   }
+  return safe.edges.map(String).filter((edge) => SAFE_AREA_EDGES[edge] !== undefined);
+}
+
+/**
+ * Like windowInsetsPadding, an inset an ancestor already applied is consumed, so a descendant
+ * asking for the same edge adds nothing more.
+ */
+function safeAreaCss(
+  node: Raw,
+  scope: WebRenderScope,
+  css: Record<string, string>,
+): Record<string, string> {
+  const consumed = scope.consumedInsets ?? [];
   const padded = { ...css };
-  for (const edge of safe.edges) {
-    const target = SAFE_AREA_EDGES[String(edge)];
-    if (target) {
+  for (const edge of safeAreaEdges(node)) {
+    const target = SAFE_AREA_EDGES[edge];
+    if (target && !consumed.includes(edge)) {
       padded[target[0]] = `calc(${css[target[0]] ?? "0px"} + var(${target[1]}))`;
     }
   }
@@ -123,8 +141,10 @@ function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = 
   if (typeof node.testTag === "string") {
     attrs["data-testid"] = node.testTag;
   }
-  if (typeof node.contentDescription === "string") {
-    attrs["aria-label"] = bound(node.contentDescription, scope);
+  // As the native mapper resolves it: semantics.label, then the legacy contentDescription.
+  const label = record(node.semantics)?.label ?? node.contentDescription;
+  if (typeof label === "string") {
+    attrs["aria-label"] = bound(label, scope);
   }
   // Component defaults first, so the spec's own style wins, as on both devices.
   const style = {
@@ -133,11 +153,19 @@ function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = 
     ...textCss(record(node.style), scope.style),
     ...(scope.inBox ? { "grid-area": "cell" } : {}),
   };
-  return { attrs, style: safeAreaCss(node, style) };
+  return { attrs, style: safeAreaCss(node, scope, style) };
 }
 
 function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRenderScope {
-  return { ...scope, ...patch, style: { ...scope.style, ...patch.style } };
+  // Descendants see the insets this node applied as consumed.
+  const consumedInsets = [...(scope.consumedInsets ?? []), ...(scope.ownInsets ?? [])];
+  return {
+    ...scope,
+    ...patch,
+    style: { ...scope.style, ...patch.style },
+    consumedInsets,
+    ownInsets: [],
+  };
 }
 
 function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
@@ -194,6 +222,15 @@ function fillMissing(node: Raw): Raw {
   return { ...node, style: { width: "fill", height: "fill", ...style } };
 }
 
+/** Whether a child's visibleWhen keeps it, binding its repeat placeholders first. */
+function rendersVisibly(entry: unknown, scope: WebRenderScope, path: string): boolean {
+  const bound = scope.instances.reduce(
+    (current, instance) => bindStructure(current, path, instance),
+    record(entry) ?? {},
+  );
+  return bound.visibleWhen === undefined || conditionHolds(bound.visibleWhen, scope.condition);
+}
+
 function spacerFilled(node: Raw): Raw {
   return isUnsizedSpacer(node) ? fillMissing(node) : node;
 }
@@ -204,7 +241,10 @@ const line =
     // A wrap-sized line around a filling spacer grows to its parent, as a Compose parent does
     // around a fillMaxSize child; otherwise it would shrink to nothing.
     const node =
-      Array.isArray(raw.children) && raw.children.some(isUnsizedSpacer) ? fillMissing(raw) : raw;
+      Array.isArray(raw.children) &&
+      raw.children.some((entry) => isUnsizedSpacer(entry) && rendersVisibly(entry, scope, path))
+        ? fillMissing(raw)
+        : raw;
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     return el("div", { attrs, style }, children(node, inner, path));
@@ -301,6 +341,7 @@ const divider: NodeRenderer = (node, scope) => {
 const icon: NodeRenderer = (node, scope) => {
   // The Material glyph set is not inlined, so an icon draws as a tinted shape titled with its name.
   const { attrs, style } = base(node, scope, {
+    display: "inline-block",
     width: "24px",
     height: "24px",
     "border-radius": "6px",
@@ -408,20 +449,39 @@ function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: str
   });
 }
 
+/**
+ * Material 3 top app bar sizes: small and center-aligned are 64 dp with a 22 sp title; medium and
+ * large put a 28 or 36 sp title below the icon row, in a 112 or 152 dp bar.
+ */
+const APP_BAR_VARIANTS: Readonly<Record<string, { height: number; title: number }>> = {
+  small: { height: 64, title: 22 },
+  centerAligned: { height: 64, title: 22 },
+  medium: { height: 112, title: 28 },
+  large: { height: 152, title: 36 },
+};
+
 const topAppBar: NodeRenderer = (node, scope, path) => {
+  const variant = typeof node.variant === "string" ? node.variant : "small";
+  const size = APP_BAR_VARIANTS[variant] ?? APP_BAR_VARIANTS.small!;
+  const expanded = variant === "medium" || variant === "large";
   const { attrs, style } = base(node, scope, {
     display: "flex",
+    "flex-wrap": expanded ? "wrap" : "nowrap",
     "align-items": "center",
+    "align-content": "space-between",
     // Like the native bar, it takes no window insets of its own: status-bar clearance comes only
     // from an authored safeAreaPadding.
-    "min-height": "64px",
+    "min-height": `${size.height}px`,
     "padding-inline": "16px",
-    "font-size": "22px",
+    "font-size": `${size.title}px`,
     "align-self": "stretch",
     ...roleCss(scope, "surface", "onSurface"),
   });
   const actions = Array.isArray(node.actions) ? node.actions : [];
-  const title = el("span", { style: { flex: "1 1 auto" } }, [bound(node.title, scope)]);
+  const titleStyle: Record<string, string> = expanded
+    ? { order: "1", "flex-basis": "100%", "padding-bottom": "16px" }
+    : { flex: "1 1 auto", ...(variant === "centerAligned" ? { "text-align": "center" } : {}) };
+  const title = el("span", { style: titleStyle }, [bound(node.title, scope)]);
   return el("div", { attrs: { ...attrs, role: "heading" }, style }, [
     ...appBarIcons([node.navigationIcon], scope, path),
     title,
@@ -761,6 +821,7 @@ export function renderWebNode(
     return undefined;
   }
   const styled: Raw = { ...raw, style: resolvedStyle(raw, scope) };
+  const own: WebRenderScope = { ...scope, ownInsets: safeAreaEdges(styled) };
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  return renderer ? renderer(styled, scope, path) : placeholder(styled, scope, path);
+  return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
 }

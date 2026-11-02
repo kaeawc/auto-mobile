@@ -27,8 +27,9 @@ device frame registry.
   unregistered when the id is evicted; each change sends `list_changed`. List entries carry no
   `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
   `_meta`.
-- **Updates.** Every new revision sends `resources/updated` for the parameter-free URI of the id and
-  of each id in its variant group, in revision order. The concrete resource matches subscriptions
+- **Updates.** Every new revision sends `resources/updated` for the parameter-free URI of the id,
+  of each id in its variant group, and of each id in the group it left (or was evicted from), in
+  revision order. The concrete resource matches subscriptions
   exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
 
 ## Spec revisions
@@ -66,10 +67,10 @@ it inlined per variant.
   no storage, cookies or URL changes. It must stay at or below 150 KB.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
-- **Budget.** The page is at most 2 MiB. Each variant's latest revision is always kept; older
-  revisions are added newest first while they fit, after measuring the shell (head, toolbar, full
-  history list and script). If the latest revisions alone do not fit, the build fails with an
-  `ActionableError` naming the largest view.
+- **Budget.** The page is at most 2 MiB. Each variant's latest revision and the revision shown
+  first are always kept; older revisions are added newest first while they fit, after measuring the
+  shell (head, toolbar, full history list and script). If the kept revisions alone do not fit, the
+  build fails with an `ActionableError` naming the largest view.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Still renderer

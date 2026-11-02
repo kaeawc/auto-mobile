@@ -127,6 +127,57 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
     expect(pinned.contents[0]!._meta).toMatchObject({ revision: 1, frame: "pixel-9" });
   });
 
+  test("a prototype leaving its variant group also updates its former siblings", async () => {
+    const showIn = (id: string, variant?: { group: string; label: string }) => {
+      const ticket = specs.beginShow("d", id, false, "android");
+      specs.endShow("d", ticket, {
+        id,
+        spec: { ...spec(id), id },
+        replaceOthers: false,
+        ...(variant ? { variant } : {}),
+      });
+    };
+    await request("resources/subscribe", { uri: "automobile:prototype/a/web" });
+    await request("resources/subscribe", { uri: "automobile:prototype/b/web" });
+    showIn("a", { group: "g", label: "A" });
+    showIn("b", { group: "g", label: "B" });
+    await prototypeWebNotificationsSettled();
+    const before = updatedUris().length;
+    showIn("b");
+    await prototypeWebNotificationsSettled();
+    expect(updatedUris().slice(before).sort()).toEqual([
+      "automobile:prototype/a/web",
+      "automobile:prototype/b/web",
+    ]);
+  });
+
+  test("evicting a variant updates the siblings it leaves behind", async () => {
+    const specOf = (id: string) => ({ ...spec(id), id });
+    const bytes = Buffer.byteLength(JSON.stringify(specOf("a")));
+    ResourceRegistry.restoreForTesting(snapshot);
+    revisions = new PrototypeSpecRevisions(new FakeTimer(), { revisions: 20, bytes: bytes * 2 });
+    specs = new PrototypeShownSpecs(revisions);
+    registerPrototypeResources(undefined, { revisions, rendererVersion: () => "9.9.9" });
+    const showIn = (id: string, variant?: { group: string; label: string }) => {
+      const ticket = specs.beginShow("d", id, false, "android");
+      specs.endShow("d", ticket, {
+        id,
+        spec: specOf(id),
+        replaceOthers: false,
+        ...(variant ? { variant } : {}),
+      });
+    };
+    await request("resources/subscribe", { uri: "automobile:prototype/b/web" });
+    showIn("a", { group: "g", label: "A" });
+    showIn("b", { group: "g", label: "B" });
+    await prototypeWebNotificationsSettled();
+    const before = updatedUris().length;
+    showIn("c");
+    await prototypeWebNotificationsSettled();
+    expect(revisions.ids()).toEqual(["b", "c"]);
+    expect(updatedUris().slice(before)).toContain("automobile:prototype/b/web");
+  });
+
   test("an unknown id is an actionable error listing known ids", async () => {
     show("first");
     expect(request("resources/read", { uri: "automobile:prototype/nope/web" })).rejects.toThrow(

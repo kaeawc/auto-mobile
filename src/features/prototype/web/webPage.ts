@@ -213,12 +213,8 @@ function revisionHistory(
   );
 }
 
-function isLatest(input: PrototypeWebPageInput, group: readonly RenderedView[]): boolean {
-  return input.variants.some(
-    (variant) =>
-      variant.id === group[0]?.variant && variant.revisions.at(-1)?.revision === group[0].revision,
-  );
-}
+/** Whether a revision is always kept: each variant's latest, plus the one shown first. */
+type Pinned = (variant: string, revision: number) => boolean;
 
 const groupBytes = (group: readonly RenderedView[]) =>
   group.reduce((sum, view) => sum + Buffer.byteLength(view.html), 0);
@@ -232,19 +228,26 @@ const HIDDEN_ATTRIBUTE_BYTES = Buffer.byteLength(' hidden=""');
  * entries); an older revision costs its views plus its own history entry, so the budget counts
  * exactly what the final page holds.
  */
-function budgetedViews(input: PrototypeWebPageInput, frame: string, shellBytes: number) {
+function budgetedViews(
+  input: PrototypeWebPageInput,
+  frame: string,
+  shellBytes: number,
+  pinned: Pinned,
+) {
   const groups = input.variants.flatMap((variant) => renderViews(input, frame, variant));
   const limit = input.maxBytes ?? MAX_PROTOTYPE_WEB_PAGE_BYTES;
   const budget = limit - shellBytes + HIDDEN_ATTRIBUTE_BYTES;
-  const latest = groups.filter((group) => isLatest(input, group));
+  const isPinned = (group: readonly RenderedView[]) =>
+    pinned(group[0]!.variant, group[0]!.revision);
+  const latest = groups.filter(isPinned);
   let used = latest.reduce((sum, group) => sum + groupBytes(group), 0);
   if (used > budget) {
     const largest = [...latest].sort((a, b) => groupBytes(b) - groupBytes(a))[0]![0]!;
     throw new ActionableError(
-      `The prototype web page would exceed ${limit} bytes even with only the latest revision of each variant. Largest view: variant ${largest.variant} revision ${largest.revision} (${Buffer.byteLength(largest.html)} bytes). Reduce the spec's repeated content or show fewer variants.`,
+      `The prototype web page would exceed ${limit} bytes even with only the latest revision of each variant and the revision shown first. Largest view: variant ${largest.variant} revision ${largest.revision} (${Buffer.byteLength(largest.html)} bytes). Reduce the spec's repeated content or show fewer variants.`,
     );
   }
-  const older = groups.filter((group) => !isLatest(input, group));
+  const older = groups.filter((group) => !isPinned(group));
   const kept = new Set(latest);
   for (const group of older) {
     const cost =
@@ -294,16 +297,15 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),
   ).id;
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
-  // The shell lists only the latest revisions, which are always kept; older entries are charged
-  // to their own revision in the budget.
-  const latestRevision = (variant: string, revision: number) =>
+  // The shell lists only the pinned revisions (each latest and the one shown first), which are
+  // always kept; older entries are charged to their own revision in the budget.
+  const pinned: Pinned = (variant, revision) =>
+    (variant === chosen.id && revision === shown.revision) ||
     input.variants.some(
       (entry) => entry.id === variant && entry.revisions.at(-1)?.revision === revision,
     );
-  const shellBytes = Buffer.byteLength(
-    pageHtml(input, shown, "", revisionHistory(input, latestRevision)),
-  );
-  const groups = budgetedViews(input, frame, shellBytes);
+  const shellBytes = Buffer.byteLength(pageHtml(input, shown, "", revisionHistory(input, pinned)));
+  const groups = budgetedViews(input, frame, shellBytes, pinned);
   const views = groups.flat();
   const first = views.find(
     (view) =>

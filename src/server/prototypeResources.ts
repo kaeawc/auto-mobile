@@ -124,10 +124,44 @@ async function onWebRevision(
   if (syncWebResources(sources)) {
     await ResourceRegistry.notifyResourceListChanged();
   }
-  if (event.kind === "revision") {
-    const ids = new Set([event.id, ...prototypeVariantIds(sources.revisions, event.id)]);
+  const known = new Set(sources.revisions.ids());
+  const formerGroup = webGroups.get(event.id);
+  const former = [...webGroups]
+    .filter(([id, group]) => formerGroup !== undefined && group === formerGroup && known.has(id))
+    .map(([id]) => id);
+  webGroups = nextGroups(sources.revisions, event, known);
+  // The event's id and its current siblings change, and so do the siblings it left (or, when
+  // evicted, the group it was dropped from).
+  const current = known.has(event.id) ? prototypeVariantIds(sources.revisions, event.id) : [];
+  const ids = new Set([...(known.has(event.id) ? [event.id] : []), ...current, ...former]);
+  if (ids.size > 0) {
     await ResourceRegistry.notifyResourcesUpdated([...ids].map(prototypeWebUri));
   }
+}
+
+/** Each known id's variant group, as of the last notification. */
+let webGroups = new Map<string, string | undefined>();
+
+function groupsOf(source: PrototypeSpecRevisionSource): Map<string, string | undefined> {
+  return new Map(source.ids().map((id) => [id, source.revision(id).variant?.group]));
+}
+
+/**
+ * The groups after this event. The store announces a revision before the evictions it caused, so
+ * an id that has vanished keeps its last group until its own eviction event has been handled.
+ */
+function nextGroups(
+  source: PrototypeSpecRevisionSource,
+  event: PrototypeSpecRevisionEvent,
+  known: ReadonlySet<string>,
+): Map<string, string | undefined> {
+  const next = groupsOf(source);
+  for (const [id, group] of webGroups) {
+    if (!known.has(id) && !(event.kind === "evicted" && event.id === id)) {
+      next.set(id, group);
+    }
+  }
+  return next;
 }
 
 function registerPrototypeWebResources(sources: PrototypeWebSources): void {
@@ -147,6 +181,7 @@ function registerPrototypeWebResources(sources: PrototypeWebSources): void {
   ResourceRegistry.registerListRefresher("prototype-web", async () => {
     syncWebResources(sources);
   });
+  webGroups = groupsOf(sources.revisions);
   unsubscribeWeb?.();
   unsubscribeWeb = sources.revisions.onRevision((event) => {
     // Chained so notifications go out in revision order.

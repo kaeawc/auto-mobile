@@ -1,4 +1,5 @@
 import { specTypeSchemas } from "@modelcontextprotocol/server";
+import { withWireDeadline } from "../helpers/requestDeadline";
 import { asObservedResult } from "../../src/features/action/observedInteractionStages";
 import { recordObservationRead } from "../../src/features/observe/observationReadScope";
 import { z } from "zod/v4";
@@ -816,7 +817,9 @@ describe("tapOn handler transport deadline", () => {
       duration: 20000,
       __mcpRequestDeadlineMs: timer.now() + 5000,
     };
-    const call = tapOnHandler(device, internalArgs, { deps: interactionDeps });
+    const call = withWireDeadline(internalArgs, (args) =>
+      tapOnHandler(device, args, { deps: interactionDeps }),
+    );
     await expect(call).rejects.toBeInstanceOf(ActionableError);
     await expect(call).rejects.toThrow(
       "longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started.",
@@ -845,10 +848,10 @@ describe("tapOn handler transport deadline", () => {
         action: "longPress" as const,
         __mcpRequestDeadlineMs: deadline,
       };
-      await tapOnHandler(
-        { deviceId: "handler-deadline", name: "Test", platform: "android" },
-        args,
-        { deps: interactionDeps },
+      await withWireDeadline(args, (rest) =>
+        tapOnHandler({ deviceId: "handler-deadline", name: "Test", platform: "android" }, rest, {
+          deps: interactionDeps,
+        }),
       );
       expect(received).toBe(deadline);
       expect(recoveryPolicy).toBeUndefined();

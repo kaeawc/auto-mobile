@@ -1,4 +1,5 @@
 import { toolIsError, toolJson } from "../helpers/toolResponse";
+import { underRequestDeadline, withWireDeadline } from "../helpers/requestDeadline";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { DefaultDeviceResourceObserver } from "../../src/utils/deviceResourceObserver";
 import { DefaultDeviceResourceController } from "../../src/utils/deviceResourceController";
@@ -358,16 +359,19 @@ describe("setDeviceResources", () => {
 
   test("accepts injected execution metadata and honors the transport deadline", async () => {
     const tool = ToolRegistry.getTool("setDeviceResources")!;
-    await tool.deviceAwareHandler!(device, {
-      resources: { wallpaperRendering: "disabled" },
-      timeoutMs: 10_000,
-      __executionId: "exec",
-      __executionStartTime: 0,
-      __mcpSessionId: "session",
-      __mcpRequestDeadlineMs: 9_000,
-      __mcpRequestTimeoutMs: 9_000,
-      __mcpLiveDeadlineKey: "key",
-    });
+    await withWireDeadline(
+      {
+        resources: { wallpaperRendering: "disabled" },
+        timeoutMs: 10_000,
+        __executionId: "exec",
+        __executionStartTime: 0,
+        __mcpSessionId: "session",
+        __mcpRequestDeadlineMs: 9_000,
+        __mcpRequestTimeoutMs: 9_000,
+        __mcpLiveDeadlineKey: "key",
+      },
+      (args) => tool.deviceAwareHandler!(device, args),
+    );
     expect(controller.requests[0]!.deadlineMs).toBe(4_000);
   });
 
@@ -380,7 +384,10 @@ describe("setDeviceResources", () => {
       [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 9_000,
       [INTERNAL_NO_DIFF_PARAM]: true,
     });
-    await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, args);
+    // The deadline the handler honors is the request's, not one written into its args (#15663).
+    await underRequestDeadline({ deadlineMs: 9_000 }, () =>
+      ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, args),
+    );
     expect(controller.requests).toHaveLength(1);
     expect(controller.requests[0]).toMatchObject({
       device,

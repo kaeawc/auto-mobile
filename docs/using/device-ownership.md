@@ -65,6 +65,8 @@ Other refusals you may meet, and what to do:
 | `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                                                                                      |
 | `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                                                                          |
 
+Every daemon that shares an adb server must run the same release or later: a daemon
+from before the shared claims table cannot see a device a newer daemon claimed there.
 A daemon warning about unknown registry migrations means a newer release has updated
 shared ownership data. Allocation claim files alone decide ownership, and this daemon
 skips the shared claims table until restart. This `files_only` mode does not enforce

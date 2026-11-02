@@ -7,6 +7,8 @@ import {
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { underRequestDeadline } from "../helpers/requestDeadline";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DEFAULT_MAX_INTERACTIONS, Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
@@ -359,13 +361,11 @@ describe("navigation tool session graph selection", () => {
     });
     const call = spyOn(ToolRegistry, "callInternal");
     try {
-      const args = Object.freeze({
-        targetScreen: "Settings",
-        sessionUuid: "running-session",
-        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 500,
-        [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
-      });
-      const response = await navigateToHandler(device, args);
+      const args = Object.freeze({ targetScreen: "Settings", sessionUuid: "running-session" });
+      const response = await underRequestDeadline(
+        { timeoutMs: 500, deadlineMs: 1500, startTime: 7, liveDeadlineKey: "navigate-live" },
+        () => navigateToHandler(device, args),
+      );
       expect(readToolResponse(response).isError).toBeUndefined();
       expect(call).toHaveBeenCalledTimes(1);
       expect(call.mock.calls[0]).toEqual([
@@ -375,23 +375,24 @@ describe("navigation tool session graph selection", () => {
           platform: "ios",
           deviceId: device.deviceId,
           sessionUuid: "running-session",
-          [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 500,
-          [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
         },
-        { progress: undefined, signal: undefined },
+        // The replay runs under the request's absolute and remaining budget, as before (#15663).
+        {
+          progress: undefined,
+          signal: undefined,
+          requestDeadline: { timeoutMs: 500, deadlineMs: 1500 },
+        },
       ]);
-      expect(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM]).toBe(1500);
     } finally {
       call.mockRestore();
     }
   });
 
-  test("omits absent request budget keys from handler options", async () => {
+  test("omits an absent request budget from handler options", async () => {
     const navigateToHandler = createNavigateToHandler({
       navigateToFactory: () => ({
         execute: async (options) => {
-          expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_TIMEOUT_PARAM)).toBe(false);
-          expect(Object.hasOwn(options, INTERNAL_MCP_REQUEST_DEADLINE_PARAM)).toBe(false);
+          expect(Object.hasOwn(options, "requestDeadline")).toBe(false);
           return {
             success: true,
             targetScreen: options.targetScreen,
@@ -402,14 +403,11 @@ describe("navigation tool session graph selection", () => {
         },
       }),
     });
-    for (const budget of [
-      {},
-      {
-        [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: undefined,
-        [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: undefined,
-      },
-    ]) {
-      const response = await navigateToHandler(device, { targetScreen: "Settings", ...budget });
+    // No request deadline, and one carrying neither budget (only a start time).
+    for (const requestDeadline of [undefined, { startTime: 1 }]) {
+      const response = await runWithToolSelectionContext({ requestDeadline }, () =>
+        navigateToHandler(device, { targetScreen: "Settings" }),
+      );
       expect(readToolResponse(response).isError).toBeUndefined();
     }
   });

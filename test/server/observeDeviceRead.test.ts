@@ -52,7 +52,6 @@ import {
 } from "../../src/utils/directSessionDeviceRegistry";
 import { SnapshotReferenceStore } from "../../src/features/observe/SnapshotReferenceStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/wire/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { DeviceReadOptions } from "../../src/features/observe/interfaces/ObserveScreen";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -124,12 +123,13 @@ describe("session-free observe device read", () => {
       },
     });
     try {
-      await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
-        ToolRegistry.getTool("observe")!.deviceAwareHandler!(device, {
-          deviceId: device.deviceId,
-          display: "all",
-          [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: timer.now() + 750,
-        }),
+      await runWithToolSelectionContext(
+        { explicitObserveDeviceRead: true, requestDeadline: { deadlineMs: timer.now() + 750 } },
+        () =>
+          ToolRegistry.getTool("observe")!.deviceAwareHandler!(device, {
+            deviceId: device.deviceId,
+            display: "all",
+          }),
       );
       expect(received).toEqual([{ requireFreshScreenshot: false, timeoutMs: 650 }]);
     } finally {

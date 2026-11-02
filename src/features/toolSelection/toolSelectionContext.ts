@@ -133,6 +133,14 @@ export const runWithToolSelectionContext = async <T>(
 export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
   toolSelectionContext.getStore();
 
+/**
+ * The tracked execution the current call runs under (#15663): set at MCP ingress and inherited by
+ * every nested call and plan step. Absent outside a tool call.
+ */
+export function currentExecution(): ToolSelectionContext["execution"] {
+  return getToolSelectionContext()?.execution;
+}
+
 /** Whether the current device-aware call runs on the read-only device path (#10830). */
 export function isSessionlessDeviceRead(): boolean {
   return getToolSelectionContext()?.explicitObserveDeviceRead === true;

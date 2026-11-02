@@ -4,7 +4,9 @@ import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constants";
 import { ActionableError } from "../../src/models/ActionableError";
+import { deviceActionClock } from "../../src/server/pipeline/deviceActionClock";
 import {
+  currentExecution,
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
@@ -173,7 +175,8 @@ describe("ToolRegistry.callInternal (#3108)", () => {
   });
 
   test("propagates outer execution metadata to a nested device-aware plan step", async () => {
-    const device = { name: "Pixel", deviceId: "emulator-5554", platform: "android" as const };
+    let seenExecution: ReturnType<typeof currentExecution>;
+    const device = { name: "Pixel", deviceId: "emulator-15663", platform: "android" as const };
     const originalRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
     const restore = ToolRegistry.setPipelineOverridesForTesting({
@@ -207,18 +210,25 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       ToolRegistry.registerDeviceAware("nestedStep", "Nested step", z.object({}), {
         handler: async (_device, args) => {
           captured.push({ args });
+          seenExecution = currentExecution();
           return SENTINEL;
         },
         planExecutable: true,
       });
 
+      // The outer call was admitted as a control call, so its dispatch moves the device's clock.
+      deviceActionClock.markControl("outer-execution");
       await runWithToolSelectionContext(
         { execution: { executionId: "outer-execution", startTime: 123 } },
         () => ToolRegistry.callInternal("nestedStep", {}, { forPlan: true }),
       );
+      expect(deviceActionClock.lastActionStartMs(device.deviceId)).toBe(123);
 
+      // The step runs under the outer execution ambiently; its id is not written in-band (#15663).
       expect(captured).toHaveLength(1);
-      expect(captured[0].args.__executionId).toBe("outer-execution");
+      expect(seenExecution).toMatchObject({ executionId: "outer-execution", startTime: 123 });
+      expect(captured[0].args).not.toHaveProperty("__executionId");
+      // Still in-band for the transport-deadline fallback until that moves too.
       expect(captured[0].args.__executionStartTime).toBe(123);
     } finally {
       restore();

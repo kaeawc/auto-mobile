@@ -4,7 +4,17 @@
  * switches between views the host pre-rendered and never runs spec logic. UI state stays in
  * memory: no storage, cookies or URL changes.
  */
-export function prototypeWebPageRuntime(): void {
+/**
+ * The scale a zoom step lands on: 50–400 %, except that a fitted scale already below 50 % is
+ * never raised, so zooming out never enlarges the preview. Passed into the runtime as an argument,
+ * so it is unit-tested and still inlined with the script.
+ */
+export function prototypeWebZoomScale(current: number, requested: number): number {
+  const lower = Math.min(0.5, current);
+  return Math.max(lower, Math.min(4, requested));
+}
+
+export function prototypeWebPageRuntime(zoomScale: typeof prototypeWebZoomScale): void {
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -64,7 +74,7 @@ export function prototypeWebPageRuntime(): void {
   };
   const zoomTo = (scale: number) => {
     state.fit = false;
-    state.scale = Math.max(0.5, Math.min(4, scale));
+    state.scale = zoomScale(state.scale, scale);
     apply();
   };
   pick("rotate")?.addEventListener("click", () => {

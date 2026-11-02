@@ -8,6 +8,7 @@ import {
   PROTOTYPE_WEB_RUNTIME,
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
+import { prototypeWebZoomScale } from "../../../../src/features/prototype/web/webPageRuntime";
 
 const reference = JSON.parse(
   readFileSync(
@@ -60,6 +61,13 @@ describe("prototype web page (#16346)", () => {
     expect(page.html.match(/<script/g)).toHaveLength(1);
     expect(page.html).not.toMatch(/\s(src|href)="(?!data:|#)/);
     expect(page.html).not.toMatch(/@import|url\((?!data:)/);
+  });
+
+  test("zooming out never enlarges a preview fitted below 50%", () => {
+    expect(prototypeWebZoomScale(0.38, 0.38 / 1.25)).toBe(0.38);
+    expect(prototypeWebZoomScale(1, 0.2)).toBe(0.5);
+    expect(prototypeWebZoomScale(1, 9)).toBe(4);
+    expect(prototypeWebZoomScale(0.38, 0.38 * 1.25)).toBeCloseTo(0.475);
   });
 
   test("keeps the runtime within its budget", () => {

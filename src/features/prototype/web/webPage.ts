@@ -4,7 +4,7 @@ import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import type { WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
-import { prototypeWebPageRuntime } from "./webPageRuntime";
+import { prototypeWebPageRuntime, prototypeWebZoomScale } from "./webPageRuntime";
 import { renderPrototypeStill } from "./webStill";
 import type { UnsupportedWebNode } from "./webRender";
 
@@ -49,7 +49,7 @@ export interface PrototypeWebPage {
 }
 
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
-export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})();`;
+export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})(${prototypeWebZoomScale.toString()});`;
 export const MAX_PROTOTYPE_WEB_RUNTIME_BYTES = 150 * 1024;
 export const MAX_PROTOTYPE_WEB_PAGE_BYTES = 2 * 1024 * 1024;
 

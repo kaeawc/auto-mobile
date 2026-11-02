@@ -4,8 +4,9 @@ AutoMobile can drive a Wear OS emulator with the same tools it uses on a phone. 
 setting one up, the watch-specific behaviour, and what is out of scope.
 
 > [!WARNING]
-> **Not yet verified on a device.** The watch-specific behaviour below has not been run on a real
-> Wear OS emulator yet, so every behaviour that depends on the emulator is **unverified**.
+> **Verification limits.** Watch-specific behaviour remains unverified unless stated below.
+> Sleep/wake power-state changes have been measured on a Wear OS emulator; ambient mode itself
+> has no usable readback.
 
 ## Create the emulator by hand
 
@@ -71,6 +72,24 @@ Which of the three methods works on a given image is unverified; check `attempts
 
 `swipeOn` with `lookFor` still scrolls with touch swipes on a watch.
 
+## Ambient power state
+
+Enable `ambient` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), then call:
+
+```json
+{ "name": "ambient", "arguments": { "action": "enter" } }
+```
+
+Use `action: "exit"` to wake the device. This Android-only tool sends `KEYCODE_SLEEP` for
+`enter` or `KEYCODE_WAKEUP` for `exit`, then reads wakefulness once. `success: true` means
+`Dozing` or `Asleep` for enter, or `Awake` for exit. A failed or unreadable state returns
+`success: false` with a `reason`; inspect `wakefulness` when present and use `observe` to
+check the current state.
+
+This is a power-state change. Wear exposes no ambient readback, so the result does not prove
+ambient mode. Hardware wake by tilt or touch remains untested. Command failures return an
+error; check the device connection before retrying.
+
 ## Prototypes
 
 `prototype` `show` renders on a watch with the phone overlay and components; there are no
@@ -84,5 +103,5 @@ expected to support pinned shortcuts, so `save` with `pin: true` keeps the save 
 - Choosing or creating a Wear OS emulator from `formFactor` alone, and physical watches.
 - Notifications, tiles, complications and watch faces (`systemTray` is built for the phone
   notification shade).
-- Ambient mode, and a paired phone and watch.
+- Ambient-mode verification, hardware wake by tilt or touch, and a paired phone and watch.
 - Watch-specific prototype components and round-aware prototype layout.

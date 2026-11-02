@@ -545,6 +545,25 @@ test("default binary directory follows the package root and the injected environ
   }
 });
 
+test("a relative binary directory override resolves against the daemon launch directory, not the process cwd", async () => {
+  const h = harness();
+  const paths: string[] = [];
+  const injector = createMemoryPressureInjector(h.device, {
+    timer: h.timer,
+    env: {
+      AUTOMOBILE_LMK_PRESSURE_DIR: "build/lmk-pressure",
+      AUTOMOBILE_DAEMON_LAUNCH_CWD: "/launch dir",
+    },
+    binaryExists: (path) => {
+      paths.push(path);
+      return true;
+    },
+  });
+  const applied = await injector.apply("on");
+  expect(paths).toEqual([resolve("/launch dir", "build/lmk-pressure", "x86_64", "lmk_pressure")]);
+  await applied.reset?.();
+});
+
 test("recovery removes file-only leftovers without touching an unrelated reused PID", async () => {
   for (const leftovers of [[PID], [BIN], [PID, BIN, OUT]]) {
     const h = harness();

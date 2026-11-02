@@ -11,6 +11,7 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type {
@@ -67,11 +68,12 @@ function resolveBinaryPath(abi: string, env: NodeJS.ProcessEnv): string {
   while (!existsSync(join(root, "package.json")) && dirname(root) !== root) {
     root = dirname(root);
   }
-  return join(
-    readEnvTrimmed(ENV.LMK_PRESSURE_DIR, env) ?? join(root, "build/lmk-pressure"),
-    abi,
-    "lmk_pressure",
-  );
+  const override = readEnvTrimmed(ENV.LMK_PRESSURE_DIR, env);
+  // The detached daemon chdirs to the user's home, so a relative override must anchor at the launch directory.
+  const directory = override
+    ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
+    : join(root, "build/lmk-pressure");
+  return join(directory, abi, "lmk_pressure");
 }
 
 export interface MemoryPressureOptions {

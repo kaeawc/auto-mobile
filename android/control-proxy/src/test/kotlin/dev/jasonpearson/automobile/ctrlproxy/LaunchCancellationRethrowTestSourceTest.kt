@@ -204,6 +204,7 @@ internal class LaunchCancellationRethrowTestSourceTest {
       listOf(
         ScannedSource("CtrlProxy.kt", exemptSuspendFns = emptyList()),
         ScannedSource("CtrlProxyActionRouter.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("CtrlProxyServiceStartup.kt", exemptSuspendFns = emptyList()),
         ScannedSource("CaCertificateController.kt", exemptSuspendFns = emptyList()),
         ScannedSource("SettingsController.kt", exemptSuspendFns = emptyList()),
         ScannedSource("PackageController.kt", exemptSuspendFns = emptyList()),

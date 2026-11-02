@@ -1,7 +1,30 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the still renderer and the device frame registry.
+document covers the page, the still renderer and the device frame registry.
+
+## Page
+
+`buildPrototypeWebPage(input)` in `src/features/prototype/web/webPage.ts` returns one HTML
+document, its `sha256`, the frame used, the unsupported nodes of the first view and the revisions
+it inlined per variant.
+
+- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape.
+  The first view is the chosen variant's chosen revision (default: latest) in portrait; the rest
+  are `hidden`.
+- **Controls.** Only four: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
+  double-click to fit), a variant select (only with more than one variant) and the revision
+  history (newest first, `r<N> · show|patch`). Controls are buttons and a select with labels.
+- **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
+  self-contained. It only shows and hides views and moves the stage; UI state stays in memory, with
+  no storage, cookies or URL changes. It must stay at or below 150 KB.
+- **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
+  styles, and `data:` images and fonts. The page references no external URL.
+- **Budget.** The page is at most 2 MiB. Each variant's latest revision is always kept; older
+  revisions are added newest first while they fit, after measuring the shell (head, toolbar, full
+  history list and script). If the latest revisions alone do not fit, the build fails with an
+  `ActionableError` naming the largest view.
+- **Determinism.** The same input yields byte-identical HTML.
 
 ## Still renderer
 
@@ -27,17 +50,20 @@ the host, so the page's script only switches between views it was given and neve
   string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
   condition counts as true, so a node is never hidden on a guess.
 - **Window.** An explicit `window.layoutDirection` sets the content's `dir` (the frame is never
-  mirrored). Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
+  mirrored), and `start`/`end` safe-area edges read the inset on the matching physical side. Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
   each axis it leaves unsized, as on devices; a sheet spans the screen width, `height` dp tall at its `edge`; a floating window
   sits at its `gravity`, moved by its `offset`.
 - **Style precedence.** A control's default styling applies first and the spec's own style wins.
   `styleWhen` entries whose condition holds merge over `style` in authored order; an entry the
   still cannot decide is not applied. `textStyle` resolves to the Material 3 type scale before
   explicit `textSize`, `fontWeight` and `lineHeight`.
-- **Layout.** Rows, columns, cards and scrolls are flex lines that start-align children on the cross axis unless
+- **Layout.** Rows, columns, cards and scrolls (reversed when `reverse`, so they open at the end) are flex
+  lines that start-align children on the cross axis unless
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill` (inside a box grid, only on its own axis), `{dp}`, `weight`, padding (logical
   start and end), corner radius, border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
+- **Typography.** `theme.typography` scales every type-scale role and sets its family, as the
+  native theme does.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
   accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
   roles unpainted. Unpainted screen regions show a checkerboard. An explicit `theme.mode` of
@@ -62,10 +88,12 @@ the host, so the page's script only switches between views it was given and neve
   inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
-  generic status bar, the cutout and the navigation handle (or three generic button marks). Landscape swaps the screen size, uses
+  generic status bar, the cutout and the navigation handle (or three generic button marks, which move to
+  the right edge in landscape when the frame reserves that inset). Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
-  `windowInsetsPadding`, an edge an ancestor already applied adds nothing more (`ime` adds nothing,
+  `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own
+  padding on that edge (`ime` adds nothing,
   since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. A top app bar takes no inset
   of its own, as on the devices: it clears the status bar only through `safeAreaPadding`.

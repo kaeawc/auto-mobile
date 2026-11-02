@@ -6,7 +6,7 @@ import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import { renderDeviceFrame, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
-import { cssColor } from "./webStyle";
+import { cssColor, themeTypography } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
 const STILL_LOCALE = "en-US";
@@ -117,9 +117,19 @@ function sizedRoot(spec: unknown): unknown {
 function placed(spec: unknown, content: WebElement | undefined): WebElement {
   const window = placedWindow(spec, content);
   const direction = record(record(spec)?.window)?.layoutDirection;
-  return direction === "rtl" || direction === "ltr"
-    ? { ...window, attrs: { ...window.attrs, dir: direction } }
-    : window;
+  if (direction !== "rtl" && direction !== "ltr") {
+    return window;
+  }
+  // In RTL the logical start is the physical right, so the logical insets swap sides.
+  const insets: Record<string, string> =
+    direction === "rtl"
+      ? { "--safe-start": "var(--safe-right)", "--safe-end": "var(--safe-left)" }
+      : {};
+  return {
+    ...window,
+    attrs: { ...window.attrs, dir: direction },
+    style: { ...window.style, ...insets },
+  };
 }
 
 function placedWindow(spec: unknown, content: WebElement | undefined): WebElement {
@@ -144,7 +154,12 @@ function stillScope(
   const authored = record(spec.theme)?.mode;
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
-    style: { mode, palette: prototypeRolePalette(expanded, mode), parentAxis: "column" },
+    style: {
+      mode,
+      palette: prototypeRolePalette(expanded, mode),
+      parentAxis: "column",
+      typography: themeTypography(expanded),
+    },
     condition: { state: record(spec.state) ?? {}, platform },
     data: spec.data,
     spec,

@@ -97,8 +97,9 @@ export function bound(text: unknown, scope: WebRenderScope): string {
 const SAFE_AREA_EDGES: Readonly<Record<string, [string, string]>> = {
   top: ["padding-top", "--safe-top"],
   bottom: ["padding-bottom", "--safe-bottom"],
-  start: ["padding-inline-start", "--safe-left"],
-  end: ["padding-inline-end", "--safe-right"],
+  // Logical edges read logical insets, which the window maps to the physical side for its direction.
+  start: ["padding-inline-start", "--safe-start"],
+  end: ["padding-inline-end", "--safe-end"],
 };
 
 /**
@@ -116,6 +117,24 @@ export function safeAreaEdges(node: Raw): string[] {
   return safe.edges.map(String).filter((edge) => SAFE_AREA_EDGES[edge] !== undefined);
 }
 
+/** Expands a `padding` shorthand of px values into logical longhands; others stay as they are. */
+function paddingLonghands(css: Record<string, string>): Record<string, string> {
+  const shorthand = css.padding;
+  if (shorthand === undefined) {
+    return { ...css };
+  }
+  const parts = shorthand.trim().split(/\s+/);
+  const [top, end = top, bottom = top, start = end] = parts;
+  const rest = Object.fromEntries(Object.entries(css).filter(([key]) => key !== "padding"));
+  return {
+    "padding-top": top!,
+    "padding-inline-end": end!,
+    "padding-bottom": bottom!,
+    "padding-inline-start": start!,
+    ...rest,
+  };
+}
+
 /**
  * Like windowInsetsPadding, an inset an ancestor already applied is consumed, so a descendant
  * asking for the same edge adds nothing more.
@@ -126,11 +145,13 @@ function safeAreaCss(
   css: Record<string, string>,
 ): Record<string, string> {
   const consumed = scope.consumedInsets ?? [];
-  const padded = { ...css };
+  // A component's `padding` shorthand becomes longhands first, so an inset adds to it rather than
+  // replacing it on that edge.
+  const padded = safeAreaEdges(node).length > 0 ? paddingLonghands(css) : { ...css };
   for (const edge of safeAreaEdges(node)) {
     const target = SAFE_AREA_EDGES[edge];
     if (target && !consumed.includes(edge)) {
-      padded[target[0]] = `calc(${css[target[0]] ?? "0px"} + var(${target[1]}))`;
+      padded[target[0]] = `calc(${padded[target[0]] ?? "0px"} + var(${target[1]}))`;
     }
   }
   return padded;
@@ -222,13 +243,19 @@ function fillMissing(node: Raw): Raw {
   return { ...node, style: { width: "fill", height: "fill", ...style } };
 }
 
-/** Whether a child's visibleWhen keeps it, binding its repeat placeholders first. */
-function rendersVisibly(entry: unknown, scope: WebRenderScope, path: string): boolean {
+/**
+ * Whether a child is a visible spacer that will fill its line: its repeat placeholders bind, its
+ * visibleWhen keeps it, and its style (with matching styleWhen entries) leaves it unsized.
+ */
+function fillsAsSpacer(entry: unknown, scope: WebRenderScope, path: string): boolean {
   const bound = scope.instances.reduce(
     (current, instance) => bindStructure(current, path, instance),
     record(entry) ?? {},
   );
-  return bound.visibleWhen === undefined || conditionHolds(bound.visibleWhen, scope.condition);
+  if (bound.visibleWhen !== undefined && !conditionHolds(bound.visibleWhen, scope.condition)) {
+    return false;
+  }
+  return isUnsizedSpacer({ ...bound, style: resolvedStyle(bound, scope) });
 }
 
 function spacerFilled(node: Raw): Raw {
@@ -241,8 +268,7 @@ const line =
     // A wrap-sized line around a filling spacer grows to its parent, as a Compose parent does
     // around a fillMaxSize child; otherwise it would shrink to nothing.
     const node =
-      Array.isArray(raw.children) &&
-      raw.children.some((entry) => isUnsizedSpacer(entry) && rendersVisibly(entry, scope, path))
+      Array.isArray(raw.children) && raw.children.some((entry) => fillsAsSpacer(entry, scope, path))
         ? fillMissing(raw)
         : raw;
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
@@ -311,7 +337,8 @@ const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
   const { attrs, style } = base(node, scope, {
     display: "flex",
-    "flex-direction": horizontal ? "row" : "column",
+    // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
+    "flex-direction": `${horizontal ? "row" : "column"}${node.reverse === true ? "-reverse" : ""}`,
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
@@ -339,7 +366,13 @@ const divider: NodeRenderer = (node, scope) => {
       scope,
       vertical
         ? { width: "1px", "align-self": "stretch", "background-color": color }
-        : { height: "1px", "align-self": "stretch", "background-color": color },
+        : // Inside a box grid the line axis is horizontal, so it stretches there too.
+          {
+            height: "1px",
+            "align-self": "stretch",
+            "justify-self": "stretch",
+            "background-color": color,
+          },
     ),
   );
 };

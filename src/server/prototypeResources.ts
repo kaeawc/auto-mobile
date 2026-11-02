@@ -21,7 +21,27 @@ import {
 } from "../features/prototype/nativePrototypeUris";
 import { defaultSavedPrototypeMirror } from "../features/prototype/savedPrototypeMirror";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
-import { daemonPrototypeShownSpecs } from "./prototypeTools/registration";
+import {
+  daemonPrototypeShownSpecs,
+  daemonPrototypeSpecRevisions,
+} from "./prototypeTools/registration";
+import type {
+  PrototypeSpecRevisionEvent,
+  PrototypeSpecRevisionSource,
+} from "../features/prototype/prototypeSpecRevisions";
+import {
+  PROTOTYPE_WEB_TEMPLATE,
+  prototypeWebResourceName,
+  prototypeWebUri,
+} from "../features/prototype/prototypeWebUris";
+import {
+  prototypeVariantIds,
+  readPrototypeWebResource,
+  type PrototypeWebResourceQuery,
+} from "../features/prototype/web/prototypeWebResource";
+import { logger } from "../utils/logger";
+import { decodeSegmentOrThrow } from "./resourceUriSegments";
+import type { ResourceContent } from "./resourceRegistry";
 
 /** Live sources: the prototype tool's shown specs (and the platforms it showed on) and the saved mirror. */
 export function defaultNativePrototypeSources(): NativePrototypeSources {
@@ -35,13 +55,124 @@ export function defaultNativePrototypeSources(): NativePrototypeSources {
   };
 }
 
+/** Where the web resource reads spec revisions and the version stamped into its `_meta`. */
+export interface PrototypeWebSources {
+  readonly revisions: PrototypeSpecRevisionSource;
+  readonly rendererVersion: () => string;
+}
+
+export function defaultPrototypeWebSources(): PrototypeWebSources {
+  return {
+    revisions: daemonPrototypeSpecRevisions(),
+    rendererVersion: () => releaseVersion(getMcpServerVersion()),
+  };
+}
+
+function readWeb(sources: PrototypeWebSources, query: PrototypeWebResourceQuery): ResourceContent {
+  const web = readPrototypeWebResource(sources.revisions, query, sources.rendererVersion());
+  const params = new URLSearchParams(
+    Object.entries({ frame: query.frame, revision: query.revision, variant: query.variant })
+      .filter((entry): entry is [string, string] => entry[1] !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  ).toString();
+  const uri = prototypeWebUri(query.id);
+  return {
+    uri: params ? `${uri}?${params}` : uri,
+    mimeType: "text/html",
+    text: web.html,
+    _meta: { ...web.meta },
+  };
+}
+
+/** Ids whose concrete web resource this module registered, so stale ones can be unregistered. */
+const listedWebIds = new Set<string>();
+let unsubscribeWeb: (() => void) | undefined;
+let webNotifications: Promise<void> = Promise.resolve();
+
+/** Registers one parameter-free resource per known id and drops evicted ones; true if it changed. */
+function syncWebResources(sources: PrototypeWebSources): boolean {
+  const known = new Set(sources.revisions.ids());
+  let changed = false;
+  for (const id of listedWebIds) {
+    if (!known.has(id)) {
+      ResourceRegistry.unregister(prototypeWebUri(id));
+      listedWebIds.delete(id);
+      changed = true;
+    }
+  }
+  for (const id of known) {
+    if (listedWebIds.has(id) && ResourceRegistry.getResource(prototypeWebUri(id))) {
+      continue;
+    }
+    ResourceRegistry.register(prototypeWebUri(id), prototypeWebResourceName(id), {
+      title: `${id} (web)`,
+      description: `Prototype ${id} as a self-contained HTML page in a device frame (latest revision)`,
+      mimeType: "text/html",
+      handler: async () => readWeb(sources, { id }),
+    });
+    listedWebIds.add(id);
+    changed = true;
+  }
+  return changed;
+}
+
+/** A new revision changes the page of its id and of every variant sharing its group. */
+async function onWebRevision(
+  sources: PrototypeWebSources,
+  event: PrototypeSpecRevisionEvent,
+): Promise<void> {
+  if (syncWebResources(sources)) {
+    await ResourceRegistry.notifyResourceListChanged();
+  }
+  if (event.kind === "revision") {
+    const ids = new Set([event.id, ...prototypeVariantIds(sources.revisions, event.id)]);
+    await ResourceRegistry.notifyResourcesUpdated([...ids].map(prototypeWebUri));
+  }
+}
+
+function registerPrototypeWebResources(sources: PrototypeWebSources): void {
+  ResourceRegistry.registerTemplate(PROTOTYPE_WEB_TEMPLATE, "Prototype as a web page", {
+    description:
+      "A shown prototype as one self-contained HTML page in a device frame (frame: a device frame id; revision: a kept spec revision, default the latest; variant: the prototype id of its variant group shown first)",
+    mimeType: "text/html",
+    handler: async (params: Record<string, string>) =>
+      readWeb(sources, {
+        id: decodeSegmentOrThrow(params.id ?? ""),
+        frame: params.frame,
+        revision: params.revision,
+        variant: params.variant,
+      }),
+  });
+  syncWebResources(sources);
+  ResourceRegistry.registerListRefresher("prototype-web", async () => {
+    syncWebResources(sources);
+  });
+  unsubscribeWeb?.();
+  unsubscribeWeb = sources.revisions.onRevision((event) => {
+    // Chained so notifications go out in revision order.
+    webNotifications = webNotifications
+      .then(() => onWebRevision(sources, event))
+      .catch((error) => {
+        // A failed notification must not fail the show or patch that recorded the revision.
+        logger.warn(`[prototype] web resource notification failed for ${event.id}`, error);
+      });
+  });
+}
+
+/** Resolves once every web resource notification queued so far has been sent. */
+export function prototypeWebNotificationsSettled(): Promise<void> {
+  return webNotifications;
+}
+
 /**
- * Registers the `prototype` authoring guide, its icon lookup (#11052) and the native-code
- * resources (#13729).
+ * Registers the `prototype` authoring guide, its icon lookup (#11052), the native-code
+ * resources (#13729) and the per-prototype web page (#16345).
  */
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),
+  webSources: PrototypeWebSources = defaultPrototypeWebSources(),
 ): void {
+  registerPrototypeWebResources(webSources);
   ResourceRegistry.register(PROTOTYPE_GUIDE_URI, "Prototype authoring guide", {
     description:
       "Node and action vocabulary, repeat grammar, limits, theme roles and icon lookup for the prototype tool",

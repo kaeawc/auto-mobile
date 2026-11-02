@@ -3,9 +3,11 @@ import type { Timer } from "../../../utils/SystemTimer";
 import {
   explainIosIndeterminateText,
   readIosTypedTextField,
+  readIosTypedTextFocus,
   verifyIosTypedText,
 } from "../iosTypedTextVerification";
 import { getTextRequestDeadlineMs, resolveTextCtrlProxyTimeoutMs } from "../textTransportTimeout";
+import type { FocusedTextField } from "../ClearText";
 import type { TypingSession } from "./TypingSession";
 import type {
   ResolvedSendKeysTypingMode,
@@ -41,22 +43,11 @@ export class IosTyper {
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
-    let clearWarning: string | undefined;
-    if (operation === "replace") {
-      const clearResult = await this.deps.clear(signal, display);
-      if (!clearResult.success) {
-        return { ...clearResult, resolvedMode };
-      }
-      clearWarning = clearResult.warning;
-      signal?.throwIfAborted();
+    const preparation = await this.prepareTyping(operation, signal, display);
+    if (preparation.kind === "refused") {
+      return preparation.result;
     }
-
-    const before = await readIosTypedTextField({
-      observer: this.deps.observer,
-      timer: this.deps.timer,
-      signal,
-      display,
-    });
+    const { before, clearWarning } = preparation;
     this.deps.session.typingPasswordField = before?.secure === true;
     signal?.throwIfAborted();
 
@@ -103,5 +94,48 @@ export class IosTyper {
       ),
       resolvedMode,
     };
+  }
+
+  private async prepareTyping(
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<
+    | { kind: "refused"; result: TextActionResult & { resolvedMode: ResolvedSendKeysTypingMode } }
+    | { kind: "ready"; before: FocusedTextField | undefined; clearWarning: string | undefined }
+  > {
+    let clearWarning: string | undefined;
+    if (operation === "replace") {
+      const clearResult = await this.deps.clear(signal, display);
+      if (!clearResult.success) {
+        return { kind: "refused", result: { ...clearResult, resolvedMode: "xcuiTypeText" } };
+      }
+      clearWarning = clearResult.warning;
+      signal?.throwIfAborted();
+    }
+
+    const read = {
+      observer: this.deps.observer,
+      timer: this.deps.timer,
+      signal,
+      display,
+    };
+    if (this.deps.targetLayer() === "prototype") {
+      return { kind: "ready", before: await readIosTypedTextField(read), clearWarning };
+    }
+    const focus = await readIosTypedTextFocus(read);
+    // Unavailable reads retain their existing best-effort dispatch behavior.
+    if (focus.kind === "read" && focus.field === undefined && !focus.keyboardVisible) {
+      return {
+        kind: "refused",
+        result: {
+          success: false,
+          error:
+            "iOS nothing was typed: no text field has focus. Tap a text field first (e.g. tapOn), then retry.",
+          resolvedMode: "xcuiTypeText",
+        },
+      };
+    }
+    return { kind: "ready", before: focus.kind === "read" ? focus.field : undefined, clearWarning };
   }
 }

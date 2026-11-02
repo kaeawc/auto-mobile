@@ -3,10 +3,59 @@ import { DefaultSendKeysCommandExecutor } from "../../../src/features/action/Sen
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { compareIosTypedText } from "../../../src/features/action/iosTypedTextVerification";
 import { expect, test } from "bun:test";
-import { typedObservation } from "./IosTypedTextTestHarness";
+import { typedObservation, unfocusedObservation } from "./IosTypedTextTestHarness";
 import { createSendKeysHarness, ios } from "./SendKeysTestHarness";
 import type { ObserveResult } from "../../../src/models";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
+
+const noFocusPrefix = "iOS nothing was typed: no text field has focus.";
+
+for (const operation of ["insert", "replace"] as const) {
+  const name = operation === "insert" ? "append" : operation;
+  test(`iOS ${name} refuses to insert when no field or keyboard has focus`, async () => {
+    const h = createSendKeysHarness(ios, { execute: async () => unfocusedObservation() });
+    const result = await h.executor.type({ action: "type", text: "hello", operation });
+    expect(result.success).toBe(false);
+    expect(result.error?.startsWith(noFocusPrefix)).toBe(true);
+    expect(result.error).toContain("tapOn");
+    expect(result.warning).toBeUndefined();
+    expect(h.inserted).toEqual([]);
+  });
+
+  test(`iOS ${name} keeps dispatching without readable focus when the keyboard is visible`, async () => {
+    const h = createSendKeysHarness(ios, { execute: async () => unfocusedObservation(true) });
+    const result = await h.executor.type({ action: "type", text: "hello", operation });
+    expect(result.success).toBe(true);
+    expect(h.inserted).toEqual(["hello"]);
+    expect(result.warning).toContain("focused field could not be read");
+  });
+}
+
+for (const unavailable of ["rejected", "stale", "hierarchy error", "missing hierarchy"] as const) {
+  test(`iOS dispatches when the focus read is ${unavailable}`, async () => {
+    const observation = unfocusedObservation();
+    if (unavailable === "stale") {
+      observation.freshness = { isFresh: false };
+    } else if (unavailable === "hierarchy error") {
+      observation.viewHierarchy!.hierarchy.error = "Hierarchy unavailable";
+    } else if (unavailable === "missing hierarchy") {
+      observation.viewHierarchy = undefined;
+    }
+    const h = createSendKeysHarness(ios, {
+      execute: async () => {
+        if (unavailable === "rejected") {
+          throw new Error("Observer unavailable");
+        }
+        return observation;
+      },
+    });
+    const result = await h.executor.type({ action: "type", text: "hello" });
+    expect(result.success).toBe(true);
+    expect(h.inserted).toEqual(["hello"]);
+    expect(result.error).toBeUndefined();
+    expect(result.warning).toContain("focused field could not be read");
+  });
+}
 
 const cases = [
   { name: "unchanged", before: "old", after: "old", success: false, error: "nothing was typed" },

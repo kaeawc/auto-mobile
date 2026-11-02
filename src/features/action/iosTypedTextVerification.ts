@@ -18,6 +18,7 @@ import { isTextIndeterminateMessage } from "./TextIndeterminateError";
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { combineAbortSignals, combineWithAmbientAbort } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
+import { isIosKeyboardVisible } from "../observe/ios/IosScreenIdentity";
 
 /** Keep secure values out of the shared focused-field reader, including its property copies. */
 class SecureValueOmittingParser extends DefaultElementParser {
@@ -178,17 +179,31 @@ function readBudgetMs(timer: Timer, maxWaitMs?: number): number | undefined {
     : Math.min(maxWaitMs, requestRemaining ?? maxWaitMs);
 }
 
-/** One fresh hierarchy-only read, bounded even when a client ignores cancellation. */
+export type IosTypedTextFocusRead =
+  | { kind: "unavailable" }
+  | { kind: "read"; field: FocusedTextField | undefined; keyboardVisible: boolean };
+
+/** Preserve the focused-field-only contract for verification callers. */
 export async function readIosTypedTextField(
   read: IosTypedTextRead,
   options: FocusedTextFieldOptions = {},
   maxWaitMs?: number,
 ): Promise<FocusedTextField | undefined> {
+  const result = await readIosTypedTextFocus(read, options, maxWaitMs);
+  return result.kind === "read" ? result.field : undefined;
+}
+
+/** One fresh hierarchy-only read, bounded even when a client ignores cancellation. */
+export async function readIosTypedTextFocus(
+  read: IosTypedTextRead,
+  options: FocusedTextFieldOptions = {},
+  maxWaitMs?: number,
+): Promise<IosTypedTextFocusRead> {
   const { observer, timer, signal, display } = read;
   const requestSignal = combineWithAmbientAbort(signal);
   const remaining = readBudgetMs(timer, maxWaitMs);
   if (requestSignal?.aborted || (remaining !== undefined && remaining <= 0)) {
-    return undefined;
+    return { kind: "unavailable" };
   }
   const controller = new AbortController();
   const readSignal = combineAbortSignals(requestSignal, controller.signal);
@@ -212,16 +227,21 @@ export async function readIosTypedTextField(
       },
     );
     const hierarchy = observation.viewHierarchy;
-    return observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error
-      ? undefined
-      : getFocusedTextField(hierarchy, new SecureValueOmittingParser(), {
-          ...options,
-          includeIosNativeEditableValues: true,
-        });
+    if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
+      return { kind: "unavailable" };
+    }
+    return {
+      kind: "read",
+      field: getFocusedTextField(hierarchy, new SecureValueOmittingParser(), {
+        ...options,
+        includeIosNativeEditableValues: true,
+      }),
+      keyboardVisible: isIosKeyboardVisible(observation.viewHierarchy, observation.screenSize),
+    };
   } catch {
     // Best-effort verification must preserve a confirmed delivery; never log field/transport values.
     logger.warn("[iOS typed text] Focused field read unavailable; result cannot be verified");
-    return undefined;
+    return { kind: "unavailable" };
   }
 }
 

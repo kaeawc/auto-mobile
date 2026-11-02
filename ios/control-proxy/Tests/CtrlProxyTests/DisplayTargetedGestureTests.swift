@@ -154,6 +154,106 @@ final class DisplayTargetedGestureTests: XCTestCase {
         }
     }
 
+    func testLetterboxedAppWithUnknownDisplayStaysOnMainScreen() throws {
+        let size = GestureSize(width: 375, height: 667)
+        let geometry = GestureCoordinateGeometry(
+            app: size, screen: folded.screen, observation: size, rotation: 0, appOrigin: .zero
+        )
+        let other = TapDiagnostics.DisplayScreen(displayId: 3, isMain: false)
+        for displayId in [UInt64?.none, 0] {
+            let provider = provider(geometry: geometry)
+            provider.inventory = GestureDisplayInventory(
+                screens: [main, other], applicationDisplayId: displayId, isPhoneIdiom: true
+            )
+            let factory = try DisplayGestureFactory(provider: provider)
+            let requested = GesturePoint(x: 187, y: 333)
+            let delivery = try factory.deliver(start: requested, press: 0)
+            XCTAssertEqual(delivery.selection.strategy, .legacy)
+            XCTAssertEqual(delivery.selection.reason, "appOnMainScreen")
+            XCTAssertEqual(delivery.selection.offset, requested)
+            XCTAssertFalse(factory.mismatch)
+            XCTAssertNil(factory.target.displayId)
+            XCTAssertEqual(factory.target.reason, "appOnMainScreen")
+            XCTAssertEqual(provider.actions, ["tap"])
+            XCTAssertTrue(provider.touches.isEmpty)
+            XCTAssertEqual(provider.inventoryReads, 1)
+            var diagnostics = TapDiagnostics(requested: .init(x: requested.x, y: requested.y, durationMs: 0))
+            factory.annotate(&diagnostics, delivery: delivery)
+            XCTAssertNil(diagnostics.targetDisplayId)
+            XCTAssertEqual(diagnostics.targetDisplayReason, "appOnMainScreen")
+            XCTAssertNil(diagnostics.deliveryWarning)
+        }
+    }
+
+    func testAppOutsideMainScreenKeepsSoleNonMainScreen() throws {
+        let other = TapDiagnostics.DisplayScreen(displayId: 3, isMain: false)
+        for size in [GestureSize(width: 467, height: 667), GestureSize(width: 375, height: 679)] {
+            for displayId in [UInt64?.none, 0] {
+                let provider = provider(geometry: GestureCoordinateGeometry(
+                    app: size, screen: folded.screen, observation: size, rotation: 0, appOrigin: .zero
+                ))
+                provider.inventory = GestureDisplayInventory(
+                    screens: [main, other], applicationDisplayId: displayId, isPhoneIdiom: true
+                )
+                let factory = try DisplayGestureFactory(provider: provider)
+                let delivery = try factory.deliver(start: .zero, press: 0)
+                XCTAssertTrue(factory.mismatch)
+                XCTAssertEqual(factory.target.displayId, 3)
+                XCTAssertEqual(factory.target.reason, "soleNonMainScreen")
+                XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+                XCTAssertEqual(provider.touches.first?.displayId, 3)
+            }
+        }
+    }
+
+    func testLetterboxedAppWithKnownNonMainDisplayKeepsAppDisplay() throws {
+        let size = GestureSize(width: 375, height: 667)
+        let provider = provider(geometry: GestureCoordinateGeometry(
+            app: size, screen: folded.screen, observation: size, rotation: 0, appOrigin: .zero
+        ))
+        provider.inventory = GestureDisplayInventory(
+            screens: [main, .init(displayId: 3, isMain: false)], applicationDisplayId: 3, isPhoneIdiom: true
+        )
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(start: .zero, press: 0)
+        XCTAssertTrue(factory.mismatch)
+        XCTAssertEqual(factory.target.displayId, 3)
+        XCTAssertEqual(factory.target.reason, "appDisplay")
+        XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+        XCTAssertEqual(provider.touches.first?.displayId, 3)
+    }
+
+    func testOffsetWindowKeepsExistingDisplayAndCoordinateRoutes() throws {
+        let size = GestureSize(width: 375, height: 585)
+        let translation = try XCTUnwrap(windowedAppTranslation(
+            appOrigin: .zero, appSize: size, windowOrigin: GesturePoint(x: 230, y: 255), windowSize: size
+        ))
+        let geometry = GestureCoordinateGeometry(
+            app: size, screen: GestureSize(width: 834, height: 1210), observation: size, rotation: 0,
+            appOrigin: .zero, windowTranslation: translation
+        )
+        for isPhone in [false, true] {
+            let provider = provider(geometry: geometry)
+            provider.inventory = GestureDisplayInventory(
+                screens: [main, .init(displayId: 3, isMain: false)], applicationDisplayId: 0, isPhoneIdiom: isPhone
+            )
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(start: .zero, press: 0)
+            XCTAssertTrue(factory.mismatch)
+            if isPhone {
+                XCTAssertEqual(factory.target.reason, "soleNonMainScreen")
+                XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+                XCTAssertEqual(provider.touches.first?.displayId, 3)
+            } else {
+                XCTAssertEqual(factory.target.reason, "nonPhoneIdiom")
+                XCTAssertEqual(delivery.selection.strategy, .legacy)
+                XCTAssertEqual(delivery.selection.reason, "mappingUndefined(rotation=0,geometryOrPoint)")
+                XCTAssertEqual(delivery.selection.windowTranslation(translation), translation)
+                XCTAssertTrue(provider.touches.isEmpty)
+            }
+        }
+    }
+
     func testFoldedDiagnosticsInventoryDoesNotSelectDisplayRoute() throws {
         let provider = provider(geometry: folded)
         let factory = try DisplayGestureFactory(provider: provider)

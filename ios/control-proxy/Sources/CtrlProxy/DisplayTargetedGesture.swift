@@ -8,6 +8,13 @@ struct GestureDisplayInventory: Equatable, Sendable {
 
     var mainDisplayId: UInt64? { screens.first(where: { $0.isMain })?.displayId }
 
+    func target(for geometry: GestureCoordinateGeometry?) -> (displayId: UInt64?, reason: String) {
+        if geometry?.isAppOnMainScreen(applicationDisplayId: applicationDisplayId) == true {
+            return (nil, "appOnMainScreen")
+        }
+        return target
+    }
+
     var target: (displayId: UInt64?, reason: String) {
         if let applicationDisplayId, applicationDisplayId != 0,
            let mainDisplayId, applicationDisplayId != mainDisplayId
@@ -112,23 +119,31 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     let inventory: GestureDisplayInventory?
 
     var mismatch: Bool {
-        (geometry ?? provider.cachedGeometry).map { hasMultiPanelMismatch(app: $0.app, screen: $0.screen) } == true
+        (geometry ?? provider.cachedGeometry)?.multiPanelMismatch == true
+    }
+
+    var target: (displayId: UInt64?, reason: String) {
+        inventory?.target(for: geometry) ?? (nil, "notSampled")
     }
 
     init(provider: Provider, forced: TapCoordinateStrategy? = nil) throws {
         self.provider = provider
         // Forced legacy inspects only the observation cache, without live geometry reads.
-        geometry = forced == .legacy ? provider.cachedGeometry : try provider.geometry()
+        var geometry = forced == .legacy ? provider.cachedGeometry : try provider.geometry()
+        // Read the inventory on the raw size mismatch before deciding whether the app is on main.
         let mismatch = (geometry ?? provider.cachedGeometry)
             .map { hasMultiPanelMismatch(app: $0.app, screen: $0.screen) } == true
-        inventory = mismatch || forced?.targetsDisplay == true ? provider.displayInventory() : nil
+        let inventory = mismatch || forced?.targetsDisplay == true ? provider.displayInventory() : nil
+        geometry?.applicationDisplayId = inventory?.applicationDisplayId
+        self.geometry = geometry
+        self.inventory = inventory
     }
 
     func selection(point: GesturePoint, forced: TapCoordinateStrategy?) -> GestureCoordinateSelection {
         let strategy: TapCoordinateStrategy?
         if let forced, !forced.targetsDisplay {
             strategy = forced
-        } else if mismatch || forced?.targetsDisplay == true, inventory?.target.displayId != nil {
+        } else if mismatch || forced?.targetsDisplay == true, target.displayId != nil {
             strategy = forced ?? .displayTargeted
         } else {
             strategy = nil
@@ -176,7 +191,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         var fallback: TapCoordinateStrategy?
         // Double taps use the same coordinate fallback, never a single synthesized touch.
         if !doubleTap, selected.strategy.targetsDisplay,
-           let displayId = inventory?.target.displayId,
+           let displayId = target.displayId,
            let startPoint = point(start, selection: selected),
            let endPoint = point(end ?? start, selection: endSelection)
         {
@@ -231,7 +246,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     {
         let selected = selection(point: center, forced: nil)
         var fallback: TapCoordinateStrategy?
-        if selected.strategy.targetsDisplay, let displayId = inventory?.target.displayId {
+        if selected.strategy.targetsDisplay, let displayId = target.displayId {
             let observed = observedPinchPaths(
                 center: center, distanceStart: distanceStart, distanceEnd: distanceEnd,
                 rotationDegrees: rotationDegrees
@@ -277,8 +292,8 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
             )
         }
         diagnostics.route = delivery.route
-        diagnostics.targetDisplayId = inventory?.target.displayId
-        diagnostics.targetDisplayReason = inventory?.target.reason ?? "notSampled"
+        diagnostics.targetDisplayId = target.displayId
+        diagnostics.targetDisplayReason = target.reason
         diagnostics.deviceIdiom = inventory.map { $0.isPhoneIdiom ? "phone" : "other" }
         diagnostics.mainDisplayId = inventory?.mainDisplayId
         diagnostics.applicationDisplayId = inventory?.applicationDisplayId

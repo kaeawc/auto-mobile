@@ -62,17 +62,19 @@ function bindBare(text: string, scope: WebRenderScope): string {
   return text.replace(/\{([^{}]+)\}/g, (whole, inner: string) => {
     if (!inner.startsWith("derived:")) {
       return Object.hasOwn(scope.condition.state, inner)
-        ? renderScalar(scope.condition.state[inner])
+        ? shield(renderScalar(scope.condition.state[inner]))
         : whole;
     }
     const name = inner.slice("derived:".length);
     const derive = record(scope.spec.derive);
     return derive && Object.hasOwn(derive, name)
-      ? resolvePrototypeDerived(scope.spec as Parameters<typeof resolvePrototypeDerived>[0], name, {
-          data: scope.data,
-          state: scope.condition.state,
-          env: scope.format,
-        })
+      ? shield(
+          resolvePrototypeDerived(
+            scope.spec as Parameters<typeof resolvePrototypeDerived>[0],
+            name,
+            { data: scope.data, state: scope.condition.state, env: scope.format },
+          ),
+        )
       : whole;
   });
 }
@@ -83,7 +85,7 @@ export function bound(text: unknown, scope: WebRenderScope): string {
   }
   // Data placeholders bind first, then repeat items, then state, as the devices bind text. Every
   // inserted value is shielded until the end, so it is never read again as a placeholder.
-  const data = bindPrototypeDataText(text, (pointer) => {
+  const data = bindPrototypeDataText(text.replaceAll(ESCAPE, `${ESCAPE}e`), (pointer) => {
     const value = resolvePrototypeDataPointer(scope.data, pointer);
     return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
       ? shield(renderScalar(value))
@@ -95,11 +97,19 @@ export function bound(text: unknown, scope: WebRenderScope): string {
   return unshield(bindBare(items, scope));
 }
 
-/** Braces in an inserted value become private-use stand-ins until binding is done. */
-const OPEN = "\uE000";
-const CLOSE = "\uE001";
-const shield = (value: string) => value.replaceAll("{", OPEN).replaceAll("}", CLOSE);
-const unshield = (value: string) => value.replaceAll(OPEN, "{").replaceAll(CLOSE, "}");
+/**
+ * Braces in an inserted value become escapes until binding is done. The escape character is itself
+ * escaped wherever it already appears (authored or inserted), so every character survives exactly.
+ */
+const ESCAPE = "\uE000";
+const shield = (value: string) =>
+  value
+    .replaceAll(ESCAPE, `${ESCAPE}e`)
+    .replaceAll("{", `${ESCAPE}o`)
+    .replaceAll("}", `${ESCAPE}c`);
+const UNESCAPED: Readonly<Record<string, string>> = { e: ESCAPE, o: "{", c: "}" };
+const unshield = (value: string) =>
+  value.replace(/\uE000([eoc])/g, (_whole, kind: string) => UNESCAPED[kind]!);
 
 function shieldedInstance(instance: Instance): Instance {
   const values = Object.fromEntries(
@@ -191,6 +201,11 @@ function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = 
     ...textCss(record(node.style), scope.style),
     ...(scope.inBox ? { "grid-area": "cell" } : {}),
   };
+  // Per-corner radii are longhands; a component's default shorthand would sort after some of them
+  // and reset those corners, so it goes when the spec sets its own corners.
+  if ("border-start-start-radius" in style) {
+    delete (style as Record<string, string>)["border-radius"];
+  }
   return { attrs, style: safeAreaCss(node, scope, style) };
 }
 

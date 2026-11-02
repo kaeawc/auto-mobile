@@ -1037,6 +1037,38 @@ describe("prototype web still (#16346)", () => {
     expect(toggle.attrs["aria-disabled"]).toBe("true");
   });
 
+  test("text keeps private-use characters exactly, authored or inserted", () => {
+    const spec = {
+      ...reference,
+      state: { mark: "\uE000o\uE001" },
+      data: { note: "\uE000c" },
+      root: { type: "text", testTag: "t", text: "\uE000o\uE000e\uE001 {mark} {data:/note}" },
+    };
+    expect(textOf(byTag(renderPrototypeStill(spec), "t")[0]!)).toBe(
+      "\uE000o\uE000e\uE001 \uE000o\uE001 \uE000c",
+    );
+  });
+
+  test("per-corner radii replace a control's default radius instead of being reset by it", () => {
+    const icon = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "icon",
+          testTag: "i",
+          name: "star",
+          style: { cornerRadius: { bottomStart: 30, bottomEnd: 40 } },
+        },
+      }),
+      "i",
+    )[0]!;
+    expect(icon.style).not.toHaveProperty("border-radius");
+    expect(icon.style).toMatchObject({
+      "border-end-start-radius": "30px",
+      "border-end-end-radius": "40px",
+    });
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

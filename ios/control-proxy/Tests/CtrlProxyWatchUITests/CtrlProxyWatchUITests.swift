@@ -12,6 +12,46 @@ final class CtrlProxyWatchUITests: XCTestCase {
         super.record(issue)
     }
 
+    func testSnapshotRefusesWhenAppIsNotForeground() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let app = XCUIApplication(
+            bundleIdentifier: environment["AM_BUNDLE_ID"] ?? "dev.jasonpearson.automobile.ctrlproxy.watch"
+        )
+        app.launch()
+        defer { app.activate() }
+
+        let source = WatchXCUISource(app: app, failureCoordinator: commandFailureCoordinator)
+        XCTAssertEqual(app.state, .runningForeground)
+        let hierarchy = try source.snapshot()
+        let root = try XCTUnwrap(hierarchy.root)
+        XCTAssertFalse(root.className.isEmpty)
+
+        XCUIDevice.shared.press(.home)
+        let leftForeground = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "state != %@",
+                NSNumber(value: XCUIApplication.State.runningForeground.rawValue)
+            ),
+            object: app
+        )
+        guard XCTWaiter().wait(for: [leftForeground], timeout: 10) == .completed else {
+            XCTFail("Watch app remained in the foreground after pressing Home")
+            return
+        }
+
+        XCTAssertThrowsError(try source.snapshot()) { error in
+            guard let commandError = error as? WatchCommandError else {
+                XCTFail("Expected WatchCommandError, got \(error)")
+                return
+            }
+            guard case .appNotForeground = commandError else {
+                XCTFail("Expected appNotForeground, got \(commandError)")
+                return
+            }
+            XCTAssertEqual(commandError.code, "app_not_foreground")
+        }
+    }
+
     /// Host contract: -only-testing:CtrlProxyWatchUITests/CtrlProxyWatchUITests/testRunService
     func testRunService() throws {
         continueAfterFailure = true

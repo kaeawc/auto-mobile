@@ -9075,14 +9075,6 @@
         "hasDefault": false
       }
     ],
-    "dev.jasonpearson.automobile.protocol.PrototypeNodeMapOnCameraIdle": [
-      {
-        "name": "into",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      }
-    ],
     "dev.jasonpearson.automobile.protocol.PrototypeLoop": [
       {
         "name": "effect",
@@ -9101,6 +9093,14 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeNodeMapOnCameraIdle": [
+      {
+        "name": "into",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeOffset": [

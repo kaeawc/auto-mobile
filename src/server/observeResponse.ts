@@ -12,8 +12,10 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { type ObserveScreenshotOptions } from "../features/observe/screenshot/screenshotOptions";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/wire/constants";
+import {
+  currentRequestDeadline,
+  getToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
 import { type DeviceObservationAccess } from "./deviceObservationAccess";
 import { ActionableError } from "../models/ActionableError";
@@ -291,7 +293,7 @@ function aggregateObserveTimeoutMs(args: ObserveArgs): number | undefined {
   if (args.display !== "all") {
     return undefined;
   }
-  const deadline = (args as Record<string, unknown>)[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  const deadline = currentRequestDeadline()?.deadlineMs;
   return typeof deadline === "number" && Number.isFinite(deadline)
     ? Math.max(0, deadline - defaultTimer.now() - 100)
     : undefined;

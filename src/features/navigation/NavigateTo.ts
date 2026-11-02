@@ -1,7 +1,4 @@
-import {
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-} from "../../daemon/wire/constants";
+import type { RequestDeadline } from "../toolSelection/toolSelectionContext";
 import { stripNavigationToolParams } from "../../models/navigationToolParams";
 import { ActionableError, BootedDevice, NavigateToResult } from "../../models";
 import {
@@ -66,8 +63,8 @@ export interface NavigateToOptions {
   platform: "android" | "ios";
   /** Session that selected the outer device, retained by internal replays. */
   sessionUuid?: string;
-  [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]?: number;
-  [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]?: number;
+  /** The navigateTo request's transport deadline, which each replayed tool call runs under. */
+  requestDeadline?: Pick<RequestDeadline, "deadlineMs" | "timeoutMs">;
 }
 
 interface PathRunContext {
@@ -763,15 +760,9 @@ export class NavigateTo {
         platform: this.device.platform,
         deviceId: this.device.deviceId,
         ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        ...(options[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] !== undefined
-          ? { [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: options[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] }
-          : {}),
-        ...(options[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] !== undefined
-          ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: options[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
-          : {}),
       },
       undefined,
-      signal,
+      { signal, requestDeadline: options.requestDeadline },
     );
     throwIfAborted(signal);
     throwIfInternalToolFailed(response, interaction.toolName, this.device.platform);
@@ -808,7 +799,7 @@ export class NavigateTo {
         ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
       },
       undefined,
-      signal,
+      { signal },
     );
     throwIfAborted(signal);
     throwIfInternalToolFailed(response, "pressButton", this.device.platform);

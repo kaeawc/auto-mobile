@@ -61,7 +61,6 @@ export async function startWatchDevice(
   const deps = getDeviceToolsDependencies();
   const startedAtMs = deps.timer.now();
   return await runWithAcquisitionDeadline(
-    rawArgs,
     startedAtMs + (args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS),
     signal,
     {

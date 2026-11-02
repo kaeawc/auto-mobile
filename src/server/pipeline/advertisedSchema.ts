@@ -22,7 +22,8 @@ import {
 } from "../../daemon/wire/constants";
 
 /**
- * Internal params a plan step inherits from its enclosing request. Listed once
+ * Internal params a plan step inherits from its enclosing request, in-band for provisioning; other
+ * readers take the ambient request deadline (#15663). Listed once
  * so the "parent wins even when absent" strip in
  * `internalToolInvocationContext` cannot drift from the set it writes.
  */

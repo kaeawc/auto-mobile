@@ -398,7 +398,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // Internal setup tap (#3087) via the callInternal seam (#3108): no
       // diff/strip, no baseline advance.
       throwIfAborted(signal);
-      const response = await this.internalTools.callInternal(tapTool, args, undefined, signal);
+      const response = await this.internalTools.callInternal(tapTool, args, undefined, { signal });
       throwIfAborted(signal);
       throwIfInternalToolFailed(response, "tapOn", platform);
 
@@ -701,7 +701,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
             ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
           },
           undefined,
-          signal,
+          { signal },
         );
         throwIfAborted(signal);
         await this.sleep(BOTTOM_SHEET_DISMISS_SETTLE_MS, signal);
@@ -832,7 +832,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
             ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
           },
           undefined,
-          signal,
+          { signal },
         );
         throwIfAborted(signal);
         throwIfInternalToolFailed(response, "tapOn", platform);
@@ -885,7 +885,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
       },
       undefined,
-      signal,
+      { signal },
     );
     throwIfAborted(signal);
     throwIfInternalToolFailed(response, "pressButton", platform);

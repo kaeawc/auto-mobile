@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { withWireDeadline } from "../helpers/requestDeadline";
 import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
@@ -173,15 +174,14 @@ describe("device acquisition wait deadlines", () => {
   ) {
     deviceUtils.setBootedDevices(device.platform, [device]);
     const tool = ToolRegistry.getTool(device.platform === "android" ? "getAndroid" : "getApple")!;
-    return tool.handler(
+    return withWireDeadline(
       {
         ...(device.platform === "android" ? { avdName: device.name } : { udid: device.deviceId }),
         bootTimeoutMs: 1_000,
         automationReadyTimeoutMs: 1_000,
         ...internalArgs,
       },
-      undefined,
-      signal,
+      (args) => tool.handler(args, undefined, signal),
     );
   }
 
@@ -198,7 +198,7 @@ describe("device acquisition wait deadlines", () => {
         },
       });
       const rawArgs = { platform: "android" as const, name: "Pixel", __mcpRequestDeadlineMs: 500 };
-      await expect(handlers.startDeviceHandler(rawArgs)).rejects.toBe(stopped);
+      await expect(withWireDeadline(rawArgs, handlers.startDeviceHandler)).rejects.toBe(stopped);
       expect(observedDeadline).toBe(500);
       expect(timer.getSleepHistory()).toEqual([]);
     },
@@ -271,13 +271,13 @@ describe("device acquisition wait deadlines", () => {
             }
           }
         : undefined;
-      const pending = ToolRegistry.getTool("getAndroid")!.handler(
+      const pending = withWireDeadline(
         {
           avdName: android.name,
           __mcpRequestDeadlineMs: 180_000,
           ...(mode !== "no progress" ? { __mcpLiveDeadlineKey: key } : {}),
         },
-        progress,
+        (args) => ToolRegistry.getTool("getAndroid")!.handler(args, progress),
       );
       const outcome = observe(pending);
       try {
@@ -1119,10 +1119,9 @@ describe("device acquisition wait deadlines", () => {
       });
       const notifyDeviceReady = spyOn(pool, "notifyDeviceReady");
       const outcome = observe(
-        ToolRegistry.getTool("startDevice")!.handler({
-          platform: "android",
-          __mcpRequestDeadlineMs: 500,
-        }),
+        withWireDeadline({ platform: "android", __mcpRequestDeadlineMs: 500 }, (args) =>
+          ToolRegistry.getTool("startDevice")!.handler(args),
+        ),
       );
       try {
         for (let pass = 0; pass < 20 && recoverySignal === undefined; pass++) {

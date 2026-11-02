@@ -2,6 +2,14 @@ import { ActionableError } from "../../models/ActionableError";
 import type { InternalToolName, InternalToolPayloads } from "../../utils/internalToolPayloads";
 import type { StructuredToolResponse } from "../../utils/toolUtils";
 import type { ProgressCallback } from "../action/BaseVisualChange";
+import type { RequestDeadline } from "../toolSelection/toolSelectionContext";
+
+/** How an internal call runs: its abort signal and, outside a plan, its deadline. */
+export interface InternalToolCallerRequest {
+  signal?: AbortSignal;
+  /** The transport deadline the call runs under outside a plan (#15663); none when omitted. */
+  requestDeadline?: RequestDeadline;
+}
 
 /** What a resolved tool exposes to its internal caller: only the name it was registered under. */
 export interface InternalToolHandle {
@@ -20,7 +28,7 @@ export interface InternalToolCaller {
     tool: string | InternalToolHandle,
     args: Record<string, unknown>,
     progress?: ProgressCallback,
-    signal?: AbortSignal,
+    request?: InternalToolCallerRequest,
   ): Promise<unknown>;
   callInternalTyped<K extends InternalToolName>(
     name: K,
@@ -51,8 +59,8 @@ function current(): InternalToolCaller {
  */
 export const registeredInternalToolCaller: InternalToolCaller = {
   getTool: (name) => current().getTool(name),
-  callInternal: (tool, args, progress, signal) =>
-    current().callInternal(tool, args, progress, signal),
+  callInternal: (tool, args, progress, request) =>
+    current().callInternal(tool, args, progress, request),
   callInternalTyped: (name, args, progress, signal) =>
     current().callInternalTyped(name, args, progress, signal),
 };

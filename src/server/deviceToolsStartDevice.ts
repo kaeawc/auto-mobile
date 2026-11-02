@@ -962,7 +962,6 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
     return await runWithAcquisitionDeadline(
-      rawArgs,
       getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
       {

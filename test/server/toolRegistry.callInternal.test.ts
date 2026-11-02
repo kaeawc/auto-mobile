@@ -5,8 +5,10 @@ import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constants";
 import { ActionableError } from "../../src/models/ActionableError";
 import { deviceActionClock } from "../../src/server/pipeline/deviceActionClock";
+import { resolveTransportDeadlineMs } from "../../src/server/transportDeadline";
 import {
   currentExecution,
+  currentRequestDeadline,
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
@@ -176,6 +178,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
   test("propagates outer execution metadata to a nested device-aware plan step", async () => {
     let seenExecution: ReturnType<typeof currentExecution>;
+    let seenTransportDeadline: number | undefined;
     const device = { name: "Pixel", deviceId: "emulator-15663", platform: "android" as const };
     const originalRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
@@ -211,6 +214,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
         handler: async (_device, args) => {
           captured.push({ args });
           seenExecution = currentExecution();
+          seenTransportDeadline = resolveTransportDeadlineMs();
           return SENTINEL;
         },
         planExecutable: true,
@@ -219,10 +223,17 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       // The outer call was admitted as a control call, so its dispatch moves the device's clock.
       deviceActionClock.markControl("outer-execution");
       await runWithToolSelectionContext(
-        { execution: { executionId: "outer-execution", startTime: 123 } },
+        {
+          execution: { executionId: "outer-execution", startTime: 123 },
+          // A step inherits the plan's deadline; a remaining budget with no start of its own.
+          planRequest: {},
+          requestDeadline: { timeoutMs: 50 },
+        },
         () => ToolRegistry.callInternal("nestedStep", {}, { forPlan: true }),
       );
       expect(deviceActionClock.lastActionStartMs(device.deviceId)).toBe(123);
+      // The device-aware handler measures that budget from its execution's start (#15663).
+      expect(seenTransportDeadline).toBe(173);
 
       // The step runs under the outer execution ambiently; its id is not written in-band (#15663).
       expect(captured).toHaveLength(1);
@@ -293,6 +304,52 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
       expect(Object.keys(captured[0].args)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
       expect(captured[0].args.__mcpRequestTimeoutMs).toBe(20);
+    });
+  });
+
+  describe("the request deadline an internal call runs under (#15663)", () => {
+    const outer = { deadlineMs: 900, timeoutMs: 800, startTime: 100, liveDeadlineKey: "outer" };
+
+    function registerDeadlineProbe(): Array<ReturnType<typeof currentRequestDeadline>> {
+      const seen: Array<ReturnType<typeof currentRequestDeadline>> = [];
+      ToolRegistry.register("deadlineProbe", "Deadline probe", schema, {
+        handler: async () => {
+          seen.push(currentRequestDeadline());
+          return SENTINEL;
+        },
+      });
+      return seen;
+    }
+
+    test("outside a plan, a nested call does not inherit the outer request's deadline", async () => {
+      const seen = registerDeadlineProbe();
+      await runWithToolSelectionContext({ requestDeadline: outer }, () =>
+        ToolRegistry.callInternal("deadlineProbe", {}),
+      );
+      expect(seen).toEqual([undefined]);
+    });
+
+    test("outside a plan, a nested call runs under the deadline its caller passes", async () => {
+      const seen = registerDeadlineProbe();
+      const passed = { deadlineMs: 500, timeoutMs: 400 };
+      await runWithToolSelectionContext({ requestDeadline: outer }, () =>
+        ToolRegistry.callInternal("deadlineProbe", {}, { requestDeadline: passed }),
+      );
+      expect(seen).toEqual([passed]);
+    });
+
+    test("inside a plan, every internal call runs under the request's deadline", async () => {
+      const seen = registerDeadlineProbe();
+      await runWithToolSelectionContext({ requestDeadline: outer, planRequest: {} }, async () => {
+        await ToolRegistry.callInternal("deadlineProbe", {}, { forPlan: true });
+        // A caller's own deadline does not replace the plan's, as plan metadata never could.
+        await ToolRegistry.callInternal(
+          "deadlineProbe",
+          {},
+          { requestDeadline: { deadlineMs: 1 } },
+        );
+      });
+      expect(seen).toEqual([outer, outer]);
     });
   });
 

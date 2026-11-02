@@ -129,7 +129,7 @@ describe("NavigateTo", () => {
             targetScreen: "SettingsScreen",
             platform: "android",
             ...(sessionUuid ? { sessionUuid } : {}),
-            ...(hasBudget ? { __mcpRequestTimeoutMs: 500, __mcpRequestDeadlineMs: 1500 } : {}),
+            ...(hasBudget ? { requestDeadline: { timeoutMs: 500, deadlineMs: 1500 } } : {}),
           });
           expect(result.success).toBe(true);
           const replay = call.mock.calls[0][1];
@@ -142,10 +142,12 @@ describe("NavigateTo", () => {
           expect(replay.sessionUuid).toBe(sessionUuid);
           expect(Object.hasOwn(replay, "sessionUuid")).toBe(sessionUuid !== undefined);
           expect(replay.__futureInternal).toBeUndefined();
-          expect(Object.hasOwn(replay, "__mcpRequestTimeoutMs")).toBe(hasBudget);
-          expect(Object.hasOwn(replay, "__mcpRequestDeadlineMs")).toBe(hasBudget);
-          expect(replay.__mcpRequestTimeoutMs).toBe(hasBudget ? 500 : undefined);
-          expect(replay.__mcpRequestDeadlineMs).toBe(hasBudget ? 1500 : undefined);
+          // The recorded edge's stale budget is dropped; the replay runs under the current one.
+          expect(Object.hasOwn(replay, "__mcpRequestTimeoutMs")).toBe(false);
+          expect(Object.hasOwn(replay, "__mcpRequestDeadlineMs")).toBe(false);
+          expect(call.mock.calls[0][2]?.requestDeadline).toEqual(
+            hasBudget ? { timeoutMs: 500, deadlineMs: 1500 } : undefined,
+          );
           expect(JSON.stringify(result.path)).not.toContain("__");
           expect(JSON.stringify(result.path)).not.toContain("old-session");
           expect(args.sessionUuid).toBe("old-session");

@@ -26,6 +26,20 @@ export function unfocusedObservation(keyboardVisible = false): ObserveResult {
   });
 }
 
+/** A native input that contributes a verification snapshot but has no typing focus. */
+export function unfocusedNativeInputObservation(): ObserveResult {
+  return buildObserveResult({
+    ...unfocusedObservation(),
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          $: { class: "UITextField", "view-id": "email", focused: "false", value: "" },
+        },
+      },
+    },
+  });
+}
+
 export function typedObservation(value: string, secure = false, omitValue = false): ObserveResult {
   const hierarchy = structuredClone(iosKeyboardVisibleHierarchy);
   const parser = new DefaultElementParser();

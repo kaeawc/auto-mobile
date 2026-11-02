@@ -3,6 +3,7 @@ import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
   getFocusedTextField,
+  hasFocusedTextInput,
   type FocusedTextField,
   type FocusedTextFieldOptions,
 } from "./ClearText";
@@ -181,7 +182,12 @@ function readBudgetMs(timer: Timer, maxWaitMs?: number): number | undefined {
 
 export type IosTypedTextFocusRead =
   | { kind: "unavailable" }
-  | { kind: "read"; field: FocusedTextField | undefined; keyboardVisible: boolean };
+  | {
+      kind: "read";
+      field: FocusedTextField | undefined;
+      hasFocusedTextInput: boolean;
+      keyboardVisible: boolean;
+    };
 
 /** Preserve the focused-field-only contract for verification callers. */
 export async function readIosTypedTextField(
@@ -236,6 +242,8 @@ export async function readIosTypedTextFocus(
         ...options,
         includeIosNativeEditableValues: true,
       }),
+      // Real focus does not require a readable value or a native editable snapshot.
+      hasFocusedTextInput: hasFocusedTextInput(hierarchy, new SecureValueOmittingParser()),
       keyboardVisible: isIosKeyboardVisible(observation.viewHierarchy, observation.screenSize),
     };
   } catch {

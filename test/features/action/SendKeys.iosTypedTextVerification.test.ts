@@ -3,7 +3,11 @@ import { DefaultSendKeysCommandExecutor } from "../../../src/features/action/Sen
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { compareIosTypedText } from "../../../src/features/action/iosTypedTextVerification";
 import { expect, test } from "bun:test";
-import { typedObservation, unfocusedObservation } from "./IosTypedTextTestHarness";
+import {
+  typedObservation,
+  unfocusedObservation,
+  unfocusedNativeInputObservation,
+} from "./IosTypedTextTestHarness";
 import { createSendKeysHarness, ios } from "./SendKeysTestHarness";
 import type { ObserveResult } from "../../../src/models";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
@@ -20,6 +24,22 @@ for (const operation of ["insert", "replace"] as const) {
     expect(result.error).toContain("tapOn");
     expect(result.warning).toBeUndefined();
     expect(h.inserted).toEqual([]);
+  });
+
+  test(`iOS ${name} refuses an unfocused native input with the keyboard dismissed`, async () => {
+    let reads = 0;
+    const observation = unfocusedNativeInputObservation();
+    const h = createSendKeysHarness(ios, {
+      execute: async () => {
+        reads++;
+        return observation;
+      },
+    });
+    const result = await h.executor.type({ action: "type", text: "hello", operation });
+    expect(result.success).toBe(false);
+    expect(result.error?.startsWith(noFocusPrefix)).toBe(true);
+    expect(h.inserted).toEqual([]);
+    expect(reads).toBe(operation === "replace" ? 3 : 1);
   });
 
   test(`iOS ${name} keeps dispatching without readable focus when the keyboard is visible`, async () => {

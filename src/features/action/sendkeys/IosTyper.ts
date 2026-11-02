@@ -125,7 +125,7 @@ export class IosTyper {
     }
     const focus = await readIosTypedTextFocus(read);
     // Unavailable reads retain their existing best-effort dispatch behavior.
-    if (focus.kind === "read" && focus.field === undefined && !focus.keyboardVisible) {
+    if (focus.kind === "read" && !focus.hasFocusedTextInput && !focus.keyboardVisible) {
       return {
         kind: "refused",
         result: {

@@ -158,7 +158,7 @@ class PressureDevice extends FakeAdbExecutor {
       if (this.exitAfterReady) {
         this.processes.delete("4321");
       }
-      return result(this.ready && this.readyMisses-- <= 0 ? "READY 1292\n" : "");
+      return result(this.ready && this.readyMisses-- <= 0 ? "READY 1484\n" : "");
     }
     if (command === "shell logcat -d -b all -t '11-02 10:15:50.000'") {
       return result(this.logMisses-- > 0 ? "" : this.logs);
@@ -183,14 +183,21 @@ function expectClean(device: PressureDevice) {
   expect([...device.processes.values()].filter((name) => name === BIN)).toEqual([]);
 }
 
-test("captured MemAvailable sizes the payload with reserve, minimum, floor and cap", () => {
+test("captured MemAvailable sizes the payload with overshoot, payload minimum, floor and cap", () => {
   expect(parseMemAvailableKb(meminfo)).toBe(1389112);
-  expect(memoryPressureSizeMiB(parseMemAvailableKb(meminfo))).toBe(1292);
-  expect(memoryPressureSizeMiB(1189708)).toBe(1097);
-  expect(memoryPressureSizeMiB(320 * 1024)).toBe(256);
-  expect(memoryPressureSizeMiB(321 * 1024 - 1)).toBe(256);
+  expect(memoryPressureSizeMiB(parseMemAvailableKb(meminfo))).toBe(1484);
+  expect(memoryPressureSizeMiB(1189708)).toBe(1289);
+  expect(memoryPressureSizeMiB(1532 * 1024)).toBe(1660);
+  expect(memoryPressureSizeMiB(1583 * 1024)).toBe(1711);
+  expect(memoryPressureSizeMiB(128 * 1024)).toBe(256);
+  expect(memoryPressureSizeMiB(129 * 1024 - 1)).toBe(256);
+  expect(memoryPressureSizeMiB((16384 - 128) * 1024 - 1)).toBe(16383);
+  expect(memoryPressureSizeMiB((16384 - 128) * 1024)).toBe(16384);
+  expect(memoryPressureSizeMiB((16384 - 128 + 1) * 1024)).toBe(16384);
   expect(memoryPressureSizeMiB(99_000_000)).toBe(16384);
-  expect(() => memoryPressureSizeMiB(320 * 1024 - 1)).toThrow("not enough available memory");
+  for (const kb of [0, 128 * 1024 - 1]) {
+    expect(() => memoryPressureSizeMiB(kb)).toThrow("not enough available memory");
+  }
   for (const kb of [-1, NaN, Infinity, 1.5]) {
     expect(() => memoryPressureSizeMiB(kb)).toThrow("invalid MemAvailable");
   }
@@ -229,7 +236,7 @@ test("happy apply has exact ordered shell/push sequence, waits using FakeTimer a
   h.device.logMisses = 1;
   const applied = await h.injector.apply("on");
   expect(applied.status).toBe("applied");
-  expect(applied.detail).toBe("4 lmkd kills with 1292 MiB memory pressure payload");
+  expect(applied.detail).toBe("4 lmkd kills with 1484 MiB memory pressure payload");
   expect(applied.reset).toBeDefined();
   const scan = `shell for p in /proc/[0-9]*; do if [ "$(tr '\\000' '\\n' < /proc/\u0024{p##*/}/cmdline 2>/dev/null | head -n 1)" = '${BIN}' ]; then echo "\u0024{p##*/}"; fi; done`;
   expect(h.device.commands).toEqual([
@@ -244,7 +251,7 @@ test("happy apply has exact ordered shell/push sequence, waits using FakeTimer a
     "shell date +'%m-%d %H:%M:%S.000'",
     `push /fake/x86_64/lmk_pressure ${BIN}`,
     `shell chmod 755 ${BIN}`,
-    `shell nohup ${BIN} 1292 >${OUT} 2>&1 </dev/null & echo $! > ${PID}`,
+    `shell nohup ${BIN} 1484 1800 >${OUT} 2>&1 </dev/null & echo $! > ${PID}`,
     `shell cat ${OUT} 2>/dev/null; true`,
     `shell cat ${OUT} 2>/dev/null; true`,
     "shell logcat -d -b all -t '11-02 10:15:50.000'",
@@ -307,11 +314,11 @@ test("arm64 selects its own binary without shell-quoting the host push argv", as
   await outcome.reset?.();
 });
 
-test("no lmkd kill within 15 seconds rolls back every artifact and names the payload", async () => {
+test("no lmkd kill within 15 seconds rolls back every artifact and names the payload and MemAvailable", async () => {
   const h = harness();
   h.device.logs = "unrelated logcat";
   await expect(h.injector.apply("on")).rejects.toThrow(
-    "1292 MiB: no lmkd kill followed within 15 seconds",
+    "1484 MiB (sized from MemAvailable 1389112 kB): no lmkd kill followed within 15 seconds",
   );
   expectClean(h.device);
   expect(h.timer.now()).toBe(15000);
@@ -321,7 +328,7 @@ test("no lmkd kill within 15 seconds rolls back every artifact and names the pay
 test("READY timeout is bounded to 60 fake seconds and rolls back", async () => {
   const h = harness();
   h.device.ready = false;
-  await expect(h.injector.apply("on")).rejects.toThrow("1292 MiB did not become READY");
+  await expect(h.injector.apply("on")).rejects.toThrow("1484 MiB did not become READY");
   expectClean(h.device);
   expect(h.timer.now()).toBe(60000);
   expect(h.timer.getSleepCallCount()).toBe(240);

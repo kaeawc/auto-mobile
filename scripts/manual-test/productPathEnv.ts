@@ -135,6 +135,7 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only executable path or command name.",
   },
   { name: "AUTOMOBILE_VIDEO_SERVER_JAR", kind: "input", reason: "Read-only encoder JAR." },
+  { name: "AUTOMOBILE_LMK_PRESSURE_DIR", kind: "input", reason: "Read-only payload directory." },
   {
     name: "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER",
     kind: "input",

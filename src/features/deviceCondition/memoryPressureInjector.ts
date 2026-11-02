@@ -25,9 +25,10 @@ export const MEMORY_PRESSURE_BINARY = "/data/local/tmp/automobile-lmk-pressure";
 export const MEMORY_PRESSURE_PID = `${MEMORY_PRESSURE_BINARY}.pid`;
 export const MEMORY_PRESSURE_OUTPUT = `${MEMORY_PRESSURE_BINARY}.out`;
 const ARTIFACTS = [MEMORY_PRESSURE_PID, MEMORY_PRESSURE_OUTPUT, MEMORY_PRESSURE_BINARY];
-export const MEMORY_PRESSURE_RESERVE_MIB = 64;
+export const MEMORY_PRESSURE_OVERSHOOT_MIB = 128;
 export const MEMORY_PRESSURE_MIN_MIB = 256;
 export const MEMORY_PRESSURE_MAX_MIB = 16384;
+export const MEMORY_PRESSURE_MAX_SECONDS = 1800;
 const POLL_MS = 250;
 const READY_TIMEOUT_MS = 60_000;
 const KILL_WINDOW_MS = 15_000;
@@ -46,7 +47,8 @@ export function memoryPressureSizeMiB(memAvailableKb: number): number {
   if (!Number.isSafeInteger(memAvailableKb) || memAvailableKb < 0) {
     unsupported("invalid MemAvailable measurement");
   }
-  const size = Math.floor(memAvailableKb / 1024) - MEMORY_PRESSURE_RESERVE_MIB;
+  // Exceed MemAvailable to exhaust swap and trigger lmkd; the minimum applies to the payload.
+  const size = Math.floor(memAvailableKb / 1024) + MEMORY_PRESSURE_OVERSHOOT_MIB;
   if (size < MEMORY_PRESSURE_MIN_MIB) {
     unsupported("not enough available memory to create pressure");
   }
@@ -188,7 +190,7 @@ class MemoryPressureFixture {
     await shell(
       this.adb,
       [
-        `nohup ${MEMORY_PRESSURE_BINARY} ${size} >${MEMORY_PRESSURE_OUTPUT} 2>&1 </dev/null & echo $! > ${MEMORY_PRESSURE_PID}`,
+        `nohup ${MEMORY_PRESSURE_BINARY} ${size} ${MEMORY_PRESSURE_MAX_SECONDS} >${MEMORY_PRESSURE_OUTPUT} 2>&1 </dev/null & echo $! > ${MEMORY_PRESSURE_PID}`,
       ],
       signal,
     );
@@ -255,16 +257,17 @@ class MemoryPressureFixture {
     try {
       await this.restoreNow(signal);
       const path = await this.binaryPath(signal);
-      const size = memoryPressureSizeMiB(
-        parseMemAvailableKb(await shell(this.adb, ["cat", "/proc/meminfo"], signal)),
+      const memAvailableKb = parseMemAvailableKb(
+        await shell(this.adb, ["cat", "/proc/meminfo"], signal),
       );
+      const size = memoryPressureSizeMiB(memAvailableKb);
       const since = await shell(this.adb, ["date", "+'%m-%d %H:%M:%S.000'"], signal);
       this.owned = true;
       await this.start(path, size, signal);
       const kills = await this.observeKills(since, signal);
       if (kills === 0) {
         unsupported(
-          `memory pressure payload ${size} MiB: no lmkd kill followed within ${KILL_WINDOW_MS / 1000} seconds`,
+          `memory pressure payload ${size} MiB (sized from MemAvailable ${memAvailableKb} kB): no lmkd kill followed within ${KILL_WINDOW_MS / 1000} seconds`,
         );
       }
       if ((await this.livePids(signal)).length === 0) {

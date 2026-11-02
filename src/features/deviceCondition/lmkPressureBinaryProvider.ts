@@ -95,7 +95,9 @@ export class LmkPressureBinaryProvider {
       );
       return null;
     }
-    const dir = path.join(this.cacheDir, abi);
+    // Keyed by the pinned SHA-256 as well as the ABI, so daemons on different releases that
+    // share the data directory can never replace each other's verified binary.
+    const dir = path.join(this.cacheDir, abi, expected.toLowerCase());
     const binaryPath = path.join(dir, LMK_PRESSURE_BINARY_FILENAME);
     const metadataPath = path.join(dir, LMK_PRESSURE_METADATA_FILENAME);
     const cached = await this.cache.isCached<LmkPressureMetadata>({

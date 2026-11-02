@@ -105,13 +105,13 @@ describe("LmkPressureBinaryProvider (#16402)", () => {
     });
     const arm = await provider.ensure("arm64-v8a");
     const x86 = await provider.ensure("x86_64");
-    expect(arm).toBe(join(CACHE, "arm64-v8a", "lmk_pressure"));
-    expect(x86).toBe(join(CACHE, "x86_64", "lmk_pressure"));
+    expect(arm).toBe(join(CACHE, "arm64-v8a", sha(ARM_BYTES), "lmk_pressure"));
+    expect(x86).toBe(join(CACHE, "x86_64", sha(X86_BYTES), "lmk_pressure"));
     expect(fs.files.get(arm ?? "")).toBe(ARM_BYTES);
     expect(fs.files.get(x86 ?? "")).toBe(X86_BYTES);
     expect(downloader.urls).toEqual(["https://assets/arm64-v8a", "https://assets/x86_64"]);
     expect(
-      JSON.parse(fs.files.get(join(CACHE, "x86_64", "lmk-pressure.json")) ?? "{}"),
+      JSON.parse(fs.files.get(join(CACHE, "x86_64", sha(X86_BYTES), "lmk-pressure.json")) ?? "{}"),
     ).toMatchObject({ sha256: sha(X86_BYTES), size: Buffer.byteLength(X86_BYTES) });
   });
 
@@ -179,9 +179,33 @@ describe("LmkPressureBinaryProvider (#16402)", () => {
     await Promise.resolve();
     downloader.release?.();
     const [a, b] = await both;
-    expect(a).toBe(join(CACHE, "x86_64", "lmk_pressure"));
+    expect(a).toBe(join(CACHE, "x86_64", sha(X86_BYTES), "lmk_pressure"));
     expect(b).toBe(a);
     expect(fs.files.get(a ?? "")).toBe(X86_BYTES);
     expect([...fs.files.keys()].filter((path) => path.endsWith(".download"))).toEqual([]);
+  });
+
+  test("providers pinned to different releases never replace each other's binary (#16411 review)", async () => {
+    const { fs, downloader, provider } = setup({ x86_64: sha(X86_BYTES) });
+    const older = await provider.ensure("x86_64");
+    // Another daemon on a different AutoMobile version shares the data directory.
+    downloader.bodies.set("https://other/x86_64", "other release");
+    const other = new LmkPressureBinaryProvider({
+      fileSystem: fs,
+      downloader,
+      checksumCalculator: new ContentChecksum(fs),
+      timer: new FakeTimer(),
+      cacheDir: CACHE,
+      expectedChecksum: () => sha("other release"),
+      releaseUrl: () => "https://other/x86_64",
+      idGenerator: new CountingIdGenerator("b"),
+    });
+    const newer = await other.ensure("x86_64");
+    expect(newer).not.toBe(older);
+    expect(fs.files.get(older ?? "")).toBe(X86_BYTES);
+    expect(fs.files.get(newer ?? "")).toBe("other release");
+    // The first daemon still gets its own verified bytes from the cache, without a download.
+    expect(await provider.ensure("x86_64")).toBe(older);
+    expect(downloader.urls).toEqual(["https://assets/x86_64", "https://other/x86_64"]);
   });
 });

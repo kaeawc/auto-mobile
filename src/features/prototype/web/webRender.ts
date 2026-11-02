@@ -207,8 +207,15 @@ function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
   return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
 }
 
-/** Lets a container decorate each drawn child, given the child node it was drawn from. */
-export type WebCellDecorator = (element: WebElement, authored: Raw) => WebElement;
+/**
+ * Lets a container decorate each child, given the child node it was drawn from. A hidden child
+ * arrives as undefined, so a container that keeps a slot for every child (a carousel) can still
+ * draw one; returning undefined draws nothing.
+ */
+export type WebCellDecorator = (
+  element: WebElement | undefined,
+  authored: Raw,
+) => WebElement | undefined;
 
 export function children(
   node: Raw,
@@ -249,10 +256,8 @@ function renderOrSkip(
   cell?: WebCellDecorator,
 ): WebChild[] {
   const rendered = renderWebNode(node, scope, path);
-  if (!rendered) {
-    return [];
-  }
-  return [cell ? cell(rendered, record(node) ?? {}) : rendered];
+  const drawn = cell ? cell(rendered, record(node) ?? {}) : rendered;
+  return drawn ? [drawn] : [];
 }
 
 /** A spacer with no width, height or weight fills its parent, as the native spacer does. */
@@ -297,7 +302,7 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
 }
 
 /** Containers that grow on an axis when a child fills it, as a Compose parent does. */
-const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "card"]);
+const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box", "card"]);
 
 /**
  * The axes on which a container grows because a child fills them; a repeat with no rows renders
@@ -327,7 +332,9 @@ const line =
     return el("div", { attrs, style }, children(node, inner, path));
   };
 
-const box: NodeRenderer = (node, scope, path) => {
+const box: NodeRenderer = (raw, scope, path) => {
+  // A wrap-sized box grows around a filling child, as a Compose Box does.
+  const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
   const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
   return el("div", { attrs, style }, children(node, inner, path));

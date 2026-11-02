@@ -244,7 +244,10 @@ function gridColumnCount(columns: unknown, available: number, gap: number): numb
  */
 const gridCell =
   (columns: number) =>
-  (element: WebElement, authored: Raw): WebElement => {
+  (element: WebElement | undefined, authored: Raw): WebElement | undefined => {
+    if (!element) {
+      return undefined;
+    }
     const span = typeof authored.span === "number" ? Math.trunc(authored.span) : 1;
     const style: Css = { ...element.style };
     // Android measures the child at exactly its cell width, so neither width nor maxWidth narrows it.
@@ -313,7 +316,8 @@ export const carouselRenderer =
       inBox: true,
       style: { ...scope.style, parentAxis: undefined },
     });
-    const items = kit.children(node, inner, path).map((entry) =>
+    // Android keeps an item slot for every child, hiding only a hidden child's content.
+    const item = (entry: WebElement | undefined): WebElement =>
       el(
         "div",
         {
@@ -325,9 +329,9 @@ export const carouselRenderer =
             overflow: "hidden",
           },
         },
-        [entry],
-      ),
-    );
+        entry ? [entry] : [],
+      );
+    const items = kit.children(node, inner, path, item);
     return el("div", { attrs, style }, items);
   };
 

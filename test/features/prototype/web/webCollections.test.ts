@@ -453,6 +453,29 @@ describe("web still carousel (#16382)", () => {
     // Each repeat row binds its own item, not a copy of the first.
     expect(new Set(items.map(textOf)).size).toBe(items.length);
   });
+
+  test("keeps an empty item slot for a hidden child, as Android does", () => {
+    const carousel = byNode(
+      renderPrototypeStill(
+        rootOf(
+          {
+            type: "carousel",
+            itemWidth: 200,
+            itemSpacing: 8,
+            children: [
+              { type: "text", text: "Hidden", visibleWhen: { key: "show", equals: true } },
+              { type: "text", text: "Shown" },
+            ],
+          },
+          { state: { show: false } },
+        ),
+      ).element,
+      "carousel",
+    )[0]!;
+    const items = byPart(carousel, "item");
+    expect(items.map(textOf)).toEqual(["", "Shown"]);
+    expect(items[0]!.style).toMatchObject({ flex: "0 0 200px" });
+  });
 });
 
 describe("web still navigation bars (#16382)", () => {
@@ -652,6 +675,26 @@ describe("web still chips and sliders (#16382)", () => {
     )[0]!;
     expect(slider.attrs["aria-disabled"]).toBe("true");
     expect(slider.style.opacity).toBe("0.38");
+  });
+
+  test("an unsized box around a slider grows to its parent's width, as Compose's Box does", () => {
+    const root = renderPrototypeStill(
+      rootOf({
+        type: "column",
+        children: [
+          { type: "box", testTag: "box", children: [{ type: "slider", stateKey: "v" }] },
+          {
+            type: "box",
+            testTag: "sized",
+            style: { width: { dp: 120 } },
+            children: [{ type: "slider", stateKey: "v" }],
+          },
+        ],
+      }),
+    ).element;
+    expect(byTag(root, "box")[0]!.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+    // An authored width still wins.
+    expect(byTag(root, "sized")[0]!.style.width).toBe("120px");
   });
 
   test("a chip's authored foreground colour wins over its Material role", () => {

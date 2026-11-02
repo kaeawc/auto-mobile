@@ -279,12 +279,14 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   if (isUnsizedSpacer(styled)) {
     return ["width", "height"];
   }
+  const style = record(styled.style) ?? {};
+  // An authored `fill` grows the parent just as a default fill does (fillMax either way).
+  const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
-  if (GROWING_CONTAINERS.has(String(bound.type))) {
-    const style = record(styled.style) ?? {};
-    return lineFillAxes(styled, scope, path).filter((axis) => style[axis] === undefined);
-  }
-  return defaultFillAxes(styled);
+  const inferred = GROWING_CONTAINERS.has(String(bound.type))
+    ? lineFillAxes(styled, scope, path).filter((axis) => style[axis] === undefined)
+    : defaultFillAxes(styled);
+  return [...authored, ...inferred];
 }
 
 /** Containers that grow on an axis when a child fills it, as a Compose parent does. */

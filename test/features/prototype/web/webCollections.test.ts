@@ -531,6 +531,26 @@ describe("web still chips and sliders (#16382)", () => {
     expect(tab.style["font-size"]).toBe("28px");
   });
 
+  test("an authored fill on a child grows its unsized parent like a default fill", () => {
+    const wrapper = byTag(
+      renderPrototypeStill(
+        rootOf({
+          type: "column",
+          style: { width: "fill" },
+          children: [
+            {
+              type: "column",
+              testTag: "wrapper",
+              children: [{ type: "slider", stateKey: "v", style: { width: "fill" } }],
+            },
+          ],
+        }),
+      ).element,
+      "wrapper",
+    )[0]!;
+    expect(wrapper.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+  });
+
   test("an unsized column around an unsized column passes a slider's fill up to its parent", () => {
     const outer = byTag(
       renderPrototypeStill(

@@ -1,6 +1,7 @@
 import { SelinuxOwner } from "../../../src/features/deviceCondition/SelinuxOwner";
 import { ArtifactOwner } from "../../../src/features/deviceCondition/ArtifactOwner";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeStubBuilder } from "../../fakes/FakeStubBuilder";
 import type { BootedDevice, ExecResult } from "../../../src/models";
@@ -43,6 +44,7 @@ function adbWith(responses: Record<string, string>): FakeAdbExecutor {
 }
 
 const MAGISK = "com.topjohnwu.magisk";
+const MAGISK_MARKER = "/data/local/tmp/automobile-rootstate-magisk";
 function createRootStateInjector(adb: FakeAdbExecutor, builder = new FakeStubBuilder()) {
   return realCreateRootStateInjector(adb, undefined, undefined, builder);
 }
@@ -72,7 +74,7 @@ function adbWithFiles(initial: Record<string, string>, permissive = true) {
         args
           .slice(2)
           .filter((path) => files.has(path))
-          .join("\n"),
+          .join("\n") + (args.includes("pm") ? `\n${result.stdout}` : ""),
       );
     }
     if (args[1] === "cat") {
@@ -81,9 +83,12 @@ function adbWithFiles(initial: Record<string, string>, permissive = true) {
     if (args[1] === "printf") {
       files.set(args.at(-1)!, "#!/system/bin/sh\nexit 1\n");
     }
+    if (args[1] === "touch") {
+      files.set(args[2].replaceAll("'", ""), "");
+    }
     if (args[1] === "rm") {
       for (const path of args.slice(3)) {
-        files.delete(path);
+        files.delete(path.replaceAll("'", ""));
       }
     }
     if (args[1] === "setenforce") {
@@ -207,7 +212,7 @@ describe("rootState injector (#14060)", () => {
     await first.apply({ rootState: "rooted-detectable" });
     expect((await second.apply({ rootState: "unset" })).changes[0].status).toBe("unchanged");
     expect((await second.restore()).restored).toEqual([]);
-    expect(files.size).toBe(ROOT_ARTIFACT_PATHS.length);
+    expect(files.size).toBe(ROOT_ARTIFACT_PATHS.length + 1);
     expect(state.permissive).toBe(true);
     expect((await first.restore()).verifiedClean).toBe(true);
     expect(files.size).toBe(0);
@@ -285,8 +290,8 @@ describe("rootState injector (#14060)", () => {
       const listings = adb
         .getExecutedCommands()
         .filter((command) => command.startsWith("shell ls "));
-      // Discovery, then removal verification; reset must not probe for leftovers a second time.
-      expect(listings).toHaveLength(2);
+      // Discovery, marker check, then removal verification; no second leftover probe.
+      expect(listings).toHaveLength(3);
       expect(await controller.restore()).toEqual({
         restored: [],
         failures: [],
@@ -308,6 +313,71 @@ describe("rootState injector (#14060)", () => {
     expect(adb.getExecutedCommands()).toContain(`uninstall ${MAGISK}`);
   });
 
+  test("writes the package marker only after install succeeds", async () => {
+    const { adb, files } = adbWithFiles({}, false);
+    await createRootStateInjector(adb).apply("rooted-detectable");
+    expect(files.has(MAGISK_MARKER)).toBe(true);
+    const commands = adb.getExecutedCommands();
+    expect(commands.indexOf(`shell touch '${MAGISK_MARKER}'`)).toBeGreaterThan(
+      commands.indexOf("install -r /fake/magisk.apk"),
+    );
+  });
+
+  test("a fresh injector recovers the marked package after the file stubs are gone", async () => {
+    const { adb, files, state } = adbWithFiles({ [MAGISK_MARKER]: "" });
+    adb.setCommandResponse(`pm list packages ${MAGISK}`, execResult(`package:${MAGISK}`));
+    const artifacts = new ArtifactOwner();
+    const injector = realCreateRootStateInjector(adb, undefined, artifacts, new FakeStubBuilder());
+    const reset = await injector.recover?.();
+    expect(reset).toBeFunction();
+    expect(artifacts.plantedForOther({}, `package:${MAGISK}`)).toBe(true);
+    await reset?.();
+    expect(adb.getExecutedCommands()).toContain(`uninstall ${MAGISK}`);
+    expect(files.has(MAGISK_MARKER)).toBe(false);
+    const commands = adb.getExecutedCommands();
+    expect(commands.indexOf(`shell rm -f '${MAGISK_MARKER}'`)).toBeGreaterThan(
+      commands.lastIndexOf(`shell pm list packages ${MAGISK}`),
+    );
+    expect(state.permissive).toBe(false);
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  for (const unreadable of [false, true]) {
+    test(`recovery preserves a package with ${unreadable ? "an unreadable" : "no"} marker`, async () => {
+      const { adb, files } = adbWithFiles(unreadable ? { [MAGISK_MARKER]: "" } : {}, false);
+      adb.setCommandResponse(`pm list packages ${MAGISK}`, execResult(`package:${MAGISK}`));
+      let markerReads = 0;
+      const execute = adb.execute.bind(adb);
+      adb.execute = async (args, options) => {
+        if (args[1] === "ls" && args[2] === MAGISK_MARKER) {
+          markerReads += 1;
+          if (unreadable) {
+            throw new Error("marker unreadable");
+          }
+        }
+        return execute(args, options);
+      };
+      const injector = createRootStateInjector(adb);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await injector.recover?.()).toBeNull();
+        expect(markerReads).toBe(1);
+        expect(adb.getExecutedCommands()).not.toContain(`uninstall ${MAGISK}`);
+        expect(files.has(MAGISK_MARKER)).toBe(unreadable);
+        if (unreadable) {
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining("rootState package marker probe failed: marker unreadable"),
+            expect.any(Error),
+          );
+        } else {
+          expect(warn).not.toHaveBeenCalled();
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
+
   test("failed install rolls back, disposes the APK, and leaves nothing held", async () => {
     const adb = adbWith(ROOTABLE);
     adb.setCommandResponse("install -r", execResult("Failure [INSTALL_FAILED_INVALID_APK]"));
@@ -319,6 +389,7 @@ describe("rootState injector (#14060)", () => {
       expect(artifacts.plantedForOther({}, key)).toBe(false);
     }
     expect(builder.disposed).toBe(1);
+    expect(adb.getExecutedCommands()).not.toContain(`shell touch '${MAGISK_MARKER}'`);
     expect(adb.getExecutedCommands()).toContain("unroot");
     expect(await injector.isClean()).toBe(true);
     const before = adb.getExecutedCommands().length;
@@ -357,6 +428,7 @@ describe("rootState injector (#14060)", () => {
     };
     await expect(outcome.reset?.()).rejects.toThrow(/left artifacts.*package:/);
     expect(adb.getExecutedCommands()).toContain("shell setenforce 1");
+    expect(adb.getExecutedCommands()).not.toContain(`shell rm -f '${MAGISK_MARKER}'`);
     expect(await injector.isClean()).toBe(false);
     adb.execute = execute;
     await outcome.reset?.();

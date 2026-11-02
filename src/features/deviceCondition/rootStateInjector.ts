@@ -17,6 +17,7 @@ import { SelinuxOwner, resolveSelinuxOwner, selinuxOwnersByDevice } from "./Seli
 import { ArtifactOwner, artifactOwnersByDevice, resolveArtifactOwner } from "./ArtifactOwner";
 import {
   DefaultMagiskStubBuilder,
+  MAGISK_PACKAGE,
   createMagiskPackageArtifact,
   type MagiskStubBuilder,
 } from "./magiskStub";
@@ -40,6 +41,8 @@ export const ROOT_ARTIFACT_PATHS = [
   "/system/bin/busybox",
   "/system/app/Superuser.apk",
 ] as const;
+
+const MAGISK_MARKER = "/data/local/tmp/automobile-rootstate-magisk";
 
 const STUB_SCRIPT = "#!/system/bin/sh\\nexit 1\\n";
 
@@ -188,20 +191,30 @@ async function rootStateIsClean(
   return !owner.selinux.has(owner.selinuxToken) && (await owner.selinux.isClean(adb, signal));
 }
 
-/** Recover only known file stubs; existing packages cannot be identified safely. */
-async function recoverRootArtifacts(
-  adb: AdbExecutor,
-  owner: {
-    held: Set<string>;
-    planted: Set<string>;
-    artifacts: ArtifactOwner;
-    artifactToken: object;
-    selinux: SelinuxOwner;
-    selinuxToken: object;
-  },
-  existing: Set<string>,
-  signal?: AbortSignal,
-): Promise<string[]> {
+interface RootStateOwner {
+  held: Set<string>;
+  planted: Set<string>;
+  artifacts: ArtifactOwner;
+  artifactToken: object;
+  selinux: SelinuxOwner;
+  selinuxToken: object;
+  packageArtifact: string;
+}
+
+/** Recover exact file stubs and a package whose fixture marker was verified. */
+async function recoverRootArtifacts({
+  adb,
+  owner,
+  existing,
+  signal,
+  markedPackage,
+}: {
+  adb: AdbExecutor;
+  owner: RootStateOwner;
+  existing: Set<string>;
+  signal?: AbortSignal;
+  markedPackage?: string;
+}): Promise<string[]> {
   const matches: string[] = [];
   for (const path of ROOT_ARTIFACT_PATHS) {
     if (!existing.has(path) || owner.held.has(path)) {
@@ -218,6 +231,9 @@ async function recoverRootArtifacts(
       matches.push(path);
     }
   }
+  if (markedPackage) {
+    matches.push(markedPackage);
+  }
   if (matches.length > 0) {
     await owner.selinux.recover(owner.selinuxToken);
     for (const path of matches) {
@@ -227,6 +243,93 @@ async function recoverRootArtifacts(
     }
   }
   return matches;
+}
+
+async function readMarkedPackage(
+  adb: AdbExecutor,
+  packageArtifact: string,
+  existing: Set<string>,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (!existing.has(packageArtifact)) {
+    return undefined;
+  }
+  try {
+    if ((await listExisting(adb, [MAGISK_MARKER], signal)).has(MAGISK_MARKER)) {
+      return packageArtifact;
+    }
+  } catch (error) {
+    // Without a readable marker we cannot distinguish the fixture from real Magisk.
+    logger.warn(`rootState package marker probe failed: ${errorMessage(error)}`, error);
+  }
+  return undefined;
+}
+
+async function writeMagiskMarker(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+  await shell(adb, ["touch", shellQuote(MAGISK_MARKER)], signal);
+}
+
+async function applyMarkedPackage(
+  adb: AdbExecutor,
+  owner: RootStateOwner,
+  magisk: ReturnType<typeof createMagiskPackageArtifact>,
+  { hadPackage, signal }: { hadPackage: boolean; signal?: AbortSignal },
+): Promise<void> {
+  let plantedPackage = false;
+  await magisk.apply(
+    hadPackage,
+    (planted) => {
+      plantedPackage = planted;
+      owner.artifacts[planted ? "plant" : "hold"](owner.artifactToken, owner.packageArtifact);
+      owner.held.add(owner.packageArtifact);
+    },
+    signal,
+  );
+  if (plantedPackage) {
+    await writeMagiskMarker(adb, signal);
+  }
+}
+
+async function removeMarkedPackage(
+  adb: AdbExecutor,
+  magisk: ReturnType<typeof createMagiskPackageArtifact>,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (await magisk.remove(signal)) {
+    return true;
+  }
+  // Keep the recovery evidence until PackageManager confirms the package is gone.
+  await shell(adb, ["rm", "-f", shellQuote(MAGISK_MARKER)], signal);
+  return false;
+}
+
+async function probeLeftovers(
+  adb: AdbExecutor,
+  owner: RootStateOwner,
+  paths: readonly string[],
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    // Batch package discovery with the file listing: a clean device needs one shell read.
+    const existing = owner.held.has(owner.packageArtifact)
+      ? await listExisting(adb, paths, signal)
+      : new Set(
+          (
+            await shell(
+              adb,
+              ["ls", ...paths, "2>/dev/null;", "pm", "list", "packages", MAGISK_PACKAGE],
+              signal,
+            )
+          )
+            .split("\n")
+            .filter((line) => line !== ""),
+        );
+    const markedPackage = await readMarkedPackage(adb, owner.packageArtifact, existing, signal);
+    await recoverRootArtifacts({ adb, owner, existing, signal, markedPackage });
+  } catch (error) {
+    // Discovery is optional; no ownership is acquired until every content read succeeds.
+    logger.warn(`rootState recovery probe failed: ${errorMessage(error)}`, error);
+  }
 }
 
 export function createRootStateInjector(
@@ -245,23 +348,25 @@ export function createRootStateInjector(
   const held = new Set<string>();
   // True while this fixture is applied and its reset is owed; a repeat apply is then coalesced.
   let active = false;
-  // Only artifacts we planted or recognised by their exact stub content. A real userdebug su
+  // Only artifacts we planted or recognised by exact stub content or the package marker. A real userdebug su
   // is never overwritten or deleted by reset.
   const planted = new Set<string>();
-  const recovery = { held, planted, artifacts, artifactToken, selinux, selinuxToken };
-  const probeLeftovers = async (paths: readonly string[], signal?: AbortSignal): Promise<void> => {
-    try {
-      await recoverRootArtifacts(adb, recovery, await listExisting(adb, paths, signal), signal);
-    } catch (error) {
-      // Discovery is optional; no ownership is acquired until every content read succeeds.
-      logger.warn(`rootState recovery probe failed: ${errorMessage(error)}`, error);
-    }
+  const recovery: RootStateOwner = {
+    held,
+    planted,
+    artifacts,
+    artifactToken,
+    selinux,
+    selinuxToken,
+    packageArtifact,
   };
   // One reset serves every apply, so repeat applies never stack separate cleanups. It is
   // defined here, before any mutation, so every later failure can undo it.
   const reset = async (resetSignal?: AbortSignal, sweep = true): Promise<void> => {
     if (sweep) {
       await probeLeftovers(
+        adb,
+        recovery,
         ROOT_ARTIFACT_PATHS.filter((path) => !held.has(path)),
         resetSignal,
       );
@@ -276,9 +381,6 @@ export function createRootStateInjector(
     // Planted by a fixture (here or by integrityState) and needed by no other fixture.
     const removable = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
     const removableFiles = removable.filter((path) => path !== packageArtifact);
-    if (removable.includes(packageArtifact) && (await magisk.remove(resetSignal))) {
-      remaining.add(packageArtifact);
-    }
     if (removableFiles.length > 0) {
       // A reboot can return /system to read-only while the planted files survive.
       await remountSystem(adb, resetSignal);
@@ -287,6 +389,12 @@ export function createRootStateInjector(
       for (const path of await listExisting(adb, removableFiles, resetSignal)) {
         remaining.add(path);
       }
+    }
+    if (
+      removable.includes(packageArtifact) &&
+      (await removeMarkedPackage(adb, magisk, resetSignal))
+    ) {
+      remaining.add(packageArtifact);
     }
     await selinux.release(adb, selinuxToken, resetSignal);
     await adbCommand(adb, ["unroot"], resetSignal);
@@ -308,7 +416,7 @@ export function createRootStateInjector(
     if (active) {
       return null;
     }
-    await probeLeftovers(ROOT_ARTIFACT_PATHS, signal);
+    await probeLeftovers(adb, recovery, ROOT_ARTIFACT_PATHS, signal);
     return held.size > 0 || selinux.has(selinuxToken)
       ? (resetSignal?: AbortSignal) => reset(resetSignal, false)
       : null;
@@ -342,7 +450,7 @@ export function createRootStateInjector(
       // Both reads happen before the first mutation, so a failed probe changes nothing.
       const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
       const hadPackage = await magisk.present(signal);
-      const leftovers = await recoverRootArtifacts(adb, recovery, existing, signal);
+      const leftovers = await recoverRootArtifacts({ adb, owner: recovery, existing, signal });
       await selinux.capture(adb, selinuxToken, signal);
       const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
       try {
@@ -358,14 +466,7 @@ export function createRootStateInjector(
           held.add(path);
         }
         await plantArtifacts(adb, toPlant, planted, signal);
-        await magisk.apply(
-          hadPackage,
-          (plantedPackage) => {
-            artifacts[plantedPackage ? "plant" : "hold"](artifactToken, packageArtifact);
-            held.add(packageArtifact);
-          },
-          signal,
-        );
+        await applyMarkedPackage(adb, recovery, magisk, { hadPackage, signal });
       } catch (error) {
         try {
           await reset();

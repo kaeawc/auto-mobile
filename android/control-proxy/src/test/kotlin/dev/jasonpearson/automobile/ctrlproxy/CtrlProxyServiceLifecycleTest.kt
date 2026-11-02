@@ -1,19 +1,46 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
 
 /** The stop half of each startup step, on a service that never reached onServiceConnected. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 class CtrlProxyServiceLifecycleTest {
-  private val service: CtrlProxy = Robolectric.buildService(CtrlProxy::class.java).create().get()
+  private val controller: ServiceController<CtrlProxy> =
+    Robolectric.buildService(CtrlProxy::class.java).create()
+  private val service: CtrlProxy = controller.get()
+  private var destroyed = false
+
+  @After
+  fun tearDown() {
+    // onCreate starts the gesture thread; destroying the service quits it.
+    if (!destroyed) controller.destroy()
+  }
+
+  private fun storageManager() =
+    StorageSubscriptionManager(
+      service,
+      ioDispatcher = Dispatchers.Unconfined,
+      scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+    )
+
+  private fun StorageSubscriptionManager.isDestroyed() =
+    subscribe("com.example.app", "prefs").exceptionOrNull()?.message ==
+      "Storage subscription manager is destroyed"
 
   @Test
   fun `stopping logcat forwarding closes the buffer and forgets it`() {
@@ -37,6 +64,17 @@ class CtrlProxyServiceLifecycleTest {
 
     assertTrue(navigation.isCancelled)
     assertTrue(storage.isCancelled)
+  }
+
+  @Test
+  fun `onDestroy destroys a created storage subscription manager`() {
+    val manager = storageManager().also { service.storageSubscriptionManager = it }
+    assertEquals(false, manager.isDestroyed())
+
+    controller.destroy()
+    destroyed = true
+
+    assertTrue("onDestroy must release the storage manager", manager.isDestroyed())
   }
 
   @Test

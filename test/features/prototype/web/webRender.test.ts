@@ -1049,6 +1049,16 @@ describe("prototype web still (#16346)", () => {
     );
   });
 
+  test("placeholder keys with private-use characters still bind their own values", () => {
+    const spec = {
+      ...reference,
+      state: { "s\uE000": "S", "s\uE000e": "wrong" },
+      data: { "d\uE000": "D", "d\uE000e": "wrong" },
+      root: { type: "text", testTag: "t", text: "{s\uE000} {data:/d\uE000}" },
+    };
+    expect(textOf(byTag(renderPrototypeStill(spec), "t")[0]!)).toBe("S D");
+  });
+
   test("per-corner radii replace a control's default radius instead of being reset by it", () => {
     const icon = byTag(
       renderPrototypeStill({

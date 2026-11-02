@@ -61,8 +61,9 @@ const MAX_WEB_REPEAT_ITEMS = 200;
 function bindBare(text: string, scope: WebRenderScope): string {
   return text.replace(/\{([^{}]+)\}/g, (whole, inner: string) => {
     if (!inner.startsWith("derived:")) {
-      return Object.hasOwn(scope.condition.state, inner)
-        ? shield(renderScalar(scope.condition.state[inner]))
+      const key = unshield(inner);
+      return Object.hasOwn(scope.condition.state, key)
+        ? shield(renderScalar(scope.condition.state[key]))
         : whole;
     }
     const name = inner.slice("derived:".length);
@@ -85,8 +86,9 @@ export function bound(text: unknown, scope: WebRenderScope): string {
   }
   // Data placeholders bind first, then repeat items, then state, as the devices bind text. Every
   // inserted value is shielded until the end, so it is never read again as a placeholder.
-  const data = bindPrototypeDataText(text.replaceAll(ESCAPE, `${ESCAPE}e`), (pointer) => {
-    const value = resolvePrototypeDataPointer(scope.data, pointer);
+  // Authored text is escaped too, so lookups read each placeholder's key unescaped.
+  const data = bindPrototypeDataText(escaped(text), (pointer) => {
+    const value = resolvePrototypeDataPointer(scope.data, unshield(pointer));
     return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
       ? shield(renderScalar(value))
       : "";
@@ -102,11 +104,9 @@ export function bound(text: unknown, scope: WebRenderScope): string {
  * escaped wherever it already appears (authored or inserted), so every character survives exactly.
  */
 const ESCAPE = "\uE000";
+const escaped = (value: string) => value.replaceAll(ESCAPE, `${ESCAPE}e`);
 const shield = (value: string) =>
-  value
-    .replaceAll(ESCAPE, `${ESCAPE}e`)
-    .replaceAll("{", `${ESCAPE}o`)
-    .replaceAll("}", `${ESCAPE}c`);
+  escaped(value).replaceAll("{", `${ESCAPE}o`).replaceAll("}", `${ESCAPE}c`);
 const UNESCAPED: Readonly<Record<string, string>> = { e: ESCAPE, o: "{", c: "}" };
 const unshield = (value: string) =>
   value.replace(/\uE000([eoc])/g, (_whole, kind: string) => UNESCAPED[kind]!);

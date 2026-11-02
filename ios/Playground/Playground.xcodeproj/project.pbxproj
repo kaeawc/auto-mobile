@@ -16,6 +16,7 @@
 		32FCAE1924E826EF9F5C8A93 /* TapAtTargetsDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1F7F4145845D9AD5D8C48E /* TapAtTargetsDemo.swift */; };
 		35D28DCC0C2798977F34483F /* PhotosAuthorizationProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC01FB9ECFD3E67A88850123 /* PhotosAuthorizationProbe.swift */; };
 		37A81542464B011E1647E518 /* PhotosAuthorizationProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A8BC8E5B6EA4CEE87E3D905 /* PhotosAuthorizationProbeTests.swift */; };
+		3A2A9A65828D3CD103C00BE1 /* StatusSheetDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA12565BE3936B47614D8005 /* StatusSheetDemo.swift */; };
 		41A9106D251A3C850BDF5B2E /* CrayonGrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7824DDA408B56A9A41551ED /* CrayonGrain.swift */; };
 		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
 		4E220C88A805ED0A7AFDEE38 /* PlaygroundDatabaseFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */; };
@@ -118,6 +119,7 @@
 		E36CCA31979717E4A6A47AA7 /* CrayonGrain.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = CrayonGrain.metal; sourceTree = "<group>"; };
 		E40DD68F934F5F0D2981ACA1 /* Playground.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Playground.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7824DDA408B56A9A41551ED /* CrayonGrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonGrain.swift; sourceTree = "<group>"; };
+		FA12565BE3936B47614D8005 /* StatusSheetDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusSheetDemo.swift; sourceTree = "<group>"; };
 		FAD793841AB97726998E94B5 /* PlaygroundFilesPickerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlaygroundFilesPickerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundThemeTests.swift; sourceTree = "<group>"; };
 		FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverTab.swift; sourceTree = "<group>"; };
@@ -222,6 +224,7 @@
 				CC01FB9ECFD3E67A88850123 /* PhotosAuthorizationProbe.swift */,
 				C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */,
 				3CF899DC96DC92471BB6FC81 /* PlaygroundDatabaseFixture.swift */,
+				FA12565BE3936B47614D8005 /* StatusSheetDemo.swift */,
 				83925D121AF0F0A28F781607 /* Resources */,
 				A99B72DF7BBF7885110254C4 /* SdkContract */,
 				EAF2D62F55B68E2361617BFC /* Tabs */,
@@ -450,6 +453,7 @@
 				7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */,
 				54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */,
 				327A28D4620038BBA8D02656 /* Shapes.swift in Sources */,
+				3A2A9A65828D3CD103C00BE1 /* StatusSheetDemo.swift in Sources */,
 				5855FEB2C4AC53F1F22EFDCB /* TapAtTargetLayout.swift in Sources */,
 				32FCAE1924E826EF9F5C8A93 /* TapAtTargetsDemo.swift in Sources */,
 				007B2120C2735B42A20C510B /* Theme.swift in Sources */,

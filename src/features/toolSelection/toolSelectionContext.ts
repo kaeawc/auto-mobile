@@ -42,15 +42,8 @@ export type ToolSelectionContext = {
   explicitObserveDeviceRead?: boolean;
   /** The request's transport deadline; an explicit `undefined` clears an inherited one. */
   requestDeadline?: RequestDeadline;
-  /**
-   * Trusted enclosing plan metadata, reattached after each step's schema parse. Its deadline fields
-   * now reach only provisioning's in-band reads; every other step reads `requestDeadline` (#15663).
-   */
+  /** Set while a plan runs: its steps inherit the request's deadline and use its progress. */
   planRequest?: {
-    deadlineMs?: unknown;
-    timeoutMs?: unknown;
-    startTime?: unknown;
-    liveDeadlineKey?: unknown;
     progress?: ProgressCallback;
   };
   routingSessionUuid?: string;

@@ -62,7 +62,10 @@ it inlined per variant.
   are `hidden`.
 - **Controls.** Only four: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
   double-click to fit), a variant select (only with more than one variant) and the revision
-  history (newest first, `r<N> · show|patch`). Controls are buttons and a select with labels.
+  history (newest first, `r<N> · show|patch`; only when some variant has more than one revision
+  in the page). Controls are buttons and a select with labels. A toolbar note says the preview is
+  static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
+  history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
   self-contained. It only shows and hides views and moves the stage; UI state stays in memory, with
   no storage, cookies or URL changes. It must stay at or below 150 KB.
@@ -114,7 +117,9 @@ the host, so the page's script only switches between views it was given and neve
   native theme does.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
   accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
-  roles unpainted. Unpainted screen regions show a checkerboard. An explicit `theme.mode` of
+  roles unpainted. Both devices paint nothing behind a window, so the app below shows through;
+  the still has no app below, so the screen paints the theme's `background` role (else `surface`),
+  or the Material 3 baseline background for the mode when the scheme leaves both unresolved. An explicit `theme.mode` of
   `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
@@ -132,8 +137,10 @@ the host, so the page's script only switches between views it was given and neve
   lines); a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
-  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted square titled with the icon name, because the glyph set is not
-  inlined. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
+  titled with the name, because the glyph set is not inlined. A switch draws its label before a
+  Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
+  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle (or three generic button marks, which move to
@@ -143,8 +150,9 @@ the host, so the page's script only switches between views it was given and neve
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own
   padding on that edge (`ime` adds nothing,
   since the still has no keyboard). Safe areas are exposed as
-  `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. A top app bar takes no inset
-  of its own, as on the devices: it clears the status bar only through `safeAreaPadding`.
+  `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. Both devices draw a
+  window's content edge to edge and a top app bar takes no inset of its own, so it clears the
+  status bar only through `safeAreaPadding`.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

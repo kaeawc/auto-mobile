@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { IosTyper, type IosTyperDeps } from "../../../../src/features/action/sendkeys/IosTyper";
 import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
 import { IOS_TEXT_CHUNK_CODE_POINTS } from "../../../../src/features/action/sendkeys/IosTextChunks";
+import { IOS_FOCUSED_VALUE_READ_WINDOW } from "../../../../src/features/action/iosTypedTextVerification";
 import { markPartialAfterMutation } from "../../../../src/features/action/sendkeys/ExecutorHelpers";
 import { TextIndeterminateError } from "../../../../src/features/action/TextIndeterminateError";
 import {
@@ -145,14 +146,17 @@ test("a partial repeated-character chunk stops further inserts", async () => {
   expect(h.inserts).toHaveLength(2);
 });
 
-test("chunk typing warns when repeated values saturate the XCUI window", async () => {
+test("chunk typing warns once when repeated values saturate the XCUI window", async () => {
   const h = harness();
-  h.state.value = "a".repeat(512);
-  h.deps.observer.execute = async () => typedObservation(h.state.value.slice(-512));
+  h.state.value = "a".repeat(IOS_FOCUSED_VALUE_READ_WINDOW);
+  h.deps.observer.execute = async () =>
+    typedObservation(h.state.value.slice(0, IOS_FOCUSED_VALUE_READ_WINDOW));
   const result = await h.typer.executeIosType(longText, "insert");
   expect(result.success).toBe(true);
   expect(result.warning).toContain("not verified");
-  expect(result.warning).toContain("512-character XCUI value window");
+  expect(result.warning).toBe(
+    "iOS typed text result was not verified: the focused field value fills the 512-character read window, so a change past it cannot be seen.",
+  );
   expect(h.inserts).toHaveLength(4);
 });
 
@@ -336,6 +340,12 @@ test.each(["short", "😀".repeat(IOS_TEXT_CHUNK_CODE_POINTS)])(
     expect(await h.typer.executeIosType(text, "insert")).toEqual({
       success: true,
       resolvedMode: "xcuiTypeText",
+      ...(text.length >= IOS_FOCUSED_VALUE_READ_WINDOW
+        ? {
+            warning:
+              "iOS typed text result was not verified: the focused field value fills the 512-character read window, so a change past it cannot be seen.",
+          }
+        : {}),
     });
     expect(h.inserts).toEqual([
       { text, options: { timeoutMs: resolveTextCtrlProxyTimeoutMs(text), abortSignal: undefined } },

@@ -51,22 +51,22 @@ export interface IosTypedTextVerificationResult {
   warning?: string;
 }
 
-/** XCUI can expose only this many characters of a long editable value. */
-const IOS_XCUI_VALUE_WINDOW_CHARS = 512;
+/** XCUI snapshot values expose only the first 512 characters of a longer focused value. */
+export const IOS_FOCUSED_VALUE_READ_WINDOW = 512;
+
+const IOS_FOCUSED_VALUE_READ_WINDOW_WARNING = `iOS typed text result was not verified: the focused field value fills the ${IOS_FOCUSED_VALUE_READ_WINDOW}-character read window, so a change past it cannot be seen.`;
 
 function compareIosChunkAppend(
   text: string,
   before: string,
   after: string,
 ): IosTypedTextVerificationResult {
-  if (
-    before.length === IOS_XCUI_VALUE_WINDOW_CHARS &&
-    after.length === IOS_XCUI_VALUE_WINDOW_CHARS
-  ) {
+  // An exact window may hide the append, including the chunk that first fills it.
+  // Wider readable values still allow the full append check below.
+  if (after.length === IOS_FOCUSED_VALUE_READ_WINDOW) {
     return {
       success: true,
-      warning:
-        "iOS typed text result was not verified: both focused field values fill the 512-character XCUI value window.",
+      warning: IOS_FOCUSED_VALUE_READ_WINDOW_WARNING,
     };
   }
   if (before === after) {
@@ -146,13 +146,19 @@ function compareIosNonSecureTypedText(
       warning: "iOS typed text result was not verified: the focused field could not be read.",
     };
   }
+  if (after.value.length >= IOS_FOCUSED_VALUE_READ_WINDOW) {
+    return {
+      success: true,
+      warning: IOS_FOCUSED_VALUE_READ_WINDOW_WARNING,
+    };
+  }
   if (before.value === after.value) {
     return {
       success: false,
       error: "iOS nothing was typed: the focused field value is unchanged.",
     };
   }
-  return containsTypedCharacters(after.value ?? "", text)
+  return containsTypedCharacters(after.value, text)
     ? { success: true }
     : {
         success: true,
@@ -194,6 +200,9 @@ function describeFocusedValueChange(
   before: string | undefined,
   after: string | undefined,
 ): string {
+  if (after !== undefined && after.length >= IOS_FOCUSED_VALUE_READ_WINDOW) {
+    return `the focused field's value fills the ${IOS_FOCUSED_VALUE_READ_WINDOW}-character read window, so what was committed is unknown.`;
+  }
   if (before === undefined || after === undefined) {
     return "the focused field's value could not be read, so what was committed is unknown.";
   }

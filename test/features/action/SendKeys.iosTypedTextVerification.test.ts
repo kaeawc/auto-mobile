@@ -1,7 +1,10 @@
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultSendKeysCommandExecutor } from "../../../src/features/action/SendKeys";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
-import { compareIosTypedText } from "../../../src/features/action/iosTypedTextVerification";
+import {
+  compareIosTypedText,
+  IOS_FOCUSED_VALUE_READ_WINDOW,
+} from "../../../src/features/action/iosTypedTextVerification";
 import { expect, test } from "bun:test";
 import {
   typedObservation,
@@ -42,13 +45,38 @@ test("chunk verification accepts a full repeated-character append", () => {
 test.each(["a", "x"])("chunk verification warns for a saturated XCUI value window (%s)", (last) => {
   const result = compareIosTypedText(
     "a".repeat(1000),
-    { secure: false, value: "a".repeat(512) },
-    { secure: false, value: last.repeat(512) },
+    { secure: false, value: "a".repeat(IOS_FOCUSED_VALUE_READ_WINDOW) },
+    { secure: false, value: last.repeat(IOS_FOCUSED_VALUE_READ_WINDOW) },
     true,
   );
   expect(result.success).toBe(true);
   expect(result.warning).toContain("not verified");
-  expect(result.warning).toContain("512");
+  expect(result.warning).toBe(
+    "iOS typed text result was not verified: the focused field value fills the 512-character read window, so a change past it cannot be seen.",
+  );
+});
+
+test("the chunk that first fills the read window uses the single-shot warning once", () => {
+  const before = { secure: false, value: "old" };
+  const after = { secure: false, value: "a".repeat(IOS_FOCUSED_VALUE_READ_WINDOW) };
+  const chunk = "a".repeat(1000);
+  const singleShot = compareIosTypedText(chunk, before, after);
+  expect(singleShot.success).toBe(true);
+  expect(singleShot.warning).toContain("512-character read window");
+  expect(compareIosTypedText(chunk, before, after, true)).toEqual(singleShot);
+});
+
+test("readable chunk verification requires both full growth and the chunk suffix", () => {
+  const before = { secure: false, value: "old" };
+  for (const value of ["oldab", "oldxyz"]) {
+    expect(compareIosTypedText("abc", before, { secure: false, value }, true)).toEqual({
+      success: false,
+      error: "iOS typed text chunk was not fully appended to the focused field.",
+    });
+  }
+  expect(compareIosTypedText("abc", before, { secure: false, value: "oldabc" }, true)).toEqual({
+    success: true,
+  });
 });
 
 for (const operation of ["insert", "replace"] as const) {

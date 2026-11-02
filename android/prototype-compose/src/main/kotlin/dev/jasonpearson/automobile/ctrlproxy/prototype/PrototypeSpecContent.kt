@@ -1324,7 +1324,7 @@ private fun RenderPrototypePager(
   PrototypePagerIndicatorLayout(
     pager,
     source.axis == "vertical",
-    PrototypePagerIndicator(source.indicator, source.indicatorPlacement),
+    PrototypePagerIndicator(source.indicator, source.indicatorPlacement, fill),
     pagerModifier,
   ) { pagesModifier ->
     if (source.axis == "vertical") {

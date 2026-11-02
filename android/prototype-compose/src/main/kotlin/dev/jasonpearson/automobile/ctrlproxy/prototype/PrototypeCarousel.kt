@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -49,10 +50,23 @@ internal fun pagerIndicatorDots(
   }
 }
 
-/** Android keeps its existing overlay unless the spec explicitly asks for space after the pages. */
-internal fun pagerIndicatorBelow(placement: String?): Boolean = placement == "below"
+/**
+ * Reserve a strip only when it leaves room for pages; infinity represents unbounded wrap sizing.
+ */
+internal fun pagerIndicatorBelow(
+  placement: String?,
+  availableSizeDp: Float = Float.POSITIVE_INFINITY,
+): Boolean = placement == "below" && availableSizeDp > 22f
 
-internal data class PrototypePagerIndicator(val style: String?, val placement: String?)
+/** Weight reserves the remaining space beside the strip only when that dimension fills. */
+internal fun pagerIndicatorPagesUseWeight(vertical: Boolean, fill: PrototypePageFill): Boolean =
+  if (vertical) fill.width else fill.height
+
+internal data class PrototypePagerIndicator(
+  val style: String?,
+  val placement: String?,
+  val fill: PrototypePageFill,
+)
 
 @Composable
 internal fun PrototypePagerIndicatorLayout(
@@ -66,14 +80,44 @@ internal fun PrototypePagerIndicatorLayout(
     pages(modifier)
   } else if (!pagerIndicatorBelow(indicator.placement)) {
     pages(modifier.pagerIndicator(pager, vertical))
-  } else if (vertical) {
-    Row(modifier) {
-      pages(Modifier.weight(1f).fillMaxHeight())
+  } else {
+    // Keep sizing on the outer node and pass its minimums through to the original row/column.
+    BoxWithConstraints(modifier, propagateMinConstraints = true) {
+      val availableSizeDp = if (vertical) maxWidth.value else maxHeight.value
+      if (pagerIndicatorBelow(indicator.placement, availableSizeDp)) {
+        PrototypePagerIndicatorBelow(pager, vertical, indicator.fill, pages)
+      } else {
+        pages(Modifier.pagerIndicator(pager, vertical))
+      }
+    }
+  }
+}
+
+@Composable
+private fun PrototypePagerIndicatorBelow(
+  pager: PagerState,
+  vertical: Boolean,
+  fill: PrototypePageFill,
+  pages: @Composable (Modifier) -> Unit,
+) {
+  if (vertical) {
+    Row {
+      pages(
+        Modifier.then(
+            if (pagerIndicatorPagesUseWeight(vertical, fill)) Modifier.weight(1f) else Modifier,
+          )
+          .then(if (fill.height) Modifier.fillMaxHeight() else Modifier),
+      )
       Box(Modifier.width(22.dp).fillMaxHeight().pagerIndicator(pager, true))
     }
   } else {
-    Column(modifier) {
-      pages(Modifier.weight(1f).fillMaxWidth())
+    Column {
+      pages(
+        Modifier.then(
+            if (pagerIndicatorPagesUseWeight(vertical, fill)) Modifier.weight(1f) else Modifier,
+          )
+          .then(if (fill.width) Modifier.fillMaxWidth() else Modifier),
+      )
       Box(Modifier.height(22.dp).fillMaxWidth().pagerIndicator(pager, false))
     }
   }

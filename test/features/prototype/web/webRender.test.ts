@@ -935,6 +935,150 @@ describe("prototype web still (#16346)", () => {
     expect(row.style).not.toHaveProperty("flex");
   });
 
+  test("inserted data and repeat values are never read again as state placeholders", () => {
+    const spec = {
+      ...reference,
+      state: { secret: "LEAK" },
+      data: { note: "{secret}" },
+      root: {
+        type: "column",
+        repeat: { as: "item", items: [{ label: "{secret}" }] },
+        children: [
+          { type: "text", testTag: "d", text: "{data:/note}" },
+          { type: "text", testTag: "r", text: "{item.label}" },
+        ],
+      },
+    };
+    const still = renderPrototypeStill(spec);
+    expect(textOf(byTag(still, "d")[0]!)).toBe("{secret}");
+    expect(textOf(byTag(still, "r")[0]!)).toBe("{secret}");
+  });
+
+  test("a repeated line with no rows stays wrap-sized", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        data: { rows: [] },
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "r",
+              repeat: { as: "item", items: { path: "/rows" } },
+              children: [{ type: "spacer" }],
+            },
+          ],
+        },
+      }),
+      "r",
+    )[0]!;
+    expect(row.style).not.toHaveProperty("flex");
+  });
+
+  test("a center-aligned title is centred on the bar, not beside the navigation slot", () => {
+    const bar = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "topAppBar",
+          testTag: "bar",
+          title: "T",
+          variant: "centerAligned",
+          navigationIcon: { icon: "arrow_back", label: "Back" },
+        },
+      }),
+      "bar",
+    )[0]!;
+    const title = bar.children.find(
+      (child) => typeof child !== "string" && textOf(child) === "T",
+    ) as WebElement;
+    expect(title.style).toMatchObject({ position: "absolute", left: "0", right: "0" });
+    expect(bar.style.position).toBe("relative");
+  });
+
+  test("a captioned field's wrapper takes its max width; a disabled list item disables its trailing control", () => {
+    const field = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          testTag: "c",
+          children: [
+            {
+              type: "textField",
+              stateKey: "q",
+              supportingText: "Hint",
+              style: { maxWidth: 200 },
+            },
+          ],
+        },
+      }),
+      "c",
+    )[0]!;
+    const wrapper = field.children[0] as WebElement;
+    expect(wrapper.style["max-width"]).toBe("200px");
+    expect((wrapper.children[0] as WebElement).style).not.toHaveProperty("max-width");
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        state: { ready: false, on: true },
+        root: {
+          type: "listItem",
+          testTag: "li",
+          headline: "H",
+          enabledWhen: { key: "ready", equals: true },
+          trailing: { type: "switch", stateKey: "on" },
+        },
+      }),
+      "li",
+    )[0]!;
+    const toggle = find(row, (element) => element.attrs.role === "switch")[0]!;
+    expect(toggle.attrs["aria-disabled"]).toBe("true");
+  });
+
+  test("text keeps private-use characters exactly, authored or inserted", () => {
+    const spec = {
+      ...reference,
+      state: { mark: "\uE000o\uE001" },
+      data: { note: "\uE000c" },
+      root: { type: "text", testTag: "t", text: "\uE000o\uE000e\uE001 {mark} {data:/note}" },
+    };
+    expect(textOf(byTag(renderPrototypeStill(spec), "t")[0]!)).toBe(
+      "\uE000o\uE000e\uE001 \uE000o\uE001 \uE000c",
+    );
+  });
+
+  test("placeholder keys with private-use characters still bind their own values", () => {
+    const spec = {
+      ...reference,
+      state: { "s\uE000": "S", "s\uE000e": "wrong" },
+      data: { "d\uE000": "D", "d\uE000e": "wrong" },
+      root: { type: "text", testTag: "t", text: "{s\uE000} {data:/d\uE000}" },
+    };
+    expect(textOf(byTag(renderPrototypeStill(spec), "t")[0]!)).toBe("S D");
+  });
+
+  test("per-corner radii replace a control's default radius instead of being reset by it", () => {
+    const icon = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "icon",
+          testTag: "i",
+          name: "star",
+          style: { cornerRadius: { bottomStart: 30, bottomEnd: 40 } },
+        },
+      }),
+      "i",
+    )[0]!;
+    expect(icon.style).not.toHaveProperty("border-radius");
+    expect(icon.style).toMatchObject({
+      "border-end-start-radius": "30px",
+      "border-end-end-radius": "40px",
+    });
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

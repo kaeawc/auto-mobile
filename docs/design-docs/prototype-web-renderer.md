@@ -1,7 +1,30 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the still renderer and the device frame registry.
+document covers the page, the still renderer and the device frame registry.
+
+## Page
+
+`buildPrototypeWebPage(input)` in `src/features/prototype/web/webPage.ts` returns one HTML
+document, its `sha256`, the frame used, the unsupported nodes of the first view and the revisions
+it inlined per variant.
+
+- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape.
+  The first view is the chosen variant's chosen revision (default: latest) in portrait; the rest
+  are `hidden`.
+- **Controls.** Only four: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
+  double-click to fit), a variant select (only with more than one variant) and the revision
+  history (newest first, `r<N> · show|patch`). Controls are buttons and a select with labels.
+- **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
+  self-contained. It only shows and hides views and moves the stage; UI state stays in memory, with
+  no storage, cookies or URL changes. It must stay at or below 150 KB.
+- **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
+  styles, and `data:` images and fonts. The page references no external URL.
+- **Budget.** The page is at most 2 MiB. Each variant's latest revision is always kept; older
+  revisions are added newest first while they fit, after measuring the shell (head, toolbar, full
+  history list and script). If the latest revisions alone do not fit, the build fails with an
+  `ActionableError` naming the largest view.
+- **Determinism.** The same input yields byte-identical HTML.
 
 ## Still renderer
 

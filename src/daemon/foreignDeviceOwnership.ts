@@ -1,4 +1,4 @@
-import type { DeviceClaimMirror } from "./deviceClaims";
+import type { DeviceClaim, DeviceClaimMirror } from "./deviceClaims";
 import { adbServerScope } from "../utils/adbServerScope";
 export { adbServerScope } from "../utils/adbServerScope";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -365,8 +365,8 @@ export interface ForeignOwnershipOptions {
  * Reads two per-device lock files: the CtrlProxy forwarding lease (#10485) a daemon takes in its
  * coordination directory when it first talks to a device's CtrlProxy, and the allocation claim a
  * daemon takes while a session holds the device (#10709). With a claims table attached the table
- * decides a claim instead and no claim file is written (#11811 step d); the files are still read,
- * and written when no table can decide. The claim lives in a directory
+ * decides a claim (#11811 step d); for one more release the winner still writes its claim file, and
+ * the files alone decide when no table can. The claim lives in a directory
  * scoped to the ADB server rather than to the coordination directory, so daemons with different
  * `AUTOMOBILE_COORDINATION_DIR` values on one adb server still see each other's claims (#10708).
  * A 0.0.84 daemon's claim in the coordination directory (#10707) is still read, never written.
@@ -533,16 +533,22 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     const outcome = await this.claimFile(deviceId, owner);
     if (outcome === "claimed") {
-      this.claimMirror?.claimed(deviceId, owner, () => this.claimFileIsOurs(deviceId, owner));
+      this.claimMirror?.claimed(
+        deviceId,
+        owner,
+        () => this.claimFileIsOurs(deviceId, owner),
+        (row) => this.isLiveTableOwner(deviceId, row),
+      );
     }
     return outcome !== "refused";
   }
 
   /**
-   * The host-wide table decides the claim, and no claim file is written (#11811 step d). A claim
-   * file or 0.0.84 claim a live foreign daemon still holds is honoured for one more release.
-   * Undefined when no table can decide (watch and TV have none; no registry; a failed write): the
-   * claim files decide, as before.
+   * The host-wide table decides the claim (#11811 step d), and for one more release the winner also
+   * writes its claim file, so a daemon that cannot use the table and falls back to the files still
+   * sees it (owner decision 2026-11-02, option A2). A claim file or 0.0.84 claim a live foreign
+   * daemon holds refuses the claim. Undefined when no table can decide (watch and TV have none; no
+   * registry; a failed write): the claim files decide, as before.
    */
   private async claimInTable(
     deviceId: string,
@@ -555,14 +561,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     if ((await this.fileClaimOwner(deviceId)) !== undefined || this.hasUnreadableClaim(deviceId)) {
       return false;
     }
-    const decision = await acquire(deviceId, owner, async (row) => {
-      const live = await this.evaluateContent(
-        { pid: row.pid, metadata: row.metadata },
-        deviceId,
-        "claim",
-      );
-      return live !== undefined;
-    });
+    const decision = await acquire(deviceId, owner, (row) => this.isLiveTableOwner(deviceId, row));
     if (decision.outcome === "unavailable") {
       return undefined;
     }
@@ -571,7 +570,22 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       this.owners.set(deviceId, decision.ownerPid);
       return false;
     }
+    if ((await this.claimFile(deviceId, owner)) === "refused") {
+      // A daemon deciding by the files took the device meanwhile: give the table's claim back.
+      this.claimMirror?.released(deviceId, owner);
+      return false;
+    }
     return true;
+  }
+
+  /** Whether the owner a table row names is a live daemon still using the device. */
+  private async isLiveTableOwner(deviceId: string, row: DeviceClaim): Promise<boolean> {
+    const live = await this.evaluateContent(
+      { pid: row.pid, metadata: row.metadata },
+      deviceId,
+      "claim",
+    );
+    return live !== undefined;
   }
 
   /** The live foreign owner a claim file (this release's or a 0.0.84 one) names, if any. */

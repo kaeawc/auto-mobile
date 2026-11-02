@@ -7,9 +7,12 @@ Tracking issue: #11811. For the release notes of the first release that contains
 
 The host binding registry database gains a `device_claims` table: one row per claimed device.
 For Android and iOS the table decides allocation: a daemon claims a device with an atomic write
-that succeeds only while no live daemon holds the row, and writes no allocation claim file. Claim
-files are still read, and still written for watchOS and tvOS (the table does not admit those
-platforms yet) and whenever no registry can decide (none open, a files-only daemon, a failed write).
+that succeeds only while no live daemon holds the row. For this release the winner also writes its
+allocation claim file, so a daemon that cannot use the table at that moment (a registry still
+opening, a busy write, a failed open) and falls back to the claim files still sees the claim. The
+release after this one stops writing claim files and stops reading them. Claim files alone decide
+for watchOS and tvOS (the table does not admit those platforms yet) and whenever no registry can
+decide (none open, a files-only daemon, a failed write).
 
 ## Mixed versions are unsupported
 

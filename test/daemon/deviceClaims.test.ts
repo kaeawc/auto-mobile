@@ -149,27 +149,35 @@ describe("the device_claims table", () => {
 
     test("takes over only the row it judged, never one that changed since", async () => {
       await claims.upsert(CLAIM);
-      const stale = { pid: 999, ownerToken: "gone" };
+      const stale = { pid: 999, ownerToken: "gone", updatedAtMs: CLAIM.updatedAtMs };
       expect(await claims.replaceIf(stale, TAKER)).toBe(false);
       expect(await claims.get("android", "emulator-5554")).toEqual(CLAIM);
-      expect(await claims.replaceIf(OWNER, TAKER)).toBe(true);
+      expect(await claims.replaceIf(CLAIM, TAKER)).toBe(true);
       expect(await claims.get("android", "emulator-5554")).toEqual(TAKER);
     });
 
     test("a row with the judged PID but another owner token is a different owner", async () => {
       await claims.upsert(CLAIM);
-      expect(await claims.replaceIf({ pid: OWNER.pid, ownerToken: "restarted" }, TAKER)).toBe(
-        false,
-      );
+      expect(await claims.replaceIf({ ...CLAIM, ownerToken: "restarted" }, TAKER)).toBe(false);
       expect(await claims.get("android", "emulator-5554")).toEqual(CLAIM);
+    });
+
+    test("an owner that released and claimed again since the judgement is a different row", async () => {
+      await claims.upsert(CLAIM);
+      const judged = (await claims.get("android", "emulator-5554"))!;
+      await claims.release("android", "emulator-5554", OWNER);
+      const reclaimed = { ...CLAIM, claimedAtMs: 30, updatedAtMs: 30 };
+      expect(await claims.replaceIf(undefined, reclaimed)).toBe(true);
+      expect(await claims.replaceIf(judged, TAKER)).toBe(false);
+      expect(await claims.get("android", "emulator-5554")).toEqual(reclaimed);
     });
 
     test("two takers of the same judged row: exactly one wins", async () => {
       await claims.upsert(CLAIM);
       const other = { ...TAKER, pid: 300, ownerToken: "token-c" };
       const results = await Promise.all([
-        claims.replaceIf(OWNER, TAKER),
-        claims.replaceIf(OWNER, other),
+        claims.replaceIf(CLAIM, TAKER),
+        claims.replaceIf(CLAIM, other),
       ]);
       expect(results.filter(Boolean)).toHaveLength(1);
     });

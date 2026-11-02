@@ -805,18 +805,61 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     return held ? `${held.pid}/${held.token}` : "none";
   };
 
-  test("a won claim is decided by the table and writes no claim file; a release withdraws the row (#11811 d)", async () => {
+  test("a won claim is decided by the table and the winner also writes its claim file; a release withdraws both (#11811 d, A2)", async () => {
     const files = new FakeOwnershipFiles();
     const store = new FakeDeviceClaims();
     const { ownership, mirror } = mirroredDaemon(files, store, SELF_PID);
 
     expect(await ownership.claim(DEVICE)).toBe(true);
     await mirror.idle();
-    expect(fileOwner(files)).toBe("none");
+    expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
 
     ownership.release(DEVICE);
     await mirror.idle();
+    expect(store.rows.size).toBe(0);
+    expect(fileOwner(files)).toBe("none");
+  });
+
+  test("a daemon that cannot use the table still sees the table winner through its claim file (A2)", async () => {
+    const files = new FakeOwnershipFiles();
+    const store = new FakeDeviceClaims();
+    const winner = mirroredDaemon(files, store, PEER_PID);
+    // No table: a registry still opening, or a failed open, leaves only the claim files.
+    const fallback = new ForwardLeaseForeignDeviceOwnership(SELF_PID, files, new FakeOwnerProbe(), {
+      ownerSocketPath: () => undefined,
+      timer: new FakeTimer(),
+    });
+    expect(await winner.ownership.claim(DEVICE)).toBe(true);
+
+    expect(await fallback.claim(DEVICE)).toBe(false);
+    expect(fileOwner(files)).toStartWith(`${PEER_PID}/`);
+  });
+
+  test("a table claim whose claim file a files-deciding daemon took meanwhile is given back (A2)", async () => {
+    const files = new FakeOwnershipFiles();
+    const store = new FakeDeviceClaims();
+    const fallback = new ForwardLeaseForeignDeviceOwnership(PEER_PID, files, new FakeOwnerProbe(), {
+      ownerSocketPath: () => undefined,
+      timer: new FakeTimer(),
+    });
+    // The files-deciding daemon takes the claim file between this daemon's table write and its own
+    // claim file write.
+    const replaceIf = store.replaceIf.bind(store);
+    let raced = false;
+    store.replaceIf = async (expected, claim) => {
+      const written = await replaceIf(expected, claim);
+      if (written && !raced && claim.pid === SELF_PID) {
+        raced = true;
+        expect(await fallback.claim(DEVICE)).toBe(true);
+      }
+      return written;
+    };
+    const self = mirroredDaemon(files, store, SELF_PID);
+
+    expect(await self.ownership.claim(DEVICE)).toBe(false);
+    await self.mirror.idle();
+    expect(fileOwner(files)).toStartWith(`${PEER_PID}/`);
     expect(store.rows.size).toBe(0);
   });
 
@@ -846,7 +889,7 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     expect(await self.ownership.claim(DEVICE)).toBe(true);
 
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
-    expect(fileOwner(files)).toBe("none");
+    expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
   });
 
   test("a daemon whose claim another took over never writes it back over the new owner's row", async () => {
@@ -864,6 +907,120 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     await peer.mirror.idle();
 
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+  });
+
+  test("a claim the files decided while the table was unavailable never displaces a live table owner", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeOwnershipFiles();
+      const store = new FakeDeviceClaims();
+      // A live peer that claimed through the table from another claim directory: no file here.
+      await store.upsert({
+        platform: "android",
+        deviceId: DEVICE,
+        kind: "allocation",
+        pid: PEER_PID,
+        ownerToken: "peer-token",
+        claimedAtMs: 1,
+        updatedAtMs: 1,
+      });
+      let open = false;
+      const timer = new FakeTimer();
+      const ownership = new ForwardLeaseForeignDeviceOwnership(
+        SELF_PID,
+        files,
+        new FakeOwnerProbe(),
+        { ownerSocketPath: () => undefined, timer },
+      );
+      const mirror = new StoreDeviceClaimMirror({
+        platform: "android",
+        store: () => (open ? store : undefined),
+        timer,
+        generationOf: () => undefined,
+        retryDelaysMs: [10],
+      });
+      ownership.attachClaimMirror(mirror);
+      expect(await ownership.claim(DEVICE)).toBe(true);
+
+      open = true;
+      timer.advanceTime(10);
+      await mirror.idle();
+      expect((await store.get("android", DEVICE))?.pid).toBe(PEER_PID);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  describe("a claim the files decided is recorded by compare-and-set (#11811 d)", () => {
+    const owner = { pid: SELF_PID, ownerToken: "self-token" };
+    const foreignRow: DeviceClaim = {
+      platform: "android",
+      deviceId: DEVICE,
+      kind: "allocation",
+      pid: PEER_PID,
+      ownerToken: "peer-token",
+      claimedAtMs: 1,
+      updatedAtMs: 1,
+    };
+    const mirrorOver = (store: FakeDeviceClaims, timer = new FakeTimer()) =>
+      new StoreDeviceClaimMirror({
+        platform: "android",
+        store: () => store,
+        timer,
+        generationOf: () => undefined,
+        retryDelaysMs: [10],
+      });
+
+    test("never replaces a row a live foreign owner holds", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const store = new FakeDeviceClaims();
+        await store.upsert(foreignRow);
+        const mirror = mirrorOver(store);
+        mirror.claimed(DEVICE, owner, undefined, async () => true);
+        await mirror.idle();
+        expect(await store.get("android", DEVICE)).toEqual(foreignRow);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("replaces a row whose owner is gone", async () => {
+      const store = new FakeDeviceClaims();
+      await store.upsert(foreignRow);
+      const mirror = mirrorOver(store);
+      mirror.claimed(DEVICE, owner, undefined, async () => false);
+      await mirror.idle();
+      expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+    });
+
+    test("a row that changed between the read and the write is read again on retry", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const store = new FakeDeviceClaims();
+        const timer = new FakeTimer();
+        const replaceIf = store.replaceIf.bind(store);
+        let lost = 0;
+        store.replaceIf = async (expected, claim) => {
+          if (lost === 0) {
+            lost++;
+            // Another writer lands first: the row the mirror read is no longer the row.
+            await store.upsert({ ...foreignRow, updatedAtMs: 2 });
+            return replaceIf(expected, claim);
+          }
+          return replaceIf(expected, claim);
+        };
+        const mirror = mirrorOver(store, timer);
+        mirror.claimed(DEVICE, owner, undefined, async () => false);
+        await mirror.idle();
+        expect((await store.get("android", DEVICE))?.pid).toBe(PEER_PID);
+        timer.advanceTime(10);
+        await mirror.idle();
+        expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   test("a busy table leaves the claim to the claim file, and a later claim moves it to the table", async () => {

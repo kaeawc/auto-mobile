@@ -501,8 +501,12 @@ in files-only mode: this daemon can allocate a device held only by a managed bin
 because allocation claim files alone decide ownership. Outside files-only mode the
 `device_claims` table decides Android and iOS allocation (#11811 step d): a claim is an
 optimistic compare-and-set on the device's row (judge a foreign owner's liveness, then
-write only if the row is unchanged), so no allocation claim file is written for those
-platforms; watch and TV, and any claim no table can decide, keep the claim files. The device-claims mirror skips
+write only if the row, including its `updated_at_ms`, is unchanged). For one more release the
+winner also writes its allocation claim file, so a daemon that cannot use the table and falls
+back to the files still sees it; a winner whose claim file a files-deciding daemon took meanwhile
+gives the row back. A claim the files decided is recorded by the same compare-and-set and never
+replaces a row a live foreign owner holds. Watch and TV, and any claim no table can decide, are
+decided by the claim files. The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers
 requiring current registry evidence still fail with non-retryable
 `registry_schema_unsupported`; its payload includes recorded writer versions and the

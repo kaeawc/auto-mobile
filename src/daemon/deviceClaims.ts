@@ -26,6 +26,9 @@ export interface DeviceClaim {
   updatedAtMs: number;
 }
 
+/** The row a compare-and-set judged: its owner and the write that put it there. */
+export type DeviceClaimVersion = Pick<DeviceClaim, "pid" | "ownerToken" | "updatedAtMs">;
+
 /** The host-wide `device_claims` table: it decides Android and iOS claims (#11811 step d). */
 export interface DeviceClaims {
   /**
@@ -35,14 +38,12 @@ export interface DeviceClaims {
    */
   upsert(claim: DeviceClaim): Promise<void>;
   /**
-   * The atomic claim (#11811 step d): writes `claim` only while the device's row is still what the
-   * caller judged it to be: no row when `expected` is undefined, else a row naming `expected`.
-   * Returns false when the row changed meanwhile, so of two daemons racing for it one wins.
+   * The atomic claim (#11811 step d): writes `claim` only while the device's row is still the one
+   * the caller judged: no row when `expected` is undefined, else the row `expected` read (same
+   * owner and same `updatedAtMs`, so an owner that released and claimed again in between is a
+   * different row). Returns false when the row changed meanwhile, so of two racing writers one wins.
    */
-  replaceIf(
-    expected: { pid: number; ownerToken: string } | undefined,
-    claim: DeviceClaim,
-  ): Promise<boolean>;
+  replaceIf(expected: DeviceClaimVersion | undefined, claim: DeviceClaim): Promise<boolean>;
   /** Removes the row only while `owner` still holds it; another owner's row is left alone. */
   release(
     platform: Platform,
@@ -72,11 +73,14 @@ export interface DeviceClaimMirror {
   /**
    * `stillHeld` re-checks the claim file before any later write of this claim (a retry, a backfill):
    * a daemon whose claim another daemon took over is never told, and must not write it back.
+   * The write is a compare-and-set; with `isLiveForeignOwner` it also never replaces a row a live
+   * foreign owner holds (#11811 step d), which keeps that owner's claim.
    */
   claimed(
     deviceId: string,
     owner: { pid: number; ownerToken: string; metadata?: string },
     stillHeld?: () => boolean,
+    isLiveForeignOwner?: (row: DeviceClaim) => Promise<boolean>,
   ): void;
   released(deviceId: string, owner: { pid: number; ownerToken: string }): void;
   /**
@@ -129,6 +133,8 @@ interface MirrorIntent {
   kind: "claim" | "release";
   /** Decided by the table, so it is written back only while no other owner has taken the row. */
   acquired?: true;
+  /** A file-decided claim never replaces a row this says a live foreign owner holds. */
+  isLiveForeignOwner?: (row: DeviceClaim) => Promise<boolean>;
   owner: MirrorOwner;
   claimedAtMs: number;
   stillHeld?: () => boolean;
@@ -171,7 +177,12 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     this.intents.clear();
   }
 
-  claimed(deviceId: string, owner: MirrorOwner, stillHeld?: () => boolean): void {
+  claimed(
+    deviceId: string,
+    owner: MirrorOwner,
+    stillHeld?: () => boolean,
+    isLiveForeignOwner?: (row: DeviceClaim) => Promise<boolean>,
+  ): void {
     if (this.skipped) {
       return;
     }
@@ -185,6 +196,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
       owner,
       claimedAtMs: sameOwner ? held.claimedAtMs : this.options.timer.now(),
       ...(stillHeld === undefined ? {} : { stillHeld }),
+      ...(isLiveForeignOwner === undefined ? {} : { isLiveForeignOwner }),
     });
   }
 
@@ -371,7 +383,10 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
 
   private record(
     deviceId: string,
-    intent: Pick<MirrorIntent, "kind" | "owner" | "claimedAtMs" | "stillHeld">,
+    intent: Pick<
+      MirrorIntent,
+      "kind" | "owner" | "claimedAtMs" | "stillHeld" | "isLiveForeignOwner"
+    >,
   ) {
     if (this.disposed || this.skipped) {
       return;
@@ -465,18 +480,52 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     if (intent.kind === "release") {
       return store.release(this.options.platform, deviceId, intent.owner);
     }
-    const row = this.claimRow(deviceId, intent.owner, intent.claimedAtMs);
-    if (!intent.acquired) {
-      return store.upsert(row);
-    }
-    // A table-decided claim is written back only where the row is still ours or gone: another
-    // owner that took the device meanwhile keeps it, and this intent is dropped.
     const held = await store.get(this.options.platform, deviceId);
     const ours = held?.pid === intent.owner.pid && held.ownerToken === intent.owner.ownerToken;
-    if ((held && !ours) || !(await store.replaceIf(held, row))) {
-      if (this.intents.get(deviceId) === intent) {
-        this.intents.delete(deviceId);
+    if (intent.acquired) {
+      // A table-decided claim is written back only where the row is still ours or gone: another
+      // owner that took the device meanwhile keeps it, and this intent is dropped.
+      if (
+        (held && !ours) ||
+        !(await store.replaceIf(held, this.claimRowFor(deviceId, intent, held)))
+      ) {
+        this.dropIntent(deviceId, intent);
       }
+      return;
+    }
+    if (held && !ours && (await this.heldByLiveForeignOwner(held, intent))) {
+      // The table names a live owner the claim files did not: it keeps the row (#11811 step d).
+      logger.warn(
+        `[DeviceClaims] Not recording the claim on ${deviceId}: the host-wide table names live owner pid ${held.pid}`,
+      );
+      this.dropIntent(deviceId, intent);
+      return;
+    }
+    // A compare-and-set, never a blind write: a row that changed since it was read is re-judged.
+    if (!(await store.replaceIf(held, this.claimRowFor(deviceId, intent, held)))) {
+      throw new Error("the row changed while it was being written");
+    }
+  }
+
+  /** The intent's row, keeping the original claim time when the table already names this owner. */
+  private claimRowFor(
+    deviceId: string,
+    intent: MirrorIntent,
+    held: DeviceClaim | undefined,
+  ): DeviceClaim {
+    const ours = held?.pid === intent.owner.pid && held.ownerToken === intent.owner.ownerToken;
+    return this.claimRow(deviceId, intent.owner, ours ? held.claimedAtMs : intent.claimedAtMs);
+  }
+
+  private async heldByLiveForeignOwner(row: DeviceClaim, intent: MirrorIntent): Promise<boolean> {
+    return (
+      intent.isLiveForeignOwner !== undefined && this.isLiveOwner(row, intent.isLiveForeignOwner)
+    );
+  }
+
+  private dropIntent(deviceId: string, intent: MirrorIntent): void {
+    if (this.intents.get(deviceId) === intent) {
+      this.intents.delete(deviceId);
     }
   }
 

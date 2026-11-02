@@ -1,5 +1,5 @@
 import type { Platform } from "../../src/models";
-import type { DeviceClaim, DeviceClaims } from "../../src/daemon/deviceClaims";
+import type { DeviceClaim, DeviceClaims, DeviceClaimVersion } from "../../src/daemon/deviceClaims";
 
 /** In-memory `device_claims`: one row per (platform, device), with the real release guard. */
 export class FakeDeviceClaims implements DeviceClaims {
@@ -22,15 +22,14 @@ export class FakeDeviceClaims implements DeviceClaims {
     this.rows.set(key, { ...claim, claimedAtMs: sameOwner ? held.claimedAtMs : claim.claimedAtMs });
   }
 
-  async replaceIf(
-    expected: { pid: number; ownerToken: string } | undefined,
-    claim: DeviceClaim,
-  ): Promise<boolean> {
+  async replaceIf(expected: DeviceClaimVersion | undefined, claim: DeviceClaim): Promise<boolean> {
     this.failIfBusy();
     const key = this.key(claim.platform, claim.deviceId);
     const held = this.rows.get(key);
     const matches = expected
-      ? held?.pid === expected.pid && held.ownerToken === expected.ownerToken
+      ? held?.pid === expected.pid &&
+        held.ownerToken === expected.ownerToken &&
+        held.updatedAtMs === expected.updatedAtMs
       : held === undefined;
     if (!matches) {
       return false;

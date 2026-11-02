@@ -1,6 +1,11 @@
 import { sql, type Kysely } from "kysely";
 import type { Platform } from "../../../models";
-import type { DeviceClaim, DeviceClaimKind, DeviceClaims } from "../../deviceClaims";
+import type {
+  DeviceClaim,
+  DeviceClaimKind,
+  DeviceClaims,
+  DeviceClaimVersion,
+} from "../../deviceClaims";
 
 export interface DeviceClaimTables {
   device_claims: {
@@ -48,10 +53,7 @@ export class SqliteDeviceClaims implements DeviceClaims {
     );
   }
 
-  async replaceIf(
-    expected: { pid: number; ownerToken: string } | undefined,
-    claim: DeviceClaim,
-  ): Promise<boolean> {
+  async replaceIf(expected: DeviceClaimVersion | undefined, claim: DeviceClaim): Promise<boolean> {
     const row = toRow(claim);
     return this.write(async (db) => {
       if (!expected) {
@@ -69,6 +71,7 @@ export class SqliteDeviceClaims implements DeviceClaims {
         .where("device_id", "=", claim.deviceId)
         .where("pid", "=", expected.pid)
         .where("owner_token", "=", expected.ownerToken)
+        .where("updated_at_ms", "=", expected.updatedAtMs)
         .executeTakeFirst();
       return Number(updated.numUpdatedRows) > 0;
     });

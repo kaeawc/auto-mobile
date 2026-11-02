@@ -108,3 +108,8 @@ test("maps built-in font families to CSS", () => {
   expect(textCss({ fontFamily: "sansSerif" }, context)["font-family"]).toBe("sans-serif");
   expect(textCss({ fontFamily: "default" }, context)).not.toHaveProperty("font-family");
 });
+
+test("an explicit normal font style is emitted so it overrides an italic parent", () => {
+  expect(textCss({ fontStyle: "normal" }, context)["font-style"]).toBe("normal");
+  expect(textCss({ fontStyle: "italic" }, context)["font-style"]).toBe("italic");
+});

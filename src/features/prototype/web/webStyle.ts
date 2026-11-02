@@ -189,6 +189,8 @@ const FONT_FAMILY: Readonly<Record<string, string>> = {
   monospace: "monospace",
 };
 
+const FONT_STYLE: Readonly<Record<string, string>> = { italic: "italic", normal: "normal" };
+
 const TEXT_DECORATION: Readonly<Record<string, string>> = {
   none: "none",
   underline: "underline",
@@ -221,8 +223,10 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
   if (typeof style.letterSpacing === "number") {
     css["letter-spacing"] = px(style.letterSpacing);
   }
-  if (style.fontStyle === "italic") {
-    css["font-style"] = "italic";
+  // Both values emit, so an explicit `normal` span overrides an italic parent.
+  const fontStyle = FONT_STYLE[String(style.fontStyle)];
+  if (fontStyle) {
+    css["font-style"] = fontStyle;
   }
   const family = FONT_FAMILY[String(style.fontFamily)];
   if (family) {

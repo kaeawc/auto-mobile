@@ -78,3 +78,19 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"x86_64/lmk_pressure not found"* ]]
 }
+
+@test "the pull-request job sets up AutoMobile before the emulator action boots through it" {
+  # boot-emulator.sh boots with `bun run src/index.ts`, so Bun and the
+  # repository dependencies must be installed first (#16413 review).
+  run bun -e '
+    const yaml = require("js-yaml");
+    const fs = require("fs");
+    const job = yaml.load(fs.readFileSync(".github/workflows/pull_request.yml", "utf8")).jobs["lmk-pressure-x86_64-emulator-smoke"];
+    const uses = job.steps.map((step) => step.uses ?? "");
+    const setup = uses.indexOf("./.github/actions/setup-auto-mobile-npm-package");
+    const emulator = uses.indexOf("./.github/actions/android-emulator");
+    console.log(setup >= 0 && emulator > setup ? "ordered" : `setup=${setup} emulator=${emulator}`);
+  '
+  [ "$status" -eq 0 ]
+  [ "$output" = "ordered" ]
+}

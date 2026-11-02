@@ -2462,6 +2462,9 @@ jobs:
           bash scripts/android/build-lmk-pressure.sh
           bash scripts/ci/verify-lmk-pressure-binaries.sh build/lmk-pressure
 
+      # The emulator action boots through `bun run src/index.ts --boot-device`.
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
       - uses: ./.github/actions/android-emulator
         with:
           arch: "x86_64"

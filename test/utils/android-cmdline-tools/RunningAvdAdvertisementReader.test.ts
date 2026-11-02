@@ -29,6 +29,25 @@ describe("TmpdirRunningAvdAdvertisementReader", () => {
     expect(await reader.isAvdAdvertisedRunning(AVD)).toBe(true);
   });
 
+  test("maps each live advertisement of the AVD to its console serial (#16339)", async () => {
+    const dir = createRunningDir();
+    writeAdvertisement(dir, 4242, AVD);
+    writeFileSync(join(dir, "pid_4343.ini"), "port.serial=5560\navd.id=other-avd\n", "utf-8");
+    writeFileSync(join(dir, "pid_4444.ini"), `port.serial=5562\navd.id=${AVD}\n`, "utf-8");
+    const reader = new TmpdirRunningAvdAdvertisementReader(dir, (pid) => pid !== 4444);
+
+    expect(await reader.advertisedSerials(AVD)).toEqual(["emulator-5554"]);
+  });
+
+  test("an advertisement without a console port maps to no serial", async () => {
+    const dir = createRunningDir();
+    writeFileSync(join(dir, "pid_4242.ini"), `avd.id=${AVD}\n`, "utf-8");
+    const reader = new TmpdirRunningAvdAdvertisementReader(dir, () => true);
+
+    expect(await reader.isAvdAdvertisedRunning(AVD)).toBe(true);
+    expect(await reader.advertisedSerials(AVD)).toEqual([]);
+  });
+
   test("ignores an advertisement whose process is gone", async () => {
     const dir = createRunningDir();
     writeAdvertisement(dir, 4242, AVD);

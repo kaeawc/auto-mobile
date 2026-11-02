@@ -9,9 +9,14 @@ import type {
   HostCommandExecutor,
   HostCommandOptions,
 } from "../../../src/utils/HostCommandExecutor";
+import type { SystemDetection } from "../../../src/utils/system/SystemDetection";
 import type { ExecResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { AMBIENT_ENV, readEnvRaw } from "../../../src/config/env";
+
+const linuxSystemDetection: Pick<SystemDetection, "getCurrentPlatform"> = {
+  getCurrentPlatform: () => "linux",
+};
 
 class FakeFiles implements MagiskStubFiles {
   writes = new Map<string, string>();
@@ -139,7 +144,9 @@ describe("Magisk stub builder", () => {
     const files = new FakeFiles();
     const host = new FakeHost();
     const signal = new AbortController().signal;
-    const apk = await new DefaultMagiskStubBuilder(host, files, "/sdk").build(signal);
+    const apk = await new DefaultMagiskStubBuilder(host, files, "/sdk", linuxSystemDetection).build(
+      signal,
+    );
     expect(files.writes.get(join("/fake/private-temp", "AndroidManifest.xml"))).toBe(
       MAGISK_STUB_MANIFEST,
     );
@@ -161,7 +168,7 @@ describe("Magisk stub builder", () => {
   test("missing SDK configuration is actionable and runs no commands", async () => {
     const host = new FakeHost();
     await expect(
-      new DefaultMagiskStubBuilder(host, new FakeFiles(), "").build(),
+      new DefaultMagiskStubBuilder(host, new FakeFiles(), "", linuxSystemDetection).build(),
     ).rejects.toBeInstanceOf(ActionableError);
     expect(host.calls).toEqual([]);
   });
@@ -170,9 +177,9 @@ describe("Magisk stub builder", () => {
     const files = new FakeFiles();
     files.missing = true;
     const host = new FakeHost();
-    await expect(new DefaultMagiskStubBuilder(host, files, "/sdk").build()).rejects.toThrow(
-      /ANDROID_HOME/,
-    );
+    await expect(
+      new DefaultMagiskStubBuilder(host, files, "/sdk", linuxSystemDetection).build(),
+    ).rejects.toThrow(/ANDROID_HOME/);
     expect(host.calls).toEqual([]);
   });
 
@@ -180,9 +187,9 @@ describe("Magisk stub builder", () => {
     const files = new FakeFiles();
     const host = new FakeHost();
     host.fail = true;
-    await expect(new DefaultMagiskStubBuilder(host, files, "/sdk").build()).rejects.toThrow(
-      /build command failed/,
-    );
+    await expect(
+      new DefaultMagiskStubBuilder(host, files, "/sdk", linuxSystemDetection).build(),
+    ).rejects.toThrow(/build command failed/);
     expect(files.removed).toEqual(["/fake/private-temp"]);
   });
 });

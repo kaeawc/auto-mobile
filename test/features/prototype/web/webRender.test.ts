@@ -904,6 +904,37 @@ describe("prototype web still (#16346)", () => {
     expect(scrollOf(false)).toBe("column");
   });
 
+  test("a spacer sized by a matching styleWhen does not make its line fill", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        state: { compact: true },
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "r",
+              children: [
+                {
+                  type: "spacer",
+                  styleWhen: [
+                    {
+                      when: { key: "compact", equals: true },
+                      style: { width: { dp: 8 }, height: { dp: 8 } },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "r",
+    )[0]!;
+    expect(row.style).not.toHaveProperty("flex");
+  });
+
   test("an explicit theme mode wins over the caller's; system falls back to it", () => {
     const surface = (mode: string | undefined, option?: "light" | "dark") =>
       byTag(

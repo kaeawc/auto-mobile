@@ -243,13 +243,19 @@ function fillMissing(node: Raw): Raw {
   return { ...node, style: { width: "fill", height: "fill", ...style } };
 }
 
-/** Whether a child's visibleWhen keeps it, binding its repeat placeholders first. */
-function rendersVisibly(entry: unknown, scope: WebRenderScope, path: string): boolean {
+/**
+ * Whether a child is a visible spacer that will fill its line: its repeat placeholders bind, its
+ * visibleWhen keeps it, and its style (with matching styleWhen entries) leaves it unsized.
+ */
+function fillsAsSpacer(entry: unknown, scope: WebRenderScope, path: string): boolean {
   const bound = scope.instances.reduce(
     (current, instance) => bindStructure(current, path, instance),
     record(entry) ?? {},
   );
-  return bound.visibleWhen === undefined || conditionHolds(bound.visibleWhen, scope.condition);
+  if (bound.visibleWhen !== undefined && !conditionHolds(bound.visibleWhen, scope.condition)) {
+    return false;
+  }
+  return isUnsizedSpacer({ ...bound, style: resolvedStyle(bound, scope) });
 }
 
 function spacerFilled(node: Raw): Raw {
@@ -262,8 +268,7 @@ const line =
     // A wrap-sized line around a filling spacer grows to its parent, as a Compose parent does
     // around a fillMaxSize child; otherwise it would shrink to nothing.
     const node =
-      Array.isArray(raw.children) &&
-      raw.children.some((entry) => isUnsizedSpacer(entry) && rendersVisibly(entry, scope, path))
+      Array.isArray(raw.children) && raw.children.some((entry) => fillsAsSpacer(entry, scope, path))
         ? fillMissing(raw)
         : raw;
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));

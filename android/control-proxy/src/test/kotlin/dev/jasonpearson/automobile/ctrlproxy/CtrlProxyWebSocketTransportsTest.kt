@@ -83,6 +83,17 @@ class CtrlProxyWebSocketTransportsTest {
     assertEquals(1, service.webSocketObserverGeneration())
   }
 
+  @Test
+  fun `observer generation advances on reconnect while the client count stays one`() {
+    service.webSocketServer = WebSocketServer(port = 0, scope = serverScope)
+    val first = service.webSocketServer.registerClient(1, SilentTransport)
+    service.webSocketServer.unregisterClient(first)
+    service.webSocketServer.registerClient(2, SilentTransport)
+
+    assertEquals(1, service.webSocketConnectionCount())
+    assertEquals(2, service.webSocketObserverGeneration())
+  }
+
   private object SilentTransport : WebSocketServer.ClientTransport {
     override suspend fun send(message: String) = Unit
 

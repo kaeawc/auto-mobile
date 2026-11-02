@@ -5,6 +5,7 @@ import { LmkPressureBinaryProvider } from "../../../src/features/deviceCondition
 import type { LmkPressureFileSystem } from "../../../src/features/deviceCondition/NodeLmkPressureFileSystem";
 import type { ChecksumCalculator, Sha256Source } from "../../../src/utils/ChecksumCalculator";
 import type { FileDownloader } from "../../../src/utils/FileDownloader";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const CACHE = "/cache/lmk-pressure";
@@ -85,6 +86,7 @@ function setup(checksums: Partial<Record<"arm64-v8a" | "x86_64", string>> = {}) 
     cacheDir: CACHE,
     expectedChecksum: (abi) => checksums[abi] ?? "",
     releaseUrl: (abi) => `https://assets/${abi}`,
+    idGenerator: new CountingIdGenerator("a"),
   });
   return { fs, downloader, provider };
 }
@@ -157,5 +159,29 @@ describe("LmkPressureBinaryProvider (#16402)", () => {
     const [a, b] = await both;
     expect(a).toBe(b);
     expect(downloader.urls).toEqual(["https://assets/x86_64"]);
+  });
+
+  test("separate providers downloading the same ABI at once both succeed (#16411 review)", async () => {
+    const { fs, downloader, provider } = setup({ x86_64: sha(X86_BYTES) });
+    // A second device's apply builds its own provider over the same cache directory.
+    const other = new LmkPressureBinaryProvider({
+      fileSystem: fs,
+      downloader,
+      checksumCalculator: new ContentChecksum(fs),
+      timer: new FakeTimer(),
+      cacheDir: CACHE,
+      expectedChecksum: () => sha(X86_BYTES),
+      releaseUrl: (abi) => `https://assets/${abi}`,
+      idGenerator: new CountingIdGenerator("b"),
+    });
+    downloader.hold();
+    const both = Promise.all([provider.ensure("x86_64"), other.ensure("x86_64")]);
+    await Promise.resolve();
+    downloader.release?.();
+    const [a, b] = await both;
+    expect(a).toBe(join(CACHE, "x86_64", "lmk_pressure"));
+    expect(b).toBe(a);
+    expect(fs.files.get(a ?? "")).toBe(X86_BYTES);
+    expect([...fs.files.keys()].filter((path) => path.endsWith(".download"))).toEqual([]);
   });
 });

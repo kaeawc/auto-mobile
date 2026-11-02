@@ -7,6 +7,7 @@ import {
 import { ActionableError } from "../../models/ActionableError";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/ChecksumCalculator";
 import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
+import { type IdGenerator, defaultIdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { getTempDir } from "../../utils/tempDir";
@@ -36,6 +37,8 @@ export interface LmkPressureBinaryProviderDeps {
   /** Test seam: the release asset URL per ABI. */
   releaseUrl?: (abi: LmkPressureAbi) => string;
   downloadTimeoutMs?: number;
+  /** Names each download's staging file, so concurrent callers never share one. */
+  idGenerator?: IdGenerator;
 }
 
 /**
@@ -53,6 +56,7 @@ export class LmkPressureBinaryProvider {
   private readonly downloadTimeoutMs: number;
   private readonly expectedChecksum: (abi: LmkPressureAbi) => string;
   private readonly releaseUrl: (abi: LmkPressureAbi) => string;
+  private readonly idGenerator: IdGenerator;
   private readonly inFlight = new Map<LmkPressureAbi, Promise<string | null>>();
 
   constructor(deps: LmkPressureBinaryProviderDeps = {}) {
@@ -69,6 +73,7 @@ export class LmkPressureBinaryProvider {
     this.expectedChecksum =
       deps.expectedChecksum ?? ((abi) => resolveLmkPressureChecksum(abi, this.env));
     this.releaseUrl = deps.releaseUrl ?? ((abi) => resolveLmkPressureUrl(abi, this.env));
+    this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
   }
 
   /** Verified local path of the ABI's released binary, or null when none is pinned. */
@@ -110,7 +115,9 @@ export class LmkPressureBinaryProvider {
       label: "[LMK_PRESSURE]",
       expectedSha256: expected,
       url: this.releaseUrl(abi),
-      archivePath: `${binaryPath}.download`,
+      // Each attempt stages its own file: another provider (a second device's apply, or
+      // another daemon) may be downloading the same ABI into this directory at once.
+      archivePath: `${binaryPath}.${this.idGenerator.next()}.download`,
       finalPath: binaryPath,
       metadataPath,
       downloadTimeoutMs: this.downloadTimeoutMs,

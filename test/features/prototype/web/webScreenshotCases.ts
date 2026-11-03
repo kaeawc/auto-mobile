@@ -108,11 +108,7 @@ export function webScreenshotPage(entry: WebScreenshotCase): string {
 }
 
 /** A page showing one spec as the only revision of the only variant. */
-export function webSpecPage(
-  spec: unknown,
-  name: string,
-  frame: (typeof WEB_SCREENSHOT_FRAMES)[number] = "pixel-9",
-): string {
+export function webSpecPage(spec: unknown, name: string, frame: string = "pixel-9"): string {
   return buildPrototypeWebPage({
     title: name,
     frame,

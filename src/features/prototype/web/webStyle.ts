@@ -10,6 +10,12 @@ export interface WebStyleContext {
   readonly palette: ReadonlyMap<string, Rgba>;
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
+  /**
+   * Inside a horizontal scroll, where Compose measures content against an unbounded width (and
+   * descendants inherit it until a node bounds its own width), so a row's unsized aspect ratio
+   * sizes from the height instead of taking all the width.
+   */
+  readonly unboundedWidth?: boolean;
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
   /** The frame's platform, for looks the devices draw differently (glass). Android when unset. */
@@ -36,6 +42,13 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 }
 
 type Css = Record<string, string>;
+
+/**
+ * A style key the web renderer adds to a horizontal scroll's child, and to the children of a row
+ * or box beneath it, never authored (the style schema is strict, so a `styleWhen` cannot overwrite
+ * it): the parent's definite content height (dp), the incoming max height Compose hands that child.
+ */
+export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 

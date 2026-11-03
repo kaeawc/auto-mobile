@@ -5,7 +5,6 @@ import { sortedReaddirEntriesSync } from "../../src/utils/io";
 // The sdkmanager execution-boundary detector (issue #4052, hardened in #4339 and #4341). Its row
 // in boundaryRows.ts (issue #13219) and test/lint/sdkManagerExecutionBoundary.integration.test.ts
 // both import `directlyExecutesSdkManager` from here so there is exactly one detector.
-export const SOURCE_ROOT = "src";
 export const OWNER = "src/utils/android-cmdline-tools/SdkManagerClient.ts";
 // Keep production diagnostics out of this list unless they genuinely cannot use the client.
 export const EXCEPTIONS = new Map<string, string>();

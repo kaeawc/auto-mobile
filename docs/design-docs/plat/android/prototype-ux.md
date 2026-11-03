@@ -485,13 +485,18 @@ components and rotary input in prototypes are out of scope.
 
 ## Android Automotive
 
-The renderer is phone-oriented; on a car display it lays out wide and landscape. A successful `show`
-on an Android device whose booted form factor is `automotive` reports `formFactor: "automotive"`,
-taken from the device's form factor with no extra read; other devices omit it. `save` with `pin:true`
-uses the same launcher check as everywhere else, so a car launcher without pinned-shortcut support keeps
-the save and reports `pinned:"unsupported"`. Dismiss placement relative to the car system bars, and
-whether the overlay stays visible while driving restrictions are on, are unverified on an AAOS emulator
-(#14916). Car App Library templates and car-specific spec nodes are out of scope.
+The renderer is phone-oriented; on a car display it lays out wide and landscape. A successful `show` on
+an Android device whose booted form factor is `automotive` reports `formFactor: "automotive"`, taken
+from the device's form factor with no extra read; other devices omit it. `save` with `pin:true` uses the
+same launcher check as everywhere else, so a car launcher without pinned-shortcut support keeps the save
+and reports `pinned:"unsupported"` (the car launcher `com.android.car.carlauncher` has none). The car
+top bar can be taller than the `systemBars` top inset the overlay window receives, so for fullscreen and
+top-gravity floating windows the host uses the larger of that inset and the display's `systemBars` top
+inset: the dismiss bar, the escape pill and top-edge `safeAreaPadding` clear the whole bar. With `none`,
+authored content without top-edge `safeAreaPadding` still starts behind the car top bar. The floored
+position and whether the overlay stays visible while driving restrictions are on are unverified on a
+device; checking them needs a userdebug or eng AAOS image, since user builds refuse driving-state
+emulation. Car App Library templates and car-specific spec nodes are out of scope.
 
 ## Common node properties
 
@@ -4143,16 +4148,27 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   not a launcher; it reports the shortcut unconfirmed instead. In-process saves take a per-device
   ownership; a second concurrent save only checks the current page and never swipes or restarts
   under the first.
-- An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
-  screen-off device reports `device_locked`; the save remains and a retry is safe.
+- An unsupported launcher keeps the save and reports `pinned:"unsupported"`. With the screen off,
+  `requestPinShortcut` throws `IllegalStateException` and the call reports `device_locked`; the save
+  remains and a retry is safe. An awake device showing the keyguard accepts the request, and the
+  dialog waits behind the keyguard (`pending`).
 - The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`
   runs `cmd shortcut clear-shortcuts` from the host, but only when no saved prototype remains,
   because the command clears all CtrlProxy shortcuts.
 - Uninstalling or clearing CtrlProxy deletes saved prototypes and every pinned shortcut; the host
   mirror (#12268) restores the saved content, never the icons.
-- Pinning from the accessibility service while no CtrlProxy activity is visible, launcher dialog
-  shapes, badges and `clear-shortcuts` behaviour on the workspace are unverified on a device
-  (#12261).
+- The accessibility-bound CtrlProxy may call `requestPinShortcut` with no activity visible (its
+  process is a bound foreground service).
+- The dialog is `AddItemActivity` (`QuickstepAddItemActivity` on API 37 Pixel Launcher) and its
+  shape differs by API and launcher: a platform AlertDialog with "ADD AUTOMATICALLY" (AOSP
+  Launcher3), a bottom sheet with an "Add to home screen" `Button` (Pixel Launcher before API 37),
+  or a Compose sheet whose labels are plain text under a clickable parent (Pixel Launcher, API 37).
+  The accept match is by label and covers all three (fixtures in
+  `test/fixtures/android-pin-dialog/`); a launcher with another label is reported
+  (`unrecognized` or a timeout) and Cancel is never tapped.
+- The launcher badges the pinned icon with CtrlProxy's icon, and often places it on workspace
+  page 2 even when page 1 has room.
+- `clear-shortcuts` removes the icons from the workspace, not only the shortcut records.
 
 ## Lazy lists (`prototype_lazy_list_v1`, #14182, not device-verified)
 

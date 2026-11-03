@@ -314,7 +314,7 @@ the host, so the page's script only switches between views it was given and neve
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
   app's top colour. The top colour comes from geometry, not from reading CSS properties one by one: a
   small layout pass places the window's content on the screen (flex lines with growth, gaps, arrangement
-  and alignment, one-cell boxes, collection grids' column tracks, block flow, minimum and maximum sizes, aspect ratio, padding including
+  and alignment, a reversed line placed from its end, one-cell boxes, collection grids' column tracks, block flow, minimum and maximum sizes, aspect ratio, padding including
   the safe-area insets, absolute insets, relative offsets and translations, overflow clips, and CSS paint
   order with z-index), then samples evenly spaced points along the screen's top edge. At each point the
   last opaque background painted there is the colour, else the screen background; the colour at the most

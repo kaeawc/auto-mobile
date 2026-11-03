@@ -29,6 +29,7 @@ import {
 import {
   GUIDE_DEVICE_LOOPBACK,
   GUIDE_PLATFORM,
+  GUIDE_MEDIA_ACTIONS,
   GUIDE_NOTIFICATIONS,
   GUIDE_PLATFORM_EXAMPLE,
   GUIDE_STRINGS_SEMANTICS,
@@ -357,7 +358,7 @@ export function renderPrototypeGuide(): string {
     renderPlatformDifferences(),
     renderNativeCode(),
     renderWebPreview(),
-    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}\n\n${GUIDE_NOTIFICATIONS}`,
+    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}\n\n${GUIDE_NOTIFICATIONS}\n\n${GUIDE_MEDIA_ACTIONS}`,
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

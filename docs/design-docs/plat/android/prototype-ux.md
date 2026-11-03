@@ -2216,6 +2216,16 @@ avatar?}` with unique ids. Each email must use a reserved domain (`example.test`
 `.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
 `sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
 validation. No production runtime advertises the module yet.
+`prototypeAuthSession.ts` is the session reference both runtimes copy. A sign-in writes the account to `into`
+(default `/data/session`) and then saves `{token, userId, expiresAtMs}` in the prototype's secure store. The
+token is an opaque `fake-<IdGenerator id>`, and the TTL is `sessionTtlSeconds`, default 3600. An account the
+block does not list, a `/data` write that fails or a store write that fails is `platform_error` and changes
+nothing. `cancelled` and `unavailable` keep their codes, any other code becomes `platform_error`, and a
+failed sign-in keeps the previous session. `auth.signOut` clears the store and removes `into`.
+`auth.sessionExpired` clears the store and leaves `/data` to the `platform.on` handlers. At launch, a session
+that is still valid for a listed account restores `/platform/auth`; any other is cleared. A session past its
+TTL is reported as expired, so the runtime raises `auth.sessionExpired`. The token appears in no result,
+`/data` value or `/platform` key, and a store error is reported by its name only.
 
 **Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
 `location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole
@@ -2380,6 +2390,9 @@ one-key union), which is a node-scoped player released when the node leaves comp
   position into; a slider bound to it holds device writes while it is dragged and seeks on release.
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
+- At most `MAX_PROTOTYPE_VIDEO_NODES` (64) `videoPlayer` nodes, counted in the authored tree and
+  again after repeat expansion, so every repeat instance counts. A `poster` costs one image against
+  `MAX_PROTOTYPE_IMAGES` in both counts.
 
 **Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
 `{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`
@@ -4139,12 +4152,19 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   work: launcher dialogs differ).
 - A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
   `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
-  screen. If it is missing, it resolves the default launcher (`cmd package resolve-activity`), and
-  when that package is a known launcher runs `am force-stop` plus a HOME intent once, waits for the
-  launcher's tree to go quiet, and looks again. The result reports `launcherRestarted` and
-  `shortcutVisible`; an unknown launcher is left alone with a warning. It is on by default on
-  emulators and physical devices; `restartLauncher:false` opts out. It never runs on a pending pin
-  (no shortcut exists yet) and runs at most once per call.
+  screen, swiping through the following workspace pages (Pixel Launcher puts a new pin on page 2)
+  until the label appears, a page repeats, or ten pages are checked. If it is missing, it resolves
+  the default launcher (`cmd package resolve-activity`), and when that package is a known launcher
+  runs `am force-stop` plus a HOME intent once, waits for the launcher's tree to go quiet, and scans
+  again from the reset page. The result reports `launcherRestarted` and `shortcutVisible`; an
+  unknown launcher is left alone with a warning. It is on by default on emulators and physical
+  devices; `restartLauncher:false` opts out. It never runs on a pending pin (no shortcut exists
+  yet) and runs at most once per call.
+- Guards: the save is a control call, so the device-ownership layer refuses it on a device another
+  session, daemon or binding holds. The check never swipes or restarts when the foreground app is
+  not a launcher; it reports the shortcut unconfirmed instead. In-process saves take a per-device
+  ownership; a second concurrent save only checks the current page and never swipes or restarts
+  under the first.
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. With the screen off,
   `requestPinShortcut` throws `IllegalStateException` and the call reports `device_locked`; the save
   remains and a retry is safe. An awake device showing the keyguard accepts the request, and the

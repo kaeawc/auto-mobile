@@ -52,12 +52,67 @@ function swiftFiles(dir: string): string[] {
   });
 }
 
-/** Modules a local package re-exports, mapped back to the spec's package names. */
+/**
+ * Maps the modules a package re-exports to the spec package names a target must also
+ * declare. A module that is one of the package's own targets, or that is not a local
+ * package module at all (system/remote), needs nothing. A local module whose package
+ * the spec never declares under `packages:` is still reported, under a descriptive
+ * name, because the target cannot depend on it until the package is declared.
+ */
+export function requiredPackagesForReexports(
+  exportedModules: string[],
+  ownModules: ReadonlySet<string>,
+  localModuleDirs: ReadonlyMap<string, string>,
+  specPackageByDir: ReadonlyMap<string, string>,
+): string[] {
+  return [...new Set(exportedModules)].flatMap((mod) => {
+    const dir = localModuleDirs.get(mod);
+    if (ownModules.has(mod) || dir === undefined) {
+      return [];
+    }
+    return [specPackageByDir.get(dir) ?? `${mod} (from ${dir}, undeclared in packages:)`];
+  });
+}
+
+function hasPackageManifest(dir: string): boolean {
+  return readdirSync(dir).includes("Package.swift");
+}
+
+function sourceModules(packageDir: string): string[] {
+  try {
+    return readdirSync(join(packageDir, "Sources"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch (error) {
+    // A Swift package without a Sources directory defines no local modules.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/** Every module under `ios/<package>/Sources/<Module>`, mapped to its package directory. */
+function localModuleDirectories(): Map<string, string> {
+  const modules = new Map<string, string>();
+  for (const entry of readdirSync(IOS_DIR, { withFileTypes: true })) {
+    const packageDir = join(IOS_DIR, entry.name);
+    if (entry.isDirectory() && hasPackageManifest(packageDir)) {
+      for (const mod of sourceModules(packageDir)) {
+        modules.set(mod, packageDir);
+      }
+    }
+  }
+  return modules;
+}
+
+/** Spec package names a local package's `@_exported import`s require alongside it. */
 function realReexportsOf(projectDir: string, spec: XcodegenSpec) {
-  const moduleToPackage = new Map<string, string>();
+  const localModuleDirs = localModuleDirectories();
+  const specPackageByDir = new Map<string, string>();
   for (const [name, pkg] of Object.entries(spec.packages ?? {})) {
     if (pkg.path) {
-      moduleToPackage.set(name, name);
+      specPackageByDir.set(resolve(projectDir, pkg.path), name);
     }
   }
   return (packageName: string): string[] => {
@@ -65,16 +120,18 @@ function realReexportsOf(projectDir: string, spec: XcodegenSpec) {
     if (!path) {
       return [];
     }
-    const sources = join(resolve(projectDir, path), "Sources");
-    const exported = swiftFiles(sources).flatMap((file) =>
+    const packageDir = resolve(projectDir, path);
+    const exported = swiftFiles(join(packageDir, "Sources")).flatMap((file) =>
       [...readFileSync(file, "utf8").matchAll(/^\s*@_exported\s+import\s+(\w+)/gm)].map(
         (match) => match[1],
       ),
     );
-    return [...new Set(exported)].flatMap((mod) => {
-      const owner = moduleToPackage.get(mod);
-      return owner && owner !== packageName ? [owner] : [];
-    });
+    return requiredPackagesForReexports(
+      exported,
+      new Set(sourceModules(packageDir)),
+      localModuleDirs,
+      specPackageByDir,
+    );
   };
 }
 
@@ -94,6 +151,40 @@ describe("xcodegen project.yml re-exported package dependencies", () => {
     };
     expect(findMissingReexportedPackages(spec, (name) => (name === "Sdk" ? ["Wire"] : []))).toEqual(
       [],
+    );
+  });
+
+  test("maps a re-exported local module to the spec package declared for its directory", () => {
+    expect(
+      requiredPackagesForReexports(
+        ["Wire", "Foundation", "SdkInternal"],
+        new Set(["Sdk", "SdkInternal"]),
+        new Map([
+          ["Wire", "/ios/wire"],
+          ["Sdk", "/ios/sdk"],
+          ["SdkInternal", "/ios/sdk"],
+        ]),
+        new Map([
+          ["/ios/wire", "WirePackage"],
+          ["/ios/sdk", "Sdk"],
+        ]),
+      ),
+    ).toEqual(["WirePackage"]);
+  });
+
+  test("reports a re-exported local module whose package the spec never declares", () => {
+    const required = requiredPackagesForReexports(
+      ["Wire"],
+      new Set(["Sdk"]),
+      new Map([["Wire", "/ios/wire"]]),
+      new Map([["/ios/sdk", "Sdk"]]),
+    );
+    expect(required).toEqual(["Wire (from /ios/wire, undeclared in packages:)"]);
+    const spec: XcodegenSpec = {
+      targets: { App: { dependencies: [{ package: "Sdk" }] } },
+    };
+    expect(findMissingReexportedPackages(spec, (name) => (name === "Sdk" ? required : []))).toEqual(
+      [{ target: "App", missing: required[0], via: "Sdk" }],
     );
   });
 

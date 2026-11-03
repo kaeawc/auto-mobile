@@ -35,8 +35,26 @@ test("combines with all, any and not", () => {
   expect(conditionHolds({ not: { key: "flag", equals: true } }, scope)).toBe(false);
 });
 
-test("a platform pointer is undecidable, so the node stays visible", () => {
+test("a platform pointer the frame does not decide is undecidable, so the node stays visible", () => {
   expect(conditionHolds({ platform: "/device/widthClass", equals: "expanded" }, scope)).toBe(true);
+  const decided = { ...scope, platformState: { "/device/widthClass": "compact" } };
+  expect(conditionHolds({ platform: "/device/idiom", equals: "tablet" }, decided)).toBe(true);
+});
+
+test("a platform pointer the frame decides compares like state", () => {
+  const decided = {
+    ...scope,
+    platformState: { "/device/widthClass": "compact", "/device/posture": undefined },
+  };
+  expect(conditionHolds({ platform: "/device/widthClass", equals: "expanded" }, decided)).toBe(
+    false,
+  );
+  expect(conditionHolds({ platform: "/device/widthClass", equals: "compact" }, decided)).toBe(true);
+  expect(conditionHolds({ platform: "/device/posture", equals: "book" }, decided)).toBe(false);
+  expect(conditionHolds({ platform: "/device/posture", empty: true }, decided)).toBe(true);
+  expect(
+    conditionHolds({ not: { platform: "/device/widthClass", notEquals: "compact" } }, decided),
+  ).toBe(true);
 });
 
 test("an undecidable condition stays undecided under not, all and any", () => {

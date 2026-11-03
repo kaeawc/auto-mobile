@@ -11,6 +11,10 @@ import Foundation
 struct PrototypeStorageBlock: Decodable, Equatable {
     let version: Int
     let keys: [String]
+    /// `state:` keys kept in the Keychain, never in plaintext storage (#14321).
+    var secure: [String]? = nil
+    /// Secure keys that unlock only after `biometric.authenticate` (#14321).
+    var secureAuth: [String: String]? = nil
 }
 
 /// One parsed storage key.
@@ -46,6 +50,17 @@ struct PrototypeStoredValues: Codable, Equatable {
     var version: Int
     /// By storage key (`state:darkMode`, `data:/cart`).
     var values: [String: JSONValue]
+    /// The secure store's values by `state:<key>` (#14321). A biometric-bound entry only marks that the
+    /// key holds a value; its content is not read. Never encoded: secure values stay out of the
+    /// plaintext file.
+    var secure: [String: JSONValue]? = nil
+    /// Secure keys whose hardware key was revoked, so their value can no longer be decrypted. Never
+    /// encoded, like `secure`.
+    var invalidated: [String]? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case version, values
+    }
 }
 
 enum PrototypeStorageBytes {

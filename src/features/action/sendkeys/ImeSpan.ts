@@ -6,6 +6,9 @@ import { redactPasswordImeFailure, withImeFailure } from "../imeFailureDiagnosti
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { ImeRestorationError } from "./ImeRestorationError";
+import type { ImeEditorState } from "./ImeEditorState";
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { pendingImeRestores, type PendingImeRestoreRegistry } from "./PendingImeRestore";
 
 type SendKeysCommandExecution = Awaited<
   ReturnType<NonNullable<SendKeysCommandExecutor["withImeSpan"]>>
@@ -27,6 +30,7 @@ export interface ImeSpanSnapshot {
 
 export interface AndroidImeSpan {
   snapshot?: ImeSpanSnapshot;
+  editorState?: ImeEditorState;
   lastType?: { text: string; focusedFieldClass?: string | null; passwordField?: boolean };
   safeToRestore: boolean;
   restorationFailed?: boolean;
@@ -45,13 +49,19 @@ export interface ImeSpanHost {
     wasEnabled: boolean,
     priorSubtype: ImeSubtypeSnapshot,
   ): Promise<void>;
+  getPinnedUser(): number | undefined;
+  setPinnedUser(userId: number | undefined): void;
   clearPinnedUser(): void;
 }
 
 export class ImeSpanService {
   private readonly imeSpanContext = new AsyncLocalStorage<AndroidImeSpan>();
 
-  constructor(private readonly host: ImeSpanHost) {}
+  constructor(
+    private readonly host: ImeSpanHost,
+    private readonly timer: Timer = defaultTimer,
+    private readonly pending: PendingImeRestoreRegistry = pendingImeRestores,
+  ) {}
 
   get imeSpan(): AndroidImeSpan | undefined {
     return this.imeSpanContext.getStore();
@@ -70,7 +80,7 @@ export class ImeSpanService {
     }
     const admission = Promise.withResolvers<void>();
     const active = Promise.withResolvers<void>();
-    // Keep the existing shared mutex callback alive until the loop's finally restores.
+    // Keep the shared mutex callback alive only until this call finishes.
     // Acquire lazily so non-IME commands never inherit IME admission/quarantine failures.
     const completion = withAndroidImeLock(
       this.host.deviceId,
@@ -85,6 +95,11 @@ export class ImeSpanService {
     void completion.catch(admission.reject);
     await admission.promise;
     span.lockCompletion = completion;
+    const pending = this.pending.take(this.host.deviceId);
+    if (pending) {
+      span.snapshot = pending.snapshot;
+      this.host.setPinnedUser(pending.userId);
+    }
   }
 
   private async finishImeSpan(
@@ -99,7 +114,12 @@ export class ImeSpanService {
       failure = error;
     } finally {
       try {
-        await this.restoreImeSpan();
+        const span = this.imeSpan!;
+        if (failure === undefined && execution && this.canDeferImeRestore(execution, span)) {
+          this.deferImeRestore(span);
+        } else {
+          await this.restoreImeSpan();
+        }
       } catch (restoreError) {
         logger.warn("[SendKeys] IME span restoration failed", restoreError);
         if (failure !== undefined) {
@@ -109,13 +129,25 @@ export class ImeSpanService {
           );
         }
         this.reportImeSpanRestoreFailure(execution!, restoreError);
+      } finally {
+        // Even a timer/registry failure must not strand the per-device mutex.
+        await this.releaseImeSpanLock(this.imeSpan!);
       }
     }
     if (failure !== undefined) {
       throw failure;
     }
     execution!.restorationFailed = execution!.restorationFailed || this.imeSpan?.restorationFailed;
+    execution!.imeEditorState = this.imeSpan?.editorState;
     return execution!;
+  }
+
+  private canDeferImeRestore(execution: SendKeysCommandExecution, span: AndroidImeSpan): boolean {
+    return (
+      !execution.failure &&
+      execution.results.every((result) => result.success) &&
+      span.safeToRestore
+    );
   }
 
   private reportImeSpanRestoreFailure(
@@ -147,9 +179,45 @@ export class ImeSpanService {
     execution.restorationFailed = true;
   }
 
+  private deferImeRestore(span: AndroidImeSpan): void {
+    const snapshot = span.snapshot;
+    if (!snapshot) {
+      return;
+    }
+    const userId = this.host.getPinnedUser();
+    this.pending.store(
+      this.host.deviceId,
+      {
+        snapshot,
+        userId,
+        restore: async () => {
+          this.host.setPinnedUser(userId);
+          try {
+            await this.host.restoreIme(snapshot.prior, snapshot.wasEnabled, snapshot.priorSubtype);
+          } finally {
+            this.host.clearPinnedUser();
+          }
+        },
+      },
+      this.timer,
+    );
+    span.snapshot = undefined;
+  }
+
+  private async releaseImeSpanLock(span: AndroidImeSpan): Promise<void> {
+    if (span.releaseLock) {
+      this.host.clearPinnedUser();
+    }
+    span.releaseLock?.();
+    span.releaseLock = undefined;
+    await span.lockCompletion;
+    span.lockCompletion = undefined;
+  }
+
   async restoreImeSpan(): Promise<void> {
     const span = this.imeSpan;
-    if (!span) {
+    if (!span?.releaseLock) {
+      await this.pending.flush(this.host.deviceId);
       return;
     }
     const snapshot = span.snapshot;
@@ -173,14 +241,7 @@ export class ImeSpanService {
       logger.warn("[SendKeys] Active IME span restoration failed", error);
       throw error;
     } finally {
-      // Clear the pinned user before releasing the lock to another call on this executor.
-      if (span.releaseLock) {
-        this.host.clearPinnedUser();
-      }
-      span.releaseLock?.();
-      span.releaseLock = undefined;
-      await span.lockCompletion;
-      span.lockCompletion = undefined;
+      await this.releaseImeSpanLock(span);
     }
   }
 }

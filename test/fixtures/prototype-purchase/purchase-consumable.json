@@ -1,0 +1,73 @@
+{
+  "name": "A consumable records the transaction, grants no entitlement and can be bought again",
+  "products": [
+    {
+      "id": "pro_monthly",
+      "kind": "subscription"
+    },
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    },
+    {
+      "id": "coins_100",
+      "kind": "consumable"
+    }
+  ],
+  "state": {
+    "entitlements": {},
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "purchase",
+      "productId": "coins_100",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "c1"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "c1",
+            "productId": "coins_100",
+            "status": "purchased"
+          }
+        },
+        "into": {
+          "status": "purchased",
+          "transactionId": "c1"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "coins_100",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "c2"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "c2",
+            "productId": "coins_100",
+            "status": "purchased"
+          }
+        },
+        "into": {
+          "status": "purchased",
+          "transactionId": "c2"
+        },
+        "entitlementsChanged": false
+      }
+    }
+  ]
+}

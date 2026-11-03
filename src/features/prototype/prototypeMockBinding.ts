@@ -1,6 +1,7 @@
 /**
  * Placeholder binding for canned mock responses (#14271): `{params.id}`, `{query.q}` and
- * `{body:/pointer}`, the same placeholder family as specs and no expressions. A string that is
+ * `{body:/pointer}`, plus `{item}` and `{item:/pointer}` for the item a collection write stored
+ * (broadcasts only); the same placeholder family as specs and no expressions. A string that is
  * exactly one placeholder takes the bound value's type; a placeholder inside longer text is
  * interpolated as text. An unbound placeholder is `null` (exact) or empty (interpolated).
  */
@@ -13,10 +14,18 @@ export interface MockBindingContext {
   params: Record<string, string>;
   query: Record<string, string>;
   body: PrototypeRequestJson | undefined;
+  /** The stored item of a collection write; only broadcasts bind it. */
+  item?: PrototypeRequestJson;
 }
 
-const PLACEHOLDER = /\{(params\.[A-Za-z][A-Za-z0-9_]*|query\.[^{}\s]+|body:\/[^{}\s]*)\}/g;
-const EXACT = new RegExp(`^${PLACEHOLDER.source}$`);
+const REQUEST_TOKENS = String.raw`params\.[A-Za-z][A-Za-z0-9_]*|query\.[^{}\s]+|body:\/[^{}\s]*`;
+/** Grammars without and with `{item}`, so a route body's literal `{item}` text stays as written. */
+const GRAMMARS = [REQUEST_TOKENS, String.raw`${REQUEST_TOKENS}|item(?::\/[^{}\s]*)?`].map(
+  (tokens) => ({
+    placeholder: new RegExp(String.raw`\{(${tokens})\}`, "g"),
+    exact: new RegExp(String.raw`^\{(${tokens})\}$`),
+  }),
+);
 
 function lookup(token: string, context: MockBindingContext): PrototypeRequestJson | undefined {
   // Own properties only: `{query.toString}` must be unbound, not the inherited function.
@@ -25,6 +34,14 @@ function lookup(token: string, context: MockBindingContext): PrototypeRequestJso
   }
   if (token.startsWith("query.")) {
     return ownValue(context.query, token.slice("query.".length));
+  }
+  if (token === "item") {
+    return context.item;
+  }
+  if (token.startsWith("item:")) {
+    return resolvePrototypeDataPointer(context.item, token.slice("item:".length)) as
+      | PrototypeRequestJson
+      | undefined;
   }
   return resolvePrototypeDataPointer(context.body, token.slice("body:".length)) as
     | PrototypeRequestJson
@@ -55,6 +72,7 @@ export function bindMockValue(
   context: MockBindingContext,
   limit: number = MAX_PROTOTYPE_RESPONSE_BYTES,
 ): PrototypeRequestJson {
+  const { placeholder, exact: exactPlaceholder } = GRAMMARS["item" in context ? 1 : 0]!;
   let left = limit;
   const charge = (size: number): void => {
     left -= size;
@@ -75,15 +93,15 @@ export function bindMockValue(
   };
   const bind = (entry: PrototypeRequestJson): PrototypeRequestJson => {
     if (typeof entry === "string") {
-      const exact = EXACT.exec(entry);
+      const exact = exactPlaceholder.exec(entry);
       if (exact) {
         const bound = lookup(exact[1]!, context) ?? null;
         charge(sizeOf(exact[1]!, bound));
         return bound;
       }
       // Literal text only: each placeholder is charged for what it emits, not for its own syntax.
-      charge(entry.replace(PLACEHOLDER, "").length);
-      return entry.replace(PLACEHOLDER, (_match, token: string) => {
+      charge(entry.replace(placeholder, "").length);
+      return entry.replace(placeholder, (_match, token: string) => {
         const text = asText(lookup(token, context));
         charge(text.length);
         return text;

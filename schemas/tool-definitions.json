@@ -4871,7 +4871,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -5001,7 +5010,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -5017,7 +5026,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -7542,7 +7560,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -8326,7 +8353,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -8342,7 +8369,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -10218,7 +10254,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   },
                   "sizePx": {
                     "type": "object",
@@ -13449,7 +13494,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -13552,7 +13606,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -13568,7 +13622,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -16885,7 +16948,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -17057,7 +17129,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -17073,7 +17145,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -18621,6 +18702,7 @@
                             "cover",
                             "rear",
                             "external",
+                            "cluster",
                             "overlay",
                             "virtual",
                             "unknown"
@@ -19274,6 +19356,7 @@
                             "cover",
                             "rear",
                             "external",
+                            "cluster",
                             "overlay",
                             "virtual",
                             "unknown"
@@ -21504,7 +21587,7 @@
           "type": "boolean"
         },
         "display": {
-          "description": "Panel key, role (inner, cover, rear, external, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
+          "description": "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
           "type": "string"
         },
         "project": {
@@ -21682,7 +21765,16 @@
             },
             "role": {
               "type": "string",
-              "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+              "enum": [
+                "inner",
+                "cover",
+                "rear",
+                "external",
+                "cluster",
+                "overlay",
+                "virtual",
+                "unknown"
+              ]
             },
             "posture": {
               "type": "string",
@@ -22588,7 +22680,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -25758,7 +25859,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -25907,7 +26017,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -25923,7 +26033,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -27936,7 +28055,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -28047,7 +28175,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -28063,7 +28191,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -39263,7 +39400,16 @@
                 },
                 "role": {
                   "type": "string",
-                  "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                  "enum": [
+                    "inner",
+                    "cover",
+                    "rear",
+                    "external",
+                    "cluster",
+                    "overlay",
+                    "virtual",
+                    "unknown"
+                  ]
                 }
               },
               "required": ["key", "role"],
@@ -41823,6 +41969,7 @@
                           "cover",
                           "rear",
                           "external",
+                          "cluster",
                           "overlay",
                           "virtual",
                           "unknown"
@@ -43338,7 +43485,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -43441,7 +43597,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -43457,7 +43613,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -46606,7 +46771,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -46705,7 +46879,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -46721,7 +46895,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -48654,7 +48837,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -48753,7 +48945,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -48769,7 +48961,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -50346,7 +50547,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -52541,7 +52751,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   },
                   "sizePx": {
                     "type": "object",
@@ -53626,7 +53845,16 @@
             },
             "role": {
               "type": "string",
-              "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+              "enum": [
+                "inner",
+                "cover",
+                "rear",
+                "external",
+                "cluster",
+                "overlay",
+                "virtual",
+                "unknown"
+              ]
             },
             "posture": {
               "$ref": "#/$defs/__schema0"
@@ -55480,7 +55708,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -55591,7 +55828,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -55607,7 +55844,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -57487,7 +57733,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -57503,7 +57749,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -60842,7 +61097,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -61153,7 +61417,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -61169,7 +61433,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -63733,7 +64006,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -64056,7 +64338,7 @@
         },
         "__schema10": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema11": {
           "type": "string",
@@ -64072,7 +64354,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -65801,7 +66092,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -65915,7 +66215,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -65931,7 +66231,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",

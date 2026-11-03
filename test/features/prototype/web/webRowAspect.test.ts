@@ -221,6 +221,15 @@ test("a conditional maxWidth or weight cannot undo the row measure (styleWhen me
   expect(nodeCss(taker, context)).toMatchObject({ flex: "1 1 0", "min-width": "0" });
 });
 
+test("a zeroed row child gives up an authored minWidth, as sizeIn clamps it to no width", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const zeroed = { minWidth: 100, [ROW_MEASURE_KEY]: { zero: true } };
+  expect(nodeCss(zeroed, context)).toMatchObject({ "min-width": "0", "max-width": "0px" });
+  // A shrinking child keeps its authored minimum.
+  const shrinking = { minWidth: 100, [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK } };
+  expect(nodeCss(shrinking, context)["min-width"]).toBe("100px");
+});
+
 test("a row's definite content height is its dp height or maxHeight less vertical padding", () => {
   expect(rowContentHeight({ height: { dp: 20 } })).toBe(20);
   expect(

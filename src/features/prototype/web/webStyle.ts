@@ -76,7 +76,10 @@ function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
   css["flex-shrink"] = String(shrink);
 }
 
-/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+/**
+ * Applied after the authored bounds. A shrinking or taking child keeps an authored `minWidth`;
+ * `zero` beats both bounds, as `sizeIn` clamps an authored minimum into a zero incoming width.
+ */
 function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   const measure = record(style[ROW_MEASURE_KEY]);
   if (context.parentAxis !== "row" || !measure) {
@@ -92,6 +95,7 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
     css["min-width"] = "0";
   }
   if (measure.zero === true) {
+    css["min-width"] = "0";
     css["max-width"] = "0px";
   }
 }

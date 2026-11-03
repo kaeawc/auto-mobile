@@ -122,7 +122,11 @@ Import needs identical accept/reject behaviour on all three platforms.
   `dataExtractionRules` exclude the library. The prototype storage file name derives from the
   library id.
 - Relaunch finishes the task and starts `ViewerActivity` again. Reset is relaunch plus clearing that
-  library id's storage. Delete removes the spec, assets and storage.
+  library id's storage. Delete removes the metadata first (it is the visibility marker), then the
+  storage, spec and assets. On Android an app-start sweep deletes any saved bundle with no metadata
+  directory, which finishes a delete that failed after the metadata went and an add interrupted
+  before its metadata commit; it aborts without deleting anything when metadata cannot be listed,
+  and keeps a bundle whose metadata exists but is unreadable.
 - Share rebuilds a clean bundle (section 4) and hands it out through a `FileProvider` scoped to an
   export-cache subdirectory, with a read-only temporary grant and the temp file deleted afterwards.
 - Fonts and images decode off the main thread.

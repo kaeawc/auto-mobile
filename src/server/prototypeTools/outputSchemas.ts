@@ -306,7 +306,7 @@ export const prototypeOutputSchema = z.object({
       display: z
         .object({
           key: z.string(),
-          role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
+          role: z.enum(["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]),
         })
         .optional()
         .describe(

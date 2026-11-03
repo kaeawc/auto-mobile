@@ -33,6 +33,37 @@ test("weight shares the parent's main axis", () => {
   });
 });
 
+test("an unsized aspect ratio fills the incoming width, as Compose sizes it width-first", () => {
+  const column = nodeCss({ aspectRatio: 1.7777778 }, { ...context, parentAxis: "column" });
+  expect(column).toMatchObject({ "aspect-ratio": "1.7777778", width: "100%" });
+  expect(nodeCss({ aspectRatio: 2 }, context)).toMatchObject({ width: "100%" });
+  // A capped width keeps the parent's authored alignment, so the node never overrides it.
+  const capped = nodeCss({ aspectRatio: 2, maxWidth: 100 }, { ...context, parentAxis: "column" });
+  expect(capped).not.toHaveProperty("align-self");
+  expect(nodeCss({ aspectRatio: 2, maxWidth: 100 }, context)).not.toHaveProperty("justify-self");
+});
+
+test("an aspect ratio falls back to the height bound when the width would overflow it", () => {
+  const css = nodeCss({ aspectRatio: 2, maxHeight: 50 }, { ...context, parentAxis: "column" });
+  expect(css).toMatchObject({ width: "100%", "max-width": "100px", "max-height": "50px" });
+  // The tighter of the authored max width and the ratio-scaled max height wins.
+  const both = nodeCss({ aspectRatio: 2, maxHeight: 50, maxWidth: 80 }, context);
+  expect(both["max-width"]).toBe("80px");
+});
+
+test("an aspect ratio keeps an authored size, weight, or row main axis", () => {
+  const column = { ...context, parentAxis: "column" as const };
+  expect(nodeCss({ aspectRatio: 2, width: { dp: 40 } }, column)).toMatchObject({
+    width: "40px",
+    "aspect-ratio": "2",
+  });
+  expect(nodeCss({ aspectRatio: 2, height: { dp: 40 } }, column)).not.toHaveProperty("width");
+  expect(nodeCss({ aspectRatio: 2, weight: 1 }, column)).not.toHaveProperty("width");
+  expect(nodeCss({ aspectRatio: 2 }, { ...context, parentAxis: "row" })).not.toHaveProperty(
+    "width",
+  );
+});
+
 test("corner radius accepts numbers, shape tokens and per-corner objects", () => {
   expect(nodeCss({ cornerRadius: "medium" }, context)["border-radius"]).toBe("12px");
   expect(nodeCss({ cornerRadius: 6 }, context)["border-radius"]).toBe("6px");

@@ -139,18 +139,25 @@ export function rowSequentialChildren(
   }
   return entries.map((entry, index) => {
     const node = styled[index];
-    const weighted = typeof record(node?.style)?.weight === "number";
-    if (!node || index === taker) {
-      return node ? withStyle(entry, { weight: 1 }) : entry;
+    if (!node) {
+      return entry;
     }
+    if (index === taker) {
+      return withStyle(entry, { weight: 1 });
+    }
+    const weighted = typeof record(node.style)?.weight === "number";
     if (taker >= 0 && (index > taker || weighted)) {
       return withStyle(entry, { maxWidth: 0 });
     }
-    if (capped < 0 || index < capped || weighted) {
-      return entry;
-    }
-    const basis = aspectRatioCap(node);
-    const shrink = index === capped ? CAPPED_SHRINK : LATER_SHRINK;
-    return measured(entry, basis === undefined ? { shrink } : { shrink, basis });
+    return capped < 0 || index < capped || weighted
+      ? entry
+      : cappedSibling(entry, node, index === capped);
   });
+}
+
+/** The capped aspect ratio itself, or a later unweighted sibling, with its shrink tier. */
+function cappedSibling(entry: unknown, node: Raw, first: boolean): unknown {
+  const basis = aspectRatioCap(node);
+  const shrink = first ? CAPPED_SHRINK : LATER_SHRINK;
+  return measured(entry, basis === undefined ? { shrink } : { shrink, basis });
 }

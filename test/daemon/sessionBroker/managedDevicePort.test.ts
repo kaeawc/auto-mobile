@@ -8,7 +8,7 @@ import {
   bindingDeviceName,
 } from "../../../src/daemon/sessionBroker/provisioning/reconciler";
 import { ProvisionDeviceError } from "../../../src/devices/exactDeviceProvisioning";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import type { BrokerExecutionReleaseResult } from "../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
@@ -1335,6 +1335,12 @@ describe("ManagedDevicePort retained creation cleanup", () => {
 });
 
 describe("ManagedDevicePort retained readiness retries", () => {
+  beforeAll(async () => {
+    // Pay the SQLite registry's one-time open cost outside the first timed row (#16523).
+    const warm = await openSqliteBindingRegistry({ dbPath: ":memory:", timer: new FakeTimer() });
+    await warm.close();
+  });
+
   async function retryRig(registry: BindingRegistry, timer: FakeTimer) {
     await registry.ensureScope(SCOPE);
     const inventory = new FakeInventory();

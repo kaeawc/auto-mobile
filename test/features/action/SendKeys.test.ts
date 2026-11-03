@@ -995,6 +995,14 @@ describe("SendKeys", () => {
         display: "external",
         skipScreenshot: true,
         hierarchyOnly: true,
+        skipAccessibilityAudit: true,
+      },
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
       },
     ]);
   });

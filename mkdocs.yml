@@ -118,6 +118,7 @@ not_in_nav: |
   /decisions/prototype-embedded-request-routing.md
   /decisions/prototype-mock-backend.md
   /decisions/prototype-request-retrofit.md
+  /decisions/qrcode-generator-share-qr.md
   /decisions/types-bun-test-typecheck.md
   /decisions/watchos-platform.md
 
@@ -143,6 +144,7 @@ nav:
       - "Android Automotive OS": using/android-automotive.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
+      - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md

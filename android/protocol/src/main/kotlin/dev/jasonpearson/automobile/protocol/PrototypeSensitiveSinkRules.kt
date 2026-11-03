@@ -114,15 +114,13 @@ internal object PrototypeSensitiveSinkRules {
       val repeat = node.value["repeat"] as? JsonObject
       val pointer = (repeat?.get("items") as? JsonObject)?.text("path")
       val alias = repeat?.text("as")
-      if (
-        alias != null &&
-          pointer != null &&
-          PrototypeDataPointer.isValid(pointer) &&
-          taints.any { overlaps(it, pointer, false) }
-      )
-        node.path to alias
-      else null
+      if (alias != null && isTaintedPointer(pointer, taints)) node.path to alias else null
     }
+
+  private fun isTaintedPointer(pointer: String?, taints: List<String>): Boolean =
+    pointer != null &&
+      PrototypeDataPointer.isValid(pointer) &&
+      taints.any { overlaps(it, pointer, false) }
 
   private fun boundTexts(
     field: Field,

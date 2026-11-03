@@ -646,6 +646,39 @@ describe("prototype web still (#16346)", () => {
     expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
   });
 
+  test("a column-weighted row with a dp height caps its aspect ratio by its share (#16704)", () => {
+    const ratioIn = (parent: string, style: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: parent,
+            style: { height: { dp: 40 } },
+            children: [
+              {
+                type: "row",
+                style,
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                  { type: "text", text: "b" },
+                ],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    const weighted = { weight: 1, height: { dp: 10 } };
+    // The weight's 40 dp share overrides the 10 dp height, so the ratio is at most 80 dp wide.
+    expect(ratioIn("column", weighted)).toMatchObject({ "flex-basis": "80px" });
+    // A max height still bounds the share.
+    expect(ratioIn("column", { ...weighted, maxHeight: 15 })).toMatchObject({
+      "flex-basis": "30px",
+    });
+    // In a row the weight is horizontal, so the 10 dp height holds.
+    expect(ratioIn("row", weighted)).toMatchObject({ "flex-basis": "20px" });
+  });
+
   test("a repeat column's instances each cap their aspect ratio by their own share (#16694)", () => {
     const ratios = byTag(
       renderPrototypeStill({

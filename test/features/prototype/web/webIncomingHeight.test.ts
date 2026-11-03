@@ -8,6 +8,7 @@ import {
 } from "../../../../src/features/prototype/web/webIncomingHeight";
 import { CAPPED_SHRINK, rowMeasured } from "../../../../src/features/prototype/web/webRowAspect";
 import {
+  INCOMING_HEIGHT_EXACT_KEY,
   INCOMING_HEIGHT_KEY,
   nodeCss,
   ROW_MEASURE_KEY,
@@ -16,6 +17,7 @@ import {
 const prepare = (entry: unknown) => record(entry);
 const heightOf = (entry: unknown) => record(record(entry)?.style)?.[INCOMING_HEIGHT_KEY];
 const childrenOf = (node: Raw) => node.children as unknown[];
+const exactOf = (entry: unknown) => record(record(entry)?.style)?.[INCOMING_HEIGHT_EXACT_KEY];
 
 test("a node's content height is the least of its incoming, dp and max height, less padding", () => {
   expect(contentHeight({ height: { dp: 20 } })).toBe(20);
@@ -157,7 +159,10 @@ test("a node with no known height, or one that lays out no line, leaves its chil
   const scroll = { type: "scroll", style: { height: { dp: 40 } }, children };
   expect(withChildHeights(scroll, "root", prepare)).toBe(scroll);
   // The key is internal: it never reaches the CSS.
-  const css = nodeCss({ [INCOMING_HEIGHT_KEY]: 40 }, { mode: "light", palette: new Map() });
+  const css = nodeCss(
+    { [INCOMING_HEIGHT_KEY]: 40, [INCOMING_HEIGHT_EXACT_KEY]: true },
+    { mode: "light", palette: new Map() },
+  );
   expect(css).toEqual({ "box-sizing": "border-box" });
 });
 
@@ -183,4 +188,60 @@ test("a fill-height row in a 40 dp column caps its aspect ratio at 40 dp × rati
     shrink: CAPPED_SHRINK,
     basis: 80,
   });
+});
+
+test("an exact incoming height overrides the dp height, within min and max height (#16704)", () => {
+  const exact = {
+    height: { dp: 10 },
+    [INCOMING_HEIGHT_KEY]: 40,
+    [INCOMING_HEIGHT_EXACT_KEY]: true,
+  };
+  expect(contentHeight(exact)).toBe(40);
+  expect(contentHeight({ ...exact, maxHeight: 30, padding: { top: 5 } })).toBe(25);
+  expect(contentHeight({ ...exact, [INCOMING_HEIGHT_KEY]: 4, minHeight: 12 })).toBe(12);
+  // A max incoming height still yields to the smaller dp height.
+  expect(contentHeight({ ...exact, [INCOMING_HEIGHT_EXACT_KEY]: undefined })).toBe(10);
+});
+
+test("a column marks only its weighted children's shares exact; a row marks none (#16704)", () => {
+  const children = [
+    { type: "row", style: { weight: 1, height: { dp: 10 } } },
+    { type: "box", style: { height: { dp: 10 } } },
+  ];
+  const column = withChildHeights(
+    { type: "column", style: { height: { dp: 40 } }, children },
+    "root",
+    prepare,
+  );
+  expect(childrenOf(column).map(heightOf)).toEqual([30, 40]);
+  expect(childrenOf(column).map(exactOf)).toEqual([true, undefined]);
+  expect(contentHeight(record(record(childrenOf(column)[0])?.style))).toBe(30);
+  const row = withChildHeights(
+    { type: "row", style: { height: { dp: 40 } }, children },
+    "root",
+    prepare,
+  );
+  expect(childrenOf(row).map(exactOf)).toEqual([undefined, undefined]);
+  expect(contentHeight(record(record(childrenOf(row)[0])?.style))).toBe(10);
+  // A repeat column's template is a bound only; each instance's weighted share is exact.
+  const repeated = {
+    type: "column",
+    style: { height: { dp: 40 } },
+    repeat: { items: [] },
+    children,
+  };
+  expect(childrenOf(withChildHeights(repeated, "root", prepare)).map(exactOf)).toEqual([
+    undefined,
+    undefined,
+  ]);
+  const lists = repeatInstanceChildren(repeated, "root", [prepare, prepare]);
+  expect(lists.map((list) => list.map(exactOf))).toEqual([
+    [true, undefined],
+    [true, undefined],
+  ]);
+  // The boxes take 10 dp each in order; the two weighted rows share the 20 dp left.
+  expect(lists.map((list) => list.map(heightOf))).toEqual([
+    [10, 40],
+    [10, 30],
+  ]);
 });

@@ -58,6 +58,14 @@ export const ROW_BOUND_KEY = "webRowBound";
 export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 
 /**
+ * A style key the web renderer adds beside INCOMING_HEIGHT_KEY, never authored: `true` when that
+ * height is the child's exact allocation rather than a max, as a column's weight share is. Compose's
+ * weight constraint coerces an inner `height`, and the web's flex share grows past it, so the
+ * allocation, not the authored dp height, sizes the child.
+ */
+export const INCOMING_HEIGHT_EXACT_KEY = "webIncomingHeightExact";
+
+/**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one.
  */

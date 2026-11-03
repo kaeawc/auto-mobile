@@ -1,6 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
 import type { PrepareChild } from "./webRowAspect";
-import { INCOMING_HEIGHT_KEY } from "./webStyle";
+import { INCOMING_HEIGHT_EXACT_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
 
 const finite = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : Infinity;
@@ -8,24 +8,42 @@ const finite = (value: unknown): number =>
 const side = (padding: Raw | undefined, name: string) =>
   typeof padding?.[name] === "number" ? padding[name] : 0;
 
+/** `height` held under the node's `maxHeight`, then raised to its `minHeight`, which wins. */
+function clamped(style: Raw | undefined, height: number): number {
+  const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
+  return Math.max(floor, Math.min(height, finite(style?.maxHeight)));
+}
+
 /**
  * The height a node's own size takes, as CSS and Compose's `sizeIn` then `height` resolve it: its
  * dp `height` (else unbounded) held under `maxHeight`, then raised to `minHeight`, which wins.
  */
 function ownHeight(style: Raw | undefined): number {
-  const capped = Math.min(finite(record(style?.height)?.dp), finite(style?.maxHeight));
-  const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
-  return Math.max(floor, capped);
+  return clamped(style, finite(record(style?.height)?.dp));
 }
 
 /**
- * The tallest a node lets its children be: its own height (see ownHeight) within the height its
- * parent hands it (INCOMING_HEIGHT_KEY), less its vertical padding. A `fill`, weighted or
- * wrap-sized node is bounded by the incoming height alone, as Compose's incoming max height
- * bounds it. Infinity when no bound is statically known.
+ * The height a node's box takes within what its parent hands it (INCOMING_HEIGHT_KEY): an exact
+ * allocation (INCOMING_HEIGHT_EXACT_KEY, a column's weight share) within its own min and max
+ * height, overriding any dp `height`, as Compose's weight constraint and the web's flex share do;
+ * otherwise its own height (see ownHeight) within the incoming max.
+ */
+function boxHeight(style: Raw | undefined): number {
+  const incoming = finite(style?.[INCOMING_HEIGHT_KEY]);
+  if (style?.[INCOMING_HEIGHT_EXACT_KEY] === true && incoming !== Infinity) {
+    return clamped(style, incoming);
+  }
+  return Math.min(incoming, ownHeight(style));
+}
+
+/**
+ * The tallest a node lets its children be: its box height (see boxHeight) less its vertical
+ * padding. A `fill`, weighted or wrap-sized node is bounded by the incoming height alone, as
+ * Compose's incoming max height bounds it; a column-weighted node takes its share even over an
+ * authored dp height. Infinity when no bound is statically known.
  */
 export function contentHeight(style: Raw | undefined): number {
-  const bound = Math.min(finite(style?.[INCOMING_HEIGHT_KEY]), ownHeight(style));
+  const bound = boxHeight(style);
   const padding = record(style?.padding);
   return Math.max(0, bound - side(padding, "top") - side(padding, "bottom"));
 }
@@ -92,13 +110,26 @@ export function columnChildHeights(
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
-function withHeight(entry: unknown, height: number | undefined): unknown {
+/**
+ * `entry` carrying the incoming `height` its parent hands it, marked exact when `exact` (a column's
+ * weight share) and otherwise a max, clearing any exact mark a template copy carried.
+ */
+function withHeight(entry: unknown, height: number | undefined, exact = false): unknown {
   const node = record(entry);
   if (!node || height === undefined || height === Infinity) {
     return entry;
   }
-  return { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height } };
+  const style: Raw = { ...record(node.style), [INCOMING_HEIGHT_KEY]: height };
+  if (exact) {
+    style[INCOMING_HEIGHT_EXACT_KEY] = true;
+  } else {
+    delete style[INCOMING_HEIGHT_EXACT_KEY];
+  }
+  return { ...node, style };
 }
+
+/** Whether a column hands this resolved child an exact allocation: its weight share. */
+const exactIn = (prepared: Raw | undefined) => weightOf(prepared) !== undefined;
 
 /**
  * A row, column or box with each child carrying the incoming max height it hands that child
@@ -106,7 +137,9 @@ function withHeight(entry: unknown, height: number | undefined): unknown {
  * unchanged. A row or box hands every child its content height. A column measures its children
  * in order (see columnChildHeights), except a repeat, whose children are one template, so each
  * gets the whole content height as a bound until repeatInstanceChildren hands each instance its
- * own share. A height that depends on layout (a sibling's wrap
+ * own share. A column's weighted child gets its share as an exact allocation
+ * (INCOMING_HEIGHT_EXACT_KEY); a row's weight is horizontal, so its children's dp heights still
+ * hold. A height that depends on layout (a sibling's wrap
  * height, the screen) is left out, so the bound stays an upper one or is absent.
  *
  * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
@@ -121,15 +154,18 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
   if (content === Infinity) {
     return node;
   }
-  const heights =
-    type === "column" && node.repeat === undefined
-      ? columnChildHeights(
-          children.map((entry, index) => prepare(entry, childPath(path, index))),
-          content,
-          typeof style?.spacing === "number" ? style.spacing : 0,
-        )
-      : children.map(() => content);
-  return { ...node, children: children.map((entry, index) => withHeight(entry, heights[index])) };
+  if (type !== "column" || node.repeat !== undefined) {
+    return { ...node, children: children.map((entry) => withHeight(entry, content)) };
+  }
+  const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
+  const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
+  const heights = columnChildHeights(prepared, content, spacing);
+  return {
+    ...node,
+    children: children.map((entry, index) =>
+      withHeight(entry, heights[index], exactIn(prepared[index])),
+    ),
+  };
 }
 
 /**
@@ -159,6 +195,9 @@ export function repeatInstanceChildren(
   const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
   const heights = columnChildHeights(prepared, content, spacing);
   return prepares.map((_prepare, instance) =>
-    template.map((entry, index) => withHeight(entry, heights[instance * template.length + index])),
+    template.map((entry, index) => {
+      const at = instance * template.length + index;
+      return withHeight(entry, heights[at], exactIn(prepared[at]));
+    }),
   );
 }

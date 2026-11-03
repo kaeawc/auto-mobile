@@ -107,31 +107,35 @@ object PrototypeQueue {
 
   fun apply(state: State, op: Op, random: Random): Result =
     when (op) {
-      Op.Play -> Result(state.copy(playing = state.currentItemId != null))
-      Op.Pause -> Result(state.copy(playing = false))
-      is Op.Seek -> Result(state.copy(positionMs = op.positionMs))
       Op.Next -> next(state)
       Op.Previous -> previous(state)
       is Op.SkipTo ->
         if (op.itemId in state.items) moveTo(state, op.itemId)
         else Result(state, error = ITEM_NOT_FOUND)
-      is Op.SetShuffle -> Result(shuffled(state, op.shuffle, random))
-      is Op.SetRepeat -> Result(state.copy(repeat = op.repeat))
-      is Op.SetRate -> Result(state.copy(rate = op.rate))
-      is Op.SetSleepTimer ->
-        Result(
-          state.copy(
-            sleep =
-              when {
-                op.endOfItem -> Sleep.EndOfItem
-                op.ms > 0 -> Sleep.Timer(op.ms)
-                else -> null
-              },
-          ),
-        )
       Op.Ended -> ended(state)
-      is Op.Advance -> Result(advanced(state, op.ms))
       is Op.Sync -> sync(state, op.items.distinct())
+      else -> Result(updated(state, op, random))
+    }
+
+  /** The ops that never change the current item. */
+  private fun updated(state: State, op: Op, random: Random): State =
+    when (op) {
+      Op.Play -> state.copy(playing = state.currentItemId != null)
+      Op.Pause -> state.copy(playing = false)
+      is Op.Seek -> state.copy(positionMs = op.positionMs)
+      is Op.SetShuffle -> shuffled(state, op.shuffle, random)
+      is Op.SetRepeat -> state.copy(repeat = op.repeat)
+      is Op.SetRate -> state.copy(rate = op.rate)
+      is Op.SetSleepTimer -> state.copy(sleep = sleepFor(op))
+      is Op.Advance -> advanced(state, op.ms)
+      else -> state
+    }
+
+  private fun sleepFor(op: Op.SetSleepTimer): Sleep? =
+    when {
+      op.endOfItem -> Sleep.EndOfItem
+      op.ms > 0 -> Sleep.Timer(op.ms)
+      else -> null
     }
 
   private fun moveTo(state: State, itemId: String?, playing: Boolean = state.playing): Result =

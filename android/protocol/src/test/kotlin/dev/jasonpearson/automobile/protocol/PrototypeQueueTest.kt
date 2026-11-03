@@ -41,31 +41,40 @@ class PrototypeQueueTest {
     }
   }
 
+  private val argumentFreeOps =
+    mapOf(
+      "play" to Op.Play,
+      "pause" to Op.Pause,
+      "next" to Op.Next,
+      "previous" to Op.Previous,
+      "ended" to Op.Ended,
+    )
+
   private fun op(json: JsonObject): Op {
-    fun string(key: String) = json.getValue(key).jsonPrimitive.content
-    return when (val name = string("op")) {
-      "play" -> Op.Play
-      "pause" -> Op.Pause
-      "seek" -> Op.Seek(json.getValue("positionMs").jsonPrimitive.long)
-      "next" -> Op.Next
-      "previous" -> Op.Previous
-      "skipTo" -> Op.SkipTo(string("itemId"))
-      "setShuffle" -> Op.SetShuffle(json.getValue("shuffle").jsonPrimitive.boolean)
-      "setRepeat" -> Op.SetRepeat(Repeat.fromWire(string("repeat")) ?: error("repeat"))
-      "setRate" -> Op.SetRate(json.getValue("rate").jsonPrimitive.double)
-      "setSleepTimer" -> {
-        val timer = json.getValue("timer").jsonObject
-        Op.SetSleepTimer(
-          ms = timer["ms"]?.jsonPrimitive?.long ?: 0,
-          endOfItem = timer["endOfItem"]?.jsonPrimitive?.booleanOrNull == true,
-        )
-      }
-      "ended" -> Op.Ended
-      "advance" -> Op.Advance(json.getValue("ms").jsonPrimitive.long)
+    val name = json.getValue("op").jsonPrimitive.content
+    return argumentFreeOps[name] ?: opWithArguments(name, json)
+  }
+
+  private fun opWithArguments(name: String, json: JsonObject): Op {
+    fun primitive(key: String) = json.getValue(key).jsonPrimitive
+    return when (name) {
+      "seek" -> Op.Seek(primitive("positionMs").long)
+      "skipTo" -> Op.SkipTo(primitive("itemId").content)
+      "setShuffle" -> Op.SetShuffle(primitive("shuffle").boolean)
+      "setRepeat" -> Op.SetRepeat(Repeat.fromWire(primitive("repeat").content) ?: error("repeat"))
+      "setRate" -> Op.SetRate(primitive("rate").double)
+      "setSleepTimer" -> sleepTimer(json.getValue("timer").jsonObject)
+      "advance" -> Op.Advance(primitive("ms").long)
       "sync" -> Op.Sync(json.getValue("items").jsonArray.map { it.jsonPrimitive.content })
       else -> error("unknown op $name")
     }
   }
+
+  private fun sleepTimer(timer: JsonObject) =
+    Op.SetSleepTimer(
+      ms = timer["ms"]?.jsonPrimitive?.long ?: 0,
+      endOfItem = timer["endOfItem"]?.jsonPrimitive?.booleanOrNull == true,
+    )
 
   private fun snapshot(result: PrototypeQueue.Result): Map<String, Any?> {
     val state = result.state

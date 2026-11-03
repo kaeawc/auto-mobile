@@ -171,7 +171,9 @@ function stillScope(
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
   const authored = record(spec.theme)?.mode;
-  const size = screenSize(frame, options.orientation ?? "portrait");
+  const orientation = options.orientation ?? "portrait";
+  const size = screenSize(frame, orientation);
+  const { top, bottom } = frame.safeArea[orientation];
   const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
@@ -196,6 +198,7 @@ function stillScope(
     inBox: false,
     unsupported: [],
     screenWidth: size.width,
+    safeInsets: { top, bottom },
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
     layers: [],

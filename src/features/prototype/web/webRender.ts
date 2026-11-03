@@ -43,7 +43,7 @@ import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
 import { rowFillAxes, rowMeasured } from "./webRowAspect";
-import { withChildHeights } from "./webIncomingHeight";
+import { withChildHeights, withSafeInsets, type VerticalInsets } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -88,6 +88,8 @@ export interface WebRenderScope {
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
   readonly ownInsets?: readonly string[];
+  /** The frame's top and bottom safe-area insets (dp), which the static height pass subtracts. */
+  readonly safeInsets?: VerticalInsets;
 }
 
 export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -283,7 +285,7 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
-    ? lineFillAxes(heightsIn(styled, local, path), local, path).filter(
+    ? lineFillAxes(heightsIn(styled, child(local, {}), path), local, path).filter(
         (axis) => style[axis] === undefined,
       )
     : defaultFillAxes(styled);
@@ -311,7 +313,18 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
 }
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
-const heightsIn = (n: Raw, s: WebRenderScope, at: string) => withChildHeights(n, at, prepareIn(s));
+
+/**
+ * The node's children each carrying the height it hands them (see withChildHeights). `s` is the
+ * scope the node renders in, so its consumed insets are its ancestors'; the inset its own
+ * `safeAreaPadding` adds on an edge they left is taken out of its content height.
+ */
+function heightsIn(n: Raw, s: WebRenderScope, at: string): Raw {
+  const consumed = s.consumedInsets ?? [];
+  const edges = safeAreaEdges(n).filter((edge) => !consumed.includes(edge));
+  const inset = s.safeInsets ? withSafeInsets(n, edges, s.safeInsets) : n;
+  return withChildHeights(inset, at, prepareIn(s));
+}
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>

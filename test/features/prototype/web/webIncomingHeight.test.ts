@@ -5,6 +5,7 @@ import {
   contentHeight,
   exactWeightShares,
   withChildHeights,
+  withSafeInsets,
 } from "../../../../src/features/prototype/web/webIncomingHeight";
 import { CAPPED_SHRINK, rowMeasured } from "../../../../src/features/prototype/web/webRowAspect";
 import {
@@ -12,6 +13,7 @@ import {
   nodeCss,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
+  SAFE_INSET_KEY,
   WEIGHTED_HEIGHT_KEY,
 } from "../../../../src/features/prototype/web/webStyle";
 
@@ -258,4 +260,59 @@ test("a weighted row bounded around a capped aspect ratio keeps its share over i
   expect(nodeCss({ maxWidth: 20, [ROW_BOUND_KEY]: true }, light)["max-width"]).toBe(
     "min(100%, 20px)",
   );
+});
+
+test("a node's safe-area inset is padding its content height leaves out (#16720)", () => {
+  const style = { height: { dp: 100 }, padding: { top: 4 }, [SAFE_INSET_KEY]: { top: 48 } };
+  expect(contentHeight(style)).toBe(48);
+  expect(contentHeight({ ...style, [SAFE_INSET_KEY]: { top: 48, bottom: 24 } })).toBe(24);
+  expect(contentHeight({ [INCOMING_HEIGHT_KEY]: 40, [SAFE_INSET_KEY]: { top: 48 } })).toBe(0);
+  // An exact weight share is padded by the inset too.
+  const share = { [INCOMING_HEIGHT_KEY]: 100, [WEIGHTED_HEIGHT_KEY]: true };
+  expect(contentHeight({ ...share, [SAFE_INSET_KEY]: { bottom: 24 } })).toBe(76);
+});
+
+test("withSafeInsets carries the inset of each top or bottom edge it is given (#16720)", () => {
+  const insets = { top: 48, bottom: 24 };
+  const row: Raw = { type: "row", style: { height: { dp: 100 } } };
+  expect(record(withSafeInsets(row, ["top"], insets).style)?.[SAFE_INSET_KEY]).toEqual({
+    top: 48,
+    bottom: 0,
+  });
+  expect(record(withSafeInsets(row, ["top", "bottom"], insets).style)).toEqual({
+    height: { dp: 100 },
+    [SAFE_INSET_KEY]: { top: 48, bottom: 24 },
+  });
+  // Side edges and a zero inset add no height.
+  expect(withSafeInsets(row, ["start", "end"], insets)).toBe(row);
+  expect(withSafeInsets(row, ["top"], { top: 0, bottom: 24 })).toBe(row);
+  expect(withSafeInsets(row, [], insets)).toBe(row);
+});
+
+test("a column's hoisted sheet takes none of its height (#16720)", () => {
+  const sheet = { type: "bottomSheet", style: { height: { dp: 100 } }, child: { type: "text" } };
+  const column: Raw = {
+    type: "column",
+    style: { height: { dp: 100 }, spacing: 8 },
+    children: [sheet, { type: "row", style: { weight: 1 }, children: [] }],
+  };
+  const children = childrenOf(withChildHeights(column, "root", prepare));
+  // Neither the sheet's height nor a spacing gap beside it comes out of the row's share.
+  expect(children[0]).toBe(sheet);
+  expect(heightOf(children[1])).toBe(100);
+  expect(weightedOf(children[1])).toBe(true);
+  expect(columnChildHeights([undefined, { style: { weight: 1 } }], 100, 8)).toEqual([
+    undefined,
+    100,
+  ]);
+});
+
+test("a row or box hands a hoisted sheet no height (#16720)", () => {
+  const sheet = { type: "bottomSheet", child: { type: "text" } };
+  for (const type of ["row", "box"]) {
+    const node: Raw = { type, style: { height: { dp: 50 } }, children: [sheet, { type: "text" }] };
+    const children = childrenOf(withChildHeights(node, "root", prepare));
+    expect(children[0]).toBe(sheet);
+    expect(heightOf(children[1])).toBe(50);
+  }
 });

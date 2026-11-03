@@ -129,6 +129,14 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
   ]);
 }
 
+/** Node types the renderer hoists into a window layer, leaving nothing in their parent's flow. */
+export const WEB_LAYER_TYPES: ReadonlySet<string> = new Set(["bottomSheet"]);
+
+/** Whether a node is hoisted into a window layer (see WEB_LAYER_TYPES), open or closed. */
+export function isWebLayerNode(node: Raw | undefined): boolean {
+  return node !== undefined && WEB_LAYER_TYPES.has(String(node.type));
+}
+
 export function webSheetLayers(kit: WebRenderKit): Readonly<Record<string, WebLayerRenderer>> {
   const bottomSheet: WebLayerRenderer = (node, scope, path) => {
     if (!sheetOpen(node, scope)) {

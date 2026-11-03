@@ -6,7 +6,10 @@ import {
   type WebChild,
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
-import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
+import {
+  renderPrototypeStill,
+  type PrototypeStillOptions,
+} from "../../../../src/features/prototype/web/webStill";
 
 const reference = JSON.parse(
   readFileSync(
@@ -644,6 +647,73 @@ describe("prototype web still (#16346)", () => {
     expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
     // A wrap row is bounded by what is left too.
     expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
+  });
+
+  test("a column's hoisted sheet takes none of the height a weighted row gets (#16720)", () => {
+    const ratioOf = (state: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state,
+          root: {
+            type: "column",
+            style: { height: { dp: 100 } },
+            children: [
+              {
+                type: "bottomSheet",
+                openWhen: { key: "open", equals: true },
+                detents: ["half"],
+                style: { height: { dp: 100 } },
+                child: { type: "text", text: "Details" },
+              },
+              {
+                type: "row",
+                style: { weight: 1 },
+                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // The sheet draws in a window layer, open or closed, so the row's share is the whole 100 dp.
+    expect(ratioOf({ open: false })).toMatchObject({ "flex-basis": "200px", width: "200px" });
+    expect(ratioOf({ open: true })).toMatchObject({ "flex-basis": "200px", width: "200px" });
+  });
+
+  test("a row's own safe-area padding comes out of its aspect ratio's height cap (#16720)", () => {
+    const ratioIn = (column: Record<string, unknown>, options: PrototypeStillOptions = {}) =>
+      byTag(
+        renderPrototypeStill(
+          {
+            ...reference,
+            root: {
+              type: "column",
+              ...column,
+              children: [
+                {
+                  type: "row",
+                  style: { width: { dp: 300 }, height: { dp: 100 } },
+                  safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+                  children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+                },
+              ],
+            },
+          },
+          options,
+        ),
+        "ratio",
+      )[0]!.style;
+    // Pixel 9's 48 dp top inset leaves the row 52 dp of content, so the box is 104 x 52.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "104px", width: "104px" });
+    // An ancestor that already applied the top inset consumed it, so the row adds none.
+    const consumed = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
+    expect(ratioIn(consumed)).toMatchObject({ "flex-basis": "200px" });
+    // The keyboard inset adds nothing in a still.
+    const ime = { safeAreaPadding: { edges: ["top"], types: ["ime"] } };
+    expect(ratioIn(ime)).toMatchObject({ "flex-basis": "104px" });
+    // The inset is the frame's: an iPhone 16 portrait top inset is 59 dp, leaving 41 dp.
+    expect(ratioIn({}, { frame: "iphone-16" })).toMatchObject({ "flex-basis": "82px" });
   });
 
   test("an explicit wrap-width root keeps its content width in its window", () => {

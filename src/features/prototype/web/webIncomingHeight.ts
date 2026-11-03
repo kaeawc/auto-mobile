@@ -1,6 +1,7 @@
 import { record, type Raw } from "../prototypeTemplate";
 import type { PrepareChild } from "./webRowAspect";
-import { INCOMING_HEIGHT_KEY, WEIGHTED_HEIGHT_KEY } from "./webStyle";
+import { isWebLayerNode } from "./webSheet";
+import { INCOMING_HEIGHT_KEY, SAFE_INSET_KEY, WEIGHTED_HEIGHT_KEY } from "./webStyle";
 
 const finite = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : Infinity;
@@ -24,14 +25,38 @@ function ownHeight(style: Raw | undefined): number {
  * bounded by the incoming height alone, as Compose's incoming max height bounds it. A column's
  * weighted child marked with an exact share (WEIGHTED_HEIGHT_KEY) takes it whole, whatever its dp
  * height and height bounds, as Compose's fixed weight constraints and SwiftUI's weighted axis pin it. Infinity when
- * no bound is statically known.
+ * no bound is statically known. The safe-area inset the node's `safeAreaPadding` adds
+ * (SAFE_INSET_KEY) is padding too, as `windowInsetsPadding` is.
  */
 export function contentHeight(style: Raw | undefined): number {
   const incoming = finite(style?.[INCOMING_HEIGHT_KEY]);
   const bound =
     style?.[WEIGHTED_HEIGHT_KEY] === true ? incoming : Math.min(incoming, ownHeight(style));
   const padding = record(style?.padding);
-  return Math.max(0, bound - side(padding, "top") - side(padding, "bottom"));
+  const inset = record(style?.[SAFE_INSET_KEY]);
+  const vertical =
+    side(padding, "top") + side(padding, "bottom") + side(inset, "top") + side(inset, "bottom");
+  return Math.max(0, bound - vertical);
+}
+
+/** The frame's safe-area insets in dp, on the edges the static height pass reads. */
+export interface VerticalInsets {
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/**
+ * The node with the frame's inset on each top or bottom edge its `safeAreaPadding` applies
+ * (`edges`, already less those an ancestor consumed) carried in its style (SAFE_INSET_KEY), so
+ * contentHeight takes it out; the node unchanged when that adds nothing.
+ */
+export function withSafeInsets(node: Raw, edges: readonly string[], insets: VerticalInsets): Raw {
+  const top = edges.includes("top") ? insets.top : 0;
+  const bottom = edges.includes("bottom") ? insets.bottom : 0;
+  if (top <= 0 && bottom <= 0) {
+    return node;
+  }
+  return { ...node, style: { ...record(node.style), [SAFE_INSET_KEY]: { top, bottom } } };
 }
 
 const weightOf = (node: Raw | undefined): number | undefined => {
@@ -100,6 +125,10 @@ export function exactWeightShares(children: readonly (Raw | undefined)[]): boole
   );
 }
 
+/** A child as it takes part in its parent's flow: undefined when hidden or hoisted into a layer. */
+const inFlow = (node: Raw | undefined): Raw | undefined =>
+  isWebLayerNode(node) ? undefined : node;
+
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
 function withHeight(entry: unknown, height: number | undefined, weighted: boolean): unknown {
@@ -115,7 +144,8 @@ function withHeight(entry: unknown, height: number | undefined, weighted: boolea
  * A row, column or box with each child carrying the incoming max height it hands that child
  * (INCOMING_HEIGHT_KEY), where the node's own content height is statically known; other nodes
  * unchanged. A row or box hands every child its content height. A column measures its children
- * in order (see columnChildHeights) and, when its shares are exact (see exactWeightShares), marks
+ * in order (see columnChildHeights), leaving out a child hoisted into a window layer, which takes
+ * none of its height and is handed none, and, when its shares are exact (see exactWeightShares), marks
  * each weighted child (WEIGHTED_HEIGHT_KEY), except a repeat, whose children are one template, so each
  * gets the whole content height as a bound. A height that depends on layout (a sibling's wrap
  * height, the screen) is left out, so the bound stays an upper one or is absent.
@@ -133,9 +163,12 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
     return node;
   }
   if (type !== "column" || node.repeat !== undefined) {
-    return { ...node, children: children.map((entry) => withHeight(entry, content, false)) };
+    const handed = (entry: unknown) =>
+      isWebLayerNode(record(entry)) ? entry : withHeight(entry, content, false);
+    return { ...node, children: children.map(handed) };
   }
-  const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
+  // A hoisted layer (a bottomSheet) leaves nothing in the column's flow, so it takes no height.
+  const prepared = children.map((entry, index) => inFlow(prepare(entry, childPath(path, index))));
   const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
   const heights = columnChildHeights(prepared, content, spacing);
   const exact = exactWeightShares(prepared);

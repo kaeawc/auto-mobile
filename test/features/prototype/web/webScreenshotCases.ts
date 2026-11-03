@@ -109,17 +109,21 @@ export function webScreenshotCases(): WebScreenshotCase[] {
 /** The page under test: the case's spec as the only revision of the only variant. */
 export function webScreenshotPage(entry: WebScreenshotCase): string {
   const spec: unknown = JSON.parse(readFileSync(entry.fixture, "utf8"));
+  return webSpecPage(spec, entry.spec, entry.frame, entry.settings);
+}
+
+/** A page showing one spec as the only revision of the only variant. */
+export function webSpecPage(
+  spec: unknown,
+  name: string,
+  frame: (typeof WEB_SCREENSHOT_FRAMES)[number] = "pixel-9",
+  settings: Pick<PrototypeWebPageInput, "locale" | "textSize"> = {},
+): string {
   return buildPrototypeWebPage({
-    title: entry.spec,
-    frame: entry.frame,
-    ...entry.settings,
-    variants: [
-      {
-        id: entry.spec,
-        label: entry.spec,
-        revisions: [{ revision: 1, operation: "show", spec }],
-      },
-    ],
+    title: name,
+    frame,
+    ...settings,
+    variants: [{ id: name, label: name, revisions: [{ revision: 1, operation: "show", spec }] }],
   }).html;
 }
 

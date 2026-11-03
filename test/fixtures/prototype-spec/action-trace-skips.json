@@ -1,0 +1,56 @@
+{
+  "typescript": [
+    {
+      "trace": "dismiss cancels pending timers",
+      "issue": 16529
+    },
+    {
+      "trace": "dismiss ends the prototype and skips later actions",
+      "issue": 16529
+    },
+    {
+      "trace": "a repeating timer stops after maxRuns",
+      "issue": 16529
+    },
+    {
+      "trace": "setPage moves and clamps the pager",
+      "issue": 16529
+    },
+    {
+      "trace": "setStack replaces the whole path",
+      "issue": 16529
+    },
+    {
+      "trace": "stack actions move the path",
+      "issue": 16529
+    },
+    {
+      "trace": "state actions write their keys in order",
+      "issue": 16529
+    },
+    {
+      "trace": "timers fire on the fake clock",
+      "issue": 16529
+    }
+  ],
+  "kotlin": [
+    {
+      "trace": "upsertData replaces the row with the same key",
+      "issue": 16620
+    },
+    {
+      "trace": "setStack replaces the whole path",
+      "issue": 16620
+    }
+  ],
+  "swift": [
+    {
+      "trace": "upsertData replaces the row with the same key",
+      "issue": 16620
+    },
+    {
+      "trace": "setStack replaces the whole path",
+      "issue": 16620
+    }
+  ]
+}

@@ -1,0 +1,174 @@
+[
+  {
+    "name": "data actions write /data",
+    "spec": {
+      "id": "trace-data",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "data": {
+        "items": ["b"],
+        "title": "old"
+      },
+      "root": {
+        "type": "text",
+        "text": "Data"
+      }
+    },
+    "steps": [
+      {
+        "actions": [
+          {
+            "type": "setData",
+            "path": "/data/title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ],
+        "expect": {
+          "data": {
+            "items": ["b"],
+            "title": "new"
+          }
+        }
+      },
+      {
+        "actions": [
+          {
+            "type": "appendData",
+            "path": "/data/items",
+            "value": {
+              "value": "c"
+            }
+          }
+        ],
+        "expect": {
+          "data": {
+            "items": ["b", "c"],
+            "title": "new"
+          }
+        }
+      },
+      {
+        "actions": [
+          {
+            "type": "prependData",
+            "path": "/data/items",
+            "value": {
+              "value": ["a"]
+            }
+          }
+        ],
+        "expect": {
+          "data": {
+            "items": ["a", "b", "c"],
+            "title": "new"
+          }
+        }
+      },
+      {
+        "actions": [
+          {
+            "type": "removeData",
+            "path": "/data/items/1"
+          },
+          {
+            "type": "removeData",
+            "path": "/data/title"
+          }
+        ],
+        "expect": {
+          "data": {
+            "items": ["a", "c"]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "upsertData replaces the row with the same key",
+    "spec": {
+      "id": "trace-upsert",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "data": {
+        "rows": [
+          {
+            "id": "a",
+            "n": 1
+          }
+        ]
+      },
+      "root": {
+        "type": "text",
+        "text": "Rows"
+      }
+    },
+    "steps": [
+      {
+        "actions": [
+          {
+            "type": "upsertData",
+            "path": "/data/rows",
+            "key": "/id",
+            "value": {
+              "value": {
+                "id": "b",
+                "n": 2
+              }
+            }
+          }
+        ],
+        "expect": {
+          "data": {
+            "rows": [
+              {
+                "id": "a",
+                "n": 1
+              },
+              {
+                "id": "b",
+                "n": 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        "actions": [
+          {
+            "type": "upsertData",
+            "path": "/data/rows",
+            "key": "/id",
+            "value": {
+              "value": {
+                "id": "a",
+                "n": 3
+              }
+            }
+          }
+        ],
+        "expect": {
+          "data": {
+            "rows": [
+              {
+                "id": "a",
+                "n": 3
+              },
+              {
+                "id": "b",
+                "n": 2
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+]

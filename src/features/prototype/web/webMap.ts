@@ -109,13 +109,13 @@ export function wrapOffset(dx: number): number {
 
 /** A line's x coordinates as it is drawn: each one the short way round from the one before. */
 function unwrappedXs(points: readonly MapPoint[]): number[] {
-  return points.reduce<number[]>(
-    (xs, point, index) => [
-      ...xs,
-      index === 0 ? point.x : xs[index - 1]! + wrapOffset(point.x - points[index - 1]!.x),
-    ],
-    [],
-  );
+  let previous: MapPoint | undefined;
+  let x = 0;
+  return points.map((point) => {
+    x = previous ? x + wrapOffset(point.x - previous.x) : point.x;
+    previous = point;
+    return x;
+  });
 }
 
 interface Span {
@@ -124,14 +124,16 @@ interface Span {
 }
 
 function mergeSpans(spans: readonly Span[]): Span[] {
-  return spans
-    .toSorted((a, b) => a.start - b.start)
-    .reduce<Span[]>((merged, span) => {
-      const last = merged.at(-1);
-      return last && span.start <= last.end
-        ? [...merged.slice(0, -1), { start: last.start, end: Math.max(last.end, span.end) }]
-        : [...merged, span];
-    }, []);
+  const merged: Span[] = [];
+  for (const span of spans.toSorted((a, b) => a.start - b.start)) {
+    const last = merged.at(-1);
+    if (last && span.start <= last.end) {
+      merged[merged.length - 1] = { start: last.start, end: Math.max(last.end, span.end) };
+    } else {
+      merged.push(span);
+    }
+  }
+  return merged;
 }
 
 /**

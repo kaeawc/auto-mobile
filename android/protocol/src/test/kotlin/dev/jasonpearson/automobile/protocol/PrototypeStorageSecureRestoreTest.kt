@@ -116,7 +116,7 @@ class PrototypeStorageSecureRestoreTest {
     )
     val unlisted =
       PrototypeStorageRestorer.restore(
-        spec(storage = """{"version":1,"keys":[]}""", requires = false),
+        spec(storage = """{"version":1,"keys":["state:count"]}""", requires = false),
         secure("state:token" to JsonPrimitive("abc")),
       )
     assertEquals(
@@ -189,7 +189,7 @@ class PrototypeStorageSecureRestoreTest {
 
   private companion object {
     const val SECURE_STORAGE =
-      """{"version":1,"keys":[],"secure":["state:token","state:pin"],""" +
+      """{"version":1,"keys":["state:count"],"secure":["state:token","state:pin"],""" +
         """"secureAuth":{"state:pin":"biometric"}}"""
   }
 }

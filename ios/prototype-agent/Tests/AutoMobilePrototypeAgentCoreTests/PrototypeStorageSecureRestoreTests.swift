@@ -2,7 +2,7 @@
 import XCTest
 
 private let secureStorage =
-    #"{"version":1,"keys":[],"secure":["state:token","state:pin"],"secureAuth":{"state:pin":"biometric"}}"#
+    #"{"version":1,"keys":["state:count"],"secure":["state:token","state:pin"],"secureAuth":{"state:pin":"biometric"}}"#
 
 private func makeSecureSpec(storage: String? = secureStorage, pin: String = "") throws -> PrototypeSpec {
     let storageField = storage.map { #","storage":\#($0)"# } ?? ""
@@ -80,7 +80,7 @@ final class PrototypeStorageSecureRestoreTests: XCTestCase {
             .init(key: "state:pin", reason: .version), .init(key: "state:token", reason: .version),
         ])
         let unlisted = try PrototypeStorageRestore.restore(
-            spec: makeSecureSpec(storage: #"{"version":1,"keys":[]}"#),
+            spec: makeSecureSpec(storage: #"{"version":1,"keys":["state:count"]}"#),
             stored: secure(["state:token": .string("abc")])
         )
         XCTAssertEqual(unlisted.dropped, [.init(key: "state:token", reason: .unlisted)])
@@ -99,7 +99,7 @@ final class PrototypeStorageSecureRestoreTests: XCTestCase {
         // A non-string key cannot be listed in storage.secure here: the spec decoder runs the secure
         // storage rules and refuses it, so the restorer's own check is never reached on iOS.
         XCTAssertThrowsError(try makeSecureSpec(
-            storage: #"{"version":1,"keys":[],"secure":["state:token","state:count"]}"#
+            storage: #"{"version":1,"keys":["state:count"],"secure":["state:token","state:count"]}"#
         ))
         let atLimit = String(repeating: "é", count: PrototypeStorageRestore.maxSecureValueBytes / 2)
         let fits = PrototypeStorageRestore.restore(spec: spec, stored: secure(["state:token": .string(atLimit)]))

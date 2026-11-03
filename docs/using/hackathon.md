@@ -54,6 +54,18 @@ Notes on running them:
   (`prototype` with `action: "awaitEvent"`). The onboarding, checkout and chat templates emit
   `signup_submit`, `order_placed` and `message_sent`, so the agent can respond live in a demo.
 
+### Camera and media concepts
+
+These single-flow concepts exercise device capture. A device without the named capability refuses
+them like any other template.
+
+| Concept                   | Shape                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `concept-voice-note.json` | Record, stop and review a voice note's duration. Needs `audioRecorder` and microphone permission; emits `voice_note_recorded`. |
+
+On an emulator or simulator, grant the microphone with `setAppPermissions` and feed a known WAV
+with `injectAudioInput` before tapping Record.
+
 ## Demo-day checklist
 
 - **Run offline.** A prototype with no `request` actions needs no network. Save it on the device so

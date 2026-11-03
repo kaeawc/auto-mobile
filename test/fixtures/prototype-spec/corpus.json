@@ -37,6 +37,7 @@
     "color-role-and-corner-tokens.json",
     "commerce-catalog.json",
     "component-gallery.json",
+    "concept-voice-note.json",
     "content-description.json",
     "content-transition-crossfade.json",
     "content-transition-none.json",
@@ -2547,6 +2548,12 @@
     "choreography.json": ["prototype_choreography_v1", "prototype_motion_v2"],
     "color-role-and-corner-tokens.json": [],
     "component-gallery.json": [],
+    "concept-voice-note.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_audioRecorder_v1",
+      "prototype_platform_v1",
+      "prototype_stack_v1"
+    ],
     "content-description.json": [],
     "content-transition-crossfade.json": ["prototype_content_transition_v1"],
     "content-transition-none.json": [],

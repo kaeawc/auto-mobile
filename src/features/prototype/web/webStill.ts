@@ -166,6 +166,16 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+/** The fixed locale and zone keep a still's bytes stable; the logger is optional for a browser embed. */
+function stillFormat(options: PrototypeStillOptions): WebRenderScope["format"] {
+  return {
+    locale: STILL_LOCALE,
+    timeZone: "UTC",
+    nowMs: options.nowMs ?? 0,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  };
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
@@ -194,12 +204,7 @@ function stillScope(
     },
     data: spec.data,
     spec,
-    format: {
-      locale: STILL_LOCALE,
-      timeZone: "UTC",
-      nowMs: options.nowMs ?? 0,
-      ...(options.logger === undefined ? {} : { logger: options.logger }),
-    },
+    format: stillFormat(options),
     instances: [],
     inBox: false,
     unsupported: [],

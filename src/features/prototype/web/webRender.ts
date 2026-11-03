@@ -26,6 +26,7 @@ import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webSheetLayers } from "./webSheet";
+import { webSkins, type WebSkinId } from "./webSkin";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
@@ -65,6 +66,8 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /** The platform skin components draw in; Android (Material 3) when absent. */
+  readonly skin?: WebSkinId;
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
   /**
@@ -953,6 +956,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 
 const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
 
+const WEB_SKINS = webSkins(KIT);
+
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
   const id = typeof node.id === "string" ? node.id : undefined;
@@ -1046,7 +1051,8 @@ export function renderWebNode(
     layer(styled, own, path);
     return undefined;
   }
-  const renderer = WEB_NODE_RENDERERS[String(styled.type)];
+  const type = String(styled.type);
+  const renderer = WEB_SKINS[own.skin ?? "android"].renderers[type] ?? WEB_NODE_RENDERERS[type];
   const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
   const shaded = shaderFallback(styled, path);
   if (shaded) {

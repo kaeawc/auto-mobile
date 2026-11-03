@@ -7,6 +7,7 @@ import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import type { WebSkinId } from "./webSkin";
 import type { WebStackScreens } from "./webStack";
 import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
@@ -18,6 +19,8 @@ export interface PrototypeStillOptions {
   /** A device frame id; defaults to the platform's default frame. */
   readonly frame?: string;
   readonly platform?: "android" | "ios";
+  /** The platform skin components draw in; defaults to the frame's platform. */
+  readonly skin?: WebSkinId;
   readonly orientation?: WebOrientation;
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
@@ -194,6 +197,7 @@ function stillScope(
     instances: [],
     inBox: false,
     unsupported: [],
+    skin: options.skin ?? frame.platform,
     screenWidth: size.width,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],

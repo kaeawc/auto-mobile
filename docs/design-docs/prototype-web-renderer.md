@@ -124,8 +124,8 @@ it inlined per variant.
 
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
 spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
-`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
-`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
+`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery`,
+`doc-example-2` and `native-controls` (every button variant and two sliders), each in `pixel-9` and `iphone-16`, portrait (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
@@ -234,7 +234,7 @@ the host, so the page's script only switches between views it was given and neve
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
   `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `videoPlayer`,
   `map`, `cameraPreview` and `castButton`. Where the devices differ,
-  the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
+  the skin decides (below); the descriptions here are the Android skin's. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
   would reveal are not drawn. Its `dots` indicator is a row of 6 px dots, 8 px apart, the current one
@@ -303,6 +303,20 @@ the host, so the page's script only switches between views it was given and neve
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
   8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
+- **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
+  `skin` option overrides it. A skin replaces the renderers of the components its platform draws
+  natively (`designCoverage` `native` in `schemas/prototype-spec-contract.json`); every other
+  component draws the shared Material 3 renderer on both. A node's `ios` namespace is read only in
+  the iOS skin and its `android` namespace only in the Android one. The Android skin replaces
+  nothing. The iOS skin draws `button` as the iOS renderer's SwiftUI styles at the regular control
+  size in the 17 px body style, tinted with the theme's `primary`: `filled` is a 6 px-radius tint fill
+  under white text with 7x12 px padding, `tonal` the tint at 0.15 opacity under tint text,
+  `elevated` that with a 1 px shadow, `outlined` a 1 px tint capsule with 8x16 px padding, `text`
+  bare tint text; `ios.buttonStyle` draws `glassProminent` as a filled and `glass` as a tonal
+  capsule, without blur. Its `slider` is the system slider: its label 4 px above a 28 px row whose
+  4 px track is systemBlue up to the value and systemFill after it, under a white 28 px thumb whose
+  centre travels 14 px inside each end; the value is its state, else `min`, clamped and not
+  snapped. `timePicker`, `datePicker` and `pasteButton` are still placeholders on both skins.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
   navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to

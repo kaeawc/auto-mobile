@@ -317,6 +317,12 @@ describe("prototype tool on an iOS simulator", () => {
     expect(agent.requests).toEqual([]);
   });
 
+  test("a host-only screenMap still maps a spec with an Android-only settings page", async () => {
+    const { payload } = await call({ action: "screenMap", spec: settingsWifi });
+    expect(payload.success).toBe(true);
+    expect(agent.requests).toEqual([]);
+  });
+
   test("reset is forwarded to the agent only when true", async () => {
     await call({ action: "show", spec });
     await call({ action: "show", spec, reset: false });

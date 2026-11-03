@@ -173,7 +173,11 @@ function prototypePlatformError(
     if (options.devicePersistence) {
       return new ActionableError('window.persistence "device" is Android only; omit it on iOS.');
     }
-    const settingsPage = prototypeSettingsPagePlatformError(args.spec, "ios");
+    // Only a spec that runs or is saved for the device needs the page; screenMap is host-only.
+    const settingsPage =
+      args.action === "show" || args.action === "save"
+        ? prototypeSettingsPagePlatformError(args.spec, "ios")
+        : undefined;
     if (settingsPage) {
       return new ActionableError(
         `Invalid prototype at spec.${settingsPage.path}: ${settingsPage.message}. Nothing was shown.`,

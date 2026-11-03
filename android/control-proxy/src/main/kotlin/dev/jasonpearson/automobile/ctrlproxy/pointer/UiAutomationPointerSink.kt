@@ -8,8 +8,8 @@ import android.view.MotionEvent
 /**
  * Builds a real `MotionEvent` per planned event and injects it through [UiAutomation], which runs
  * with shell identity. Measured on API 31-37 emulators (#13082): apps receive the stylus or mouse
- * tool type, the planned pressure, tilt and orientation, `STYLUS_PRIMARY` and hover enter/move/exit.
- * A physical pen device is unverified.
+ * tool type, the planned pressure, tilt and orientation, `STYLUS_PRIMARY` and hover
+ * enter/move/exit. A physical pen device is unverified.
  */
 internal class UiAutomationPointerSink(
   private val uiAutomation: UiAutomation,

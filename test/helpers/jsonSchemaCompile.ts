@@ -41,6 +41,22 @@ export function compileAjv<T = unknown>(schema: unknown, options: Options): Vali
   return compileOn<T>(shared("07", options), schema);
 }
 
+// Options for a very large schema, such as the prototype tool's ~230 KB input schema with
+// ~1500 internal `$ref`s. Ajv's defaults inline each referenced subschema and then optimize
+// the generated code, which costs ~3 s to compile that schema plus ~0.7 s on its first
+// validation; with both off it is ~0.75 s and ~0.15 s. Neither option changes a verdict:
+// referenced subschemas become separate functions instead of being inlined.
+const LARGE_SCHEMA_OPTIONS: Options = {
+  strict: false,
+  inlineRefs: false,
+  code: { optimize: false },
+};
+
+/** Compile a large JSON Schema 2020-12 `schema` without Ajv's ref inlining and code optimizer. */
+export function compileLargeAjv2020<T = unknown>(schema: unknown): ValidateFunction<T> {
+  return compileAjv2020<T>(schema, LARGE_SCHEMA_OPTIONS);
+}
+
 export function compileJsonSchema(schema: unknown): void {
   compileAjv2020(schema);
 }

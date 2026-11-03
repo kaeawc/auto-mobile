@@ -56,11 +56,30 @@ describe("prototype share", () => {
     expect(link.protocol).toBe("automobile-proto:");
     expect(link.searchParams.get("url")).toBe(URL_);
     expect(link.searchParams.get("sha256")).toBe(share.sha256);
-    expect(share.qrPngPath).toBe(share.bundlePath.replace(".automobile-proto", ".qr.png"));
+    expect(share.qrPngPath).toBe(
+      share.bundlePath.replace(
+        ".automobile-proto",
+        `-${sha256(Buffer.from(share.link!)).slice(0, 12)}.qr.png`,
+      ),
+    );
     expect(Buffer.from(files.written.get(share.qrPngPath!)!).toString()).toBe(`png:${share.link}`);
     expect(share.qr).toBe(`qr:${share.link}`);
     expect(qrTexts.at(-1)).toBe(share.link);
     expect(result.warning).toContain(URL_);
+  });
+
+  test("one bundle shared at two urls keeps a QR per link", async () => {
+    const files = new FakeProtoViewerShareFiles();
+    const first = await shareProtoViewerBundle({ spec, url: URL_ }, deps(files));
+    const second = await shareProtoViewerBundle(
+      { spec, url: "https://mirror.example.com/demo.automobile-proto" },
+      deps(files),
+    );
+    expect(second.share?.bundlePath).toBe(first.share!.bundlePath);
+    expect(second.share?.qrPngPath).not.toBe(first.share!.qrPngPath);
+    expect(Buffer.from(files.written.get(first.share!.qrPngPath!)!).toString()).toBe(
+      `png:${first.share!.link}`,
+    );
   });
 
   test("the same spec shares to the same bytes and hash", async () => {

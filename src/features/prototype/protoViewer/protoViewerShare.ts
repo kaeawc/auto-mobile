@@ -113,7 +113,9 @@ export async function shareProtoViewerBundle(
     };
   }
   const qr = (deps.qr ?? defaultProtoViewerShareQrRenderer).render(link);
-  const qrPngPath = path.join(directory, `${stem}.qr.png`);
+  // One bundle can be shared at several URLs: the QR is named by its link, never overwritten.
+  const linkId = bundleSha256(Buffer.from(link)).slice(0, 12);
+  const qrPngPath = path.join(directory, `${stem}-${linkId}.qr.png`);
   await deps.files.write(qrPngPath, qr.png);
   return {
     success: true,

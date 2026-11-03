@@ -29,6 +29,24 @@ car image is installed in the range, the error names the `sdkmanager` command to
 reuses the car emulator instead of creating another. Creating and booting a car emulator this way works
 with an `android-automotive` image; with a Play Store car image it is unverified.
 
+If the test will drive the car, ask for that up front so you never get a Play image:
+
+```json
+{
+  "platform": "android",
+  "formFactor": "automotive",
+  "createIfMissing": true,
+  "requires": { "vehicle": { "motion": "supported" } }
+}
+```
+
+`requires.vehicle.motion: "supported"` (on `startDevice` and `getAndroid`) matches only an emulator
+built from an `android-automotive` image and creates one from such an image instead of the Play
+image. If none is installed in the range, the error names the `sdkmanager` package to install. It is
+refused for a non-automotive request. A booted car emulator's `traits.vehicle` in the booted-devices
+resource reports `motion` (`supported`, `unsupported`, or `unknown` when the build props could not be
+read) and `nightMode` (`supported`); other devices have no `vehicle` field.
+
 To choose the exact image and profile yourself, call `provisionDevice` with an `android-automotive`
 system image as `runtime` and an automotive profile as `deviceType`:
 

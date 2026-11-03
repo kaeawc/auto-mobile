@@ -12,6 +12,7 @@ import type {
 } from "../models/DeviceMatchCriteria";
 import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { defaultRandom, type Random } from "./Random";
+import { androidSystemImageTagsFor } from "../models/formFactor";
 
 export type DisplayInventoryClassification = "multi" | "single" | "unavailable";
 
@@ -246,6 +247,7 @@ export function matchesDeviceCriteria(
   return (
     matchesPlatform(item, criteria) &&
     matchesPlayStore(item, criteria) &&
+    matchesVehicleMotion(item, criteria) &&
     matchesVersionRange(item, criteria) &&
     matchesName(item, criteria) &&
     matchesFormFactor(item, criteria) &&
@@ -264,6 +266,27 @@ function matchesPlayStore(item: { runtimeId?: string }, criteria: DeviceMatchCri
   }
   const tag = item.runtimeId ? parseAndroidSystemImageRuntime(item.runtimeId)?.tag : undefined;
   return tag !== undefined && isPlayStoreSystemImageTag(tag);
+}
+
+/**
+ * `requires.vehicle.motion` (#16742) holds only for a non-Play automotive image: Play Store car
+ * images are `user` builds whose car service refuses driving-state injection. A device whose
+ * image is unknown cannot show it.
+ */
+function matchesVehicleMotion(
+  item: { runtimeId?: string },
+  criteria: DeviceMatchCriteria,
+): boolean {
+  if (criteria.requires?.vehicle?.motion !== "supported") {
+    return true;
+  }
+  const tag = item.runtimeId ? parseAndroidSystemImageRuntime(item.runtimeId)?.tag : undefined;
+  return tag !== undefined && isMotionCapableAutomotiveTag(tag);
+}
+
+/** A car image whose `userdebug` build can simulate driving state: automotive and not Play Store. */
+export function isMotionCapableAutomotiveTag(tag: string): boolean {
+  return androidSystemImageTagsFor("automotive").includes(tag) && !isPlayStoreSystemImageTag(tag);
 }
 
 function matchesRequiredDisplays(
@@ -566,8 +589,9 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
 }
 
 /**
- * Requirements no new device can satisfy: display capabilities (unknown until a device exists) and
- * `requires.playStore` off Android, where a created simulator would still not match (#14302).
+ * Requirements no new device can satisfy: display capabilities (unknown until a device exists),
+ * `requires.playStore` off Android, where a created simulator would still not match (#14302), and
+ * `requires.vehicle` outside an automotive Android request (#16742).
  */
 export function assertCreatableRequirements(
   criteria: DeviceMatchCriteria,
@@ -579,6 +603,15 @@ export function assertCreatableRequirements(
   if (criteria.requires?.playStore === true && criteria.platform !== "android") {
     throw new ActionableError(
       "requires.playStore applies to Android emulators only: no device was created. Remove it for an iOS request.",
+    );
+  }
+  if (
+    criteria.requires?.vehicle?.motion !== undefined &&
+    (criteria.platform !== "android" || criteria.formFactor !== "automotive")
+  ) {
+    throw new ActionableError(
+      "requires.vehicle applies to Android Automotive emulators only: no device was created. " +
+        "Pass platform 'android' and formFactor 'automotive', or remove requires.vehicle.",
     );
   }
 }

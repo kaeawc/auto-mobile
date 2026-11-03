@@ -192,18 +192,10 @@ class DirectoryLibraryRepository(
     source: LibrarySource,
     requires: List<String> = emptyList(),
   ): LibraryResult<LibraryEntry> {
-    if (
-      !validLibrarySpec(request.specJson) || !AutoMobilePrototype.capabilities.containsAll(requires)
-    )
-      return LibraryResult.Failure(LibraryError.Invalid)
     val specSha256 = sha256Hex(request.specJson.toByteArray())
-    // Repeat the importer's early check under this lock: purgeBlocked() lists through it.
-    if (!admission.admits(source, specSha256, null))
-      return LibraryResult.Failure(LibraryError.Hidden)
-    val listed = list()
-    if (listed is LibraryResult.Failure) return listed
-    if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
-      return LibraryResult.Failure(LibraryError.Limit)
+    rejectAdd(request, source, specSha256, requires)?.let {
+      return it
+    }
     val result = storageResult {
       val incomingBytes =
         request.specJson.toByteArray(Charsets.UTF_8).size.toLong() +
@@ -253,6 +245,28 @@ class DirectoryLibraryRepository(
     return when (result) {
       is LibraryResult.Failure -> result
       is LibraryResult.Success -> result.value
+    }
+  }
+
+  /** Validity, admission and count checks that run under the lock before any save. */
+  private fun rejectAdd(
+    request: SavedPrototypeSaveRequest,
+    source: LibrarySource,
+    specSha256: String,
+    requires: List<String>,
+  ): LibraryResult.Failure? {
+    if (
+      !validLibrarySpec(request.specJson) || !AutoMobilePrototype.capabilities.containsAll(requires)
+    )
+      return LibraryResult.Failure(LibraryError.Invalid)
+    // Repeat the importer's early check under this lock: purgeBlocked() lists through it.
+    if (!admission.admits(source, specSha256, null))
+      return LibraryResult.Failure(LibraryError.Hidden)
+    return when (val listed = list()) {
+      is LibraryResult.Failure -> listed
+      is LibraryResult.Success ->
+        if (listed.value.size >= MAX_LIBRARY_PROTOTYPES) LibraryResult.Failure(LibraryError.Limit)
+        else null
     }
   }
 

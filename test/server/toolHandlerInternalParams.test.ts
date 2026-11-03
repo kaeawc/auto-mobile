@@ -153,6 +153,68 @@ function unsafeSchemaParses(file: string, source: string): string[] {
   return offenders;
 }
 
+/**
+ * Every place outside comments that names the in-band connection key: the constant or the literal
+ * key. Handlers read the connection from the ambient call context instead (#15663).
+ */
+function inBandConnectionReads(file: string, source: string): string[] {
+  const { program, errors } = parseSync(file, source);
+  expect(errors).toEqual([]);
+  const offenders: string[] = [];
+  const line = (start: number) => `${file}:${source.slice(0, start).split("\n").length}`;
+  new Visitor({
+    Identifier(node) {
+      if (node.name === "INTERNAL_MCP_SESSION_PARAM" || node.name === INTERNAL_MCP_SESSION_PARAM) {
+        offenders.push(line(node.start));
+      }
+    },
+    Literal(node) {
+      if (node.value === INTERNAL_MCP_SESSION_PARAM) {
+        offenders.push(line(node.start));
+      }
+    },
+  }).visit(program);
+  // A shorthand `{ __mcpSessionId }` is both a key and a binding: report its line once.
+  return [...new Set(offenders)];
+}
+
+describe("the in-band connection key stays at the ingress boundary (#15663)", () => {
+  // `parseCallContext` reads the forwarded wire key once; nothing past it may.
+  const ALLOWED = new Set(["server/pipeline/ingress/callContext.ts"]);
+
+  let offenders: string[];
+  beforeAll(() => {
+    const src = join(import.meta.dir, "../../src");
+    const files = ["server", "features"].flatMap((dir) =>
+      Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: join(src, dir) }), (file) =>
+        `${dir}/${file}`.replaceAll("\\", "/"),
+      ),
+    );
+    expect(files.length).toBeGreaterThan(0);
+    offenders = files
+      .filter((file) => !ALLOWED.has(file))
+      .flatMap((file) => inBandConnectionReads(file, readFileSync(join(src, file), "utf8")));
+  });
+
+  test("no src/server or src/features file names __mcpSessionId outside ingress", () => {
+    expect(offenders).toEqual([]);
+  });
+
+  test("the scan finds the constant and the literal key, and ignores comments", () => {
+    expect(
+      inBandConnectionReads(
+        "fixture.ts",
+        `
+      // a comment naming __mcpSessionId is fine
+      const a = args[INTERNAL_MCP_SESSION_PARAM];
+      const b = args["__mcpSessionId"];
+      const { __mcpSessionId } = args;
+    `,
+      ),
+    ).toEqual(["fixture.ts:3", "fixture.ts:4", "fixture.ts:5"]);
+  });
+});
+
 describe("handler internal metadata regression guard", () => {
   let offenders: string[];
   beforeAll(() => {

@@ -142,10 +142,9 @@ export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
 export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
 /**
- * MCP session identity the daemon injects so a tool handler can autolock on
- * behalf of the calling session. Exported here (rather than kept local to
- * `server/index.ts`, where it originates) so it can take part in the canonical
- * {@link INTERNAL_TOOL_PARAM_NAMES} list without an import cycle.
+ * Wire-only: the MCP connection identity the daemon's socket forward carries. Read once at ingress
+ * by `parseCallContext` into the call's ambient autolock identity (#15663); handlers never see it,
+ * and it stays in {@link INTERNAL_TOOL_PARAM_NAMES} so a client-supplied value is stripped.
  */
 export const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
 

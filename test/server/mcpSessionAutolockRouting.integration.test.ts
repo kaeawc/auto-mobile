@@ -78,7 +78,7 @@ describe("MCP session autolock routing", () => {
     PlatformDeviceManagerFactory.reset();
   });
 
-  test("strips proxy-injected session keys before schema validation and passes them to handlers", async () => {
+  test("strips proxy-injected session keys before schema validation and passes the connection ambiently", async () => {
     fixture = new McpTestFixture({
       daemonMode: true,
       sessionContext: { sessionId: "shared-loopback-session" },
@@ -95,7 +95,7 @@ describe("MCP session autolock routing", () => {
     );
 
     expect(capturedArgs.value).toBe("ok");
-    expect(capturedArgs.__mcpSessionId).toBe("unix-socket-session");
+    expect(capturedArgs).not.toHaveProperty("__mcpSessionId");
     expect(ambient).toBe("unix-socket-session");
   });
 
@@ -377,10 +377,14 @@ describe("MCP session autolock routing", () => {
     });
     await fixture.setup();
 
-    const capturedArgs = await callCaptureTool(fixture, { value: "ok" });
+    let ambient: string | undefined = "unset";
+    const capturedArgs = await callCaptureTool(fixture, { value: "ok" }, () => {
+      ambient = currentAutolockMcpSessionId();
+    });
 
     expect(capturedArgs.value).toBe("ok");
     expect(capturedArgs).not.toHaveProperty("__mcpSessionId");
+    expect(ambient).toBeUndefined();
   });
 
   // #11096: the daemon's one-shot CLI marker reaches handlers only over its internal transport.
@@ -407,13 +411,18 @@ describe("MCP session autolock routing", () => {
     });
     await fixture.setup();
 
-    const capturedArgs = await callCaptureTool(fixture, {
-      value: "ok",
-      [INTERNAL_ONE_SHOT_CLI_PARAM]: true,
-    });
+    let ambient: string | undefined;
+    const capturedArgs = await callCaptureTool(
+      fixture,
+      { value: "ok", [INTERNAL_ONE_SHOT_CLI_PARAM]: true },
+      () => {
+        ambient = currentAutolockMcpSessionId();
+      },
+    );
 
     expect(capturedArgs).not.toHaveProperty(INTERNAL_ONE_SHOT_CLI_PARAM);
-    expect(capturedArgs.__mcpSessionId).toBe("direct-mcp-session");
+    expect(capturedArgs).not.toHaveProperty("__mcpSessionId");
+    expect(ambient).toBe("direct-mcp-session");
   });
 
   test("keeps direct MCP sessions available as implicit autolock keys", async () => {
@@ -428,7 +437,7 @@ describe("MCP session autolock routing", () => {
     });
 
     expect(capturedArgs.value).toBe("ok");
-    expect(capturedArgs.__mcpSessionId).toBe("direct-mcp-session");
+    expect(capturedArgs).not.toHaveProperty("__mcpSessionId");
     expect(ambient).toBe("direct-mcp-session");
   });
 });

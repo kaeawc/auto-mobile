@@ -1,23 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import {
-  internalMcpSessionId,
   internalOneShotCli,
   internalOptionalOneShotCli,
   internalRequesterSessionUuid,
 } from "../../../src/daemon/wire/internalToolParams";
 
 describe("shared internal tool parameter readers", () => {
-  test.each([
-    ["__mcpSessionId", internalMcpSessionId],
-    ["__requesterSessionUuid", internalRequesterSessionUuid],
-  ] as const)("%s reads strings without normalizing them", (key, read) => {
-    expect(read({ [key]: "identity" })).toBe("identity");
-    expect(read({ [key]: "" })).toBe("");
-    expect(read({})).toBeUndefined();
-    for (const value of [undefined, null, true, 42, {}, []]) {
-      expect(read({ [key]: value })).toBeUndefined();
-    }
-  });
+  test.each([["__requesterSessionUuid", internalRequesterSessionUuid]] as const)(
+    "%s reads strings without normalizing them",
+    (key, read) => {
+      expect(read({ [key]: "identity" })).toBe("identity");
+      expect(read({ [key]: "" })).toBe("");
+      expect(read({})).toBeUndefined();
+      for (const value of [undefined, null, true, 42, {}, []]) {
+        expect(read({ [key]: value })).toBeUndefined();
+      }
+    },
+  );
 
   test("the optional one-shot marker preserves false and absence", () => {
     for (const value of [true, false]) {

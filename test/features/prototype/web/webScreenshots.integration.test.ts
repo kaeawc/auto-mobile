@@ -19,6 +19,7 @@ import {
   webScreenshotEngines,
   webScreenshotOutputPath,
   webScreenshotPage,
+  webSpecPage,
   type WebScreenshotEngine,
 } from "./webScreenshotCases";
 
@@ -48,6 +49,8 @@ const PAGE_URL = "http://prototype-web.test/";
 const PER_PIXEL_DELTA = 0.1;
 const PIXEL_RATIO = 0.001;
 const CASE_TIMEOUT_MS = 30_000;
+/** A cold browser start can exceed bun's 5 s default hook timeout. */
+const LAUNCH_TIMEOUT_MS = 30_000;
 /**
  * The page's status bar clock follows the browser clock (#16585); the check pins it to the stills'
  * 9:41, in UTC, so the goldens stay byte-stable.
@@ -208,7 +211,7 @@ for (const engine of ENGINES) {
 
     beforeAll(async () => {
       browser = await BROWSER_TYPES[engine].launch();
-    });
+    }, LAUNCH_TIMEOUT_MS);
 
     afterAll(async () => {
       await browser?.close();
@@ -327,4 +330,69 @@ for (const engine of ENGINES) {
       CASE_TIMEOUT_MS,
     );
   });
+}
+
+const FADE_FIXTURE = join(
+  import.meta.dir,
+  "../../../fixtures/prototype-web/fade-edges-overflow.json",
+);
+
+for (const engine of ENGINES) {
+  describeBrowser(
+    `scroll fade edges follow overflow in headless ${engine} (#16606, #16459)`,
+    () => {
+      let browser: Browser;
+
+      beforeAll(async () => {
+        browser = await BROWSER_TYPES[engine].launch();
+      }, LAUNCH_TIMEOUT_MS);
+
+      afterAll(async () => {
+        await browser?.close();
+      });
+
+      for (const direction of ["ltr", "rtl"] as const) {
+        test(
+          `only an overflowing scroll fades its trailing edge (${direction})`,
+          async () => {
+            const base = JSON.parse(readFileSync(FADE_FIXTURE, "utf8")) as Record<string, unknown>;
+            const window = {
+              ...(base.window as Record<string, unknown>),
+              layoutDirection: direction,
+            };
+            const { page } = await openPage(
+              browser,
+              webSpecPage({ ...base, window }, "fade-edges"),
+            );
+            try {
+              const masks = await page.evaluate(() =>
+                Object.fromEntries(
+                  Array.from(
+                    document.querySelectorAll<HTMLElement>("[data-view]:not([hidden]) [data-fade]"),
+                  ).map((scroll) => [scroll.dataset.testid, getComputedStyle(scroll).maskImage]),
+                ),
+              );
+              const trailing = direction === "rtl" ? "to right" : "to left";
+              // Without scroll-driven animations (Firefox today) the page keeps the fade always on.
+              const followsOverflow = await page.evaluate(() =>
+                CSS.supports("animation-timeline", "scroll()"),
+              );
+              if (followsOverflow) {
+                expect(masks["vertical-fits"]).toBe("none");
+                expect(masks["horizontal-fits"]).toBe("none");
+              } else {
+                expect(masks["vertical-fits"]).toStartWith("linear-gradient(to top,");
+                expect(masks["horizontal-fits"]).toStartWith(`linear-gradient(${trailing},`);
+              }
+              expect(masks["vertical-overflows"]).toStartWith("linear-gradient(to top,");
+              expect(masks["horizontal-overflows"]).toStartWith(`linear-gradient(${trailing},`);
+            } finally {
+              await page.close();
+            }
+          },
+          CASE_TIMEOUT_MS,
+        );
+      }
+    },
+  );
 }

@@ -14,7 +14,7 @@ const cases = webScreenshotCases();
 
 describe("prototype web screenshot goldens (#16346)", () => {
   test("every case has a fixture and viewport-sized portrait and landscape goldens", () => {
-    expect(cases.length).toBe(16);
+    expect(cases.length).toBe(20);
     for (const entry of cases) {
       expect(existsSync(entry.fixture)).toBe(true);
       expect(pngSize(readFileSync(entry.golden))).toEqual(WEB_SCREENSHOT_VIEWPORT);

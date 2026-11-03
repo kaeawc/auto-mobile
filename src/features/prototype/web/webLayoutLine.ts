@@ -429,11 +429,19 @@ function lineJustify(
   return physical === undefined ? undefined : (SIDE_SWAP[physical] ?? physical);
 }
 
+/** Where a line starts on its main axis, how far it extends, and whether it runs from its end. */
+interface MainLine {
+  readonly start: Len;
+  readonly extent: Len;
+  readonly reverse: boolean;
+}
+
 /**
  * A main-axis position from an offset along the line. A reversed line runs from its main-end,
  * so an item's offset is measured back from the end of the line's extent.
  */
-function mainPosition(start: Len, extent: Len, offset: Len, size: Len, reverse: boolean): Len {
+function mainPosition(line: MainLine, offset: Len, size: Len): Len {
+  const { start, extent, reverse } = line;
   return reverse ? add(start, sub(extent, add(offset, size))) : add(start, offset);
 }
 
@@ -454,10 +462,13 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   const justify = lineJustify(box.parent.style["justify-content"], main, reverse);
   const [lead, between] = arrangement(justify, remaining, items.length);
   // A container sized by its content ends where its items do.
-  const extent =
-    room ??
-    sizes.reduce<Len>((total, size) => add(total, size), gap * Math.max(0, items.length - 1));
-  const lineStart = startOf(box.content, main);
+  const line: MainLine = {
+    start: startOf(box.content, main),
+    extent:
+      room ??
+      sizes.reduce<Len>((total, size) => add(total, size), gap * Math.max(0, items.length - 1)),
+    reverse,
+  };
   const placed: PlacedChild[] = [];
   let cursor: Len = lead;
   for (const [index, item] of items.entries()) {
@@ -465,7 +476,7 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
     if (item.element) {
       const [offset, crossSize] = crossPlacement(item.element, main, size, box);
       const position: [Len, Len] = [
-        mainPosition(lineStart, extent, cursor, size, reverse),
+        mainPosition(line, cursor, size),
         add(startOf(box.content, cross), offset),
       ];
       const rect = oriented(main, position, [size, crossSize]);

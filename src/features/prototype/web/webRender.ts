@@ -40,6 +40,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import { rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -316,9 +317,12 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
   ) {
     return [];
   }
-  const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));
+  const own = rowFillAxes(raw, path, prepareIn(scope));
+  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
+
+const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
 function spacerFilled(node: Raw): Raw {
   return isUnsizedSpacer(node) ? fillMissing(node) : node;
@@ -332,7 +336,8 @@ const line =
     const node = filling(raw, lineFillAxes(raw, scope, path));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    return el("div", { attrs, style }, children(node, inner, path));
+    const rowed = rowMeasured(node, path, prepareIn(inner));
+    return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
@@ -364,6 +369,7 @@ const text: NodeRenderer = (node, scope) => {
 
 const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
+  const fade = fadeEdgesCss(node, scope.style);
   const { attrs, style } = base(node, scope, {
     display: "flex",
     // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
@@ -371,13 +377,14 @@ const scroll: NodeRenderer = (node, scope, path) => {
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
-    ...fadeEdgesCss(node, scope.style),
+    ...fade.style,
   });
   const inner = child(scope, {
     inBox: false,
     style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
   });
-  return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
+  const scrollAttrs = { ...attrs, ...fade.attrs };
+  return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
 
 const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node), scope));

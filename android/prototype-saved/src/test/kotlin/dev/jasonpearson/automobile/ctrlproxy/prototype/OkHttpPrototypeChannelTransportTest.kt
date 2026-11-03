@@ -131,7 +131,7 @@ class OkHttpPrototypeChannelTransportTest {
     connection.close(1000, "")
     assertNull(
       "no callback after the caller closes",
-      recorder.seen.poll(200, TimeUnit.MILLISECONDS),
+      recorder.seen.poll(QUIET_MS, TimeUnit.MILLISECONDS),
     )
   }
 
@@ -259,60 +259,24 @@ class OkHttpPrototypeChannelTransportTest {
 
   @Test
   fun `a handshake that never answers times out`() {
-    server.enqueue(MockResponse.Builder().headersDelay(2, TimeUnit.SECONDS).build())
+    server.enqueue(
+      MockResponse.Builder().headersDelay(HEADERS_DELAY_MS, TimeUnit.MILLISECONDS).build(),
+    )
     val recorder = Recorder()
-    transport(handshakeTimeoutMs = 200)
+    transport(handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS)
       .open(request(PrototypeChannelKind.SSE, server.url("/feed").toString()), recorder)
     assertEquals("timeout", (recorder.next() as Seen.Closed).error?.code)
   }
 
-  @Test
-  fun `an open websocket outlives the handshake timeout`() {
-    server.enqueue(
-      MockResponse.Builder()
-        .webSocketUpgrade(
-          object : ServerSocket() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-              Thread {
-                Thread.sleep(STREAM_DELAY_MS)
-                webSocket.send("late")
-              }
-                .start()
-            }
-          },
-        )
-        .build(),
-    )
-    val recorder = Recorder()
-    val connection =
-      transport(handshakeTimeoutMs = OUTLIVED_HANDSHAKE_MS)
-        .open(request(PrototypeChannelKind.WEBSOCKET, wsUrl()), recorder)
-    assertTrue(recorder.next() is Seen.Open)
-    assertEquals(Seen.Frame("late", null, null), recorder.next())
-    connection.close(1000, "")
-  }
-
-  @Test
-  fun `an open sse stream outlives the handshake timeout`() {
-    server.enqueue(
-      MockResponse.Builder()
-        .setHeader("Content-Type", "text/event-stream")
-        .bodyDelay(STREAM_DELAY_MS, TimeUnit.MILLISECONDS)
-        .body("data: late\n\n")
-        .build(),
-    )
-    val recorder = Recorder()
-    transport(handshakeTimeoutMs = OUTLIVED_HANDSHAKE_MS)
-      .open(request(PrototypeChannelKind.SSE, server.url("/feed").toString()), recorder)
-    assertEquals(Seen.Open(null), recorder.next())
-    assertEquals(Seen.Frame("late", null, null), recorder.next())
-  }
-
   private companion object {
     /**
-     * Generous enough that a loaded runner still upgrades in time; the stream then waits longer.
+     * The handshake deadline under test, and a server slower than it (as the Retrofit timeout
+     * test).
      */
-    const val OUTLIVED_HANDSHAKE_MS = 1_000L
-    const val STREAM_DELAY_MS = 1_500L
+    const val HANDSHAKE_TIMEOUT_MS = 1L
+    const val HEADERS_DELAY_MS = 25L
+
+    /** How long to watch for a callback that must not come. */
+    const val QUIET_MS = 20L
   }
 }

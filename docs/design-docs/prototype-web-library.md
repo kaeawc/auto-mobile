@@ -18,8 +18,8 @@ link to a running daemon are separate decisions with their own gates, below.
   pure function from spec, frame, orientation, mode and screen to an element tree. It already
   runs no actions, timers or requests, and serializes deterministically. The page runtime
   (`webPageRuntime.ts`) only switches pre-rendered views and moves the stage.
-- `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 73 KB
-  minified (23 KB gzip). The renderer's closure reads only the contract values in the generated
+- `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 74 KB
+  minified (24 KB gzip). The renderer's closure reads only the contract values in the generated
   `prototypeRenderContract.generated.ts`, not the whole contract JSON; the string-table zod
   schema lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside
   the closure; and the derived-format path takes an optional injected logger instead of

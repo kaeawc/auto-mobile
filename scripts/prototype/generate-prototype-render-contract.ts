@@ -23,6 +23,9 @@ interface RenderContractSource {
   patterns: Readonly<Record<string, string>>;
   stringFields: readonly string[];
   stringOpaqueFields: readonly string[];
+  platformModules: {
+    device: { state: { widthClass: { breakpoints?: readonly number[] } } };
+  };
   definitions: {
     repeat: {
       fields: { items: { rule: { options: readonly { kind: string; max?: number }[] } } };
@@ -62,6 +65,10 @@ export function renderPrototypeRenderContract(source: RenderContractSource): str
   if (repeatMax === undefined) {
     throw new Error("Contract repeat.items: no array option with a max");
   }
+  const breakpoints = source.platformModules.device.state.widthClass.breakpoints;
+  if (!breakpoints || breakpoints.length !== 2) {
+    throw new Error("Contract platformModules.device widthClass: expected two breakpoints");
+  }
   return [
     "// Generated from schemas/prototype-spec-contract.json; do not edit.",
     "// Regenerate: bun scripts/prototype/generate-prototype-render-contract.ts",
@@ -70,6 +77,9 @@ export function renderPrototypeRenderContract(source: RenderContractSource): str
     "",
     "/** The largest literal `repeat.items` array. */",
     `export const PROTOTYPE_REPEAT_ITEMS_MAX = ${repeatMax};`,
+    "",
+    "/** The `/device/widthClass` medium and expanded breakpoints, in dp. */",
+    `export const PROTOTYPE_WIDTH_CLASS_BREAKPOINTS = [${breakpoints.join(", ")}] as const;`,
     "",
     ...objectLines("prototypeContractPatternSources", Object.entries(source.patterns)),
     "",

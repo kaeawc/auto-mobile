@@ -274,7 +274,9 @@ the host, so the page's script only switches between views it was given and neve
 no code change. `deviceFrameSchema.ts` holds its strict schema, and the registry's unit test
 validates every entry, so an invalid entry fails CI instead of rendering wrong geometry. The
 registry is not validated at load: `deviceFrames.ts` stays free of zod so the still renderer
-bundles for the browser (see [Prototype web library](prototype-web-library.md)).
+bundles for the browser (see [Prototype web library](prototype-web-library.md)), and fills the
+schema's defaults and `inner` panel itself; a unit test holds that result equal to the schema's
+parse.
 
 It is called a _frame_ registry, never a device profile, because `deviceProfile` already means
 the session broker's OEM manufacturer profiles.

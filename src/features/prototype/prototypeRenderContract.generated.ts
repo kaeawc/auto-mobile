@@ -14,6 +14,9 @@ export const prototypeRenderLimits = {
 /** The largest literal `repeat.items` array. */
 export const PROTOTYPE_REPEAT_ITEMS_MAX = 128;
 
+/** The `/device/widthClass` medium and expanded breakpoints, in dp. */
+export const PROTOTYPE_WIDTH_CLASS_BREAKPOINTS = [600, 840] as const;
+
 export const prototypeContractPatternSources = {
   pathKey: "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])",
   stateKey: "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])",

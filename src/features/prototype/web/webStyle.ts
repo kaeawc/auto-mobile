@@ -114,6 +114,14 @@ function boxStyle(css: Css, style: Raw, context: WebStyleContext) {
     Object.assign(css, radius);
     css.overflow = "hidden";
   }
+  paintStyle(css, style, context);
+  if (typeof style.alpha === "number") {
+    css.opacity = String(style.alpha);
+  }
+}
+
+/** Gradient, border, glass and shadows, after the background and shape they paint with. */
+function paintStyle(css: Css, style: Raw, context: WebStyleContext) {
   // Android paints the gradient over the background, across the whole node.
   const gradient = gradientCss(style.gradient, context);
   if (gradient) {
@@ -136,9 +144,6 @@ function boxStyle(css: Css, style: Raw, context: WebStyleContext) {
     .join(",");
   if (shadow) {
     css["box-shadow"] = shadow;
-  }
-  if (typeof style.alpha === "number") {
-    css.opacity = String(style.alpha);
   }
 }
 

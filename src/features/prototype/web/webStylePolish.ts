@@ -118,20 +118,24 @@ export function glassCss(style: Raw, context: WebStyleContext): Css {
   const tint = resolvePrototypeColor(glass?.tint, context.mode, context.palette);
   const capsule: Css =
     style.cornerRadius === undefined ? { "border-radius": "9999px", overflow: "hidden" } : {};
-  if (context.platform !== "ios") {
-    const fill =
-      tint ?? resolvePrototypeColor("surfaceContainer", context.mode, context.palette) ?? undefined;
-    return {
-      ...capsule,
-      ...(fill ? { "background-color": rgbaCss({ ...fill, a: GLASS_FALLBACK_ALPHA }) } : {}),
-    };
-  }
-  const clear = glass?.variant === "clear";
+  const look =
+    context.platform === "ios"
+      ? iosGlass(tint, glass?.variant === "clear", context)
+      : androidGlassFallback(tint, context);
+  return { ...capsule, ...look };
+}
+
+function androidGlassFallback(tint: Rgba | undefined, context: WebStyleContext): Css {
+  const fill = tint ?? resolvePrototypeColor("surfaceContainer", context.mode, context.palette);
+  return fill ? { "background-color": rgbaCss({ ...fill, a: GLASS_FALLBACK_ALPHA }) } : {};
+}
+
+function iosGlass(tint: Rgba | undefined, clear: boolean, context: WebStyleContext): Css {
   const base = tint ?? { r: 255, g: 255, b: 255, a: 1 };
-  const alpha = (clear ? 0.12 : 0.32) * (tint ? 1 : context.mode === "dark" ? 0.5 : 1);
+  // Untinted glass reads dimmer over a dark backdrop.
+  const dim = !tint && context.mode === "dark" ? 0.5 : 1;
   return {
-    ...capsule,
-    "background-color": rgbaCss({ ...base, a: alpha }),
+    "background-color": rgbaCss({ ...base, a: (clear ? 0.12 : 0.32) * dim }),
     "backdrop-filter": `blur(${clear ? 6 : 16}px) saturate(1.8)`,
     "box-shadow": "inset 0 0 0 1px rgba(255,255,255,0.35)",
   };
@@ -229,4 +233,19 @@ export function fadeEdgesCss(node: Raw, context: WebStyleContext): Css {
       ? "to top"
       : "to bottom";
   return { "mask-image": `linear-gradient(${toward},rgba(0,0,0,0) 0,#000 ${px(length)})` };
+}
+
+/**
+ * A node with `style.shader` draws without it, as a device without shader support does; the
+ * still lists it with reason `shaderFallback`.
+ */
+export function shaderFallback(
+  node: Raw,
+  path: string,
+): { type: string; id?: string; path: string; reason: "shaderFallback" } | undefined {
+  if (record(node.style)?.shader === undefined) {
+    return undefined;
+  }
+  const id = typeof node.id === "string" ? node.id : undefined;
+  return { type: String(node.type), ...(id ? { id } : {}), path, reason: "shaderFallback" };
 }

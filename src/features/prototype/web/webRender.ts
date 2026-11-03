@@ -1,5 +1,4 @@
 import { bindPrototypeDataText, resolvePrototypeDataPointer } from "../prototypeData";
-import { prototypeLinkifyMatches, type PrototypeLinkifyKind } from "../prototypeLinkify";
 import {
   projectPrototypeDerivedItem,
   resolvePrototypeDerived,
@@ -36,7 +35,8 @@ import {
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
-import { fadeEdgesCss, withOverContentLayers } from "./webStylePolish";
+import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
+import { textRuns } from "./webText";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -355,52 +355,6 @@ const box: NodeRenderer = (raw, scope, path) => {
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
-/** A span with its own text style and background; a link is marked, since a still never taps. */
-function styledSpan(text: string, style: Raw | undefined, link: boolean, scope: WebRenderScope) {
-  const background = cssColor(style?.background, scope.style);
-  const css = {
-    ...textCss(style, scope.style),
-    ...(background ? { "background-color": background } : {}),
-  };
-  return el("span", { attrs: link ? { "data-link": "true" } : {}, style: css }, [text]);
-}
-
-/**
- * `linkify`: the resolved text split into plain runs and one link per match, in its `style`, as
- * Android draws it; plain text when nothing matches.
- */
-function linkified(text: string, linkify: Raw, scope: WebRenderScope): WebChild[] {
-  const kinds = Array.isArray(linkify.kinds) ? (linkify.kinds as PrototypeLinkifyKind[]) : [];
-  const matches = prototypeLinkifyMatches(text, kinds);
-  if (matches.length === 0) {
-    return [text];
-  }
-  const runs: WebChild[] = [];
-  let cursor = 0;
-  for (const match of matches) {
-    if (match.start > cursor) {
-      runs.push(text.slice(cursor, match.start));
-    }
-    runs.push(styledSpan(match.text, record(linkify.style), true, scope));
-    cursor = match.end;
-  }
-  return cursor < text.length ? [...runs, text.slice(cursor)] : runs;
-}
-
-/** A text node's content: its `text` (linkified when asked), or each span in its own style. */
-function textContent(node: Raw, scope: WebRenderScope): WebChild[] {
-  if (!Array.isArray(node.spans)) {
-    const linkify = record(node.linkify);
-    const text = bound(node.text, scope);
-    return linkify ? linkified(text, linkify, scope) : [text];
-  }
-  return node.spans.map((span) => {
-    const entry = record(span) ?? {};
-    const link = Array.isArray(entry.onTap) && entry.onTap.length > 0;
-    return styledSpan(bound(entry.text, scope), record(entry.style), link, scope);
-  });
-}
-
 const text: NodeRenderer = (node, scope) => {
   const maxLines = record(node.style)?.maxLines;
   const clamp: Record<string, string> =
@@ -413,7 +367,11 @@ const text: NodeRenderer = (node, scope) => {
         }
       : {};
   const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
-  return el("span", { attrs, style }, textContent(node, scope));
+  return el(
+    "span",
+    { attrs, style },
+    textRuns(node, (value) => bound(value, scope), scope.style),
+  );
 };
 
 const scroll: NodeRenderer = (node, scope, path) => {
@@ -1089,15 +1047,9 @@ export function renderWebNode(
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
   const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
-  if (record(styled.style)?.shader !== undefined) {
-    // Devices that cannot run the shader draw the node without it; so does the still.
-    const id = typeof styled.id === "string" ? styled.id : undefined;
-    own.unsupported.push({
-      type: String(styled.type),
-      ...(id ? { id } : {}),
-      path,
-      reason: "shaderFallback",
-    });
+  const shaded = shaderFallback(styled, path);
+  if (shaded) {
+    own.unsupported.push(shaded);
   }
   return withOverContentLayers(element, styled.style, own.style);
 }

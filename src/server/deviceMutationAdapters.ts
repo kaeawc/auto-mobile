@@ -16,7 +16,7 @@ import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
 import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
-import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
+import { appFallback, lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
 import { orchestrationToolMutations } from "./deviceMutationOrchestrationAdapters";
 import {
   deviceConditionSkewsClock,
@@ -280,8 +280,10 @@ function namedToolMutations(
       ? postedNotificationKey(args.appId)
       : undefined;
   if (posted !== undefined) {
-    // The named app's SDK receiver posts it; force-stopping that app cancels it (#14364).
-    return [mutation("notification", posted)];
+    // The named app's SDK receiver posts it; force-stopping that app cancels it (#14364). Posting
+    // also persists a notification channel, which only uninstalling a session-installed app
+    // removes, so the app fallback stays unless the session installed the app.
+    return [mutation("notification", posted), appFallback("postNotification", args.appId)];
   }
   if (name === "rotate") {
     return rotationMutations(args);

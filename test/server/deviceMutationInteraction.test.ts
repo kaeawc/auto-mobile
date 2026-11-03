@@ -407,10 +407,13 @@ test("iOS volume presses force fallback; Android presses do not", () => {
 });
 
 describe("postNotification journal row (#14364)", () => {
-  test("an Android call naming its app journals a revertible posted row for that app", () => {
+  test("an Android call naming its app journals a revertible posted row plus the app fallback", () => {
     expect(
       deviceToolMutations("postNotification", { appId: "com.example.app", title: "Hi" }, "android"),
-    ).toEqual([{ kind: "notification", key: "posted:com.example.app" }]);
+    ).toEqual([
+      { kind: "notification", key: "posted:com.example.app" },
+      { kind: "opaque", key: opaqueIntentKey("postNotification", "com.example.app") },
+    ]);
   });
 
   test.each([

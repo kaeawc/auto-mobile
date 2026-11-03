@@ -206,22 +206,32 @@ export function withOverContentLayers(
   };
 }
 
+/** A scroll's fade as the page applies it: the mask in `--fade-mask`, the scroll axis in `data-fade`. */
+export interface WebFadeEdges {
+  readonly attrs: Record<string, string>;
+  readonly style: Css;
+}
+
+const NO_FADE: WebFadeEdges = { attrs: {}, style: {} };
+
 /**
  * `scroll.fadeEdges` as a mask. Fades show only where scrolling remains; a still opens at the
- * scroll's start (a reverse scroll at its end), so the leading edge never fades, and since it
- * cannot measure overflow it always fades the trailing edge. Start and end mirror in RTL.
+ * scroll's start (a reverse scroll at its end), so the leading edge never fades. The trailing
+ * edge's mask is handed to the page's {@link FADE_EDGES_PAGE_CSS}, which draws it only while the
+ * browser can scroll the element, as Android draws it only while `canScrollForward`. Start and
+ * end mirror in RTL.
  */
-export function fadeEdgesCss(node: Raw, context: WebStyleContext): Css {
+export function fadeEdgesCss(node: Raw, context: WebStyleContext): WebFadeEdges {
   const fades = record(node.fadeEdges);
   if (!fades) {
-    return {};
+    return NO_FADE;
   }
   const horizontal = node.axis === "horizontal";
   const reverse = node.reverse === true;
   const field = horizontal ? (reverse ? "start" : "end") : reverse ? "top" : "bottom";
   const length = fades[field];
   if (typeof length !== "number" || length <= 0) {
-    return {};
+    return NO_FADE;
   }
   // The direction the fade runs from its transparent edge into the content.
   const physicalEnd = horizontal && (field === "end") !== (context.rtl === true);
@@ -234,9 +244,25 @@ export function fadeEdgesCss(node: Raw, context: WebStyleContext): Css {
       : "to bottom";
   // Clamped to the viewport, as Android's prototypeFadeLine does, so the far edge stays opaque.
   return {
-    "mask-image": `linear-gradient(${toward},rgba(0,0,0,0) 0,#000 min(${px(length)},100%))`,
+    attrs: { "data-fade": horizontal ? "x" : "y" },
+    style: {
+      "--fade-mask": `linear-gradient(${toward},rgba(0,0,0,0) 0,#000 min(${px(length)},100%))`,
+    },
   };
 }
+
+/**
+ * Page rules that draw a scroll's `--fade-mask` only while its content overflows (#16606). A
+ * scroll-driven animation holds the mask for its whole range, and its `scroll(self)` timeline is
+ * inactive while the element cannot scroll, so content that fits draws no fade. It depends only on
+ * layout, not on time, so a screenshot is deterministic. A browser without scroll-driven
+ * animations always draws the mask, as the still did before it could tell.
+ */
+export const FADE_EDGES_PAGE_CSS = [
+  "@keyframes prototype-fade{from,to{mask-image:var(--fade-mask)}}",
+  "@supports (animation-timeline:scroll()){[data-fade]{animation-name:prototype-fade;animation-duration:auto;animation-timing-function:linear;animation-fill-mode:both;animation-timeline:scroll(self y)}[data-fade=x]{animation-timeline:scroll(self x)}}",
+  "@supports not (animation-timeline:scroll()){[data-fade]{mask-image:var(--fade-mask)}}",
+].join("");
 
 /**
  * A node with `style.shader` draws without it, as a device without shader support does; the

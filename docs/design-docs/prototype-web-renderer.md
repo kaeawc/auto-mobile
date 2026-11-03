@@ -88,7 +88,8 @@ it inlined per variant.
   then the others in key order; such views carry `data-screen`). The first view is the chosen
   variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
   `hidden`.
-- **Controls.** Only five: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
+- **Controls.** Only five: rotate (portrait/landscape; absent for watch and TV frames, which
+  never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
   double-click to fit), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
@@ -99,8 +100,16 @@ it inlined per variant.
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
   self-contained. It only shows and hides views, lists the shown revision's screens in the
-  screen select and moves the stage; UI state stays in memory, with no storage, cookies or URL
+  screen select, moves the stage and animates rotation; UI state stays in memory, with no storage, cookies or URL
   changes. It must stay at or below 150 KB.
+- **Rotation.** Rotate turns the frame 90° (counterclockwise into landscape, clockwise back)
+  with the Web Animations API: the outgoing view turns away from upright while the incoming view,
+  pre-rendered in the new orientation, turns in from a quarter turn, so both track one frame, and
+  the stage's fitted scale animates with them. Android (`data-platform` on `body`) cross-fades
+  the content over a 500 ms turn; iOS hands over to the new layout in the first quarter of a
+  400 ms turn, as its window re-lays out while the bounds animate. The end state is the plain
+  landscape view. A second rotate finishes the running turn first. `prefers-reduced-motion:
+  reduce` skips the animation.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
 - **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
@@ -123,11 +132,13 @@ nothing at runtime drives a browser.
 - **Assertions.** The page is served from one fixed URL and every other request is aborted and
   fails the case, on top of the page's own CSP. No console error, page error or
   `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
-  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; rotate
-  shows the landscape view, wider than tall; a page with a screen select shows exactly the picked
+  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
+  through rotate both views are shown and turned, and the finished turn shows only the landscape
+  view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
   screen's view.
-- **Goldens.** One PNG per case in `test/fixtures/prototype-web/screenshots/`
-  (`<spec>--<frame>.png`, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
+  (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
+  turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.

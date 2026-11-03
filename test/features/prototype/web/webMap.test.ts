@@ -149,6 +149,8 @@ describe("prototype web map (#16539)", () => {
     });
     expect(mapSize(undefined, screen)).toEqual({ width: 390, height: 200 });
     expect(mapSize({ height: "fill" }, screen)).toEqual({ width: 390, height: 844 });
+    // `wrap` sets no CSS height, so the box stays at its 200 dp default.
+    expect(mapSize({ height: "wrap" }, screen)).toEqual({ width: 390, height: 200 });
   });
 
   test("an empty map draws the neutral canvas", () => {

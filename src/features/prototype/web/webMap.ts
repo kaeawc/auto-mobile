@@ -374,8 +374,8 @@ function dpSize(value: unknown): number | undefined {
 }
 
 /**
- * The size the map frames and projects against: its `{dp}` size; an unsized height is the 200 dp
- * the box takes. An axis its parent sizes (`fill`, or stretching across a column) cannot be known
+ * The size the map frames and projects against: its `{dp}` size; any other height but `fill`
+ * (unsized, `wrap`) leaves the box at its 200 dp. An axis its parent sizes (`fill`, or stretching across a column) cannot be known
  * here, so it takes the screen's, the most it can render at: the eye then sits far enough out that
  * no horizon shows in the box, and the ground's reach covers it. Points are placed from the centre
  * in dp, so they land true whatever size the box renders at.
@@ -387,7 +387,7 @@ export function mapSize(
   return {
     width: dpSize(style?.width) ?? screen.width,
     height:
-      dpSize(style?.height) ?? (style?.height === undefined ? DEFAULT_MAP_HEIGHT : screen.height),
+      dpSize(style?.height) ?? (style?.height === "fill" ? screen.height : DEFAULT_MAP_HEIGHT),
   };
 }
 

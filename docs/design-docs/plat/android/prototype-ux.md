@@ -2256,6 +2256,12 @@ it keeps `/platform/location/current` current while the prototype is shown and r
 write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
 `requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
+The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
+only when the spec emits them or writes them into `/data`. `prototypeLocationEventSummary`
+(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
+`test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
+the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
+names (never the values) of anything it dropped.
 
 **BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
 of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,

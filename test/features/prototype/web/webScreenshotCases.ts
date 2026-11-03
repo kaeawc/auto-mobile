@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { deviceFrameOrThrow } from "../../../../src/features/prototype/web/deviceFrames";
+import {
+  frameOrientations,
+  type WebOrientation,
+} from "../../../../src/features/prototype/web/webFrame";
 import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/webPage";
 
 /**
@@ -10,12 +15,26 @@ import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/we
 const FIXTURES = join(import.meta.dir, "../../../fixtures");
 
 /**
- * Committed goldens: two PNGs per case, `<spec>--<frame>.png` in portrait and
- * `<spec>--<frame>--landscape.png` at the end of the animated rotation (#16545).
+ * Committed goldens: two PNGs per case of a frame that rotates, `<spec>--<frame>.png` in portrait
+ * and `<spec>--<frame>--landscape.png` at the end of the animated rotation (#16545); one,
+ * `<spec>--<frame>.png` in its only orientation, for a watch, TV or car frame.
  */
 export const WEB_SCREENSHOT_GOLDEN_DIR = join(FIXTURES, "prototype-web/screenshots");
 
 export const WEB_SCREENSHOT_FRAMES = ["pixel-9", "iphone-16"] as const;
+
+/**
+ * One reference spec per watch, TV and car frame (#16446), rather than every spec on every frame,
+ * so the golden count grows by one per frame.
+ */
+export const WEB_SCREENSHOT_FORM_FACTOR_FRAMES = [
+  "wearos-small-round",
+  "apple-watch",
+  "android-tv-1080p",
+  "apple-tv",
+  "car-1024p-landscape",
+] as const;
+const FORM_FACTOR_SPEC = "reference-checkout";
 
 /** Spec name to fixture path under test/fixtures. */
 export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
@@ -43,23 +62,43 @@ export const WEB_SCREENSHOT_FONT_CSS =
 export interface WebScreenshotCase {
   readonly name: string;
   readonly spec: string;
-  readonly frame: (typeof WEB_SCREENSHOT_FRAMES)[number];
+  readonly frame: string;
   readonly fixture: string;
+  /** The frame's orientations, the one the page opens in first. */
+  readonly orientations: readonly WebOrientation[];
+  /** The page as it opens, in `orientations[0]`. */
   readonly golden: string;
-  readonly landscapeGolden: string;
+  /** After rotating, for a frame with both orientations. */
+  readonly landscapeGolden?: string;
+}
+
+function screenshotCase(spec: string, frame: string): WebScreenshotCase {
+  const orientations = frameOrientations(deviceFrameOrThrow(frame));
+  const golden = (suffix: string) =>
+    join(WEB_SCREENSHOT_GOLDEN_DIR, `${spec}--${frame}${suffix}.png`);
+  return {
+    name: `${spec}--${frame}`,
+    spec,
+    frame,
+    fixture: join(FIXTURES, WEB_SCREENSHOT_SPECS[spec]!),
+    orientations,
+    golden: golden(""),
+    ...(orientations.length > 1 ? { landscapeGolden: golden("--landscape") } : {}),
+  };
 }
 
 export function webScreenshotCases(): WebScreenshotCase[] {
-  return Object.entries(WEB_SCREENSHOT_SPECS).flatMap(([spec, fixture]) =>
-    WEB_SCREENSHOT_FRAMES.map((frame) => ({
-      name: `${spec}--${frame}`,
-      spec,
-      frame,
-      fixture: join(FIXTURES, fixture),
-      golden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${spec}--${frame}.png`),
-      landscapeGolden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${spec}--${frame}--landscape.png`),
-    })),
-  );
+  return [
+    ...Object.keys(WEB_SCREENSHOT_SPECS).flatMap((spec) =>
+      WEB_SCREENSHOT_FRAMES.map((frame) => screenshotCase(spec, frame)),
+    ),
+    ...WEB_SCREENSHOT_FORM_FACTOR_FRAMES.map((frame) => screenshotCase(FORM_FACTOR_SPEC, frame)),
+  ];
+}
+
+/** Every golden a case owns. */
+export function webScreenshotGoldens(entry: WebScreenshotCase): string[] {
+  return [entry.golden, ...(entry.landscapeGolden ? [entry.landscapeGolden] : [])];
 }
 
 /** The page under test: the case's spec as the only revision of the only variant. */

@@ -125,20 +125,22 @@ it inlined per variant.
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
 spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
 `pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
-`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
-`webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
+`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait, and `reference-checkout` alone in
+each watch, TV and car frame (the list is `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
 - **Assertions.** The page is served from one fixed URL and every other request is aborted and
   fails the case, on top of the page's own CSP. No console error, page error or
   `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
-  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
+  non-zero size, in the frame's first orientation; the stage carries the runtime's fitted scale and
+  the zoom label shows it; a watch, TV or car page has no rotate control; on other frames, halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
   screen's view.
-- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
-  (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
-  turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+- **Goldens.** One PNG per orientation of the case's frame in
+  `test/fixtures/prototype-web/screenshots/` (`<spec>--<frame>.png` as the page opens and, on a
+  frame that rotates, `<spec>--<frame>--landscape.png` at the end of the turn; plain git blobs, not
+  LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.

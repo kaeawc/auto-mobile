@@ -164,6 +164,33 @@ function compareToGolden(name: string, golden: string, actual: Buffer): string |
   return undefined;
 }
 
+/**
+ * Mid-rotation (#16545): both views are shown and turned; then the turn ends upright. Returns the
+ * landscape screenshot, then checks that reduced motion turns back without animating.
+ */
+async function checkRotation(page: Page, name: string): Promise<Buffer> {
+  await page.click('[data-control="rotate"]');
+  const turning = await midRotation(page);
+  expect(turning.animations).toBe(3);
+  expect(turning.shown.sort()).toEqual(["landscape", "portrait"]);
+  expect(turning.angles.every((angle) => Math.abs(angle) > 1)).toBe(true);
+  await finishAnimations(page);
+  const rotated = await shownView(page);
+  expect(rotated.count).toBe(1);
+  expect(rotated.orientation).toBe("landscape");
+  expect(rotated.width).toBeGreaterThan(rotated.height);
+  const landscape = await page.screenshot({ animations: "disabled", caret: "hide" });
+  writeOutput(`${name}--landscape.png`, landscape);
+
+  // Reduced motion skips the turn.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.click('[data-control="rotate"]');
+  expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+  expect((await shownView(page)).orientation).toBe("portrait");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  return landscape;
+}
+
 describeBrowser("prototype web page in headless Chromium (#16346)", () => {
   let browser: Browser;
 
@@ -183,7 +210,7 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
         try {
           const first = await shownView(page);
           expect(first.count).toBe(1);
-          expect(first.orientation).toBe("portrait");
+          expect(first.orientation).toBe(entry.orientations[0]);
           expect(first.width).toBeGreaterThan(0);
           expect(first.height).toBeGreaterThan(0);
 
@@ -202,26 +229,16 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
           // Saved before any assertion, so a case that fails a functional check keeps its image.
           writeOutput(`${entry.name}.png`, screenshot);
 
-          // Mid-rotation (#16545): both views are shown and turned; then the turn ends upright.
-          await page.click('[data-control="rotate"]');
-          const turning = await midRotation(page);
-          expect(turning.animations).toBe(3);
-          expect(turning.shown.sort()).toEqual(["landscape", "portrait"]);
-          expect(turning.angles.every((angle) => Math.abs(angle) > 1)).toBe(true);
-          await finishAnimations(page);
-          const rotated = await shownView(page);
-          expect(rotated.count).toBe(1);
-          expect(rotated.orientation).toBe("landscape");
-          expect(rotated.width).toBeGreaterThan(rotated.height);
-          const landscape = await page.screenshot({ animations: "disabled", caret: "hide" });
-          writeOutput(`${entry.name}--landscape.png`, landscape);
-
-          // Reduced motion skips the turn.
-          await page.emulateMedia({ reducedMotion: "reduce" });
-          await page.click('[data-control="rotate"]');
-          expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
-          expect((await shownView(page)).orientation).toBe("portrait");
-          await page.emulateMedia({ reducedMotion: "no-preference" });
+          const landscape = entry.landscapeGolden
+            ? await checkRotation(page, entry.name)
+            : undefined;
+          if (!entry.landscapeGolden) {
+            // A watch, TV or car never rotates (#16446): no control, and the one view stays shown.
+            expect(await page.$('[data-control="rotate"]')).toBeNull();
+            if (entry.orientations[0] === "landscape") {
+              expect(first.width).toBeGreaterThan(first.height);
+            }
+          }
 
           // A multi-screen stack's picker shows exactly the picked screen's view.
           const screens = await page.$$eval(
@@ -249,9 +266,11 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
           }).toEqual({ consoleErrors: [], pageErrors: [], requests: [], violations: [] });
 
           expect(compareToGolden(entry.name, entry.golden, screenshot)).toBeUndefined();
-          expect(
-            compareToGolden(`${entry.name}--landscape`, entry.landscapeGolden, landscape),
-          ).toBeUndefined();
+          if (entry.landscapeGolden && landscape) {
+            expect(
+              compareToGolden(`${entry.name}--landscape`, entry.landscapeGolden, landscape),
+            ).toBeUndefined();
+          }
         } finally {
           await page.close();
         }

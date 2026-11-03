@@ -144,6 +144,116 @@
         "screen": "Public spec: 820 x 1180 pt at @2x",
         "insets": "UIKit safe area insets for this model; corner radius estimated"
       }
+    },
+    {
+      "id": "wearos-small-round",
+      "platform": "android",
+      "label": "Wear OS small round",
+      "formFactor": "watch",
+      "screen": { "widthDp": 192, "heightDp": 192, "density": 2 },
+      "cornerRadiusDp": 96,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+        "landscape": { "top": 0, "bottom": 0, "left": 0, "right": 0 }
+      },
+      "mask": "round",
+      "input": "rotary",
+      "frame": { "bezelDp": 14, "color": "#202124" },
+      "source": {
+        "screen": "wearos_small_round hardware profile: 384 x 384 px at xhdpi (density 2); not yet measured on an emulator",
+        "insets": "No system bars on a watch; not yet measured on an emulator",
+        "kinds": { "screen": "avdProfile", "insets": "avdProfile" }
+      }
+    },
+    {
+      "id": "apple-watch",
+      "platform": "ios",
+      "label": "Apple Watch Series 10 (46mm)",
+      "formFactor": "watch",
+      "screen": { "widthDp": 208, "heightDp": 248, "density": 2 },
+      "cornerRadiusDp": 42,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+        "landscape": { "top": 0, "bottom": 0, "left": 0, "right": 0 }
+      },
+      "input": "rotary",
+      "frame": { "bezelDp": 14, "color": "#1c1c1e" },
+      "source": {
+        "screen": "Apple Watch Series 10 (46mm) simulator device type: 416 x 496 px at @2x; corner radius estimated",
+        "insets": "No system bars on a watch; not yet measured on a simulator",
+        "kinds": { "screen": "simulatorProfile", "insets": "simulatorProfile" }
+      }
+    },
+    {
+      "id": "android-tv-1080p",
+      "platform": "android",
+      "label": "Android TV (1080p)",
+      "formFactor": "tv",
+      "screen": { "widthDp": 540, "heightDp": 960, "density": 2 },
+      "cornerRadiusDp": 0,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 48, "bottom": 48, "left": 27, "right": 27 },
+        "landscape": { "top": 27, "bottom": 27, "left": 48, "right": 48 }
+      },
+      "input": "dpad",
+      "frame": { "bezelDp": 6, "color": "#111111" },
+      "source": {
+        "screen": "tv_1080p hardware profile: 1920 x 1080 px at xhdpi (density 2), recorded in portrait; not yet measured on an emulator",
+        "insets": "Android TV overscan margins (48 dp sides, 27 dp top and bottom); not yet measured on an emulator",
+        "kinds": { "screen": "avdProfile", "insets": "publicSpec" }
+      }
+    },
+    {
+      "id": "apple-tv",
+      "platform": "ios",
+      "label": "Apple TV 4K",
+      "formFactor": "tv",
+      "screen": { "widthDp": 1080, "heightDp": 1920, "density": 2 },
+      "cornerRadiusDp": 0,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 80, "bottom": 80, "left": 60, "right": 60 },
+        "landscape": { "top": 60, "bottom": 60, "left": 80, "right": 80 }
+      },
+      "input": "dpad",
+      "frame": { "bezelDp": 8, "color": "#111111" },
+      "source": {
+        "screen": "Apple TV 4K simulator device type: 1920 x 1080 pt at @2x, recorded in portrait; not yet measured on a simulator",
+        "insets": "tvOS safe area (60 pt top and bottom, 80 pt sides); not yet measured on a simulator",
+        "kinds": { "screen": "simulatorProfile", "insets": "publicSpec" }
+      }
+    },
+    {
+      "id": "car-1024p-landscape",
+      "platform": "android",
+      "label": "Car (1024p landscape)",
+      "formFactor": "automotive",
+      "screen": { "widthDp": 768, "heightDp": 1024, "density": 1 },
+      "cornerRadiusDp": 0,
+      "cutout": { "type": "none" },
+      "statusBarDp": 48,
+      "navBar": { "type": "buttons", "heightDp": 64 },
+      "safeArea": {
+        "portrait": { "top": 48, "bottom": 64, "left": 0, "right": 0 },
+        "landscape": { "top": 48, "bottom": 64, "left": 0, "right": 0 }
+      },
+      "frame": { "bezelDp": 10, "color": "#202124" },
+      "source": {
+        "screen": "automotive_1024p_landscape hardware profile: 1024 x 768 px at mdpi (density 1), recorded in portrait; not yet measured on an emulator",
+        "insets": "Estimated head-unit status and navigation bars; not yet measured on an emulator",
+        "kinds": { "screen": "avdProfile", "insets": "avdProfile" }
+      }
     }
   ]
 }

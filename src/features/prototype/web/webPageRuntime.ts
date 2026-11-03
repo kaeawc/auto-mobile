@@ -151,7 +151,8 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const state = {
     variant: doc.body.dataset.variant ?? "",
     revision: doc.body.dataset.revision ?? "",
-    orientation: "portrait" as "portrait" | "landscape",
+    // The frame's first orientation: landscape for a TV or car, which never leaves it.
+    orientation: doc.body.dataset.orientation as "portrait" | "landscape",
     // The first apply sets the shown view's screen.
     screen: "",
     scale: 1,

@@ -226,3 +226,63 @@ describe("device frame schema v2 (#16444)", () => {
     }
   });
 });
+
+describe("watch, TV and car frames (#16446)", () => {
+  const byId = (id: string) => deviceFrameOrThrow(id);
+
+  test("each matches its provisioned profile's form factor, mask and input", () => {
+    expect(
+      ["wearos-small-round", "apple-watch", "android-tv-1080p", "apple-tv", "car-1024p-landscape"]
+        .map(byId)
+        .map(({ id, platform, formFactor, mask, input }) => ({
+          id,
+          platform,
+          formFactor,
+          mask,
+          input,
+        })),
+    ).toEqual([
+      {
+        id: "wearos-small-round",
+        platform: "android",
+        formFactor: "watch",
+        mask: "round",
+        input: "rotary",
+      },
+      { id: "apple-watch", platform: "ios", formFactor: "watch", mask: "rect", input: "rotary" },
+      {
+        id: "android-tv-1080p",
+        platform: "android",
+        formFactor: "tv",
+        mask: "rect",
+        input: "dpad",
+      },
+      { id: "apple-tv", platform: "ios", formFactor: "tv", mask: "rect", input: "dpad" },
+      {
+        id: "car-1024p-landscape",
+        platform: "android",
+        formFactor: "automotive",
+        mask: "rect",
+        input: "touch",
+      },
+    ]);
+  });
+
+  test("watches and TVs have no system bars; every new frame says where its geometry came from", () => {
+    for (const id of ["wearos-small-round", "apple-watch", "android-tv-1080p", "apple-tv"]) {
+      expect(byId(id)).toMatchObject({ statusBarDp: 0, navBar: { type: "none" } });
+    }
+    expect(byId("wearos-small-round").source.kinds?.screen).toBe("avdProfile");
+    expect(byId("apple-watch").source.kinds?.screen).toBe("simulatorProfile");
+    expect(byId("android-tv-1080p").source.kinds?.screen).toBe("avdProfile");
+    expect(byId("apple-tv").source.kinds?.screen).toBe("simulatorProfile");
+    expect(byId("car-1024p-landscape").source.kinds?.screen).toBe("avdProfile");
+  });
+
+  test("a landscape-only frame records its geometry in portrait", () => {
+    for (const id of ["android-tv-1080p", "apple-tv", "car-1024p-landscape"]) {
+      const { widthDp, heightDp } = byId(id).screen;
+      expect(widthDp).toBeLessThan(heightDp);
+    }
+  });
+});

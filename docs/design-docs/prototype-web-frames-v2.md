@@ -68,8 +68,14 @@ posture lights and how the hinge splits it.
   navigation bar. A Digital Crown or rotary bezel is frame decoration (`input: "rotary"`), not
   behaviour. A watch is `compact` and has no landscape view.
 - **TV.** A TV frame has no bezel padding beyond its stand, no status or navigation bar and
-  `input: "dpad"`. The renderer marks the first focusable node with a focus ring, because a
-  10-foot UI with no focus is not a usable preview. A TV is landscape only.
+  `input: "dpad"`. On a `dpad` frame the renderer marks the first focusable node (a spec node
+  whose role is button, checkbox, switch, slider, tab or text box, and not disabled) with a focus
+  ring, because a 10-foot UI with no focus is not a usable preview. A TV is landscape only.
+- **Orientation.** A watch draws only portrait; a TV or car draws only landscape and its page opens
+  there. Every frame records its geometry in portrait, so a landscape-only frame is its portrait
+  geometry turned a quarter turn. A frame that draws one orientation has no rotate control, and a
+  still asked for the other orientation is an error naming the one it has. A Compose or SwiftUI
+  preview is sized in the frame's first orientation.
 
 ## Cars
 

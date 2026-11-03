@@ -6,6 +6,34 @@ export type WebOrientation = "portrait" | "landscape";
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
+const BOTH: readonly WebOrientation[] = ["portrait", "landscape"];
+const PORTRAIT_ONLY: readonly WebOrientation[] = ["portrait"];
+const LANDSCAPE_ONLY: readonly WebOrientation[] = ["landscape"];
+
+/**
+ * The orientations a frame is drawn in, its default first (prototype-web-frames-v2.md): a watch
+ * has no landscape view, and a TV or car is landscape only. Every frame records its geometry in
+ * portrait, so a landscape-only frame is the portrait geometry turned a quarter turn.
+ */
+export function frameOrientations(
+  frame: Pick<DeviceFrame, "formFactor">,
+): readonly WebOrientation[] {
+  switch (frame.formFactor) {
+    case "watch":
+      return PORTRAIT_ONLY;
+    case "tv":
+    case "automotive":
+      return LANDSCAPE_ONLY;
+    default:
+      return BOTH;
+  }
+}
+
+/** A `round` mask clips the screen (and its bezel) to a circle; `rect` keeps the corner radius. */
+function maskRadius(frame: DeviceFrame, cornerRadiusDp: number): string {
+  return frame.mask === "round" ? "50%" : px(cornerRadiusDp);
+}
+
 /** Screen size in the orientation; landscape swaps the portrait width and height. */
 export function screenSize(frame: DeviceFrame, orientation: WebOrientation) {
   const { widthDp, heightDp } = frame.screen;
@@ -55,8 +83,12 @@ function statusBar(
   orientation: WebOrientation,
   content: WebStatusBarContent,
 ): WebElement[] {
-  // iPhones hide the status bar in landscape; a zero top inset there means no bar.
-  if (orientation === "landscape" && frame.safeArea.landscape.top === 0) {
+  // Watches and TVs draw no status bar. iPhones hide it in landscape; a zero top inset there
+  // means no bar.
+  if (
+    frame.statusBarDp === 0 ||
+    (orientation === "landscape" && frame.safeArea.landscape.top === 0)
+  ) {
     return [];
   }
   const { width } = screenSize(frame, orientation);
@@ -180,7 +212,7 @@ export function renderDeviceFrame(
         width: px(width),
         height: px(height),
         overflow: "hidden",
-        "border-radius": px(frame.cornerRadiusDp),
+        "border-radius": maskRadius(frame, frame.cornerRadiusDp),
         // Both devices paint nothing behind a window, so the app below shows through; a still has no
         // app below, so the theme's background stands in for it.
         "background-color": options.background,
@@ -213,13 +245,14 @@ export function renderDeviceFrame(
         "data-chrome": "frame",
         "data-frame": frame.id,
         "data-orientation": orientation,
+        ...(frame.mask === "round" ? { "data-mask": "round" } : {}),
         "aria-label": `${frame.label} (${orientation})`,
       },
       style: {
         display: "inline-block",
         padding: px(frame.frame.bezelDp),
         "background-color": frame.frame.color,
-        "border-radius": px(frame.cornerRadiusDp + frame.frame.bezelDp),
+        "border-radius": maskRadius(frame, frame.cornerRadiusDp + frame.frame.bezelDp),
       },
     },
     [screen],

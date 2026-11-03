@@ -3,7 +3,9 @@ import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
-import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
+import { ActionableError } from "../../../models";
+import { frameOrientations, renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
+import { markInitialFocus } from "./webFocus";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
@@ -18,6 +20,7 @@ export interface PrototypeStillOptions {
   /** A device frame id; defaults to the platform's default frame. */
   readonly frame?: string;
   readonly platform?: "android" | "ios";
+  /** One of the frame's orientations; defaults to its first (landscape for a TV or car). */
   readonly orientation?: WebOrientation;
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
@@ -166,11 +169,12 @@ function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
   frame: DeviceFrame,
+  orientation: WebOrientation,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
   const authored = record(spec.theme)?.mode;
-  const size = screenSize(frame, options.orientation ?? "portrait");
+  const size = screenSize(frame, orientation);
   const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
@@ -234,6 +238,23 @@ function stillStatusBarContent(
   return statusBarContentFor(top, dark ? "light" : "dark");
 }
 
+/** The requested orientation, which the frame must support, else the frame's default. */
+function stillOrientation(
+  frame: DeviceFrame,
+  requested: WebOrientation | undefined,
+): WebOrientation {
+  const supported = frameOrientations(frame);
+  if (requested === undefined) {
+    return supported[0]!;
+  }
+  if (!supported.includes(requested)) {
+    throw new ActionableError(
+      `Device frame "${frame.id}" has no ${requested} view. Its orientations: ${supported.join(", ")}`,
+    );
+  }
+  return requested;
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
@@ -243,15 +264,18 @@ export function renderPrototypeStill(
   );
   // Components expand, then string tables resolve for the still's fixed locale, as on devices.
   const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
-  const scope = stillScope(expanded, options, frame);
+  const orientation = stillOrientation(frame, options.orientation);
+  const scope = stillScope(expanded, options, frame, orientation);
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const content = placed(expanded, root, scope.layers);
+  const placedContent = placed(expanded, root, scope.layers);
+  // A d-pad device always has a focused item, so a TV still shows where focus starts.
+  const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
   const element = renderDeviceFrame(
     frame,
-    options.orientation ?? "portrait",
+    orientation,
     {
       dark,
       textColor,

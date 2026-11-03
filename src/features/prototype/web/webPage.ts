@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models";
 import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
-import type { WebOrientation } from "./webFrame";
+import { frameOrientations, type WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
 import {
   prototypeWebAnimateTurn,
@@ -62,8 +62,6 @@ export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ 
 export const MAX_PROTOTYPE_WEB_RUNTIME_BYTES = 150 * 1024;
 export const MAX_PROTOTYPE_WEB_PAGE_BYTES = 2 * 1024 * 1024;
 
-const ORIENTATIONS: readonly WebOrientation[] = ["portrait", "landscape"];
-
 const PAGE_CSS = [
   "*{box-sizing:border-box}",
   "html,body{margin:0;height:100%}",
@@ -104,7 +102,7 @@ interface RenderedView {
   readonly unsupported: readonly UnsupportedWebNode[];
 }
 
-/** One screen of one revision in both orientations: the unit the budget keeps or drops. */
+/** One screen of one revision in each of the frame's orientations: the unit the budget keeps or drops. */
 type ScreenGroup = readonly RenderedView[];
 
 /** One revision's screen groups, its start screen first. */
@@ -164,23 +162,32 @@ function renderView(
 }
 
 /**
- * Each revision newest first, one group of both orientations per screen of its outermost stack
- * (just one group without a multi-screen stack). The default portrait still finds the screens.
+ * Each revision newest first, one group of the frame's orientations per screen of its outermost
+ * stack (just one group without a multi-screen stack). The default orientation's still finds the
+ * screens.
  */
 function renderViews(
   input: PrototypeWebPageInput,
-  frame: string,
+  frame: { id: string; orientations: readonly WebOrientation[] },
   variant: PrototypeWebVariant,
 ): RevisionViews[] {
+  const [first, ...rest] = frame.orientations as [WebOrientation, ...WebOrientation[]];
   return [...variant.revisions].reverse().map((revision) => {
-    const probe = renderView(input, frame, { variant: variant.id, revision }, "portrait");
+    const probe = renderView(input, frame.id, { variant: variant.id, revision }, first);
     const screens = pickerScreens(probe.stack);
     const groups =
       screens.length === 0
-        ? [[probe, renderView(input, frame, { variant: variant.id, revision }, "landscape")]]
+        ? [
+            [
+              probe,
+              ...rest.map((orientation) =>
+                renderView(input, frame.id, { variant: variant.id, revision }, orientation),
+              ),
+            ],
+          ]
         : screens.map((screen) =>
-            ORIENTATIONS.map((orientation) =>
-              renderView(input, frame, { variant: variant.id, revision, screen }, orientation),
+            frame.orientations.map((orientation) =>
+              renderView(input, frame.id, { variant: variant.id, revision, screen }, orientation),
             ),
           );
     return { variant: variant.id, revision: revision.revision, screens: groups };
@@ -204,14 +211,11 @@ function screenPicker(screens: ScreenPicker): WebElement[] {
   ];
 }
 
-/** Watches and TVs never rotate (prototype-web-frames-v2.md); every other form factor does. */
-export function prototypeWebFrameRotates(formFactor: string): boolean {
-  return formFactor !== "watch" && formFactor !== "tv";
-}
-
-/** The frame facts the page shell needs: the platform's rotation and whether the device rotates. */
+/** The frame facts the page shell needs: the platform's rotation and the orientations it has. */
 interface PageFrame {
   readonly platform: string;
+  /** The orientation shown first. */
+  readonly orientation: WebOrientation;
   /** A device that never rotates gets no rotate control. */
   readonly rotates: boolean;
 }
@@ -432,7 +436,7 @@ function pageHtml(
   first: { variant: PrototypeWebVariant; revision: number },
   { frame, views, history, screens }: PageParts,
 ): string {
-  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}">${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
+  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}" data-orientation="${frame.orientation}">${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
   const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
@@ -448,10 +452,12 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
   const device = deviceFrameOrThrow(
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),
   );
-  const frame = device.id;
+  const orientations = frameOrientations(device);
+  const frame = { id: device.id, orientations };
   const pageFrame: PageFrame = {
     platform: device.platform,
-    rotates: prototypeWebFrameRotates(device.formFactor),
+    orientation: orientations[0]!,
+    rotates: orientations.length > 1,
   };
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
   // The shell lists only the pinned revisions (each latest and the one shown first), which are
@@ -478,7 +484,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     (view) =>
       view.variant === chosen.id &&
       view.revision === shown.revision &&
-      view.orientation === "portrait",
+      view.orientation === pageFrame.orientation,
   );
   if (!first) {
     throw new ActionableError(
@@ -511,7 +517,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
   return {
     html,
     sha256: createHash("sha256").update(html).digest("hex"),
-    frame,
+    frame: device.id,
     unsupportedNodes: first.unsupported,
     inlinedRevisions,
   };

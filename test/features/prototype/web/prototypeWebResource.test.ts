@@ -37,7 +37,7 @@ describe("readPrototypeWebResource", () => {
     expect(web.meta.revision).toBe(1);
     expect(web.meta.deviceRevision).toBeUndefined();
     expect(web.html).toContain(
-      '<body data-variant="checkout" data-revision="1" data-platform="android">',
+      '<body data-variant="checkout" data-revision="1" data-platform="android" data-orientation="portrait">',
     );
   });
 

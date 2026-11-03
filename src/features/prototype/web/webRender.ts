@@ -714,19 +714,16 @@ const textField: NodeRenderer = (node, scope, path) => {
   const caption = fieldCaption(node, error, scope);
   // With a caption, the wrapper is what the parent lays out, so it takes the field's sizing.
   const [outer, inner] = caption.length === 0 ? [{}, style] : splitParentFacing(style);
-  const field = el(
-    "div",
-    { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner },
-    [
-      ...namedIcon(node.leadingIcon, scope),
-      el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
-        ...floatingLabel(node, empty, scope),
-        el("span", { style: lineBounds(node) }, [shown]),
-      ]),
-      // The trailing slot is an {icon, label} action, like an app-bar action.
-      ...appBarIcons([node.trailingIcon], scope, path),
-    ],
-  );
+  const box = el("div", { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner }, [
+    ...namedIcon(node.leadingIcon, scope),
+    el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
+      ...floatingLabel(node, empty, scope),
+      el("span", { style: lineBounds(node) }, [shown]),
+    ]),
+    // The trailing slot is an {icon, label} action, like an app-bar action.
+    ...appBarIcons([node.trailingIcon], scope, path),
+  ]);
+  const field = caption.length === 0 ? box : withOverContentLayers(box, node.style, scope.style);
   return caption.length === 0
     ? field
     : el("div", { style: { ...outer, display: "flex", "flex-direction": "column", gap: "4px" } }, [
@@ -1040,10 +1037,6 @@ export function renderWebNode(
   }
   const { styled, scope: local } = prepared;
   const own: WebRenderScope = { ...local, ownInsets: safeAreaEdges(styled) };
-  const shaded = shaderFallback(styled, path);
-  if (shaded) {
-    own.unsupported.push(shaded);
-  }
   const layer = WEB_LAYER_RENDERERS[String(styled.type)];
   if (layer) {
     layer(styled, own, path);
@@ -1051,5 +1044,12 @@ export function renderWebNode(
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
   const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
-  return withOverContentLayers(element, styled.style, own.style);
+  const shaded = shaderFallback(styled, path);
+  if (shaded) {
+    own.unsupported.push(shaded);
+  }
+  // The layers belong to the node's own box; a wrapper (a captioned field) layers its box itself.
+  return element.attrs["data-node"] === undefined
+    ? element
+    : withOverContentLayers(element, styled.style, own.style);
 }

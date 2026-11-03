@@ -161,6 +161,43 @@ test("an open bottom sheet carries the layers too (#16540)", () => {
   expect((sheet!.children.at(-1) as WebElement).attrs["data-layer"]).toBe("innerShadow");
 });
 
+test("a captioned text field layers its box, not the caption (#16540)", () => {
+  const still = stillOf({
+    type: "textField",
+    testTag: "name",
+    supportingText: "Required",
+    style: { shadows: [{ color: "#000000", radius: 4, inner: true }] },
+  });
+  const box = tagged(still, "name");
+  expect((box.children.at(-1) as WebElement).attrs["data-layer"]).toBe("innerShadow");
+  expect(find(still.element, (element) => element.attrs["data-layer"] !== undefined)).toHaveLength(
+    1,
+  );
+});
+
+test("only an open bottom sheet is listed as a shader fallback (#16540)", () => {
+  const sheet = (open: boolean) =>
+    stillOf(
+      {
+        type: "column",
+        children: [
+          {
+            type: "bottomSheet",
+            id: "sheet",
+            openWhen: { key: "open", equals: true },
+            style: { shader: { asset: "ripple" } },
+            child: { type: "text", text: "sheet" },
+          },
+        ],
+      },
+      { state: { open } },
+    ).unsupportedNodes;
+  expect(sheet(false)).toEqual([]);
+  expect(sheet(true)).toEqual([
+    { type: "bottomSheet", id: "sheet", path: "root.children[0]", reason: "shaderFallback" },
+  ]);
+});
+
 describe("glass (#16540)", () => {
   const glassy = { surface: "glass", glass: { tint: "#0000FF" } };
 

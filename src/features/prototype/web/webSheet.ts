@@ -3,7 +3,7 @@ import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
 import type { WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor, rgbaCss, type WebStyleContext } from "./webStyle";
-import { withOverContentLayers } from "./webStylePolish";
+import { shaderFallback, withOverContentLayers } from "./webStylePolish";
 
 /**
  * A node drawn in the window's layer above the whole tree instead of in place. It appends what it
@@ -131,6 +131,11 @@ export function webSheetLayers(kit: WebRenderKit): Readonly<Record<string, WebLa
   const bottomSheet: WebLayerRenderer = (node, scope, path) => {
     if (!sheetOpen(node, scope)) {
       return;
+    }
+    // A closed sheet draws nothing; an open one draws without its shader, so it is listed.
+    const shaded = shaderFallback(node, path);
+    if (shaded) {
+      scope.unsupported.push(shaded);
     }
     // Layers keep tree order, a sheet before any sheet inside it, as both devices stack them.
     const at = scope.layers.length;

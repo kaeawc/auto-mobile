@@ -1,5 +1,6 @@
 import type { DeviceFrame } from "./deviceFrames";
 import { el, type WebElement } from "./webNodes";
+import { renderStatusBar, type WebStatusBarContent } from "./webStatusBar";
 
 export type WebOrientation = "portrait" | "landscape";
 
@@ -49,48 +50,17 @@ function cutout(frame: DeviceFrame, orientation: WebOrientation): WebElement[] {
   ];
 }
 
-function statusBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean): WebElement[] {
+function statusBar(
+  frame: DeviceFrame,
+  orientation: WebOrientation,
+  content: WebStatusBarContent,
+): WebElement[] {
   // iPhones hide the status bar in landscape; a zero top inset there means no bar.
   if (orientation === "landscape" && frame.safeArea.landscape.top === 0) {
     return [];
   }
-  const color = dark ? "#ffffff" : "#000000";
-  return [
-    el(
-      "div",
-      {
-        attrs: { "data-chrome": "statusBar", "aria-hidden": "true" },
-        style: {
-          position: "absolute",
-          left: "0",
-          right: "0",
-          top: "0",
-          height: px(frame.statusBarDp),
-          display: "flex",
-          "align-items": "center",
-          "justify-content": "space-between",
-          padding: "0 24px",
-          "box-sizing": "border-box",
-          color,
-          "font-size": "14px",
-          "font-weight": "600",
-          "z-index": "2",
-          "pointer-events": "none",
-        },
-      },
-      [
-        "9:41",
-        el("span", {
-          style: {
-            width: "24px",
-            height: "11px",
-            border: `1px solid ${color}`,
-            "border-radius": "3px",
-          },
-        }),
-      ],
-    ),
-  ];
+  const { width } = screenSize(frame, orientation);
+  return [renderStatusBar({ frame, width, landscape: orientation === "landscape", content })];
 }
 
 /** Three-button navigation: generic back, home and recents marks, outlined in the bar colour. */
@@ -140,21 +110,31 @@ function navPlacement(heightDp: number, side: boolean): Record<string, string> {
     : { left: "0", right: "0", bottom: "0", height: size };
 }
 
+/**
+ * The gesture affordance: iOS's home indicator, or Android's navigation handle. `data-nav` names
+ * it so back (#16542) and home (#16550) gestures can attach to it.
+ */
+function gestureHandle(platform: DeviceFrame["platform"], dark: boolean): WebElement {
+  const ios = platform === "ios";
+  return el("span", {
+    attrs: { "data-nav": ios ? "homeIndicator" : "handle" },
+    style: {
+      width: ios ? "134px" : "108px",
+      height: ios ? "5px" : "4px",
+      "border-radius": ios ? "2.5px" : "2px",
+      "background-color": dark ? "#ffffff" : "#000000",
+      opacity: ios ? "0.9" : "0.6",
+    },
+  });
+}
+
 function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean): WebElement[] {
   if (frame.navBar.type === "none") {
     return [];
   }
   const handle =
     frame.navBar.type === "gesture"
-      ? el("span", {
-          style: {
-            width: "108px",
-            height: "4px",
-            "border-radius": "2px",
-            "background-color": dark ? "#ffffff" : "#000000",
-            opacity: "0.6",
-          },
-        })
+      ? gestureHandle(frame.platform, dark)
       : buttonNavigation(dark ? "#ffffff" : "#000000", navOnSide(frame, orientation));
   return [
     el(
@@ -176,7 +156,7 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
   ];
 }
 
-/** A device frame around the screen content, with status bar, cutout and navigation handle. */
+/** A device frame around the screen content, with status bar, cutout and navigation handle or home indicator. */
 export function renderDeviceFrame(
   frame: DeviceFrame,
   orientation: WebOrientation,
@@ -186,6 +166,8 @@ export function renderDeviceFrame(
     background: string;
     /** The content's base font size; 14px unless the system text size scales it. */
     fontSize?: string;
+    /** The status bar's content style; absent follows `dark`. */
+    statusBarContent?: WebStatusBarContent;
   },
   content: WebElement,
 ): WebElement {
@@ -217,7 +199,11 @@ export function renderDeviceFrame(
     },
     [
       content,
-      ...statusBar(frame, orientation, options.dark),
+      ...statusBar(
+        frame,
+        orientation,
+        options.statusBarContent ?? (options.dark ? "light" : "dark"),
+      ),
       ...cutout(frame, orientation),
       ...navBar(frame, orientation, options.dark),
     ],

@@ -287,11 +287,15 @@ the host, so the page's script only switches between views it was given and neve
   `assetNotInlined`. A map fetches no tiles: it draws a neutral canvas (`plain`, or a faint street
   grid), 200 px tall unless sized, with its polylines in an inline SVG and its markers as pins, placed
   by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
-  point. A camera framing turns by its `bearing` and `tilt` (a fit frames north up): the canvas moves
-  to a ground square under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, sized from the
+  point. Points are placed in dp from the box centre (`calc(50% + …px)`, the SVG's origin at the
+  centre), so CSS resolves them against the box as rendered. A width or height the parent sizes
+  (`fill`, a stretched width, the fullscreen root) cannot be known when rendering, so the framing and
+  perspective use the screen's size on that axis, the most the box can take. A camera framing turns
+  by its `bearing` and `tilt` (a fit frames north up): the canvas moves to a ground square under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, sized from the
   box corners traced back onto the plane so it covers any aspect ratio, and lines and pins are
   projected the same way in code: pins stay upright, and lines are clipped at a near plane (0.1 of the
-  eye distance) and break into separate runs there, while pins past it are dropped.
+  eye distance) and break into separate runs there, while pins past it are dropped. Because the
+  height used is never less than the rendered one, the eye is far enough out that no horizon shows.
   A camera preview is a portrait viewfinder at its
   `aspectRatio` (default 4:3) showing colour bars and a label naming its mode. A cast button is the
   skin's idle route icon (Cast on Android, AirPlay on iOS) in a 48 px target; it is a `details`

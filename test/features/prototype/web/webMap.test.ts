@@ -3,13 +3,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   cameraOrientation,
+  eyeDistance,
   fitFraming,
+  fromCentre,
   groundReach,
   groundTransform,
-  mapPercent,
+  mapOffset,
+  mapSize,
   mercator,
   projectLine,
-  projectPercent,
+  projectOffset,
 } from "../../../../src/features/prototype/web/webMap";
 import {
   toHtml,
@@ -51,6 +54,20 @@ function still(map: Record<string, unknown>) {
   return { ...rendered, part, html: toHtml(rendered.element) };
 }
 
+/** A pin's offset from the box centre, read back from `fromCentre`'s CSS. */
+function offsetOf(value: unknown): number {
+  const text = String(value);
+  if (text === "50%") {
+    return 0;
+  }
+  const match = /^calc\(50% ([+-]) ([\d.]+)px\)$/.exec(text);
+  expect(match).not.toBeNull();
+  return (match![1] === "-" ? -1 : 1) * Number(match![2]);
+}
+
+/** The default still frame's portrait screen, which a root map fills. */
+const SCREEN = { width: 411, height: 923 };
+
 const markers = {
   path: "/places",
   as: "place",
@@ -71,10 +88,17 @@ describe("prototype web map (#16539)", () => {
     const points = [mercator(0, -1), mercator(0, 1)];
     const size = { width: 400, height: 200 };
     const view = fitFraming(points, size)!;
-    expect(mapPercent(points[0]!, view, size).left).toBeCloseTo(10, 3);
-    expect(mapPercent(points[1]!, view, size).left).toBeCloseTo(90, 3);
+    // 80% of the 400 dp width, split either side of the centre.
+    expect(mapOffset(points[0]!, view).x).toBeCloseTo(-160, 3);
+    expect(mapOffset(points[1]!, view).x).toBeCloseTo(160, 3);
     expect(fitFraming([points[0]!], size)!.worldSize).toBe(256 * 2 ** 15);
     expect(fitFraming([], size)).toBeUndefined();
+  });
+
+  test("places a point in dp from the box centre", () => {
+    expect(fromCentre(0)).toBe("50%");
+    expect(fromCentre(12.5)).toBe("calc(50% + 12.5px)");
+    expect(fromCentre(-80)).toBe("calc(50% - 80px)");
   });
 
   test("draws marker pins and route lines with no tiles or placeholder", () => {
@@ -82,12 +106,14 @@ describe("prototype web map (#16539)", () => {
     expect(map.unsupportedNodes).toEqual([]);
     const pins = map.part("marker");
     expect(pins.map((pin) => pin.attrs["aria-label"])).toEqual(["Ferry", "Pier"]);
-    expect(pins.map((pin) => [pin.style.left, pin.style.top])).toEqual([
-      ["39.744%", "90%"],
-      ["60.256%", "10%"],
-    ]);
-    expect(map.html).toContain('<polyline fill="none" points="39.744,90 60.256,10"');
-    expect(map.html).toContain('viewBox="0 0 100 100"');
+    const at = pins.map((pin) => [offsetOf(pin.style.left), offsetOf(pin.style.top)]);
+    // The root fills the screen: the fit spans 80% of its width (the tighter side), centred.
+    expect(at[0]![0]).toBeCloseTo(-SCREEN.width * 0.4, 3);
+    expect(at[1]).toEqual([-at[0]![0]!, -at[0]![1]!]);
+    expect(map.html).toContain(
+      `<polyline fill="none" points="${at[0]!.join(",")} ${at[1]!.join(",")}"`,
+    );
+    expect(map.html).toContain('<svg aria-hidden="true" height="1"');
     expect(map.html).not.toMatch(/\b(src|href)=|url\(/);
   });
 
@@ -111,8 +137,18 @@ describe("prototype web map (#16539)", () => {
     });
     // The taller box fits the points by width, so they no longer reach the vertical margins.
     const pins = map.part("marker");
-    expect(pins.map((pin) => pin.style.left)).toEqual(["10%", "90%"]);
+    expect(pins.map((pin) => pin.style.left)).toEqual(["calc(50% - 80px)", "calc(50% + 80px)"]);
     expect(map.html).toContain("height:400px");
+  });
+
+  test("sizes a map by its dp size, else 200 dp tall, else the screen it fills", () => {
+    const screen = { width: 390, height: 844 };
+    expect(mapSize({ width: { dp: 300 }, height: { dp: 150 } }, screen)).toEqual({
+      width: 300,
+      height: 150,
+    });
+    expect(mapSize(undefined, screen)).toEqual({ width: 390, height: 200 });
+    expect(mapSize({ height: "fill" }, screen)).toEqual({ width: 390, height: 844 });
   });
 
   test("an empty map draws the neutral canvas", () => {
@@ -122,47 +158,39 @@ describe("prototype web map (#16539)", () => {
   });
 
   test("north up and straight down projects exactly as the flat placement", () => {
-    const size = { width: 400, height: 200 };
     const view = { center: mercator(0, 0), worldSize: 256 * 2 ** 4 };
     const point = mercator(1, 2);
-    expect(projectPercent(point, view, size, { bearing: 0, tilt: 0 })).toEqual(
-      mapPercent(point, view, size),
+    expect(projectOffset(point, view, 300, { bearing: 0, tilt: 0 })).toEqual(
+      mapOffset(point, view),
     );
   });
 
   test("a bearing turns the map the other way about the centre", () => {
-    const size = { width: 200, height: 200 };
     const center = mercator(0, 0);
     const view = { center, worldSize: 1000 };
     const east = { x: center.x + 0.05, y: center.y };
     // Facing east (90°), east is straight ahead: up the screen.
-    expect(projectPercent(east, view, size, { bearing: 90, tilt: 0 })).toEqual({
-      left: 50,
-      top: 25,
-    });
+    expect(projectOffset(east, view, 300, { bearing: 90, tilt: 0 })).toEqual({ x: 0, y: -50 });
     // Facing south, east is on the left.
-    expect(projectPercent(east, view, size, { bearing: 180, tilt: 0 })).toEqual({
-      left: 25,
-      top: 50,
-    });
+    expect(projectOffset(east, view, 300, { bearing: 180, tilt: 0 })).toEqual({ x: -50, y: 0 });
   });
 
   test("a tilt pulls the far half in and pushes the near half out", () => {
-    const size = { width: 200, height: 200 };
     const center = mercator(0, 0);
     const view = { center, worldSize: 1000 };
+    const eye = eyeDistance(200);
     const offset = (dx: number, dy: number) => ({ x: center.x + dx, y: center.y + dy });
     const tilted = (dx: number, dy: number) =>
-      projectPercent(offset(dx, dy), view, size, { bearing: 0, tilt: 60 })!;
-    expect(tilted(0, 0)).toEqual({ left: 50, top: 50 });
+      projectOffset(offset(dx, dy), view, eye, { bearing: 0, tilt: 60 })!;
+    expect(tilted(0, 0)).toEqual({ x: 0, y: 0 });
     const far = tilted(0.05, -0.05);
     const near = tilted(0.05, 0.05);
-    expect(far.top).toBeGreaterThan(25);
-    expect(far.left).toBeLessThan(75);
-    expect(near.top).toBeLessThan(100);
-    expect(near.left).toBeGreaterThan(75);
+    expect(far.y).toBeGreaterThan(-50);
+    expect(far.x).toBeLessThan(50);
+    expect(near.y).toBeLessThan(100);
+    expect(near.x).toBeGreaterThan(50);
     // The eye is 1.5 heights (300 dp) out: a point that far down at 60° sits behind it.
-    expect(projectPercent(offset(0, 0.4), view, size, { bearing: 0, tilt: 60 })).toBeUndefined();
+    expect(projectOffset(offset(0, 0.4), view, eye, { bearing: 0, tilt: 60 })).toBeUndefined();
   });
 
   test("reads and clamps the camera's bearing and tilt", () => {
@@ -178,6 +206,7 @@ describe("prototype web map (#16539)", () => {
   test("a turned camera draws a turned ground layer and projected pins", () => {
     const map = still({
       markers,
+      style: { width: { dp: 412 }, height: { dp: 200 } },
       camera: { lat: 37.77, lng: -122.42, zoom: 12, bearing: 90, tilt: 45 },
     });
     const ground = map.part("ground");
@@ -192,8 +221,8 @@ describe("prototype web map (#16539)", () => {
     const pins = map.part("marker");
     expect(pins[0]!.style).toMatchObject({ left: "50%", top: "50%" });
     // The pier lies north-east; facing east it is ahead and to the left.
-    expect(parseFloat(String(pins[1]!.style.left))).toBeLessThan(50);
-    expect(parseFloat(String(pins[1]!.style.top))).toBeLessThan(50);
+    expect(offsetOf(pins[1]!.style.left)).toBeLessThan(0);
+    expect(offsetOf(pins[1]!.style.top)).toBeLessThan(0);
     expect(map.html).not.toMatch(/\b(src|href)=|url\(/);
   });
 
@@ -204,14 +233,17 @@ describe("prototype web map (#16539)", () => {
       root: { type: "map", markers, camera: { data: "/cam" } },
     });
     const ground = find(fromData.element, (element) => element.attrs["data-part"] === "ground");
-    expect(ground[0]!.style.transform).toBe("perspective(300px) rotateX(0deg) rotate(-30deg)");
+    expect(ground[0]!.style.transform).toBe("perspective(1384.5px) rotateX(0deg) rotate(-30deg)");
     const fitted = still({
       markers,
       fit: "markers",
       camera: { lat: 37.77, lng: -122.42, zoom: 12, bearing: 90 },
     });
     expect(fitted.part("ground")).toEqual([]);
-    expect(fitted.part("marker").map((pin) => pin.style.left)).toEqual(["39.744%", "60.256%"]);
+    const left = fitted.part("marker").map((pin) => offsetOf(pin.style.left));
+    // North up, the pier lies east of the ferry, either side of the centre.
+    expect(left[0]).toBeLessThan(0);
+    expect(left[1]).toBe(-left[0]!);
   });
 
   test("the ground reaches every corner of a short, wide box", () => {
@@ -228,34 +260,33 @@ describe("prototype web map (#16539)", () => {
   });
 
   test("a route clips at the near plane instead of dropping its far vertex", () => {
-    const size = { width: 200, height: 200 };
     const center = mercator(0, 0);
     const view = { center, worldSize: 256 * 2 ** 3 };
+    const eye = eyeDistance(200);
     const orientation = { bearing: 0, tilt: 60 };
     const south = mercator(-60, 0);
-    const [run, ...rest] = projectLine([center, south], view, size, orientation);
+    const [run, ...rest] = projectLine([center, south], view, eye, orientation);
     expect(rest).toEqual([]);
     expect(run).toHaveLength(2);
-    expect(run![0]).toEqual({ left: 50, top: 50 });
+    expect(run![0]).toEqual({ x: 0, y: 0 });
     // Latitude −10 lies on the visible part, so the clipped end is past it.
-    const tenSouth = projectPercent(mercator(-10, 0), view, size, orientation)!;
-    expect(tenSouth.top).toBeCloseTo(67.121, 3);
-    expect(run![1]!.top).toBeGreaterThan(tenSouth.top);
-    expect(run![1]!.left).toBe(50);
+    const tenSouth = projectOffset(mercator(-10, 0), view, eye, orientation)!;
+    expect(tenSouth.y).toBeCloseTo(34.242, 3);
+    expect(run![1]!.y).toBeGreaterThan(tenSouth.y);
+    expect(run![1]!.x).toBe(0);
     // Passing behind the eye and back breaks the line rather than joining its visible ends.
-    const runs = projectLine([center, south, mercator(0, 10)], view, size, orientation);
+    const runs = projectLine([center, south, mercator(0, 10)], view, eye, orientation);
     expect(runs).toHaveLength(2);
     expect(runs.map((points) => points.length)).toEqual([2, 2]);
   });
 
   test("a flat line is one run of the flat placement", () => {
-    const size = { width: 400, height: 200 };
     const view = { center: mercator(0, 0), worldSize: 4096 };
     const points = [mercator(0, -1), mercator(1, 1)];
-    expect(projectLine(points, view, size, { bearing: 0, tilt: 0 })).toEqual([
-      points.map((point) => mapPercent(point, view, size)),
+    expect(projectLine(points, view, 300, { bearing: 0, tilt: 0 })).toEqual([
+      points.map((point) => mapOffset(point, view)),
     ]);
-    expect(projectLine([], view, size, { bearing: 0, tilt: 0 })).toEqual([]);
+    expect(projectLine([], view, 300, { bearing: 0, tilt: 0 })).toEqual([]);
   });
 
   test("a turned fill map sizes its ground from the box as rendered", () => {
@@ -268,5 +299,33 @@ describe("prototype web map (#16539)", () => {
     expect(map.html).toContain("container-type:size");
     expect(map.part("ground")[0]!.style.height).toMatch(/^max\(\d+px,300cqmax\)$/);
     expect(still({ markers }).html).not.toContain("container-type");
+  });
+
+  test("a tilted fill map puts its eye far enough out that no horizon shows (#16656)", () => {
+    const map = still({
+      markers,
+      camera: { lat: 37.77, lng: -122.42, zoom: 12, tilt: 60 },
+    });
+    // The root fills the screen, so the eye is 1.5 screen heights out, not 1.5 × 200 dp.
+    const eye = eyeDistance(SCREEN.height);
+    expect(map.part("ground")[0]!.style.transform).toBe(
+      `perspective(${eye}px) rotateX(60deg) rotate(0deg)`,
+    );
+    // The horizon sits eye·cot(tilt) above the centre: past the top of any box up to the screen.
+    expect(eye / Math.tan((60 * Math.PI) / 180)).toBeGreaterThan(SCREEN.height / 2);
+    // The ground's reach covers the whole screen-sized box at that eye.
+    const side = parseInt(/^max\((\d+)px/.exec(String(map.part("ground")[0]!.style.width))![1]!);
+    expect(side / 2).toBeGreaterThanOrEqual(groundReach(SCREEN, 60));
+  });
+
+  test("a fill map places pins at their zoom, whatever size the box renders at (#16656)", () => {
+    const camera = { lat: 37.77, lng: -122.42, zoom: 12 };
+    const map = still({ markers, camera });
+    const view = { center: mercator(camera.lat, camera.lng), worldSize: 256 * 2 ** 12 };
+    const pier = mapOffset(mercator(37.8, -122.4), view);
+    expect(map.part("marker")[1]!.style).toMatchObject({
+      left: fromCentre(pier.x),
+      top: fromCentre(pier.y),
+    });
   });
 });

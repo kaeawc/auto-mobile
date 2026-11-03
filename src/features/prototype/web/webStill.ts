@@ -195,6 +195,7 @@ function stillScope(
     inBox: false,
     unsupported: [],
     screenWidth: size.width,
+    screenHeight: size.height,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
     layers: [],

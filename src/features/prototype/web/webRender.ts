@@ -67,6 +67,8 @@ export interface WebRenderScope {
   readonly unsupported: UnsupportedWebNode[];
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
+  /** The screen height in dp for the orientation: the most a map that fills its parent can take. */
+  readonly screenHeight: number;
   /**
    * A pager's `page` and `pageCount`: text placeholders and every condition (`visibleWhen`,
    * `styleWhen`, `enabledWhen`, `errorWhen`) read them, as Android's local pager state does; a

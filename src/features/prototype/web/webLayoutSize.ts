@@ -159,18 +159,37 @@ export function contentBox(element: WebElement, rect: WebRect, vars: CssVars): W
   };
 }
 
-/** Fills the unknown dimension from the known one by the element's `aspect-ratio`. */
-export function withAspectRatio(element: WebElement, rect: WebRect): WebRect {
+/** An element's `aspect-ratio` as width over height, if it has a usable one. */
+function aspectRatioOf(element: WebElement): number | undefined {
   const [width, height = "1"] = (element.style["aspect-ratio"] ?? "").split("/");
   const ratio = Number(width) / Number(height);
-  if (!Number.isFinite(ratio) || ratio <= 0) {
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : undefined;
+}
+
+/**
+ * Fills the unknown dimension from the known one by the element's `aspect-ratio`, then clamps it
+ * by that dimension's own `min-*` and `max-*`, as CSS does with a ratio-derived size. `room` is the
+ * containing box, whose size resolves percentage constraints.
+ */
+export function withAspectRatio(
+  element: WebElement,
+  rect: WebRect,
+  room: WebRect,
+  vars: CssVars,
+): WebRect {
+  const ratio = aspectRatioOf(element);
+  if (ratio === undefined) {
     return rect;
   }
+  const derive = (axis: Axis, size: number): WebRect => ({
+    ...rect,
+    [axis]: clampSize(size, element, axis, { base: room[axis], vars }),
+  });
   if (rect.height === undefined && rect.width !== undefined) {
-    return { ...rect, height: rect.width / ratio };
+    return derive("height", rect.width / ratio);
   }
   if (rect.width === undefined && rect.height !== undefined) {
-    return { ...rect, width: rect.height * ratio };
+    return derive("width", rect.height * ratio);
   }
   return rect;
 }

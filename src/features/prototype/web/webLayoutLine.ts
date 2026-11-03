@@ -127,12 +127,17 @@ function placeTracks(
 function placeInCell(child: WebElement, box: Container): PlacedChild {
   const justify = child.style["justify-self"] ?? box.parent.style["justify-items"];
   const align = child.style["align-self"] ?? box.parent.style["align-items"];
-  const sized = withAspectRatio(child, {
-    left: 0,
-    top: 0,
-    width: alignedSize(child, "width", justify, box),
-    height: alignedSize(child, "height", align, box),
-  });
+  const sized = withAspectRatio(
+    child,
+    {
+      left: 0,
+      top: 0,
+      width: alignedSize(child, "width", justify, box),
+      height: alignedSize(child, "height", align, box),
+    },
+    box.content,
+    box.vars,
+  );
   const { content } = box;
   return {
     element: child,
@@ -173,12 +178,17 @@ function placeFlow(children: readonly WebChild[], box: Container): PlacedChild[]
       continue;
     }
     const align = isInline(child) ? "start" : "stretch";
-    const rect = withAspectRatio(child, {
-      left: content.left,
-      top: cursor,
-      width: alignedSize(child, "width", align, box),
-      height: contentSize(child, "height", box),
-    });
+    const rect = withAspectRatio(
+      child,
+      {
+        left: content.left,
+        top: cursor,
+        width: alignedSize(child, "width", align, box),
+        height: contentSize(child, "height", box),
+      },
+      content,
+      box.vars,
+    );
     placed.push({ element: child, rect });
     cursor = add(cursor, rect.height);
   }
@@ -212,6 +222,22 @@ interface LineItem {
   readonly max: Len;
 }
 
+/** A line item's self-alignment on the cross axis: `align-self`, else the line's `align-items`. */
+function crossAlign(child: WebElement, box: Container): string | undefined {
+  const own = child.style["align-self"];
+  return own === undefined || own === "auto" ? box.parent.style["align-items"] : own;
+}
+
+/**
+ * An `auto` main size taken from the item's cross size through its `aspect-ratio`, clamped on the
+ * main axis; unknown when the item has no ratio or its cross size is unknown.
+ */
+function ratioMainSize(child: WebElement, main: Axis, box: Container): Len {
+  const crossSize = alignedSize(child, crossOf(main), crossAlign(child, box), box);
+  const rect = oriented(main, [0, 0], [undefined, crossSize]);
+  return withAspectRatio(child, rect, box.content, box.vars)[main];
+}
+
 function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   if (typeof child === "string") {
     return { base: undefined, grow: 0, max: undefined };
@@ -220,48 +246,42 @@ function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   const { grow, basis } = flexOf(child);
   const declared =
     basis === "auto" ? declaredSize(child, main, room, box.vars) : cssLength(basis, box.vars, room);
-  const base = clampSize(declared === "auto" ? undefined : declared, child, main, {
-    base: room,
-    vars: box.vars,
-  });
+  // A content-sized item with an aspect ratio and a known cross size takes its main size from both.
+  const base =
+    declared === "auto"
+      ? (ratioMainSize(child, main, box) ??
+        clampSize(undefined, child, main, { base: room, vars: box.vars }))
+      : clampSize(declared, child, main, { base: room, vars: box.vars });
   const max = cssLength(child.style[`max-${main}`], box.vars, room);
   // A growing item's unmeasured content basis is taken as zero, so it shares the room as
   // `flex: 1` would; its growth, not its content, decides its size.
   return { element: child, base: base === undefined && grow > 0 ? 0 : base, grow, max };
 }
 
-/** Free space shared among growing items, each held at its maximum (CSS flex resolution). */
+/**
+ * Free space shared among growing items, each held at its maximum (CSS flex resolution, 9.7).
+ * Each round shares what the frozen items left of the initial free space; when the unfrozen grow
+ * factors sum below 1, they take at most that fraction of the initial free space.
+ */
 function distribute(items: readonly LineItem[], free: number): { sizes: Len[]; remaining: Len } {
-  const sizes: number[] = items.map((item) => item.base ?? 0);
-  const frozen = new Set<number>();
-  let remaining = free;
-  for (let round = 0; round <= items.length && remaining > 0; round++) {
-    const active = items.flatMap((item, index) =>
-      item.grow > 0 && !frozen.has(index) ? [index] : [],
-    );
+  const bases: number[] = items.map((item) => item.base ?? 0);
+  const sizes = [...bases];
+  const frozen = new Set(items.flatMap((item, index) => (item.grow > 0 ? [] : [index])));
+  const grownBy = (): number => sizes.reduce((sum, size, index) => sum + size - bases[index]!, 0);
+  while (frozen.size < items.length) {
+    const active = items.flatMap((_, index) => (frozen.has(index) ? [] : [index]));
     const total = active.reduce((sum, index) => sum + items[index]!.grow, 0);
-    if (active.length === 0) {
-      break;
-    }
-    // Grow factors summing below 1 take only that fraction of the free space.
-    const share = (remaining * Math.min(1, total)) / total;
-    const capped = active.filter(
-      (index) => sizes[index]! + share * items[index]!.grow > (items[index]!.max ?? Infinity),
+    const share = total < 1 ? Math.min(free - grownBy(), free * total) : free - grownBy();
+    const targets = new Map(
+      active.map((index) => [index, bases[index]! + (share * items[index]!.grow) / total]),
     );
-    const grown = capped.length > 0 ? capped : active;
-    for (const index of grown) {
-      const target =
-        capped.length > 0 ? items[index]!.max! : sizes[index]! + share * items[index]!.grow;
-      remaining -= target - sizes[index]!;
-      sizes[index] = target;
+    const capped = active.filter((index) => targets.get(index)! > (items[index]!.max ?? Infinity));
+    for (const index of capped.length > 0 ? capped : active) {
+      sizes[index] = capped.length > 0 ? items[index]!.max! : targets.get(index)!;
       frozen.add(index);
     }
-    if (capped.length === 0) {
-      remaining = Math.max(0, remaining);
-      break;
-    }
   }
-  return { sizes, remaining };
+  return { sizes, remaining: Math.max(0, free - grownBy()) };
 }
 
 /** Each item's main size after growing, and the free space left for the arrangement. */
@@ -324,12 +344,13 @@ function mainGap(main: Axis, box: Container): number {
 /** The cross-axis size and offset of a line item, aligned by `align-self` or `align-items`. */
 function crossPlacement(child: WebElement, main: Axis, mainSize: Len, box: Container): [Len, Len] {
   const cross = crossOf(main);
-  const own = child.style["align-self"];
-  const align = own === undefined || own === "auto" ? box.parent.style["align-items"] : own;
+  const align = crossAlign(child, box);
   // A ratio-derived cross size is known before alignment places it.
   const size = withAspectRatio(
     child,
     oriented(main, [0, 0], [mainSize, alignedSize(child, cross, align, box)]),
+    box.content,
+    box.vars,
   )[cross];
   return [alignOffset(align, box.content[cross], size), size];
 }
@@ -356,7 +377,10 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
       const [offset, crossSize] = crossPlacement(item.element, main, size, box);
       const position: [Len, Len] = [cursor, add(startOf(box.content, cross), offset)];
       const rect = oriented(main, position, [size, crossSize]);
-      placed.push({ element: item.element, rect: withAspectRatio(item.element, rect) });
+      placed.push({
+        element: item.element,
+        rect: withAspectRatio(item.element, rect, box.content, box.vars),
+      });
     }
     cursor = add(add(add(cursor, size), gap), between);
   }

@@ -151,3 +151,42 @@ test("a ratio-sized line item is aligned with its derived cross size", () => {
     height: 400,
   });
 });
+
+test("fractional grow factors take their share of the initial free space after a cap", () => {
+  // CSS: the 0.4 child grows to 160, is capped at 100 and frozen; the 0.6 child then takes 0.6
+  // of the initial 400px free space, not of the 300px left after the cap.
+  const row = named("row", { display: "flex", "flex-direction": "row" }, [
+    named("capped", { flex: "0.4 1 0", "max-width": "100px", height: "10px" }),
+    named("rest", { flex: "0.6 1 0", height: "10px" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "capped")).toEqual({ left: 0, top: 0, width: 100, height: 10 });
+  expect(rectOf(painted, "rest")).toEqual({ left: 100, top: 0, width: 240, height: 10 });
+});
+
+test("a line item's ratio-derived main size places the siblings after it", () => {
+  const row = named("row", { display: "flex", "flex-direction": "row" }, [
+    named("square", { height: "100px", "aspect-ratio": "1" }),
+    named("black", { width: "300px", height: "100px" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "square")).toEqual({ left: 0, top: 0, width: 100, height: 100 });
+  expect(rectOf(painted, "black")).toEqual({ left: 100, top: 0, width: 300, height: 100 });
+});
+
+test("a ratio-derived dimension is clamped by its own min and max", () => {
+  const root = named("root", {}, [
+    named("capped", {
+      display: "inline-block",
+      height: "400px",
+      "aspect-ratio": "1",
+      "max-width": "100px",
+    }),
+  ]);
+  expect(rectOf(topEdgePaintOrder(root, SCREEN), "capped")).toEqual({
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 400,
+  });
+});

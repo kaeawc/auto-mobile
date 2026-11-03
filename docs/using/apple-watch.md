@@ -92,8 +92,8 @@ Every other tool refuses a watch before doing anything, with:
 
 ### What each tool does on a watch
 
-- `observe` returns a screenshot. With the automation runner connected and your app in the
-  foreground it also returns the view hierarchy; otherwise the result carries
+- `observe` returns a screenshot. With the automation runner connected and the runner's target
+  app in the foreground it also returns the view hierarchy; otherwise the result carries
   `hierarchyUnavailable` and no hierarchy fields. With a hierarchy, bounds and `screenSize` are in
   points and `screenshotImageSize` is in pixels; a screenshot-only result reports `screenSize` in
   pixels. Check `screenSize.units` (`points` or `physical-pixels`) before using it for `tapAt`,
@@ -121,6 +121,9 @@ Every other tool refuses a watch before doing anything, with:
 ## Limits
 
 - No physical Apple Watch and no paired iPhone (see above).
+- The automation runner reads the view hierarchy of its own bundled watch app only, and its target
+  cannot be changed yet. For any other app, including yours, `observe` is screenshot-only and
+  `tapOn` and `swipeOn` with `lookFor` cannot match elements.
 - No text input, pinch, multi-touch or drag.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
   phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

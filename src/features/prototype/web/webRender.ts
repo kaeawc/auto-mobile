@@ -21,6 +21,7 @@ import {
   type WebAxis,
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { materialButtonRenderer } from "./webButton";
 import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
@@ -483,12 +484,6 @@ function roleCss(
   return css;
 }
 
-const BUTTON_ROLES: Readonly<Record<string, [string, string]>> = {
-  filled: ["primary", "onPrimary"],
-  tonal: ["secondaryContainer", "onSecondaryContainer"],
-  elevated: ["surfaceContainerLow", "primary"],
-};
-
 /**
  * A control whose enabledWhen is decidably false draws disabled (Material's 0.38 opacity) and
  * says so to assistive tech, as the native controls do. Undecidable conditions stay enabled.
@@ -503,33 +498,6 @@ function disabledState(
     ? { css: {}, attrs: {} }
     : { css: { opacity: "0.38" }, attrs: { "aria-disabled": "true" } };
 }
-
-const button: NodeRenderer = (node, scope) => {
-  const disabled = disabledState(node, scope);
-  const variant = typeof node.variant === "string" ? node.variant : "filled";
-  const roles = BUTTON_ROLES[variant];
-  const outline: Record<string, string> =
-    variant === "outlined"
-      ? { border: `1px solid ${cssColor("outline", scope.style) ?? "currentColor"}` }
-      : {};
-  const { attrs, style } = base(node, scope, {
-    display: "inline-flex",
-    "align-items": "center",
-    "justify-content": "center",
-    "min-height": "40px",
-    padding: "0 24px",
-    "border-radius": "20px",
-    "font-weight": "500",
-    ...(roles ? roleCss(scope, roles[0], roles[1]) : roleCss(scope, "transparent", "primary")),
-    gap: "8px",
-    ...outline,
-    ...disabled.css,
-  });
-  return el("div", { attrs: { ...attrs, role: "button", ...disabled.attrs }, style }, [
-    ...namedIcon(node.icon, scope),
-    bound(node.label, scope),
-  ]);
-};
 
 /** App-bar navigation and action slots draw as icon placeholders labelled with their action. */
 function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: string): WebElement[] {
@@ -940,13 +908,13 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   divider,
   icon,
   image,
-  button,
   topAppBar,
   textField,
   switch: toggle("switch"),
   checkbox: toggle("checkbox"),
   card,
   listItem,
+  button: materialButtonRenderer(KIT),
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
   ...webMediaRenderers(KIT),

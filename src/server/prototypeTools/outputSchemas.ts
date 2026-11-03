@@ -239,6 +239,7 @@ export const prototypeOutputSchema = z.object({
         .describe("defineBackend: item count per collection"),
       routes: z.number().int().nonnegative().optional(),
       faults: z.number().int().nonnegative().optional(),
+      actors: z.number().int().nonnegative().optional(),
       cleared: z.boolean().optional().describe("clearBackend: false when no such backend existed"),
     })
     .optional()

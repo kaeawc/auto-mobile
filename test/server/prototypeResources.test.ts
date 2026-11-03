@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { FakeTimer } from "../fakes/FakeTimer";
 import contract from "../../schemas/prototype-spec-contract.json";
 import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
 import { PrototypeMockBackendRegistry } from "../../src/features/prototype/PrototypeMockBackendRegistry";
@@ -134,7 +135,7 @@ describe("automobile:prototype resource", () => {
     expect(() =>
       new PrototypeMockBackendRegistry({
         ids: new CountingIdGenerator(),
-        timer: { sleep: async () => {} },
+        timer: new FakeTimer(),
       }).define(mockCall.backendId, mockCall.backend),
     ).not.toThrow();
     expect(validatePrototypeSpec(components)).toMatchObject({ success: true });

@@ -6,12 +6,13 @@ import {
   MAX_MOCK_BACKEND_BYTES,
 } from "../../../src/features/prototype/prototypeMockSchema";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { SeededRandom } from "../../fakes/SeededRandom";
 
 const registry = (createRandom?: (seed: number | undefined) => SeededRandom) =>
   new PrototypeMockBackendRegistry({
     ids: new FakeIdGenerator(),
-    timer: { sleep: async () => {} },
+    timer: new FakeTimer(),
     createRandom,
   });
 

@@ -24952,7 +24952,8 @@
         "dismissed": {
           "sensitive": false
         },
-        "scheduledFired": { "sensitive": false }
+        "scheduledFired": { "sensitive": false },
+        "push": { "sensitive": false, "capability": "prototype_platform_push_v1" }
       },
       "state": {
         "badge": {

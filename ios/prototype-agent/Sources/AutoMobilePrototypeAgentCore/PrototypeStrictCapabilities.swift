@@ -228,6 +228,9 @@ enum PrototypeStrictCapabilities {
         }
         if let root = spec["root"] { scan(root) }
         if let handlers = spec["platform"] { scan(handlers) }
+        for event in (spec["platform"]?.objectFields?["on"]?.objectFields ?? [:]).keys {
+            if let capability = PrototypePlatformValidator.eventCapability(event) { result.insert(capability) }
+        }
         for channel in (spec["channels"]?.objectFields ?? [:]).values { scan(channel) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }

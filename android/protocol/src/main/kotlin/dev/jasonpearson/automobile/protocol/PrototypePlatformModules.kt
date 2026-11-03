@@ -45,6 +45,14 @@ internal object PrototypePlatformModules {
     return owner.takeIf { module(owner)?.member("events")?.containsKey(member) == true }
   }
 
+  /** The capability an `event` handler needs beyond its module's, when its definition names one. */
+  fun eventCapability(event: String): String? {
+    val (owner, member) = qualified(event) ?: return null
+    return (module(owner)?.member("events")?.member(member)?.get("capability") as? JsonPrimitive)
+      ?.takeIf(JsonPrimitive::isString)
+      ?.content
+  }
+
   fun userInitiated(event: String): Boolean {
     val (owner, member) = qualified(event) ?: return false
     return module(owner)?.member("events")?.member(member)?.flag("userInitiated") == true

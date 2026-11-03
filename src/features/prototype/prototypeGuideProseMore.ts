@@ -330,6 +330,8 @@ passive, default and high to active; optional \`description\` and \`showBadge\`)
 - \`schedule\` takes the \`post\` arguments plus \`delaySeconds\` (1 to 604800) and also needs
   \`prototype_platform_notifications_scheduled_v1\`; its firing is the \`notifications.scheduledFired\`
   event. Delivery is inexact.
+- A \`notifications.push\` handler receives a simulated server push and also needs
+  \`prototype_platform_push_v1\`; read \`{event: "/type"}\` and \`{event: "/data/..."}\` there.
 - \`cancel\` takes exactly one of \`id\`, \`group\` or \`all: true\`.
 - Taps, action buttons and inline replies arrive at \`platform.on\` handlers
   (\`notifications.opened|action|reply|dismissed\`); read \`{event: "/notificationId"}\`,

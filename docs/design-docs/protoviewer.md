@@ -126,6 +126,11 @@ Import needs identical accept/reject behaviour on all three platforms.
 - Share rebuilds a clean bundle (section 4) and hands it out through a `FileProvider` scoped to an
   export-cache subdirectory, with a read-only temporary grant and the temp file deleted afterwards.
 - Fonts and images decode off the main thread.
+- **Copy diagnostics** in the viewer toolbar puts plain text on the clipboard: app version, Android
+  SDK level, the renderer capability set, the last failure as a fixed code (`validation`,
+  `storage-load`, `render`, `watchdog` or `library-<error>`) and whether the render watchdog tripped.
+  `ViewerDiagnostics` has no field for spec text, validator paths or messages, labels, library ids,
+  saved state or requests, so none can be copied; `ViewerDiagnosticsTest` asserts this.
 
 ### 3.4 iOS app
 
@@ -613,6 +618,7 @@ harnesses and a nightly CI job remain future work.
 | Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                |
 | Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
+| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK (owner, 2026-10-31, #14157).       |
 
 ## Issues
 

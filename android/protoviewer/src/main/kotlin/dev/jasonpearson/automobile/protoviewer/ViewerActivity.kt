@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -39,6 +43,7 @@ import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypeHttpClient as EmbeddedHttpClient
+import dev.jasonpearson.automobile.prototype.PrototypeLoadError
 import dev.jasonpearson.automobile.prototype.PrototypeNetwork
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
@@ -59,6 +64,9 @@ class ViewerActivity : ComponentActivity() {
   private var runtime by mutableStateOf<PrototypeRuntime?>(null)
   private var watchdog: PrototypeScheduledTask? = null
   private var renderFailed = false
+  // Diagnostics keep fixed failure codes only, never spec, storage or request content.
+  private var lastFailure: ViewerFailure? = null
+  private var watchdogTripped = false
   private var content by mutableStateOf<ViewerContent?>(null)
   private var state by mutableStateOf<ViewerScreenState>(ViewerScreenState.Loading)
   private var confirmReset by mutableStateOf(false)
@@ -72,11 +80,16 @@ class ViewerActivity : ComponentActivity() {
     libraryId = intent.getStringExtra(ViewerLaunch.LIBRARY_ID)
     libraryId?.let { services.register(it, restart) }
     setContent { ProtoViewerTheme { ViewerScreen() } }
-    watchdog = services.renderWatchdog.start(lifecycleScope) { failRender() }
+    watchdog =
+      services.renderWatchdog.start(lifecycleScope) {
+        if (!renderFailed && !isFinishing && !restarting) watchdogTripped = true
+        failRender(ViewerFailure.Watchdog)
+      }
     lifecycleScope.launch {
       val loaded = withContext(services.io) { loadViewer(libraryId, services.repository) }
       if (!isFinishing && !restarting && !renderFailed) {
         state = loaded
+        if (loaded is ViewerScreenState.Error) lastFailure = ViewerFailure.of(loaded.reason)
         if (loaded is ViewerScreenState.Ready) prepare(loaded.prototype) else stopWatchdog()
       }
     }
@@ -111,6 +124,7 @@ class ViewerActivity : ComponentActivity() {
         restarting,
         { lifecycleScope.launch { relaunch(false) } },
         { confirmReset = true },
+        { copyDiagnostics() },
       )
       // Spec dialogs, menus, dropdowns, sheets and anchored overlays are all in-window renderer
       // layers. Clip that whole surface, including its scrims, below the app-owned provenance.
@@ -119,7 +133,7 @@ class ViewerActivity : ComponentActivity() {
         if (current == null) ViewerStatus(state) { finish() }
         else
           services.renderer.Render(
-            onFailure = { failRender() },
+            onFailure = { failRender(ViewerFailure.Render) },
             content = {
               ProvideEmbeddedPrototypeHost(current.host) {
                 AutoMobilePrototype(
@@ -130,10 +144,8 @@ class ViewerActivity : ComponentActivity() {
                   network = current.network,
                   handleBack = true,
                   onDismiss = { finish() },
-                  onError = {
-                    SideEffect {
-                      failRender()
-                    }
+                  onError = { error: PrototypeLoadError ->
+                    SideEffect { failRender(ViewerFailure.of(error)) }
                   },
                 )
               }
@@ -154,9 +166,10 @@ class ViewerActivity : ComponentActivity() {
     watchdog = null
   }
 
-  private fun failRender() {
+  private fun failRender(failure: ViewerFailure) {
     if (renderFailed || isFinishing || restarting) return
     renderFailed = true
+    lastFailure = failure
     stopWatchdog()
     runtime?.close()
     runtime = null
@@ -188,11 +201,41 @@ class ViewerActivity : ComponentActivity() {
     if (result is LibraryResult.Failure) {
       restarting = false
       restartFailed = true
+      lastFailure = ViewerFailure.of(result.error)
       state = ViewerScreenState.Error(result.error)
       return@withLock
     }
     finishAndRemoveTask()
     ViewerLaunch.open(this, id, relaunch = true)
+  }
+
+  internal fun diagnostics(): ViewerDiagnostics =
+    ViewerDiagnostics(
+      appVersion = appVersion(),
+      androidSdk = Build.VERSION.SDK_INT,
+      capabilities = AutoMobilePrototype.capabilities,
+      lastFailure = lastFailure,
+      watchdogTripped = watchdogTripped,
+    )
+
+  private fun appVersion(): String =
+    try {
+      packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+    } catch (error: android.content.pm.PackageManager.NameNotFoundException) {
+      // Our own package always resolves; keep the action usable if it somehow does not.
+      Log.w("ProtoViewer", "Cannot read the app version", error)
+      "unknown"
+    }
+
+  private fun copyDiagnostics() {
+    val clipboard = getSystemService(ClipboardManager::class.java) ?: return
+    clipboard.setPrimaryClip(
+      ClipData.newPlainText(getString(R.string.diagnostics_label), diagnostics().format()),
+    )
+    // Android 13+ confirms clipboard writes itself; earlier versions show nothing.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+      Toast.makeText(this, R.string.diagnostics_copied, Toast.LENGTH_SHORT).show()
+    }
   }
 
   override fun onResume() {
@@ -292,12 +335,15 @@ internal fun ViewerStatus(state: ViewerScreenState, back: () -> Unit) {
 /** App-owned chrome only; prototype text is rendered separately without localization. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
+// One callback per toolbar action keeps the chrome stateless and testable.
+@Suppress("LongParameterList")
 internal fun ViewerChrome(
   allowNetwork: Boolean,
   actionFailed: Boolean,
   restarting: Boolean,
   relaunch: () -> Unit,
   reset: () -> Unit,
+  copyDiagnostics: () -> Unit,
 ) {
   FlowRow(Modifier.fillMaxWidth().testTag("viewer-actions")) {
     TextButton(onClick = relaunch, enabled = !restarting) {
@@ -306,6 +352,7 @@ internal fun ViewerChrome(
     TextButton(onClick = reset, enabled = !restarting) {
       Text(stringResource(R.string.reset))
     }
+    TextButton(onClick = copyDiagnostics) { Text(stringResource(R.string.copy_diagnostics)) }
   }
   if (allowNetwork)
     Text(

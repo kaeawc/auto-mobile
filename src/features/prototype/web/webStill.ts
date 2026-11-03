@@ -177,6 +177,19 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+/** The posture's panel is the active panel; its hinge, when it folds that panel, sets the posture. */
+function platformStateFor(
+  platform: "android" | "ios",
+  screenDp: { widthDp: number; heightDp: number },
+  fold: WebFold | undefined,
+) {
+  return stillPlatformState({
+    platform,
+    ...screenDp,
+    ...(fold ? { fold: { posture: fold.posture, hinge: fold.band.axis } } : {}),
+  });
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
@@ -203,12 +216,7 @@ function stillScope(
     condition: {
       state: record(spec.state) ?? {},
       platform: frame.platform,
-      // The posture's panel is the active panel; its hinge, if it folds it, sets the posture.
-      platformState: stillPlatformState({
-        platform: frame.platform,
-        ...screenDp,
-        ...(fold ? { fold: { posture: fold.posture, hinge: fold.band.axis } } : {}),
-      }),
+      platformState: platformStateFor(frame.platform, screenDp, fold),
     },
     data: spec.data,
     spec,

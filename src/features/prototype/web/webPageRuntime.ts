@@ -47,6 +47,28 @@ export function prototypeWebScreenView<View extends { dataset: { screen?: string
   return views.find((view) => view.dataset.screen === screen) ?? views[0];
 }
 
+/** Where the viewer is among the pre-rendered views' dimensions besides the screen. */
+export interface PrototypeWebViewKey {
+  readonly variant: string;
+  readonly revision: string;
+  readonly orientation: string;
+  /** Empty for a frame without postures, whose views carry none. */
+  readonly posture: string;
+}
+
+/** Whether a view belongs to the key: its variant, revision, orientation and posture (#16445). */
+export function prototypeWebViewMatches(
+  dataset: { readonly [name: string]: string | undefined },
+  key: PrototypeWebViewKey,
+): boolean {
+  return (
+    dataset.variant === key.variant &&
+    dataset.revision === key.revision &&
+    dataset.orientation === key.orientation &&
+    (dataset.posture ?? "") === key.posture
+  );
+}
+
 /** One rotation turn: the keyframes of the view turning away and of the view turning in. */
 export interface PrototypeWebRotation {
   readonly durationMs: number;
@@ -130,12 +152,14 @@ export interface PrototypeWebRuntimeRules {
   readonly fitScale: typeof prototypeWebFitScale;
   readonly wheelFactor: typeof prototypeWebWheelFactor;
   readonly screenView: typeof prototypeWebScreenView;
+  readonly viewMatches: typeof prototypeWebViewMatches;
   readonly rotation: typeof prototypeWebRotation;
   readonly animateTurn: typeof prototypeWebAnimateTurn;
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
-  const { zoomScale, fitScale: fitted, wheelFactor, screenView, rotation, animateTurn } = rules;
+  const { zoomScale, fitScale: fitted, wheelFactor, screenView, viewMatches } = rules;
+  const { rotation, animateTurn } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -153,7 +177,6 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     variant: doc.body.dataset.variant ?? "",
     revision: doc.body.dataset.revision ?? "",
     orientation: "portrait" as "portrait" | "landscape",
-    // A foldable frame's posture; empty for a frame without postures, whose views carry none.
     posture: doc.body.dataset.posture ?? "",
     // The first apply sets the shown view's screen.
     screen: "",
@@ -162,14 +185,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     y: 0,
     fit: true,
   };
-  const revisionViews = () =>
-    views.filter(
-      (view) =>
-        view.dataset.variant === state.variant &&
-        view.dataset.revision === state.revision &&
-        view.dataset.orientation === state.orientation &&
-        (view.dataset.posture ?? "") === state.posture,
-    );
+  const revisionViews = () => views.filter((view) => viewMatches(view.dataset, state));
   const current = () => screenView(revisionViews(), state.screen);
   // The picker lists the shown revision's own screens, so it never offers a view the page lacks.
   // A revision without the chosen screen shows its start, which becomes the chosen screen.

@@ -14,6 +14,7 @@ import {
   prototypeWebFitScale,
   prototypeWebRotation,
   prototypeWebScreenView,
+  prototypeWebViewMatches,
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "../../../../src/features/prototype/web/webPageRuntime";
@@ -97,6 +98,7 @@ describe("prototype web page (#16346)", () => {
       "prototypeWebFitScale",
       "prototypeWebWheelFactor",
       "prototypeWebScreenView",
+      "prototypeWebViewMatches",
     ]) {
       expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
     }
@@ -562,8 +564,17 @@ describe("prototype web page postures (#16445)", () => {
     expect(html).not.toContain('data-control="posture"');
   });
 
-  test("the runtime switches posture among the pre-rendered views", () => {
+  test("the runtime matches a view by variant, revision, orientation and posture", () => {
     expect(PROTOTYPE_WEB_RUNTIME).toContain('pick("posture")');
-    expect(PROTOTYPE_WEB_RUNTIME).toContain("view.dataset.posture");
+    const key = { variant: "a", revision: "1", orientation: "portrait", posture: "closed" };
+    const view = { ...key };
+    expect(prototypeWebViewMatches(view, key)).toBe(true);
+    expect(prototypeWebViewMatches({ ...view, posture: "opened" }, key)).toBe(false);
+    expect(prototypeWebViewMatches({ ...view, orientation: "landscape" }, key)).toBe(false);
+    expect(prototypeWebViewMatches({ ...view, revision: "2" }, key)).toBe(false);
+    // A frame without postures: the key's posture is empty and its views carry none.
+    const { posture: _posture, ...plain } = view;
+    expect(prototypeWebViewMatches(plain, { ...key, posture: "" })).toBe(true);
+    expect(prototypeWebViewMatches(plain, key)).toBe(false);
   });
 });

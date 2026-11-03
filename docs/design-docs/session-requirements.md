@@ -223,22 +223,13 @@ because Xcode reports its product family as `iPhone`. The catalog, inventory
 form factor, display panels and `setPosture` share that one predicate, and
 inventories report a Duo as `foldable`.
 
-Execution is a host capability, `capabilities.iosDuo` in the session broker
-host configuration, and is off by default. While it is off, normalization
-returns non-retryable `capability_disabled` for an explicit Duo archetype, Duo
-model type, exact model classified as Duo, omitted default archetype of Duo, or
-known Duo model farther down the applicable default path, and resolution
-refuses any model that resolves to Duo. These checks occur before pool matching
-or creation resolution, so a refused request needs no installed Duo model,
-runtime, or creation default.
-
-When it is on, Duo requests resolve like any other iOS hardware and need an
-iOS 27.1+ runtime. Enabling it never widens other selectors: a configured
-default must belong to the requested model type, so a phone or tablet request
-cannot resolve to a Duo. The policy is checked only at admission. A stored Duo
-resource stays readable for recovery, baseline reset and destroy after the
-capability is turned off. A broker with the capability enabled advertises
-`session-broker/ios-duo/v1` from `daemon/capabilities`.
+Duo requests resolve like any other iOS hardware whenever the simulator device
+type and a compatible runtime are installed. Installed device-type metadata
+determines runtime compatibility; there is no fixed minimum runtime version.
+Missing hardware or runtimes produce the normal hardware or runtime failure.
+A configured default must belong to the requested model type, so a phone or
+tablet request cannot resolve to a Duo. Duo support has no separate capability
+advertisement in `daemon/capabilities`.
 
 ## Pure API and provenance
 

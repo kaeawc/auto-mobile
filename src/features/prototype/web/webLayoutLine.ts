@@ -6,7 +6,6 @@ import {
   clampSize,
   declaredSize,
   shorthandValues,
-  sub,
   withAspectRatio,
   type Axis,
   type Len,

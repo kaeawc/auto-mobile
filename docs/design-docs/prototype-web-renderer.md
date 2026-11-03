@@ -135,7 +135,8 @@ nothing at runtime drives a browser.
   non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
-  screen's view.
+  screen's view. The browser clock is fixed at 9:41 UTC, so the live status bar clock matches the
+  stills; a separate case installs a running clock and checks the clock advances each minute.
 - **Settings cases.** `reference-checkout` also renders in both frames at the largest text size
   (`fontScale` 2, `accessibility-extra-extra-extra-large`) and in the `ar` locale (RTL), golden
   `<spec>--<frame>--<setting>.png` (and `--landscape.png` after it).
@@ -177,7 +178,10 @@ the host, so the page's script only switches between views it was given and neve
   top-level `derive` entry. Repeat placeholders
   bind each object item (a literal `items` array or a data pointer; scalar items are skipped
   before indices are assigned, as on devices), including the repeat's own `derive`
-  fields. Text binds once, in that order: every inserted data or repeat value is shielded until binding
+  fields. A repeat draws at most 200 items, except a `list`, which draws up to the list contract
+  limit (2,000) capped by its `maxItems`, as devices do. A 2,000-row list of plain list items is
+  about 0.7 MB of markup, inside the page budget; a page whose kept start screens exceed it fails
+  the build as described under **Budget**. Text binds once, in that order: every inserted data or repeat value is shielded until binding
   ends, so it is never read again as a placeholder. Nested conditions with typed operands and state keys bind through the devices' own
   field walk (`mapBindableFields`). A spans-only text node renders each span
   with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses the locale, `UTC` and a
@@ -238,11 +242,14 @@ the host, so the page's script only switches between views it was given and neve
   `theme.typography`, to text roles, explicit sizes, the 14 sp default and the fixed text of
   controls (app bar title, field label, caption and lines, list item text); icons and the device
   chrome do not scale. The default size (`1`, `large`) renders the same bytes as none.
-- **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
-  accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
-  roles unpainted. Both devices paint nothing behind a window, so the app below shows through;
-  the still has no app below, so the screen paints the theme's `background` role (else `surface`),
-  or the Material 3 baseline background for the mode when the scheme leaves both unresolved. An explicit `theme.mode` of
+- **Colour.** Theme roles resolve from the Material 3 baseline, then the roles a `theme.colors.seed`
+  derives, then the explicit overrides. The seed roles are the HSL approximation both devices
+  share (`prototypeSeedScheme.ts`, Android's `prototypeSeedColorScheme`, the iOS agent's
+  `seedScheme`), rounded to 8-bit channels as Compose stores them. A `device` source has no
+  device scheme to read, so it falls through to the seed or the baseline, as iOS and Android
+  below API 31 do. The accessibility lint still treats a seed or device scheme as unknown. Both
+  devices paint nothing behind a window, so the app below shows through; the still has no app
+  below, so the screen paints the theme's `background` role (else `surface`). An explicit `theme.mode` of
   `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
@@ -325,7 +332,8 @@ the host, so the page's script only switches between views it was given and neve
   the right edge in landscape when the frame reserves that inset, and iOS's home indicator
   (`data-nav="homeIndicator"`). The status bar is never a picture of a real OS: a clock and generic
   cellular, Wi-Fi and battery marks (`data-status` with a `data-level`) drawn from a fixed state (9:41,
-  four bars, Wi-Fi on, full battery). An iPhone with an island centres the clock and the marks in the
+  four bars, Wi-Fi on, full battery). In the interactive page the runtime rewrites every clock from
+  the browser's local time in the same `h:mm` 12-hour form, re-armed at each minute boundary. An iPhone with an island centres the clock and the marks in the
   ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
   app's top colour, which is the first opaque background spanning the screen along the content's leading
@@ -337,7 +345,8 @@ the host, so the page's script only switches between views it was given and neve
   since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. Both devices draw a
   window's content edge to edge and a top app bar takes no inset of its own, so it clears the
-  status bar only through `safeAreaPadding`.
+  status bar only through `safeAreaPadding`; likewise content clears the landscape cutout side
+  (an iPhone's 59 pt left inset) only through `safeAreaPadding` on the `start` edge.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

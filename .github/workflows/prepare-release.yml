@@ -257,6 +257,7 @@ jobs:
     uses: ./.github/workflows/verify-protoviewer-artifact-policy.yml
     with:
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      release-version: ${{ needs.prepare-version.outputs.protoviewer_version }}
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 

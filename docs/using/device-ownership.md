@@ -325,47 +325,8 @@ the device really should be stopped out from under its holder.
 
 ## Apple TV simulators
 
-Call `listDevices` with `platform: "tvos"` to list booted Apple TV simulators, or
-`listDeviceImages` with `platform: "tvos"` to list configured ones. Read
-`automobile:devices/images/tvos` for configured Apple TVs, installed tvOS runtimes,
-Apple TV models and their compatible runtimes. Check inventory completeness before
-treating an empty result as no devices; retry a failed listing.
-General device and image listings continue to cover Android and iOS.
-
-`provisionDevice` with `device.platform: "tvos"` takes an exact `name`, optional
-`deviceId` (UDID), and `spec: { runtime, deviceType }` identifiers from that
-catalog. It adopts an exact match or creates a simulator; a name clash, missing
-UDID or incompatible runtime/model is refused. A missing tvOS runtime must be
-installed with `xcodebuild -downloadPlatform tvOS`; the tool never downloads it.
-With `boot` (the default), it boots and binds a session at readiness `booted`;
-a simulator it created is deleted again if boot or binding fails; if deleting it
-again fails, the error says so and tells you to delete it with `deleteDevice`. `boot: false`
-creates or adopts without a session. `resources`, `enableTools` and
-`readiness: "automation"` are unsupported.
-
-`deleteDevice` takes `target: { platform: "tvos", isVirtual: true, stableId: "<UDID>" }`,
-`mode: "destroy"` and `verifyAbsence: true`. It stops a running simulator and
-releases its session before deletion, then confirms absence with a fresh listing.
-An absent UDID returns `already_absent`; a mismatched `target.stableName` fails
-with `identity_conflict`, and an unsuccessful deletion with `tv_delete_failed`.
-
-`startDevice` with `platform: "tvos"` boots an existing simulator, starts its automation
-runner and binds a session. Set `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` to a prebuilt
-simulator runner xctestrun; otherwise a source checkout discovers or builds it.
-If startup fails, the response explains why and the booted session supports screenshot-only
-observation. Releasing the session, killing or deleting the simulator stops its runner.
-
-With a connected runner, `observe` returns the hierarchy and the existing `focusedElement`;
-use `project: "full"` to include the full hierarchy. Navigate focus with `pressButton`
-using `up`, `down`, `left`, `right`, `select`, `menu`, `home` or `playPause`.
-Use `tapOn` with an exact `text` or `elementId` selector and optional zero-based `index` to
-move focus to a visible element and select it. Only the tap action is supported. A missing
-match, absent focus, stalled focus or the 30-move limit produces an error; observe and
-use `pressButton` to establish focus or move closer before retrying.
-Touch gestures and long press are unsupported. Text input supports only `type` (append)
-into the keyboard opened with `pressButton select`; selector, key and clear operations
-are unsupported. Without a runner, observation
-returns a screenshot and `hierarchyUnavailable`; call `startDevice` again to prepare automation.
+Listing, provisioning, starting, deleting and driving Apple TV simulators are covered in
+[Apple TV simulators](apple-tv.md).
 
 ## Apple Watch simulators
 
@@ -406,7 +367,7 @@ watch, even after one was selected.
   Without a runner, observation returns a fresh screenshot (`screenshotPath`,
   `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note.
   Hierarchy fields are absent, not empty; use the screenshot and retry `startDevice`
-  before acting. Apple TV observation uses its connected runner for hierarchy and focus.
+  before acting.
 - A session request (`--session-config` / `AUTOMOBILE_SESSION_CONFIG`) asks for
   a watch with `device: { "schemaVersion": 1, "platform": "watchos", "spec": {
   "runtime": "...", "deviceType": "..." } }`: the exact watchOS runtime and Apple

@@ -163,7 +163,8 @@ from the Android renderer. For each Roborazzi golden in
 `android/control-proxy/src/test/resources/screenshots/prototype/`, `webAndroidParityCases.ts`
 either rebuilds the spec the Kotlin case renders (fixture, `night`/`notnight` mode, state
 overrides, `themeFrom` and the case's JSON edit) or lists the golden with a reason; host window
-chrome and content-sized floating captures are listed, not compared.
+chrome and content-sized floating captures are listed, not compared. Every compared spec is placed
+fullscreen, because the goldens draw the root and theme without the window's placement.
 
 - **Rendering.** The still is drawn `chromeless` on the `small-phone` frame (360×640 dp, the
   goldens' `w360dp-h640dp-mdpi`, so one dp is one pixel) into a bare document with no page shell,

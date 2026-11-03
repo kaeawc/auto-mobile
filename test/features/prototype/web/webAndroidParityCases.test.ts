@@ -9,6 +9,7 @@ import {
   androidParityFixturePath,
   androidParityHtml,
   androidParitySpec,
+  contentOnly,
   readAndroidParityBudgets,
 } from "./webAndroidParityCases";
 import { pngSize } from "./webScreenshotCases";
@@ -79,6 +80,16 @@ describe("prototype web parity with the Android goldens (#16534)", () => {
     const sheets = children.filter((child) => child.type === "bottomSheet");
     expect(sheets.length).toBeGreaterThan(0);
     expect(sheets.every((sheet) => sheet.detents?.join() === "half")).toBe(true);
+  });
+
+  test("a sheet spec is compared fullscreen, as the content path draws it", () => {
+    const entry = ANDROID_PARITY_CASES.find((c) => c.golden === "doc_example_2")!;
+    const spec = androidParitySpec(entry);
+    expect((spec.window as { placement: { type: string } }).placement.type).toBe("sheet");
+    const window = contentOnly(spec).window as Record<string, unknown>;
+    expect(window.placement).toEqual({ type: "fullscreen" });
+    expect(androidParityHtml(entry)).toContain('data-window="fullscreen"');
+    expect(androidParityHtml(entry)).not.toContain('data-window="sheet"');
   });
 
   test("the page is the chromeless still alone, transparent and inset-free", () => {

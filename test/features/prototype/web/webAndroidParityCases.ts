@@ -276,11 +276,21 @@ export function androidParitySpec(entry: AndroidParityCase): Json {
 }
 
 /**
+ * The Android goldens render `PrototypeSpecContent(model.root, model.theme)`, which applies no
+ * window placement, so a sheet or floating spec draws from the top-left there. The comparison
+ * places every spec fullscreen to draw the same content path.
+ */
+export function contentOnly(spec: Json): Json {
+  const window = spec.window === undefined ? {} : asRecord(spec.window, "window");
+  return { ...spec, window: { ...window, placement: { type: "fullscreen" } } };
+}
+
+/**
  * A bare document holding only the chromeless still at the top-left: no page shell, toolbar or
  * fit-to-window scale, so one CSS pixel is one golden pixel.
  */
 export function androidParityHtml(entry: AndroidParityCase): string {
-  const still = renderPrototypeStill(androidParitySpec(entry), {
+  const still = renderPrototypeStill(contentOnly(androidParitySpec(entry)), {
     frame: ANDROID_PARITY_FRAME,
     mode: entry.mode ?? "light",
     chromeless: true,

@@ -113,7 +113,8 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   }
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
-  const { requests, fields } = libraryFields(spec, nodes, true);
+  const { requests, fields, dataWrites } = libraryFields(spec, nodes, true);
+  propagateDataTaint(tainted, platformTainted, dataWrites);
   const sinkFields = fields.filter(
     // Key fields name state entries, which a `/data` pointer cannot reach.
     (field) => !field.key && requestSinkPath(field.path, requests),
@@ -200,6 +201,31 @@ export function prototypeSensitiveWarnings(spec: unknown): string[] {
       ? `${path}: sensitive sink analysis stopped at the 4194304 expanded-byte budget at this path, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.`
       : `${path}: ${message}; this is a warning only and does not block the show.`,
   );
+}
+
+/**
+ * A data action that copies a tainted `/data` or sensitive `/platform` read into `/data` taints
+ * its destination, transitively (a copy of a copy stays tainted). Mutates `tainted`.
+ */
+function propagateDataTaint(
+  tainted: string[],
+  platformTainted: readonly string[],
+  writes: readonly DataWrite[],
+): void {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const write of writes) {
+      const sources = write.source === "data" ? tainted : platformTainted;
+      if (
+        !tainted.includes(write.into) &&
+        sources.some((taint) => pointersOverlap(taint, write.from, false))
+      ) {
+        tainted.push(write.into);
+        changed = true;
+      }
+    }
+  }
 }
 
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
@@ -409,14 +435,28 @@ interface LibraryField {
   pointerSource?: "data" | "platform";
   itemBinding?: boolean;
 }
+interface DataWrite {
+  into: string;
+  source: "data" | "platform";
+  from: string;
+}
+
 function libraryFields(
   spec: unknown,
   nodes: readonly Located[],
   includeDataBindings = false,
-): { requests: string[]; fields: LibraryField[] } {
+): { requests: string[]; fields: LibraryField[]; dataWrites: DataWrite[] } {
   const requests: string[] = [];
   const fields: LibraryField[] = [];
+  const destinations = new Map<string, string>();
+  const reads = new Map<string, { source: "data" | "platform"; from: string }>();
   const collect: FieldVisitor = (raw, at, kind) => {
+    if (kind === "dataPath" && at.endsWith(".path")) {
+      const into = prototypeDataPathPointer(raw);
+      if (into !== undefined) {
+        destinations.set(at.slice(0, -".path".length), into);
+      }
+    }
     if (kind === "request") {
       requests.push(at);
     }
@@ -428,6 +468,9 @@ function libraryFields(
       for (const source of ["data", "platform"] as const) {
         if (typeof binding[source] === "string") {
           fields.push({ text: binding[source], path: at, key: false, pointerSource: source });
+          if (at.endsWith(".value")) {
+            reads.set(at.slice(0, -".value".length), { source, from: binding[source] });
+          }
         }
       }
       if (typeof binding.item === "string") {
@@ -441,7 +484,11 @@ function libraryFields(
   }
   visitPrototypeHandlerFields(spec, collect);
   channelFields(spec, requests, fields, collect);
-  return { requests, fields };
+  const dataWrites = [...reads].flatMap(([prefix, read]) => {
+    const into = destinations.get(prefix);
+    return into === undefined ? [] : [{ into, ...read }];
+  });
+  return { requests, fields, dataWrites };
 }
 
 function channelFields(

@@ -41,9 +41,12 @@ camera and microphone output). The strict validator refuses sensitive calls and 
 URL, header, query or body, a channel URL or header, or `storage.keys`. The TypeScript, Kotlin and
 Swift validators refuse these bindings when `library: true`, reporting the sink path, as they do
 for `secure` text fields. Pointer overlap includes parents, children and repeat `{index}` segments;
-literal value bindings stay opaque. The contract marks location fixes and auth user IDs as
-sensitive state. Successful MCP-direct shows include a warning for each sink. No host path imports
-specs yet.
+literal value bindings stay opaque. A `setData`, `appendData`, `prependData` or `upsertData` whose
+`value` is `{data}` or `{platform}` read of tainted state taints its `/data` destination, so
+copies and copies of copies are refused too. Copies routed through `setState` are not tracked. The contract marks location fixes and auth user IDs as
+sensitive state. Successful MCP-direct shows include a warning for each sink, unless the expanded
+sink scan exceeds 4194304 bytes. Then they include one warning that the sinks are unchecked. No
+host path imports specs yet.
 
 **R3: side effects need a user gesture.** The TypeScript validator permits `share.open` and
 `notifications.post|schedule|setBadge` only in `onTap`, `onLongPress`, `onDoubleTap`, `onSubmit`

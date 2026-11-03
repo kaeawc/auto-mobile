@@ -28,9 +28,10 @@ internal object PrototypeSensitiveSinkRules {
   }
 
   fun errors(spec: JsonObject, context: PrototypeStateChecks.Context): List<PrototypeSpecError> {
-    val dataTaints = sensitiveDataPointers(spec, context)
     val platformTaints = sensitivePlatformPointers(spec)
-    if (dataTaints.isEmpty() && platformTaints.isEmpty()) return emptyList()
+    val seeds = sensitiveDataPointers(spec, context)
+    if (seeds.isEmpty() && platformTaints.isEmpty()) return emptyList()
+    val dataTaints = propagateCopies(seeds, platformTaints, context)
     val fields = sinkFields(spec, context).sortedBy { it.path }
     val validRepeats = PrototypeRepeatValidator.validate(spec) == null
     val scopes = if (validRepeats) PrototypeRepeatValidator.scopes(spec) else emptyList()
@@ -68,6 +69,41 @@ internal object PrototypeSensitiveSinkRules {
       .filterIsInstance<PrototypePlatformUses.Use.Call>()
       .filter { callDefinition(it.action.text("call"))?.second?.flag("sensitive") == true }
       .mapNotNull { it.action.text("into")?.let(PrototypeDataWriter::pathPointer) }
+
+  /** A data action copying a tainted read into `/data` taints its destination, transitively. */
+  private fun propagateCopies(
+    seeds: List<String>,
+    platformTaints: List<String>,
+    context: PrototypeStateChecks.Context,
+  ): List<String> {
+    val copies =
+      context.actions
+        .filter { it.value.text("type") in DATA_WRITES }
+        .mapNotNull { action ->
+          val into = action.value.text("path")?.let(PrototypeDataWriter::pathPointer)
+          val read = action.value["value"] as? JsonObject
+          val data = read?.text("data")
+          val platform = read?.text("platform")
+          when {
+            into == null -> null
+            data != null -> Triple(into, "data", data)
+            platform != null -> Triple(into, "platform", platform)
+            else -> null
+          }
+        }
+    val taints = seeds.toMutableList()
+    do {
+      val added =
+        copies.filter { (into, source, from) ->
+          into !in taints &&
+            (if (source == "data") taints else platformTaints).any { overlaps(it, from, false) }
+        }
+      taints.addAll(added.map { it.first }.distinct())
+    } while (added.isNotEmpty())
+    return taints
+  }
+
+  private val DATA_WRITES = setOf("setData", "appendData", "prependData", "upsertData")
 
   private fun sensitivePlatformPointers(spec: JsonObject): List<String> {
     val declared =

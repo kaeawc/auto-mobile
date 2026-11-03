@@ -25,7 +25,7 @@ enum PrototypeSensitiveSinkRules {
     )
         -> [PrototypeLoadError]
     {
-        let taints = sensitivePointers(spec)
+        let seeds = sensitivePointers(spec)
         let declared = PrototypeStrictBindings.array(spec["requires"]?.objectFields?["platform"])
         let platformTaints = PrototypeContractValidator.platformModules.flatMap { module, raw in
             (raw.objectFields?["state"]?.objectFields ?? [:]).compactMap { key, entry -> String? in
@@ -33,7 +33,8 @@ enum PrototypeSensitiveSinkRules {
                     "/\(module)/\(key)" : nil
             }
         }
-        guard !taints.isEmpty || !platformTaints.isEmpty else { return [] }
+        guard !seeds.isEmpty || !platformTaints.isEmpty else { return [] }
+        let taints = propagateCopies(seeds, platformTaints: platformTaints, actions: actions)
         let sinks = sinkFields(spec, actions: actions).sorted {
             $0.path.utf16.lexicographicallyPrecedes($1.path.utf16)
         }
@@ -96,6 +97,35 @@ enum PrototypeSensitiveSinkRules {
             }
         }
         return errors
+    }
+
+    /// A data action copying a tainted read into `/data` taints its destination, transitively.
+    private static func propagateCopies(
+        _ seeds: [String], platformTaints: [String], actions: [PrototypeLocatedValue]
+    ) -> [String] {
+        let writes: Set<String> = ["setData", "appendData", "prependData", "upsertData"]
+        let copies = actions.compactMap { action -> (into: String, source: String, from: String)? in
+            guard let type = action.value["type"]?.stringValue, writes.contains(type),
+                  let into = action.value["path"]?.stringValue.flatMap(PrototypeDataWrite.pointer(ofPath:)),
+                  let read = action.value["value"]?.objectFields else { return nil }
+            for source in ["data", "platform"] {
+                if let from = read[source]?.stringValue { return (into, source, from) }
+            }
+            return nil
+        }
+        var taints = seeds
+        var changed = true
+        while changed {
+            changed = false
+            for copy in copies where !taints.contains(copy.into) {
+                let sources = copy.source == "data" ? taints : platformTaints
+                if sources.contains(where: { overlaps($0, copy.from, pointerIndexWildcard: false) }) {
+                    taints.append(copy.into)
+                    changed = true
+                }
+            }
+        }
+        return taints
     }
 
     private static func sinkFields(_ spec: [String: JSONValue], actions: [PrototypeLocatedValue]) -> [Field] {

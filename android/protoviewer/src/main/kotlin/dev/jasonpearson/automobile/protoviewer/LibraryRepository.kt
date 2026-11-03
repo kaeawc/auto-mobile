@@ -44,6 +44,11 @@ data class LibraryEntry(
   val specSha256: String,
   val requires: List<String>,
   val pinned: Boolean,
+  /**
+   * Lowercase https host a link import (#14128) fetched the bundle from. App-owned, never read from
+   * bundle bytes; null for every other source. It is the identity Block acts on.
+   */
+  val sourceHost: String? = null,
 )
 
 enum class LibraryError {
@@ -248,7 +253,8 @@ class DirectoryLibraryRepository(
             it.label.length <= libraryLimits.maxLabelLength &&
             it.importedAt >= 0 &&
             it.lastOpenedAt >= 0 &&
-            Regex("[a-f0-9]{64}").matches(it.specSha256)
+            Regex("[a-f0-9]{64}").matches(it.specSha256) &&
+            (it.sourceHost == null || validSourceHost(it.sourceHost))
         }
       } catch (error: Exception) {
         java.util.logging.Logger.getLogger("ProtoViewerLibrary")

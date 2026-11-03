@@ -94,6 +94,7 @@ class LibraryActivity : ComponentActivity() {
           ::open,
           ::share,
           ::delete,
+          ReceivedContentActions(::report, ::hide, ::block),
           allowNetwork = allowNetwork,
           localNetworkDenied = localNetworkDenied,
           setAllowNetwork = { enabled ->
@@ -102,6 +103,9 @@ class LibraryActivity : ComponentActivity() {
           },
           openLicenses = { startActivity(Intent(this, LicensesActivity::class.java)) },
           openSecurityPolicy = { actionFailed = !launchSecurityPolicy(this) },
+          openContact = {
+            actionFailed = !launchReport(this, getString(R.string.contact_subject), "")
+          },
         )
         pendingExport?.let { exported ->
           AlertDialog(
@@ -150,6 +154,28 @@ class LibraryActivity : ComponentActivity() {
         withContext(services.io) { services.repository.delete(entry.libraryId) } is
           LibraryResult.Failure
       entries = withContext(services.io) { services.repository.list() }
+    }
+  }
+
+  private fun report(entry: LibraryEntry) {
+    val body = getString(R.string.report_body, reportDetails(entry))
+    actionFailed = !launchReport(this, getString(R.string.report_subject), body)
+  }
+
+  private fun hide(entry: LibraryEntry) = updateBlocklist { hide(entry.specSha256) }
+
+  private fun block(entry: LibraryEntry) {
+    val host = entry.sourceHost ?: return
+    updateBlocklist { block(host) }
+  }
+
+  private fun updateBlocklist(change: ContentBlocklist.() -> Unit) {
+    lifecycleScope.launch {
+      entries =
+        withContext(services.io) {
+          services.blocklist.change()
+          services.repository.list()
+        }
     }
   }
 
@@ -248,11 +274,13 @@ internal fun LibraryScreen(
   open: (LibraryEntry, Boolean, Boolean) -> Unit,
   share: (LibraryEntry) -> Unit = {},
   delete: (LibraryEntry) -> Unit = {},
+  received: ReceivedContentActions = ReceivedContentActions(),
   allowNetwork: Boolean = false,
   localNetworkDenied: Boolean = false,
   setAllowNetwork: (Boolean) -> Unit = {},
   openLicenses: () -> Unit = {},
   openSecurityPolicy: () -> Unit = {},
+  openContact: () -> Unit = {},
 ) {
   LazyColumn(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp)) {
     item {
@@ -289,6 +317,13 @@ internal fun LibraryScreen(
           },
       )
     }
+    item {
+      ListItem(
+        headlineContent = { Text(stringResource(R.string.contact)) },
+        supportingContent = { Text(REPORT_CONTACT_EMAIL) },
+        modifier = Modifier.fillMaxWidth().testTag("open-contact").clickable { openContact() },
+      )
+    }
     if (actionFailed) item { Text(stringResource(R.string.action_error)) }
     when (result) {
       null -> item { Text(stringResource(R.string.loading)) }
@@ -296,7 +331,7 @@ internal fun LibraryScreen(
       is LibraryResult.Success -> {
         if (result.value.isEmpty()) item { Text(stringResource(R.string.empty_library)) }
         items(result.value, key = { it.libraryId }) { entry ->
-          LibraryRow(entry, open, share, delete)
+          LibraryRow(entry, open, share, delete, received)
         }
       }
     }
@@ -309,9 +344,12 @@ private fun LibraryRow(
   open: (LibraryEntry, Boolean, Boolean) -> Unit,
   share: (LibraryEntry) -> Unit,
   delete: (LibraryEntry) -> Unit,
+  received: ReceivedContentActions,
 ) {
   var confirm by remember { mutableStateOf(false) }
   var confirmDelete by remember { mutableStateOf(false) }
+  var confirmHide by remember { mutableStateOf(false) }
+  var confirmBlock by remember { mutableStateOf(false) }
   val openLabel = stringResource(R.string.open_prototype, entry.label)
   ListItem(
     headlineContent = { Text(entry.label) },
@@ -323,7 +361,14 @@ private fun LibraryRow(
         open(entry, false, false)
       },
     trailingContent = {
-      LibraryEntryMenu(entry, open, share, { confirm = true }, { confirmDelete = true })
+      LibraryEntryMenu(
+        entry,
+        open,
+        share,
+        { confirm = true },
+        { confirmDelete = true },
+        ReceivedContentActions(received.report, { confirmHide = true }, { confirmBlock = true }),
+      )
     },
   )
 
@@ -351,6 +396,30 @@ private fun LibraryRow(
         TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
       },
     )
+  if (confirmHide)
+    BlocklistConfirmation(
+      "confirm-hide",
+      stringResource(R.string.hide_title),
+      stringResource(R.string.hide_body),
+      stringResource(R.string.hide),
+      { confirmHide = false },
+    ) {
+      confirmHide = false
+      received.hide(entry)
+    }
+  entry.sourceHost?.let { host ->
+    if (confirmBlock)
+      BlocklistConfirmation(
+        "confirm-block",
+        stringResource(R.string.block_title, host),
+        stringResource(R.string.block_body),
+        stringResource(R.string.block_host, host),
+        { confirmBlock = false },
+      ) {
+        confirmBlock = false
+        received.block(entry)
+      }
+  }
   if (confirm)
     ResetConfirmation({ confirm = false }) {
       confirm = false
@@ -365,6 +434,7 @@ private fun LibraryEntryMenu(
   share: (LibraryEntry) -> Unit,
   reset: () -> Unit,
   delete: () -> Unit,
+  received: ReceivedContentActions,
 ) {
   var expanded by remember { mutableStateOf(false) }
   Column {
@@ -383,6 +453,34 @@ private fun LibraryEntryMenu(
           share(entry)
         },
       )
+      if (entry.isReceived) {
+        DropdownMenuItem(
+          text = { Text(stringResource(R.string.report)) },
+          modifier = Modifier.testTag("report-${entry.libraryId}"),
+          onClick = {
+            expanded = false
+            received.report(entry)
+          },
+        )
+        DropdownMenuItem(
+          text = { Text(stringResource(R.string.hide)) },
+          modifier = Modifier.testTag("hide-${entry.libraryId}"),
+          onClick = {
+            expanded = false
+            received.hide(entry)
+          },
+        )
+        entry.sourceHost?.let { host ->
+          DropdownMenuItem(
+            text = { Text(stringResource(R.string.block_host, host)) },
+            modifier = Modifier.testTag("block-${entry.libraryId}"),
+            onClick = {
+              expanded = false
+              received.block(entry)
+            },
+          )
+        }
+      }
       DropdownMenuItem(
         text = { Text(stringResource(R.string.delete)) },
         onClick = {
@@ -406,4 +504,32 @@ private fun LibraryEntryMenu(
       )
     }
   }
+}
+
+/** Report, Hide and Block for content another person sent (#16437). */
+internal class ReceivedContentActions(
+  val report: (LibraryEntry) -> Unit = {},
+  val hide: (LibraryEntry) -> Unit = {},
+  val block: (LibraryEntry) -> Unit = {},
+)
+
+@Composable
+@Suppress("LongParameterList") // Dialog text, tag and both outcomes are independent.
+private fun BlocklistConfirmation(
+  tag: String,
+  title: String,
+  body: String,
+  confirmLabel: String,
+  dismiss: () -> Unit,
+  confirm: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = dismiss,
+    title = { Text(title) },
+    text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(body) } },
+    confirmButton = {
+      TextButton(modifier = Modifier.testTag(tag), onClick = confirm) { Text(confirmLabel) }
+    },
+    dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.cancel)) } },
+  )
 }

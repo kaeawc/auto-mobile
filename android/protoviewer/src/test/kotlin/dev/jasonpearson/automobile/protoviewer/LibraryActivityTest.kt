@@ -32,6 +32,7 @@ class LibraryActivityTest {
   @get:Rule val compose = createComposeRule()
   private val repository = FakeLibraryRepository()
   private val settings = FakeSettingsStore()
+  private val blocklist = FakeContentBlocklist()
   private val permission = FakeLocalNetworkPermission()
   private val grant = FakeLocalNetworkGrant()
   private val exports = FakeExportFiles()
@@ -50,6 +51,7 @@ class LibraryActivityTest {
         localNetworkPermission = { _, result -> permission.apply { this.result = result } },
         localNetworkGrant = grant,
         sharer = sharer,
+        blocklist = blocklist,
       )
     }
   }
@@ -75,6 +77,79 @@ class LibraryActivityTest {
     val policy = shadowOf(activity).nextStartedActivity
     assertEquals(Intent.ACTION_VIEW, policy.action)
     assertEquals(SECURITY_POLICY_URL, policy.dataString)
+  }
+
+  @Test
+  fun contactRowPublishesTheReportAddressAndOpensMail() {
+    val activity = launch()
+    compose.onNodeWithText(REPORT_CONTACT_EMAIL).assertIsDisplayed()
+    compose.onNodeWithTag("open-contact").performClick()
+    val mail = shadowOf(activity).nextStartedActivity
+    assertEquals(Intent.ACTION_SENDTO, mail.action)
+    assertEquals(REPORT_CONTACT_EMAIL, mail.getStringArrayExtra(Intent.EXTRA_EMAIL)?.single())
+  }
+
+  @Test
+  fun reportOnAReceivedPrototypeMailsItsDetails() {
+    repository.prototypes[FIRST] = Fixtures.prototype()
+    val activity = launch()
+    openMenu()
+    compose.onNodeWithTag("report-$FIRST").performClick()
+    val mail = shadowOf(activity).nextStartedActivity
+    assertEquals(Intent.ACTION_SENDTO, mail.action)
+    assertTrue(
+      checkNotNull(mail.getStringExtra(Intent.EXTRA_TEXT)).contains(Fixtures.entry().specSha256),
+    )
+  }
+
+  @Test
+  fun hideRequiresConfirmationThenRemovesTheRow() {
+    repository.prototypes[FIRST] = Fixtures.prototype()
+    launch()
+    openMenu()
+    compose.onNodeWithTag("hide-$FIRST").performClick()
+    compose.onNodeWithText("Hide this prototype?").assertIsDisplayed()
+    compose.onNodeWithTag("confirm-hide").performClick()
+    assertEquals(setOf(Fixtures.entry().specSha256), blocklist.hidden)
+    compose.onNodeWithTag("library-$FIRST").assertDoesNotExist()
+  }
+
+  @Test
+  fun blockIsOfferedOnlyWithALinkHostAndHidesThatHost() {
+    val linked = Fixtures.prototype(SECOND)
+    repository.prototypes[SECOND] =
+      linked.copy(
+        entry = linked.entry.copy(source = LibrarySource.share, sourceHost = "proto.example.com"),
+      )
+    repository.prototypes[FIRST] = Fixtures.prototype()
+    launch()
+    compose
+      .onNodeWithContentDescription("More options for ${Fixtures.entry(SECOND).label}")
+      .performClick()
+    compose.onNodeWithTag("block-$SECOND").performClick()
+    compose.onNodeWithText("Block proto.example.com?").assertIsDisplayed()
+    compose.onNodeWithTag("confirm-block").performClick()
+    assertEquals(setOf("proto.example.com"), blocklist.hosts)
+    compose.onNodeWithTag("library-$SECOND").assertDoesNotExist()
+    openMenu()
+    compose.onNodeWithTag("report-$FIRST").assertIsDisplayed()
+    compose.onNodeWithTag("block-$FIRST").assertDoesNotExist()
+  }
+
+  @Test
+  fun ownPrototypesOfferNoReportOrHide() {
+    val own = Fixtures.prototype()
+    repository.prototypes[FIRST] = own.copy(entry = own.entry.copy(source = LibrarySource.mcp))
+    launch()
+    openMenu()
+    compose.onNodeWithTag("report-$FIRST").assertDoesNotExist()
+    compose.onNodeWithTag("hide-$FIRST").assertDoesNotExist()
+  }
+
+  private fun openMenu() {
+    compose
+      .onNodeWithContentDescription("More options for ${Fixtures.entry().label}")
+      .performClick()
   }
 
   @Test

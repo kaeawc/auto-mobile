@@ -204,11 +204,12 @@ directory or one index file):
   "source": "mcp|file|share|paste",
   "specSha256": "...",
   "requires": ["prototype_data_model_v1"],
-  "pinned": false
+  "pinned": false,
+  "sourceHost": "proto.example.com"
 }
 ```
 
-`source` and trust are app-owned: the importing code path writes them from how the bytes arrived,
+`source`, `sourceHost` and trust are app-owned: the importing code path writes them from how the bytes arrived,
 and they are never read from bundle bytes. The file is never part of an export. A corrupt or
 unreadable `library.json` entry is skipped, not fatal.
 
@@ -248,6 +249,24 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   fetch with the egress check, and refuse a mismatch before the strict import path, with
   `source: "share"`. Links do not expire. Android only; iOS distribution beyond dev-signed builds is
   out of scope.
+
+**Report, hide and block** (App Store 1.2, Play UGC). They apply only to received content
+(`source` `file` or `share`); the user's own `mcp` and `paste` prototypes are never hidden.
+Android implements them; the iOS viewer does not yet (#16437).
+
+- Identity: Block uses the link-origin host, the lowercase DNS host a link import (#14128) fetched
+  the bundle from, recorded in `library.json` as `sourceHost` (null for every other source). The
+  bundle carries no author field, because a self-asserted author would be spoofable. A file or
+  share-sheet import has no sender identity, so it offers Hide and Report but not Block.
+- Hide stores the entry's `specSha256` locally. It hides that content, including identical copies
+  received later, and blocks no one.
+- The blocklist (hidden spec hashes, blocked hosts) is local app state, never exported. A repository
+  decorator applies it to every reader, so a hidden entry is absent from the list, MCP `open` and
+  the viewer. Hidden entries stay on disk; hiding is not deletion.
+- Report opens the user's mail app addressed to the published contact
+  (`automobile+coc@jasonpearson.dev`, the project's code-of-conduct enforcement address) with the
+  label, spec SHA-256, source and host. The app sends nothing itself and attaches no bundle bytes.
+  The library shows the same contact in a "Report a problem" row.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 

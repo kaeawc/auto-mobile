@@ -153,3 +153,20 @@ internal class FakeLibraryRepository : LibraryRepository {
     return LibraryResult.Success(Unit)
   }
 }
+
+internal class FakeContentBlocklist : ContentBlocklist {
+  val hidden = mutableSetOf<String>()
+  val hosts = mutableSetOf<String>()
+
+  override fun hiddenSpecHashes(): Set<String> = hidden.toSet()
+
+  override fun blockedHosts(): Set<String> = hosts.toSet()
+
+  override fun hide(specSha256: String) {
+    hidden += specSha256
+  }
+
+  override fun block(host: String) {
+    hosts += host
+  }
+}

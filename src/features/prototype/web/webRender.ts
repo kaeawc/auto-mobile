@@ -21,6 +21,7 @@ import {
   type WebAxis,
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { appBarIcons, webAppBarRenderers } from "./webAppBar";
 import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
@@ -40,7 +41,13 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
-import { rowFillAxes, rowMeasured } from "./webRowAspect";
+import {
+  contentHeightBound,
+  rowCapCss,
+  rowFillAxes,
+  rowMeasured,
+  type RowChildOverride,
+} from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -85,6 +92,10 @@ export interface WebRenderScope {
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
   readonly ownInsets?: readonly string[];
+  /** The content height bound in dp a row or box passes its children; a scroll has none. */
+  readonly heightBound?: number;
+  /** A row's sequential-measure overrides for its children, by path, after their `styleWhen`. */
+  readonly childOverrides?: ReadonlyMap<string, RowChildOverride>;
 }
 
 export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -205,6 +216,9 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
     style: { ...scope.style, ...patch.style },
     consumedInsets,
     ownInsets: [],
+    // Only a container that passes a height bound or overrides on sets them for its children.
+    heightBound: patch.heightBound,
+    childOverrides: patch.childOverrides,
   };
 }
 
@@ -243,7 +257,10 @@ export function children(
       values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
       index,
     };
-    const itemScope = child(scope, { instances: [...scope.instances, instance] });
+    const itemScope = child(scope, {
+      instances: [...scope.instances, instance],
+      heightBound: scope.heightBound,
+    });
     return list.flatMap((entry, at) =>
       renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
     );
@@ -317,12 +334,17 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
   ) {
     return [];
   }
-  const own = rowFillAxes(raw, path, prepareIn(scope));
+  const own = rowFillAxes(raw, path, prepareIn(scope), rowBounds(raw, scope));
   const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
+
+const rowBounds = (node: Raw, scope: WebRenderScope) => ({
+  height: contentHeightBound(node.style, scope.heightBound),
+  screenWidth: scope.screenWidth,
+});
 
 function spacerFilled(node: Raw): Raw {
   return isUnsizedSpacer(node) ? fillMissing(node) : node;
@@ -335,16 +357,26 @@ const line =
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
-    const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    const rowed = rowMeasured(node, path, prepareIn(inner));
-    return el("div", { attrs, style }, children(rowed, inner, path));
+    const bounds = rowBounds(node, scope);
+    const inner = child(scope, {
+      inBox: false,
+      style: { ...scope.style, parentAxis: axis },
+      heightBound: bounds.height,
+    });
+    const childOverrides = rowMeasured(node, path, prepareIn(inner), bounds);
+    const capped = { ...style, ...rowCapCss(node, childOverrides) };
+    return el("div", { attrs, style: capped }, children(node, { ...inner, childOverrides }, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
   // A wrap-sized box grows around a filling child, as a Compose Box does.
   const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
-  const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
+  const inner = child(scope, {
+    inBox: true,
+    style: { ...scope.style, parentAxis: undefined },
+    heightBound: contentHeightBound(node.style, scope.heightBound),
+  });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -521,87 +553,6 @@ const button: NodeRenderer = (node, scope) => {
   ]);
 };
 
-/** App-bar navigation and action slots draw as icon placeholders labelled with their action. */
-function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: string): WebElement[] {
-  return slots.flatMap((slot) => {
-    const action = record(slot);
-    if (typeof action?.icon !== "string") {
-      return [];
-    }
-    const glyph = icon({ type: "icon", name: action.icon }, scope, path);
-    const label = typeof action.label === "string" ? bound(action.label, scope) : action.icon;
-    return [
-      el("span", { attrs: { role: "button", "aria-label": label }, style: { padding: "12px" } }, [
-        glyph,
-      ]),
-    ];
-  });
-}
-
-/**
- * Material 3 top app bar sizes: small and center-aligned are 64 dp with a 22 sp title; medium and
- * large put a 28 or 36 sp title below the icon row, in a 112 or 152 dp bar.
- */
-const APP_BAR_VARIANTS: Readonly<Record<string, { height: number; title: number }>> = {
-  small: { height: 64, title: 22 },
-  centerAligned: { height: 64, title: 22 },
-  medium: { height: 112, title: 28 },
-  large: { height: 152, title: 36 },
-};
-
-/**
- * An expanded bar's title takes its own line below the icons; a center-aligned title is centred
- * on the whole bar, whatever slots sit beside it; a small bar's title fills the space between.
- */
-function appBarTitleStyle(variant: string, expanded: boolean): Record<string, string> {
-  if (expanded) {
-    return { order: "1", "flex-basis": "100%", "padding-bottom": "16px" };
-  }
-  return variant === "centerAligned"
-    ? {
-        position: "absolute",
-        left: "0",
-        right: "0",
-        "text-align": "center",
-        "pointer-events": "none",
-      }
-    : { flex: "1 1 auto" };
-}
-
-const topAppBar: NodeRenderer = (node, scope, path) => {
-  const variant = typeof node.variant === "string" ? node.variant : "small";
-  const size = APP_BAR_VARIANTS[variant] ?? APP_BAR_VARIANTS.small!;
-  const expanded = variant === "medium" || variant === "large";
-  const { attrs, style } = base(node, scope, {
-    display: "flex",
-    "flex-wrap": expanded ? "wrap" : "nowrap",
-    "align-items": "center",
-    "align-content": "space-between",
-    // Like the native bar, it takes no window insets of its own: status-bar clearance comes only
-    // from an authored safeAreaPadding.
-    "min-height": `${size.height}px`,
-    "padding-inline": "16px",
-    "font-size": `${size.title}px`,
-    "align-self": "stretch",
-    position: "relative",
-    ...roleCss(scope, "surface", "onSurface"),
-  });
-  const actions = Array.isArray(node.actions) ? node.actions : [];
-  const title = el("span", { style: appBarTitleStyle(variant, expanded) }, [
-    bound(node.title, scope),
-  ]);
-  return el("div", { attrs: { ...attrs, role: "heading" }, style }, [
-    ...appBarIcons([node.navigationIcon], scope, path),
-    title,
-    // When the title leaves the flow (its own line, or centred on the bar), a spacer keeps the
-    // actions at the end.
-    ...(expanded || variant === "centerAligned"
-      ? [el("span", { style: { flex: "1 1 auto" } })]
-      : []),
-    ...appBarIcons(actions, scope, path),
-  ]);
-};
-
 /** The typed value (masked when secure), or the placeholder when the field is empty. */
 function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: boolean } {
   // A state key inside a repeat may hold item placeholders, which bind first.
@@ -716,7 +667,7 @@ const textField: NodeRenderer = (node, scope, path) => {
       el("span", { style: lineBounds(node) }, [shown]),
     ]),
     // The trailing slot is an {icon, label} action, like an app-bar action.
-    ...appBarIcons([node.trailingIcon], scope, path),
+    ...appBarIcons(KIT, [node.trailingIcon], scope, path),
   ]);
   const field = caption.length === 0 ? box : withOverContentLayers(box, node.style, scope.style);
   return caption.length === 0
@@ -931,12 +882,12 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   icon,
   image,
   button,
-  topAppBar,
   textField,
   switch: toggle("switch"),
   checkbox: toggle("checkbox"),
   card,
   listItem,
+  ...webAppBarRenderers(KIT),
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
   ...webMediaRenderers(KIT),
@@ -1020,7 +971,11 @@ function preparedNode(
   if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
     return undefined;
   }
-  return { styled: { ...raw, style: resolvedStyle(raw, local) }, scope: local };
+  const override = scope.childOverrides?.get(path)?.style;
+  const style = override
+    ? { ...resolvedStyle(raw, local), ...override }
+    : resolvedStyle(raw, local);
+  return { styled: { ...raw, style }, scope: local };
 }
 
 export function renderWebNode(
@@ -1040,7 +995,9 @@ export function renderWebNode(
     return undefined;
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const drawn = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const css = scope.childOverrides?.get(path)?.css;
+  const element = css ? { ...drawn, style: { ...drawn.style, ...css } } : drawn;
   const shaded = shaderFallback(styled, path);
   if (shaded) {
     own.unsupported.push(shaded);

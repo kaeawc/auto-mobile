@@ -580,6 +580,77 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")["max-width"]).toBe("0px");
   });
 
+  test("an active styleWhen cannot undo a later sibling's zero width (#16675)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        state: { wide: true },
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                {
+                  type: "box",
+                  testTag: "after",
+                  styleWhen: [{ when: { key: "wide", equals: true }, style: { maxWidth: 40 } }],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    expect(byTag({ element: root }, "after")[0]!.style["max-width"]).toBe("0px");
+  });
+
+  test("a bounded row sizes its aspect ratio from the height, as Compose does (#16675)", () => {
+    const row = (height: Record<string, unknown>, parent: Record<string, unknown> = {}) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            style: parent,
+            children: [
+              {
+                type: "row",
+                testTag: "line",
+                style: height,
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                  { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+                ],
+              },
+            ],
+          },
+        }),
+        "line",
+      )[0]!;
+    const check = (line: WebElement) => {
+      const style = (tag: string) => byTag({ element: line }, tag)[0]!.style;
+      // A wrap row keeps its content width, capped at its parent's: nothing takes all of it.
+      expect(line.style).not.toHaveProperty("align-self");
+      expect(line.style["max-width"]).toBe("100%");
+      expect(style("ratio")).toMatchObject({
+        "aspect-ratio": "1",
+        width: "100px",
+        "flex-shrink": "1",
+        "min-width": "0",
+      });
+      expect(style("ratio")).not.toHaveProperty("flex");
+      expect(style("after")).toMatchObject({ width: "40px" });
+      expect(style("after")).not.toHaveProperty("max-width");
+    };
+    check(row({ height: { dp: 100 } }));
+    // A height inherited from the parent bounds the row just as its own does.
+    check(row({}, { height: { dp: 116 }, padding: { top: 8, bottom: 8 } }));
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

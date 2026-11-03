@@ -71,6 +71,10 @@ describe("prototype web page (#16346)", () => {
     expect(page.html).not.toMatch(/@import|url\((?!data:)/);
   });
 
+  test("declares an empty icon, so no browser fetches /favicon.ico against the CSP (#16459)", () => {
+    expect(page.html).toContain('<link rel="icon" href="data:,">');
+  });
+
   test("zooming out never enlarges a preview fitted below 50%", () => {
     expect(prototypeWebZoomScale(0.38, 0.38 / 1.25)).toBe(0.38);
     expect(prototypeWebZoomScale(1, 0.2)).toBe(0.5);

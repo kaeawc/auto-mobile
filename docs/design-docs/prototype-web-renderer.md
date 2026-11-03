@@ -111,7 +111,8 @@ it inlined per variant.
   landscape view. A second rotate finishes the running turn first. `prefers-reduced-motion:
   reduce` skips the animation.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
-  styles, and `data:` images and fonts. The page references no external URL.
+  styles, and `data:` images and fonts. The page references no external URL, and declares an
+  empty `data:` icon so no browser requests `/favicon.ico` against that CSP.
 - **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
   of the revision shown first are always kept, then their other screens while they fit; older
   revisions are added newest first while their start screen and history entry fit, each followed
@@ -123,7 +124,7 @@ it inlined per variant.
 ## Browser check
 
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
-spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
+spec in headless Chromium, Firefox and WebKit: `reference-checkout` plus `template-feed-detail`,
 `pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
 `doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
@@ -135,19 +136,22 @@ nothing at runtime drives a browser.
   non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
-  screen's view.
-- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
-  (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
+  screen's view. Every engine runs these assertions; CSS 3D and clipping differ between engines,
+  so a page that only works in Chromium fails here.
+- **Goldens.** Compared only in Chromium, the one engine whose CI build they are trusted from.
+  Two PNGs per case in `test/fixtures/prototype-web/screenshots/` (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
   turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
-  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens. It needs the
-  Chromium build of the pinned `playwright-core`:
-  `node_modules/.bin/playwright-core install --only-shell chromium`. Every case that reaches
-  capture writes `<case>.png`, and a pixel mismatch also `<case>.diff.png`, to
-  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`).
+  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens, and
+  `--engine <chromium|firefox|webkit>` (repeatable) limits the engines. It needs the browser builds
+  of the pinned `playwright-core`:
+  `node_modules/.bin/playwright-core install --only-shell chromium firefox webkit`. Every case that
+  reaches capture writes `<case>.png`, and a Chromium pixel mismatch also `<case>.diff.png`, to
+  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`);
+  Firefox and WebKit captures go to its `firefox/` and `webkit/` subdirectories.
 - **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
   and on pull requests that touch the web renderer, its reference fixtures, the check, or
   `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux

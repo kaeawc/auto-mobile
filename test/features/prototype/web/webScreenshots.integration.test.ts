@@ -1,28 +1,46 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { chromium, type Browser, type Page } from "playwright-core";
+import { dirname, join } from "node:path";
+import {
+  chromium,
+  firefox,
+  webkit,
+  type Browser,
+  type BrowserType,
+  type Page,
+} from "playwright-core";
 import { diffPngs } from "../../../../src/features/visual/VisualDiff";
 import {
   WEB_SCREENSHOT_FONT_CSS,
   WEB_SCREENSHOT_GOLDEN_DIR,
   WEB_SCREENSHOT_VIEWPORT,
+  WEB_SCREENSHOT_GOLDEN_ENGINE,
   webScreenshotCases,
+  webScreenshotEngines,
+  webScreenshotOutputPath,
   webScreenshotPage,
+  type WebScreenshotEngine,
 } from "./webScreenshotCases";
 
 /**
- * Headless Chromium check of the prototype web page's reference specs (#16346). Opt-in: it
- * launches a browser, so it runs only through `bash scripts/prototype/web-screenshots.sh` and the
- * advisory `Prototype Web Screenshots` workflow. Playwright is a dev dependency of this check
- * only; nothing at runtime drives a browser.
+ * Headless browser check of the prototype web page's reference specs (#16346), in Chromium,
+ * Firefox and WebKit (#16459); only Chromium is compared with the goldens. Opt-in: it launches
+ * browsers, so it runs only through `bash scripts/prototype/web-screenshots.sh` and the advisory
+ * `Prototype Web Screenshots` workflow. Playwright is a dev dependency of this check only; nothing
+ * at runtime drives a browser.
  */
 const RUN = process.env.AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS === "1";
 const UPDATE = process.env.AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_UPDATE === "1";
 const OUT_DIR =
   process.env.AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT ??
   join(import.meta.dir, "../../../../scratch/prototype-web-screenshots");
+const ENGINES = webScreenshotEngines(process.env.AUTOMOBILE_PROTOTYPE_WEB_ENGINES);
 const describeBrowser = RUN ? describe : describe.skip;
+const BROWSER_TYPES: Readonly<Record<WebScreenshotEngine, BrowserType>> = {
+  chromium,
+  firefox,
+  webkit,
+};
 
 /** The page is served from this origin; every other request is a leak and is aborted. */
 const PAGE_URL = "http://prototype-web.test/";
@@ -133,9 +151,10 @@ async function finishAnimations(page: Page): Promise<void> {
   );
 }
 
-function writeOutput(name: string, png: Buffer): void {
-  mkdirSync(OUT_DIR, { recursive: true });
-  writeFileSync(join(OUT_DIR, name), png);
+function writeOutput(engine: WebScreenshotEngine, name: string, png: Buffer): void {
+  const path = join(OUT_DIR, webScreenshotOutputPath(engine, name));
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, png);
 }
 
 /** Compares against a golden; a mismatch leaves `<name>.png` and `<name>.diff.png` in OUT_DIR. */
@@ -157,106 +176,112 @@ function compareToGolden(name: string, golden: string, actual: Buffer): string |
   }
   if (!result.match) {
     if (result.diffPng) {
-      writeOutput(`${name}.diff.png`, result.diffPng);
+      writeOutput(WEB_SCREENSHOT_GOLDEN_ENGINE, `${name}.diff.png`, result.diffPng);
     }
     return `${(result.diffRatio * 100).toFixed(3)}% of pixels differ (limit ${PIXEL_RATIO * 100}%)`;
   }
   return undefined;
 }
 
-describeBrowser("prototype web page in headless Chromium (#16346)", () => {
-  let browser: Browser;
+for (const engine of ENGINES) {
+  describeBrowser(`prototype web page in headless ${engine} (#16346, #16459)`, () => {
+    let browser: Browser;
 
-  beforeAll(async () => {
-    browser = await chromium.launch();
-  });
+    beforeAll(async () => {
+      browser = await BROWSER_TYPES[engine].launch();
+    });
 
-  afterAll(async () => {
-    await browser?.close();
-  });
+    afterAll(async () => {
+      await browser?.close();
+    });
 
-  for (const entry of webScreenshotCases()) {
-    test(
-      entry.name,
-      async () => {
-        const { page, ...problems } = await openPage(browser, webScreenshotPage(entry));
-        try {
-          const first = await shownView(page);
-          expect(first.count).toBe(1);
-          expect(first.orientation).toBe("portrait");
-          expect(first.width).toBeGreaterThan(0);
-          expect(first.height).toBeGreaterThan(0);
+    for (const entry of webScreenshotCases()) {
+      test(
+        entry.name,
+        async () => {
+          const { page, ...problems } = await openPage(browser, webScreenshotPage(entry));
+          try {
+            const first = await shownView(page);
+            expect(first.count).toBe(1);
+            expect(first.orientation).toBe("portrait");
+            expect(first.width).toBeGreaterThan(0);
+            expect(first.height).toBeGreaterThan(0);
 
-          // The runtime ran: it fitted the stage and wrote that scale into the zoom label.
-          const zoom = await page.evaluate(() => ({
-            transform: document.querySelector<HTMLElement>("[data-stage]")?.style.transform ?? "",
-            label: document.querySelector('[data-control="zoom-level"]')?.textContent ?? "",
-          }));
-          const scale = Number(/scale\(([\d.]+)\)/.exec(zoom.transform)?.[1]);
-          expect(scale).toBeGreaterThan(0);
-          expect(zoom.label).toBe(`${Math.round(scale * 100)}%`);
+            // The runtime ran: it fitted the stage and wrote that scale into the zoom label.
+            const zoom = await page.evaluate(() => ({
+              transform: document.querySelector<HTMLElement>("[data-stage]")?.style.transform ?? "",
+              label: document.querySelector('[data-control="zoom-level"]')?.textContent ?? "",
+            }));
+            const scale = Number(/scale\(([\d.]+)\)/.exec(zoom.transform)?.[1]);
+            expect(scale).toBeGreaterThan(0);
+            expect(zoom.label).toBe(`${Math.round(scale * 100)}%`);
 
-          await page.addStyleTag({ content: WEB_SCREENSHOT_FONT_CSS });
-          await page.evaluate(() => document.fonts.ready.then(() => undefined));
-          const screenshot = await page.screenshot({ animations: "disabled", caret: "hide" });
-          // Saved before any assertion, so a case that fails a functional check keeps its image.
-          writeOutput(`${entry.name}.png`, screenshot);
+            await page.addStyleTag({ content: WEB_SCREENSHOT_FONT_CSS });
+            await page.evaluate(() => document.fonts.ready.then(() => undefined));
+            const screenshot = await page.screenshot({ animations: "disabled", caret: "hide" });
+            // Saved before any assertion, so a case that fails a functional check keeps its image.
+            writeOutput(engine, `${entry.name}.png`, screenshot);
 
-          // Mid-rotation (#16545): both views are shown and turned; then the turn ends upright.
-          await page.click('[data-control="rotate"]');
-          const turning = await midRotation(page);
-          expect(turning.animations).toBe(3);
-          expect(turning.shown.sort()).toEqual(["landscape", "portrait"]);
-          expect(turning.angles.every((angle) => Math.abs(angle) > 1)).toBe(true);
-          await finishAnimations(page);
-          const rotated = await shownView(page);
-          expect(rotated.count).toBe(1);
-          expect(rotated.orientation).toBe("landscape");
-          expect(rotated.width).toBeGreaterThan(rotated.height);
-          const landscape = await page.screenshot({ animations: "disabled", caret: "hide" });
-          writeOutput(`${entry.name}--landscape.png`, landscape);
+            // Mid-rotation (#16545): both views are shown and turned; then the turn ends upright.
+            await page.click('[data-control="rotate"]');
+            const turning = await midRotation(page);
+            expect(turning.animations).toBe(3);
+            expect(turning.shown.sort()).toEqual(["landscape", "portrait"]);
+            expect(turning.angles.every((angle) => Math.abs(angle) > 1)).toBe(true);
+            await finishAnimations(page);
+            const rotated = await shownView(page);
+            expect(rotated.count).toBe(1);
+            expect(rotated.orientation).toBe("landscape");
+            expect(rotated.width).toBeGreaterThan(rotated.height);
+            const landscape = await page.screenshot({ animations: "disabled", caret: "hide" });
+            writeOutput(engine, `${entry.name}--landscape.png`, landscape);
 
-          // Reduced motion skips the turn.
-          await page.emulateMedia({ reducedMotion: "reduce" });
-          await page.click('[data-control="rotate"]');
-          expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
-          expect((await shownView(page)).orientation).toBe("portrait");
-          await page.emulateMedia({ reducedMotion: "no-preference" });
+            // Reduced motion skips the turn.
+            await page.emulateMedia({ reducedMotion: "reduce" });
+            await page.click('[data-control="rotate"]');
+            expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+            expect((await shownView(page)).orientation).toBe("portrait");
+            await page.emulateMedia({ reducedMotion: "no-preference" });
 
-          // A multi-screen stack's picker shows exactly the picked screen's view.
-          const screens = await page.$$eval(
-            '[data-control="screen"]:not([hidden]) option',
-            (options) => options.map((option) => (option as HTMLOptionElement).value),
-          );
-          if (screens.length > 1) {
-            await page.selectOption('[data-control="screen"]', screens.at(-1)!);
-            const picked = await page.evaluate(() =>
-              Array.from(document.querySelectorAll<HTMLElement>("[data-view]"))
-                .filter((view) => !view.hidden)
-                .map((view) => view.dataset.screen),
+            // A multi-screen stack's picker shows exactly the picked screen's view.
+            const screens = await page.$$eval(
+              '[data-control="screen"]:not([hidden]) option',
+              (options) => options.map((option) => (option as HTMLOptionElement).value),
             );
-            expect(picked).toEqual([screens.at(-1)]);
+            if (screens.length > 1) {
+              await page.selectOption('[data-control="screen"]', screens.at(-1)!);
+              const picked = await page.evaluate(() =>
+                Array.from(document.querySelectorAll<HTMLElement>("[data-view]"))
+                  .filter((view) => !view.hidden)
+                  .map((view) => view.dataset.screen),
+              );
+              expect(picked).toEqual([screens.at(-1)]);
+            }
+
+            const violations = await page.evaluate((): string[] =>
+              Reflect.get(globalThis, "__cspViolations"),
+            );
+            expect({
+              consoleErrors: problems.consoleErrors,
+              pageErrors: problems.pageErrors,
+              requests: problems.requests,
+              violations,
+            }).toEqual({ consoleErrors: [], pageErrors: [], requests: [], violations: [] });
+
+            // Goldens are trusted only from Chromium; the other engines run the behaviour above.
+            if (engine !== WEB_SCREENSHOT_GOLDEN_ENGINE) {
+              return;
+            }
+            expect(compareToGolden(entry.name, entry.golden, screenshot)).toBeUndefined();
+            expect(
+              compareToGolden(`${entry.name}--landscape`, entry.landscapeGolden, landscape),
+            ).toBeUndefined();
+          } finally {
+            await page.close();
           }
-
-          const violations = await page.evaluate((): string[] =>
-            Reflect.get(globalThis, "__cspViolations"),
-          );
-          expect({
-            consoleErrors: problems.consoleErrors,
-            pageErrors: problems.pageErrors,
-            requests: problems.requests,
-            violations,
-          }).toEqual({ consoleErrors: [], pageErrors: [], requests: [], violations: [] });
-
-          expect(compareToGolden(entry.name, entry.golden, screenshot)).toBeUndefined();
-          expect(
-            compareToGolden(`${entry.name}--landscape`, entry.landscapeGolden, landscape),
-          ).toBeUndefined();
-        } finally {
-          await page.close();
-        }
-      },
-      CASE_TIMEOUT_MS,
-    );
-  }
-});
+        },
+        CASE_TIMEOUT_MS,
+      );
+    }
+  });
+}

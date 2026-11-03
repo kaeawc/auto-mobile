@@ -9,11 +9,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
 // Robolectric supplies the android.text classes the place-list builder validates spans with.
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
 class PoiPlaceListTemplateTest {
   @Test
   fun `place list builds with a distance span on every row`() {

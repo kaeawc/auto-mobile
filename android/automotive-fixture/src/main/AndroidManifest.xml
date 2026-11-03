@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
   <!-- Navigation-category templates (list, grid, pane and place list) need these grants. -->
   <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
   <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
@@ -7,7 +7,7 @@
   <uses-feature android:name="android.hardware.wifi" android:required="false" />
   <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
   <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
-  <uses-feature android:name="android.software.leanback" android:required="false" />
+  <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
   <application android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_fixture" android:label="@string/app_name" android:supportsRtl="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
     <meta-data android:name="com.android.automotive" android:resource="@xml/automotive_app_desc" />
     <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1" />
@@ -20,18 +20,21 @@
     </activity>
     <!-- No distractionOptimized meta-data: blocked while driving. -->
     <activity android:name=".ParkedOnlyActivity" android:exported="false" />
-    <service android:name=".media.FixtureMediaBrowserService" android:exported="true" android:label="@string/media_service_label">
+    <!-- The car media center binds to this service by intent action, so it must be exported without a permission. -->
+    <service android:name=".media.FixtureMediaBrowserService" android:exported="true" android:label="@string/media_service_label" tools:ignore="ExportedService">
       <intent-filter>
         <action android:name="android.media.browse.MediaBrowserService" />
       </intent-filter>
     </service>
-    <service android:name=".car.FixtureCarAppService" android:exported="true">
+    <!-- The templates host binds here; FixtureCarAppService's HostValidator decides which hosts may connect. -->
+    <service android:name=".car.FixtureCarAppService" android:exported="true" tools:ignore="ExportedService">
       <intent-filter>
         <action android:name="androidx.car.app.CarAppService" />
         <category android:name="androidx.car.app.category.NAVIGATION" />
       </intent-filter>
     </service>
-    <activity android:name="androidx.car.app.activity.CarAppActivity" android:exported="true" android:label="@string/templates_label" android:launchMode="singleTask" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+    <!-- Library activity: lint cannot see its superclass because dependency checking is off. -->
+    <activity android:name="androidx.car.app.activity.CarAppActivity" android:exported="true" tools:ignore="Instantiatable" android:label="@string/templates_label" android:launchMode="singleTask" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />

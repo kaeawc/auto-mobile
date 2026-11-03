@@ -311,6 +311,20 @@ describe("iOS skin defaults for the Material components (#16599)", () => {
     expect(bar("small").children).toHaveLength(1);
   });
 
+  test("a scroll-aware medium or large bar frames its title line at 48 or 88 pt", () => {
+    const framed = (variant: string, onScroll: string) =>
+      rendered([{ type: "topAppBar", title: "Mail", variant, onScroll, testTag: "a" }], ios, "a");
+    expect(part(framed("large", "exitUntilCollapsed"), "expanded-title").style).toMatchObject({
+      height: "88px",
+      "justify-content": "flex-end",
+    });
+    expect(part(framed("medium", "enterAlways"), "expanded-title").style.height).toBe("48px");
+    const pinned = framed("large", "pinned");
+    expect(find(pinned, (candidate) => candidate.attrs["data-part"] === "expanded-title")).toEqual(
+      [],
+    );
+  });
+
   test("a card takes the iOS renderer's container: surfaceContainerHigh, outline and shadow", () => {
     const card = (variant?: string) =>
       rendered(

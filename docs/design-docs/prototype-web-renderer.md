@@ -326,7 +326,8 @@ the host, so the page's script only switches between views it was given and neve
   square as its trailing control; `chip` is 32 px with 12 px padding in the medium subheadline style
   and the content colour, in a 44 px target; `topAppBar` is a 64 px row padded 4 px with 48 px icon
   buttons and a `.title3` semibold title (12 px in, 4 px after a navigation icon), or a `.title`
-  (medium) or `.largeTitle` (large) line below the row; `card` is `surfaceContainerHigh` when
+  (medium) or `.largeTitle` (large) line below the row, framed at 48 or 88 px with an
+  `enterAlways` or `exitUntilCollapsed` `onScroll`; `card` is `surfaceContainerHigh` when
   filled, else `surface`, with an `outlineVariant` outline when outlined. Like the iOS renderer,
   the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField`, `bottomNav`, `tabBar`
   and `bottomSheet` still draw the shared renderer. `timePicker`, `datePicker` and `pasteButton`

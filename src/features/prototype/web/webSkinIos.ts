@@ -302,25 +302,40 @@ function rowTitle(node: Raw, variant: string, text: string): WebElement[] {
   return [];
 }
 
-/** A medium or large bar's title on its own line below the icons: `.title` or `.largeTitle`. */
-function expandedTitle(variant: string, text: string): WebElement[] {
+/** The scroll behaviours for which the iOS renderer frames the expanded title at a fixed height. */
+const FRAMED_ON_SCROLL: ReadonlySet<unknown> = new Set(["enterAlways", "exitUntilCollapsed"]);
+
+/**
+ * A medium or large bar's title on its own line below the icons: `.title` or `.largeTitle`, padded
+ * 16 pt across and 20 or 28 pt below. With an `enterAlways` or `exitUntilCollapsed` scroll
+ * behaviour the iOS renderer frames that padded line at 48 or 88 pt, bottom-aligned.
+ */
+function expandedTitle(node: Raw, variant: string, text: string): WebElement[] {
   if (variant !== "medium" && variant !== "large") {
     return [];
   }
   const large = variant === "large";
-  return [
-    el(
-      "span",
-      {
-        style: {
-          ...iosText(large ? "largeTitle" : "title"),
-          ...ONE_LINE,
-          padding: `0 16px ${large ? 28 : 20}px`,
-        },
+  const title = el(
+    "span",
+    {
+      style: {
+        ...iosText(large ? "largeTitle" : "title"),
+        ...ONE_LINE,
+        padding: `0 16px ${large ? 28 : 20}px`,
       },
-      [text],
-    ),
-  ];
+    },
+    [text],
+  );
+  if (!FRAMED_ON_SCROLL.has(node.onScroll)) {
+    return [title];
+  }
+  const frame: Css = {
+    display: "flex",
+    "flex-direction": "column",
+    "justify-content": "flex-end",
+    height: large ? "88px" : "48px",
+  };
+  return [el("div", { attrs: { "data-part": "expanded-title" }, style: frame }, [title])];
 }
 
 /**
@@ -362,7 +377,7 @@ export const iosTopAppBarRenderer =
     );
     return el("div", { attrs: { ...attrs, role: "heading" }, style }, [
       row,
-      ...expandedTitle(variant, text),
+      ...expandedTitle(node, variant, text),
     ]);
   };
 

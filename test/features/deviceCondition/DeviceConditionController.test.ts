@@ -4,6 +4,7 @@ import {
   type DeviceConditionInjector,
   type DeviceConditionApplyOutcome,
 } from "../../../src/features/deviceCondition/DeviceConditionController";
+import { FakeLogger } from "../../fakes/FakeLogger";
 import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
 import type { DeviceConditionKey } from "../../../src/features/deviceCondition/DeviceConditionTypes";
 
@@ -15,6 +16,7 @@ class FakeInjector implements DeviceConditionInjector {
   failReset = false;
   failApply = false;
   failApplyWithOwedReset = false;
+  recover?: DeviceConditionInjector["recover"];
   constructor(readonly key: DeviceConditionKey) {}
 
   apply(value: string): Promise<DeviceConditionApplyOutcome> {
@@ -52,10 +54,122 @@ class FakeInjector implements DeviceConditionInjector {
 }
 
 function controllerWith(injectors: Map<DeviceConditionKey, DeviceConditionInjector>) {
-  return new DeviceConditionController((key) => injectors.get(key));
+  return new DeviceConditionController((key) => injectors.get(key), new FakeLogger());
 }
 
 describe("DeviceConditionController (#14050)", () => {
+  for (const initialRecovery of ["unset", "reset"] as const) {
+    for (const cleanup of ["unset", "reset"] as const) {
+      test(`a successful apply supersedes failed ${initialRecovery} recovery before ${cleanup}`, async () => {
+        const injector = new FakeInjector("faults.memoryPressure");
+        injector.recover = () => Promise.reject(new Error("device offline"));
+        const controller = controllerWith(new Map([[injector.key, injector]]));
+        const failed = await controller.apply(
+          initialRecovery === "unset" ? { faults: { memoryPressure: "unset" } } : { reset: true },
+        );
+        expect(failed.success).toBe(false);
+        expect(controller.hasActiveConditions()).toBe(true);
+        injector.recover = () => Promise.resolve(null);
+        const applied = await controller.apply({ faults: { memoryPressure: "on" } });
+        expect(applied.success).toBe(true);
+        const cleared = await controller.apply(
+          cleanup === "unset" ? { faults: { memoryPressure: "unset" } } : { reset: true },
+        );
+        expect(injector.resetCount).toBe(1);
+        expect(injector.clean).toBe(true);
+        expect(cleared.success).toBe(true);
+        if (cleanup === "unset") {
+          expect(cleared.changes).toEqual([{ key: injector.key, status: "cleared" }]);
+        } else {
+          expect(cleared.restore).toEqual({
+            restored: [injector.key],
+            failures: [],
+            verifiedClean: true,
+          });
+        }
+        const reset = await controller.apply({ reset: true });
+        expect(reset.success).toBe(true);
+        expect(reset.restore?.verifiedClean).toBe(true);
+        expect(controller.hasActiveConditions()).toBe(false);
+      });
+    }
+  }
+
+  test("an owed reset supersedes failed recovery even though apply is unsupported", async () => {
+    const injector = new FakeInjector("faults.memoryPressure");
+    injector.recover = () => Promise.reject(new Error("device offline"));
+    const controller = controllerWith(new Map([[injector.key, injector]]));
+    expect((await controller.apply({ reset: true })).success).toBe(false);
+    injector.recover = () => Promise.resolve(null);
+    injector.failApplyWithOwedReset = true;
+    const applied = await controller.apply({ faults: { memoryPressure: "on" } });
+    expect(applied.success).toBe(false);
+    expect(controller.hasActiveConditions()).toBe(true);
+    const cleared = await controller.apply({ faults: { memoryPressure: "unset" } });
+    expect(cleared.success).toBe(true);
+    expect(cleared.changes).toEqual([{ key: injector.key, status: "cleared" }]);
+    expect(injector.resetCount).toBe(1);
+    expect(injector.clean).toBe(true);
+    expect(controller.hasActiveConditions()).toBe(false);
+  });
+
+  test("failed recovery keeps reset unsuccessful and the key active until a dirty device is recovered", async () => {
+    const injector = new FakeInjector("faults.memoryPressure");
+    injector.recover = () => Promise.reject(new Error("device offline"));
+    const controller = controllerWith(new Map([[injector.key, injector]]));
+    const result = await controller.apply({ reset: true });
+    expect(result.success).toBe(false);
+    expect(result.restore).toEqual({
+      restored: [],
+      failures: [
+        {
+          key: injector.key,
+          error:
+            "Could not check the device for an abandoned faults.memoryPressure fixture (device offline). Reconnect the device and run reset again, or release the session to retry.",
+        },
+      ],
+      verifiedClean: false,
+    });
+    expect(controller.hasActiveConditions()).toBe(true);
+    expect(controller.activeKeys()).toEqual([injector.key]);
+    injector.clean = false;
+    injector.recover = async () => (await injector.apply("on")).reset ?? null;
+    const retried = await controller.apply({ reset: true });
+    expect(injector.resetCount).toBe(1);
+    expect(retried.success).toBe(true);
+    expect(retried.restore).toEqual({
+      restored: [injector.key],
+      failures: [],
+      verifiedClean: true,
+    });
+    expect(controller.hasActiveConditions()).toBe(false);
+    expect(controller.activeKeys()).toEqual([]);
+  });
+
+  test("failed recovery makes unset unsupported and a clean recovery clears the obligation", async () => {
+    const injector = new FakeInjector("faults.memoryPressure");
+    injector.recover = () => Promise.reject(new Error("device offline"));
+    const controller = controllerWith(new Map([[injector.key, injector]]));
+    const result = await controller.apply({ faults: { memoryPressure: "unset" } });
+    expect(result.success).toBe(false);
+    expect(result.changes).toEqual([
+      {
+        key: injector.key,
+        status: "unsupported",
+        detail:
+          "Could not check the device for an abandoned faults.memoryPressure fixture (device offline). Reconnect the device and run reset again, or release the session to retry.",
+      },
+    ]);
+    expect(controller.hasActiveConditions()).toBe(true);
+    injector.recover = () => Promise.resolve(null);
+    const retried = await controller.apply({ reset: true });
+    expect(retried.success).toBe(true);
+    expect(retried.restore).toEqual({ restored: [], failures: [], verifiedClean: true });
+    expect(injector.resetCount).toBe(0);
+    expect(controller.hasActiveConditions()).toBe(false);
+    expect(controller.activeKeys()).toEqual([]);
+  });
+
   test("a condition with no injector is reported unsupported, not silently dropped", async () => {
     const controller = controllerWith(new Map());
     const result = await controller.apply({ faults: {}, rootState: "unset" });

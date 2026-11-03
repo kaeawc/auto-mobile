@@ -43,6 +43,9 @@ units and escapes `$`; Swift uses `\u{X}` scalars.
   folder reference.
 - Both hosts pass only `onEvent` and `onDismiss`; error views use the renderer defaults until the
   app edits the host.
+- The single-file `automobile:prototype/{id}/compose` and `.../swiftui` resources render this same
+  template with the spec inlined, a header and a sized preview; see
+  `docs/design-docs/prototype-web-renderer.md`.
 - A `storage` block opts the host in to file-backed storage. Requests use the embedded routing
   decision in `docs/decisions/prototype-embedded-request-routing.md`.
 

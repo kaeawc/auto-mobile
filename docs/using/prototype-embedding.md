@@ -50,6 +50,25 @@ The JSON result holds:
   `automobile:prototype/native/asset?id=<id>&assetId=<asset>&deviceId=<device>`.
 - `notes`: anything the app must still do, such as supplying asset files or an HTTP client.
 
+## Read one Compose or SwiftUI file
+
+For a single file to paste into an app, read `automobile:prototype/<id>/compose` (Kotlin,
+`text/x-kotlin`) or `automobile:prototype/<id>/swiftui` (Swift, `text/x-swift`) for a prototype
+shown in this daemon session.
+
+| Parameter  | Meaning                                                                                                                                      |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frame`    | A device frame id such as `pixel-9` or `iphone-16`, used to size the preview. Defaults to `pixel-9` for Compose and `iphone-16` for SwiftUI. |
+| `revision` | A kept revision. Defaults to the latest.                                                                                                     |
+
+The file is the same host the native resource generates, with the spec built in as a string
+constant and a `@Preview` (Compose) or `#Preview` (SwiftUI) sized to the frame. Its header comment
+names the library to add and the capabilities the spec needs, and lists each referenced image or
+font with the path the file loads it from and its `automobile:prototype/native/asset` URI. Assets
+are not built in: add those files yourself (a saved prototype serves their bytes from the URI).
+Revisions, errors, `_meta` (without `variants`) and subscriptions work as for the web page below,
+and `resources/list` lists both files for every prototype shown in this daemon session.
+
 ## Where the files go
 
 Copy each `files[].path` and `assets[].path` exactly as the resource returns it. The host file reads
@@ -164,3 +183,51 @@ sample prototype on each platform: the Android host and assets, and the iOS spec
 checks refuse that address, loopback and `localhost`, so on iOS point the request at the machine's
 LAN address (private addresses are allowed on ports other than the daemon's) or serve it from a
 `PrototypeNetworkConfiguration(hostHandler:)`.
+
+## Preview as a web page
+
+To look at a prototype without a device or an app, read `automobile:prototype/<id>/web`. It is one
+self-contained HTML page (`text/html`, no network access) with the prototype in a device frame,
+rotate and zoom controls, a screen picker when the prototype's stack has more than one screen, and
+its revision history.
+
+| Parameter  | Meaning                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| `frame`    | A device frame id such as `pixel-9` or `iphone-16`. Defaults to the platform that showed the prototype. |
+| `revision` | A kept revision. Defaults to the latest.                                                                |
+| `variant`  | The prototype id of the alternative to show first (see below).                                          |
+
+Revision 1 is the first show of the id. Each later show and each patch that lands adds one; taps
+and typing on the device do not. The last 20 revisions are kept, and an older one is an error that
+names the oldest kept revision. The result's `_meta` reports `revision`, `deviceRevision` (the
+device's own counter for that patch), `revisions`, `variants`, `frame`, `sha256` and
+`rendererVersion`.
+
+`resources/list` lists `automobile:prototype/<id>/web` for every prototype shown in this daemon
+session. Subscribe to that URI, without parameters, to be told about every new revision; a
+subscription to a URI with `revision=` is never notified again.
+
+To compare design alternatives, show each under its own id with the same `variant` group, for
+example `variant: {group: "checkout", label: "Compact"}`. The web page of any of them offers every
+alternative in the group by its label. The device keeps showing whichever was shown last.
+
+## Embed envelope
+
+To take a prototype's spec together with what it needs from a renderer, read
+`automobile:prototype/<id>/embed` (`application/json`). It returns:
+
+```json
+{
+  "format": "automobile-prototype-embed",
+  "version": 1,
+  "requires": ["..."],
+  "spec": { "...": "..." }
+}
+```
+
+`spec` is the prototype's spec and `requires` lists the renderer capabilities it needs, as this
+server computed them. Keep the two together: a renderer that lacks a listed capability should
+refuse the spec rather than draw part of it. A `version` other than `1` is a newer format.
+
+`revision` and `variant` work as for the web page; there is no `frame`. Errors, listing and
+subscriptions also match the web page, and `_meta` reports the same fields except `frame`.

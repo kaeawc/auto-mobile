@@ -21,13 +21,16 @@ const ROOT = join(import.meta.dir, "..", "..");
 // `oxlint --print-config` normally completes in milliseconds, but it can be
 // delayed by concurrent test processes on a two-core CI host.
 const OXLINT_SPAWN_TIMEOUT_MS = process.platform === "win32" ? 8_000 : 5_000;
-// Two config attempts take at most 16 s on Windows or 10 s elsewhere,
-// leaving at least four seconds of slack in the existing hook.
+// Two config attempts plus the 2 s control spawn take at most 18 s on Windows
+// or 12 s elsewhere, leaving at least two seconds of slack in the hook.
 const CONFIG_READ_HOOK_TIMEOUT_MS = 20_000;
 // Six fixture spawns plus 2 s overhead: 50 s on Windows, 32 s elsewhere.
 const FIXTURE_TEST_TIMEOUT_MS = 6 * OXLINT_SPAWN_TIMEOUT_MS + 2_000;
 // One fixture spawn plus 2 s overhead: 10 s on Windows, 7 s elsewhere.
 const SINGLE_FIXTURE_TEST_TIMEOUT_MS = OXLINT_SPAWN_TIMEOUT_MS + 2_000;
+// After a timeout, one trivial `bun --version` launch is timed so the failure
+// shows whether the runner itself is starved or only oxlint stalled (#16415).
+const CONTROL_SPAWN_TIMEOUT_MS = 2_000;
 
 interface OxlintSpawnResult {
   exitCode: number | null;
@@ -60,6 +63,12 @@ function runOxlint(
     }),
   clock: Pick<Timer, "now"> = { now: () => performance.now() },
   cwd = ROOT,
+  controlSpawn: () => OxlintSpawnResult = () =>
+    Bun.spawnSync({
+      cmd: [process.execPath, "--version"],
+      timeout: CONTROL_SPAWN_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    }),
 ): OxlintResult {
   const attempts = retryTimeout ? 2 : 1;
   for (let attempt = 1; ; attempt++) {
@@ -72,8 +81,11 @@ function runOxlint(
       if (attempt < attempts) {
         continue;
       }
+      const controlStartedAt = clock.now();
+      const control = controlSpawn();
+      const controlElapsedMs = clock.now() - controlStartedAt;
       throw new Error(
-        `oxlint ${args.join(" ")} timed out after ${OXLINT_SPAWN_TIMEOUT_MS}ms (attempt ${attempt}/${attempts}), ${spawnDiagnostics(result, elapsedMs)}\n${outputTails(result)}`,
+        `oxlint ${args.join(" ")} timed out after ${OXLINT_SPAWN_TIMEOUT_MS}ms (attempt ${attempt}/${attempts}), ${spawnDiagnostics(result, elapsedMs)}\ncontrol spawn (bun --version): ${spawnDiagnostics(control, controlElapsedMs)}\n${outputTails(result)}`,
       );
     }
     if (result.exitCode === null || ![0, 1].includes(result.exitCode)) {
@@ -393,7 +405,9 @@ describe("bounded oxlint spawn results", () => {
       ),
     ).toEqual({ ...successResult, elapsedMs: 7 });
     expect(attempts).toBe(2);
-    expect(2 * OXLINT_SPAWN_TIMEOUT_MS + 4_000).toBeLessThanOrEqual(CONFIG_READ_HOOK_TIMEOUT_MS);
+    expect(2 * OXLINT_SPAWN_TIMEOUT_MS + CONTROL_SPAWN_TIMEOUT_MS + 2_000).toBeLessThanOrEqual(
+      CONFIG_READ_HOOK_TIMEOUT_MS,
+    );
   });
 
   test("a repeated timeout reports its budget and both output tails", () => {
@@ -404,10 +418,52 @@ describe("bounded oxlint spawn results", () => {
       clock.advanceTime(attempts === 1 ? 10 : 25);
       return timeoutResult;
     };
-    expect(() => runOxlint(["--print-config"], true, spawn, clock)).toThrow(
-      `timed out after ${OXLINT_SPAWN_TIMEOUT_MS}ms (attempt 2/2), exit null, signal SIGKILL, elapsed 25ms, stdout 13 bytes, stderr 16 bytes\nstdout (tail): config output\nstderr (tail): spawn diagnostic`,
+    const control = () => {
+      clock.advanceTime(30);
+      return successResult;
+    };
+    expect(() => runOxlint(["--print-config"], true, spawn, clock, undefined, control)).toThrow(
+      `timed out after ${OXLINT_SPAWN_TIMEOUT_MS}ms (attempt 2/2), exit null, signal SIGKILL, elapsed 25ms, stdout 13 bytes, stderr 16 bytes\ncontrol spawn (bun --version): exit 0, signal none, elapsed 30ms, stdout 2 bytes, stderr 0 bytes\nstdout (tail): config output\nstderr (tail): spawn diagnostic`,
     );
     expect(attempts).toBe(2);
+  });
+
+  test("a timed-out control spawn is reported, so a starved runner is visible", () => {
+    const clock = new FakeTimer();
+    const spawn = () => {
+      clock.advanceTime(8);
+      return timeoutResult;
+    };
+    const control = () => {
+      clock.advanceTime(CONTROL_SPAWN_TIMEOUT_MS);
+      return { ...timeoutResult, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+    };
+    expect(() => runOxlint(["fixture.ts"], false, spawn, clock, undefined, control)).toThrow(
+      `control spawn (bun --version): exit null, signal SIGKILL, elapsed ${CONTROL_SPAWN_TIMEOUT_MS}ms, stdout 0 bytes, stderr 0 bytes`,
+    );
+  });
+
+  test("the control spawn runs only after the last timed-out attempt", () => {
+    let attempts = 0;
+    let controls = 0;
+    const clock = new FakeTimer();
+    expect(
+      runOxlint(
+        ["--print-config"],
+        true,
+        () => {
+          attempts++;
+          return attempts === 1 ? timeoutResult : successResult;
+        },
+        clock,
+        undefined,
+        () => {
+          controls++;
+          return successResult;
+        },
+      ),
+    ).toEqual({ ...successResult, elapsedMs: 0 });
+    expect(controls).toBe(0);
   });
 
   test("fixture timeout fails after one attempt, including empty diagnostics", () => {
@@ -423,9 +479,11 @@ describe("bounded oxlint spawn results", () => {
           return { ...timeoutResult, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
         },
         clock,
+        undefined,
+        () => successResult,
       ),
     ).toThrow(
-      `timed out after ${OXLINT_SPAWN_TIMEOUT_MS}ms (attempt 1/1), exit null, signal SIGKILL, elapsed 9ms, stdout 0 bytes, stderr 0 bytes\nstdout (tail): \nstderr (tail): `,
+      `timed out after ${OXLINT_SPAWN_TIMEOUT_MS}ms (attempt 1/1), exit null, signal SIGKILL, elapsed 9ms, stdout 0 bytes, stderr 0 bytes\ncontrol spawn (bun --version): exit 0, signal none, elapsed 0ms, stdout 2 bytes, stderr 0 bytes\nstdout (tail): \nstderr (tail): `,
     );
     expect(attempts).toBe(1);
   });

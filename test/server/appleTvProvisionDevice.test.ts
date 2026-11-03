@@ -20,6 +20,8 @@ import { bindBootedDeviceSession } from "../../src/server/deviceToolsStartDevice
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { toolJson } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
+import type { ProgressCallback } from "../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
@@ -170,8 +172,25 @@ describe("provisionDevice on an Apple TV simulator", () => {
     };
   }
 
+  /** Call a registered tool as MCP ingress does: under the connection its args name (#15663). */
+  const call = (
+    name: string,
+    args: Record<string, unknown>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) =>
+    withWireConnection(args, (wireArgs) =>
+      ToolRegistry.getTool(name)!.handler(wireArgs, progress, signal),
+    );
+
+  /** `provisionAppleTvDevice` called directly, under the connection its args name. */
+  const provisionTvDirect = (
+    args: Record<string, unknown>,
+    bind: Parameters<typeof provisionAppleTvDevice>[1],
+  ) => withWireConnection(args, (wireArgs) => provisionAppleTvDevice(wireArgs, bind));
+
   const provision = (args: Record<string, unknown>) =>
-    ToolRegistry.getTool("provisionDevice")!.handler({ __mcpSessionId: "client-a", ...args });
+    call("provisionDevice", { __mcpSessionId: "client-a", ...args });
 
   const failure = (promise: Promise<unknown>) =>
     promise.then(
@@ -183,7 +202,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     const tv = tvDevice({ name: NAME, state: "Shutdown" });
     const { simctl, sessions, runnerCalls, timer } = await arrange([tv]);
     const result = toolJson(
-      await ToolRegistry.getTool("startDevice")!.handler({
+      await call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __mcpSessionId: "client-a",
@@ -245,7 +264,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
       },
     });
     const start = () =>
-      ToolRegistry.getTool("startDevice")!.handler({
+      call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __mcpSessionId: "client-a",
@@ -273,7 +292,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     const tv = tvDevice({ name: NAME, state: "Booted" });
     const { launcher, sessions, releasedPorts } = await arrange([tv]);
     const start = () =>
-      ToolRegistry.getTool("startDevice")!.handler({
+      call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __mcpSessionId: "client-a",
@@ -298,7 +317,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
       throw new Error("set AUTOMOBILE_TVOS_RUNNER_XCTESTRUN");
     };
     const result = toolJson(
-      await ToolRegistry.getTool("startDevice")!.handler({
+      await call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __mcpSessionId: "client-a",
@@ -314,7 +333,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
   test("startDevice adopts an already booted TV by exact name without another boot", async () => {
     const { simctl, timer } = await arrange([tvDevice({ name: NAME, state: "Booted" })]);
     const result = toolJson(
-      await ToolRegistry.getTool("startDevice")!.handler({
+      await call("startDevice", {
         platform: "tvos",
         name: NAME,
         __mcpSessionId: "client-a",
@@ -329,7 +348,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     const tv = tvDevice({ name: NAME, state: "Booted" });
     const { sessions, simctl, timer } = await arrange([tv]);
     const start = () =>
-      ToolRegistry.getTool("startDevice")!.handler({
+      call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __oneShotCli: true,
@@ -354,7 +373,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     const tv = tvDevice({ name: NAME, state: "Booted" });
     const { sessions, simctl, timer } = await arrange([tv]);
     const result = toolJson(
-      await ToolRegistry.getTool("startDevice")!.handler({
+      await call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __mcpSessionId: "client-a",
@@ -368,7 +387,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(session && isAnonymousAcquisitionSession(session)).toBe(false);
 
     await expect(
-      ToolRegistry.getTool("startDevice")!.handler({
+      call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __oneShotCli: true,
@@ -398,7 +417,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
       reachedBoot.resolve();
       return await readyDevice.promise;
     };
-    const pending = ToolRegistry.getTool("startDevice")!.handler({
+    const pending = call("startDevice", {
       platform: "tvos",
       deviceId: tv.udid,
       timeoutMs: 50,
@@ -424,7 +443,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     const { simctl, sessions, runnerCalls, timer } = await arrange([tv]);
     simctl.bootError = new Error("simctl bootstatus failed");
     await expect(
-      ToolRegistry.getTool("startDevice")!.handler({
+      call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __mcpSessionId: "client-a",
@@ -438,7 +457,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
   test("startDevice refuses Android/iOS setup options before booting a TV", async () => {
     const { simctl } = await arrange([tvDevice({ name: NAME })]);
     await expect(
-      ToolRegistry.getTool("startDevice")!.handler({
+      call("startDevice", {
         platform: "tvos",
         name: NAME,
         screenSize: "1080x1920",
@@ -511,7 +530,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
       const { sessionId } = sessionSchema.parse(toolJson(await provision({ device: TV })));
       simctl.commands.length = 0;
       let bindCalls = 0;
-      const outcome = await provisionAppleTvDevice(
+      const outcome = await provisionTvDirect(
         { __mcpSessionId: caller, device: TV },
         async (...args) => {
           bindCalls++;
@@ -628,12 +647,15 @@ describe("provisionDevice on an Apple TV simulator", () => {
       },
     });
 
-    const outcome = await ToolRegistry.getTool("provisionDevice")!
-      .handler({ __mcpSessionId: "client-a", device: TV }, undefined, request.signal)
-      .then(
-        () => "delivered",
-        () => "refused",
-      );
+    const outcome = await call(
+      "provisionDevice",
+      { __mcpSessionId: "client-a", device: TV },
+      undefined,
+      request.signal,
+    ).then(
+      () => "delivered",
+      () => "refused",
+    );
 
     expect(outcome).toBe("refused");
     expect(seen).toEqual([false, true]);
@@ -655,7 +677,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
       },
     });
     const pending = failure(
-      ToolRegistry.getTool("startDevice")!.handler({
+      call("startDevice", {
         platform: "tvos",
         deviceId: tv.udid,
         __mcpSessionId: "client-a",
@@ -724,7 +746,8 @@ describe("provisionDevice on an Apple TV simulator", () => {
       return udid;
     };
     const error = await failure(
-      ToolRegistry.getTool("provisionDevice")!.handler(
+      call(
+        "provisionDevice",
         { __mcpSessionId: "client-a", device: TV, boot: false },
         undefined,
         request.signal,
@@ -875,7 +898,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
   test("a TV this call created is deleted again when session binding fails", async () => {
     const { simctl } = await arrange();
     const error = await failure(
-      provisionAppleTvDevice({ __mcpSessionId: "client-a", device: TV }, async () => {
+      provisionTvDirect({ __mcpSessionId: "client-a", device: TV }, async () => {
         throw new Error("session bind failed");
       }),
     );

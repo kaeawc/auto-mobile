@@ -99,6 +99,8 @@ export function normalizeHierarchyOptionalFields<T extends ViewHierarchyResult |
   const normalized = { ...hierarchy };
   for (const key of [
     "hierarchy",
+    "windows",
+    "contentHiddenRegions",
     "accessibility-focused-element",
     "systemInsets",
     "insets",

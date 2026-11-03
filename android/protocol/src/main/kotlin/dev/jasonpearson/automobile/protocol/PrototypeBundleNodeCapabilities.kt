@@ -101,7 +101,7 @@ internal object PrototypeBundleNodeCapabilities {
         "tabBar" -> mapOf("bar_scroll_v1" to setOf("onScroll", "scroll"))
         "pager" ->
           mapOf(
-            "carousel_v1" to setOf("indicator"),
+            "carousel_v1" to setOf("indicator", "indicatorPlacement"),
             "pager_options_v1" to setOf("axis", "pageSpacing", "peek", "pageSize"),
           )
         "list" -> mapOf("refresh_v1" to setOf("refresh"))

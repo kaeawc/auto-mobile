@@ -1,0 +1,11 @@
+[     636.464487] EV_ABS       ABS_MT_TRACKING_ID   00000005            
+[     636.464487] EV_ABS       ABS_MT_TOOL_TYPE     MT_TOOL_PEN         
+[     636.464487] EV_KEY       BTN_TOOL_RUBBER      DOWN                
+[     636.464487] EV_ABS       ABS_MT_POSITION_X    00004000            
+[     636.464487] EV_ABS       ABS_MT_POSITION_Y    00004e20            
+[     636.464487] EV_SYN       SYN_REPORT           00000000            
+[     636.520831] EV_ABS       ABS_MT_POSITION_X    00004074            
+[     636.520831] EV_SYN       SYN_REPORT           00000000            
+[     636.586300] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[     636.586300] EV_KEY       BTN_TOOL_RUBBER      UP                  
+[     636.586300] EV_SYN       SYN_REPORT           00000000            

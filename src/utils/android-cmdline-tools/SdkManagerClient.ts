@@ -87,9 +87,9 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
-function quoteForWindowsCmd(value: string): string {
+export function quoteForWindowsCmd(value: string): string {
   if (/[\r\n"]/.test(value)) {
-    throw new Error("sdkmanager arguments cannot contain Windows command-line quotes or newlines");
+    throw new Error("Windows batch arguments cannot contain command-line quotes or newlines");
   }
   return `"${value.replace(/%/g, "%%")}"`;
 }

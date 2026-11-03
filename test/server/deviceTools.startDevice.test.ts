@@ -71,6 +71,7 @@ import { runWithToolSelectionContext } from "../../src/features/toolSelection/to
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import * as os from "os";
 import { toolJson } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 // Successful acquisitions in this suite always have a bound session.
 const startResultSchema = startDeviceOutputSchema.extend({
@@ -196,7 +197,10 @@ describe("startDevice handler", () => {
     if (!tool) {
       throw new Error("startDevice not registered");
     }
-    const result = await tool.handler(args, progress, signal);
+    // Run as MCP ingress does: under the connection the in-band key names (#15663).
+    const result = await withWireConnection(args, (wireArgs) =>
+      tool.handler(wireArgs, progress, signal),
+    );
     return startResultSchema.parse(toolJson(result));
   }
 

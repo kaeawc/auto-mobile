@@ -69,9 +69,33 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
     let screen: GestureSize
     let observation: GestureSize
     let rotation: Int?
+    /// Live frame metadata is optional; size-only observations cannot establish the display.
+    var appOrigin: GesturePoint? = nil
+    var screenOrigin: GesturePoint = .zero
+    var windowTranslation: GesturePoint? = nil
+    var applicationDisplayId: UInt64? = nil
+
+    /// A letterboxed app at the main-screen origin is not evidence of another panel (#16259).
+    nonisolated func isAppOnMainScreen(applicationDisplayId: UInt64?) -> Bool {
+        guard hasMultiPanelMismatch(app: app, screen: screen),
+              applicationDisplayId == nil || applicationDisplayId == 0,
+              app.isValid, screen.isValid, let appOrigin,
+              appOrigin.x.isFinite, appOrigin.y.isFinite,
+              appOrigin == screenOrigin, windowTranslation == nil else { return false }
+        return app.width <= screen.width && app.height <= screen.height
+    }
+
+    nonisolated var multiPanelMismatch: Bool {
+        hasMultiPanelMismatch(app: app, screen: screen) &&
+            !isAppOnMainScreen(applicationDisplayId: applicationDisplayId)
+    }
 
     nonisolated func replacingScreen(_ screen: GestureSize) -> Self {
-        Self(app: app, screen: screen, observation: observation, rotation: rotation)
+        Self(
+            app: app, screen: screen, observation: observation, rotation: rotation,
+            appOrigin: appOrigin, screenOrigin: screenOrigin, windowTranslation: windowTranslation,
+            applicationDisplayId: applicationDisplayId
+        )
     }
 
     /// Correct only a runner-screen mismatch that disappears against the trusted screen.
@@ -241,8 +265,13 @@ struct GestureCoordinateSelection: Equatable, Sendable {
         }
         if forced == .legacy { return legacy("forced", isForced: true) }
         guard let geometry else { return legacy("mappingUndefined(noObservation)") }
-        let mismatch = hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen)
-        guard mismatch || forced != nil else { return legacy("singlePanel") }
+        let mismatch = geometry.multiPanelMismatch
+        guard mismatch || forced != nil else {
+            return legacy(
+                geometry.isAppOnMainScreen(applicationDisplayId: geometry.applicationDisplayId)
+                    ? "appOnMainScreen" : "singlePanel"
+            )
+        }
         let strategy = forced ?? .appRelative
         guard let normalized = mappedOffset(point: point, geometry: geometry, strategy: strategy) else {
             let rotation = geometry.rotation.map { String($0) } ?? "nil"

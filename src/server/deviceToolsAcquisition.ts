@@ -4,7 +4,7 @@ import type { DeviceInfo } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
-import { deleteInternalToolParams, INTERNAL_ONE_SHOT_CLI_PARAM } from "../daemon/wire/constants";
+import { deleteInternalToolParams } from "../daemon/wire/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
@@ -640,11 +640,6 @@ async function prepareDevice(
   }
 }
 
-/** Carry the daemon-forwarded one-shot `--cli` marker into the acquisition target (#11096). */
-function oneShotCliMarker(rawArgs: Record<string, unknown>): { __oneShotCli?: true } {
-  return rawArgs[INTERNAL_ONE_SHOT_CLI_PARAM] === true ? { __oneShotCli: true } : {};
-}
-
 // Compatibility implementation. New callers use getAndroid/getApple so their
 // platform identity and readiness budgets are explicit.
 function stripInternalAcquisitionParams(rawArgs: object) {
@@ -658,16 +653,13 @@ async function getAndroidHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  const { __mcpSessionId } = rawArgs;
-  const oneShotCli = oneShotCliMarker(rawArgs);
-  const presentationOrder = acceptancePresentationOrder(rawArgs);
+  const presentationOrder = acceptancePresentationOrder();
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
   const args = getAndroidSchema.parse(externalArgs);
   const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
   const automationReadyTimeoutMs =
     args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
   const startedAtMs = getDeviceToolsDependencies().timer.now();
-  const mcpSessionId = typeof __mcpSessionId === "string" ? __mcpSessionId : undefined;
   // Prefer the AVD name (exact virtual-device identity); otherwise target the
   // booted serial by deviceId (#5870). A paired AVD name and serial keeps
   // lifecycle coordination by stable name while directing boot to the
@@ -684,9 +676,7 @@ async function getAndroidHandler(
         ...(presentationOrder !== undefined ? { presentationOrder } : {}),
         preferRunning: true,
         createIfMissing: false,
-        __mcpSessionId: mcpSessionId,
         __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-        ...oneShotCli,
       }
     : {
         platform: "android",
@@ -694,9 +684,7 @@ async function getAndroidHandler(
         deviceId: args.deviceId,
         preferRunning: true,
         createIfMissing: false,
-        __mcpSessionId: mcpSessionId,
         __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-        ...oneShotCli,
       };
   return await runWithAcquisitionDeadline(
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
@@ -740,8 +728,7 @@ async function getAppleHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  const { __mcpSessionId } = rawArgs;
-  const presentationOrder = acceptancePresentationOrder(rawArgs);
+  const presentationOrder = acceptancePresentationOrder();
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
   const args = getAppleSchema.parse(externalArgs);
   // #5870: `deviceId` is an accepted alias for `udid` on iOS.
@@ -763,9 +750,7 @@ async function getAppleHandler(
             preferRunning: true,
             ...(presentationOrder !== undefined ? { presentationOrder } : {}),
             createIfMissing: false,
-            __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
             __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-            ...oneShotCliMarker(rawArgs),
           },
           {
             bootTimeoutMs,

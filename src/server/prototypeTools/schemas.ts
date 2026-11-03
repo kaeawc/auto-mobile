@@ -250,11 +250,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "defineBackend",
           "clearBackend",
           "backendLog",
+          "publish",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend or backendLog; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend, backendLog or publish; host-only: screenMap",
         },
       ),
       goal: z
@@ -278,13 +279,13 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .regex(MOCK_BACKEND_ID, "backendId must match [a-z0-9][a-z0-9-]{0,30}")
         .optional()
         .describe(
-          "defineBackend, clearBackend and backendLog: the mock backend id; requests to https://<backendId>.mock.automobile.invalid are answered by it",
+          "defineBackend, clearBackend, backendLog and publish: the mock backend id; requests and channels to https://<backendId>.mock.automobile.invalid (wss:// for WebSocket) are answered by it",
         ),
       backend: z
         .record(z.string(), z.unknown())
         .optional()
         .describe(
-          "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?}. Replaces the backend of that id",
+          "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?, rooms?:[{path:'/rooms/:roomId',onConnect?:[frame],echo?,relay?,timeline?:[{afterMs,frame}]}], broadcasts?:{collection:{room:'/rooms/{item:/roomId}',frame,on?:[POST|PUT|PATCH]}}, actors?:[{on:{route:'POST /path/:id'}|every+maxRuns, afterMs?, do:[{afterMs?, append|update|remove: collection, id?, value?}]}]}. Actors write to collections after a matching successful request or every N ms (at most 16 actors, 64 steps each; publish, advance and notify are not supported yet). Replaces the backend of that id and closes its open channels",
         ),
       mock: z
         .record(z.string(), z.unknown())
@@ -304,7 +305,19 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .int()
         .min(0)
         .optional()
-        .describe("backendLog only: return requests with a sequence number above this"),
+        .describe("backendLog only: return requests and frames with a sequence number above this"),
+      room: z
+        .string()
+        .startsWith("/")
+        .max(256)
+        .optional()
+        .describe("publish only: the room path, such as /rooms/general"),
+      frame: z
+        .json()
+        .optional()
+        .describe(
+          "publish only: the frame every member of the room receives (a string as written, other JSON as JSON text)",
+        ),
       testSessionId: z
         .string()
         .min(1)
@@ -368,6 +381,24 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .optional()
         .describe(
           "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
+        ),
+      variant: z
+        .object({
+          group: z
+            .string()
+            .min(1)
+            .max(64)
+            .describe("Name shared by every alternative of one design"),
+          label: z
+            .string()
+            .min(1)
+            .max(64)
+            .describe("This alternative's name, shown in the web preview's variant switcher"),
+        })
+        .strict()
+        .optional()
+        .describe(
+          "show only: host-side grouping of design alternatives; never sent to the device and does not change what it shows. Shows of different ids with the same group become variants of one web preview (automobile:prototype/{id}/web). Each show states it afresh; a later patch keeps it.",
         ),
       locale: z
         .string()
@@ -489,6 +520,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "display",
     "reset",
     "replaceOthers",
+    "variant",
     "locale",
     "pseudoLocale",
     "appearance",
@@ -511,6 +543,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "backendId",
     "backend",
     "since",
+    "room",
+    "frame",
     "mock",
     "mockPath",
   ] as const;
@@ -523,6 +557,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       "appearance",
       "assets",
       "replaceOthers",
+      "variant",
       "locale",
       "pseudoLocale",
       "mock",
@@ -542,6 +577,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     defineBackend: ["backendId", "backend"],
     clearBackend: ["backendId"],
     backendLog: ["backendId", "since"],
+    publish: ["backendId", "room", "frame"],
     status: [],
     inspect: [],
     screenMap: ["spec", "specPath"],
@@ -589,6 +625,8 @@ function validateMockBackendInput(
     backend?: unknown;
     mock?: unknown;
     mockPath?: string;
+    room?: string;
+    frame?: unknown;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -599,7 +637,7 @@ function validateMockBackendInput(
       message: "show takes either mock or mockPath, not both",
     });
   }
-  const mock = ["defineBackend", "clearBackend", "backendLog"].includes(value.action);
+  const mock = ["defineBackend", "clearBackend", "backendLog", "publish"].includes(value.action);
   if (mock && value.backendId === undefined) {
     ctx.addIssue({
       code: "custom",
@@ -613,6 +651,13 @@ function validateMockBackendInput(
       path: ["backend"],
       message: "defineBackend requires backend (an object, {} for an empty backend)",
     });
+  }
+  if (value.action === "publish") {
+    (["room", "frame"] as const)
+      .filter((field) => value[field] === undefined)
+      .forEach((field) =>
+        ctx.addIssue({ code: "custom", path: [field], message: "publish requires room and frame" }),
+      );
   }
 }
 
@@ -692,6 +737,7 @@ export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
   "defineBackend",
   "clearBackend",
   "backendLog",
+  "publish",
 ];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {

@@ -29,6 +29,7 @@ import {
 import {
   GUIDE_DEVICE_LOOPBACK,
   GUIDE_PLATFORM,
+  GUIDE_MEDIA_ACTIONS,
   GUIDE_NOTIFICATIONS,
   GUIDE_PLATFORM_EXAMPLE,
   GUIDE_STRINGS_SEMANTICS,
@@ -38,7 +39,9 @@ import {
 } from "./prototypeGuideProseMore";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
+import { MAX_PROTOTYPE_SPEC_REVISIONS } from "./prototypeSpecRevisions";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
+import { renderPlatformDrivingTools } from "./prototypePlatformDrivingTools";
 
 /** Resource URIs served by the prototype authoring guide. */
 export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
@@ -215,6 +218,18 @@ function renderNativeCode(): string {
     "## Embedding in an app",
     "",
     `Read \`${PROTOTYPE_NATIVE_URI}?id=<id>\` (optional \`platform=android|ios\`, \`deviceId\`) for a shown or saved prototype as app code: the spec, its assets, a Jetpack Compose or SwiftUI host file that renders it with the published renderer library, the library coordinate to add, and the capabilities the spec needs. Asset bytes for saved prototypes come from \`${PROTOTYPE_NATIVE_ASSET_URI}?id=<id>&assetId=<asset>\`.`,
+    "",
+    "For one file to paste instead, read `automobile:prototype/<id>/compose` (Kotlin) or `automobile:prototype/<id>/swiftui` (Swift) for a shown prototype: the same host file with the spec inlined as a string constant, a header naming the library coordinate, required capabilities and each asset's URI (assets are not inlined), and a preview sized to `frame` (default `pixel-9` / `iphone-16`). `revision` picks a kept revision as for the web page.",
+  ].join("\n");
+}
+
+function renderWebPreview(): string {
+  return [
+    "## Web preview and alternatives",
+    "",
+    `Read \`automobile:prototype/<id>/web\` for a shown prototype as one self-contained HTML page: the prototype in a device frame with rotate, zoom, a variant switcher and its revision history. Optional \`frame\` (a device frame id; default the showing platform's), \`revision\` (default the latest) and \`variant\`. Revision 1 is the first acknowledged show; each later show of the id and each landed patch adds one; device state edits do not. The last ${MAX_PROTOTYPE_SPEC_REVISIONS} revisions per id are kept. Subscribe to the URI without parameters to hear every new revision.`,
+    "",
+    "To present design alternatives side by side, show each under its own id with `variant: {group, label}` using one `group` (host-side only; the device shows whatever was shown last). The web page of any id in the group offers every alternative by `label`. Describe them in chat and ask the user which they prefer.",
   ].join("\n");
 }
 
@@ -339,7 +354,18 @@ export function renderPrototypeGuide(): string {
     renderIcons(),
     renderPlatformDifferences(),
     renderNativeCode(),
-    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}\n\n${GUIDE_NOTIFICATIONS}`,
+    renderWebPreview(),
+    `${GUIDE_PLATFORM}
+
+${renderPlatformModules()}
+
+${renderPlatformDrivingTools()}
+
+${GUIDE_PLATFORM_EXAMPLE}
+
+${GUIDE_NOTIFICATIONS}
+
+${GUIDE_MEDIA_ACTIONS}`,
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

@@ -11,6 +11,7 @@ import type { Element, ObserveResult, ViewHierarchyNode } from "../../../src/mod
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { typedObservation } from "./IosTypedTextTestHarness";
 import { android, createSendKeysHarness, ios } from "./SendKeysTestHarness";
+import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 
 /** The focused Email field as a DOM element merged from web view `checkout`. */
 function webObservation(value: string, snapshotId: string): ObserveResult {
@@ -84,6 +85,66 @@ function harness() {
 }
 
 describe("sendKeys on a web-view field (#5162)", () => {
+  test("a 1500-code-point web insert at the caret succeeds in two chunks", async () => {
+    const { h, web, field } = harness();
+    field.value = "prefixSUFFIX";
+    let caret = "prefix".length;
+    const chunks: string[] = [];
+    h.client.insert = async (text) => {
+      chunks.push(text);
+      field.value = field.value.slice(0, caret) + text + field.value.slice(caret);
+      caret += text.length;
+      return { success: true };
+    };
+    const text = "a".repeat(1000) + "😀".repeat(500);
+    const result = await h.executor.type({ action: "type", text });
+    expect(result).toMatchObject({ success: true, backend: "xctest" });
+    expect(chunks.map((chunk) => Array.from(chunk).length)).toEqual([1000, 500]);
+    expect(field.value).toBe(`prefix${text}SUFFIX`);
+    expect(web.requests).toEqual([]);
+  });
+
+  test.each([
+    { codePoints: 40_000, deadlineMs: undefined, seconds: 720 },
+    { codePoints: 3500, deadlineMs: 60_000, seconds: 64 },
+  ])(
+    "an unavailable SDK refuses a $codePoints-code-point replace after clearing",
+    async ({ codePoints, deadlineMs, seconds }) => {
+      const { h, web, field } = harness();
+      web.perform = async (request) => {
+        web.requests.push(request);
+        return { backend: "xctest", fallbackReason: "unavailable" };
+      };
+      const result = await runWithTextRequestContext({ getDeadlineMs: () => deadlineMs }, () =>
+        h.executor.type({ action: "type", text: "a".repeat(codePoints), operation: "replace" }),
+      );
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        retryable: false,
+        backend: "xctest",
+        fallbackReason: "unavailable",
+      });
+      expect(result.error).toContain("field was cleared");
+      expect(result.error).toContain("nothing was typed");
+      expect(result.error).toContain(`${codePoints} code points would take about ${seconds} s`);
+      expect(h.clientCalls).toEqual(["clear"]);
+      expect(field.value).toBe("");
+      expect(web.requests.map(({ action }) => action)).toEqual(["clear"]);
+    },
+  );
+
+  test("a 1500-code-point web replace assigns the full text once", async () => {
+    const { h, web, field } = harness();
+    const text = "a".repeat(1000) + "b".repeat(500);
+    const result = await h.executor.type({ action: "type", text, operation: "replace" });
+    expect(result).toMatchObject({ success: true, backend: "sdk" });
+    expect(field.value).toBe(text);
+    expect(web.requests.map(({ action }) => action)).toEqual(["clear", "setValue"]);
+    expect(web.requests[1].text).toBe(text);
+    expect(h.clientCalls).toEqual([]);
+  });
+
   test("a replace clears and sets the value through the web view, never through XCTest", async () => {
     const { h, web, field } = harness();
     const result = await h.executor.type({ action: "type", text: "new", operation: "replace" });

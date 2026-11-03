@@ -27,6 +27,7 @@ import { registerTelephonyTools } from "./telephonyTools";
 import { registerMeasureStartupTools } from "./measureStartupTools";
 import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
+import { registerAmbientTools } from "./ambientTool";
 import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
@@ -121,6 +122,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerMediaSessionTools();
   registerWindowModeTools();
   registerRotaryScrollTools();
+  registerAmbientTools();
   registerRotateCrownTools();
   registerHighlightTools();
   registerPrototypeTools({

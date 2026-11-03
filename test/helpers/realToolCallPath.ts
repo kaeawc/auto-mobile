@@ -5,6 +5,7 @@ import { spyOn } from "bun:test";
 import {
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_MCP_SESSION_PARAM,
 } from "../../src/daemon/wire/constants";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
@@ -225,8 +226,16 @@ export class RealToolCallPath {
       { once: true },
     );
     try {
+      // The entry keeps the forwarded `__mcpSessionId` in-band and also runs the call for that
+      // connection ambiently (#15663), as MCP ingress does.
+      const connectionId = args[INTERNAL_MCP_SESSION_PARAM];
       const result = await runWithToolSelectionContext(
-        { execution: sessionExecutionMetadataOf(execution) },
+        {
+          execution: sessionExecutionMetadataOf(execution),
+          ...(typeof connectionId === "string"
+            ? { autolockMcpSessionId: connectionId, callerMcpSessionId: connectionId }
+            : {}),
+        },
         () =>
           tool.handler(
             { ...args, [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime },

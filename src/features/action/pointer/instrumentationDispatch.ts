@@ -20,6 +20,11 @@ const DEFAULT_SEGMENT_MS = 200;
 /** Process start, UiAutomation connect and teardown, on top of the planned event time. */
 export const INSTRUMENTATION_OVERHEAD_MS = 15_000;
 
+/** Injection can run about 2x slower than the plan on a loaded emulator (measured 2.1x). */
+export function instrumentationTimeoutMs(plannedMs: number): number {
+  return plannedMs * 2 + INSTRUMENTATION_OVERHEAD_MS;
+}
+
 /** A failure that happened before anything reached the device: retry-safe. */
 export class PointerNotSentError extends ActionableError {}
 
@@ -139,7 +144,7 @@ export function createInstrumentationDispatch(adb: AdbExecutor, deviceId: string
       throwIfAborted(signal);
       const run = async () => {
         const result = await adb.executeCommand(pointerInstrumentationCommand(request), {
-          timeoutMs: plannedMs(request) + INSTRUMENTATION_OVERHEAD_MS,
+          timeoutMs: instrumentationTimeoutMs(plannedMs(request)),
           signal,
         });
         const output = [result.stdout, result.stderr].filter(Boolean).join("\n");

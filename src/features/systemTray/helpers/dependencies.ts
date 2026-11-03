@@ -17,6 +17,7 @@ import type { PressButtonResult } from "../../../models/PressButtonResult";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import type { ObserveScreenExecuteOptions } from "../../observe/interfaces/ObserveScreen";
 import { IOSCtrlProxyClient } from "../../observe/ios";
+import type { IosLockStateInvalidator } from "../../observe/ios/CachedIosLockStateProbe";
 import { ListInstalledApps } from "../../observe/ListInstalledApps";
 import { RealObserveScreen } from "../../observe/ObserveScreen";
 import type { TapCoordinatesRequest } from "../../observe/shared/SharedGestureDelegate";
@@ -63,6 +64,7 @@ export interface SystemTrayDependencies {
   observeScreenFactory: (device: BootedDevice) => SystemTrayObserver;
   adbFactory: (device: BootedDevice) => SystemTrayAdb;
   iosClientFactory?: (device: BootedDevice) => SystemTrayIosClient;
+  iosLockStateInvalidator?: IosLockStateInvalidator;
   pressHomeFactory?: (device: BootedDevice, signal?: AbortSignal) => Promise<IosGestureResult>;
   pressButtonFactory?: (device: BootedDevice) => Pick<PressButton, "execute">;
   timer: Timer;
@@ -143,6 +145,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     observeScreenFactory: overrides.observeScreenFactory ?? current.observeScreenFactory,
     adbFactory: overrides.adbFactory ?? current.adbFactory,
     iosClientFactory: overrides.iosClientFactory ?? current.iosClientFactory,
+    iosLockStateInvalidator: overrides.iosLockStateInvalidator ?? current.iosLockStateInvalidator,
     pressHomeFactory: overrides.pressHomeFactory ?? current.pressHomeFactory,
     pressButtonFactory: overrides.pressButtonFactory ?? current.pressButtonFactory,
     timer: overrides.timer ?? current.timer,

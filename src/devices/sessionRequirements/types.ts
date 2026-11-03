@@ -40,7 +40,9 @@ export type IosHardwareSelector =
 
 export type AndroidHardwareSelector =
   | { kind: "omitted" }
-  | { kind: "archetype"; archetype: AndroidArchetype };
+  | { kind: "archetype"; archetype: AndroidArchetype }
+  /** One installed AVD device profile; never falls back to an archetype default (#16427). */
+  | { kind: "exact-profile"; profileId: string };
 
 export type OsSelector =
   | { kind: "omitted" }
@@ -256,16 +258,6 @@ export type SessionRequirementDefaults =
   | IosSessionRequirementDefaults
   | AndroidSessionRequirementDefaults;
 
-/**
- * Operator-enabled host capabilities for hardware that is recognized but not executable
- * everywhere. Every capability is off when omitted, so a recognized request is refused with
- * a non-retryable `capability_disabled` failure.
- */
-export interface SessionRequirementCapabilities {
-  /** iPhone Duo simulators (iOS 27.1+ runtimes). */
-  iosDuo?: boolean;
-}
-
 export interface RequirementProvenance {
   policyVersion: string;
   catalogSource: string;
@@ -292,8 +284,16 @@ export interface NormalizedAndroidSessionDeviceRequirement {
     hardware: EffectiveAndroidHardwareSelector;
     os: EffectiveOsSelector;
   };
+  /** The installed, classified catalog profile for an explicit exact-profile selector. */
+  exactProfile?: AndroidExactCatalogProfile;
   provenance: RequirementProvenance;
 }
+
+/** A current catalog profile whose archetype is classified, as an exact-profile request requires. */
+export type AndroidExactCatalogProfile = AndroidCatalogProfile & {
+  archetype: AndroidArchetype;
+  metadataState: "current";
+};
 
 export type NormalizedSessionDeviceRequirement =
   | NormalizedIosSessionDeviceRequirement
@@ -414,7 +414,6 @@ export type ResolvedSessionDeviceProfile =
 export type SessionRequirementErrorCode =
   | "invalid_request"
   | "invalid_config"
-  | "capability_disabled"
   | "unsupported_hardware"
   | "unsupported_version_precision"
   | "missing_installed_runtime"

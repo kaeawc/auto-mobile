@@ -7,6 +7,8 @@ import type { RunningAvdAdvertisementReader } from "../../src/utils/android-cmdl
  */
 export class FakeRunningAvdAdvertisementReader implements RunningAvdAdvertisementReader {
   readonly advertised = new Set<string>();
+  /** The serial each advertised AVD runs on, when a test names one. */
+  readonly serials = new Map<string, string>();
   failWith: Error | undefined;
   readonly queriedAvdNames: string[] = [];
 
@@ -16,5 +18,13 @@ export class FakeRunningAvdAdvertisementReader implements RunningAvdAdvertisemen
       throw this.failWith;
     }
     return this.advertised.has(avdName);
+  }
+
+  async advertisedSerials(avdName: string): Promise<string[]> {
+    if (this.failWith) {
+      throw this.failWith;
+    }
+    const serial = this.serials.get(avdName);
+    return this.advertised.has(avdName) && serial !== undefined ? [serial] : [];
   }
 }

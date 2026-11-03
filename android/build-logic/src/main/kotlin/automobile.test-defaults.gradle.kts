@@ -1,5 +1,6 @@
 import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.dsl.LibraryExtension
+import dev.jasonpearson.automobile.buildlogic.test.CoverageReportLock
 import dev.jasonpearson.automobile.buildlogic.test.JUnitRunStartArgumentProvider
 import dev.jasonpearson.automobile.buildlogic.test.JUnitRunStartService
 import org.gradle.api.tasks.testing.Test
@@ -41,6 +42,22 @@ pluginManager.withPlugin("java") {
     }
   }
 }
+
+// One AGP coverage report at a time across the build (#16376): parallel report workers failed
+// copying the HTML report's resources from the shared JaCoCo jar with "Stream closed".
+val coverageReportLock =
+  gradle.sharedServices.registerIfAbsent(
+    CoverageReportLock.SERVICE_NAME,
+    CoverageReportLock::class.java,
+  ) {
+    maxParallelUsages.set(1)
+  }
+
+tasks
+  .named { CoverageReportLock.isCoverageReportTask(it) }
+  .configureEach {
+    usesService(coverageReportLock)
+  }
 
 pluginManager.withPlugin("com.android.application") {
   extensions.configure<ApplicationExtension> {

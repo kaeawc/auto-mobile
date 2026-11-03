@@ -34,7 +34,7 @@ import {
   resolveDragPathPoints,
 } from "./dragPathPlan";
 import { runDragPathStroke, type StrokeClient } from "./dragPathStroke";
-import { INSTRUMENTATION_OVERHEAD_MS } from "./pointer/instrumentationDispatch";
+import { instrumentationTimeoutMs } from "./pointer/instrumentationDispatch";
 import { dispatchRichStylus, strokeRequest, type RichStylusOptions } from "./pointer/richStylus";
 import { DRAG_PATH_DEFAULT_SEGMENT_MS } from "./dragPathPlan";
 
@@ -265,10 +265,11 @@ export class DragPath extends BaseVisualChange {
     call: ActionCall,
     { displayId, assertCurrent }: { displayId?: number; assertCurrent?: () => void },
   ): Promise<DragPathResult> {
-    // Cold start and teardown of the instrumentation count against the request budget too.
+    // Slow injection, cold start and teardown count against the request budget too.
     assertDragPathFitsRequestBudget(
-      plan.totalMs + INSTRUMENTATION_OVERHEAD_MS,
+      plan.totalMs,
       call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
+      instrumentationTimeoutMs(plan.totalMs) - plan.totalMs,
     );
     const authored = options.points;
     const waypoints = plan.vertices.map((vertex, index) => ({

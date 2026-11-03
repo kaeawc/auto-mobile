@@ -18,6 +18,7 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 /**
  * Internal tool-to-tool no-diff guard (issue #3053 part 2).
@@ -252,12 +253,16 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     const handler = ToolRegistry.getTool("tapOn")!.handler;
     const args = { platform: "android", __mcpSessionId: "mcp-session-1" };
     const output = z.object({ observation: z.record(z.string(), z.unknown()) });
-    const first = output.parse(toolPayload(await handler(args))).observation;
+    const first = output.parse(
+      toolPayload(await withWireConnection(args, (rest) => handler(rest))),
+    ).observation;
     expect(first).toHaveProperty("systemInsets");
     expect(daemonSessionManager?.getLastActionMetadata(uuid, androidA.deviceId)).toHaveProperty(
       "systemInsets",
     );
-    const second = output.parse(toolPayload(await handler(args))).observation;
+    const second = output.parse(
+      toolPayload(await withWireConnection(args, (rest) => handler(rest))),
+    ).observation;
     expect(second).not.toHaveProperty("systemInsets");
   });
 
@@ -268,29 +273,41 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     registerObserveAndTap();
 
     // Establish the baseline via observe (resets lastRenderedObservation).
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
 
     // A normal (non-internal) same-screen tapOn emits a diff.
-    const normal = await ToolRegistry.getTool("tapOn")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
+    const normal = await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("tapOn")!.handler(args),
+    );
     expect(payloadOf(normal).observation?.isDiff).toBe(true);
 
     // Re-seed the baseline (the diffing tapOn advanced it), then an internal tapOn
     // must emit the FULL observation instead of a diff.
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
-    const internal = await ToolRegistry.getTool("tapOn")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-      __internalNoDiff: true,
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
+    const internal = await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+        __internalNoDiff: true,
+      },
+      (args) => ToolRegistry.getTool("tapOn")!.handler(args),
+    );
     expect(payloadOf(internal).observation?.isDiff).toBeUndefined();
     expect(payloadOf(internal).observation?.viewHierarchy?.hierarchy.node["resource-id"]).toBe(
       "com.example:id/root",
@@ -304,18 +321,24 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     registerObserveAndTap();
 
     // Normal tapOn: observation stripped.
-    const normal = await ToolRegistry.getTool("tapOn")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
+    const normal = await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("tapOn")!.handler(args),
+    );
     expect(payloadOf(normal).observation).toBeUndefined();
 
     // Internal tapOn: observation preserved for internal consumers.
-    const internal = await ToolRegistry.getTool("tapOn")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-      __internalNoDiff: true,
-    });
+    const internal = await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+        __internalNoDiff: true,
+      },
+      (args) => ToolRegistry.getTool("tapOn")!.handler(args),
+    );
     expect(payloadOf(internal).observation).toBeDefined();
     expect(payloadOf(internal).observation?.viewHierarchy).toBeDefined();
   });
@@ -326,15 +349,21 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     await setupAutolockedSession();
     registerObserveAndTextActions();
 
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
-    const search = await ToolRegistry.getTool("sendKeys")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-      commands: [{ action: "key", key: "search" }],
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
+    const search = await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+        commands: [{ action: "key", key: "search" }],
+      },
+      (args) => ToolRegistry.getTool("sendKeys")!.handler(args),
+    );
     expect(payloadOf(search).observation?.isDiff).toBeUndefined();
     expect(payloadOf(search).observation?.skeleton).toBeDefined();
     expect(payloadOf(search).observation?.viewHierarchy).toBeUndefined();
@@ -343,16 +372,22 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       reason: "screen_changed",
     });
 
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
-    const go = await runWithEnabledCapabilities(() =>
-      ToolRegistry.getTool("sendKeys")!.handler({
+    await withWireConnection(
+      {
         platform: "android",
         __mcpSessionId: "mcp-session-1",
-        commands: [{ action: "key", key: "go" }],
-      }),
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
+    const go = await runWithEnabledCapabilities(() =>
+      withWireConnection(
+        {
+          platform: "android",
+          __mcpSessionId: "mcp-session-1",
+          commands: [{ action: "key", key: "go" }],
+        },
+        (args) => ToolRegistry.getTool("sendKeys")!.handler(args),
+      ),
     );
     expect(payloadOf(go).observation?.isDiff).toBeUndefined();
     expect(payloadOf(go).observation?.skeleton).toBeDefined();
@@ -369,31 +404,43 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     await setupAutolockedSession();
     registerObserveAndTextActions();
 
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
-    const next = await ToolRegistry.getTool("sendKeys")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-      commands: [{ action: "key", key: "next" }],
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
+    const next = await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+        commands: [{ action: "key", key: "next" }],
+      },
+      (args) => ToolRegistry.getTool("sendKeys")!.handler(args),
+    );
     expect(payloadOf(next).observation?.isDiff).toBe(true);
     expect(payloadOf(next).observationDiff).toMatchObject({
       mode: "diff",
       reason: "diff_emitted",
     });
 
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
-    const previous = await runWithEnabledCapabilities(() =>
-      ToolRegistry.getTool("sendKeys")!.handler({
+    await withWireConnection(
+      {
         platform: "android",
         __mcpSessionId: "mcp-session-1",
-        commands: [{ action: "key", key: "previous" }],
-      }),
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
+    const previous = await runWithEnabledCapabilities(() =>
+      withWireConnection(
+        {
+          platform: "android",
+          __mcpSessionId: "mcp-session-1",
+          commands: [{ action: "key", key: "previous" }],
+        },
+        (args) => ToolRegistry.getTool("sendKeys")!.handler(args),
+      ),
     );
     expect(payloadOf(previous).observation?.isDiff).toBe(true);
     expect(payloadOf(previous).observationDiff).toMatchObject({

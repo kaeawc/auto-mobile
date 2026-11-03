@@ -170,10 +170,6 @@ class PrototypeSpecContentScreenshotTest {
       renderComposable(name) { PrototypeSpecContent(model.root, theme = model.theme) }
     }
 
-  // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
-  // this baseline must be re-recorded by the Linux workflow described above.
-  /** Every node type and style token in one fullscreen tree. */
-  // Recorded by the Linux workflow; pending verification until its first golden is committed.
   @Test
   fun textFieldOptions() =
     prototypeScreenshotTest(
@@ -182,6 +178,7 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
+  /** Every node type and style token in one fullscreen tree. */
   @Test
   fun fullscreenAllNodes() =
     prototypeScreenshotTest(
@@ -189,8 +186,6 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("fullscreen-all-nodes"),
     )
 
-  // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
-  // this baseline must be re-recorded by the Linux workflow described above.
   /** Tab bar, pager with a scrolled text page, text field and a closed bottom sheet. */
   @Test
   fun tabbedPagerWithTextField() =
@@ -260,8 +255,6 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("elevation-gradient-aspect-ratio"),
     )
 
-  // Pending: renderPrototype now honours spec.theme (#11217), so the theme-bearing baselines must
-  // be re-recorded by the Linux workflow described above, then pending dropped.
   /** Text style roles under a scaled typography theme. */
   @Test
   fun textStyleRole() =
@@ -478,8 +471,7 @@ class PrototypeSpecContentScreenshotTest {
     )
 
   // Per-mode colours (#11219): `{light, dark}` pairs in a style colour, border, shadow and gradient
-  // stop, role-named stops, and the `theme.colors.light` / `theme.colors.dark` maps. Pending until
-  // recorded by the Linux workflow described above (#11319).
+  // stop, role-named stops, and the `theme.colors.light` / `theme.colors.dark` maps.
 
   /** The per-mode colour fixture on a light device: every pair draws its light side. */
   @Test

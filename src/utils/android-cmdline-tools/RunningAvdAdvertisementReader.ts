@@ -28,6 +28,13 @@ export interface RunningAvdAdvertisementReader {
    * entry cannot hide a live target (#6407).
    */
   isAvdAdvertisedRunning(avdName: string): Promise<boolean>;
+  /**
+   * The adb serials (`emulator-<console port>`) of the live processes advertising `avdName`, read
+   * from each advertisement's `port.serial`. Lets a caller name an emulator the device scan could
+   * not (another daemon's, which is not enriched, #16339). Same failure contract as
+   * {@link isAvdAdvertisedRunning}.
+   */
+  advertisedSerials(avdName: string): Promise<string[]>;
 }
 
 export interface AdvertisementHost {
@@ -89,20 +96,27 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
   }
 
   async isAvdAdvertisedRunning(avdName: string): Promise<boolean> {
-    for (const runningDir of this.runningDirs) {
-      if (this.isAdvertisedIn(runningDir, avdName)) {
-        return true;
-      }
-    }
-    return false;
+    return this.runningDirs.some(
+      (runningDir) => this.liveAdvertisementsIn(runningDir, avdName, true).length > 0,
+    );
   }
 
-  private isAdvertisedIn(runningDir: string, avdName: string): boolean {
+  async advertisedSerials(avdName: string): Promise<string[]> {
+    return this.runningDirs.flatMap((runningDir) =>
+      this.liveAdvertisementsIn(runningDir, avdName, false).flatMap((content) => {
+        const port = Number.parseInt(content.match(/^port\.serial=(\d+)$/m)?.[1] ?? "", 10);
+        return Number.isInteger(port) && port > 0 ? [`emulator-${port}`] : [];
+      }),
+    );
+  }
+
+  /** The contents of live advertisements of `avdName` in one directory; `firstOnly` stops at one. */
+  private liveAdvertisementsIn(runningDir: string, avdName: string, firstOnly: boolean): string[] {
     if (!existsSync(runningDir)) {
       // Expected miss, not a failure: only one candidate exists per host, and
       // the emulator creates it lazily, so it stays at debug level.
       logger.debug(`No running-AVD advertisement directory at ${runningDir}`);
-      return false;
+      return [];
     }
 
     const pidFiles = sortedReaddirSync(runningDir)
@@ -110,6 +124,7 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
       // Sorted so a scan reads the directory in the same order every time.
       .sort();
 
+    const live: string[] = [];
     for (const file of pidFiles) {
       const pid = parsePidFromAdvertisementFileName(file);
       if (pid === undefined) {
@@ -122,14 +137,18 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
       if (content.match(/^avd\.id=(.+)$/m)?.[1] !== avdName) {
         continue;
       }
-      if (this.isProcessAlive(pid)) {
-        logger.info(`AVD '${avdName}' is advertised as running by PID ${pid}`);
-        return true;
+      if (!this.isProcessAlive(pid)) {
+        logger.debug(`Stale advertisement for AVD '${avdName}' (PID ${pid} is not running)`);
+        continue;
       }
-      logger.debug(`Stale advertisement for AVD '${avdName}' (PID ${pid} is not running)`);
+      logger.info(`AVD '${avdName}' is advertised as running by PID ${pid}`);
+      live.push(content);
+      if (firstOnly) {
+        break;
+      }
     }
 
-    return false;
+    return live;
   }
 
   /**

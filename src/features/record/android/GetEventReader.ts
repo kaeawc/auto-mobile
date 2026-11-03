@@ -81,7 +81,28 @@ export class GetEventReader implements GestureEmitter {
   ): Promise<void> {
     const reconstructor = new TouchFrameReconstructor({
       singleTouch: node.kind === "pen",
-      onHover: onGesture,
+      onHover: (event) => {
+        const samples = event.hover;
+        const range = node.distanceRange;
+        const first = samples?.[0];
+        const mapping = first && "scalerAt" in scaler ? scaler.scalerAt(first.arrivedAt) : scaler;
+        onGesture({
+          ...event,
+          ...(first ? { downAt: first.arrivedAt } : {}),
+          hover:
+            range && samples && "toScreenPoint" in mapping
+              ? samples.map((sample) => ({
+                  ...mapping.toScreenPoint(sample.x, sample.y),
+                  arrivedAt: sample.arrivedAt,
+                  ...(sample.kernelAtMs === undefined ? {} : { kernelAtMs: sample.kernelAtMs }),
+                  distance: Math.min(
+                    1,
+                    Math.max(0, (sample.distance - range.min) / (range.max - range.min)),
+                  ),
+                }))
+              : undefined,
+        });
+      },
     });
     const classifier = new GestureClassifier(
       scaler,

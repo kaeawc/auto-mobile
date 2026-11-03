@@ -69,3 +69,37 @@ test("the refusal names the capability, the feature and the platform's update st
   expect(ios).toContain("pager indicator at root.indicator (and 1 more)");
   expect(ios).toContain("launchApp prototype: true");
 });
+
+test("pager placement accepts both choices even without dots and refuses unknown values", () => {
+  for (const indicatorPlacement of ["over", "below"]) {
+    for (const indicator of [undefined, "none", "dots"]) {
+      expect(
+        validatePrototypeSpec(
+          wrap({
+            type: "pager",
+            id: "p",
+            ...(indicator ? { indicator } : {}),
+            indicatorPlacement,
+            children: [card],
+          }),
+        ).success,
+      ).toBe(true);
+    }
+  }
+  const result = validatePrototypeSpec(
+    wrap({ type: "pager", id: "p", indicatorPlacement: "sideways", children: [card] }),
+  );
+  expect(result.success ? "" : result.error.path).toBe("root.indicatorPlacement");
+});
+
+test("carousel capability refusal names a placement field even without an indicator", () => {
+  const fields = prototypeCarouselFields(
+    wrap({ type: "pager", id: "p", indicatorPlacement: "below", children: [card] }),
+  );
+  expect(fields).toEqual(["root.indicatorPlacement"]);
+  for (const platform of ["android", "ios"] as const) {
+    const refusal = prototypeCarouselUnsupportedMessage(fields, platform);
+    expect(refusal).toContain("pager indicator at root.indicatorPlacement");
+    expect(refusal).toContain("prototype_carousel_v1");
+  }
+});

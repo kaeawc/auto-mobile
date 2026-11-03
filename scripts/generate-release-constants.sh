@@ -11,9 +11,13 @@ ios_app_hash="${IOS_CTRL_PROXY_APP_HASH:-}"
 ios_runner_sha256="${IOS_CTRL_PROXY_RUNNER_SHA256:-}"
 video_jar_checksum="${VIDEO_JAR_SHA256:-}"
 screen_capture_helper_checksum="${SCREEN_CAPTURE_HELPER_SHA256:-}"
+audio_loopback_helper_checksum="${AUDIO_LOOPBACK_HELPER_SHA256:-}"
 prototype_agent_checksum="${PROTOTYPE_AGENT_SHA256:-}"
 prototype_viewer_checksum="${PROTOTYPE_VIEWER_SHA256:-}"
 network_filter_checksum="${NETWORK_FILTER_SHA256:-}"
+# Optional, like videoJarSha256: the release workflow enforces their presence (#16402).
+lmk_pressure_arm64_checksum="${LMK_PRESSURE_ARM64_SHA256:-}"
+lmk_pressure_x86_64_checksum="${LMK_PRESSURE_X86_64_SHA256:-}"
 
 max_registry_entries=100
 
@@ -22,7 +26,7 @@ max_registry_entries=100
 #   - Checksums only (no version): update registry[0] checksums in place
 #   - Nothing set: no-op
 has_checksums=false
-if [ -n "$apk_checksum" ] || [ -n "$protoviewer_apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ]; then
+if [ -n "$apk_checksum" ] || [ -n "$protoviewer_apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$audio_loopback_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ] || [ -n "$lmk_pressure_arm64_checksum" ] || [ -n "$lmk_pressure_x86_64_checksum" ]; then
   has_checksums=true
 fi
 
@@ -74,6 +78,12 @@ if [ -n "$screen_capture_helper_checksum" ] && ! [[ "$screen_capture_helper_chec
   exit 1
 fi
 
+if [ -n "$audio_loopback_helper_checksum" ] && ! [[ "$audio_loopback_helper_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: AUDIO_LOOPBACK_HELPER_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${audio_loopback_helper_checksum}"
+  exit 1
+fi
+
 if [ -n "$prototype_agent_checksum" ] && ! [[ "$prototype_agent_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: PROTOTYPE_AGENT_SHA256 must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${prototype_agent_checksum}"
@@ -89,6 +99,18 @@ fi
 if [ -n "$network_filter_checksum" ] && ! [[ "$network_filter_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: NETWORK_FILTER_SHA256 must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${network_filter_checksum}"
+  exit 1
+fi
+
+if [ -n "$lmk_pressure_arm64_checksum" ] && ! [[ "$lmk_pressure_arm64_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: LMK_PRESSURE_ARM64_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${lmk_pressure_arm64_checksum}"
+  exit 1
+fi
+
+if [ -n "$lmk_pressure_x86_64_checksum" ] && ! [[ "$lmk_pressure_x86_64_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: LMK_PRESSURE_X86_64_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${lmk_pressure_x86_64_checksum}"
   exit 1
 fi
 
@@ -184,8 +206,8 @@ PY
 
 if [ -n "$release_version" ]; then
   # Mode: add new registry entry (requires every production release artifact).
-  if [ -z "$apk_checksum" ] || [ -z "$protoviewer_apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$prototype_viewer_checksum" ] || [ -z "$network_filter_checksum" ]; then
-    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, PROTOVIEWER_APK_SHA256, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, PROTOTYPE_VIEWER_SHA256, and NETWORK_FILTER_SHA256"
+  if [ -z "$apk_checksum" ] || [ -z "$protoviewer_apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$audio_loopback_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$prototype_viewer_checksum" ] || [ -z "$network_filter_checksum" ]; then
+    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, PROTOVIEWER_APK_SHA256, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, AUDIO_LOOPBACK_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, PROTOTYPE_VIEWER_SHA256, and NETWORK_FILTER_SHA256"
     exit 1
   fi
 
@@ -207,9 +229,12 @@ if [ -n "$release_version" ]; then
     runnerSha256Target: \"xctest\",
     videoJarSha256: \"${video_jar_checksum}\",
     screenCaptureHelperSha256: \"${screen_capture_helper_checksum}\",
+    audioLoopbackHelperSha256: \"${audio_loopback_helper_checksum}\",
     prototypeAgentSha256: \"${prototype_agent_checksum}\",
     prototypeViewerSha256: \"${prototype_viewer_checksum}\",
     networkFilterSha256: \"${network_filter_checksum}\",
+    lmkPressureArm64Sha256: \"${lmk_pressure_arm64_checksum}\",
+    lmkPressureX8664Sha256: \"${lmk_pressure_x86_64_checksum}\",
   },"
 
     # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
@@ -279,6 +304,10 @@ else
     update_registry_field "$tmp_file" "nightly" "screenCaptureHelperSha256" "$screen_capture_helper_checksum"
   fi
 
+  if [ -n "$audio_loopback_helper_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "audioLoopbackHelperSha256" "$audio_loopback_helper_checksum"
+  fi
+
   if [ -n "$prototype_agent_checksum" ]; then
     update_registry_field "$tmp_file" "nightly" "prototypeAgentSha256" "$prototype_agent_checksum"
   fi
@@ -289,6 +318,14 @@ else
 
   if [ -n "$network_filter_checksum" ]; then
     update_registry_field "$tmp_file" "nightly" "networkFilterSha256" "$network_filter_checksum"
+  fi
+
+  if [ -n "$lmk_pressure_arm64_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "lmkPressureArm64Sha256" "$lmk_pressure_arm64_checksum"
+  fi
+
+  if [ -n "$lmk_pressure_x86_64_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "lmkPressureX8664Sha256" "$lmk_pressure_x86_64_checksum"
   fi
 
   echo "Updated release constants:"
@@ -303,6 +340,10 @@ else
   fi
   if [ -n "$screen_capture_helper_checksum" ]; then
     echo "   screen-capture-helper checksum (nightly): ${screen_capture_helper_checksum}"
+  fi
+
+  if [ -n "$audio_loopback_helper_checksum" ]; then
+    echo "   audio-loopback-helper checksum (nightly): ${audio_loopback_helper_checksum}"
   fi
   if [ -n "$prototype_agent_checksum" ]; then
     echo "   prototype-agent checksum (nightly): ${prototype_agent_checksum}"
@@ -376,6 +417,13 @@ if [ -n "$screen_capture_helper_checksum" ]; then
   echo "   screen-capture-helper checksum: ${screen_capture_helper_checksum}"
 fi
 
+if [ -n "$audio_loopback_helper_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "audioLoopbackHelperSha256" "$audio_loopback_helper_checksum"
+  fi
+  echo "   audio-loopback-helper checksum: ${audio_loopback_helper_checksum}"
+fi
+
 if [ -n "$prototype_agent_checksum" ]; then
   if [ -n "$release_version" ]; then
     update_registry_field "$tmp_file" "$release_version" "prototypeAgentSha256" "$prototype_agent_checksum"
@@ -395,6 +443,20 @@ if [ -n "$network_filter_checksum" ]; then
     update_registry_field "$tmp_file" "$release_version" "networkFilterSha256" "$network_filter_checksum"
   fi
   echo "   network-filter checksum: ${network_filter_checksum}"
+fi
+
+if [ -n "$lmk_pressure_arm64_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "lmkPressureArm64Sha256" "$lmk_pressure_arm64_checksum"
+  fi
+  echo "   lmk-pressure arm64-v8a checksum: ${lmk_pressure_arm64_checksum}"
+fi
+
+if [ -n "$lmk_pressure_x86_64_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "lmkPressureX8664Sha256" "$lmk_pressure_x86_64_checksum"
+  fi
+  echo "   lmk-pressure x86_64 checksum: ${lmk_pressure_x86_64_checksum}"
 fi
 
 if cmp -s "$constants_path" "$tmp_file"; then

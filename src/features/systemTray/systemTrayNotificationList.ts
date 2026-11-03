@@ -31,6 +31,7 @@ import {
   attributeRowByDumpsys,
   intersectDumpsysRecordsForRow,
   parseActiveNotificationKeysForApp,
+  prototypeTagForRow,
   parseDumpsysNotificationRecords,
   type DumpsysNotificationRecord,
 } from "./notificationDumpsys";
@@ -57,6 +58,11 @@ export interface ListedTrayNotification {
   texts: string[];
   inGroup: boolean;
   ownership: TrayOwnershipEvidence;
+  /**
+   * The prototype posting tag (`proto:...`) of the one active record whose
+   * extras the row renders; absent when no prototype record matches uniquely.
+   */
+  tag?: string;
 }
 
 const ACTION_FIELD_IDS = ["action0", "action1", "action2", "action_text"];
@@ -456,7 +462,13 @@ const attributeTrayRows = (
     if (attribution === "other") {
       continue;
     }
-    const notification = { ...row.notification, appId, ownership: attribution };
+    const tag = prototypeTagForRow(afterRecords, appId, new Set(row.correlationTexts));
+    const notification: ListedTrayNotification = {
+      ...row.notification,
+      appId,
+      ownership: attribution,
+      ...(tag === undefined ? {} : { tag }),
+    };
     const previousIndex = notification.id === null ? undefined : nativeIds.get(notification.id);
     if (previousIndex !== undefined) {
       notifications[previousIndex] = notification;
@@ -486,6 +498,11 @@ export const listSystemTrayNotifications = async (
      * that goes on to open the shade itself (clearAll) has no use for it.
      */
     skipTerminalObservation?: boolean;
+    /**
+     * Read the notification dump for app-header rows too, solely to name their
+     * prototype posting tag. clearAll counts rows and has no use for it.
+     */
+    readPrototypeTags?: boolean;
   },
   context: TrayNotificationListContext,
 ): Promise<{
@@ -495,7 +512,15 @@ export const listSystemTrayNotifications = async (
   swipes: number;
   order: "encounter";
 }> => {
-  const { device, appId, appLabel, awaitTimeoutMs, signal, skipTerminalObservation } = options;
+  const {
+    device,
+    appId,
+    appLabel,
+    awaitTimeoutMs,
+    signal,
+    skipTerminalObservation,
+    readPrototypeTags = true,
+  } = options;
   const { getSystemTrayDependencies, waitForSystemTrayOpen, observeSystemTray } = context;
 
   if (device.platform !== "android") {
@@ -522,11 +547,11 @@ export const listSystemTrayNotifications = async (
   const { rows, beforeSnapshot, swipes } = pageScan;
   observation = pageScan.observation;
   signal?.throwIfAborted();
-  // Only pay for the dump when the shade actually rendered a row the header
-  // rule cannot attribute.
+  // Only pay for the dump when the shade rendered a row it could inform: one
+  // the header rule cannot attribute, or the app's own row a tag could name.
   const { notifications, unattributedRows, requestedRecords, hasUnmatchedRequestedRecords } =
     await resolveTrayListingAttribution(
-      { rows, beforeSnapshot, device, appId, appLabel, signal },
+      { rows, beforeSnapshot, device, appId, appLabel, signal, readPrototypeTags },
       context,
     );
   signal?.throwIfAborted();
@@ -577,7 +602,10 @@ async function scanTrayNotificationPages(
   let swipes = 0;
   while (true) {
     signal?.throwIfAborted();
-    if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
+    if (
+      !observation?.viewHierarchy ||
+      !detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)
+    ) {
       throw new NotificationShadeNotOpenError(
         "Notification shade is not open; cannot list notifications.",
       );
@@ -645,11 +673,12 @@ async function resolveTrayListingAttribution(
     appId: string;
     appLabel: string | null;
     signal?: AbortSignal;
+    readPrototypeTags: boolean;
   },
   context: TrayNotificationListContext,
 ) {
   const { getSystemTrayDependencies } = context;
-  const { rows, beforeSnapshot, device, appId, appLabel, signal } = options;
+  const { rows, beforeSnapshot, device, appId, appLabel, signal, readPrototypeTags } = options;
   const { adbFactory } = getSystemTrayDependencies();
   const hasHeaderlessRows = rows.some((row) => row.notification.appLabel === null);
   const beforeRecords = beforeSnapshot.status === "records" ? beforeSnapshot.records : undefined;
@@ -658,9 +687,16 @@ async function resolveTrayListingAttribution(
       "[systemTray] before dumpsys snapshot unavailable; falling back to after-only evidence.",
     );
   }
-  const afterRecords = hasHeaderlessRows
-    ? ((await readDumpsysNotificationRecords(adbFactory(device), signal)) ?? [])
-    : [];
+  // Header rows need the dump too, but only to name a prototype posting tag;
+  // it never changes their header attribution.
+  const hasHeaderRowsForApp =
+    readPrototypeTags &&
+    appLabel !== null &&
+    rows.some((row) => row.notification.appLabel === appLabel);
+  const afterRecords =
+    hasHeaderlessRows || hasHeaderRowsForApp
+      ? ((await readDumpsysNotificationRecords(adbFactory(device), signal)) ?? [])
+      : [];
   const { notifications, unattributedRows } = attributeTrayRows(rows, appId, appLabel, {
     beforeRecords,
     afterRecords,

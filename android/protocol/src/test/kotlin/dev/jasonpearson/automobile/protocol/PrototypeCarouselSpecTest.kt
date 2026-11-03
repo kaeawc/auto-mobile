@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
@@ -41,6 +42,35 @@ class PrototypeCarouselSpecTest {
     assertEquals(
       "root.indicator",
       failure("""{"type":"pager","id":"p","indicator":"bars","children":[$card]}"""),
+    )
+  }
+
+  @Test
+  fun `pager placement decodes without dots requires carousel and refuses unknown values`() {
+    for (placement in listOf("over", "below")) {
+      val raw =
+        spec("""{"type":"pager","id":"p","indicatorPlacement":"$placement","children":[$card]}""")
+      val pager = Json.decodeFromString(PrototypeSpec.serializer(), raw).root as PrototypePagerNode
+      assertEquals(placement, pager.indicatorPlacement)
+      assertTrue(
+        "prototype_carousel_v1" in
+          PrototypeStrictPolicy.required(Json.parseToJsonElement(raw).jsonObject),
+      )
+      val refused =
+        PrototypeSpecValidator.validate(raw, supportedCapabilities = emptySet())
+          as PrototypeSpecValidation.Failure
+      assertTrue(refused.error.message.contains("prototype_carousel_v1"))
+    }
+    val defaultPager =
+      Json.decodeFromString(
+          PrototypeSpec.serializer(),
+          spec("""{"type":"pager","id":"p","children":[$card]}"""),
+        )
+        .root as PrototypePagerNode
+    assertNull(defaultPager.indicatorPlacement)
+    assertEquals(
+      "root.indicatorPlacement",
+      failure("""{"type":"pager","id":"p","indicatorPlacement":"sideways","children":[$card]}"""),
     )
   }
 

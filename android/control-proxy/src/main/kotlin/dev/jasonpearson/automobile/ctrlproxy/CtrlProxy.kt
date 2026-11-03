@@ -46,12 +46,14 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShor
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
+import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeChannelTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeChannelHostLink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundTracker
@@ -403,8 +405,8 @@ class CtrlProxy : AccessibilityService() {
       deviceEventTransport(),
       timeProvider,
     )
-  private lateinit var rotationProvenance: RotationProvenanceTracker
-  private var deviceStateRegistration: AutoCloseable? = null
+  internal lateinit var rotationProvenance: RotationProvenanceTracker
+  internal var deviceStateRegistration: AutoCloseable? = null
   internal val navigationEventAccumulator = NavigationEventAccumulator()
   internal val sdkEventBatchProcessor by lazy {
     SdkEventBatchProcessor(
@@ -439,6 +441,17 @@ class CtrlProxy : AccessibilityService() {
         if (target is WebSocketServer.ConnectedClient) {
           webSocketServerOrNull?.sendToClient(target, frame)
         }
+      },
+    )
+  /** `via: "host"` prototype channels: relayed over the socket by the connected host (#14269). */
+  internal val hostPrototypeChannels =
+    HostPrototypeChannelTransport(
+      object : PrototypeChannelHostLink {
+        override fun send(frame: String): Any? = webSocketServerOrNull?.sendToHost(frame)
+
+        override fun sendTo(target: Any, frame: String): Boolean =
+          target is WebSocketServer.ConnectedClient &&
+            webSocketServerOrNull?.sendToClient(target, frame) == true
       },
     )
   private val prototypeRefreshCoalescer =
@@ -1325,7 +1338,7 @@ class CtrlProxy : AccessibilityService() {
 
   private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
-  private val displayTransitions =
+  internal val displayTransitions =
     DisplayTransitionRelay(
       object : DisplayTransitionRelay.Host {
         override fun launch(block: suspend () -> Unit) {
@@ -1378,16 +1391,7 @@ class CtrlProxy : AccessibilityService() {
     }
 
     try {
-      val displaySignal =
-        DisplayRotationChangeSignal(
-          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
-          onTransition = displayTransitions::onTransition,
-        )
-      rotationProvenance = RotationProvenanceTracker(displaySignal)
-      deviceStateRegistration =
-        DeviceStateTransitions.register(this) { state ->
-          displaySignal.emitDeviceState(state)
-        }
+      startDisplayTracking()
       overlayDrawer =
         OverlayDrawer(screenDimensionsProvider = { displayController.getScreenDimensions() })
       overlayManager =
@@ -1495,12 +1499,7 @@ class CtrlProxy : AccessibilityService() {
 
     unregisterReceivers()
 
-    if (::rotationProvenance.isInitialized) {
-      rotationProvenance.close()
-    }
-    runCatching { deviceStateRegistration?.close() }
-      .onFailure { Log.w(TAG, "Failed to unregister device-state listener", it) }
-    deviceStateRegistration = null
+    stopDisplayTracking()
 
     stopLogcatForwarding()
 
@@ -1544,6 +1543,10 @@ class CtrlProxy : AccessibilityService() {
     )
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
   }
+
+  /** The rotation tracker once [onServiceConnected] has created it; null before then. */
+  internal val rotationProvenanceOrNull: RotationProvenanceTracker?
+    get() = if (::rotationProvenance.isInitialized) rotationProvenance else null
 
   /** The WebSocket server once [onServiceConnected] has created it; null before then. */
   internal val webSocketServerOrNull: WebSocketServer?

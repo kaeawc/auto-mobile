@@ -211,25 +211,33 @@ export function restartStopHarness() {
       signal?: AbortSignal,
       targetDevice: BootedDevice = device,
     ) =>
-      runWithToolSelectionContext({ routingSessionUuid: requester }, () =>
-        ToolRegistry.getTool(name)!.handler(
-          name === "killDevice"
-            ? { device: targetDevice, force, [INTERNAL_MCP_SESSION_PARAM]: mcpSessionId }
-            : {
-                target: {
-                  platform,
-                  isVirtual: true,
-                  stableId: platform === "android" ? targetDevice.name : targetDevice.deviceId,
+      // The connection is ambient as at MCP ingress (#15663), which also still forwards it in-band.
+      runWithToolSelectionContext(
+        {
+          routingSessionUuid: requester,
+          ...(mcpSessionId
+            ? { autolockMcpSessionId: mcpSessionId, callerMcpSessionId: mcpSessionId }
+            : {}),
+        },
+        () =>
+          ToolRegistry.getTool(name)!.handler(
+            name === "killDevice"
+              ? { device: targetDevice, force, [INTERNAL_MCP_SESSION_PARAM]: mcpSessionId }
+              : {
+                  target: {
+                    platform,
+                    isVirtual: true,
+                    stableId: platform === "android" ? targetDevice.name : targetDevice.deviceId,
+                  },
+                  mode: "destroy",
+                  verifyAbsence: true,
+                  force,
+                  cancellationPolicy: "cancel-on-request-abort",
+                  [INTERNAL_MCP_SESSION_PARAM]: mcpSessionId,
                 },
-                mode: "destroy",
-                verifyAbsence: true,
-                force,
-                cancellationPolicy: "cancel-on-request-abort",
-                [INTERNAL_MCP_SESSION_PARAM]: mcpSessionId,
-              },
-          undefined,
-          signal,
-        ),
+            undefined,
+            signal,
+          ),
       );
     async function kill(requester?: string, force = false) {
       await call("killDevice", requester, force);

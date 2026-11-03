@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
@@ -148,20 +149,18 @@ function registerTools(): void {
   ToolRegistry.register(
     "getAndroid",
     "getAndroid",
-    z
-      .object({ __mcpSessionId: z.string().optional(), deviceId: z.string().optional() })
-      .passthrough(),
+    z.object({ deviceId: z.string().optional() }).passthrough(),
     async (toolArgs) => {
       const deviceId = toolArgs.deviceId ?? devices[0].deviceId;
       // Autolock off mints an ordinary device session owned by the acquiring connection.
       const sessionUuid =
-        (await pool.autolockDevice(deviceId, "android", toolArgs.__mcpSessionId)) ??
+        (await pool.autolockDevice(deviceId, "android", currentAutolockMcpSessionId())) ??
         (await pool.bindOrReuseDeviceSession({
           sessionId: `session-${deviceId}`,
           deviceId,
           platform: "android",
           allowSessionRebind: false,
-          mcpSessionId: toolArgs.__mcpSessionId,
+          mcpSessionId: currentAutolockMcpSessionId(),
         }));
       return {
         content: [

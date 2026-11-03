@@ -187,4 +187,63 @@ describe("Android physical display inventory", () => {
       { key: "4619827551948147201", role: "cover", sizePx: { width: 1080, height: 2364 } },
     ]);
   });
+  // Overlay displays (`settings put global overlay_display_devices 1080x1920/320`) have no
+  // SurfaceFlinger physical id; their display-service record carries `type OVERLAY` (#13138).
+  const overlayRecord =
+    '    DisplayDeviceInfo{"Overlay #1": uniqueId="overlay:1", 1080 x 1920, modeId 2, density 320, 320.0 x 320.0 dpi, touch NONE, rotation 0, type OVERLAY, state ON, FLAG_PRESENTATION}\n';
+
+  test("adds an overlay display to a phone inventory under the overlay role", () => {
+    const infos = fixture("phone-display-device-info.txt") + overlayRecord;
+    expect(
+      parseAndroidDeviceDisplayOutcome(
+        fixture("phone-surfaceflinger.txt"),
+        infos,
+        fixture("phone-states.txt"),
+      ),
+    ).toEqual({ kind: "multi" });
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        infos,
+        fixture("phone-states.txt"),
+      )?.panels,
+    ).toEqual([
+      { key: "4619827259835644672", role: "unknown", sizePx: { width: 1080, height: 2400 } },
+      { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+    ]);
+  });
+
+  test("lists overlays after physical panels without changing fold roles", () => {
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("fold-surfaceflinger.txt"),
+        overlayRecord + fixture("dual-display-device-info.txt"),
+        "Supported states: []",
+      )?.panels,
+    ).toEqual([
+      { key: "4619827259835644672", role: "inner", sizePx: { width: 2256, height: 2504 } },
+      { key: "4619827551948147201", role: "cover", sizePx: { width: 1080, height: 2520 } },
+      { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+    ]);
+  });
+
+  test("an overlay without a readable physical panel cannot establish an inventory", () => {
+    expect(
+      parseAndroidDeviceDisplayOutcome("", overlayRecord + overlayRecord, "Supported states: []"),
+    ).toEqual({ kind: "unreadable", reason: "no matched physical display records" });
+    expect(
+      parseAndroidDeviceDisplays("", overlayRecord + overlayRecord, "Supported states: []"),
+    ).toBeUndefined();
+  });
+
+  test("ignores an overlay: uniqueId whose record is not typed OVERLAY", () => {
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        fixture("phone-display-device-info.txt") +
+          overlayRecord.replace("type OVERLAY", "type VIRTUAL"),
+        fixture("phone-states.txt"),
+      ),
+    ).toBeUndefined();
+  });
 });

@@ -5,6 +5,8 @@ import {
   prototypeMediaPlayers,
   prototypeMediaReadValid,
 } from "../../../src/features/prototype/prototypeMedia";
+import { chargeVideoNode } from "../../../src/features/prototype/prototypeMediaSchema";
+import { nodeImageUses } from "../../../src/features/prototype/prototypeRepeat";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const players = { main: { kind: "video", source: { sample: "colorBars" } } };
@@ -145,6 +147,24 @@ describe("videoPlayer nodes", () => {
     expect(validatePrototypeSpec(spec({ state: { scrub: 0 } }, node)).success).toBe(true);
     expect(validatePrototypeSpec(spec({ state: { scrub: true } }, node)).success).toBe(false);
     expect(validatePrototypeSpec(spec({}, node)).success).toBe(false);
+  });
+
+  test("only videoPlayer nodes count toward the video node limit", () => {
+    const counter = { videoNodes: 63 };
+    expect(chargeVideoNode({ type: "image" }, counter, "root")).toBeUndefined();
+    expect(chargeVideoNode({ type: "videoPlayer" }, counter, "root.a")).toBeUndefined();
+    expect(chargeVideoNode({ type: "videoPlayer" }, counter, "root.b")).toEqual({
+      path: "root.b",
+      message: "Video node limit exceeded",
+    });
+    expect(counter.videoNodes).toBe(65);
+  });
+
+  test("a poster costs one image, and a videoPlayer without one costs none", () => {
+    expect(nodeImageUses({ type: "videoPlayer", player: "main", poster: "still" })).toBe(1);
+    expect(nodeImageUses({ type: "videoPlayer", player: "main" })).toBe(0);
+    expect(nodeImageUses({ type: "image" })).toBe(1);
+    expect(nodeImageUses({ type: "text", poster: "still" })).toBe(0);
   });
 });
 

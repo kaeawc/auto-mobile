@@ -1,7 +1,5 @@
-import {
-  internalOptionalOneShotCli,
-  internalRequesterSessionUuid,
-} from "../../../daemon/wire/internalToolParams";
+import { internalRequesterSessionUuid } from "../../../daemon/wire/internalToolParams";
+import { currentOneShotCli } from "../../toolSelection/toolSelectionContext";
 import { ActionableError } from "../../../models";
 import { deviceReservedForRestartRecoveryError } from "../../../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "../lifecycleRequester";
@@ -82,6 +80,6 @@ export function startRequester(args: StartDeviceSessionArgs) {
   return {
     ...requester,
     sessionUuid: internalRequesterSessionUuid(args) ?? requester.sessionUuid,
-    oneShotCli: internalOptionalOneShotCli(args),
+    oneShotCli: currentOneShotCli(),
   };
 }

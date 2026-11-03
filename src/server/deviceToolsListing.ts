@@ -234,7 +234,7 @@ export function createListingHandlers() {
     // images and richer per-device detail) survive as a `note`.
     // Internal callers may pass "either", which the tool schema itself does not offer.
     const platform = listingPlatform(args.platform ?? "either");
-    const presentationOrder = acceptancePresentationOrder(args);
+    const presentationOrder = acceptancePresentationOrder();
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deps = getDeviceToolsDependencies();
     const deviceManager = deps.deviceManagerFactory();

@@ -63,8 +63,9 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
     adb.setCommandResponse("wm size", { stdout: "Physical size: 1080x1920", stderr: "" } as never);
     const touchProc = new FakeAdbProcess();
     const penProc = new FakeAdbProcess();
+    const monitorProc = new FakeAdbProcess();
     adb.spawn.mockImplementation(async (args) =>
-      args[args.length - 1] === "/dev/input/event5" ? penProc : touchProc,
+      args.length === 3 ? monitorProc : args.at(-1) === "/dev/input/event5" ? penProc : touchProc,
     );
     spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
     const timer = new FakeTimer();
@@ -76,6 +77,7 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
     expect(adb.spawn.mock.calls.map(([args]) => args)).toEqual([
       ["shell", "getevent", "-lt", "/dev/input/event3"],
       ["shell", "getevent", "-lt", "/dev/input/event5"],
+      ["shell", "getevent", "-lt"],
     ]);
     const feed = (lines: string[]): void => {
       penProc.stdout.emit("data", Buffer.from(lines.join("\n") + "\n"));
@@ -97,6 +99,7 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
     expect(result.steps.map((step) => step.tool)).toEqual(["tapAt"]);
     expect(touchProc.killed).toBe(true);
     expect(penProc.killed).toBe(true);
+    expect(monitorProc.killed).toBe(true);
   });
 });
 
@@ -305,6 +308,25 @@ describe("pressure in recorded plan steps", () => {
 });
 
 describe("pen timelines follow the primary geometry", () => {
+  test("late followers inherit geometry history and can detach when their node disappears", () => {
+    const axes = { xMin: 0, xMax: 1079, yMin: 0, yMax: 1919 };
+    const initial = { rotation: 0, display: { width: 1080, height: 1920 } };
+    const primary = new ScreenGeometryTimeline(axes, initial, 0);
+    primary.noteChangeReported(5);
+    primary.apply({ rotation: 1, display: { width: 1200, height: 2000 } }, 5);
+    const follower = new ScreenGeometryTimeline(axes, initial, 10);
+    const detach = primary.follow(follower);
+    expect(follower.scalerAt(10).toScreenPoint(500, 700)).toEqual(
+      primary.scalerAt(10).toScreenPoint(500, 700),
+    );
+    expect(follower.warningsFor(0, 10)).toEqual(primary.warningsFor(0, 10));
+    detach();
+    detach();
+    primary.apply({ rotation: 2 }, 20);
+    expect(follower.currentRotation).toBe(1);
+    expect(primary.currentRotation).toBe(2);
+  });
+
   test("a rotation applied to the primary timeline reaches the follower's scaler", () => {
     const display = { width: 1080, height: 1920 };
     const penAxes = { xMin: 0, xMax: 2159, yMin: 0, yMax: 3839 };

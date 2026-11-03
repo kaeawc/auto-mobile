@@ -4,6 +4,7 @@ import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { afterEach, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { asMcpConnection } from "../helpers/mcpConnection";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -375,10 +376,13 @@ describe.each([
     signal?: AbortSignal,
   ): Promise<string | undefined> => {
     try {
-      const response = (await ToolRegistry.getTool(tool)!.handler(
-        { ...args, __mcpSessionId: "mcp-client" },
-        undefined,
-        signal,
+      // Acquisition still reads the in-band connection id; ingress also sets it ambiently (#15663).
+      const response = (await asMcpConnection("mcp-client", () =>
+        ToolRegistry.getTool(tool)!.handler(
+          { ...args, __mcpSessionId: "mcp-client" },
+          undefined,
+          signal,
+        ),
       )) as { content: Array<{ text: string }> };
       const payload = JSON.parse(response.content[0].text) as {
         sessionId?: string;
@@ -659,15 +663,17 @@ describe.each([
       const reachCancelPoint = cancelAt(point, () =>
         controller.abort(new Error("client cancelled")),
       );
-      const response = ToolRegistry.getTool("provisionDevice")!.handler(
-        {
-          device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
-          boot: true,
-          readiness: "automation",
-          __mcpSessionId: "mcp-client",
-        },
-        undefined,
-        controller.signal,
+      const response = asMcpConnection("mcp-client", () =>
+        ToolRegistry.getTool("provisionDevice")!.handler(
+          {
+            device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
+            boot: true,
+            readiness: "automation",
+            __mcpSessionId: "mcp-client",
+          },
+          undefined,
+          controller.signal,
+        ),
       ) as Promise<{ content: Array<{ text: string }> }>;
       await reachCancelPoint();
       const payload = JSON.parse((await response).content[0].text) as {
@@ -779,15 +785,17 @@ describe.each([
         const controller = new AbortController();
         afterBind = () => controller.abort(new Error("client cancelled"));
 
-        const response = (await ToolRegistry.getTool("provisionDevice")!.handler(
-          {
-            device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
-            boot: true,
-            readiness: "automation",
-            __mcpSessionId: "mcp-client",
-          },
-          undefined,
-          controller.signal,
+        const response = (await asMcpConnection("mcp-client", () =>
+          ToolRegistry.getTool("provisionDevice")!.handler(
+            {
+              device: { platform: "android", name: avd.name, spec: ANDROID_SPEC },
+              boot: true,
+              readiness: "automation",
+              __mcpSessionId: "mcp-client",
+            },
+            undefined,
+            controller.signal,
+          ),
         )) as { isError?: boolean; content: Array<{ text: string }> };
         await drain();
 
@@ -827,7 +835,7 @@ describe.each([
         },
       });
       return runWithAbortSignal(signal, async () => {
-        await handler({ ...args, __mcpSessionId: "mcp-client" } as never, undefined, signal);
+        await asMcpConnection("mcp-client", () => handler(args as never, undefined, signal));
       }).then(
         () => true,
         () => false,

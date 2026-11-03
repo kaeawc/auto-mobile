@@ -68,6 +68,8 @@ ${condition}
     expect(accepted.valid).toBe(true);
 
     for (const accepts of [
+      "        faults:\n          memoryPressure: on",
+      "        faults:\n          memoryPressure: unset",
       "        faults:\n          revokePermission:\n            package: com.example.app\n            permission: android.permission.CAMERA",
       "        faults:\n          revokePermission: unset",
       "        faults:\n          disablePackage:\n            package: com.example.app\n          clearPackageData: unset",
@@ -85,6 +87,7 @@ ${condition}
     }
 
     for (const rejected of [
+      "        faults:\n          memoryPressure: off",
       "        rootState: god-mode",
       "        faults:\n          battery: explode",
       "        faults:\n          dontKeepActivities: off",

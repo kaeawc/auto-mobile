@@ -6,6 +6,7 @@ import {
 } from "../../../../src/features/action/sendkeys/ImeSpan";
 import { ImeRestorationError } from "../../../../src/features/action/sendkeys/ImeRestorationError";
 import type { SendKeysCommandExecutor } from "../../../../src/features/action/SendKeys";
+import { DevicePendingImeRestores } from "../../../../src/features/action/sendkeys/PendingImeRestore";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 type Execution = Awaited<ReturnType<NonNullable<SendKeysCommandExecutor["withImeSpan"]>>>;
@@ -18,19 +19,22 @@ function harness() {
     restoreIme: async (prior, enabled, subtype) => {
       calls.push(`${prior}:${enabled}:${subtype.id}`);
     },
+    getPinnedUser: () => undefined,
+    setPinnedUser: () => {},
     clearPinnedUser: () => {
       calls.push("clearPinnedUser");
     },
   };
-  return { service: new ImeSpanService(host), host, calls };
+  const pending = new DevicePendingImeRestores();
+  return { service: new ImeSpanService(host, new FakeTimer(), pending), host, calls, pending };
 }
 function execution(): Execution {
   return { results: [{ index: 0, action: "type", resolvedMode: "ime", success: true }] };
 }
 
 describe("ImeSpanService", () => {
-  test("isolates overlapping calls and restores before clearing the pinned user", async () => {
-    const { service, calls } = harness();
+  test("isolates overlapping calls and releases before deferred restoration", async () => {
+    const { service, calls, pending, host } = harness();
     const timer = new FakeTimer();
     const first = service.withImeSpan(async () => {
       const span = service.imeSpan!;
@@ -48,7 +52,9 @@ describe("ImeSpanService", () => {
     // Admission may not yet have reached the fake sleep.
     timer.resolveAll();
     expect((await first).restorationFailed).toBeUndefined();
-    expect(calls).toEqual(["keyboard/.Ime:false:7", "clearPinnedUser"]);
+    expect(calls).toEqual(["clearPinnedUser"]);
+    await pending.flush(host.deviceId);
+    expect(calls).toEqual(["clearPinnedUser", "keyboard/.Ime:false:7", "clearPinnedUser"]);
     expect(service.imeSpan).toBeUndefined();
   });
 
@@ -59,15 +65,16 @@ describe("ImeSpanService", () => {
       throw new ImeRestorationError("restore failed");
     };
     const result = await service.withImeSpan(async () => {
+      await service.acquireImeSpan(service.imeSpan!);
       service.imeSpan!.snapshot = snapshot;
-      return execution();
+      return { ...execution(), failure: { index: 0, error: "commit failed" } };
     });
     expect(result).toMatchObject({
       restorationFailed: true,
       failure: { index: 0, error: "Text commit succeeded, but restore failed" },
       results: [{ success: false }],
     });
-    expect(calls).toEqual(["restore"]);
+    expect(calls).toEqual(["restore", "clearPinnedUser"]);
   });
 
   test("aggregates action and restoration errors and releases the lock", async () => {

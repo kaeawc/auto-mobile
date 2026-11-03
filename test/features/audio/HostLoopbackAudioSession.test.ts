@@ -41,6 +41,35 @@ async function turns(count: number): Promise<void> {
 }
 
 describe("HostLoopbackAudioSession injection", () => {
+  test("awaits released helper resolution before launching", async () => {
+    const timer = new FakeTimer();
+    let resolvePath: (path: string) => void = () => {};
+    const path = new Promise<string>((resolve) => {
+      resolvePath = resolve;
+    });
+    const helpers: FakeLoopbackHelperProcess[] = [];
+    const session = new HostLoopbackAudioSession(
+      {
+        helperPath: () => path,
+        launchHelper: (helperPath, args) => {
+          expect(helperPath).toBe("/cache/audio-loopback-helper");
+          const helper = new FakeLoopbackHelperProcess(args);
+          helpers.push(helper);
+          queueMicrotask(() => helper.ready());
+          return helper;
+        },
+        timer,
+      },
+      ENV_NAME,
+    );
+    const starting = session.injectAudio(sineTone({ durationMs: 10 }));
+    expect(helpers).toHaveLength(0);
+    resolvePath("/cache/audio-loopback-helper");
+    const injection = await starting;
+    expect(helpers).toHaveLength(1);
+    expect((await injection.stop()).reason).toBe("stopped");
+  });
+
   test("plays a clip as mono PCM, closes stdin and completes when the helper exits", async () => {
     const { session, helpers, timer } = setup();
     const mono = sineTone({ durationMs: 250, sampleRate: 16_000 });

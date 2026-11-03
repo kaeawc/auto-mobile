@@ -25,6 +25,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { withWireConnection } from "../helpers/mcpConnection";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 isolateToolRegistry();
@@ -163,9 +164,12 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
     }
   };
 
+  // Run as MCP ingress does: under the connection the in-band key names (#15663).
   const start = (args: Record<string, unknown>): Promise<Outcome> =>
     (
-      ToolRegistry.getTool("startDevice")!.handler(args) as Promise<{
+      withWireConnection(args, (wireArgs) =>
+        ToolRegistry.getTool("startDevice")!.handler(wireArgs),
+      ) as Promise<{
         content: Array<{ text: string }>;
       }>
     ).then(

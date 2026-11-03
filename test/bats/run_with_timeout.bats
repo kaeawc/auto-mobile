@@ -186,3 +186,18 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" =~ rc=124\ elapsed=(8|9|10)$ ]]
 }
+
+@test "an early-finishing command stops the portable watchdog with KILL, not TERM (#16367)" {
+  # A watcher killed with TERM before its subshell finishes starting can run the caller's
+  # inherited EXIT trap, so a lane's cleanup ran twice. KILL runs no handler.
+  kills="$BATS_TEST_TMPDIR/kills.log"
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 KILLS="$kills" bash -c '
+    kill() { printf "%s\n" "$*" >> "$KILLS"; builtin kill "$@"; }
+    source scripts/ios/run_with_timeout.sh
+    run_with_timeout 30 true
+  '
+
+  [ "$status" -eq 0 ]
+  grep -Eq '^-KILL -[0-9]+$' "$kills"
+  if grep -q -- '-TERM' "$kills"; then return 1; fi
+}

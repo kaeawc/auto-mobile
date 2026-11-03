@@ -12,14 +12,14 @@ enum PrototypeCastEvents {
     static let failureReasons = ["media_not_castable", "play_services_unavailable", "network", "receiver"]
 
     /// A decoded `cast.*` event: its short name and its validated data.
-    struct Event: Equatable {
+    struct Event: Equatable, Sendable {
         let name: String
         let data: [String: JSONValue]
     }
 
-    private typealias Field = (JSONValue) -> Bool
+    private typealias Field = @Sendable (JSONValue) -> Bool
 
-    private struct Shape {
+    private struct Shape: Sendable {
         let required: [String: Field]
         var optional: [String: Field] = [:]
     }

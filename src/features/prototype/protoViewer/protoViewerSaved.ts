@@ -142,7 +142,7 @@ async function saveInProtoViewer(
   if ("failure" in label) {
     return label.failure;
   }
-  const bundle = await canonicalBundle(args, spec, deps);
+  const bundle = await canonicalProtoViewerBundle(args, spec, deps, "Nothing was saved.");
   if ("failure" in bundle) {
     return bundle.failure;
   }
@@ -213,10 +213,12 @@ async function openInProtoViewer(
   return opened ?? failure("unsupported_capability", "ProtoViewer could not open the entry.");
 }
 
-async function canonicalBundle(
-  args: ProtoViewerInput,
+/** The canonical `.automobile-proto` bytes for a spec and the assets uploaded with it. */
+export async function canonicalProtoViewerBundle(
+  args: Pick<ProtoViewerInput, "assets">,
   spec: PrototypeSpec,
-  deps: ProtoViewerRouteDependencies,
+  deps: Pick<ProtoViewerRouteDependencies, "assetFileReader" | "observationScreenshotReader">,
+  nothingDone: string,
 ): Promise<{ bytes: Uint8Array } | { failure: ProtoViewerOutput }> {
   const prepared = await preparePrototypeAssets(
     args.assets ?? [],
@@ -224,7 +226,7 @@ async function canonicalBundle(
     deps.observationScreenshotReader,
   );
   if ("error" in prepared) {
-    return { failure: failure("invalid_asset_id", `${prepared.error} Nothing was saved.`) };
+    return { failure: failure("invalid_asset_id", `${prepared.error} ${nothingDone}`) };
   }
   const uploaded = new Map<string, BundleExportAsset>(
     prepared.assets.map((asset) => [asset.id, { mediaType: asset.mimeType, bytes: asset.bytes }]),
@@ -240,13 +242,13 @@ async function canonicalBundle(
       ? {
           failure: failure(
             "missing_asset",
-            `Upload every asset the spec references in the same save call${where}. Nothing was saved.`,
+            `Upload every asset the spec references in the same call${where}. ${nothingDone}`,
           ),
         }
       : {
           failure: failure(
             "invalid_spec",
-            `The prototype does not fit a ProtoViewer bundle: ${exported.code}${where}. Nothing was saved.`,
+            `The prototype does not fit a ProtoViewer bundle: ${exported.code}${where}. ${nothingDone}`,
           ),
         };
   }

@@ -60,6 +60,7 @@ export const keyboardResultSchema = z
 /** IME fields live on each command result, never on the sendKeys envelope. */
 export const sendKeysResultSchema = z
   .object({
+    warnings: z.array(z.string()).optional(),
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),

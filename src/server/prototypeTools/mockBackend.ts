@@ -8,8 +8,8 @@ import type { z } from "zod/v4";
 
 export const isMockBackendAction = (
   action: string,
-): action is "defineBackend" | "clearBackend" | "backendLog" =>
-  ["defineBackend", "clearBackend", "backendLog"].includes(action);
+): action is "defineBackend" | "clearBackend" | "backendLog" | "publish" =>
+  ["defineBackend", "clearBackend", "backendLog", "publish"].includes(action);
 
 const originOf = (backendId: string): string => `https://${backendId}${MOCK_ORIGIN_SUFFIX}`;
 
@@ -26,12 +26,22 @@ export function mockBackendOutput(
         backend: { id: backendId, origin: originOf(backendId), cleared: mocks.clear(backendId) },
       };
     }
-    if (args.action === "backendLog") {
+    if (args.action === "backendLog" || args.action === "publish") {
       const backend = mocks.get(backendId);
       if (backend === undefined) {
         return { success: false, error: `No mock backend "${backendId}" is defined.` };
       }
-      return { success: true, backendLog: backend.requestLog(args.since) };
+      if (args.action === "backendLog") {
+        return { success: true, backendLog: backend.requestLog(args.since) };
+      }
+      return {
+        success: true,
+        backend: {
+          id: backendId,
+          origin: originOf(backendId),
+          delivered: backend.publish(args.room!, args.frame!),
+        },
+      };
     }
     mocks.define(backendId, args.backend);
     const definition = mocks.get(backendId)!;
@@ -46,6 +56,7 @@ export function mockBackendOutput(
         collections,
         routes: definition.routeCount,
         faults: definition.faultCount,
+        rooms: definition.roomCount,
         actors: definition.actorCount,
       },
     };

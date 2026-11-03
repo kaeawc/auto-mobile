@@ -29,6 +29,12 @@
   <string name="reset_body">Clear this prototype’s saved values and start again?</string>
   <!-- Error shown in the library or viewer after a prototype action fails. -->
   <string name="action_error">Unable to complete this prototype action.</string>
+  <!-- Viewer toolbar action that copies app version, capabilities and the last error code for a bug report. -->
+  <string name="copy_diagnostics">Copy diagnostics</string>
+  <!-- Clipboard label for the copied diagnostics text. -->
+  <string name="diagnostics_label">ProtoViewer diagnostics</string>
+  <!-- Confirmation after diagnostics are copied, shown on Android 12 and earlier. -->
+  <string name="diagnostics_copied">Diagnostics copied</string>
   <!-- Action in the library menu, share warning dialog and system share chooser. -->
   <string name="share">Share</string>
   <!-- Title of the dialog warning about sensitive data before sharing. -->

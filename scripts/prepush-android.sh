@@ -136,8 +136,37 @@ for changed_file in "${android_changes[@]}"; do
   esac
 done
 
+# Print the launcher JVM once, and fail fast on a JAVA_HOME that no longer
+# exists (e.g. a JDK removed by a package upgrade), rather than letting lint
+# report "Unexpected lint invalid arguments" (#16011).
+gradle_jvm_reported=false
+report_gradle_jvm() {
+  [[ "$gradle_jvm_reported" == true ]] && return 0
+  gradle_jvm_reported=true
+  local java_bin source_note
+  if [[ -n "${JAVA_HOME:-}" ]]; then
+    if [[ ! -d "${JAVA_HOME}" || ! -x "${JAVA_HOME}/bin/java" ]]; then
+      echo "error: JAVA_HOME=${JAVA_HOME} is not a JDK (missing ${JAVA_HOME}/bin/java); point it at an installed JDK or unset it" >&2
+      exit 2
+    fi
+    java_bin="${JAVA_HOME}/bin/java"
+    source_note="JAVA_HOME"
+  else
+    java_bin="$(command -v java || true)"
+    source_note="PATH"
+  fi
+  if [[ -z "$java_bin" ]]; then
+    echo "==> Gradle launcher JVM: none found on PATH and JAVA_HOME unset"
+    return 0
+  fi
+  local version_line
+  version_line="$("$java_bin" -version 2>&1 | head -n 1 || true)"
+  echo "==> Gradle launcher JVM (${source_note}): ${java_bin} (${version_line:-unknown version})"
+}
+
 # A stale shared daemon with a removed JDK broke lint (#16011).
 run_gradle() {
+  report_gradle_jvm
   (cd android && ./gradlew --no-daemon "$@")
 }
 

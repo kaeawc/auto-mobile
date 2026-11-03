@@ -4,6 +4,7 @@ import {
   intersectDumpsysRecordsForRow,
   parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
+  prototypeTagForRow,
 } from "../../../src/features/systemTray/notificationDumpsys";
 
 const dump = (...lines: string[]): string => lines.join("\n");
@@ -588,5 +589,94 @@ describe("dumpsys notification records", () => {
       { pkg: "com.requested", titles: ["Syncing"], bodies: [], hasCustomLayout: false },
     ]);
     expect(attributeRowByDumpsys(records, new Set(["Syncing"]))).toBe("com.requested");
+  });
+});
+
+describe("dumpsys notification prototype tags", () => {
+  const tagged = (tag: string, title: string, flags = "0x0", pkg = "com.example.proto") =>
+    dump(
+      "  Notification List:",
+      `    NotificationRecord(0x1: pkg=${pkg} user=UserHandle{0} id=1 tag=${tag} key=0|${pkg}|1|${tag}|10200)`,
+      `      flags=${flags}`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      "      }",
+    );
+
+  test("reads a proto: tag from the record key, including one that contains a pipe", () => {
+    expect(parseDumpsysNotificationRecords(tagged("proto:a|b", "Hi"))).toEqual([
+      {
+        pkg: "com.example.proto",
+        titles: ["Hi"],
+        bodies: [],
+        hasCustomLayout: false,
+        prototypeTag: "proto:a|b",
+      },
+    ]);
+  });
+
+  test("ignores untagged, non-prototype and group-summary records", () => {
+    const records = [
+      ...parseDumpsysNotificationRecords(tagged("null", "A")),
+      ...parseDumpsysNotificationRecords(tagged("Discovery", "B")),
+      ...parseDumpsysNotificationRecords(tagged("proto:group", "C", "0x200")),
+      ...parseDumpsysNotificationRecords(tagged("proto:group", "D", "GROUP_SUMMARY|AUTO_CANCEL")),
+    ];
+    expect(records.map((record) => record.prototypeTag)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test("names the one prototype tag whose record the row renders", () => {
+    const records = [
+      ...parseDumpsysNotificationRecords(tagged("proto:a", "Alpha")),
+      ...parseDumpsysNotificationRecords(tagged("proto:b", "Beta")),
+    ];
+    expect(prototypeTagForRow(records, "com.example.proto", new Set(["Beta"]))).toBe("proto:b");
+    expect(prototypeTagForRow(records, "com.example.other", new Set(["Beta"]))).toBeUndefined();
+    expect(prototypeTagForRow(records, "com.example.proto", new Set(["Gamma"]))).toBeUndefined();
+  });
+
+  test("leaves the tag off when an untagged record of the app renders the same text", () => {
+    const records = [
+      ...parseDumpsysNotificationRecords(tagged("proto:a", "Same")),
+      ...parseDumpsysNotificationRecords(tagged("null", "Same")),
+    ];
+    expect(prototypeTagForRow(records, "com.example.proto", new Set(["Same"]))).toBeUndefined();
+  });
+
+  test("leaves the tag off when a collapsed row could be a record whose body it hides", () => {
+    const withBody = dump(
+      "  Notification List:",
+      "    NotificationRecord(0x2: pkg=com.example.proto user=UserHandle{0} id=2 tag=null key=0|com.example.proto|2|null|10200)",
+      "      extras={",
+      "        android.title=String (Shared)",
+      "        android.text=String (Hidden body)",
+      "      }",
+    );
+    const records = [
+      ...parseDumpsysNotificationRecords(tagged("proto:a", "Shared")),
+      ...parseDumpsysNotificationRecords(withBody),
+    ];
+    expect(prototypeTagForRow(records, "com.example.proto", new Set(["Shared"]))).toBeUndefined();
+  });
+
+  test("ignores a group summary that shares a child's text", () => {
+    const records = [
+      ...parseDumpsysNotificationRecords(tagged("proto:group", "Alpha", "0x200")),
+      ...parseDumpsysNotificationRecords(tagged("proto:a", "Alpha")),
+    ];
+    expect(prototypeTagForRow(records, "com.example.proto", new Set(["Alpha"]))).toBe("proto:a");
+  });
+
+  test("refuses to choose between two prototype tags rendering the same text", () => {
+    const records = [
+      ...parseDumpsysNotificationRecords(tagged("proto:a", "Same")),
+      ...parseDumpsysNotificationRecords(tagged("proto:b", "Same")),
+    ];
+    expect(prototypeTagForRow(records, "com.example.proto", new Set(["Same"]))).toBeUndefined();
   });
 });

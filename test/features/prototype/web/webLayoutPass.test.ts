@@ -272,3 +272,13 @@ test("a sized item with unmeasured content keeps its size rather than shrinking"
   expect(rectOf(painted, "card")?.width).toBe(300);
   expect(rectOf(painted, "rest")).toEqual({ left: 300, top: 0, width: 100, height: 10 });
 });
+
+test("a shrinking item keeps at least its padding and border", () => {
+  // Even with a zero minimum, black's 210px left padding floors its border box at 210.
+  const painted = topEdgePaintOrder(
+    shrinkRow({ "min-width": "0", "padding-left": "210px" }),
+    SCREEN,
+  );
+  expect(rectOf(painted, "black")?.width).toBe(210);
+  expect(rectOf(painted, "white")?.left).toBe(210);
+});

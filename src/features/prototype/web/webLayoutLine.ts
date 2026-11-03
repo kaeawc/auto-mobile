@@ -4,6 +4,7 @@ import {
   alignOffset,
   clampKnown,
   clampSize,
+  contentInsets,
   declaredSize,
   shorthandValues,
   withAspectRatio,
@@ -287,6 +288,28 @@ function automaticMinimum(child: WebElement, main: Axis, box: Container): Len {
   return Math.min(specified, content);
 }
 
+/**
+ * A line item's minimum main size: its declared `min-*`, else its automatic minimum, floored at
+ * its padding and border. `minUnknown` marks an automatic minimum that depends on content.
+ */
+function mainMinimum(
+  child: WebElement,
+  main: Axis,
+  box: Container,
+): { min: Len; minUnknown: boolean } {
+  const room = box.content[main];
+  const explicitMin = cssLength(child.style[`min-${main}`], box.vars, room);
+  const automatic = explicitMin === undefined ? automaticMinimum(child, main, box) : undefined;
+  // A border box is never narrower than its padding and border, whatever its minimum says.
+  const insets = contentInsets(child, room, box.vars);
+  const edges = main === "width" ? add(insets.left, insets.right) : add(insets.top, insets.bottom);
+  const floor = edges ?? 0;
+  const declaredMin = explicitMin ?? automatic;
+  const min =
+    declaredMin === undefined && floor === 0 ? undefined : Math.max(declaredMin ?? 0, floor);
+  return { min, minUnknown: explicitMin === undefined && automatic === undefined };
+}
+
 function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   if (typeof child === "string") {
     const none = undefined;
@@ -298,11 +321,8 @@ function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
     basisValue === "auto"
       ? declaredSize(child, main, room, box.vars)
       : cssLength(basisValue, box.vars, room);
-  const explicitMin = cssLength(child.style[`min-${main}`], box.vars, room);
   const max = cssLength(child.style[`max-${main}`], box.vars, room);
-  const automatic = explicitMin === undefined ? automaticMinimum(child, main, box) : undefined;
-  const min = explicitMin ?? automatic;
-  const minUnknown = explicitMin === undefined && automatic === undefined;
+  const { min, minUnknown } = mainMinimum(child, main, box);
   // A content-sized item with an aspect ratio and a known cross size takes its main size from both.
   const size = declared === "auto" ? ratioMainSize(child, main, box) : declared;
   // A growing item's unmeasured content basis is taken as zero, so it shares the room as

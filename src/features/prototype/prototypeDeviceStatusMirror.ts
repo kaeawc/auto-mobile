@@ -1,6 +1,9 @@
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import { numberValid, object, type Rule } from "./prototypeBindingValidation";
-import type { PrototypeStatusModule, PrototypeStatusValues } from "./prototypeDeviceStatusReference";
+import type {
+  PrototypeStatusModule,
+  PrototypeStatusValues,
+} from "./prototypeDeviceStatusReference";
 import { PROTOTYPE_PLATFORM_MODULES } from "./prototypePlatform";
 import { prototypePlatformDeliveredEventOf } from "./prototypePlatformEvent";
 

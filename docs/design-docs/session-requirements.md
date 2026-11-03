@@ -46,8 +46,24 @@ iOS hardware has four explicit selector kinds:
 - `archetype` is `phone`, `tablet`, or `duo`;
 - `omitted` requests the configured default archetype.
 
-Android hardware is `phone`, `tablet`, `foldable`, or `omitted`. Exact Android profiles
-and other categories are not accepted at this boundary. Hosts map each archetype through
+Android hardware has three selector kinds:
+
+- `exact-profile` carries one installed AVD device `profileId` (for example
+  `{ "kind": "exact-profile", "profileId": "pixel_9" }`);
+- `archetype` is `phone`, `tablet`, or `foldable`;
+- `omitted` requests the configured default archetype.
+
+An `exact-profile` resolves against the installed catalog `profiles` during
+normalization. An uninstalled profile, or one with no archetype in
+`androidProfileArchetypes`, is refused with non-retryable `unsupported_hardware`
+naming the profile; a stale or duplicated profile is `catalog_metadata_invalid`. It
+never falls back to an archetype default. The session's archetype is the profile's
+classification, so capability gates such as foldable posture still apply. It takes
+the `memoryMb` of the `defaults.android.hardware.profiles` entry naming that profile,
+else of its archetype's entry, else none. Resolution reports
+`resolvedHardwareBy: "explicit-model"` and the exact `profileId`. Pool reuse requires
+an idle device created from the same `profileId` with the same `memoryMb`. `os`
+selectors combine with it as with archetypes. Hosts map each archetype through
 `defaults.android.hardware.profiles` and classify its installed profile in
 `androidProfileArchetypes`; a foldable never falls back to a phone. An unmapped or
 uninstalled foldable profile is refused with non-retryable `unsupported_hardware`.
@@ -173,7 +189,8 @@ Android omitted -> archetype -> exact installed emulator profile
 ```
 
 An explicit archetype starts at the archetype level. An explicit model type
-skips the archetype default. An explicit model skips both preceding levels.
+skips the archetype default. An explicit model or Android exact profile skips
+every preceding level.
 Missing, duplicate, conflicting, unknown, or stale defaults return typed
 configuration or catalog errors.
 

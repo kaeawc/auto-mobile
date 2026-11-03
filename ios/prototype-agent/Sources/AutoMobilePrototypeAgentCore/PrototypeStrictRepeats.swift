@@ -16,6 +16,7 @@ struct PrototypeStrictRepeats {
     var images = 0
     var effects = PrototypeEffectUses()
     var keyframeNodes = 0
+    var videoNodes = 0
 
     static func children(_ node: [String: JSONValue], path: String) -> [PrototypeLocatedValue] {
         if node["type"] == .string("adaptive") {
@@ -256,8 +257,13 @@ struct PrototypeStrictRepeats {
     mutating func expanded(_ node: [String: JSONValue], path: String, repeatPath: String? = nil) throws {
         let at = repeatPath ?? path
         nodes += 1
-        images += node["type"] == .string("image") ? max(1, imageUses(node["asset"])) : PrototypeStrictBindings
-            .array(node["items"]).reduce(0) { $0 + imageUses($1.objectFields?["image"]) }
+        let nodeImages: Int = switch node["type"] {
+        case .string("image"): max(1, imageUses(node["asset"]))
+        case .string("videoPlayer"): imageUses(node["poster"])
+        default: PrototypeStrictBindings.array(node["items"])
+            .reduce(0) { $0 + imageUses($1.objectFields?["image"]) }
+        }
+        images += nodeImages
         if nodes > PrototypeLimits.maxNodes { throw PrototypeContractValidator.invalid(
             at,
             "Expanded node limit exceeded"
@@ -266,6 +272,10 @@ struct PrototypeStrictRepeats {
         if node["keyframes"] != nil { keyframeNodes += 1 }
         if keyframeNodes > PrototypeContractValidator.limit("MAX_PROTOTYPE_KEYFRAME_NODES") {
             throw PrototypeContractValidator.invalid("\(path).keyframes", "Keyframe node limit exceeded")
+        }
+        if node["type"] == .string("videoPlayer") { videoNodes += 1 }
+        if videoNodes > PrototypeContractValidator.limit("MAX_PROTOTYPE_VIDEO_NODES") {
+            throw PrototypeContractValidator.invalid(path, "Video node limit exceeded")
         }
         effects.add(PrototypeEffectUses(node: node))
         if effects.total > PrototypeContractValidator.limit("MAX_PROTOTYPE_EFFECTS") {

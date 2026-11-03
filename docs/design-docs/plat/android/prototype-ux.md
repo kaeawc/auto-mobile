@@ -2056,6 +2056,11 @@ values, delivered like `connectivity.changed`: the state updates at once, the ev
 state has been quiet for 500 ms, and a flap that settles back on the last delivered values is not an
 event. Unknown keys and events fail validation with a
 path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
+The host mirrors each delivered `<module>.changed` as `platformStatus.<module>` in `prototype status`
+and `inspect` (`values`, the event's device `timestamp`, the host `receivedAt`, and `simulated` for an
+injected event), so an agent can assert the device's last values without observing. A replayed event
+older than the mirrored reading on the device clock does not replace it. Data with a key or value outside the module's
+state table, or cut by the emit budget, is not mirrored and leaves the previous reading.
 
 | Module (capability)                         | Keys                                                                                                                                                                                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2133,7 +2138,11 @@ the capability yet.
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
 Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. No production runtime advertises the module yet.
+runtime. CtrlProxy registers the module on Android and opens each page for its own package with
+`FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
+the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
+handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do
+not advertise it yet.
 
 **Contact and calendar pickers (#14318).** Two modules reach the system pickers, which return only what the
 user picks and need no declared permission. `contacts` (`prototype_platform_contacts_v1`) has
@@ -2216,6 +2225,16 @@ avatar?}` with unique ids. Each email must use a reserved domain (`example.test`
 `.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
 `sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
 validation. No production runtime advertises the module yet.
+`prototypeAuthSession.ts` is the session reference both runtimes copy. A sign-in writes the account to `into`
+(default `/data/session`) and then saves `{token, userId, expiresAtMs}` in the prototype's secure store. The
+token is an opaque `fake-<IdGenerator id>`, and the TTL is `sessionTtlSeconds`, default 3600. An account the
+block does not list, a `/data` write that fails or a store write that fails is `platform_error` and changes
+nothing. `cancelled` and `unavailable` keep their codes, any other code becomes `platform_error`, and a
+failed sign-in keeps the previous session. `auth.signOut` clears the store and removes `into`.
+`auth.sessionExpired` clears the store and leaves `/data` to the `platform.on` handlers. At launch, a session
+that is still valid for a listed account restores `/platform/auth`; any other is cleared. A session past its
+TTL is reported as expired, so the runtime raises `auth.sessionExpired`. The token appears in no result,
+`/data` value or `/platform` key, and a store error is reported by its name only.
 
 **Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
 `location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole
@@ -2263,6 +2282,20 @@ three-letter `currency`. Only a subscription may have a `period` or `trialPeriod
 whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, gateway, key, card or URL field.
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 `commerce.checkout` is not in the contract, and no production runtime advertises the module.
+
+The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin `PrototypePurchaseOutcome`
+copies it, and both replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
+`gracePeriod` or `billingRetry`, and a consumable never holds one. `lastTransaction` is
+`{transactionId, productId, status}`, or null. Buying a product that is `active` or in `gracePeriod` fails
+with `alreadyOwned`, whatever outcome was queued; a product in `billingRetry` can be bought again. A product
+the catalog does not list is `platform_error` with reason `unavailable`. A failed purchase leaves the state
+untouched. A code other than `cancelled`, `alreadyOwned` or `platform_error` becomes `platform_error`, and only
+`platform_error` keeps a reason: `network`, `declined` or `unavailable`. Every result is recorded as
+`lastTransaction`, but only `purchased` grants the entitlement. A `deferred` or `pending` transaction is
+resolved later: `approved` grants the entitlement and `declined` records `declined`. Simulated
+`entitlementsChanged` events work on a subscription the user holds. `renew` sets it `active`, and
+`gracePeriod` and `billingRetry` set those states. `expire` and `refund` remove an entitlement and also apply to
+a non-consumable. `commerce.entitlementsChanged` is raised only when the entitlements actually change.
 
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
@@ -2380,6 +2413,9 @@ one-key union), which is a node-scoped player released when the node leaves comp
   position into; a slider bound to it holds device writes while it is dragged and seeks on release.
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
+- At most `MAX_PROTOTYPE_VIDEO_NODES` (64) `videoPlayer` nodes, counted in the authored tree and
+  again after repeat expansion, so every repeat instance counts. A `poster` costs one image against
+  `MAX_PROTOTYPE_IMAGES` in both counts.
 
 **Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
 `{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`
@@ -3014,6 +3050,17 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
   `{path, method?, status, every | rate}` fires on every nth matching request or with probability
   `rate`, answering `{error: "mock fault"}`.
 - Every answered request is logged (latest 200, with a sequence number) for assertions.
+- **Actors** (at most 16, each with 1–64 steps) write to collections on the backend's injected
+  timer. One fires after a successful (status below 400) request matching `on.route` (`"POST
+  /path/:id"`), or runs `maxRuns` times every `every` ms (100 ms or more; run k starts at
+  `afterMs + k * every`). Its steps run in order: `append`, `update` and `remove` go through the
+  same collection code as `POST`, `PATCH` and `DELETE` (ids, 409, 413 and the size budget apply), and
+  each step's `afterMs` is relative to the previous step. `value` and `id` bind the triggering
+  request's placeholders. A failing step is logged and skipped. A backend holds at most 256
+  scheduled steps; a trigger past that is dropped and logged. Redefining, clearing or ending the
+  session cancels every pending step. `publish`, `advance` and `notify` are refused at definition
+  until mock channels, polylines and simulated push exist, and actors follow the daemon's timer,
+  not the device clock that `prototype simulate` advances.
 
 The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
 {backendId, backend}` validates the definition and replaces the backend of that id (a failed
@@ -4135,12 +4182,19 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   work: launcher dialogs differ).
 - A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
   `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
-  screen. If it is missing, it resolves the default launcher (`cmd package resolve-activity`), and
-  when that package is a known launcher runs `am force-stop` plus a HOME intent once, waits for the
-  launcher's tree to go quiet, and looks again. The result reports `launcherRestarted` and
-  `shortcutVisible`; an unknown launcher is left alone with a warning. It is on by default on
-  emulators and physical devices; `restartLauncher:false` opts out. It never runs on a pending pin
-  (no shortcut exists yet) and runs at most once per call.
+  screen, swiping through the following workspace pages (Pixel Launcher puts a new pin on page 2)
+  until the label appears, a page repeats, or ten pages are checked. If it is missing, it resolves
+  the default launcher (`cmd package resolve-activity`), and when that package is a known launcher
+  runs `am force-stop` plus a HOME intent once, waits for the launcher's tree to go quiet, and scans
+  again from the reset page. The result reports `launcherRestarted` and `shortcutVisible`; an
+  unknown launcher is left alone with a warning. It is on by default on emulators and physical
+  devices; `restartLauncher:false` opts out. It never runs on a pending pin (no shortcut exists
+  yet) and runs at most once per call.
+- Guards: the save is a control call, so the device-ownership layer refuses it on a device another
+  session, daemon or binding holds. The check never swipes or restarts when the foreground app is
+  not a launcher; it reports the shortcut unconfirmed instead. In-process saves take a per-device
+  ownership; a second concurrent save only checks the current page and never swipes or restarts
+  under the first.
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. With the screen off,
   `requestPinShortcut` throws `IllegalStateException` and the call reports `device_locked`; the save
   remains and a retry is safe. An awake device showing the keyguard accepts the request, and the

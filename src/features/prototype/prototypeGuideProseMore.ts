@@ -48,6 +48,14 @@ sent, replacing backends of the same id, and a saved prototype does not carry th
 - **Latency and faults** replay identically for the same \`seed\`: \`latencyMs {min,max}\` delays every
   answer, and a fault \`{path, method?, status, every | rate}\` fails every nth matching request or
   that fraction of them with \`{error:"mock fault"}\`.
+- **Actors** play the other side (at most 16, each up to 64 steps). An actor fires on a matching
+  successful request (\`on: {route: "POST /messages/:id"}\`) or every N ms (\`every\` with \`maxRuns\`),
+  after an optional \`afterMs\` lead, and runs \`do\` in order: \`{append: collection, value}\`,
+  \`{update: collection, id, value}\` (merge), \`{remove: collection, id}\`, each with an optional
+  \`afterMs\` after the previous step. \`value\` and \`id\` bind \`{params.x}\`, \`{query.x}\` and
+  \`{body:/pointer}\` from the triggering request. A failed step is skipped and the run goes on;
+  redefining or clearing the backend cancels pending steps. Poll the collection to see the result.
+  \`publish\`, \`advance\` and \`notify\` steps are not supported yet.
 - A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
   with \`too_large\`.
 
@@ -336,3 +344,43 @@ passive, default and high to active; optional \`description\` and \`showBadge\`)
   \`"/actionId"\`, \`"/reply"\` and \`"/data"\` there.
 - \`/platform/notifications/channels/<id>/blocked\` is true when the user turned a declared channel
   off; a post to it fails with \`unavailable\`. A read of an undeclared channel fails validation.`;
+
+export const GUIDE_MEDIA_ACTIONS = `### Media actions
+
+\`mediaLibrary.pick\` opens the system photo picker and \`camera.capture\` opens the system camera.
+Neither needs \`requires.permissions\`. Declare the module in \`requires.platform\`. A pick needs
+\`prototype_platform_mediaLibrary_v1\`. A capture needs \`prototype_platform_camera_v1\` and
+\`prototype_platform_camera_capture_v1\`. An iOS Simulator has the picker but no system camera, so
+it advertises \`mediaLibrary\` without the capture capability.
+
+- \`pick\` takes \`media\` (\`images\`, \`videos\` or \`imagesAndVideos\`) and optional \`maxItems\` (1 to 64,
+  default 1). With \`maxItems\` 1, \`into\` receives one media item. With more, it receives an array.
+  Android clamps \`maxItems\` to the system picker's limit.
+- \`capture\` takes \`media\` (\`image\` or \`video\`) and optional \`maxDurationMs\` (1 to 600000, video only).
+- A media item is \`{asset: "media:…", kind, mimeType, width?, height?, durationMs?, bytes, source,
+  createdAt, thumbnail?}\`; \`source\` is \`library\` for a pick and \`camera\` for a capture. Bind it to an image with \`{data: "/pointer"}\`; that needs
+  \`prototype_platform_media_items_v1\`.
+- Cancelling leaves \`into\` untouched and runs \`onError\` with \`cancelled\`. A device without a camera
+  fails with \`unavailable\` (detail \`missing_usage_description\` when the iOS plist key is missing), and
+  storage failures are \`platform_error\` (detail \`media_limit\` or \`io\`). Only one system-UI call can run
+  per prototype at a time; a second fails with \`too_many_in_flight\`.
+- Current runtimes advertise neither module, so the host refuses such a spec before show.
+  \`platformMode\` and simulated outcomes through \`prototype simulate\` are not accepted yet.
+
+\`\`\`json
+{
+  "id": "photo-draft",
+  "window": {"placement": {"type": "fullscreen"}},
+  "state": {"pickStatus": "idle", "camStatus": "idle"},
+  "data": {"draft": {}},
+  "requires": {"platform": ["mediaLibrary", "camera"]},
+  "root": {
+    "type": "column",
+    "children": [
+      {"type": "text", "text": "Picker: {pickStatus}, camera: {camStatus}"},
+      {"type": "button", "label": "Choose photos", "onTap": [{"type": "platform", "call": "mediaLibrary.pick", "args": {"media": {"value": "imagesAndVideos"}, "maxItems": {"value": 4}}, "into": "/data/draft/picked", "statusKey": "pickStatus"}]},
+      {"type": "button", "label": "Take photo", "onTap": [{"type": "platform", "call": "camera.capture", "args": {"media": {"value": "image"}}, "into": "/data/draft/photo", "statusKey": "camStatus"}]}
+    ]
+  }
+}
+\`\`\``;

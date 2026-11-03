@@ -1,0 +1,77 @@
+{
+  "name": "A tapped Confirm purchases a subscription and grants it",
+  "products": [
+    {
+      "id": "pro_monthly",
+      "kind": "subscription"
+    },
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    },
+    {
+      "id": "coins_100",
+      "kind": "consumable"
+    }
+  ],
+  "state": {
+    "entitlements": {},
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "t1"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "into": {
+          "status": "purchased",
+          "transactionId": "t1"
+        },
+        "entitlementsChanged": true
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "t2"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "error": {
+          "code": "alreadyOwned",
+          "message": "pro_monthly is already owned"
+        },
+        "entitlementsChanged": false
+      }
+    }
+  ]
+}

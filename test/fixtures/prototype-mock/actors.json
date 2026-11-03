@@ -1,0 +1,145 @@
+{
+  "description": "Mock actor timelines (#14211) under a fake clock: each step sends a request, advances the clock, or expects collection contents.",
+  "cases": [
+    {
+      "name": "a posted message gets a typed reply after its delays",
+      "definition": {
+        "collections": { "messages": [], "typing": [] },
+        "actors": [
+          {
+            "on": { "route": "POST /messages" },
+            "afterMs": 800,
+            "do": [
+              { "append": "typing", "value": { "id": "bo", "channel": "{body:/channel}" } },
+              { "afterMs": 1500, "remove": "typing", "id": "bo" },
+              {
+                "append": "messages",
+                "value": { "user": "bo", "text": "On it!", "replyTo": "{body:/text}" }
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "request": {
+            "method": "POST",
+            "path": "/messages",
+            "body": { "id": 1, "user": "me", "text": "ship it?", "channel": "general" }
+          },
+          "status": 201
+        },
+        { "advanceMs": 799 },
+        { "expect": { "typing": [] } },
+        { "advanceMs": 1 },
+        { "expect": { "typing": [{ "id": "bo", "channel": "general" }] } },
+        { "advanceMs": 1499 },
+        { "expect": { "typing": [{ "id": "bo", "channel": "general" }] } },
+        { "advanceMs": 1 },
+        {
+          "expect": {
+            "typing": [],
+            "messages": [
+              { "id": 1, "user": "me", "text": "ship it?", "channel": "general" },
+              { "user": "bo", "text": "On it!", "replyTo": "ship it?", "id": "fake-1" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "route params bind into an update",
+      "definition": {
+        "collections": { "orders": [{ "id": 7, "status": "placed" }] },
+        "actors": [
+          {
+            "on": { "route": "POST /orders/:id/confirm" },
+            "do": [
+              { "update": "orders", "id": "{params.id}", "value": { "status": "preparing" } },
+              {
+                "afterMs": 1000,
+                "update": "orders",
+                "id": "{params.id}",
+                "value": { "status": "out for delivery" }
+              }
+            ]
+          }
+        ],
+        "routes": [{ "method": "POST", "path": "/orders/:id/confirm", "status": 202 }]
+      },
+      "steps": [
+        { "request": { "method": "POST", "path": "/orders/7/confirm" }, "status": 202 },
+        { "expect": { "orders": [{ "id": 7, "status": "preparing" }] } },
+        { "advanceMs": 1000 },
+        { "expect": { "orders": [{ "id": 7, "status": "out for delivery" }] } }
+      ]
+    },
+    {
+      "name": "a failed request triggers nothing",
+      "definition": {
+        "collections": { "messages": [{ "id": 1, "text": "hi" }], "log": [] },
+        "actors": [
+          {
+            "on": { "route": "POST /messages" },
+            "do": [{ "append": "log", "value": { "seen": true } }]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "request": { "method": "POST", "path": "/messages", "body": { "id": 1, "text": "dup" } },
+          "status": 409
+        },
+        { "advanceMs": 10000 },
+        { "expect": { "log": [] } }
+      ]
+    },
+    {
+      "name": "every runs maxRuns times after its lead",
+      "definition": {
+        "collections": { "ticks": [] },
+        "actors": [
+          {
+            "every": 1000,
+            "maxRuns": 3,
+            "afterMs": 500,
+            "do": [{ "append": "ticks", "value": { "at": "tick" } }]
+          }
+        ]
+      },
+      "steps": [
+        { "advanceMs": 1499 },
+        { "expect": { "ticks": [] } },
+        { "advanceMs": 1 },
+        { "expect": { "ticks": [{ "at": "tick", "id": "fake-1" }] } },
+        { "advanceMs": 10000 },
+        {
+          "expect": {
+            "ticks": [
+              { "at": "tick", "id": "fake-1" },
+              { "at": "tick", "id": "fake-2" },
+              { "at": "tick", "id": "fake-3" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a step that fails does not stop the run",
+      "definition": {
+        "collections": { "items": [] },
+        "actors": [
+          {
+            "every": 100,
+            "maxRuns": 1,
+            "do": [
+              { "remove": "items", "id": "missing" },
+              { "append": "items", "value": { "id": "a" } }
+            ]
+          }
+        ]
+      },
+      "steps": [{ "advanceMs": 100 }, { "expect": { "items": [{ "id": "a" }] } }]
+    }
+  ]
+}

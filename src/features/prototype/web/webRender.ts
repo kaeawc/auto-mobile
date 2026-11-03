@@ -28,6 +28,7 @@ import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webSheetLayers } from "./webSheet";
 import { webSkins, type WebSkinId } from "./webSkin";
+import { iosCardChrome } from "./webSkinIos";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
@@ -813,11 +814,14 @@ const card: NodeRenderer = (raw, scope, path) => {
     // Material's ColumnScope keeps wrap-sized content at its own width.
     "align-items": "flex-start",
     "border-radius": "12px",
-    ...roleCss(
-      scope,
-      node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
-      "onSurface",
-    ),
+    // The container is a skin metric; the layout is shared.
+    ...(scope.skin === "ios"
+      ? iosCardChrome(node.variant, scope)
+      : roleCss(
+          scope,
+          node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
+          "onSurface",
+        )),
   });
   const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
   return el("div", { attrs, style }, children(node, inner, path));

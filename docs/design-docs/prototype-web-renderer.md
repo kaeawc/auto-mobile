@@ -305,8 +305,9 @@ the host, so the page's script only switches between views it was given and neve
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
   `skin` option overrides it. A skin replaces the renderers of the components its platform draws
-  natively (`designCoverage` `native` in `schemas/prototype-spec-contract.json`); every other
-  component draws the shared Material 3 renderer on both. A node's `ios` namespace is read only in
+  natively (`designCoverage` `native` in `schemas/prototype-spec-contract.json`), and those of the
+  Material components the iOS renderer draws with SwiftUI defaults; every other component draws
+  the shared Material 3 renderer on both. A node's `ios` namespace is read only in
   the iOS skin and its `android` namespace only in the Android one. The Android skin replaces
   nothing. The iOS skin draws `button` as the iOS renderer's SwiftUI styles at the regular control
   size in the 17 px body style, tinted with the theme's `primary`: `filled` is a 6 px-radius tint fill
@@ -316,7 +317,20 @@ the host, so the page's script only switches between views it was given and neve
   capsule, without blur. Its `slider` is the system slider: its label 4 px above a 28 px row whose
   4 px track is systemBlue up to the value and systemFill after it, under a white 28 px thumb whose
   centre travels 14 px inside each end; the value is its state, else `min`, clamped and not
-  snapped. `timePicker`, `datePicker` and `pasteButton` are still placeholders on both skins.
+  snapped. Its Material components follow the iOS renderer's SwiftUI views (text sizes are the
+  default Dynamic Type sizes: body 17, subheadline 15, `.title3` 20, `.title` 28, `.largeTitle`
+  34 px): `switch` is a body label filling a 44 px row before a 51x31 capsule track (`primary` on,
+  `surfaceContainerHighest` off) with a 27 px thumb; `checkbox` is a 17 px check square, filled
+  when checked, 8 px before its label; `listItem` has a body headline over a subheadline
+  `onSurfaceVariant` supporting line, 56 px tall or 72 px with one, and that switch track or check
+  square as its trailing control; `chip` is 32 px with 12 px padding in the medium subheadline style
+  and the content colour, in a 44 px target; `topAppBar` is a 64 px row padded 4 px with 48 px icon
+  buttons and a `.title3` semibold title (12 px in, 4 px after a navigation icon), or a `.title`
+  (medium) or `.largeTitle` (large) line below the row; `card` is `surfaceContainerHigh` when
+  filled, else `surface`, with an `outlineVariant` outline when outlined. Like the iOS renderer,
+  the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField`, `bottomNav`, `tabBar`
+  and `bottomSheet` still draw the shared renderer. `timePicker`, `datePicker` and `pasteButton`
+  are still placeholders on both skins.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
   navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to

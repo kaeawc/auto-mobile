@@ -2,6 +2,13 @@ import { record, type Raw } from "../prototypeTemplate";
 import { defaultFillAxes, filling } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
+import {
+  iosChipRenderer,
+  iosListItemRenderer,
+  iosText,
+  iosToggleRenderer,
+  iosTopAppBarRenderer,
+} from "./webSkinIos";
 import { cssColor, rgbaCss } from "./webStyle";
 
 /**
@@ -28,7 +35,7 @@ export function skinNamespace(node: Raw, scope: WebRenderScope): Raw | undefined
 }
 
 /** SwiftUI's body text style: 17 pt on a 22 pt line. */
-const IOS_BODY: Css = { "font-size": "17px", "line-height": "22px", "font-weight": "400" };
+const IOS_BODY: Css = iosText("body");
 
 /** UIKit's systemBlue, the accent a SwiftUI Slider takes when nothing tints it. */
 function systemBlue(scope: WebRenderScope): string {
@@ -210,7 +217,15 @@ export function webSkins(kit: WebRenderKit): Readonly<Record<WebSkinId, WebSkin>
     android: { id: "android", renderers: {} },
     ios: {
       id: "ios",
-      renderers: { button: iosButtonRenderer(kit), slider: iosSliderRenderer(kit) },
+      renderers: {
+        button: iosButtonRenderer(kit),
+        slider: iosSliderRenderer(kit),
+        switch: iosToggleRenderer("switch", kit),
+        checkbox: iosToggleRenderer("checkbox", kit),
+        listItem: iosListItemRenderer(kit),
+        chip: iosChipRenderer(kit),
+        topAppBar: iosTopAppBarRenderer(kit),
+      },
     },
   };
 }

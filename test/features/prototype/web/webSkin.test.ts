@@ -161,9 +161,174 @@ describe("platform skins (#16531)", () => {
   });
 
   test("components the iOS skin leaves out draw as Material on both skins", () => {
-    const chip = { type: "chip", label: "Tag", testTag: "c" };
-    expect(rendered([chip], { skin: "ios" }, "c")).toEqual(
-      rendered([chip], { skin: "android" }, "c"),
+    const field = { type: "textField", label: "Name", stateKey: "n", testTag: "c" };
+    expect(rendered([field], { skin: "ios" }, "c")).toEqual(
+      rendered([field], { skin: "android" }, "c"),
     );
+  });
+});
+
+describe("iOS skin defaults for the Material components (#16599)", () => {
+  const ios: PrototypeStillOptions = { skin: "ios" };
+
+  test("a switch is the iOS renderer's 51x31 track after a body label that fills the row", () => {
+    const on = rendered(
+      [{ type: "switch", label: "Wi-Fi", stateKey: "w", testTag: "t" }],
+      ios,
+      "t",
+      {
+        w: true,
+      },
+    );
+    expect(on.attrs).toMatchObject({ role: "switch", "aria-checked": "true" });
+    expect(on.style).toMatchObject({ "min-height": "44px", gap: "8px", "font-size": "17px" });
+    expect(on.children[0]).toMatchObject({ style: { flex: "1 1 auto" } });
+    expect(part(on, "track").style).toMatchObject({
+      width: "51px",
+      height: "31px",
+      "justify-content": "flex-end",
+      "background-color": "rgba(51,102,153,1)",
+    });
+    expect(part(on, "thumb").style).toMatchObject({ width: "27px", height: "27px" });
+    const off = rendered([{ type: "switch", stateKey: "w", testTag: "t" }], ios, "t");
+    expect(part(off, "track").style["justify-content"]).toBe("flex-start");
+    expect(part(off, "track").style["background-color"]).not.toBe("rgba(51,102,153,1)");
+  });
+
+  test("a checkbox is a check square 8 pt before its label, filled when checked", () => {
+    const box = (state: Record<string, unknown>) =>
+      rendered(
+        [{ type: "checkbox", label: "Agree", stateKey: "a", testTag: "x" }],
+        ios,
+        "x",
+        state,
+      );
+    const checked = box({ a: true });
+    expect(checked.attrs).toMatchObject({ role: "checkbox", "aria-checked": "true" });
+    expect(checked.style).toMatchObject({ gap: "8px", "min-height": "44px" });
+    expect(checked.children[0]).toBe(part(checked, "box"));
+    expect(textOf(checked)).toBe("Agree");
+    expect(part(checked, "box").style["background-color"]).toBe("currentColor");
+    expect(part(box({}), "box").style["background-color"]).toBeUndefined();
+  });
+
+  test("a list row uses body and subheadline text and grows to 72 pt with a supporting line", () => {
+    const row = (extra: Record<string, unknown>) =>
+      rendered([{ type: "listItem", headline: "Inbox", testTag: "l", ...extra }], ios, "l");
+    expect(row({}).style["min-height"]).toBe("56px");
+    const two = row({ supporting: "3 unread", trailing: { type: "switch", stateKey: "s" } });
+    expect(two.style["min-height"]).toBe("72px");
+    const texts = two.children[0] as WebElement;
+    expect(texts.style.gap).toBe("2px");
+    expect((texts.children[0] as WebElement).style["font-size"]).toBe("17px");
+    expect((texts.children[1] as WebElement).style).toMatchObject({
+      "font-size": "15px",
+      color: "rgba(73,69,79,1)",
+    });
+    expect(part(two, "track").style.width).toBe("51px");
+    const checked = row({ trailing: { type: "checkbox", stateKey: "c" } });
+    expect(part(checked, "box")).toBeDefined();
+  });
+
+  test("a chip is padded 12 pt in the medium subheadline style inside a 44 pt target", () => {
+    const chip = (state: Record<string, unknown>) =>
+      rendered([{ type: "chip", label: "Tag", stateKey: "f", testTag: "c" }], ios, "c", state);
+    const plain = chip({});
+    expect(plain.style["min-height"]).toBe("44px");
+    expect(part(plain, "chip").style).toMatchObject({
+      height: "32px",
+      "padding-inline": "12px",
+      "font-size": "15px",
+      "font-weight": "500",
+      "border-radius": "8px",
+    });
+    expect(part(plain, "chip").style.border).not.toContain("transparent");
+    const selected = part(chip({ f: true }), "chip");
+    expect(selected.style).toMatchObject({
+      "padding-inline": "12px",
+      border: "1px solid transparent",
+    });
+    expect(selected.style["background-color"]).toBeDefined();
+    expect(selected.children).toHaveLength(2);
+  });
+
+  test("a small top app bar leads with a .title3 semibold title in a 64 pt row of 48 pt buttons", () => {
+    const bar = rendered(
+      [
+        {
+          type: "topAppBar",
+          title: "Mail",
+          navigationIcon: { icon: "arrow_back", label: "Back" },
+          actions: [{ icon: "search", label: "Search" }],
+          ios: { navigationTitle: "inline" },
+          testTag: "a",
+        },
+      ],
+      ios,
+      "a",
+    );
+    const row = bar.children[0] as WebElement;
+    expect(row.style).toMatchObject({ "min-height": "64px", "padding-inline": "4px" });
+    const [back, title, search] = row.children as WebElement[];
+    expect(back!.style).toMatchObject({ width: "48px", height: "48px" });
+    expect(back!.attrs["aria-label"]).toBe("Back");
+    expect(title!.style).toMatchObject({
+      "font-size": "20px",
+      "font-weight": "600",
+      "padding-inline-start": "4px",
+    });
+    expect(search!.attrs["aria-label"]).toBe("Search");
+    // The iOS renderer draws its own bar, so ios.navigationTitle changes nothing.
+    const plain = rendered(
+      [
+        {
+          type: "topAppBar",
+          title: "Mail",
+          navigationIcon: { icon: "arrow_back", label: "Back" },
+          actions: [{ icon: "search", label: "Search" }],
+          testTag: "a",
+        },
+      ],
+      ios,
+      "a",
+    );
+    expect(bar).toEqual(plain);
+  });
+
+  test("medium and large bars put a .title or .largeTitle line below the row", () => {
+    const bar = (variant: string) =>
+      rendered([{ type: "topAppBar", title: "Mail", variant, testTag: "a" }], ios, "a");
+    const large = bar("large").children[1] as WebElement;
+    expect(large.style).toMatchObject({ "font-size": "34px", padding: "0 16px 28px" });
+    const medium = bar("medium").children[1] as WebElement;
+    expect(medium.style).toMatchObject({ "font-size": "28px", padding: "0 16px 20px" });
+    const centred = bar("centerAligned").children[0] as WebElement;
+    expect((centred.children[0] as WebElement).style).toMatchObject({
+      position: "absolute",
+      "padding-inline": "56px",
+      "text-align": "center",
+    });
+    expect(bar("small").children).toHaveLength(1);
+  });
+
+  test("a card takes the iOS renderer's container: surfaceContainerHigh, outline and shadow", () => {
+    const card = (variant?: string) =>
+      rendered(
+        [{ type: "card", testTag: "k", ...(variant ? { variant } : {}), children: [] }],
+        ios,
+        "k",
+      );
+    const android = rendered([{ type: "card", testTag: "k", children: [] }], {}, "k");
+    expect(card().style["background-color"]).toBe("rgba(236,230,240,1)");
+    expect(card().style["background-color"]).not.toBe(android.style["background-color"]);
+    expect(card("outlined").style.border).toBe("1px solid rgba(202,196,208,1)");
+    expect(card("elevated").style["box-shadow"]).toBe("0 1px 2px rgba(0,0,0,0.2)");
+    expect(card("elevated").style.border).toBeUndefined();
+    const authored = rendered(
+      [{ type: "card", testTag: "k", style: { background: "#ff0000" }, children: [] }],
+      ios,
+      "k",
+    );
+    expect(authored.style["background-color"]).toBe("rgba(255,0,0,1)");
   });
 });

@@ -25,7 +25,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { asMcpConnection, withForwardedConnection } from "../helpers/mcpConnection";
+import { asMcpConnection, withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -166,12 +166,11 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     };
     manager.setDeviceImages("android", [image, other]);
     manager.setMockChildProcess(other.name, null);
-    // `__mcpSessionId` stays in-band and is also the call's ambient connection, as at MCP
-    // ingress (#15663).
+    // `__mcpSessionId` becomes the call's ambient connection, as at MCP ingress (#15663).
     const start = (args: Record<string, unknown>, routingSessionUuid?: string) =>
-      withForwardedConnection(args, (forwarded) =>
+      withWireConnection(args, (wire) =>
         runWithToolSelectionContext({ routingSessionUuid }, () =>
-          ToolRegistry.getTool("getAndroid")!.handler(forwarded),
+          ToolRegistry.getTool("getAndroid")!.handler(wire),
         ),
       );
     return { timer, manager, sessions, persistence, pool, internals, device, image, other, start };
@@ -249,10 +248,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     await f.pool.refreshDevices();
     expect(
       await asMcpConnection(CONNECTION, () =>
-        restartResumeSessionForDevice(
-          { platform: "android", __mcpSessionId: CONNECTION },
-          f.device,
-        ),
+        restartResumeSessionForDevice({ platform: "android" }, f.device),
       ),
     ).toBe(HOLDER);
   });
@@ -280,10 +276,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     managed = true;
     expect(
       await asMcpConnection(CONNECTION, () =>
-        restartResumeSessionForDevice(
-          { platform: "android", __mcpSessionId: CONNECTION },
-          f.device,
-        ),
+        restartResumeSessionForDevice({ platform: "android" }, f.device),
       ),
     ).toBeUndefined();
     expect(f.internals.rehydrationReservations.get(HOLDER)?.restartHandoff).toBe(true);

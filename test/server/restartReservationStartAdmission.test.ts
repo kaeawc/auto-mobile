@@ -37,7 +37,7 @@ import {
   settleByFakeEvents,
 } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
-import { withForwardedConnection } from "../helpers/mcpConnection";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateEmptyToolRegistry();
 
@@ -234,10 +234,10 @@ describe("start admission and owner resume for restart reservations", () => {
     manager.clearHistory();
     autolockWrites.length = 0;
     // In-band deadline keys become the ambient request deadline, and `__mcpSessionId` the call's
-    // ambient connection while staying in-band, as at MCP ingress (#15663).
+    // ambient connection, as at MCP ingress (#15663).
     const call = (name: string, args: Record<string, unknown>, routingSessionUuid?: string) =>
-      withForwardedConnection(args, (forwarded) =>
-        withWireDeadline(forwarded, (rest) =>
+      withWireConnection(args, (wire) =>
+        withWireDeadline(wire, (rest) =>
           runWithToolSelectionContext({ routingSessionUuid }, () =>
             ToolRegistry.getTool(name)!.handler(rest),
           ),
@@ -606,11 +606,9 @@ describe("start admission and owner resume for restart reservations", () => {
     await expect(
       settleByFakeEvents(
         f.timer,
-        runWithToolSelectionContext({ routingSessionUuid: HOLDER }, () =>
-          ToolRegistry.getTool("getAndroid")!.handler(
-            { avdName: f.device.name, __mcpSessionId: CONNECTION },
-            undefined,
-            controller.signal,
+        withWireConnection({ avdName: f.device.name, __mcpSessionId: CONNECTION }, (wire) =>
+          runWithToolSelectionContext({ routingSessionUuid: HOLDER }, () =>
+            ToolRegistry.getTool("getAndroid")!.handler(wire, undefined, controller.signal),
           ),
         ),
         { description: "cancelled owner resume" },

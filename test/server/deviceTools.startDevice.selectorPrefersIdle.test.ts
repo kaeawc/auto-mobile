@@ -21,6 +21,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -87,7 +88,10 @@ describe("selector startDevice among held and idle matching devices", () => {
   }
 
   async function startDevice(args: Record<string, unknown>): Promise<any> {
-    const result = await ToolRegistry.getTool("startDevice")!.handler(args);
+    // Run as MCP ingress does: under the connection the in-band key names (#15663).
+    const result = await withWireConnection(args, (wireArgs) =>
+      ToolRegistry.getTool("startDevice")!.handler(wireArgs),
+    );
     return toolJson(result);
   }
 

@@ -30,18 +30,3 @@ export function withWireConnection<A extends Record<string, unknown>, T>(
     fn(rest),
   );
 }
-
-/**
- * Call `fn` with `args` unchanged under the connection their `__mcpSessionId` names. MCP ingress
- * still writes the key in-band too (#15663), so a handler not yet moved off it (startDevice,
- * provisioning and acquisition forwarders) sees the connection both ways, as in production.
- */
-export function withForwardedConnection<A extends Record<string, unknown>, T>(
-  args: A,
-  fn: (args: A) => T | Promise<T>,
-): Promise<T> {
-  const connectionId = args.__mcpSessionId;
-  return asMcpConnection(typeof connectionId === "string" ? connectionId : undefined, () =>
-    fn(args),
-  );
-}

@@ -21,6 +21,8 @@ import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/vir
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { asMcpConnection } from "../helpers/mcpConnection";
+import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
 
 const metadata = Object.freeze({
   ...Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true])),
@@ -196,9 +198,11 @@ describe("handler internal metadata regression guard", () => {
         lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
       });
       const calls: unknown[] = [];
+      const bootConnections: (string | undefined)[] = [];
       const handlers = createAcquisitionHandlers({
         bootAndPrepareDevice: async (args) => {
           calls.push(args);
+          bootConnections.push(currentAutolockMcpSessionId());
           throw new ActionableError("fake device boundary");
         },
       });
@@ -207,18 +211,23 @@ describe("handler internal metadata regression guard", () => {
         ...metadata,
       });
       const acquire = name === "getAndroid" ? handlers.getAndroidHandler : handlers.getAppleHandler;
-      await expect(acquire(args)).rejects.toThrow("fake device boundary");
+      // Ingress runs the call under the connection the in-band key names (#15663).
+      await expect(asMcpConnection("session", () => acquire(args))).rejects.toThrow(
+        "fake device boundary",
+      );
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         platform: name === "getAndroid" ? "android" : "ios",
-        __mcpSessionId: "session",
         presentationOrder: "reverse",
       });
+      // The rebuilt boot args no longer forward the key; the boot sees the ambient connection.
+      expect(calls[0]).not.toHaveProperty("__mcpSessionId");
+      expect(bootConnections).toEqual(["session"]);
       expect(args).toMatchObject(metadata);
     },
   );
 
-  test("startDevice accepts full metadata and retains the session before stripping", async () => {
+  test("startDevice accepts full metadata and prepares under the ambient session", async () => {
     setDeviceToolsDependencies({ timer: new FakeTimer() });
     const acquisition = createAcquisitionHandlers({
       bootAndPrepareDevice: async () => {
@@ -226,6 +235,7 @@ describe("handler internal metadata regression guard", () => {
       },
     });
     const calls: unknown[] = [];
+    const prepareConnections: (string | undefined)[] = [];
     const handlers = createStartDeviceHandlers({
       stripInternalAcquisitionParams: (args) => {
         const external = acquisition.stripInternalAcquisitionParams(args);
@@ -234,22 +244,25 @@ describe("handler internal metadata regression guard", () => {
       },
       prepareDevice: async (args) => {
         calls.push(args);
+        prepareConnections.push(currentAutolockMcpSessionId());
         return createStructuredToolResponse({ message: "fake preparation" });
       },
     });
     const args = Object.freeze({ platform: "android" as const, avdName: "Fold", ...metadata });
-    await handlers.startDeviceHandler(args);
+    await asMcpConnection("session", () => handlers.startDeviceHandler(args));
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       platform: "android",
       name: "Fold",
       matchExactName: true,
-      __mcpSessionId: "session",
     });
+    // The rebuilt args no longer forward the key; preparation sees the ambient connection.
+    expect(calls[0]).not.toHaveProperty("__mcpSessionId");
+    expect(prepareConnections).toEqual(["session"]);
     expect(args).toMatchObject(metadata);
   });
 
-  test("provisionDevice argument seam strips full metadata, keeps session/CLI marker, takes the request's deadline", () => {
+  test("provisionDevice argument seam strips full metadata and the in-band session, keeps the CLI marker, takes the request's deadline", () => {
     const args = Object.freeze({
       device: {
         platform: "ios" as const,
@@ -267,13 +280,14 @@ describe("handler internal metadata regression guard", () => {
         device: args.device,
         boot: true,
         readiness: "automation",
-        __mcpSessionId: "session",
-        // The one-shot CLI marker is preserved like the connection identity (#11096).
+        // The connection identity is ambient, not carried in the parsed args (#15663); the
+        // one-shot CLI marker is still preserved (#11096).
         __oneShotCli: true,
         transportDeadlineMs: 90_000,
         liveDeadlineKey: "live",
       },
     );
+    expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("__mcpSessionId");
     expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("transportDeadlineMs");
     expect(args).toMatchObject(metadata);
   });

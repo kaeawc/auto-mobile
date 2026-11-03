@@ -314,7 +314,7 @@ describe("prototype web map (#16539)", () => {
     // The horizon sits eye·cot(tilt) above the centre: past the top of any box up to the screen.
     expect(eye / Math.tan((60 * Math.PI) / 180)).toBeGreaterThan(SCREEN.height / 2);
     // The ground's reach covers the whole screen-sized box at that eye.
-    const side = parseInt(/^max\((\d+)px/.exec(String(map.part("ground")[0]!.style.width))![1]!);
+    const side = Number(/^max\((\d+)px/.exec(String(map.part("ground")[0]!.style.width))![1]!);
     expect(side / 2).toBeGreaterThanOrEqual(groundReach(SCREEN, 60));
   });
 

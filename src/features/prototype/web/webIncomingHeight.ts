@@ -128,8 +128,21 @@ function withHeight(entry: unknown, height: number | undefined, exact = false): 
   return { ...node, style };
 }
 
-/** Whether a column hands this resolved child an exact allocation: its weight share. */
-const exactIn = (prepared: Raw | undefined) => weightOf(prepared) !== undefined;
+/**
+ * Which resolved column children get their incoming height as an exact allocation: the weighted
+ * ones, but only when every visible unweighted sibling has a dp height. A sibling that wraps its
+ * content or fills (CSS shares a `fill` child's height with the weights) is only known at layout
+ * time, so the weight share is an upper bound and stays a max.
+ */
+function exactShares(prepared: readonly (Raw | undefined)[]): boolean[] {
+  const known = prepared.every(
+    (node) =>
+      !node ||
+      weightOf(node) !== undefined ||
+      typeof record(record(node.style)?.height)?.dp === "number",
+  );
+  return prepared.map((node) => known && weightOf(node) !== undefined);
+}
 
 /**
  * A row, column or box with each child carrying the incoming max height it hands that child
@@ -138,7 +151,7 @@ const exactIn = (prepared: Raw | undefined) => weightOf(prepared) !== undefined;
  * in order (see columnChildHeights), except a repeat, whose children are one template, so each
  * gets the whole content height as a bound until repeatInstanceChildren hands each instance its
  * own share. A column's weighted child gets its share as an exact allocation
- * (INCOMING_HEIGHT_EXACT_KEY); a row's weight is horizontal, so its children's dp heights still
+ * (INCOMING_HEIGHT_EXACT_KEY) when every unweighted sibling's height is known; a row's weight is horizontal, so its children's dp heights still
  * hold. A height that depends on layout (a sibling's wrap
  * height, the screen) is left out, so the bound stays an upper one or is absent.
  *
@@ -160,11 +173,10 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
   const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
   const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
   const heights = columnChildHeights(prepared, content, spacing);
+  const exact = exactShares(prepared);
   return {
     ...node,
-    children: children.map((entry, index) =>
-      withHeight(entry, heights[index], exactIn(prepared[index])),
-    ),
+    children: children.map((entry, index) => withHeight(entry, heights[index], exact[index])),
   };
 }
 
@@ -194,10 +206,11 @@ export function repeatInstanceChildren(
   );
   const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
   const heights = columnChildHeights(prepared, content, spacing);
+  const exact = exactShares(prepared);
   return prepares.map((_prepare, instance) =>
     template.map((entry, index) => {
       const at = instance * template.length + index;
-      return withHeight(entry, heights[at], exactIn(prepared[at]));
+      return withHeight(entry, heights[at], exact[at]);
     }),
   );
 }

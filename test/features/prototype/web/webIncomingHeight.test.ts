@@ -245,3 +245,26 @@ test("a column marks only its weighted children's shares exact; a row marks none
     [10, 30],
   ]);
 });
+
+test("a weight share stays a max when an unweighted sibling's height depends on layout", () => {
+  const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
+  for (const sibling of [{ type: "box" }, { type: "box", style: { height: "fill" } }]) {
+    const column = withChildHeights(
+      { type: "column", style: { height: { dp: 40 } }, children: [sibling, weighted] },
+      "root",
+      prepare,
+    );
+    expect(childrenOf(column).map(exactOf)).toEqual([undefined, undefined]);
+    // The row stays within its 10 dp height (a fill sibling's Compose bound leaves it 0).
+    const bound = sibling.style ? 0 : 10;
+    expect(contentHeight(record(record(childrenOf(column)[1])?.style))).toBe(bound);
+  }
+  // A hidden sibling takes nothing, so the share stays exact.
+  const hidden = (entry: unknown) => (record(entry)?.type === "box" ? undefined : record(entry));
+  const column = withChildHeights(
+    { type: "column", style: { height: { dp: 40 } }, children: [{ type: "box" }, weighted] },
+    "root",
+    hidden,
+  );
+  expect(childrenOf(column).map(exactOf)).toEqual([undefined, true]);
+});

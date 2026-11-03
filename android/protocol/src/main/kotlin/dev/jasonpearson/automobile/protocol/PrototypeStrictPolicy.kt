@@ -55,7 +55,8 @@ internal object PrototypeStrictPolicy {
           )
       }
       if (
-        use is PrototypePlatformUses.Use.Handler && PrototypePlatformModules.sensitiveEvent(use.event)
+        use is PrototypePlatformUses.Use.Handler &&
+          PrototypePlatformModules.sensitiveEvent(use.event)
       )
         return PrototypeSpecError(
           use.path,

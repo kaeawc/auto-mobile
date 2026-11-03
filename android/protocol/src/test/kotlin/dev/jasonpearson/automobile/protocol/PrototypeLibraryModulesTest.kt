@@ -48,7 +48,7 @@ class PrototypeLibraryModulesTest {
             PrototypeSpecError(
               expectedPath,
               fixture.getValue("expectedMessage").jsonPrimitive.content,
-            )
+            ),
           ),
           result,
         )

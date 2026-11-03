@@ -107,48 +107,68 @@ function isBox(element: WebElement): boolean {
 const elementChildren = (element: WebElement): WebElement[] =>
   element.children.filter((child): child is WebElement => typeof child !== "string");
 
+/** Whether a box child's top edge is the box's: it fills the height or aligns to the top. */
+function reachesBoxTop(child: WebElement, box: WebElement): boolean {
+  if (child.style.height === "100%") {
+    return true;
+  }
+  const align = child.style["align-self"] ?? box.style["align-items"];
+  return align === undefined || align === "stretch" || align === "start" || align === "flex-start";
+}
+
 /**
- * The child whose background shows at the top: a box's last visible stretching child, since it
- * paints over its siblings, else the leading child.
+ * The children that can show at the top, in the order to sample them: a box's children that reach
+ * its top, last painted first, since a later child paints over the earlier ones in the one cell;
+ * else the leading child.
  */
-function topChild(element: WebElement): WebElement | undefined {
+function topCandidates(element: WebElement): WebElement[] {
   const children = elementChildren(element);
   if (isBox(element)) {
-    const painted = children.filter((child) => opacity(child) > 0 && stretches(child)).at(-1);
-    if (painted) {
-      return painted;
+    return children.filter((child) => reachesBoxTop(child, element)).reverse();
+  }
+  return children.slice(0, 1);
+}
+
+const MAX_DEPTH = 32;
+
+/** The innermost opaque full-width background at the top of this subtree, if any paints there. */
+function subtreeTopColor(
+  element: WebElement,
+  inherited: number,
+  depth: number,
+): string | undefined {
+  const composite = inherited * opacity(element);
+  if (composite <= 0) {
+    // Nothing in a fully transparent subtree paints.
+    return undefined;
+  }
+  const own = depth === 0 || stretches(element) ? opaqueBackground(element, composite) : undefined;
+  // Top safe-area padding moves the children below the status area, so this background shows.
+  const clears: boolean = element.style["padding-top"]?.includes("--safe-top") ?? false;
+  if (clears || depth >= MAX_DEPTH) {
+    return own;
+  }
+  // A candidate that paints nothing opaque at the top lets the one beneath it show.
+  for (const child of topCandidates(element)) {
+    const inner = subtreeTopColor(child, composite, depth + 1);
+    if (inner !== undefined) {
+      return inner;
     }
   }
-  return children[0];
+  return own;
 }
 
 /**
  * The app's top colour: the innermost opaque background along the content's leading children that
  * spans the screen, since it paints over its ancestors (a top app bar over a root column), else
- * `fallback` (the screen background). In a box the walk follows the last stretching child, which
- * paints over the others. Element opacity multiplies down the walk: a background is opaque only
- * when its alpha times that composite is 1, and a fully transparent element ends the walk. The
- * walk also stops at an element padded by the top safe area, whose children start below the
- * status bar.
+ * `fallback` (the screen background). In a box the walk samples the children that reach its top
+ * from the last painted to the first, and the first that paints an opaque top colour wins. Element
+ * opacity multiplies down the walk: a background is opaque only when its alpha times that
+ * composite is 1, and a fully transparent subtree paints nothing. The walk stops at an element
+ * padded by the top safe area, whose children start below the status bar.
  */
 export function appTopColor(content: WebChild, fallback: string): string {
-  let top = fallback;
-  let composite = 1;
-  let current: WebElement | undefined = typeof content === "string" ? undefined : content;
-  for (let depth = 0; depth < 32 && current !== undefined; depth++) {
-    composite *= opacity(current);
-    if (composite <= 0) {
-      // Nothing in a fully transparent subtree paints.
-      break;
-    }
-    const background =
-      depth === 0 || stretches(current) ? opaqueBackground(current, composite) : undefined;
-    top = background ?? top;
-    // Top safe-area padding moves the children below the status area, so this background shows.
-    const clears: boolean = current.style["padding-top"]?.includes("--safe-top") ?? false;
-    current = clears ? undefined : topChild(current);
-  }
-  return top;
+  return typeof content === "string" ? fallback : (subtreeTopColor(content, 1, 0) ?? fallback);
 }
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;

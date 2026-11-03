@@ -198,6 +198,23 @@ test("in a box the last stretching child paints over its siblings, so its colour
   expect(appTopColor(box([fill("#000000"), fill("#ffffff", { opacity: "0" })]), "#777777")).toBe(
     "#000000",
   );
+  // A later full-fill child with no background of its own lets the earlier one show.
+  const clear = el("div", { style: { "justify-self": "stretch", width: "100%" } });
+  expect(appTopColor(box([fill("#000000"), clear]), "#777777")).toBe("#000000");
+  // A bottom-aligned child does not reach the top, so the earlier full-fill one still shows there.
+  const bottomBox = el(
+    "div",
+    {
+      style: {
+        display: "grid",
+        "grid-template-areas": '"cell"',
+        "align-items": "end",
+        width: "100%",
+      },
+    },
+    [fill("#000000", { "align-self": "stretch", height: "100%" }), fill("#ffffff")],
+  );
+  expect(appTopColor(bottomBox, "#777777")).toBe("#000000");
   // A column still follows its leading child.
   const column = el("div", { style: { display: "flex", width: "100%" } }, [
     fill("#000000"),
@@ -234,6 +251,24 @@ test("a fullscreen box's last full-fill child sets the status bar content in a s
     },
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a bottom-aligned footer in a fullscreen box leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "footer",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill", alignment: "bottomStart" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        { type: "column", style: { width: "fill", height: { dp: 80 }, background: "#ffffff" } },
+        { type: "column", style: { width: "fill", height: "fill" } },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
 
 test("a transparent root does not set the status bar content in a still", () => {

@@ -87,18 +87,20 @@ Custom navigation-container painting requires integrating the style paint layer 
 
 Native SwiftUI containers at the agent's window level have the following accessibility and touch behavior on iOS 18.6, 26.5 and 27.0 unless noted. "Listed" means `observe` returns the element's id or label; "tap works" means `tapOn` fires the control's action. The agent's own touch routing is described in [Native presentations and touches](#native-presentations-and-touches-15463).
 
-| Container                            | Verdict                                           | Detail                                                                                                                                        |
-| ------------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.sheet` with detents                | Usable                                            | Grabber and close button are listed; plain text in the sheet is not. Programmatic dismissal fires `onDismiss`.                                |
-| `.sheet` with background interaction | Usable                                            | Touches reach the app under the undimmed detent.                                                                                              |
-| `.alert`                             | Usable                                            | Title, buttons and their identifiers are listed; taps fire.                                                                                   |
-| `.confirmationDialog`                | Usable on 18.6 and 27.0; not on 26.5              | On 26.5 only the title and a `UIImageView` are listed, the actions are covered and tap fails. Use the custom `bottomSheet` or an inline list. |
-| `Menu`                               | Usable on 26.5 and 27.0; not on 18.6              | On 18.6 the items are not listed and tap fails. Use the custom `bottomSheet` or an inline list.                                               |
-| `Picker(.menu)`                      | Usable on 26.5 and 27.0; not on 18.6              | Same as `Menu`.                                                                                                                               |
-| `.popover` (compact)                 | Renders and passes touches; content not reachable | Its content is not listed on any OS, so it cannot be driven by observe.                                                                       |
-| `NavigationStack` toolbar            | Usable                                            | Toolbar items are listed and tap; the large title text is not listed.                                                                         |
-| `TabView` (`Tab`)                    | Usable by label or SF Symbol id                   | Not reachable by `testTag`.                                                                                                                   |
-| `.searchable`                        | Usable                                            | Field and results are listed; the keyboard is listed as `<ime>`.                                                                              |
+| Container                            | Verdict                                           | Detail                                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.sheet` with detents                | Usable                                            | Grabber and close button are listed; plain text in the sheet is not. Programmatic dismissal fires `onDismiss`; swipe and grabber-drag dismissal are not device-verified. |
+| `.sheet` with background interaction | Usable                                            | Touches reach the app under the undimmed detent.                                                                                                                         |
+| `.alert`                             | Usable                                            | Title, buttons and their identifiers are listed; taps fire. Dims and blocks the app, as does `.confirmationDialog`.                                                      |
+| `.confirmationDialog`                | Usable on 18.6 and 27.0; not on 26.5              | On 26.5 only the title and a `UIImageView` are listed, the actions are covered and tap fails. Use the custom `bottomSheet` or an inline list.                            |
+| `Menu`                               | Usable on 26.5 and 27.0; not on 18.6              | On 18.6 the items are not listed and tap fails. Use the custom `bottomSheet` or an inline list.                                                                          |
+| `Picker(.menu)`                      | Usable on 26.5 and 27.0; not on 18.6              | Same as `Menu`.                                                                                                                                                          |
+| `.popover` (compact)                 | Renders and passes touches; content not reachable | Its content is not listed on any OS, so it cannot be driven by observe.                                                                                                  |
+| `NavigationStack` toolbar            | Usable                                            | Toolbar items are listed and tap; the large title text is not listed.                                                                                                    |
+| `TabView` (`Tab`)                    | Usable by label or SF Symbol id                   | Not reachable by `testTag`.                                                                                                                                              |
+| `.searchable`                        | Usable                                            | Field and results are listed; the keyboard is listed as `<ime>`.                                                                                                         |
+
+Settling in one frame was not measured for these containers, and an outside tap on a native modal presentation is not device-verified.
 
 A pass-through `hitTest` must claim a rect for each SwiftUI control. A SwiftUI button hit-tests to its hosting view, so returning nil for that view swallows every SwiftUI button.
 
@@ -163,7 +165,7 @@ observe pointer delivery; pure session support alone does not verify that input 
 | `pressScale`, motion, `visibleWhen`, state/actions, assets, fonts      | Supported                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Material component nodes, dialog, snackbar, pickers                    | Supported; [Material components](#material-components)                                                                                                                                                                                                                                                                                                                                                         |
 | Reusable `components` / `use` (#11053)                                 | Host expands them before sending; the agent sees plain nodes                                                                                                                                                                                                                                                                                                                                                   |
-| Hidden from `layer: "app"` observe screenshots                         | Supported (#10943, #10988); host restores after capture                                                                                                                                                                                                                                                                                                                                                        |
+| Hidden from `layer: "app"` observe screenshots                         | Supported (#10943, #10988); host restores after capture; verified on an iOS 27.0 simulator (`screenshotIncludesPrototype: false`)                                                                                                                                                                                                                                                                              |
 | `display` selector                                                     | Refused: a simulator has one screen                                                                                                                                                                                                                                                                                                                                                                            |
 | `window.layer: "app"`                                                  | Accepted and ignored silently: window level is fixed at alert + 1                                                                                                                                                                                                                                                                                                                                              |
 | `window.persistence: "device"`                                         | Refused: the agent dies with the app process                                                                                                                                                                                                                                                                                                                                                                   |
@@ -281,8 +283,8 @@ effects renders on any iOS 17 simulator (Android's API-floor table does not appl
 
 ## Open decisions
 
-All decided (2026-10-09); the remaining item is simulator verification. `inspect` maps to `get_prototype_status`; a bottom sheet lifts above the
-keyboard from keyboard-frame notifications (simulator check still owed); `window.layer: "app"` is
+All decided (2026-10-09). `inspect` maps to `get_prototype_status`; a bottom sheet lifts above the
+keyboard from keyboard-frame notifications; `window.layer: "app"` is
 ignored silently so one spec runs on both platforms.
 
 ## Appearance actions and timers
@@ -438,7 +440,9 @@ lets other touches reach the app. Menus use a system window and need no claim.
 
 Matches [Android](../android/prototype-ux.md#bottom-sheet-and-the-keyboard-10262): a `sheet` with
 `edge: "bottom"` (or none) moves above the software keyboard while shown and returns when it hides.
-Fullscreen, floating and top sheets never move. The lift animates until the sheet's bottom edge aligns with the keyboard's top edge.
+Fullscreen, floating and top sheets never move. The lift animates until the sheet's bottom edge aligns with the keyboard's top edge
+(within 1 pt on an iOS 27.0 simulator). An `observe` taken while the keyboard is still appearing sees an
+intermediate position, so a check of the lift waits for a stable `observe`.
 
 - **Source.** `keyboardWillChangeFrame` / `keyboardWillHide` in the app's process. The lift is how far
   the keyboard's end frame reaches into the prototype window (`PrototypeKeyboardLift.amount`, UIKit-free

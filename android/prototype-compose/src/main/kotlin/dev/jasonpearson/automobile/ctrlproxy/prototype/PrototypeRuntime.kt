@@ -708,24 +708,11 @@ class PrototypeRuntime(
             },
           )
         }
-        is PrototypePushAction ->
-          changeStack(action.stack, "push", action.stackTransition, action.source) { node, path ->
-            if (
-              path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
-                !node.screens.containsKey(action.screen)
-            )
-              path
-            else path + action.screen
-          }
-        is PrototypePopAction ->
-          changeStack(action.stack) { _, path -> path.dropLast(1).ifEmpty { path } }
-        is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
-        is PrototypeReplaceAction ->
-          changeStack(action.stack, "replace", action.stackTransition, action.source) { node, path
-            ->
-            if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
-          }
-        is PrototypeSetStackAction -> setStack(action)
+        is PrototypePushAction,
+        is PrototypePopAction,
+        is PrototypePopToRootAction,
+        is PrototypeReplaceAction,
+        is PrototypeSetStackAction -> runStackAction(action)
         PrototypeDismissAction -> dismiss()
         is PrototypeSetDataAction,
         is PrototypeAppendDataAction,
@@ -914,6 +901,30 @@ class PrototypeRuntime(
       stacks = current.stacks + (id to PrototypeStackSnapshot(stack.path.dropLast(1))),
       stackChange = current.stackPopChange(id),
     )
+  }
+
+  /** A `push`, `pop`, `popToRoot`, `replace` or `setStack` action; any other action is ignored. */
+  private suspend fun runStackAction(action: PrototypeAction) {
+    when (action) {
+      is PrototypePushAction ->
+        changeStack(action.stack, "push", action.stackTransition, action.source) { node, path ->
+          if (
+            path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
+              !node.screens.containsKey(action.screen)
+          )
+            path
+          else path + action.screen
+        }
+      is PrototypePopAction ->
+        changeStack(action.stack) { _, path -> path.dropLast(1).ifEmpty { path } }
+      is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
+      is PrototypeReplaceAction ->
+        changeStack(action.stack, "replace", action.stackTransition, action.source) { node, path ->
+          if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
+        }
+      is PrototypeSetStackAction -> setStack(action)
+      else -> Unit
+    }
   }
 
   /**

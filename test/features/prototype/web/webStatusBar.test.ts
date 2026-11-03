@@ -676,3 +676,27 @@ test("an end-aligned box child taller than the screen covers the status bar in a
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
+
+test("a collection grid's second row does not reach the top edge", () => {
+  const cellOf = (color: string) =>
+    el("div", {
+      style: {
+        "justify-self": "stretch",
+        "align-self": "start",
+        height: "100px",
+        "background-color": color,
+      },
+    });
+  const grid = el(
+    "div",
+    {
+      style: {
+        display: "grid",
+        "grid-template-columns": "repeat(1, minmax(0, 1fr))",
+        "background-color": WHITE,
+      },
+    },
+    [cellOf(WHITE), cellOf(BLACK)],
+  );
+  expect(appTopColor(grid, "#777777", SCREEN)).toBe(WHITE);
+});

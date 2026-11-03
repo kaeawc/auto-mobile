@@ -73,10 +73,10 @@ test("positioned children paint after in-flow ones, ordered by z-index", () => {
   expect(order).toEqual(["root", "under", "flow", "positioned", "raised"]);
 });
 
-test("a subtree below the top edge or at an unknown place is not descended into", () => {
+test("a clipped subtree below the top edge or one at an unknown place is not descended into", () => {
   const root = named("root", { display: "flex", "flex-direction": "column" }, [
     named("first", { height: "50px" }),
-    named("second", {}, [named("inner", {})]),
+    named("second", { overflow: "hidden" }, [named("inner", {})]),
     named("spun", { position: "absolute", inset: "0", transform: "rotate(10deg)" }, [
       named("hidden", {}),
     ]),
@@ -96,4 +96,58 @@ test("a box shows at a top-edge point only inside its own rect and every clip", 
   expect(paintsTopEdgeAt(box, 30)).toBe(false);
   expect(paintsTopEdgeAt({ ...box, rect: { ...box.rect, top: 1 } }, 10)).toBe(false);
   expect(paintsTopEdgeAt({ ...box, rect: { ...box.rect, width: undefined } }, 10)).toBe(false);
+});
+
+test("an unclipped subtree below the top edge is followed, so an overflowing child can reach it", () => {
+  // A 100px row 100px down aligns its 250px child to the bottom, so the child starts at y = -50.
+  const root = named(
+    "root",
+    { display: "flex", "flex-direction": "column", "padding-top": "100px" },
+    [
+      named(
+        "row",
+        { display: "flex", "flex-direction": "row", height: "100px", "align-items": "flex-end" },
+        [named("tall", { width: "400px", height: "250px" })],
+      ),
+    ],
+  );
+  expect(rectOf(topEdgePaintOrder(root, SCREEN), "tall")).toEqual({
+    left: 0,
+    top: -50,
+    width: 400,
+    height: 250,
+  });
+});
+
+test("a collection grid places cells row-major in its column tracks", () => {
+  const grid = named(
+    "grid",
+    { display: "grid", "grid-template-columns": "repeat(2, minmax(0, 1fr))", "column-gap": "20px" },
+    [
+      named("a", { "justify-self": "stretch", "align-self": "start", height: "100px" }),
+      named("b", { "justify-self": "stretch", "align-self": "start", height: "100px" }),
+      named("c", { "justify-self": "stretch", "align-self": "start", "grid-column": "span 2" }),
+    ],
+  );
+  const painted = topEdgePaintOrder(grid, SCREEN);
+  expect(rectOf(painted, "a")).toEqual({ left: 0, top: 0, width: 190, height: 100 });
+  expect(rectOf(painted, "b")).toEqual({ left: 210, top: 0, width: 190, height: 100 });
+  // The second row starts below the first row's unmeasured height.
+  expect(rectOf(painted, "c")?.top).toBeUndefined();
+});
+
+test("a ratio-sized line item is aligned with its derived cross size", () => {
+  const row = named(
+    "row",
+    { display: "flex", "flex-direction": "row", height: "400px", "align-items": "center" },
+    [named("square", { width: "400px", "aspect-ratio": "1" })],
+  );
+  // The root fills the screen, so the 400px row sits inside it.
+  const root = named("root", { display: "flex", "flex-direction": "column" }, [row]);
+  expect(rectOf(topEdgePaintOrder(root, SCREEN), "square")).toEqual({
+    left: 0,
+    top: 0,
+    width: 400,
+    height: 400,
+  });
 });

@@ -23,12 +23,19 @@ export interface PlacedChild {
  * How a container lays out its children: a box (`boxLayoutCss`, any grid here) stacks them in one
  * cell; a flex line places them along its axis; anything else flows them as blocks.
  */
-type Layout = "box" | "row" | "column" | "flow";
+type Layout = "box" | "tracks" | "row" | "column" | "flow";
+
+/** A collection grid's column count, from its `repeat(N, ...)` template. */
+function trackCount(element: WebElement): number | undefined {
+  const match = /^repeat\(\s*(\d+)\s*,/.exec(element.style["grid-template-columns"]?.trim() ?? "");
+  return match ? Number(match[1]) : undefined;
+}
 
 function layoutOf(element: WebElement): Layout {
   const { display } = element.style;
   if (display === "grid" || display === "inline-grid") {
-    return "box";
+    // A collection grid lays cells out row-major in its column tracks; any other grid is a box.
+    return trackCount(element) === undefined ? "box" : "tracks";
   }
   if (display === "flex" || display === "inline-flex") {
     return element.style["flex-direction"]?.startsWith("column") ? "column" : "row";
@@ -73,6 +80,47 @@ function alignedSize(
   const stretched = align === "stretch" || align === "normal";
   const size = declared !== "auto" ? declared : stretched ? room : undefined;
   return clampSize(size, child, axis, { base: room, vars: box.vars });
+}
+
+/** A cell's column span, from `grid-column: span N`. */
+function columnSpan(child: WebElement, columns: number): number {
+  const span = Number(/^span\s+(\d+)$/.exec(child.style["grid-column"]?.trim() ?? "")?.[1] ?? 1);
+  return Math.min(Math.max(1, span), columns);
+}
+
+/**
+ * A collection grid: equal column tracks, cells packed row-major, each starting a new row when it
+ * no longer fits. Rows after the first start below the first row's unmeasured height.
+ */
+function placeTracks(
+  children: readonly WebElement[],
+  columns: number,
+  box: Container,
+): PlacedChild[] {
+  const { content, vars } = box;
+  const [rowGap, columnGap = rowGap] = shorthandValues(box.parent.style.gap);
+  const gap = cssLength(box.parent.style["column-gap"] ?? columnGap, vars, content.width) ?? 0;
+  const track =
+    content.width === undefined ? undefined : (content.width - gap * (columns - 1)) / columns;
+  const placed: PlacedChild[] = [];
+  let column = 0;
+  let row = 0;
+  for (const child of children) {
+    const span = columnSpan(child, columns);
+    if (column + span > columns) {
+      column = 0;
+      row += 1;
+    }
+    const left = track === undefined ? undefined : add(content.left, column * (track + gap));
+    const width = track === undefined ? undefined : span * track + (span - 1) * gap;
+    const cell: Container = {
+      ...box,
+      content: { left, top: row === 0 ? content.top : undefined, width, height: undefined },
+    };
+    placed.push(placeInCell(child, cell));
+    column += span;
+  }
+  return placed;
 }
 
 /** A box child: sized and aligned on each axis by its self-alignment in the one cell. */
@@ -274,10 +322,15 @@ function mainGap(main: Axis, box: Container): number {
 }
 
 /** The cross-axis size and offset of a line item, aligned by `align-self` or `align-items`. */
-function crossPlacement(child: WebElement, cross: Axis, box: Container): [Len, Len] {
+function crossPlacement(child: WebElement, main: Axis, mainSize: Len, box: Container): [Len, Len] {
+  const cross = crossOf(main);
   const own = child.style["align-self"];
   const align = own === undefined || own === "auto" ? box.parent.style["align-items"] : own;
-  const size = alignedSize(child, cross, align, box);
+  // A ratio-derived cross size is known before alignment places it.
+  const size = withAspectRatio(
+    child,
+    oriented(main, [0, 0], [mainSize, alignedSize(child, cross, align, box)]),
+  )[cross];
   return [alignOffset(align, box.content[cross], size), size];
 }
 
@@ -300,7 +353,7 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   for (const [index, item] of items.entries()) {
     const size = sizes[index];
     if (item.element) {
-      const [offset, crossSize] = crossPlacement(item.element, cross, box);
+      const [offset, crossSize] = crossPlacement(item.element, main, size, box);
       const position: [Len, Len] = [cursor, add(startOf(box.content, cross), offset)];
       const rect = oriented(main, position, [size, crossSize]);
       placed.push({ element: item.element, rect: withAspectRatio(item.element, rect) });
@@ -310,6 +363,9 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   return placed;
 }
 
+const elementsOf = (children: readonly WebChild[]): WebElement[] =>
+  children.filter((child): child is WebElement => typeof child !== "string");
+
 /** The in-flow children of a container and the border boxes its layout gives them. */
 export function placeInFlow(parent: WebElement, content: WebRect, vars: CssVars): PlacedChild[] {
   const children = parent.children.filter(
@@ -318,9 +374,9 @@ export function placeInFlow(parent: WebElement, content: WebRect, vars: CssVars)
   const box: Container = { parent, content, vars };
   switch (layoutOf(parent)) {
     case "box":
-      return children
-        .filter((child): child is WebElement => typeof child !== "string")
-        .map((child) => placeInCell(child, box));
+      return elementsOf(children).map((child) => placeInCell(child, box));
+    case "tracks":
+      return placeTracks(elementsOf(children), trackCount(parent) ?? 1, box);
     case "row":
       return placeLine(children, "width", box);
     case "column":

@@ -314,7 +314,7 @@ the host, so the page's script only switches between views it was given and neve
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
   app's top colour. The top colour comes from geometry, not from reading CSS properties one by one: a
   small layout pass places the window's content on the screen (flex lines with growth, gaps, arrangement
-  and alignment, one-cell boxes, block flow, minimum and maximum sizes, aspect ratio, padding including
+  and alignment, one-cell boxes, collection grids' column tracks, block flow, minimum and maximum sizes, aspect ratio, padding including
   the safe-area insets, absolute insets, relative offsets and translations, overflow clips, and CSS paint
   order with z-index), then samples evenly spaced points along the screen's top edge. At each point the
   last opaque background painted there is the colour, else the screen background; the colour at the most
@@ -323,8 +323,8 @@ the host, so the page's script only switches between views it was given and neve
   layout, so a bottom sheet or floating window leaves the screen background at the top edge. Text and
   other unsized content are not measured: an unknown height or offset is taken as non-zero, a content-sized
   width covers nothing, and a box, row or column child with no self-alignment starts at its container's
-  start as the renderer emits it. A subtree that starts below the top edge, or behind a transform other
-  than a translation, is not laid out. Landscape swaps the screen size, uses
+  start as the renderer emits it. A subtree that starts below the top edge inside an overflow clip, or
+  behind a transform other than a translation, is not laid out. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own

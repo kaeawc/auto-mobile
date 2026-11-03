@@ -182,9 +182,12 @@ const clipsOverflow = (element: WebElement): boolean =>
     return value !== undefined && value !== "visible";
   });
 
-/** Whether anything inside a box can still reach the screen's top edge. */
-const mayReachTop = (rect: WebRect): boolean =>
-  rect.left !== undefined && rect.top !== undefined && rect.top <= 0;
+/**
+ * Whether anything inside a box can still reach the screen's top edge: its place is known, and it
+ * starts at the top or lets its children overflow (an alignment or offset can carry one upward).
+ */
+const mayReachTop = (element: WebElement, rect: WebRect): boolean =>
+  rect.left !== undefined && rect.top !== undefined && (rect.top <= 0 || !clipsOverflow(element));
 
 interface PaintStep {
   readonly rect: WebRect;
@@ -203,8 +206,8 @@ function paintElement(element: WebElement, step: PaintStep, painted: PaintedBox[
   const vars = scopedVars(element, step.vars);
   const rect = moved(element, step.rect, vars);
   painted.push({ element, rect, opacity, clips: step.clips });
-  // Below the top edge (or at an unknown place) a subtree cannot cover it.
-  if (step.depth >= MAX_DEPTH || !mayReachTop(rect)) {
+  // A clipped subtree below the top edge, or one at an unknown place, cannot cover it.
+  if (step.depth >= MAX_DEPTH || !mayReachTop(element, rect)) {
     return;
   }
   const clips = clipsOverflow(element) ? [...step.clips, rect] : step.clips;

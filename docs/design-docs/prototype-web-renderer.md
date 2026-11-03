@@ -232,8 +232,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `videoPlayer`,
-  `map`, `cameraPreview` and `castButton`. Where the devices differ,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `dialog`,
+  `snackbar`, `videoPlayer`, `map`, `cameraPreview` and `castButton`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -301,7 +301,16 @@ the host, so the page's script only switches between views it was given and neve
   colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
   or `dp` capped at the window), painted `surface` unless an authored background resolves,
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
-  8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  8 px around it, unless `dragHandle` is false, then its child. A `dialog` and a `snackbar` open
+  and layer the same way. A dialog is a scrim (the `scrim` role at 0.32) under a centred
+  `surfaceContainerHigh` surface with 28 px corners, 24 px padding and 16 px gaps, 280 to 560 px
+  wide with 24 px around it: its icon (`secondary`), title (`headlineSmall`, `onSurface`), text
+  (`bodyMedium`, `onSurfaceVariant`), its child (scrolling when tall), then the dismiss and confirm
+  text buttons (`labelLarge`, `primary`) at the end, tagged `<testTag>.dismiss` and
+  `<testTag>.confirm`. A snackbar has no scrim and lets touches through around it; it sits at the
+  window's bottom with 12 px around it, as wide as the window up to 600 px, at least 48 px tall,
+  in `inverseSurface` with 4 px corners and `bodyMedium` `inverseOnSurface` text, then its
+  optional `inversePrimary` action tagged `<testTag>.action`. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle (or three generic button marks, which move to

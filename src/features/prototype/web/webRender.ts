@@ -25,6 +25,7 @@ import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webModalLayers } from "./webModal";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -77,7 +78,7 @@ export interface WebRenderScope {
   readonly screen?: string;
   /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
   readonly stacks?: WebStackScreens[];
-  /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
+  /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
@@ -951,7 +952,7 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webStackRenderers(KIT),
 };
 
-const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
+const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);

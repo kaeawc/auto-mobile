@@ -100,6 +100,24 @@ describe("PrototypeMockActors lifecycle", () => {
   });
 });
 
+test("a full step queue drops runs but keeps an every actor's cadence", async () => {
+  const { timer, backend } = engine({
+    collections: { log: [], ticks: [] },
+    actors: [
+      { on: { route: "GET /log" }, afterMs: 1000, do: [{ append: "log", value: {} }] },
+      { every: 100, maxRuns: 10, do: [{ afterMs: 1, append: "ticks", value: {} }] },
+    ],
+  });
+  for (let index = 0; index < 256; index++) {
+    await backend.answer({ method: "GET", path: "/log", query: {}, body: undefined });
+  }
+  timer.advanceTime(2000);
+  expect(backend.snapshot().log).toHaveLength(256);
+  // Runs while the queue was full are dropped; the ones after it drains still land.
+  expect(backend.snapshot().ticks.length).toBeGreaterThan(0);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
 describe("mock actor definitions", () => {
   const issueOf = (definition: unknown): string | undefined => {
     const result = mockBackendDefinitionSchema.safeParse(definition);

@@ -25,7 +25,11 @@ export interface MockActorWrite {
 /** Applies a write and returns its HTTP status. */
 export type MockActorApply = (write: MockActorWrite) => number;
 
-/** Scheduled steps across all runs of a backend; a trigger past this is dropped and logged. */
+/**
+ * Scheduled steps across all runs of a backend; a step past this is dropped and logged. The next
+ * tick of an `every` actor is not counted (at most one per actor), so a full queue drops runs
+ * without stopping the cadence.
+ */
 export const MAX_MOCK_ACTOR_PENDING = 256;
 
 const NO_CONTEXT: MockBindingContext = { params: {}, query: {}, body: undefined };
@@ -78,6 +82,7 @@ export class PrototypeMockActors {
       this.timer.clearTimeout(handle);
     }
     this.pending.clear();
+    this.steps = 0;
   }
 
   get pendingCount(): number {
@@ -85,12 +90,16 @@ export class PrototypeMockActors {
   }
 
   private tick(actor: MockActor, runNumber: number, delay: number): void {
-    this.schedule(delay, () => {
-      this.run(actor.do, 0, 0, NO_CONTEXT);
-      if (runNumber < actor.maxRuns!) {
-        this.tick(actor, runNumber + 1, actor.every!);
-      }
-    });
+    this.schedule(
+      delay,
+      () => {
+        if (runNumber < actor.maxRuns!) {
+          this.tick(actor, runNumber + 1, actor.every!);
+        }
+        this.run(actor.do, 0, 0, NO_CONTEXT);
+      },
+      false,
+    );
   }
 
   private run(
@@ -115,11 +124,13 @@ export class PrototypeMockActors {
     }
   }
 
-  private schedule(delay: number, callback: () => void): void {
+  private steps = 0;
+
+  private schedule(delay: number, callback: () => void, counted = true): void {
     if (this.disposed) {
       return;
     }
-    if (this.pending.size >= MAX_MOCK_ACTOR_PENDING) {
+    if (counted && this.steps >= MAX_MOCK_ACTOR_PENDING) {
       logger.warn(
         `[PrototypeMock] actor step dropped: ${MAX_MOCK_ACTOR_PENDING} steps already scheduled.`,
       );
@@ -127,11 +138,17 @@ export class PrototypeMockActors {
     }
     const handle = this.timer.setTimeout(() => {
       this.pending.delete(handle);
+      if (counted) {
+        this.steps--;
+      }
       if (!this.disposed) {
         callback();
       }
     }, delay);
     this.pending.add(handle);
+    if (counted) {
+      this.steps++;
+    }
   }
 
   private applyStep(step: MockActorStep, context: MockBindingContext): void {

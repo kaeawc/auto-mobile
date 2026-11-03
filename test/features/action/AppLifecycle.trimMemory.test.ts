@@ -46,7 +46,8 @@ const foregroundRefusalStderr = [
   "java.lang.IllegalArgumentException: Unable to set a background trim level on a foreground process",
   ...Array.from(
     { length: 12 },
-    (_, i) => `\tat com.android.server.am.ActivityManagerService.frame${i}(ActivityManagerService.java:${i})`,
+    (_, i) =>
+      `\tat com.android.server.am.ActivityManagerService.frame${i}(ActivityManagerService.java:${i})`,
   ),
   "\tat android.app.IActivityManager$Stub.onTransact(IActivityManager.java:2959)",
 ].join("\n");
@@ -166,9 +167,9 @@ describe("AppLifecycle trimMemory (#14090)", () => {
   });
 
   test("printed refusal output is described the same way", () => {
-    expect(
-      describeTrimFailure(foregroundRefusalStderr, appId, "MODERATE", "fallback"),
-    ).toStartWith(`Android refused MODERATE for ${appId} because it is in the foreground`);
+    expect(describeTrimFailure(foregroundRefusalStderr, appId, "MODERATE", "fallback")).toStartWith(
+      `Android refused MODERATE for ${appId} because it is in the foreground`,
+    );
     expect(describeTrimFailure("no exception here", appId, "COMPLETE", "fallback")).toBe(
       "fallback",
     );

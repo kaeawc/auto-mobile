@@ -210,3 +210,85 @@ test("only a column's or card's weighted child is marked as allocated (#16701)",
   const css = nodeCss({ [INCOMING_ALLOCATED_KEY]: true }, { mode: "light", palette: new Map() });
   expect(css).toEqual({ "box-sizing": "border-box" });
 });
+
+test("a clamped weighted child hands what it leaves to its weighted siblings, as CSS flex does (#16763)", () => {
+  const weighted = (weight: number, bounds: Raw = {}) => ({
+    type: "row",
+    style: { weight, ...bounds },
+  });
+  // The issue's case: CSS freezes the 20 dp row at its maxHeight and grows its sibling to 80.
+  expect(columnChildHeights([weighted(1, { maxHeight: 20 }), weighted(1)], 100, 0)).toEqual([
+    20, 80,
+  ]);
+  // A minHeight above the share takes height from the siblings.
+  expect(columnChildHeights([weighted(1, { minHeight: 70 }), weighted(1)], 100, 0)).toEqual([
+    70, 30,
+  ]);
+  // Freezing one share can push another past its bound, so the loop runs until none moves.
+  expect(
+    columnChildHeights(
+      [weighted(1, { maxHeight: 10 }), weighted(1, { maxHeight: 40 }), weighted(2)],
+      100,
+      0,
+    ),
+  ).toEqual([10, 30, 60]);
+  expect(
+    columnChildHeights(
+      [weighted(1, { maxHeight: 10 }), weighted(1, { maxHeight: 25 }), weighted(2)],
+      100,
+      0,
+    ),
+  ).toEqual([10, 25, 65]);
+  // Min and max violations that cancel out freeze every share where it is clamped.
+  expect(
+    columnChildHeights([weighted(1, { maxHeight: 40 }), weighted(1, { minHeight: 60 })], 100, 0),
+  ).toEqual([40, 60]);
+  // Unweighted siblings, spacing and hidden children are taken off before the weights share.
+  expect(
+    columnChildHeights(
+      [
+        { type: "box", style: { height: { dp: 20 } } },
+        undefined,
+        weighted(1, { maxHeight: 10 }),
+        weighted(3),
+      ],
+      100,
+      5,
+    ),
+  ).toEqual([100, undefined, 10, 60]);
+  // Every share clamped by its own max leaves the rest unallocated.
+  expect(
+    columnChildHeights([weighted(1, { maxHeight: 10 }), weighted(1, { maxHeight: 20 })], 100, 0),
+  ).toEqual([10, 20]);
+  // Mins past the free space each keep their min, as CSS's min-height wins over the container.
+  expect(
+    columnChildHeights([weighted(1, { minHeight: 80 }), weighted(1, { minHeight: 40 })], 100, 0),
+  ).toEqual([80, 40]);
+});
+
+test("a weighted row beside a maxHeight-clamped sibling caps its aspect ratio by the redistributed share (#16763)", () => {
+  const column = withChildHeights(
+    {
+      type: "column",
+      style: { height: { dp: 100 } },
+      children: [
+        { type: "box", style: { weight: 1, maxHeight: 20 } },
+        {
+          type: "row",
+          style: { weight: 1 },
+          children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }],
+        },
+      ],
+    },
+    "root",
+    prepare,
+  );
+  expect(childrenOf(column).map(heightOf)).toEqual([20, 80]);
+  const ratio = childrenOf(
+    rowMeasured(record(childrenOf(column)[1])!, "root.children[1]", prepare),
+  );
+  expect(record(record(ratio[0])?.style)?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: CAPPED_SHRINK,
+    basis: 160,
+  });
+});

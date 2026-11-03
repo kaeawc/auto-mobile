@@ -71,10 +71,39 @@ const fixedHeight = (node: Raw): number => {
 };
 
 /**
+ * Each weighted node's share of `free`, as CSS's flexible-length algorithm resolves `flex: w w 0`
+ * items: split what is left over the unfrozen weights, clamp each share by its node's `maxHeight`
+ * then `minHeight` (see clamped), freeze the min violators when the clamps add height, the max
+ * violators when they take it away, or every share when they cancel, and repeat until every
+ * share is frozen. A share clamped by its own bound so hands what it gives up to its siblings.
+ */
+function weightShares(nodes: readonly Raw[], free: number): Map<Raw, number> {
+  const frozen = new Map<Raw, number>();
+  let open = nodes.filter((node) => weightOf(node) !== undefined);
+  while (open.length > 0) {
+    const weights = open.reduce((sum, node) => sum + (weightOf(node) ?? 0), 0);
+    const left = free - [...frozen.values()].reduce((sum, height) => sum + height, 0);
+    const targets = open.map((node) => {
+      const share = (left * (weightOf(node) ?? 0)) / (weights || 1);
+      return { node, share, height: clamped(record(node.style), share) };
+    });
+    const violation = targets.reduce((sum, target) => sum + target.height - target.share, 0);
+    const freezes = targets.filter(
+      ({ share, height }) => violation === 0 || (violation > 0 ? height > share : height < share),
+    );
+    for (const { node, height } of freezes) {
+      frozen.set(node, height);
+    }
+    open = open.filter((node) => !frozen.has(node));
+  }
+  return frozen;
+}
+
+/**
  * The incoming max height of each child of a column with content height `content`, as Compose's
  * Column measures them: an unweighted child against what its earlier siblings and the spacing
  * left, then each weighted child against its weight's share of what every unweighted child and
- * the spacing left. A sibling with no dp height counts as 0, so the result is an upper bound when
+ * the spacing left, with a share its own bound clamps handed to its siblings (see weightShares). A sibling with no dp height counts as 0, so the result is an upper bound when
  * one depends on layout. Hidden children (undefined) get no height.
  */
 export function columnChildHeights(
@@ -85,16 +114,14 @@ export function columnChildHeights(
   const visible = children.filter((node): node is Raw => node !== undefined);
   const used = visible.reduce((sum, node) => sum + fixedHeight(node), 0);
   const gaps = spacing * Math.max(0, visible.length - 1);
-  const weights = visible.reduce((sum, node) => sum + (weightOf(node) ?? 0), 0);
-  const share = Math.max(0, content - used - gaps) / (weights || 1);
+  const shares = weightShares(visible, Math.max(0, content - used - gaps));
   const heights: (number | undefined)[] = [];
   let before = 0;
   for (const node of children) {
-    const weight = weightOf(node);
     if (!node) {
       heights.push(undefined);
-    } else if (weight !== undefined) {
-      heights.push(share * weight);
+    } else if (shares.has(node)) {
+      heights.push(shares.get(node));
     } else {
       heights.push(Math.max(0, content - before));
       before += fixedHeight(node) + spacing;

@@ -22,6 +22,7 @@ import {
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
+import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
@@ -67,6 +68,8 @@ export interface WebRenderScope {
   readonly screen?: string;
   /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
   readonly stacks?: WebStackScreens[];
+  /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
+  readonly layers: WebElement[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
@@ -952,6 +955,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webStackRenderers(KIT),
 };
 
+const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
+
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
   const id = typeof node.id === "string" ? node.id : undefined;
@@ -1040,6 +1045,11 @@ export function renderWebNode(
   }
   const { styled, scope: local } = prepared;
   const own: WebRenderScope = { ...local, ownInsets: safeAreaEdges(styled) };
+  const layer = WEB_LAYER_RENDERERS[String(styled.type)];
+  if (layer) {
+    layer(styled, own, path);
+    return undefined;
+  }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
   return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
 }

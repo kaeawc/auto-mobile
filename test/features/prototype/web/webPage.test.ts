@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildPrototypeWebPage,
+  largestPinnedView,
   MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
   PROTOTYPE_WEB_RUNTIME,
   type PrototypeWebPageInput,
@@ -193,6 +194,17 @@ describe("prototype web page (#16346)", () => {
     expect(() => buildPrototypeWebPage({ ...input, maxBytes: 10 * 1024 })).toThrow(
       /would exceed 10240 bytes even with only the latest revision of each variant and the revision shown first\. Largest view: variant a revision 2/,
     );
+  });
+
+  test("names the largest single view, even outside the group with the most bytes", () => {
+    const view = (variant: string, bytes: number) => ({ variant, html: "x".repeat(bytes) });
+    // Group a holds more bytes in all (180), but group b holds the largest view (120).
+    const largest = largestPinnedView([
+      [view("a", 90), view("a", 90)],
+      [view("b", 40), view("b", 120)],
+    ]);
+    expect(largest.variant).toBe("b");
+    expect(largest.html).toHaveLength(120);
   });
 
   test("an unknown variant lists the valid ones", () => {

@@ -76,7 +76,7 @@ it inlined per variant.
 
 - **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape,
   once per screen of its outermost stack when that stack has more than one screen (start first,
-  then the others in authored order; such views carry `data-screen`). The first view is the chosen
+  then the others in key order; such views carry `data-screen`). The first view is the chosen
   variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
   `hidden`.
 - **Controls.** Only five: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
@@ -140,7 +140,7 @@ nothing at runtime drives a browser.
 
 `renderPrototypeStill(spec, {frame, orientation, mode, screen})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
-tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in authored order, its
+tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on
 the host, so the page's script only switches between views it was given and never runs spec logic.
 
@@ -187,7 +187,7 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip` and `slider`. Where the devices differ,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider` and `bottomSheet`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -234,7 +234,16 @@ the host, so the page's script only switches between views it was given and neve
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
   titled with the name, because the glyph set is not inlined. A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
-  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. A
+  `bottomSheet` is open when its `openWhen` key holds exactly `equals` (a missing key keeps it shut)
+  and draws nothing in place: like the devices' modal layer, an open one is drawn over its window
+  (the screen, a sheet window's region or a floating window's box) after the tree, in tree order, a
+  sheet before those inside it, and takes no ancestor's grid cell or consumed insets. It is a scrim
+  filling the window (the `scrim` role at 0.4 opacity by default or when named, else the authored
+  colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
+  or `dp` capped at the window), painted `surface` unless the spec sets a background or gradient,
+  with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
+  8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle (or three generic button marks, which move to

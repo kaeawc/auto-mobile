@@ -114,7 +114,7 @@ interface RevisionViews {
 
 /**
  * The screens the picker offers for a still's outermost stack: its start, then the others in
- * authored order. A stack with one screen, or a start that is not one of them, offers none.
+ * key order. A stack with one screen, or a start that is not one of them, offers none.
  */
 function pickerScreens(stack: WebStackScreens | undefined): string[] {
   if (!stack || stack.screens.length < 2 || !stack.screens.includes(stack.start)) {
@@ -314,9 +314,19 @@ const groupBytes = (group: ScreenGroup) =>
 /** The first view is shown, so its `hidden` attribute is dropped from the page. */
 const HIDDEN_ATTRIBUTE_BYTES = Buffer.byteLength(' hidden=""');
 
+/** The view of these groups with the most HTML bytes. */
+export function largestPinnedView<V extends { readonly html: string }>(
+  groups: readonly (readonly V[])[],
+): V {
+  return groups
+    .flat()
+    .reduce((largest, view) =>
+      Buffer.byteLength(view.html) > Buffer.byteLength(largest.html) ? view : largest,
+    );
+}
+
 function refuseOverBudget(limit: number, pinned: readonly RevisionViews[]): never {
-  const starts = pinned.map((revision) => revision.screens[0]!);
-  const largest = [...starts].sort((a, b) => groupBytes(b) - groupBytes(a))[0]![0]!;
+  const largest = largestPinnedView(pinned.map((revision) => revision.screens[0]!));
   throw new ActionableError(
     `The prototype web page would exceed ${limit} bytes even with only the latest revision of each variant and the revision shown first. Largest view: variant ${largest.variant} revision ${largest.revision} (${Buffer.byteLength(largest.html)} bytes). Reduce the spec's repeated content or show fewer variants.`,
   );

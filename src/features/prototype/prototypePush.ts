@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { exceedsPushPayloadLimit } from "../utility/iosPushPayload";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";
+import { prototypeJsonObjectSchema, type PrototypeJson } from "./prototypeJson";
 
 /**
  * A simulated push: `type` picks the handler, `data` is what `{event: "/data/..."}` reads, and
@@ -29,7 +29,8 @@ const stateKey = z.string().regex(prototypeContractPatterns.stateKey);
 const payloadSchema = z
   .object({
     type: stateKey,
-    data: z.record(prototypeJsonSchema).default({}),
+    // Keeps every own key, including `__proto__`, which a plain z.record drops.
+    data: prototypeJsonObjectSchema.default({}),
     notification: z
       .object({
         title: z

@@ -22,6 +22,16 @@ describe("validatePrototypePushPayload", () => {
     expect(result).toEqual({ success: true, payload, json: JSON.stringify(payload) });
   });
 
+  test("keeps every data key, including __proto__", () => {
+    const payload: unknown = JSON.parse('{"type":"message","data":{"__proto__":{"id":1},"a":2}}');
+    const result = validatePrototypePushPayload(payload);
+    expect(result.success).toBe(true);
+    const data = result.success ? result.payload.data : {};
+    expect(Object.keys(data).sort()).toEqual(["__proto__", "a"]);
+    expect(Object.getOwnPropertyDescriptor(data, "__proto__")?.value).toEqual({ id: 1 });
+    expect(result.success && result.json).toContain('"__proto__":{"id":1}');
+  });
+
   test("defaults data to an empty object", () => {
     expect(validatePrototypePushPayload({ type: "ping" })).toMatchObject({
       success: true,

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -19,6 +19,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { heldSession } from "../helpers/disconnectMonitorDaemon";
+import { warmedTests } from "../helpers/warmedTests";
 
 // A phone reachable over USB and/or wireless adb (#11133).
 const USB = "R58N12ABCDE";
@@ -31,7 +32,9 @@ const ROWS: Record<string, string> = {
 };
 
 const timers: FakeTimer[] = [];
-afterEach(() => {
+// The file's first scenario pays the daemon's one-time module and construction cost; warm it
+// outside the per-test budget so the measured run times only the scenario itself.
+const test = warmedTests(() => {
   DaemonState.getInstance().reset();
   timers.splice(0).forEach((timer) => timer.reset());
   resetAdbDeviceListCache();
@@ -102,7 +105,7 @@ async function harness(initial: string[], manager = new PhoneManager()) {
 }
 
 describe("disconnect monitor folds a re-ported wireless transport (#11133)", () => {
-  test.each([
+  test.each<[string, string[], string]>([
     ["Wi-Fi only", [WIFI], WIFI],
     ["USB + Wi-Fi after USB unplug", [USB, WIFI], USB],
   ])("%s: a wireless port change keeps the held session", async (_label, initial, expected) => {
@@ -139,54 +142,51 @@ describe("disconnect monitor folds a re-ported wireless transport (#11133)", () 
 });
 
 describe("listed-state probe follows a held phone's alias serials (#11133)", () => {
-  test.each([
+  test.each<[string, string[]]>([
     ["alias only", [WIFI]],
     ["canonical only", [USB]],
     ["both transports", [USB, WIFI]],
-  ] as const)(
-    "reconnects listed-offline %s once per canonical episode",
-    async (_label, offline) => {
-      const received: string[][] = [];
-      const probes: string[][] = [];
-      class RecordingManager extends PhoneManager {
-        async getAndroidListedDeviceStates(ids: Iterable<string>): Promise<Map<string, string>> {
-          probes.push([...ids]);
-          // Return the full listing to exercise rejection of unrelated offline rows.
-          return new Map(this.androidListedDeviceStates);
-        }
-        async recoverAndroidOfflineDevices(ids: Iterable<string>): Promise<void> {
-          received.push([...ids]);
-        }
+  ])("reconnects listed-offline %s once per canonical episode", async (_label, offline) => {
+    const received: string[][] = [];
+    const probes: string[][] = [];
+    class RecordingManager extends PhoneManager {
+      async getAndroidListedDeviceStates(ids: Iterable<string>): Promise<Map<string, string>> {
+        probes.push([...ids]);
+        // Return the full listing to exercise rejection of unrelated offline rows.
+        return new Map(this.androidListedDeviceStates);
       }
-      const h = await harness([USB, WIFI], new RecordingManager());
-      expect(h.canonical).toBe(USB);
-      h.manager.bootedDevices = [];
-      h.manager.androidListedDeviceStates = new Map([
-        [USB, "unauthorized"],
-        [WIFI, "authorizing"],
-        ...offline.map((id): [string, string] => [id, "offline"]),
-        ["192.168.1.99:40000", "offline"],
-      ]);
-      try {
-        await h.monitor.run();
-        expect(probes).toEqual([[USB, WIFI]]);
-        expect(received).toEqual([[...offline]]);
-        expect(h.daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds).toEqual(new Set([USB]));
-        expect([
-          ...h.daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIncarnations.keys(),
-        ]).toEqual([USB]);
-        expect([...h.daemon.testHooks.deviceLoss.offlineEpisodes.keys()]).toEqual([USB]);
-        expect(h.daemon.testHooks.deviceLoss.misses.size).toBe(0);
-        await h.monitor.run();
-        expect(received).toEqual([[...offline]]);
-        expect(h.cleanups).toEqual([]);
-        expect(h.pool.getDevice(USB)?.sessionId).toBe("owner");
-        expect(h.timer.getSleepHistory()).toEqual([]);
-      } finally {
-        await h.monitor.stop();
+      async recoverAndroidOfflineDevices(ids: Iterable<string>): Promise<void> {
+        received.push([...ids]);
       }
-    },
-  );
+    }
+    const h = await harness([USB, WIFI], new RecordingManager());
+    expect(h.canonical).toBe(USB);
+    h.manager.bootedDevices = [];
+    h.manager.androidListedDeviceStates = new Map([
+      [USB, "unauthorized"],
+      [WIFI, "authorizing"],
+      ...offline.map((id): [string, string] => [id, "offline"]),
+      ["192.168.1.99:40000", "offline"],
+    ]);
+    try {
+      await h.monitor.run();
+      expect(probes).toEqual([[USB, WIFI]]);
+      expect(received).toEqual([[...offline]]);
+      expect(h.daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds).toEqual(new Set([USB]));
+      expect([
+        ...h.daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIncarnations.keys(),
+      ]).toEqual([USB]);
+      expect([...h.daemon.testHooks.deviceLoss.offlineEpisodes.keys()]).toEqual([USB]);
+      expect(h.daemon.testHooks.deviceLoss.misses.size).toBe(0);
+      await h.monitor.run();
+      expect(received).toEqual([[...offline]]);
+      expect(h.cleanups).toEqual([]);
+      expect(h.pool.getDevice(USB)?.sessionId).toBe("owner");
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      await h.monitor.stop();
+    }
+  });
 
   test.each(["offline", "authorizing"])(
     "USB unplugged while the Wi-Fi alias is %s keeps the session on the first sweep",

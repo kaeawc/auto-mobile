@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { toolJson } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
@@ -93,7 +94,10 @@ describe("startDevice with a deviceId and a name", () => {
 
   async function startOutcome(args: Record<string, unknown>): Promise<string> {
     try {
-      const result = await ToolRegistry.getTool("startDevice")!.handler(args);
+      // Run as MCP ingress does: under the connection the in-band key names (#15663).
+      const result = await withWireConnection(args, (wireArgs) =>
+        ToolRegistry.getTool("startDevice")!.handler(wireArgs),
+      );
       return `bound ${String(toolJson(result).name)}`;
     } catch (error) {
       return `refused: ${error instanceof Error ? error.message : String(error)}`;

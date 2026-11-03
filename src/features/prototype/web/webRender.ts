@@ -13,7 +13,17 @@ import {
   type Instance,
   type Raw,
 } from "../prototypeTemplate";
+import {
+  defaultFillAxes,
+  filling,
+  webCollectionRenderers,
+  withPagerLocals,
+  type WebAxis,
+} from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { webControlRenderers } from "./webControls";
+import { webSheetLayers } from "./webSheet";
+import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
@@ -23,6 +33,7 @@ import {
   textCss,
   type WebStyleContext,
 } from "./webStyle";
+import { safeAreaCss, safeAreaEdges } from "./webInsets";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -45,13 +56,40 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
+  readonly screenWidth: number;
+  /**
+   * A pager's `page` and `pageCount`: text placeholders and every condition (`visibleWhen`,
+   * `styleWhen`, `enabledWhen`, `errorWhen`) read them, as Android's local pager state does; a
+   * control's own value and a pager's selection never do.
+   */
+  readonly textLocals?: Readonly<Record<string, unknown>>;
+  /** The screen the outermost stack draws instead of its start; an unknown id draws the start. */
+  readonly screen?: string;
+  /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
+  readonly stacks?: WebStackScreens[];
+  /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
+  readonly layers: WebElement[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
   readonly ownInsets?: readonly string[];
 }
 
-type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
+export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
+
+/** The shared drawing helpers the control and collection renderers build on. */
+export interface WebRenderKit {
+  readonly base: typeof base;
+  readonly child: typeof child;
+  readonly children: typeof children;
+  readonly bound: typeof bound;
+  readonly icon: NodeRenderer;
+  readonly roleCss: typeof roleCss;
+  readonly disabledState: typeof disabledState;
+  readonly renderNode: typeof renderWebNode;
+  readonly safeAreaEdges: typeof safeAreaEdges;
+}
 
 /** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
 const MAX_WEB_REPEAT_ITEMS = 200;
@@ -62,6 +100,10 @@ function bindBare(text: string, scope: WebRenderScope): string {
   return text.replace(/\{([^{}]+)\}/g, (whole, inner: string) => {
     if (!inner.startsWith("derived:")) {
       const key = unshield(inner);
+      const locals = scope.textLocals ?? {};
+      if (Object.hasOwn(locals, key)) {
+        return shield(renderScalar(locals[key]));
+      }
       return Object.hasOwn(scope.condition.state, key)
         ? shield(renderScalar(scope.condition.state[key]))
         : whole;
@@ -121,69 +163,6 @@ function shieldedInstance(instance: Instance): Instance {
   return { ...instance, values };
 }
 
-const SAFE_AREA_EDGES: Readonly<Record<string, [string, string]>> = {
-  top: ["padding-top", "--safe-top"],
-  bottom: ["padding-bottom", "--safe-bottom"],
-  // Logical edges read logical insets, which the window maps to the physical side for its direction.
-  start: ["padding-inline-start", "--safe-start"],
-  end: ["padding-inline-end", "--safe-end"],
-};
-
-/**
- * `safeAreaPadding` adds the frame's inset on each named edge to the node's own padding. System
- * bars and the cutout both read the frame's safe area; the still has no keyboard, so `ime` adds
- * nothing.
- */
-/** The edges a node's safeAreaPadding takes from the frame (none for `ime` alone). */
-export function safeAreaEdges(node: Raw): string[] {
-  const safe = record(node.safeAreaPadding);
-  const types = Array.isArray(safe?.types) ? safe.types : [];
-  if (!safe || !Array.isArray(safe.edges) || !types.some((type) => type !== "ime")) {
-    return [];
-  }
-  return safe.edges.map(String).filter((edge) => SAFE_AREA_EDGES[edge] !== undefined);
-}
-
-/** Expands a `padding` shorthand of px values into logical longhands; others stay as they are. */
-function paddingLonghands(css: Record<string, string>): Record<string, string> {
-  const shorthand = css.padding;
-  if (shorthand === undefined) {
-    return { ...css };
-  }
-  const parts = shorthand.trim().split(/\s+/);
-  const [top, end = top, bottom = top, start = end] = parts;
-  const rest = Object.fromEntries(Object.entries(css).filter(([key]) => key !== "padding"));
-  return {
-    "padding-top": top!,
-    "padding-inline-end": end!,
-    "padding-bottom": bottom!,
-    "padding-inline-start": start!,
-    ...rest,
-  };
-}
-
-/**
- * Like windowInsetsPadding, an inset an ancestor already applied is consumed, so a descendant
- * asking for the same edge adds nothing more.
- */
-function safeAreaCss(
-  node: Raw,
-  scope: WebRenderScope,
-  css: Record<string, string>,
-): Record<string, string> {
-  const consumed = scope.consumedInsets ?? [];
-  // A component's `padding` shorthand becomes longhands first, so an inset adds to it rather than
-  // replacing it on that edge.
-  const padded = safeAreaEdges(node).length > 0 ? paddingLonghands(css) : { ...css };
-  for (const edge of safeAreaEdges(node)) {
-    const target = SAFE_AREA_EDGES[edge];
-    if (target && !consumed.includes(edge)) {
-      padded[target[0]] = `calc(${padded[target[0]] ?? "0px"} + var(${target[1]}))`;
-    }
-  }
-  return padded;
-}
-
 function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = {}) {
   const attrs: Record<string, string> = { "data-node": String(node.type) };
   if (typeof node.testTag === "string") {
@@ -236,11 +215,28 @@ function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
   return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
 }
 
-function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
+/**
+ * Lets a container decorate each child, given the child node it was drawn from. A hidden child
+ * arrives as undefined, so a container that keeps a slot for every child (a carousel) can still
+ * draw one; returning undefined draws nothing.
+ */
+export type WebCellDecorator = (
+  element: WebElement | undefined,
+  authored: Raw,
+) => WebElement | undefined;
+
+export function children(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
   const list = Array.isArray(node.children) ? node.children : [];
   const repeat = record(node.repeat);
   if (!repeat) {
-    return list.flatMap((entry, index) => renderOrSkip(entry, scope, `${path}.children[${index}]`));
+    return list.flatMap((entry, index) =>
+      renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
+    );
   }
   const rows = repeatRows(repeat, scope);
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
@@ -255,13 +251,21 @@ function children(node: Raw, scope: WebRenderScope, path: string): WebChild[] {
       index,
     };
     const itemScope = child(scope, { instances: [...scope.instances, instance] });
-    return list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`));
+    return list.flatMap((entry, at) =>
+      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
+    );
   });
 }
 
-function renderOrSkip(node: unknown, scope: WebRenderScope, path: string): WebChild[] {
+function renderOrSkip(
+  node: unknown,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
   const rendered = renderWebNode(node, scope, path);
-  return rendered ? [rendered] : [];
+  const drawn = cell ? cell(rendered, record(node) ?? {}) : rendered;
+  return drawn ? [drawn] : [];
 }
 
 /** A spacer with no width, height or weight fills its parent, as the native spacer does. */
@@ -278,32 +282,47 @@ function isUnsizedSpacer(node: unknown): boolean {
 
 /** Missing width and height default to `fill`, without touching authored sizes. */
 function fillMissing(node: Raw): Raw {
-  const style = record(node.style) ?? {};
-  return { ...node, style: { width: "fill", height: "fill", ...style } };
+  return filling(node, ["width", "height"]);
 }
 
 /**
- * Whether a child is a visible spacer that will fill its line: its repeat placeholders bind, its
- * visibleWhen keeps it, and its style (with matching styleWhen entries) leaves it unsized.
+ * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
+ * fills by default (a slider's width, say). Its repeat placeholders bind, its visibleWhen must keep
+ * it, and its style includes matching styleWhen entries.
  */
-function fillsAsSpacer(entry: unknown, scope: WebRenderScope, path: string): boolean {
-  const bound = scope.instances.reduce(
-    (current, instance) => bindStructure(current, path, instance),
-    record(entry) ?? {},
-  );
-  if (bound.visibleWhen !== undefined && !conditionHolds(bound.visibleWhen, scope.condition)) {
-    return false;
+function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): WebAxis[] {
+  const prepared = preparedNode(entry, scope, path);
+  if (!prepared) {
+    return [];
   }
-  return isUnsizedSpacer({ ...bound, style: resolvedStyle(bound, scope) });
+  const { styled, scope: local } = prepared;
+  if (isUnsizedSpacer(styled)) {
+    return ["width", "height"];
+  }
+  const style = record(styled.style) ?? {};
+  // An authored `fill` grows the parent just as a default fill does (fillMax either way).
+  const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
+  // A nested line or card grows around its own filling child, so its parent grows too.
+  const inferred = GROWING_CONTAINERS.has(String(styled.type))
+    ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
+    : defaultFillAxes(styled);
+  return [...authored, ...inferred];
 }
 
-/** A line grows when it renders a filling spacer; a repeat with no rows renders none. */
-function lineFills(raw: Raw, scope: WebRenderScope, path: string): boolean {
+/** Containers that grow on an axis when a child fills it, as a Compose parent does. */
+const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box", "card"]);
+
+/**
+ * The axes on which a container grows because a child fills them; a repeat with no rows renders
+ * no children.
+ */
+function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
   const repeat = record(raw.repeat);
   if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope).length === 0)) {
-    return false;
+    return [];
   }
-  return raw.children.some((entry) => fillsAsSpacer(entry, scope, path));
+  const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));
+  return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
 function spacerFilled(node: Raw): Raw {
@@ -313,15 +332,17 @@ function spacerFilled(node: Raw): Raw {
 const line =
   (axis: "row" | "column"): NodeRenderer =>
   (raw, scope, path) => {
-    // A wrap-sized line around a filling spacer grows to its parent, as a Compose parent does
-    // around a fillMaxSize child; otherwise it would shrink to nothing.
-    const node = lineFills(raw, scope, path) ? fillMissing(raw) : raw;
+    // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
+    // parent does around a fillMax child; otherwise it would shrink to nothing.
+    const node = filling(raw, lineFillAxes(raw, scope, path));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     return el("div", { attrs, style }, children(node, inner, path));
   };
 
-const box: NodeRenderer = (node, scope, path) => {
+const box: NodeRenderer = (raw, scope, path) => {
+  // A wrap-sized box grows around a filling child, as a Compose Box does.
+  const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
   const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
   return el("div", { attrs, style }, children(node, inner, path));
@@ -357,25 +378,6 @@ const text: NodeRenderer = (node, scope) => {
       : {};
   const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
   return el("span", { attrs, style }, textContent(node, scope));
-};
-
-const stack: NodeRenderer = (node, scope, path) => {
-  const screens = record(node.screens) ?? {};
-  const start = typeof node.start === "string" ? node.start : Object.keys(screens)[0];
-  const { attrs, style } = base(node, scope, { display: "flex", "flex-direction": "column" });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
-  const screen = start === undefined ? undefined : screens[start];
-  const content = renderWebNode(screen, inner, `${path}.screens[${JSON.stringify(start)}]`);
-  // A stack screen fills the stack, as on both devices.
-  const filled = content
-    ? [
-        {
-          ...content,
-          style: { ...content.style, flex: "1 1 auto", "min-height": "0", "align-self": "stretch" },
-        },
-      ]
-    : [];
-  return el("div", { attrs, style }, filled);
 };
 
 const scroll: NodeRenderer = (node, scope, path) => {
@@ -496,7 +498,7 @@ function disabledState(
   scope: WebRenderScope,
 ): { css: Record<string, string>; attrs: Record<string, string> } {
   const enabled =
-    node.enabledWhen === undefined || conditionHolds(node.enabledWhen, scope.condition);
+    node.enabledWhen === undefined || conditionHolds(node.enabledWhen, presentation(scope));
   return enabled
     ? { css: {}, attrs: {} }
     : { css: { opacity: "0.38" }, attrs: { "aria-disabled": "true" } };
@@ -701,7 +703,8 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
 
 const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
-  const error = node.errorWhen !== undefined && decide(node.errorWhen, scope.condition) === true;
+  const error =
+    node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
     display: "flex",
@@ -836,7 +839,9 @@ const toggle =
     );
   };
 
-const card: NodeRenderer = (node, scope, path) => {
+const card: NodeRenderer = (raw, scope, path) => {
+  // A card hugs its content, but grows like a line around a child that fills.
+  const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "flex-direction": "column",
@@ -916,11 +921,22 @@ const listItem: NodeRenderer = (node, scope) => {
   ]);
 };
 
+const KIT: WebRenderKit = {
+  base,
+  child,
+  children,
+  bound,
+  icon,
+  roleCss,
+  disabledState,
+  renderNode: renderWebNode,
+  safeAreaEdges,
+};
+
 export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   box,
   row: line("row"),
   column: line("column"),
-  stack,
   scroll,
   text,
   spacer,
@@ -934,7 +950,12 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   checkbox: toggle("checkbox"),
   card,
   listItem,
+  ...webCollectionRenderers(KIT),
+  ...webControlRenderers(KIT),
+  ...webStackRenderers(KIT),
 };
+
+const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
@@ -967,6 +988,13 @@ function bindStructure(node: Raw, path: string, instance: Instance): Raw {
   });
 }
 
+/** The scope every condition reads: spec state with any pager locals over it. */
+function presentation(scope: WebRenderScope): ConditionScope {
+  return scope.textLocals
+    ? { ...scope.condition, state: { ...scope.condition.state, ...scope.textLocals } }
+    : scope.condition;
+}
+
 /**
  * The node's style with every `styleWhen` entry whose condition holds merged over it in authored
  * order, as the devices resolve it. An entry the still cannot decide is not applied.
@@ -975,10 +1003,35 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
   const entries = Array.isArray(node.styleWhen) ? node.styleWhen : [];
   return entries.reduce<Raw | undefined>((style, entry) => {
     const when = record(entry);
-    return when && decide(when.when, scope.condition) === true
+    return when && decide(when.when, presentation(scope)) === true
       ? { ...style, ...record(when.style) }
       : style;
   }, record(node.style));
+}
+
+/**
+ * What rendering and parent fill inference both see of a node: its repeat placeholders bound
+ * (through the devices' own contract), a pager's locals set before its own conditions run, its
+ * `visibleWhen` (undefined when hidden) and its `styleWhen` merged. One path, so the two agree.
+ */
+function preparedNode(
+  node: unknown,
+  scope: WebRenderScope,
+  path: string,
+): { styled: Raw; scope: WebRenderScope } | undefined {
+  const authored = record(node);
+  if (!authored || typeof authored.type !== "string") {
+    return undefined;
+  }
+  const raw = scope.instances.reduce(
+    (current, instance) => bindStructure(current, path, instance),
+    authored,
+  );
+  const local = withPagerLocals(raw, scope, KIT);
+  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
+    return undefined;
+  }
+  return { styled: { ...raw, style: resolvedStyle(raw, local) }, scope: local };
 }
 
 export function renderWebNode(
@@ -986,21 +1039,17 @@ export function renderWebNode(
   scope: WebRenderScope,
   path: string,
 ): WebElement | undefined {
-  const authored = record(node);
-  if (!authored || typeof authored.type !== "string") {
+  const prepared = preparedNode(node, scope, path);
+  if (!prepared) {
     return undefined;
   }
-  // Repeat placeholders bind through the same contract the devices use: text, spans, nested
-  // conditions with typed operands, and state keys.
-  const raw = scope.instances.reduce(
-    (current, instance) => bindStructure(current, path, instance),
-    authored,
-  );
-  if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, scope.condition)) {
+  const { styled, scope: local } = prepared;
+  const own: WebRenderScope = { ...local, ownInsets: safeAreaEdges(styled) };
+  const layer = WEB_LAYER_RENDERERS[String(styled.type)];
+  if (layer) {
+    layer(styled, own, path);
     return undefined;
   }
-  const styled: Raw = { ...raw, style: resolvedStyle(raw, scope) };
-  const own: WebRenderScope = { ...scope, ownInsets: safeAreaEdges(styled) };
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
   return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
 }

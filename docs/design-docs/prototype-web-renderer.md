@@ -2,7 +2,8 @@
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
 document covers the per-prototype resources (the page and the single-file Compose and SwiftUI
-sources), spec revisions, the page, the still renderer and the device frame registry.
+sources), spec revisions, the page, its browser check, the still renderer and the device frame
+registry.
 
 ## Resource
 
@@ -73,34 +74,79 @@ sources), spec revisions, the page, the still renderer and the device frame regi
 document, its `sha256`, the frame used, the unsupported nodes of the first view and the revisions
 it inlined per variant.
 
-- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape.
-  The first view is the chosen variant's chosen revision (default: latest) in portrait; the rest
-  are `hidden`.
-- **Controls.** Only four: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
-  double-click to fit), a variant select (only with more than one variant) and the revision
-  history (newest first, `r<N> · show|patch`; only when some variant has more than one revision
-  in the page). Controls are buttons and a select with labels. A toolbar note says the preview is
+- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape,
+  once per screen of its outermost stack when that stack has more than one screen (start first,
+  then the others in key order; such views carry `data-screen`). The first view is the chosen
+  variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
+  `hidden`.
+- **Controls.** Only five: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
+  double-click to fit), a variant select (only with more than one variant), a screen select (only
+  when some revision in the page has more than one screen view) and the revision history (newest
+  first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
+  screen select lists the shown revision's own screen views and is hidden with fewer than two, so
+  it never offers a view the page lacks; switching variant or revision keeps the chosen screen
+  when the new revision has it, else shows that revision's start. Controls are buttons and a select with labels. A toolbar note says the preview is
   static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
-  self-contained. It only shows and hides views and moves the stage; UI state stays in memory, with
-  no storage, cookies or URL changes. It must stay at or below 150 KB.
+  self-contained. It only shows and hides views, lists the shown revision's screens in the
+  screen select and moves the stage; UI state stays in memory, with no storage, cookies or URL
+  changes. It must stay at or below 150 KB.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
-- **Budget.** The page is at most 2 MiB. Each variant's latest revision and the revision shown
-  first are always kept; older revisions are added newest first while they fit, after measuring the
-  shell (head, toolbar, full history list and script). If the kept revisions alone do not fit, the
-  build fails with an `ActionableError` naming the largest view.
+- **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
+  of the revision shown first are always kept, then their other screens while they fit; older
+  revisions are added newest first while their start screen and history entry fit, each followed
+  by its other screens while they fit. The shell (head, toolbar with every screen of the shown
+  revision, full history list and script) is measured first. If the kept start screens alone do
+  not fit, the build fails with an `ActionableError` naming the largest view.
 - **Determinism.** The same input yields byte-identical HTML.
+
+## Browser check
+
+`test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
+spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
+`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
+`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
+`webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
+nothing at runtime drives a browser.
+
+- **Assertions.** The page is served from one fixed URL and every other request is aborted and
+  fails the case, on top of the page's own CSP. No console error, page error or
+  `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
+  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; rotate
+  shows the landscape view, wider than tall; a page with a screen select shows exactly the picked
+  screen's view.
+- **Goldens.** One PNG per case in `test/fixtures/prototype-web/screenshots/`
+  (`<spec>--<frame>.png`, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+  with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
+  case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
+  different size never matches. A unit test keeps the directory in step with the case list.
+- **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
+  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens. It needs the
+  Chromium build of the pinned `playwright-core`:
+  `node_modules/.bin/playwright-core install --only-shell chromium`. Every case that reaches
+  capture writes `<case>.png`, and a pixel mismatch also `<case>.diff.png`, to
+  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`).
+- **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
+  and on pull requests that touch the web renderer, its reference fixtures, the check, or
+  `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux
+  Chromium build, whose text anti-aliasing other machines may not match, so a local run can fail on
+  pixels alone; when the runner renders differently, the job uploads the
+  `prototype-web-screenshots` artifact, and adopting it means reviewing its PNGs and copying those
+  other than `*.diff.png` into the golden directory.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode})` in `src/features/prototype/web/webStill.ts`
-draws the spec as a still screen and returns an element tree plus `unsupportedNodes`. It renders on
+`renderPrototypeStill(spec, {frame, orientation, mode, screen})` in
+`src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
+tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
+start and the screen drawn). It renders on
 the host, so the page's script only switches between views it was given and never runs spec logic.
 
-- **Input.** The spec after component expansion, with its own `state` and `data`. The stack shows
-  its `start` screen. No action, timer or `request` runs.
+- **Input.** The spec after component expansion, with its own `state` and `data`. A stack shows its
+  `start` screen; the outermost stack (the first one drawn) shows `screen` instead when it has that
+  screen. No action, timer or `request` runs.
 - **Text.** String-table translations resolve first, in the still's fixed `en-US` locale. Then
   `{data:/pointer}` placeholders bind (a missing or non-scalar value is empty),
   then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a
@@ -139,12 +185,44 @@ the host, so the page's script only switches between views it was given and neve
   `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
-  `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
-  `listItem` (with its leading icon and its trailing switch, checkbox or icon). A text field draws
+  `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
+  `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider` and `bottomSheet`. Where the devices differ,
+  the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
+  page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
+  it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
+  would reveal are not drawn. Its `dots` indicator is a row of 6 px dots, 8 px apart, the current one
+  in `onSurface` and the rest at 0.38 opacity, 8 px above its bottom edge (a vertical pager: a column
+  8 px from its right edge), or centred in a 22 px strip when `below`, unless a fixed height (a
+  vertical pager: width) under 44 px leaves no room for it, when it overlays as Android does. A grid is a CSS grid of equal
+  columns with `spacing` between columns and `runSpacing` (else `spacing`) between rows; a child
+  spans its `span` clamped to the columns, takes the cell's width and sits at the top of its row. An
+  adaptive grid fits `floor((width + spacing) / (minWidth + spacing))` columns to the screen width,
+  so its tracks and clamped spans agree. A carousel draws its items in a clipped row at `itemWidth`,
+  `itemSpacing` apart, each masked with a 28 px corner, and keeps an empty slot for a hidden child; it does not resize items as multi-browse or
+  hero keylines do. A bottom nav is an 80 px `surfaceContainer` bar whose items draw their icon in a
+  64x32 pill (`secondaryContainer` when selected) over a 12 px label, and it pads its bottom edge by
+  the safe area, as both devices' navigation bars do, unless an ancestor already applied it. A tab bar
+  is a 48 px `surface` row (72 px when a tab has an icon) with an `outlineVariant` bottom divider; the
+  selected tab takes `primary` and a 3 px `primary` indicator, the rest `onSurfaceVariant`, and a
+  `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
+  their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
+  draws its named icon, else a 24 px `surfaceVariant` square, since item images are not inlined. An
+  icon button draws the icon placeholder in a 40 px circle inside a 48 px target: `standard` and
+  `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
+  `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no
+  `stateKey` is an outlined assist chip and one with a `stateKey` a filter chip, whatever its
+  `variant`, as both devices draw them: 32 px tall with an 8 px radius in a 48 px target, outlined
+  in `outlineVariant`, or `secondaryContainer` with a leading check icon while its key is `true`. A
+  slider draws its label above a 16 px track, `primary` up to the value and `secondaryContainer`
+  after it with a stop dot at its end, and a 4x44 px `primary` thumb at the value: its numeric
+  state, else 0, snapped to `step` and clamped to `min`..`max`. A pager fills both axes, and a grid,
+  carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column, box or card
+  around such a child grows on that axis, as a Compose parent does around a `fillMax` child. A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
   and actions as icon placeholders labelled with their action, and its `variant` sets its height,
-  title size and title alignment. A button, switch, checkbox, text field or
-  list item whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
+  title size and title alignment. A button, switch, checkbox, text field,
+  list item, icon button, chip or slider whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, text decorations and built-in font
   families map to CSS, and a span keeps its own background. A text field shows `errorText` with error colours when `errorWhen` is
   decidably true, and otherwise its `supportingText`; it draws filled chrome (the native default) or an outline for `outlined`; its label floats above
@@ -156,7 +234,16 @@ the host, so the page's script only switches between views it was given and neve
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
   titled with the name, because the glyph set is not inlined. A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
-  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. A
+  `bottomSheet` is open when its `openWhen` key holds exactly `equals` (a missing key keeps it shut)
+  and draws nothing in place: like the devices' modal layer, an open one is drawn over its window
+  (the screen, a sheet window's region or a floating window's box) after the tree, in tree order, a
+  sheet before those inside it, and takes no ancestor's grid cell or consumed insets. It is a scrim
+  filling the window (the `scrim` role at 0.4 opacity by default or when named, else the authored
+  colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
+  or `dp` capped at the window), painted `surface` unless an authored background resolves (the still draws no gradients),
+  with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
+  8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle (or three generic button marks, which move to

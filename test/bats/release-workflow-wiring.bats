@@ -1031,6 +1031,10 @@ wiring_requires_yq() {
   [ "$(grep -c 'check-protoviewer-artifact-policy.ts' "$gate")" -eq 2 ]
   ! grep -Fq -- "--allow-snapshot" "$gate"
   grep -Fq "check-protoviewer-artifact-policy.ts android" ".github/workflows/pull_request.yml"
+  # The candidate gate builds with the release versionName, or the -SNAPSHOT check fails it.
+  [ "$(yq -r '.jobs."build-candidate-protoviewer-artifact-policy".with."release-version"' "$prepare")" = \
+    '${{ needs.prepare-version.outputs.protoviewer_version }}' ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_RELEASE_VERSION' "$gate")" = '${{ inputs.release-version }}' ]
 }
 
 @test "ProtoViewer APK build feeds the PROTOVIEWER_* signing and version inputs the convention reads (#15301)" {

@@ -29,6 +29,7 @@ import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSuppor
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { withWireConnection } from "../helpers/mcpConnection";
 import {
   FakeWatchProvisionSimctl,
   WATCH_DEVICE_TYPE,
@@ -122,8 +123,14 @@ describe("provisionDevice on an Apple Watch simulator", () => {
     return { simctl, pool, sessions: sessionManager, runnerCalls, timer, lifecycleCoordinator };
   }
 
+  /** Call provisionDevice as MCP ingress does: under the connection its args name (#15663). */
+  const provisionAs = (args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> =>
+    withWireConnection(args, (wireArgs) =>
+      ToolRegistry.getTool("provisionDevice")!.handler(wireArgs, undefined, signal),
+    );
+
   const provision = (args: Record<string, unknown>) =>
-    ToolRegistry.getTool("provisionDevice")!.handler({ __mcpSessionId: "client-a", ...args });
+    provisionAs({ __mcpSessionId: "client-a", ...args });
 
   const failure = (promise: Promise<unknown>) =>
     promise.then(
@@ -204,12 +211,13 @@ describe("provisionDevice on an Apple Watch simulator", () => {
       },
     });
 
-    const outcome = await ToolRegistry.getTool("provisionDevice")!
-      .handler({ __mcpSessionId: "client-a", device: WATCH }, undefined, request.signal)
-      .then(
-        () => "delivered",
-        () => "refused",
-      );
+    const outcome = await provisionAs(
+      { __mcpSessionId: "client-a", device: WATCH },
+      request.signal,
+    ).then(
+      () => "delivered",
+      () => "refused",
+    );
 
     expect(outcome).toBe("refused");
     expect(seen).toEqual([false, true]);

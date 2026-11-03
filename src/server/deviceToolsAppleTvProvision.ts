@@ -1,4 +1,5 @@
 import { requestAcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
 import { holderOf } from "../daemon/deviceBinding";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -32,11 +33,7 @@ import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { formatToolParamError } from "./toolParamError";
-import {
-  internalMcpSessionId,
-  internalOneShotCli,
-  stripInternalToolParams,
-} from "./internalToolParams";
+import { internalOneShotCli, stripInternalToolParams } from "./internalToolParams";
 
 type AppleTvProvisioner = ReturnType<
   NonNullable<DeviceToolsDependencies["appleTvSimulatorProvisionerFactory"]>
@@ -189,7 +186,7 @@ async function bootAndBind(
     const reusableSessionId = internalOneShotCli(rawArgs)
       ? undefined
       : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
-          internalMcpSessionId(rawArgs),
+          currentAutolockMcpSessionId(),
           tv.deviceId,
         );
     assertTvUnclaimed(tv.deviceId, deps, lease, reusableSessionId);

@@ -34,6 +34,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -62,9 +63,12 @@ describe("killDevice device ownership (#10785)", () => {
   let manager: RecordingKillDeviceManager;
   let sessionManager: SessionManager;
 
+  /** One top-level killDevice; an `__mcpSessionId` in `args` is its ambient connection (#15663). */
   const kill = (args: Record<string, unknown>, routingSessionUuid?: string) =>
-    runWithToolSelectionContext({ routingSessionUuid }, () =>
-      ToolRegistry.getTool("killDevice")!.handler(args),
+    withWireConnection(args, (rest) =>
+      runWithToolSelectionContext({ routingSessionUuid }, () =>
+        ToolRegistry.getTool("killDevice")!.handler(rest),
+      ),
     );
 
   async function outcome(args: Record<string, unknown>, routingSessionUuid?: string) {

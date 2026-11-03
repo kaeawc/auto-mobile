@@ -90,6 +90,8 @@ export interface InternalToolInvocationContext {
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
   /** Always present, so a call outside a plan never inherits a deadline it was not given. */
   requestDeadline: RequestDeadline | undefined;
+  /** Always `undefined`: an internal call never autolocks or records for the connection. */
+  autolockMcpSessionId: undefined;
 }
 
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,

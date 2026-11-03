@@ -25,6 +25,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asMcpConnection } from "../helpers/mcpConnection";
 
 const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
 let sessions: SessionManager | undefined;
@@ -53,7 +54,7 @@ test("legacy selection passes the connection id to readiness and records its pin
     legacyDeviceSelection: () => legacy,
     resumeCtrlProxy: async () => {},
   });
-  await select({ deviceId: device.deviceId, __mcpSessionId: "conn-a" });
+  await asMcpConnection("conn-a", () => select({ deviceId: device.deviceId }));
   expect(connectionIds).toEqual(["conn-a"]);
   expect(pins.get("conn-a")).toEqual(device);
   expect(pins.has(undefined)).toBe(false);

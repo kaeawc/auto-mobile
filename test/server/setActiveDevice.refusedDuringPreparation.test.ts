@@ -29,6 +29,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { toolIsError, toolStructured } from "../helpers/toolResponse";
+import { asMcpConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -112,10 +113,13 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
     };
     const start = (caller = "client-a", signal?: AbortSignal, selector = false) =>
       runWithAbortSignal(signal, () =>
-        ToolRegistry.getTool("startDevice")!.handler(
-          { ...(selector ? { platform } : startArgs), __mcpSessionId: caller },
-          undefined,
-          signal,
+        // startDevice still reads the in-band connection id; ingress also sets it ambiently.
+        asMcpConnection(caller, () =>
+          ToolRegistry.getTool("startDevice")!.handler(
+            { ...(selector ? { platform } : startArgs), __mcpSessionId: caller },
+            undefined,
+            signal,
+          ),
         ),
       );
     const resumed: string[] = [];
@@ -125,11 +129,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       },
     });
     const select = () =>
-      selected({
-        deviceId: device.deviceId,
-        sessionUuid: "other-session",
-        __mcpSessionId: "client-b",
-      });
+      asMcpConnection("client-b", () =>
+        selected({ deviceId: device.deviceId, sessionUuid: "other-session" }),
+      );
     const drain = async () => {
       for (let second = 0; second < 5; second++) {
         for (let turn = 0; turn < 100; turn++) {
@@ -257,7 +259,7 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       });
       try {
         expectPreparationRefusal(
-          await refusal(select({ deviceId: h.device.deviceId, __mcpSessionId: "client-b" })),
+          await refusal(asMcpConnection("client-b", () => select({ deviceId: h.device.deviceId }))),
           h.device.deviceId,
         );
         expect(calls).toEqual([]);
@@ -355,14 +357,12 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
           h.resumed.push(id);
         },
       });
-      const args = {
-        deviceId: h.device.deviceId,
-        sessionUuid: "other-session",
-        __mcpSessionId: "client-b",
-        display: "main",
-      };
+      const args = { deviceId: h.device.deviceId, sessionUuid: "other-session", display: "main" };
       try {
-        expectPreparationRefusal(await refusal(select(args)), h.device.deviceId);
+        expectPreparationRefusal(
+          await refusal(asMcpConnection("client-b", () => select(args))),
+          h.device.deviceId,
+        );
         expect(inventoryReads).toBe(1);
         expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(true);
         expect(h.resumed).toEqual([]);
@@ -417,7 +417,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
         });
         try {
           expectPreparationRefusal(
-            await refusal(select({ deviceId: h.device.deviceId, __mcpSessionId: "client-b" })),
+            await refusal(
+              asMcpConnection("client-b", () => select({ deviceId: h.device.deviceId })),
+            ),
             h.device.deviceId,
           );
           expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(true);
@@ -454,7 +456,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
           },
         }),
       });
-      const result = await select({ deviceId: h.device.deviceId, __mcpSessionId: "client-b" });
+      const result = await asMcpConnection("client-b", () =>
+        select({ deviceId: h.device.deviceId }),
+      );
       expect(result.error).toBeUndefined();
       expect(calls).toEqual(["ready", "resume", "pin"]);
       expect(h.pool.isReservedForReadiness(h.device.deviceId)).toBe(false);
@@ -477,11 +481,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       try {
         expectPreparationRefusal(
           await refusal(
-            select({
-              deviceId: h.device.deviceId,
-              sessionUuid: "other-session",
-              __mcpSessionId: "client-b",
-            }),
+            asMcpConnection("client-b", () =>
+              select({ deviceId: h.device.deviceId, sessionUuid: "other-session" }),
+            ),
           ),
           h.device.deviceId,
         );
@@ -526,11 +528,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       });
       const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
       try {
-        await select({
-          deviceId: h.device.deviceId,
-          sessionUuid: holder,
-          __mcpSessionId: "client-a",
-        });
+        await asMcpConnection("client-a", () =>
+          select({ deviceId: h.device.deviceId, sessionUuid: holder }),
+        );
         expect(h.pool.getDevice(h.device.deviceId)?.sessionId).toBe(holder);
         expectHeldRefusal(await refusal(h.select()), h.device.deviceId);
       } finally {

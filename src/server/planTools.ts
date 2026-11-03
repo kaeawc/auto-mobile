@@ -258,11 +258,10 @@ const executePlanTool = async (
     progress,
     signal,
   });
-  const internalParams = params as Record<string, unknown>;
   const result = await runWithToolSelectionContext(
     {
       // #11469: steps run for the connection that called executePlan.
-      ...planCallerContext(internalParams),
+      ...planCallerContext(),
       // Steps inherit the request's deadline ambiently (#15663); the plan carries their progress.
       planRequest: { progress },
     },

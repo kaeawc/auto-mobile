@@ -21,6 +21,7 @@ import type { UIStateSetup } from "../../../src/features/navigation/interfaces/U
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { withWireConnection } from "../../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -126,10 +127,13 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     );
 
     // Seed the agent-facing baseline via a normal (non-nav) observe call.
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
     const baselineAfterObserve = daemonSessionManager!.getLastRenderedObservation(sessionId);
     expect(baselineAfterObserve).toBeDefined();
 

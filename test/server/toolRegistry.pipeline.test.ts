@@ -783,19 +783,22 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     startToolCallRecording({ connectionId: "B", timer });
     const handler = new DefaultAfterToolCallHandler();
     for (const connectionId of ["A", "B", "A", "B"]) {
-      await handler.handle({
-        outputSchema: undefined,
-        sessionUuid: undefined,
-        name: "tapOn",
-        args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
-        traits: PLAN_RELEVANT,
-        device: undefined,
-        internalCall: false,
-        response: createStructuredToolResponse({ success: true }),
-        shouldResolveDevice: false,
-        timer,
-        toolStartMs: 0,
-      });
+      // The connection is ambient; the in-band copy ingress still writes must not reach the plan.
+      await runWithToolSelectionContext({ autolockMcpSessionId: connectionId }, () =>
+        handler.handle({
+          outputSchema: undefined,
+          sessionUuid: undefined,
+          name: "tapOn",
+          args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
+          traits: PLAN_RELEVANT,
+          device: undefined,
+          internalCall: false,
+          response: createStructuredToolResponse({ success: true }),
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: 0,
+        }),
+      );
     }
     const a = stopToolCallRecording({ connectionId: "A", timer });
     expect(a.stepCount).toBe(2);
@@ -818,7 +821,10 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     startToolCallRecording({ connectionId: "A", timer });
     const handler = new DefaultAfterToolCallHandler();
     await runWithToolSelectionContext(
-      { toolCallRecording: { swipeAt: { screenSize: { width: 1000, height: 2000 } } } },
+      {
+        autolockMcpSessionId: "A",
+        toolCallRecording: { swipeAt: { screenSize: { width: 1000, height: 2000 } } },
+      },
       () =>
         handler.handle({
           outputSchema: undefined,

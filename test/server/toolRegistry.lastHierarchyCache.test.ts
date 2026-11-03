@@ -19,6 +19,7 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { toolJson, toolStructured, toolText } from "../helpers/toolResponse";
 import { buildObserveResult } from "../helpers/observeFixture";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 const observationSchema = z.looseObject({
   viewHierarchy: z.looseObject({
@@ -163,11 +164,14 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
 
     // Skeleton is the default observe projection now; this test asserts the served
     // full view hierarchy is sanitized, so opt into the full projection per-call.
-    const response = await tool.handler({
-      platform: "android",
-      project: "full",
-      __mcpSessionId: "mcp-session-1",
-    });
+    const response = await withWireConnection(
+      {
+        platform: "android",
+        project: "full",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     // Caches are populated (were dormant before the fix) with the FULL hierarchy.
     // #2917: the canonical slots are the typed top-level fields, NOT customData.
@@ -206,13 +210,16 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     );
     const tool = ToolRegistry.getTool("tapOn")!;
 
-    const response = await tool.handler({
-      platform: "android",
-      // project:"full" opts out of the #5872 skeleton default so this test can
-      // assert the raw hierarchy is sanitized end-to-end through the chokepoint.
-      project: "full",
-      __mcpSessionId: "mcp-session-1",
-    });
+    const response = await withWireConnection(
+      {
+        platform: "android",
+        // project:"full" opts out of the #5872 skeleton default so this test can
+        // assert the raw hierarchy is sanitized end-to-end through the chokepoint.
+        project: "full",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     // Action's nested observation is sanitized in BOTH representations.
     const actionResponse = actionResponseSchema.parse(toolStructured(response));
@@ -246,10 +253,13 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     );
     const tool = ToolRegistry.getTool("sendKeys")!;
 
-    await tool.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
     const cachedHierarchy = cacheData.lastHierarchy;

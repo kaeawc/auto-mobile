@@ -1,4 +1,3 @@
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import type { DevicePool } from "../daemon/devicePool";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
@@ -13,7 +12,10 @@ import {
   TestExecutionStatus,
   TestStepRecord,
 } from "../db/testExecutionRepository";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  getToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 import {
   ActionableError,
   type AndroidOrIosPlatform,
@@ -543,9 +545,8 @@ export class PlanExecutionOrchestrator {
     if (!scopes || !devicePool) {
       return undefined;
     }
-    const connectionId: unknown = Reflect.get(this.request, INTERNAL_MCP_SESSION_PARAM);
     const binding =
-      scopes.get(typeof connectionId === "string" ? connectionId : undefined) ??
+      scopes.get(currentAutolockMcpSessionId()) ??
       scopes.forGrantedSession(planLifecycleSessionUuid(sessionUuid));
     if (!binding) {
       return undefined;

@@ -1,7 +1,6 @@
 import {
   adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
-  internalMcpSessionId,
   internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
@@ -31,7 +30,6 @@ export function provisionSessionArgs(args: ProvisionDeviceArgs): StartDeviceArgs
     matchExactName: true,
     __restartResumeTargets: internalRestartResumeTargets(args),
     timeoutMs: args.timeoutMs,
-    __mcpSessionId: internalMcpSessionId(args),
     __restartResumeSessionUuid: internalRestartResumeSessionUuid(args),
     ...(internalOneShotCli(args) ? { __oneShotCli: true } : {}),
   };

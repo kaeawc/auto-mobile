@@ -53,6 +53,11 @@ export type ToolSelectionContext = {
    * for a call with no originating connection.
    */
   callerMcpSessionId?: string;
+  /**
+   * The connection a top-level call implicitly autolocks and records for (#15663). Unlike
+   * `callerMcpSessionId`, an internal call (plan step, nested tool) never inherits it.
+   */
+  autolockMcpSessionId?: string;
   /** The connection key the call's per-connection device pin is stored under (#14385). */
   deviceConnectionKey?: string;
   /** Connection-bound ownership proof for read-only cross-device checks. */
@@ -155,6 +160,19 @@ export const runWithToolSelectionContext = async <T>(
 
 export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
   toolSelectionContext.getStore();
+
+/** The connection this top-level call autolocks and records for; absent inside internal calls. */
+export const currentAutolockMcpSessionId = (): string | undefined =>
+  toolSelectionContext.getStore()?.autolockMcpSessionId;
+
+/**
+ * The connection a call runs for: its own autolock identity, else the enclosing call's (#11469). A
+ * plan step or nested call has no autolock identity and is judged as the connection that started it.
+ */
+export const currentConnectionMcpSessionId = (): string | undefined => {
+  const context = toolSelectionContext.getStore();
+  return context?.autolockMcpSessionId ?? context?.callerMcpSessionId;
+};
 
 /**
  * The tracked execution the current call runs under (#15663): set at MCP ingress and inherited by

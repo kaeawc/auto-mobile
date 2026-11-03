@@ -1,12 +1,12 @@
 import Foundation
 
 /// Library-only R2 data flow, matching prototypeSensitiveSinkErrors (#15635).
-/// Literal payloads stay opaque; only request/channel wire fields are sinks.
+/// Literal payloads stay opaque; request/channel wire fields and storage keys are sinks.
 enum PrototypeSensitiveSinkRules {
     private struct Field {
         let text: String
         let path: String
-        var dataPointer = false
+        var pointerSource: String?
         var itemBinding = false
     }
 
@@ -26,7 +26,14 @@ enum PrototypeSensitiveSinkRules {
         -> [PrototypeLoadError]
     {
         let taints = sensitivePointers(spec)
-        guard !taints.isEmpty else { return [] }
+        let declared = PrototypeStrictBindings.array(spec["requires"]?.objectFields?["platform"])
+        let platformTaints = PrototypeContractValidator.platformModules.flatMap { module, raw in
+            (raw.objectFields?["state"]?.objectFields ?? [:]).compactMap { key, entry -> String? in
+                entry.objectFields?["sensitive"] == .bool(true) && declared.contains(.string(module)) ?
+                    "/\(module)/\(key)" : nil
+            }
+        }
+        guard !taints.isEmpty || !platformTaints.isEmpty else { return [] }
         let sinks = sinkFields(spec, actions: actions).sorted {
             $0.path.utf16.lexicographicallyPrecedes($1.path.utf16)
         }
@@ -56,7 +63,7 @@ enum PrototypeSensitiveSinkRules {
             let rowRead = taintedRows.contains { scope in
                 field.path.hasPrefix("\(scope.path).children[") &&
                     (field.itemBinding || (
-                        !field.dataPointer && PrototypeRepeat.segments(
+                        field.pointerSource == nil && PrototypeRepeat.segments(
                             field.text,
                             alias: scope.alias
                         )
@@ -66,17 +73,26 @@ enum PrototypeSensitiveSinkRules {
             // Typed pointers are literal at runtime. Derived text has no host-side instance,
             // so bound()'s empty result falls back to the authored data placeholders.
             let texts: [String]
-            if field.dataPointer || !validRepeats {
+            if field.pointerSource != nil || !validRepeats {
                 texts = [field.text]
             } else {
                 let bound = repeats.bound([.init(value: ["stateKey": .string(field.text)], path: field.path)])
                 texts = bound.isEmpty ? [field.text] : bound.compactMap { $0.value["stateKey"]?.stringValue }
             }
-            let pointers = field.dataPointer ? [field.text] : texts.flatMap(dataPlaceholders)
-            if rowRead || pointers.contains(where: { pointer in
-                taints.contains { overlaps($0, pointer, pointerIndexWildcard: !field.dataPointer) }
-            }) {
-                errors.append(.invalidSpec(path: field.path, message: "Sensitive value cannot be bound into a request"))
+            func reaches(_ source: String, taints: [String]) -> Bool {
+                let pointers = field.pointerSource == nil ? texts.flatMap {
+                    source == "data" ? dataPlaceholders($0) : PrototypePlatformValidator.placeholders($0)
+                } : (field.pointerSource == source ? [field.text] : [])
+                return pointers.contains { pointer in
+                    taints.contains { overlaps($0, pointer, pointerIndexWildcard: field.pointerSource == nil) }
+                }
+            }
+            if rowRead || reaches("data", taints: taints) || reaches("platform", taints: platformTaints) {
+                errors.append(.invalidSpec(
+                    path: field.path,
+                    message: field.path.hasPrefix("storage.keys[") ? "Sensitive value cannot be persisted" :
+                        "Sensitive value cannot be bound into a request"
+                ))
             }
         }
         return errors
@@ -87,8 +103,10 @@ enum PrototypeSensitiveSinkRules {
         func binding(_ raw: JSONValue?, path: String, text: Bool = false) {
             if text, let value = raw?.stringValue { fields.append(.init(text: value, path: path)) }
             guard let form = raw?.objectFields, form["state"] == nil else { return }
-            if let pointer = form["data"]?.stringValue {
-                fields.append(.init(text: pointer, path: path, dataPointer: true))
+            for source in ["data", "platform"] {
+                if let pointer = form[source]?.stringValue {
+                    fields.append(.init(text: pointer, path: path, pointerSource: source))
+                }
             }
             if form["item"]?.stringValue != nil {
                 fields.append(.init(text: "", path: path, itemBinding: true))
@@ -119,6 +137,17 @@ enum PrototypeSensitiveSinkRules {
             let at = PrototypeLimits.dataMemberPath("channels", key: id)
             binding(raw.objectFields?["url"], path: "\(at).url", text: true)
             entries(raw.objectFields?["headers"], path: "\(at).headers", text: true)
+        }
+        for (index, key) in PrototypeStrictBindings.array(spec["storage"]?.objectFields?["keys"]).enumerated() {
+            if let key = key.stringValue, key.hasPrefix("data:"),
+               PrototypeDataPointer.isValid(String(key.dropFirst(5)))
+            {
+                fields.append(.init(
+                    text: String(key.dropFirst(5)),
+                    path: "storage.keys[\(index)]",
+                    pointerSource: "data"
+                ))
+            }
         }
         return fields
     }

@@ -101,6 +101,8 @@ export interface PrototypePlatformCall {
 }
 /** One key of a module's read-only `/platform/<module>` state (#15245). */
 export interface PrototypePlatformStateEntry {
+  /** Personal data that cannot flow into network or storage sinks (R2). */
+  sensitive?: boolean;
   /** The platforms that report the key; elsewhere it is absent and compares as missing. */
   platforms: string[];
   /** The default contract rule; valueByPlatform overrides it on a named platform. */

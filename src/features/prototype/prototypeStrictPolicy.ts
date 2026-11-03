@@ -3,12 +3,15 @@ import {
   prototypePlatformCall,
   prototypePlatformEvent,
   prototypePlatformUses,
+  PROTOTYPE_PLATFORM_MODULES,
 } from "./prototypePlatform";
 import {
   isPrototypeDataPointer,
   prototypeDataPathPointer,
   prototypeDataPlaceholders,
+  prototypePlatformPlaceholders,
 } from "./prototypeData";
+import { parsePrototypeStorageKey } from "./prototypeStorage";
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -99,23 +102,24 @@ function sensitiveModuleLibraryError(spec: unknown): PrototypeValidationError | 
 }
 
 /**
- * Sink paths (R2) where a `/data` pointer written by a `sensitive` platform call is bound into a
- * request URL, header, query or body, or a channel URL or header. Every such path is returned in
- * authored order; the library refusal reports the first one, and MCP-direct shows may warn on all.
+ * Sink paths (R2) where sensitive call results or platform state reach request/channel wire
+ * fields or storage. The library refusal reports the first sorted path; direct shows warn on all.
  */
 export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidationError[] {
   const tainted = sensitiveDataPointers(spec);
-  if (!tainted.length) {
+  const platformTainted = sensitivePlatformPointers(spec);
+  if (!tainted.length && !platformTainted.length) {
     return [];
   }
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
   const { requests, fields } = libraryFields(spec, nodes, true);
-  fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const sinkFields = fields.filter(
     // Key fields name state entries, which a `/data` pointer cannot reach.
     (field) => !field.key && requestSinkPath(field.path, requests),
   );
+  sinkFields.push(...sensitiveStorageFields(spec));
+  sinkFields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   // Direct warning callers may precede repeat validation. Keep their authored-text scan
   // for invalid repeats; the binder (including the budget probe) requires valid repeats.
   const validRepeats = repeatErrors(spec) === undefined;
@@ -128,7 +132,7 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   // Typed data pointers stay literal at runtime, even inside repeat rows. Only text binds.
   const located = sinkFields.map((field) => ({
     ...field,
-    value: { stateKey: field.dataPointer ? "" : field.text },
+    value: { stateKey: field.pointerSource ? "" : field.text },
   }));
   const instances = validRepeats
     ? repeatKeyInstances(spec, located)
@@ -154,32 +158,40 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
       ? [{ path, alias: repeat.as }]
       : [];
   });
-  const errors: PrototypeValidationError[] = [];
-  for (const field of sinkFields) {
+  return sinkFields.flatMap((field) => {
     const readsTaintedRow = taintedRepeats.some(
       (scope) =>
         field.path.startsWith(`${scope.path}.children[`) &&
         (field.itemBinding ||
-          (!field.dataPointer && repeatFieldReferences(field.text, scope.alias).length > 0)),
+          (!field.pointerSource && repeatFieldReferences(field.text, scope.alias).length > 0)),
     );
     // Derived fields have no host-side instances. Retain literal data placeholders in their
     // authored text; the device still resolves those after formatting the derived value.
-    const pointers = field.dataPointer
-      ? [field.text]
-      : (texts.get(field.path) ?? [field.text]).flatMap(prototypeDataPlaceholders);
-    const reached =
-      readsTaintedRow ||
-      pointers.some((pointer) =>
-        tainted.some((taint) => pointersOverlap(taint, pointer, !field.dataPointer)),
+    const reaches = (source: "data" | "platform", taints: string[]) => {
+      const pointers = field.pointerSource
+        ? field.pointerSource === source
+          ? [field.text]
+          : []
+        : (texts.get(field.path) ?? [field.text]).flatMap(
+            source === "data" ? prototypeDataPlaceholders : prototypePlatformPlaceholders,
+          );
+      return pointers.some((pointer) =>
+        taints.some((taint) => pointersOverlap(taint, pointer, !field.pointerSource)),
       );
-    if (reached) {
-      errors.push({
-        path: field.path,
-        message: "Sensitive value cannot be bound into a request",
-      });
-    }
-  }
-  return errors;
+    };
+    const reached =
+      readsTaintedRow || reaches("data", tainted) || reaches("platform", platformTainted);
+    return reached
+      ? [
+          {
+            path: field.path,
+            message: field.path.startsWith("storage.keys[")
+              ? "Sensitive value cannot be persisted"
+              : "Sensitive value cannot be bound into a request",
+          },
+        ]
+      : [];
+  });
 }
 
 export function prototypeSensitiveWarnings(spec: unknown): string[] {
@@ -192,6 +204,36 @@ export function prototypeSensitiveWarnings(spec: unknown): string[] {
 
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
   return prototypeSensitiveSinkErrors(spec)[0];
+}
+
+function sensitivePlatformPointers(spec: unknown): string[] {
+  const declared = object(object(spec)?.requires)?.platform;
+  return Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(([module, entry]) =>
+    Object.entries(entry.state ?? {}).flatMap(([key, state]) =>
+      state.sensitive && Array.isArray(declared) && declared.includes(module)
+        ? [`/${module}/${key}`]
+        : [],
+    ),
+  );
+}
+
+function sensitiveStorageFields(spec: unknown): LibraryField[] {
+  const fields: LibraryField[] = [];
+  const storageKeys = object(object(spec)?.storage)?.keys;
+  if (Array.isArray(storageKeys)) {
+    storageKeys.forEach((key, index) => {
+      const parsed = parsePrototypeStorageKey(key);
+      if (parsed?.kind === "data") {
+        fields.push({
+          text: parsed.pointer,
+          path: `storage.keys[${index}]`,
+          key: false,
+          pointerSource: "data",
+        });
+      }
+    });
+  }
+  return fields;
 }
 
 /** The `/data` pointers written by `sensitive` calls, in authored order (`into` of each). */
@@ -364,7 +406,7 @@ interface LibraryField {
   text: string;
   path: string;
   key: boolean;
-  dataPointer?: boolean;
+  pointerSource?: "data" | "platform";
   itemBinding?: boolean;
 }
 function libraryFields(
@@ -383,8 +425,10 @@ function libraryFields(
     }
     const binding = kind === "emitBinding" ? object(raw) : undefined;
     if (includeDataBindings && binding && !Object.hasOwn(binding, "state")) {
-      if (typeof binding.data === "string") {
-        fields.push({ text: binding.data, path: at, key: false, dataPointer: true });
+      for (const source of ["data", "platform"] as const) {
+        if (typeof binding[source] === "string") {
+          fields.push({ text: binding[source], path: at, key: false, pointerSource: source });
+        }
       }
       if (typeof binding.item === "string") {
         fields.push({ text: "", path: at, key: false, itemBinding: true });

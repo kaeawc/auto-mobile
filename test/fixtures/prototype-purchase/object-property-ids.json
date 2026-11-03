@@ -1,0 +1,102 @@
+{
+  "name": "Ids that name Object.prototype members are never treated as held",
+  "products": [
+    {
+      "id": "constructor",
+      "kind": "subscription"
+    },
+    {
+      "id": "toString",
+      "kind": "nonConsumable"
+    }
+  ],
+  "state": {
+    "entitlements": {},
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "entitlement",
+      "productId": "constructor",
+      "change": "renew",
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": null
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "constructor is not held"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "toString",
+      "change": "expire",
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": null
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "toString",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "o1"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "toString": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "o1",
+            "productId": "toString",
+            "status": "purchased"
+          }
+        },
+        "into": {
+          "status": "purchased",
+          "transactionId": "o1"
+        },
+        "entitlementsChanged": true
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "constructor",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "o2"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "toString": "active",
+            "constructor": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "o2",
+            "productId": "constructor",
+            "status": "purchased"
+          }
+        },
+        "into": {
+          "status": "purchased",
+          "transactionId": "o2"
+        },
+        "entitlementsChanged": true
+      }
+    }
+  ]
+}

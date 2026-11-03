@@ -287,14 +287,11 @@ object DeepLinkManager {
       return null
     }
 
-    // Extract path from scheme-specific part for opaque URIs
-    val ssp = uri.schemeSpecificPart
-    if (ssp == null || !ssp.startsWith(HOST)) {
+    val path = extractPath(uri)
+    if (path == null) {
       Log.d(TAG, "Invalid URI format, returning null destination name")
       return null
     }
-
-    val path = if (ssp.length > HOST.length) ssp.substring(HOST.length) else ""
 
     val destinationName = destinationNames[path] ?: parameterizedDestinationName(path)
 
@@ -360,9 +357,8 @@ object DeepLinkManager {
   }
 
   internal fun buildUri(path: String): String {
-    // Build opaque URI in format "automobile:playground/path" instead of
-    // "automobile://playground/path"
-    val uri = "$SCHEME:$HOST$path"
+    // The hierarchical form is required by the manifest intent filter.
+    val uri = "$SCHEME://$HOST$path"
     Log.d(TAG, "Built URI with path '$path': $uri")
     return uri
   }

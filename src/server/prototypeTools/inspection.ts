@@ -359,7 +359,7 @@ export function statusOutput(
   events: PrototypeEventCoordinator,
   scope: PrototypeScope,
   options: { deviceDark: "fresh" | "cached" },
-): Pick<PrototypeOutput, "prototypes" | "lastResult"> {
+): Pick<PrototypeOutput, "prototypes" | "lastResult" | "platformStatus"> {
   const status = store.status(scope);
   return {
     ...status,

@@ -2056,6 +2056,11 @@ values, delivered like `connectivity.changed`: the state updates at once, the ev
 state has been quiet for 500 ms, and a flap that settles back on the last delivered values is not an
 event. Unknown keys and events fail validation with a
 path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
+The host mirrors each delivered `<module>.changed` as `platformStatus.<module>` in `prototype status`
+and `inspect` (`values`, the event's device `timestamp`, the host `receivedAt`, and `simulated` for an
+injected event), so an agent can assert the device's last values without observing. A replayed event
+older than the mirrored reading on the device clock does not replace it. Data with a key or value outside the module's
+state table, or cut by the emit budget, is not mirrored and leaves the previous reading.
 
 | Module (capability)                         | Keys                                                                                                                                                                                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2133,7 +2138,11 @@ the capability yet.
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
 Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. No production runtime advertises the module yet.
+runtime. CtrlProxy registers the module on Android and opens each page for its own package with
+`FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
+the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
+handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do
+not advertise it yet.
 
 **Contact and calendar pickers (#14318).** Two modules reach the system pickers, which return only what the
 user picks and need no declared permission. `contacts` (`prototype_platform_contacts_v1`) has
@@ -2273,6 +2282,20 @@ three-letter `currency`. Only a subscription may have a `period` or `trialPeriod
 whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, gateway, key, card or URL field.
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 `commerce.checkout` is not in the contract, and no production runtime advertises the module.
+
+The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin `PrototypePurchaseOutcome`
+copies it, and both replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
+`gracePeriod` or `billingRetry`, and a consumable never holds one. `lastTransaction` is
+`{transactionId, productId, status}`, or null. Buying a product that is `active` or in `gracePeriod` fails
+with `alreadyOwned`, whatever outcome was queued; a product in `billingRetry` can be bought again. A product
+the catalog does not list is `platform_error` with reason `unavailable`. A failed purchase leaves the state
+untouched. A code other than `cancelled`, `alreadyOwned` or `platform_error` becomes `platform_error`, and only
+`platform_error` keeps a reason: `network`, `declined` or `unavailable`. Every result is recorded as
+`lastTransaction`, but only `purchased` grants the entitlement. A `deferred` or `pending` transaction is
+resolved later: `approved` grants the entitlement and `declined` records `declined`. Simulated
+`entitlementsChanged` events work on a subscription the user holds. `renew` sets it `active`, and
+`gracePeriod` and `billingRetry` set those states. `expire` and `refund` remove an entitlement and also apply to
+a non-consumable. `commerce.entitlementsChanged` is raised only when the entitlements actually change.
 
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
@@ -2963,9 +2986,24 @@ is an integer 1..2000; oldest rows are dropped after replacement/append and befo
 limits. Missing/non-array targets and invalid writes leave input unchanged.
 
 The daemon holds the upstream connection for `via: "host"` channels (see
-[Host channel transport](#host-channel-transport)). Runtime work remains owed: the device-side
-transports, device client frame routing, routing and atomic frame writes, reconnect/backoff, send queues, counters/events, inspection, simulation and
-foreground/background/patch/reset/dismiss lifecycle. Pure TS, Kotlin and Swift rules replay shared
+[Host channel transport](#host-channel-transport)).
+
+On Android, `PrototypeChannelController` (`prototype-compose`) is the per-prototype state machine
+behind a `PrototypeChannelTransport`: OkHttp WebSocket/okhttp-sse from the device (`prototype-saved`,
+same egress policy as device requests, no redirects followed, 25 s pings) or the CtrlProxy-socket
+relay for `via: "host"`, which fails an open at once with `network` when no host is connected.
+Transport callbacks pass through one ordered inbox, and every effect reaches its sink under one lock:
+the `/platform/realtime/<channel>` snapshot, `realtime.status`/`realtime.frame` events, and route,
+callback and `statusKey` actions to apply atomically. The first matching route wins (`{event}`
+defaults to `message`); matched frames wait for the flush window and are coalesced. A frame that is
+not JSON on a json channel, or larger than the frame cap, counts in `framesDropped`. Status runs
+idle → connecting → open, then reconnecting with backoff, ending closed (or error when the last
+close carried one). Attempts reset after 5 s open. Sends wait in a 32-entry queue while
+(re)connecting, flush on open and drop on close. A patch closes removed channels and reconnects only
+changed live ones; dismiss closes every connection with 1001 and silences the sink. Runtime work
+remains owed: wiring the controller into the prototype runtime as the `realtime` module (calls,
+data writes including `upsertData`/`maxItems`), capability advertisement, foreground/background
+lifecycle, inspection and simulation. Pure TS, Kotlin and Swift rules replay shared
 backoff and coalescing vectors under `test/fixtures/prototype-spec/realtime/`. Reconnect uses
 full jitter: `floor(random * min(maxDelayMs, initialDelayMs * 2^(attempt-1)))`, with defaults of
 8 attempts, 500 ms initial delay and 30000 ms maximum delay; exhausted attempts consume no
@@ -3013,7 +3051,8 @@ A prototype can talk to a declarative backend with no server code (decisions in
 `<backendId>.mock.automobile.invalid` is answered in process by the daemon's backend of that id,
 before the egress policy: no DNS lookup, socket or `adb reverse`. A host under that suffix that
 names no defined backend fails as `network`. Backends live for the daemon session and are bounded
-(16 backends, 16 collections, 64 routes, 1 MiB of collections and routes).
+(16 backends, 16 collections, 64 routes, 64 rooms, 1 MiB of collections, routes, rooms and
+broadcasts).
 
 - **Collections** are json-server style: `GET /<name>` filters by `?field=value`, `q` matches a
   case-insensitive substring of any string or number member, `_sort=price|-price` sorts stably
@@ -3031,12 +3070,38 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
   timer, so a run replays identically: `latencyMs {min, max}` delays every answer, and each fault
   `{path, method?, status, every | rate}` fires on every nth matching request or with probability
   `rate`, answering `{error: "mock fault"}`.
-- Every answered request is logged (latest 200, with a sequence number) for assertions.
+- **Rooms** serve `via: "host"` channels to the same origin (`wss://` for WebSocket, `https://` for
+  SSE), with no socket. A connection joins the first room `{path, onConnect?, echo?, relay?,
+  timeline?}` whose path pattern matches its URL path; no match is `handshake_failed` with status 404,
+  and a room path with 64 connections refuses the next with 503. `onConnect` frames are delivered
+  right after `opened`; each `timeline` entry fires `afterMs` after its own connection opened, on the
+  injected timer. `echo` returns a client send to its sender and `relay` passes it to the other
+  connections of the same room path. Scripted frames bind `{params.x}` and `{query.x}` from the
+  channel URL; a string frame goes on the wire as written and other JSON as JSON text. SSE
+  connections only receive. Latency and faults apply to requests, not to channels.
+- **Broadcasts** `{collection: {room, frame, on?}}` send a 2xx collection write (`POST` unless `on`
+  lists `PUT` or `PATCH`) to the room path the binding produces; `{item}` and `{item:/pointer}` bind
+  the stored item, so a message one device posts reaches every device in its room.
+- Every answered request, client send, `publish` and broadcast is logged (latest 200, with one
+  sequence number) for assertions; a frame entry is `{seq, room, from, data}`.
+- **Actors** (at most 16, each with 1–64 steps) write to collections on the backend's injected
+  timer. One fires after a successful (status below 400) request matching `on.route` (`"POST
+  /path/:id"`), or runs `maxRuns` times every `every` ms (100 ms or more; run k starts at
+  `afterMs + k * every`). Its steps run in order: `append`, `update` and `remove` go through the
+  same collection code as `POST`, `PATCH` and `DELETE` (ids, 409, 413 and the size budget apply), and
+  each step's `afterMs` is relative to the previous step. `value` and `id` bind the triggering
+  request's placeholders. A failing step is logged and skipped. A backend holds at most 256
+  scheduled steps; a trigger past that is dropped and logged. Redefining, clearing or ending the
+  session cancels every pending step. `publish`, `advance` and `notify` are refused at definition
+  until mock channels, polylines and simulated push exist, and actors follow the daemon's timer,
+  not the device clock that `prototype simulate` advances.
 
 The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
 {backendId, backend}` validates the definition and replaces the backend of that id (a failed
-definition leaves the old one), `clearBackend {backendId}` removes it, and `backendLog {backendId,
-since?}` returns the log. Their results report the origin a spec should call. `show` takes `mock`
+definition leaves the old one), `clearBackend {backendId}` removes it, `publish {backendId, room,
+frame}` delivers a frame to every connection in a room path and reports `delivered`, and
+`backendLog {backendId, since?}` returns the log. Replacing or clearing a backend, and session end,
+close its open channels with code 1001. Their results report the origin a spec should call. `show` takes `mock`
 (`{backendId: definition}`) or `mockPath` (an absolute file of the same, read like `specPath`, up to
 2 MiB): after the spec passes validation, every entry is validated and defined or none is, replacing
 backends of the same id. A saved prototype does not carry its mock backends. A request that

@@ -75,7 +75,7 @@ function dragHandle(style: WebStyleContext): WebElement {
 
 /**
  * Android's in-window sheet: a scrim over the window and, at its bottom, a full-width column as
- * tall as the first detent, painted `surface` unless the spec sets a background or gradient. The
+ * tall as the first detent, painted `surface` unless an authored background resolves. The
  * handle comes first, then the child. Authored style applies to the sheet and wins.
  */
 function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRenderKit) {
@@ -86,9 +86,7 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
     consumedInsets: [],
     style: { ...scope.style, parentAxis: "column" },
   };
-  const authored = record(node.style) ?? {};
-  const painted = authored.background !== undefined || authored.gradient !== undefined;
-  const { attrs, style } = kit.base(node, hoisted, {
+  const { attrs, style: base } = kit.base(node, hoisted, {
     display: "flex",
     "flex-direction": "column",
     "align-items": "flex-start",
@@ -97,8 +95,12 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
     height: detentHeight(node.detents),
     "max-height": "100%",
     "flex-shrink": "0",
-    ...(painted ? {} : { "background-color": rgbaCss(roleColor("surface", scope.style)) }),
   });
+  // An authored background that resolves paints the sheet; otherwise (none, a gradient the still
+  // does not draw, or an unresolved colour) it keeps the `surface` the devices fall back to.
+  const style = base["background-color"]
+    ? base
+    : { ...base, "background-color": rgbaCss(roleColor("surface", scope.style)) };
   const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: "column" } });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const scrim = el("div", {

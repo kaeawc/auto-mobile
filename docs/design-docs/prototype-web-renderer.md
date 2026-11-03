@@ -241,7 +241,7 @@ the host, so the page's script only switches between views it was given and neve
   sheet before those inside it, and takes no ancestor's grid cell or consumed insets. It is a scrim
   filling the window (the `scrim` role at 0.4 opacity by default or when named, else the authored
   colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
-  or `dp` capped at the window), painted `surface` unless the spec sets a background or gradient,
+  or `dp` capped at the window), painted `surface` unless an authored background resolves (the still draws no gradients),
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
   8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.

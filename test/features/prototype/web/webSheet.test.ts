@@ -202,7 +202,7 @@ describe("web still bottomSheet (#16382)", () => {
     expect(scrimOf(pair, "dark")).toBe(DEFAULT_SCRIM);
   });
 
-  test("the surface follows dark mode, and an authored background or gradient replaces it", () => {
+  test("the surface follows dark mode, an authored background replaces it, and a gradient keeps it", () => {
     const sheetOf = (extra: Spec, mode?: "dark") =>
       byNode(
         renderPrototypeStill(specWith(sheet(extra)), mode ? { mode } : {}).element,
@@ -212,7 +212,8 @@ describe("web still bottomSheet (#16382)", () => {
     expect(byPart(sheetOf({}, "dark"), "handle")).toHaveLength(1);
     expect(sheetOf({ style: { background: "primary" } }).style["background-color"]).toBe(PRIMARY);
     const gradient = { type: "linear", angle: 90, stops: ["#FF0000", "#0000FF"] };
-    expect(sheetOf({ style: { gradient } }).style).not.toHaveProperty("background-color");
+    // The still draws no gradients, so the sheet keeps its surface rather than turning transparent.
+    expect(sheetOf({ style: { gradient } }).style["background-color"]).toBe(SURFACE_LIGHT);
   });
 
   test("covers a sheet window's own region, not the whole screen", () => {

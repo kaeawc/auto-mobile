@@ -326,7 +326,9 @@ class PrototypeChannelController(
   }
 
   private suspend fun flushWindow() {
-    val frames = window.toList()
+    // A patch or removal since a frame arrived replaced its declaration: drop its actions before
+    // coalescing, so a stale write cannot stand in for a live channel's write to the same target.
+    val frames = window.filter { slots[it.slot.id] === it.slot }
     window.clear()
     val kept = PrototypeChannelCoalescer.coalesce(frames.map { it.actions })
     var from = 0
@@ -334,9 +336,7 @@ class PrototypeChannelController(
       val index = (from until frames.size).first { frames[it].actions === actions }
       from = index + 1
       val routed = frames[index]
-      // A patch or removal since the frame arrived replaced its declaration: drop its actions.
-      val slot = routed.slot
-      if (slots[slot.id] === slot) sink.run(slot.id, routed.actions, routed.event)
+      sink.run(routed.slot.id, routed.actions, routed.event)
     }
     val changed = dirty.toList()
     dirty.clear()

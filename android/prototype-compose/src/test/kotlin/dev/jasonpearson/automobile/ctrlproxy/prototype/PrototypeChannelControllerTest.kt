@@ -499,6 +499,27 @@ class PrototypeChannelControllerTest {
     assertTrue(h.sink.runs.isEmpty())
   }
 
+  @Test
+  fun `a stale routed frame does not coalesce away a live channel's write`() = runTest {
+    val h = Harness(this)
+    val writer =
+      channel(
+        """{"kind":"websocket","url":"wss://e.com","routes":[
+          {"actions":[{"type":"setState","key":"latest","value":{"event":"/v"}}]}]}""",
+      )
+    h.controller.update(mapOf("live" to writer, "stale" to writer.copy(url = "wss://e.com/s")))
+    h.controller.show()
+    h.host.opened.forEach { it.listener.onOpen(null) }
+    val (live, stale) = h.host.opened.toList()
+    live.listener.onFrame("""{"v":1}""", null, null)
+    stale.listener.onFrame("""{"v":2}""", null, null)
+    runCurrent()
+    h.controller.update(mapOf("live" to writer))
+    settle()
+    assertEquals(listOf("live"), h.sink.runs.map { it.first })
+    assertEquals(Json.parseToJsonElement("""{"v":1}"""), h.sink.runs.single().third)
+  }
+
   private fun vectors(name: String): JsonObject {
     val file =
       generateSequence(File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }

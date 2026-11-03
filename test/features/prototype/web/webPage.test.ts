@@ -168,7 +168,7 @@ describe("prototype web page (#16346)", () => {
       ],
     };
     // More than revision 2's second screen, so revision 2 cannot stay even with its start alone.
-    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 5000;
+    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 8000;
     const pinned = buildPrototypeWebPage({ ...three, revision: 1, maxBytes });
     expect(pinned.inlinedRevisions.a).toEqual([3, 1]);
     expect(pinned.html).toContain('<body data-variant="a" data-revision="1">');

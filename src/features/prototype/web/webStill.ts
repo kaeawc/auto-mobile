@@ -8,6 +8,7 @@ import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
@@ -210,6 +211,23 @@ function screenBackground(style: WebStyleContext): string {
   );
 }
 
+/**
+ * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
+ * colour, as both platforms' edge-to-edge defaults do.
+ */
+function stillStatusBarContent(
+  spec: unknown,
+  content: WebElement,
+  background: string,
+  dark: boolean,
+): WebStatusBarContent {
+  const authored = record(record(spec)?.window)?.statusBar;
+  if (authored === "light" || authored === "dark") {
+    return authored;
+  }
+  return statusBarContentFor(appTopColor(content, background), dark ? "light" : "dark");
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
@@ -223,11 +241,18 @@ export function renderPrototypeStill(
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
+  const background = screenBackground(scope.style);
+  const content = placed(expanded, root, scope.layers);
   const element = renderDeviceFrame(
     frame,
     options.orientation ?? "portrait",
-    { dark, textColor, background: screenBackground(scope.style) },
-    placed(expanded, root, scope.layers),
+    {
+      dark,
+      textColor,
+      background,
+      statusBarContent: stillStatusBarContent(expanded, content, background, dark),
+    },
+    content,
   );
   const stack = scope.stacks?.[0];
   return {

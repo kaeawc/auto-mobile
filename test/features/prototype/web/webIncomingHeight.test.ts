@@ -292,3 +292,17 @@ test("weight shares stay a max when two or more children are weighted", () => {
     expect(contentHeight(record(record(childrenOf(column)[1])?.style))).toBe(10);
   }
 });
+
+test("a dp-height sibling takes at least its vertical padding, as its CSS border box does", () => {
+  const padded = { type: "row", style: { height: { dp: 10 }, padding: { top: 30 } } };
+  const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
+  expect(columnChildHeights([padded, { type: "box" }], 40, 0)).toEqual([40, 10]);
+  const column = withChildHeights(
+    { type: "column", style: { height: { dp: 40 } }, children: [padded, weighted] },
+    "root",
+    prepare,
+  );
+  // The lone weighted row gets the 10 dp the padded sibling leaves, exactly.
+  expect(childrenOf(column).map(heightOf)).toEqual([40, 10]);
+  expect(contentHeight(record(record(childrenOf(column)[1])?.style))).toBe(10);
+});

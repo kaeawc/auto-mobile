@@ -55,9 +55,9 @@ const weightOf = (node: Raw | undefined): number | undefined => {
 
 /**
  * The height an unweighted child takes when `remaining` is left: its dp height clamped by its
- * bounds (see ownHeight). A `fill` child takes everything left, within its bounds, as Compose's
- * `fillMaxHeight` does in a Column, so a later sibling, weighted or not, gets nothing. With no dp
- * height it wraps its content, which is only known at layout time, so it counts as its
+ * bounds (see ownHeight), and at least its vertical padding. A `fill` child takes everything left,
+ * within its bounds, as Compose's `fillMaxHeight` does in a Column, so a later sibling, weighted or
+ * not, gets nothing. With no dp height it wraps its content, which is only known at layout time, so it counts as its
  * `minHeight` (else 0), never its `maxHeight`, and the rest is an upper bound.
  */
 const takenHeight = (node: Raw, remaining: number): number => {
@@ -66,7 +66,12 @@ const takenHeight = (node: Raw, remaining: number): number => {
     return Math.min(remaining, ownHeight(style));
   }
   const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
-  return typeof record(style?.height)?.dp === "number" ? ownHeight(style) : floor;
+  if (typeof record(style?.height)?.dp !== "number") {
+    return floor;
+  }
+  // CSS sizes a node's border box, so its vertical padding is a floor under its dp height.
+  const padding = record(style?.padding);
+  return Math.max(ownHeight(style), side(padding, "top") + side(padding, "bottom"));
 };
 
 /**

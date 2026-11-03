@@ -1,6 +1,7 @@
 import { prototypeSpecForDevice } from "../prototypeComponents";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
+import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
@@ -176,7 +177,7 @@ function stillScope(
   return {
     style: {
       mode,
-      palette: prototypeRolePalette(expanded, mode),
+      palette: prototypeDrawnPalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
       platform: frame.platform,
@@ -202,8 +203,8 @@ function stillScope(
 }
 
 /**
- * The theme's `background` role (else `surface`); a seed or device scheme leaves both unresolved,
- * so the Material 3 baseline background for the mode stands in.
+ * The theme's `background` role (else `surface`), from the baseline, seed or overrides; the
+ * Material 3 baseline background for the mode stands in should neither resolve.
  */
 function screenBackground(style: WebStyleContext): string {
   return (

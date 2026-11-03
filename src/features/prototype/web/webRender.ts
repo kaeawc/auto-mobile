@@ -33,6 +33,7 @@ import {
   cssColor,
   lineCss,
   nodeCss,
+  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
@@ -392,10 +393,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fadeEdgesCss(node, scope.style),
   });
-  const inner = child(scope, {
-    inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
-  });
+  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope.style, horizontal) });
   return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
 

@@ -52,17 +52,17 @@ const side = (padding: Raw | undefined, name: string) =>
 
 /**
  * The tallest a row lets its children be, when the row authors a definite one: its dp `height`
- * or `maxHeight`, less its vertical padding. Compose's `sizeIn` then `aspectRatio` on a child
- * respects that incoming max height. Infinity when the row's height comes from elsewhere.
+ * (coerced into its `minHeight`, as `sizeIn` applies before the height) or its `maxHeight`, less
+ * its vertical padding. Compose's `sizeIn` then `aspectRatio` on a child respects that incoming
+ * max height. Infinity when the row's height comes from elsewhere.
  */
 export function rowContentHeight(style: Raw | undefined): number {
   const dp = record(style?.height)?.dp;
-  const bounds = [
-    typeof dp === "number" ? dp : Infinity,
-    typeof style?.maxHeight === "number" ? style.maxHeight : Infinity,
-  ];
+  const max = typeof style?.maxHeight === "number" ? style.maxHeight : Infinity;
+  const min = typeof style?.minHeight === "number" ? style.minHeight : 0;
+  const height = Math.max(Math.min(typeof dp === "number" ? dp : Infinity, max), min);
   const padding = record(style?.padding);
-  return Math.max(0, Math.min(...bounds) - side(padding, "top") - side(padding, "bottom"));
+  return Math.max(0, height - side(padding, "top") - side(padding, "bottom"));
 }
 
 /**

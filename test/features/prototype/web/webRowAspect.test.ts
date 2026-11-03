@@ -13,6 +13,7 @@ import {
   nodeCss,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
+  scrollChildStyle,
 } from "../../../../src/features/prototype/web/webStyle";
 
 const shown = (entry: unknown): Raw | undefined => record(entry);
@@ -227,6 +228,9 @@ test("a row's definite content height is its dp height or maxHeight less vertica
   ).toBe(20);
   expect(rowContentHeight({ height: { dp: 4 }, padding: { top: 4, bottom: 6 } })).toBe(0);
   expect(rowContentHeight({ height: "fill" })).toBe(Infinity);
+  // sizeIn applies before the height, so a larger minHeight wins over the authored height.
+  expect(rowContentHeight({ height: { dp: 20 }, minHeight: 100 })).toBe(100);
+  expect(rowContentHeight({ minHeight: 100 })).toBe(Infinity);
   expect(rowContentHeight(undefined)).toBe(Infinity);
 });
 
@@ -245,4 +249,18 @@ test("a row's definite height caps its aspect ratios, as the incoming max height
   // An otherwise unsized ratio is capped by the row's height too, so it no longer takes the rest.
   expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, basis: 40 });
   expect(isUnsizedAspectRatio({ type: "box", style: { aspectRatio: 2 } }, 20)).toBe(false);
+});
+
+test("a row in a horizontal scroll is not bounded to the scroll's width", () => {
+  const base = { mode: "light" as const, palette: new Map() };
+  const inScroll = scrollChildStyle(base, true);
+  expect(inScroll).toMatchObject({ parentAxis: "row", unboundedWidth: true });
+  // A vertical scroll inside it keeps the unbounded width; one on its own does not add it.
+  expect(scrollChildStyle(inScroll, false)).toMatchObject({ unboundedWidth: true });
+  expect(scrollChildStyle(base, false)).toMatchObject({
+    parentAxis: "column",
+    unboundedWidth: false,
+  });
+  expect(nodeCss({ [ROW_BOUND_KEY]: true }, inScroll)).not.toHaveProperty("max-width");
+  expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, inScroll)["max-width"]).toBe("50px");
 });

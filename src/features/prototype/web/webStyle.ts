@@ -10,6 +10,11 @@ export interface WebStyleContext {
   readonly palette: ReadonlyMap<string, Rgba>;
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
+  /**
+   * Inside a horizontal scroll, where Compose measures content against an unbounded width (and
+   * descendants inherit it), so a row is not bounded to its parent's width there.
+   */
+  readonly unboundedWidth?: boolean;
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
   /** The frame's platform, for looks the devices draw differently (glass). Android when unset. */
@@ -219,7 +224,7 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     }
   }
   rowMeasureStyle(css, style, context);
-  if (style[ROW_BOUND_KEY] === true) {
+  if (style[ROW_BOUND_KEY] === true && context.unboundedWidth !== true) {
     // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
     const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
     css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
@@ -347,6 +352,12 @@ const MAIN_ALIGN: Readonly<Record<string, string>> = {
   spaceAround: "space-around",
   spaceEvenly: "space-evenly",
 };
+
+/** What a scroll's child sees: the scroll's axis, and an unbounded width when it scrolls across. */
+export function scrollChildStyle(style: WebStyleContext, horizontal: boolean): WebStyleContext {
+  const unboundedWidth = horizontal || style.unboundedWidth === true;
+  return { ...style, parentAxis: horizontal ? "row" : "column", unboundedWidth };
+}
 
 /** A row or column's flex layout: direction, arrangement, spacing and cross-axis alignment. */
 export function lineCss(axis: "row" | "column", style: unknown): Css {

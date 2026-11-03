@@ -181,6 +181,13 @@ describe("prototype web map (#16539)", () => {
     expect(mapSize({ minHeight: 400, maxHeight: 300 }, screen).height).toBe(400);
     // Non-positive bounds are ignored.
     expect(mapSize({ minHeight: -5, maxHeight: 0 }, screen).height).toBe(200);
+    // A zero dp size is a 0 px box, which its min still widens; with no min it frames as the fallback.
+    expect(mapSize({ width: { dp: 0 }, minWidth: 100 }, screen).width).toBe(100);
+    expect(mapSize({ height: { dp: 0 }, minHeight: 120 }, screen).height).toBe(120);
+    expect(mapSize({ width: { dp: 0 }, height: { dp: 0 } }, screen)).toEqual({
+      width: 390,
+      height: 200,
+    });
   });
 
   test("an aspect ratio sizes the axis the style leaves open (#16671)", () => {
@@ -435,6 +442,9 @@ describe("prototype web map (#16539)", () => {
         ],
       },
     });
+    // The box renders at its min height, which is what the eye is placed from.
+    const box = find(rendered.element, (element) => element.attrs["data-node"] === "map")[0]!;
+    expect(box.style).toMatchObject({ height: "200px", "min-height": "800px" });
     const ground = find(rendered.element, (element) => element.attrs["data-part"] === "ground")[0]!;
     const eye = eyeDistance(800);
     expect(ground.style.transform).toBe(`perspective(${eye}px) rotateX(60deg) rotate(0deg)`);

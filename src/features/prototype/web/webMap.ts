@@ -367,10 +367,10 @@ export function fromCentre(dp: number): string {
   return dp === 0 ? "50%" : `calc(50% ${dp < 0 ? "-" : "+"} ${Math.abs(dp)}px)`;
 }
 
-/** A `{dp}` dimension, as the style maps it to CSS; undefined for anything else. */
+/** A `{dp}` dimension, as the style maps it to CSS (zero included); undefined for anything else. */
 function dpSize(value: unknown): number | undefined {
   const dp = record(value)?.dp;
-  return typeof dp === "number" && dp > 0 ? dp : undefined;
+  return typeof dp === "number" && dp >= 0 ? dp : undefined;
 }
 
 /** A positive number style field (`minHeight`, `aspectRatio`, ...); undefined otherwise. */
@@ -434,9 +434,11 @@ function boundedAxes(
   // A weight sets `flex: w w 0` on the parent's main axis, which overrides any size there.
   const weighted = typeof style?.weight === "number" ? parentAxis : undefined;
   const dpWidth = weighted === "row" ? undefined : dpSize(style?.width);
+  const height = bounded(baseHeight(style, screen.height, weighted === "column"), style, "Height");
+  // A zero-size box shows nothing, so it frames against the fallback rather than dividing by zero.
   return {
-    width: bounded(dpWidth ?? screen.width, style, "Width"),
-    height: bounded(baseHeight(style, screen.height, weighted === "column"), style, "Height"),
+    width: bounded(dpWidth ?? screen.width, style, "Width") || screen.width,
+    height: height || DEFAULT_MAP_HEIGHT,
     openWidth: dpWidth === undefined && style?.width !== "fill" && weighted !== "row",
   };
 }

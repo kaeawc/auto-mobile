@@ -516,3 +516,54 @@ describe("prototype web page rotation (#16545)", () => {
     expect(PROTOTYPE_WEB_RUNTIME).toContain("prefers-reduced-motion: reduce");
   });
 });
+
+describe("prototype web page postures (#16445)", () => {
+  const foldInput = (frame: string): PrototypeWebPageInput => ({
+    title: "Fold",
+    frame,
+    variants: [
+      { id: "a", label: "A", revisions: [{ revision: 1, operation: "show", spec: tiny("x") }] },
+    ],
+  });
+  const viewKeys = (html: string) =>
+    [...html.matchAll(/<div data-orientation="(\w+)" data-posture="(\w+)"[^>]*data-view=""/g)].map(
+      (match) => `${match[2]}/${match[1]}`,
+    );
+
+  test("a foldable pre-renders every posture in both orientations, opened portrait shown first", () => {
+    const { html } = buildPrototypeWebPage(foldInput("pixel-fold"));
+    expect(viewKeys(html)).toEqual([
+      "opened/portrait",
+      "opened/landscape",
+      "closed/portrait",
+      "closed/landscape",
+      "half_opened/portrait",
+      "half_opened/landscape",
+    ]);
+    expect(html).toContain('data-platform="android" data-posture="opened">');
+    // Only the first view drops `hidden`.
+    expect(html.match(/data-view=""(?! hidden)/g)).toHaveLength(1);
+    expect(html).toMatch(/data-posture="opened" data-revision="1" data-variant="a" data-view="">/);
+  });
+
+  test("the toolbar offers the frame's postures in registry order, the shown one selected", () => {
+    const { html } = buildPrototypeWebPage(foldInput("flip-foldable"));
+    const picker = html.match(
+      /<select aria-label="Posture" data-control="posture">(.*?)<\/select>/,
+    )?.[1];
+    expect(picker).toBe(
+      '<option value="closed">Closed</option><option value="half_opened">Half opened</option><option selected="" value="opened">Opened</option>',
+    );
+  });
+
+  test("a frame without postures has no posture picker, attribute or posture views", () => {
+    const { html } = buildPrototypeWebPage(foldInput("pixel-9"));
+    expect(html).not.toContain("data-posture");
+    expect(html).not.toContain('data-control="posture"');
+  });
+
+  test("the runtime switches posture among the pre-rendered views", () => {
+    expect(PROTOTYPE_WEB_RUNTIME).toContain('pick("posture")');
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("view.dataset.posture");
+  });
+});

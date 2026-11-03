@@ -144,6 +144,90 @@
         "screen": "Public spec: 820 x 1180 pt at @2x",
         "insets": "UIKit safe area insets for this model; corner radius estimated"
       }
+    },
+    {
+      "id": "pixel-fold",
+      "platform": "android",
+      "label": "Pixel Fold",
+      "formFactor": "foldable",
+      "screen": { "widthDp": 841, "heightDp": 701, "density": 2.625 },
+      "cornerRadiusDp": 20,
+      "cutout": { "type": "none" },
+      "statusBarDp": 32,
+      "navBar": { "type": "gesture", "heightDp": 24 },
+      "safeArea": {
+        "portrait": { "top": 32, "bottom": 24, "left": 0, "right": 0 },
+        "landscape": { "top": 32, "bottom": 24, "left": 0, "right": 0 }
+      },
+      "panels": [
+        {
+          "role": "cover",
+          "screen": { "widthDp": 411, "heightDp": 797, "density": 2.625 },
+          "cornerRadiusDp": 32,
+          "cutout": { "type": "punchHole", "centerXDp": 205.5, "centerYDp": 24, "radiusDp": 12 },
+          "statusBarDp": 48,
+          "navBar": { "type": "gesture", "heightDp": 24 },
+          "safeArea": {
+            "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
+            "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
+          }
+        }
+      ],
+      "hinge": { "axis": "vertical", "positionDp": 420.5, "widthDp": 0, "occluding": false },
+      "postures": [
+        { "posture": "closed", "panel": "cover", "hingeDegrees": 0 },
+        { "posture": "half_opened", "panel": "inner", "hingeDegrees": 90 },
+        { "posture": "opened", "panel": "inner", "hingeDegrees": 180 }
+      ],
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" },
+      "source": {
+        "screen": "pixel_fold hardware profile: inner 2208 x 1840 px, cover 1080 x 2092 px, both at 420 dpi (density 2.625); not yet measured on an emulator",
+        "insets": "Estimated; status bar, navigation bar and cover cutout not yet measured on an emulator",
+        "hinge": "Seamless fold at the inner panel's centre, from the public spec; position and width not yet measured on an emulator",
+        "kinds": { "screen": "avdProfile", "insets": "publicSpec", "hinge": "publicSpec" }
+      }
+    },
+    {
+      "id": "flip-foldable",
+      "platform": "android",
+      "label": "Flip foldable",
+      "formFactor": "foldable",
+      "screen": { "widthDp": 411, "heightDp": 1004, "density": 2.625 },
+      "cornerRadiusDp": 24,
+      "cutout": { "type": "punchHole", "centerXDp": 205.5, "centerYDp": 24, "radiusDp": 12 },
+      "statusBarDp": 48,
+      "navBar": { "type": "gesture", "heightDp": 24 },
+      "safeArea": {
+        "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
+        "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
+      },
+      "panels": [
+        {
+          "role": "cover",
+          "screen": { "widthDp": 262, "heightDp": 272, "density": 2.75 },
+          "cornerRadiusDp": 24,
+          "cutout": { "type": "none" },
+          "statusBarDp": 24,
+          "navBar": { "type": "none" },
+          "safeArea": {
+            "portrait": { "top": 24, "bottom": 0, "left": 0, "right": 0 },
+            "landscape": { "top": 24, "bottom": 0, "left": 0, "right": 0 }
+          }
+        }
+      ],
+      "hinge": { "axis": "horizontal", "positionDp": 502, "widthDp": 0, "occluding": false },
+      "postures": [
+        { "posture": "closed", "panel": "cover", "hingeDegrees": 0 },
+        { "posture": "half_opened", "panel": "inner", "hingeDegrees": 90 },
+        { "posture": "opened", "panel": "inner", "hingeDegrees": 180 }
+      ],
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" },
+      "source": {
+        "screen": "SDK horizontal-fold foldable profile: inner 1080 x 2636 px at 420 dpi (density 2.625); cover 720 x 748 px at density 2.75 from a public flip-phone spec; not yet measured on an emulator",
+        "insets": "Estimated; status bar, navigation bar and cutouts not yet measured on an emulator",
+        "hinge": "Seamless fold at the inner panel's centre, from the public spec; position and width not yet measured on an emulator",
+        "kinds": { "screen": "avdProfile", "insets": "publicSpec", "hinge": "publicSpec" }
+      }
     }
   ]
 }

@@ -84,12 +84,14 @@ document, its `sha256`, the frame used, the unsupported nodes of the first view 
 it inlined per variant.
 
 - **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape,
-  once per screen of its outermost stack when that stack has more than one screen (start first,
-  then the others in key order; such views carry `data-screen`). The first view is the chosen
-  variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
-  `hidden`.
-- **Controls.** Only five: rotate (portrait/landscape; absent for watch and TV frames, which
-  never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
+  in every posture of a foldable frame (such views carry `data-posture`), once per screen of its
+  outermost stack when that stack has more than one screen (start first, then the others in key
+  order; such views carry `data-screen`). The first view is the chosen variant's chosen revision
+  (default: latest) in portrait, in the frame's default posture, on its start screen; the rest are
+  `hidden`. A screen's views in every orientation and posture are kept or dropped together.
+- **Controls.** Only six: rotate (portrait/landscape; absent for watch and TV frames, which
+  never rotate), a posture select (only for a frame with postures, in registry order; switching
+  fits the new view), zoom and pan (fit, 50–400 %, wheel, drag,
   double-click to fit), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
@@ -158,7 +160,7 @@ nothing at runtime drives a browser.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode, screen})` in
+`renderPrototypeStill(spec, {frame, orientation, posture, mode, screen})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
 tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on
@@ -303,6 +305,13 @@ the host, so the page's script only switches between views it was given and neve
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
   8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
+- **Posture.** A foldable frame draws the panel its `posture` lights (default `opened`, else its
+  first posture; a frame without postures takes none, and an unknown posture is an error listing
+  the frame's): `closed` draws the cover panel. The spec lays out on that panel in the drawn
+  orientation, minus an occluding hinge's width, shown in the two segments either side of the
+  hinge (the second copy `aria-hidden` and inert); a seamless fold lays out across the whole
+  panel and draws a crease shaded by its `hingeDegrees`, none when flat. Landscape turns the
+  hinge with the panel, so a flip's hinge runs top to bottom there.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
   navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to

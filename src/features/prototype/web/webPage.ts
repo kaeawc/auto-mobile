@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models";
 import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
+import { defaultFramePosture, framePostures } from "./webFold";
 import type { WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
 import {
@@ -98,13 +99,18 @@ interface RenderedView {
   readonly variant: string;
   readonly revision: number;
   readonly orientation: WebOrientation;
+  /** The foldable posture this view draws; absent for a frame without postures. */
+  readonly posture?: string;
   /** The outermost stack's screen this view draws; only a multi-screen stack sets it. */
   readonly screen?: string;
   readonly html: string;
   readonly unsupported: readonly UnsupportedWebNode[];
 }
 
-/** One screen of one revision in both orientations: the unit the budget keeps or drops. */
+/**
+ * One screen of one revision in both orientations and every posture: the unit the budget keeps or
+ * drops.
+ */
 type ScreenGroup = readonly RenderedView[];
 
 /** One revision's screen groups, its start screen first. */
@@ -125,15 +131,28 @@ function pickerScreens(stack: WebStackScreens | undefined): string[] {
   return [stack.start, ...stack.screens.filter((screen) => screen !== stack.start)];
 }
 
+/** The page's frame: its id and the postures it pre-renders (one undefined entry for none). */
+interface ViewFrame {
+  readonly id: string;
+  readonly postures: readonly (string | undefined)[];
+}
+
+/** Where a view sits among the page's dimensions besides variant and revision. */
+interface ViewAt {
+  readonly orientation: WebOrientation;
+  readonly posture: string | undefined;
+}
+
 function renderView(
   input: PrototypeWebPageInput,
   frame: string,
   at: { variant: string; revision: PrototypeWebRevision; screen?: string },
-  orientation: WebOrientation,
+  { orientation, posture }: ViewAt,
 ): RenderedView & { stack?: WebStackScreens } {
   const still = renderPrototypeStill(at.revision.spec, {
     frame,
     orientation,
+    ...(posture === undefined ? {} : { posture }),
     mode: input.mode,
     nowMs: input.nowMs,
     ...(at.screen === undefined ? {} : { screen: at.screen }),
@@ -146,6 +165,7 @@ function renderView(
         "data-variant": at.variant,
         "data-revision": String(at.revision.revision),
         "data-orientation": orientation,
+        ...(posture === undefined ? {} : { "data-posture": posture }),
         ...(at.screen === undefined ? {} : { "data-screen": at.screen }),
         hidden: "",
       },
@@ -156,6 +176,7 @@ function renderView(
     variant: at.variant,
     revision: at.revision.revision,
     orientation,
+    ...(posture === undefined ? {} : { posture }),
     ...(at.screen === undefined ? {} : { screen: at.screen }),
     html: toHtml(view),
     unsupported: still.unsupportedNodes,
@@ -163,28 +184,67 @@ function renderView(
   };
 }
 
+/** Every posture and orientation, the default posture's portrait view first. */
+function viewPoints(frame: ViewFrame): ViewAt[] {
+  return frame.postures.flatMap((posture) =>
+    ORIENTATIONS.map((orientation) => ({ orientation, posture })),
+  );
+}
+
 /**
- * Each revision newest first, one group of both orientations per screen of its outermost stack
- * (just one group without a multi-screen stack). The default portrait still finds the screens.
+ * Each revision newest first, one group of both orientations and every posture per screen of its
+ * outermost stack (just one group without a multi-screen stack). The default posture's portrait
+ * still finds the screens.
  */
 function renderViews(
   input: PrototypeWebPageInput,
-  frame: string,
+  frame: ViewFrame,
   variant: PrototypeWebVariant,
 ): RevisionViews[] {
+  const [first, ...rest] = viewPoints(frame);
   return [...variant.revisions].reverse().map((revision) => {
-    const probe = renderView(input, frame, { variant: variant.id, revision }, "portrait");
+    const at = { variant: variant.id, revision };
+    const probe = renderView(input, frame.id, at, first!);
     const screens = pickerScreens(probe.stack);
     const groups =
       screens.length === 0
-        ? [[probe, renderView(input, frame, { variant: variant.id, revision }, "landscape")]]
+        ? [[probe, ...rest.map((point) => renderView(input, frame.id, at, point))]]
         : screens.map((screen) =>
-            ORIENTATIONS.map((orientation) =>
-              renderView(input, frame, { variant: variant.id, revision, screen }, orientation),
-            ),
+            viewPoints(frame).map((point) => renderView(input, frame.id, { ...at, screen }, point)),
           );
     return { variant: variant.id, revision: revision.revision, screens: groups };
   });
+}
+
+const POSTURE_LABELS: Readonly<Record<string, string>> = {
+  closed: "Closed",
+  half_opened: "Half opened",
+  opened: "Opened",
+  rear_display: "Rear display",
+  flipped: "Flipped",
+  tent: "Tent",
+};
+
+/** The posture picker: only a frame with two or more postures offers one. */
+function posturePicker(frame: PageFrame): WebElement[] {
+  if (frame.postures.length < 2) {
+    return [];
+  }
+  return [
+    el(
+      "select",
+      { attrs: { "data-control": "posture", "aria-label": "Posture" } },
+      frame.postures.map((posture) =>
+        el(
+          "option",
+          {
+            attrs: { value: posture, ...(posture === frame.posture ? { selected: "" } : {}) },
+          },
+          [POSTURE_LABELS[posture] ?? posture],
+        ),
+      ),
+    ),
+  ];
 }
 
 /** The screen picker's options, or undefined for no picker; fewer than two options hide it. */
@@ -214,6 +274,9 @@ interface PageFrame {
   readonly platform: string;
   /** A device that never rotates gets no rotate control. */
   readonly rotates: boolean;
+  /** The frame's postures, and the one shown first; a frame without postures has none. */
+  readonly postures: readonly string[];
+  readonly posture?: string;
 }
 
 function toolbar(
@@ -255,6 +318,7 @@ function toolbar(
     { attrs: { "data-toolbar": "", role: "toolbar", "aria-label": "Prototype view" } },
     [
       ...(frame.rotates ? [button("rotate", "Rotate device", "Rotate")] : []),
+      ...posturePicker(frame),
       button("zoom-out", "Zoom out", "−"),
       el("span", { attrs: { "data-control": "zoom-level", "aria-live": "polite" } }, ["100%"]),
       button("zoom-in", "Zoom in", "+"),
@@ -432,7 +496,7 @@ function pageHtml(
   first: { variant: PrototypeWebVariant; revision: number },
   { frame, views, history, screens }: PageParts,
 ): string {
-  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}">${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
+  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}"${frame.posture === undefined ? "" : ` data-posture="${escapeAttribute(frame.posture)}"`}>${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
   const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
@@ -449,9 +513,19 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),
   );
   const frame = device.id;
+  const posture = defaultFramePosture(device);
+  const postures = framePostures(device);
   const pageFrame: PageFrame = {
     platform: device.platform,
     rotates: prototypeWebFrameRotates(device.formFactor),
+    postures,
+    ...(posture === undefined ? {} : { posture }),
+  };
+  // The default posture first, so a revision's first view is the one the page shows first.
+  const viewFrame: ViewFrame = {
+    id: frame,
+    postures:
+      posture === undefined ? [undefined] : [posture, ...postures.filter((p) => p !== posture)],
   };
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
   // The shell lists only the pinned revisions (each latest and the one shown first), which are
@@ -461,7 +535,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     input.variants.some(
       (entry) => entry.id === variant && entry.revisions.at(-1)?.revision === revision,
     );
-  const rendered = input.variants.flatMap((variant) => renderViews(input, frame, variant));
+  const rendered = input.variants.flatMap((variant) => renderViews(input, viewFrame, variant));
   // The shell's picker lists every screen of the shown revision. A dropped screen removes an
   // option longer than the `hidden` attribute it may add, so the page never outgrows the budget.
   const shellBytes = Buffer.byteLength(
@@ -478,7 +552,8 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     (view) =>
       view.variant === chosen.id &&
       view.revision === shown.revision &&
-      view.orientation === "portrait",
+      view.orientation === "portrait" &&
+      view.posture === posture,
   );
   if (!first) {
     throw new ActionableError(

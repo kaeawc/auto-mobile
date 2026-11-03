@@ -146,12 +146,15 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const pick = (name: string) => doc.querySelector<HTMLElement>(`[data-control="${name}"]`);
   const variantSelect = pick("variant") as HTMLSelectElement | null;
   const screenSelect = pick("screen") as HTMLSelectElement | null;
+  const postureSelect = pick("posture") as HTMLSelectElement | null;
   const revisionList = pick("revisions");
   const zoomLabel = pick("zoom-level");
   const state = {
     variant: doc.body.dataset.variant ?? "",
     revision: doc.body.dataset.revision ?? "",
     orientation: "portrait" as "portrait" | "landscape",
+    // A foldable frame's posture; empty for a frame without postures, whose views carry none.
+    posture: doc.body.dataset.posture ?? "",
     // The first apply sets the shown view's screen.
     screen: "",
     scale: 1,
@@ -164,7 +167,8 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
       (view) =>
         view.dataset.variant === state.variant &&
         view.dataset.revision === state.revision &&
-        view.dataset.orientation === state.orientation,
+        view.dataset.orientation === state.orientation &&
+        (view.dataset.posture ?? "") === state.posture,
     );
   const current = () => screenView(revisionViews(), state.screen);
   // The picker lists the shown revision's own screens, so it never offers a view the page lacks.
@@ -242,6 +246,10 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     state.revision = option?.dataset.latest ?? state.revision;
     state.fit = true;
     apply();
+  });
+  postureSelect?.addEventListener("change", () => {
+    state.posture = postureSelect.value;
+    fitView();
   });
   screenSelect?.addEventListener("change", () => {
     state.screen = screenSelect.value;

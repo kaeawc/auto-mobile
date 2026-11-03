@@ -1,4 +1,5 @@
 import type { DeviceFrame } from "./deviceFrames";
+import type { WebFold } from "./webFold";
 import { el, type WebElement } from "./webNodes";
 import { renderStatusBar, type WebStatusBarContent } from "./webStatusBar";
 
@@ -156,6 +157,118 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
   ];
 }
 
+/** Where a band along `axis` sits: its offset and size on the axis it splits. */
+function bandPlacement(axis: WebFold["band"]["axis"], start: number, size: number) {
+  return axis === "vertical"
+    ? { left: px(start), top: "0", width: px(size), height: "100%" }
+    : { top: px(start), left: "0", height: px(size), width: "100%" };
+}
+
+/**
+ * The hinge over the active panel: an occluding hinge is an opaque strip; a seamless fold draws a
+ * crease shaded by how far it is folded, and nothing when it lies flat.
+ */
+function hinge(fold: WebFold | undefined): WebElement[] {
+  if (!fold) {
+    return [];
+  }
+  const { band, hingeDegrees, occluding } = fold;
+  const attrs = {
+    "aria-hidden": "true",
+    "data-posture": fold.posture,
+    "data-hinge-degrees": String(hingeDegrees),
+  };
+  if (occluding) {
+    return [
+      el("div", {
+        attrs: { "data-chrome": "hinge", ...attrs },
+        style: {
+          position: "absolute",
+          ...bandPlacement(band.axis, band.startDp, band.widthDp),
+          "background-color": "#000",
+          "z-index": "3",
+        },
+      }),
+    ];
+  }
+  const folded = Math.min(1, Math.max(0, (180 - hingeDegrees) / 180));
+  if (folded === 0) {
+    return [];
+  }
+  const crease = 24;
+  const shade = `rgba(0,0,0,${Number((folded * 0.5).toFixed(3))})`;
+  const direction = band.axis === "vertical" ? "to right" : "to bottom";
+  return [
+    el("div", {
+      attrs: { "data-chrome": "fold", ...attrs },
+      style: {
+        position: "absolute",
+        ...bandPlacement(band.axis, band.startDp - crease / 2, crease),
+        background: `linear-gradient(${direction}, transparent, ${shade}, transparent)`,
+        "z-index": "1",
+        "pointer-events": "none",
+      },
+    }),
+  ];
+}
+
+/**
+ * Content laid out on the screen minus an occluding hinge: one box of the reduced size, shown in
+ * the two segments either side of the hinge. The second copy is hidden from assistive technology
+ * and inert, so the preview reads and focuses once.
+ */
+function segmented(
+  content: WebElement,
+  fold: WebFold | undefined,
+  size: { width: number; height: number },
+): WebElement[] {
+  if (!fold?.occluding) {
+    return [content];
+  }
+  const { axis, startDp, widthDp } = fold.band;
+  const vertical = axis === "vertical";
+  const extent = vertical ? size.width : size.height;
+  const box = (offset: number) =>
+    el(
+      "div",
+      {
+        style: {
+          position: "absolute",
+          [vertical ? "left" : "top"]: px(offset),
+          [vertical ? "top" : "left"]: "0",
+          width: px(vertical ? extent - widthDp : size.width),
+          height: px(vertical ? size.height : extent - widthDp),
+        },
+      },
+      [content],
+    );
+  const segment = (start: number, length: number, offset: number, copy: boolean) =>
+    el(
+      "div",
+      {
+        attrs: {
+          "data-segment": copy ? "after" : "before",
+          ...(copy ? { "aria-hidden": "true", inert: "" } : {}),
+        },
+        style: { position: "absolute", overflow: "hidden", ...bandPlacement(axis, start, length) },
+      },
+      [box(offset)],
+    );
+  return [
+    segment(0, startDp, 0, false),
+    segment(startDp + widthDp, extent - startDp - widthDp, -startDp, true),
+  ];
+}
+
+const POSTURE_LABELS: Readonly<Record<WebFold["posture"], string>> = {
+  closed: "closed",
+  half_opened: "half opened",
+  opened: "opened",
+  rear_display: "rear display",
+  flipped: "flipped",
+  tent: "tent",
+};
+
 /** A device frame around the screen content, with status bar, cutout and navigation handle or home indicator. */
 export function renderDeviceFrame(
   frame: DeviceFrame,
@@ -166,6 +279,9 @@ export function renderDeviceFrame(
     background: string;
     /** The status bar's content style; absent follows `dark`. */
     statusBarContent?: WebStatusBarContent;
+    /** The posture drawn: names the frame's view, and its hinge when it folds the active panel. */
+    posture?: WebFold["posture"];
+    fold?: WebFold;
   },
   content: WebElement,
 ): WebElement {
@@ -196,7 +312,8 @@ export function renderDeviceFrame(
       },
     },
     [
-      content,
+      ...segmented(content, options.fold, { width, height }),
+      ...hinge(options.fold),
       ...statusBar(
         frame,
         orientation,
@@ -213,7 +330,8 @@ export function renderDeviceFrame(
         "data-chrome": "frame",
         "data-frame": frame.id,
         "data-orientation": orientation,
-        "aria-label": `${frame.label} (${orientation})`,
+        ...(options.posture ? { "data-posture": options.posture } : {}),
+        "aria-label": `${frame.label} (${[orientation, ...(options.posture ? [POSTURE_LABELS[options.posture]] : [])].join(", ")})`,
       },
       style: {
         display: "inline-block",

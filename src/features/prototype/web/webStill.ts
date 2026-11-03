@@ -2,7 +2,15 @@ import { prototypeSpecForDevice } from "../prototypeComponents";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
-import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
+import {
+  frameInPosture,
+  layoutSize,
+  webFold,
+  type FramePosture,
+  type WebFold,
+  type WebPostureView,
+} from "./webFold";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
@@ -19,6 +27,11 @@ export interface PrototypeStillOptions {
   readonly frame?: string;
   readonly platform?: "android" | "ios";
   readonly orientation?: WebOrientation;
+  /**
+   * A foldable frame's posture (#16445); defaults to `opened`, else the frame's first. A frame
+   * without postures takes none.
+   */
+  readonly posture?: string;
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
@@ -29,6 +42,8 @@ export interface PrototypeStillOptions {
 export interface PrototypeStill {
   readonly element: WebElement;
   readonly frame: string;
+  /** The posture drawn; absent for a frame without postures. */
+  readonly posture?: FramePosture;
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
   /** The outermost stack drawn, if any: its screens and the one drawn. */
   readonly stack?: WebStackScreens;
@@ -165,12 +180,15 @@ function placedWindow(
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
-  frame: DeviceFrame,
+  view: WebPostureView,
+  fold: WebFold | undefined,
 ): WebRenderScope {
+  const { frame } = view;
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
   const authored = record(spec.theme)?.mode;
-  const size = screenSize(frame, options.orientation ?? "portrait");
+  // The spec lays out on the active panel, minus an occluding hinge.
+  const size = layoutSize(screenSize(frame, options.orientation ?? "portrait"), fold);
   const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
@@ -185,8 +203,12 @@ function stillScope(
     condition: {
       state: record(spec.state) ?? {},
       platform: frame.platform,
-      // The frame's one panel is the active panel; no registry frame has a hinge yet (#16444).
-      platformState: stillPlatformState({ platform: frame.platform, ...screenDp }),
+      // The posture's panel is the active panel; its hinge, if it folds it, sets the posture.
+      platformState: stillPlatformState({
+        platform: frame.platform,
+        ...screenDp,
+        ...(fold ? { fold: { posture: fold.posture, hinge: fold.band.axis } } : {}),
+      }),
     },
     data: spec.data,
     spec,
@@ -238,12 +260,16 @@ export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
 ): PrototypeStill {
-  const frame = deviceFrameOrThrow(
-    options.frame ?? defaultDeviceFrameId(options.platform ?? "android"),
+  const view = frameInPosture(
+    deviceFrameOrThrow(options.frame ?? defaultDeviceFrameId(options.platform ?? "android")),
+    options.posture,
   );
+  const { frame } = view;
+  const orientation = options.orientation ?? "portrait";
+  const fold = webFold(view, orientation);
   // Components expand, then string tables resolve for the still's fixed locale, as on devices.
   const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
-  const scope = stillScope(expanded, options, frame);
+  const scope = stillScope(expanded, options, view, fold);
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
@@ -251,12 +277,14 @@ export function renderPrototypeStill(
   const content = placed(expanded, root, scope.layers);
   const element = renderDeviceFrame(
     frame,
-    options.orientation ?? "portrait",
+    orientation,
     {
       dark,
       textColor,
       background,
       statusBarContent: stillStatusBarContent(expanded, content, background, dark),
+      ...(view.posture ? { posture: view.posture } : {}),
+      ...(fold ? { fold } : {}),
     },
     content,
   );
@@ -264,6 +292,7 @@ export function renderPrototypeStill(
   return {
     element,
     frame: frame.id,
+    ...(view.posture ? { posture: view.posture } : {}),
     unsupportedNodes: scope.unsupported,
     ...(stack ? { stack } : {}),
   };

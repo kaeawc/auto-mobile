@@ -159,6 +159,20 @@ describe("prototype web map across the 180° line (#16593)", () => {
     expect(to!.left - from!.left).toBeCloseTo(((4 / 360) * 256 * 100) / 400, 2);
   });
 
+  test("fitting a route frames the span it is drawn across, not just its vertices", () => {
+    // Each hop is under half the world, so the line is drawn 340° wide through Greenwich.
+    const route = [mercator(0, -170), mercator(0, 0), mercator(0, 170)];
+    const view = fitFraming([], size, [route])!;
+    const lefts = routePercents(route, view, size).map((point) => point.left);
+    expect(lefts[0]).toBeCloseTo(10, 2);
+    expect(lefts[1]).toBeCloseTo(50, 2);
+    expect(lefts[2]).toBeCloseTo(90, 2);
+    // A line wrapping the whole world is fitted one world wide.
+    const round = [0, 120, -120, 0].map((lng) => mercator(0, lng));
+    expect(fitFraming([], size, [round])!.worldSize).toBeCloseTo(400 * 0.8, 9);
+    expect(fitFraming([], size, [[]])).toBeUndefined();
+  });
+
   test("the rendered still pins and routes across 180°", () => {
     const pacific = [
       { id: "w", lat: 0, lng: 179, name: "West" },

@@ -102,38 +102,92 @@ export function wrapOffset(dx: number): number {
   return dx - Math.floor(dx + 0.5);
 }
 
-/**
- * The left and right x of the smallest arc covering `xs`, unwrapped so `right` may pass 1: the arc
- * starts just after the widest empty gap between neighbouring points around the world.
- */
-function horizontalBounds(xs: readonly number[]): { left: number; right: number } {
-  const sorted = xs.map((x) => x - Math.floor(x)).toSorted((a, b) => a - b);
-  const gaps = sorted.map((x, index) =>
-    index + 1 < sorted.length ? sorted[index + 1]! - x : sorted[0]! + 1 - x,
+/** A line's x coordinates as it is drawn: each one the short way round from the one before. */
+function unwrappedXs(points: readonly MapPoint[]): number[] {
+  return points.reduce<number[]>(
+    (xs, point, index) => [
+      ...xs,
+      index === 0 ? point.x : xs[index - 1]! + wrapOffset(point.x - points[index - 1]!.x),
+    ],
+    [],
   );
-  const widest = gaps.indexOf(Math.max(...gaps));
-  const left = sorted[(widest + 1) % sorted.length]!;
-  return { left, right: left + 1 - gaps[widest]! };
 }
 
-/** The framing that fits `points` in `size` with a margin; undefined when there are none. */
+interface Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+function mergeSpans(spans: readonly Span[]): Span[] {
+  return spans
+    .toSorted((a, b) => a.start - b.start)
+    .reduce<Span[]>((merged, span) => {
+      const last = merged.at(-1);
+      return last && span.start <= last.end
+        ? [...merged.slice(0, -1), { start: last.start, end: Math.max(last.end, span.end) }]
+        : [...merged, span];
+    }, []);
+}
+
+/**
+ * The left and right x of the smallest arc covering every span, unwrapped so `right` may pass 1:
+ * the arc starts just after the widest stretch of the world no span covers. Copies of the spans one
+ * and two worlds over make every gap that opens in `[1, 2)` a real one, each listed once.
+ */
+function horizontalBounds(spans: readonly Span[]): Span {
+  const base = spans.map(({ start, end }) => {
+    const from = start - Math.floor(start);
+    return { start: from, end: from + end - start };
+  });
+  const merged = mergeSpans(
+    [0, 1, 2].flatMap((shift) =>
+      base.map(({ start, end }) => ({ start: start + shift, end: end + shift })),
+    ),
+  );
+  const gaps = merged.slice(1).flatMap((next, index) => {
+    const before = merged[index]!.end;
+    return before >= 1 && before < 2
+      ? [{ width: next.start - before, start: next.start - 1, end: before }]
+      : [];
+  });
+  const widest = gaps.reduce<(typeof gaps)[number] | undefined>(
+    (best, gap) => (best && best.width >= gap.width ? best : gap),
+    undefined,
+  );
+  // No gap: the spans wrap the whole world, so the fit is one world wide.
+  return widest ? { start: widest.start, end: widest.end } : { start: 0, end: 1 };
+}
+
+/**
+ * The framing that fits `points` and the drawn `lines` in `size` with a margin; undefined when there
+ * is nothing to fit. A line is fitted over the span it is drawn across, not just its vertices.
+ */
 export function fitFraming(
   points: readonly MapPoint[],
   size: { width: number; height: number },
+  lines: readonly (readonly MapPoint[])[] = [],
 ): MapFraming | undefined {
-  if (points.length === 0) {
+  const drawn = lines.filter((line) => line.length > 0);
+  const ys = [...points, ...drawn.flat()].map((point) => point.y);
+  if (ys.length === 0) {
     return undefined;
   }
-  const ys = points.map((point) => point.y);
-  const { left, right } = horizontalBounds(points.map((point) => point.x));
+  const spans = [
+    ...points.map((point) => ({ start: point.x, end: point.x })),
+    ...drawn.map((line) => {
+      const xs = unwrappedXs(line);
+      return { start: Math.min(...xs), end: Math.max(...xs) };
+    }),
+  ];
+  const { start: left, end: right } = horizontalBounds(spans);
   const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
   const middle = (left + right) / 2;
   const center = { x: middle - Math.floor(middle), y: (top + bottom) / 2 };
-  const spans = [
+  const fits = [
     right > left ? (size.width * FIT_FILL) / (right - left) : Infinity,
     bottom > top ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
   ];
-  const fitted = Math.min(...spans);
+  const fitted = Math.min(...fits);
   const worldSize = Math.min(
     Number.isFinite(fitted) ? fitted : TILE_SIZE * 2 ** SINGLE_POINT_ZOOM,
     TILE_SIZE * 2 ** 22,
@@ -162,19 +216,19 @@ function cameraFraming(node: Raw, scope: WebRenderScope): MapFraming | undefined
 function framing(
   node: Raw,
   scope: WebRenderScope,
-  points: { markers: MapPoint[]; route: MapPoint[] },
+  points: { markers: MapPoint[]; lines: MapPoint[][] },
   size: { width: number; height: number },
 ): MapFraming {
   const fitted =
     node.fit === "markers"
       ? fitFraming(points.markers, size)
       : node.fit === "route"
-        ? fitFraming(points.route, size)
+        ? fitFraming([], size, points.lines)
         : undefined;
   return (
     fitted ??
     cameraFraming(node, scope) ??
-    fitFraming([...points.markers, ...points.route], size) ?? {
+    fitFraming(points.markers, size, points.lines) ?? {
       center: { x: 0.5, y: 0.5 },
       worldSize: TILE_SIZE,
     }
@@ -216,13 +270,9 @@ export function routePercents(
   view: MapFraming,
   size: { width: number; height: number },
 ): { left: number; top: number }[] {
-  const offsets = points.reduce<number[]>((dxs, point, index) => {
-    const previous = points[index - 1];
-    const dx = previous
-      ? dxs[index - 1]! + wrapOffset(point.x - previous.x)
-      : wrapOffset(point.x - view.center.x);
-    return [...dxs, dx];
-  }, []);
+  const xs = unwrappedXs(points);
+  const first = points[0] ? wrapOffset(points[0].x - view.center.x) - points[0].x : 0;
+  const offsets = xs.map((x) => x + first);
   return points.map((point, index) =>
     offsetPercent(offsets[index]!, point.y - view.center.y, view, size),
   );
@@ -317,7 +367,7 @@ const mapRenderer =
       scope,
       {
         markers: markers.map((marker) => marker.point),
-        route: lines.flatMap((line) => line.points),
+        lines: lines.map((line) => line.points),
       },
       size,
     );

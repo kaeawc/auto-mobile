@@ -326,3 +326,25 @@ export function boxLayoutCss(style: unknown): Css {
     "justify-items": horizontalPart(value).replace("flex-", ""),
   };
 }
+
+/**
+ * A multiline field keeps its newlines and its authored minLines and maxLines (24 sp lines, scaled
+ * with the system text size).
+ */
+export function multilineCss(node: Raw, context: WebStyleContext): Record<string, string> {
+  if (node.multiline !== true) {
+    return {};
+  }
+  const css: Record<string, string> = {
+    "white-space": "pre-wrap",
+    "line-height": fontPx(24, context),
+  };
+  if (typeof node.minLines === "number") {
+    css["min-height"] = fontPx(node.minLines * 24, context);
+  }
+  if (typeof node.maxLines === "number") {
+    css["max-height"] = fontPx(node.maxLines * 24, context);
+    css.overflow = "hidden";
+  }
+  return css;
+}

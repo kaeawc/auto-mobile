@@ -31,6 +31,7 @@ import {
   cssColor,
   fontPx,
   lineCss,
+  multilineCss,
   nodeCss,
   textCss,
   type WebStyleContext,
@@ -628,28 +629,6 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
 }
 
 /**
- * A multiline field keeps its newlines and its authored minLines and maxLines (24 sp lines, scaled
- * with the system text size).
- */
-function lineBounds(node: Raw, context: WebStyleContext): Record<string, string> {
-  if (node.multiline !== true) {
-    return {};
-  }
-  const css: Record<string, string> = {
-    "white-space": "pre-wrap",
-    "line-height": fontPx(24, context),
-  };
-  if (typeof node.minLines === "number") {
-    css["min-height"] = fontPx(node.minLines * 24, context);
-  }
-  if (typeof node.maxLines === "number") {
-    css["max-height"] = fontPx(node.maxLines * 24, context);
-    css.overflow = "hidden";
-  }
-  return css;
-}
-
-/**
  * A Material field's label sits inside an empty field with no placeholder (fieldValue draws it
  * there); once the field holds a value or shows a placeholder, the label floats above it.
  */
@@ -741,7 +720,7 @@ const textField: NodeRenderer = (node, scope, path) => {
       ...namedIcon(node.leadingIcon, scope),
       el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
         ...floatingLabel(node, empty, scope),
-        el("span", { style: lineBounds(node, scope.style) }, [shown]),
+        el("span", { style: multilineCss(node, scope.style) }, [shown]),
       ]),
       // The trailing slot is an {icon, label} action, like an app-bar action.
       ...appBarIcons([node.trailingIcon], scope, path),

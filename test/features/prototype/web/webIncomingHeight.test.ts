@@ -50,6 +50,9 @@ test("a column hands each child what its earlier siblings left, and weights shar
   // A sibling takes its dp height clamped by its own bounds.
   const clamped = { type: "box", style: { height: { dp: 100 }, maxHeight: 20 } };
   expect(columnChildHeights([clamped, weighted(1)], 100, 0)).toEqual([100, 80]);
+  // A wrap sibling's maxHeight is not height it takes.
+  const wrapped = { type: "box", style: { maxHeight: 100 } };
+  expect(columnChildHeights([wrapped, weighted(1)], 100, 0)).toEqual([100, 100]);
   const floored = { type: "text", style: { minHeight: 30 } };
   expect(columnChildHeights([floored, weighted(1)], 100, 0)).toEqual([100, 70]);
   // A sibling with no dp height counts as 0, so the bound is an upper one.

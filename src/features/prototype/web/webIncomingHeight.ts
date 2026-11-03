@@ -36,16 +36,17 @@ const weightOf = (node: Raw | undefined): number | undefined => {
 };
 
 /**
- * The height an unweighted child takes (see ownHeight), or its `minHeight` (else 0) when that is
- * only known at layout time, so the rest is an upper bound.
+ * The height an unweighted child takes: its dp height clamped by its bounds (see ownHeight). With
+ * no dp height it wraps its content, which is only known at layout time, so it counts as its
+ * `minHeight` (else 0), never its `maxHeight`, and the rest is an upper bound.
  */
 const fixedHeight = (node: Raw): number => {
+  const style = record(node.style);
   if (weightOf(node) !== undefined) {
     return 0;
   }
-  const style = record(node.style);
-  const own = ownHeight(style);
-  return own === Infinity ? (typeof style?.minHeight === "number" ? style.minHeight : 0) : own;
+  const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
+  return typeof record(style?.height)?.dp === "number" ? ownHeight(style) : floor;
 };
 
 /**

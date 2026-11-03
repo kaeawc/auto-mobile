@@ -339,9 +339,7 @@ function chooseIosRelease(
   model: IosCatalogModel,
 ): RequirementResult<ResolvedIosOs> {
   const valid = validIosReleases(releases);
-  let satisfying = valid.filter((release) =>
-    osSelectorMatchesVersion(selector, release.osVersion),
-  );
+  let satisfying = valid.filter((release) => osSelectorMatchesVersion(selector, release.osVersion));
   if (satisfying.length === 0) {
     return noRuntimeResult(selector, releases, "ios");
   }

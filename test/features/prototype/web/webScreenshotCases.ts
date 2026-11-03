@@ -12,7 +12,10 @@ import {
 
 const FIXTURES = join(import.meta.dir, "../../../fixtures");
 
-/** Committed goldens: one PNG per case, `<spec>--<frame>.png`. */
+/**
+ * Committed goldens: two PNGs per case, `<spec>--<frame>.png` in portrait and
+ * `<spec>--<frame>--landscape.png` at the end of the animated rotation (#16545).
+ */
 export const WEB_SCREENSHOT_GOLDEN_DIR = join(FIXTURES, "prototype-web/screenshots");
 
 export const WEB_SCREENSHOT_FRAMES = ["pixel-9", "iphone-16"] as const;
@@ -65,6 +68,8 @@ export interface WebScreenshotCase {
   readonly fixture: string;
   readonly golden: string;
   /** The system settings the page renders with; absent for the default ones. */
+  readonly landscapeGolden: string;
+  /** The system settings the page renders with; absent for the default ones. */
   readonly settings?: Pick<PrototypeWebPageInput, "locale" | "textSize">;
 }
 
@@ -81,6 +86,7 @@ function screenshotCase(
     frame,
     fixture: join(FIXTURES, WEB_SCREENSHOT_SPECS[spec]!),
     golden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${name}.png`),
+    landscapeGolden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${name}--landscape.png`),
     ...(settings ? { settings } : {}),
   };
 }

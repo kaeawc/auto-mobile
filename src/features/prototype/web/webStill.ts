@@ -120,6 +120,15 @@ function sizedRoot(spec: unknown): unknown {
   };
 }
 
+/** The explicit `window.layoutDirection`, else `rtl` for an RTL locale, else none. */
+function windowDirection(spec: unknown, locale: string): "ltr" | "rtl" | undefined {
+  const authored = record(record(spec)?.window)?.layoutDirection;
+  if (authored === "rtl" || authored === "ltr") {
+    return authored;
+  }
+  return localeLayoutDirection(locale) === "rtl" ? "rtl" : undefined;
+}
+
 /**
  * The window's content with its layout direction, so rows, start/end alignment and logical padding
  * follow it; the device chrome around it is never mirrored. An explicit `window.layoutDirection`
@@ -132,13 +141,7 @@ function placed(
   locale: string,
 ): WebElement {
   const window = placedWindow(spec, content, layers);
-  const authored = record(record(spec)?.window)?.layoutDirection;
-  const direction =
-    authored === "rtl" || authored === "ltr"
-      ? authored
-      : localeLayoutDirection(locale) === "rtl"
-        ? "rtl"
-        : undefined;
+  const direction = windowDirection(spec, locale);
   if (direction === undefined) {
     return window;
   }
@@ -195,6 +198,8 @@ function stillScope(
       parentAxis: "column",
       typography: themeTypography(expanded),
       ...(textScale ? { textScale } : {}),
+      platform: frame.platform,
+      ...(windowDirection(spec, locale) === "rtl" ? { rtl: true } : {}),
     },
     condition: {
       state: record(spec.state) ?? {},

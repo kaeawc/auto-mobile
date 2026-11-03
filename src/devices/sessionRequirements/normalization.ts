@@ -1,10 +1,4 @@
-import {
-  resolveAndroidExactProfile,
-  iosModelTypeArchetype,
-  iosModelTypesEqual,
-  resolveIosModelReference,
-  validateContext,
-} from "./catalog";
+import { resolveAndroidExactProfile, resolveIosModelReference, validateContext } from "./catalog";
 import { parseSessionDeviceRequirement } from "./parsing";
 import { failure, success } from "./result";
 import type {
@@ -22,7 +16,6 @@ import type {
   DefaultedSessionDeviceRequirement,
   SessionDeviceCatalog,
   SessionDeviceRequirement,
-  SessionRequirementCapabilities,
   SessionRequirementDefaults,
 } from "./types";
 import { normalizeOsSelector, osSelectorMatchesVersion, parseNumericVersion } from "./version";
@@ -67,73 +60,6 @@ function provenance(
     catalogRevision: catalog.provenance.revision,
     defaultsApplied,
   };
-}
-
-function capabilityDisabled(subject: string): RequirementResult<never> {
-  return failure(
-    "capability_disabled",
-    `${subject} is recognized, but Duo execution is disabled by the current provider policy.`,
-    { field: "hardware" },
-  );
-}
-
-function validateIosCapability(
-  request: IosSessionDeviceRequirement,
-  exactModel: IosCatalogModel | undefined,
-): RequirementResult<true> {
-  if (request.hardware.kind === "archetype" && request.hardware.archetype === "duo") {
-    return capabilityDisabled("The Duo archetype");
-  }
-  if (
-    request.hardware.kind === "model-type" &&
-    iosModelTypeArchetype(request.hardware.modelType) === "duo"
-  ) {
-    return capabilityDisabled("The Duo model type");
-  }
-  if (exactModel?.archetype === "duo") {
-    return capabilityDisabled(`Model '${exactModel.name}'`);
-  }
-  return success(true);
-}
-
-/**
- * A coarse pool predicate stays coarse, but a known Duo farther down its
- * configured creation path must still be refused before pool checkout.
- */
-function validateIosDefaultCapability(
-  request: IosSessionDeviceRequirement,
-  defaults: Extract<SessionRequirementDefaults, { platform: "ios" }>,
-  catalog: IosSessionDeviceCatalog,
-): RequirementResult<true> {
-  if (request.hardware.kind === "exact-model") {
-    return success(true);
-  }
-  const hardware = request.hardware;
-  const archetype = hardware.kind === "archetype" ? hardware.archetype : undefined;
-  const modelType =
-    hardware.kind === "model-type"
-      ? hardware.modelType
-      : defaults.hardware.archetypes.find((entry) => entry.archetype === archetype)?.modelType;
-  if (!modelType) {
-    return success(true);
-  }
-  if (iosModelTypeArchetype(modelType) === "duo") {
-    return capabilityDisabled("The configured hardware default");
-  }
-  const modelDefaults = defaults.hardware.modelTypes.filter((entry) =>
-    iosModelTypesEqual(entry.modelType, modelType),
-  );
-  if (modelDefaults.length !== 1) {
-    return success(true);
-  }
-  const model = resolveIosModelReference(
-    modelDefaults[0].model,
-    catalog,
-    "defaults.hardware.modelTypes.model",
-  );
-  return model.ok && model.value.archetype === "duo"
-    ? capabilityDisabled(`Configured model '${model.value.name}'`)
-    : success(true);
 }
 
 function effectiveIosHardware(
@@ -183,7 +109,6 @@ function normalizeIos(
   original: IosSessionDeviceRequirement,
   defaults: Extract<SessionRequirementDefaults, { platform: "ios" }>,
   catalog: IosSessionDeviceCatalog,
-  capabilities: SessionRequirementCapabilities,
 ): RequirementResult<NormalizedIosSessionDeviceRequirement> {
   const hardware = effectiveIosHardware(original, defaults);
   if (!hardware.ok) {
@@ -197,24 +122,9 @@ function normalizeIos(
   if (!normalizedOs.ok) {
     return normalizedOs;
   }
-  const effectiveRequest: IosSessionDeviceRequirement = {
-    ...original,
-    hardware: hardware.value,
-    os: normalizedOs.value,
-  };
   const exactModel = optionalExactModel(hardware.value, catalog);
   if (!exactModel.ok) {
     return exactModel;
-  }
-  if (capabilities.iosDuo !== true) {
-    const capability = validateIosCapability(effectiveRequest, exactModel.value);
-    if (!capability.ok) {
-      return capability;
-    }
-    const defaultCapability = validateIosDefaultCapability(effectiveRequest, defaults, catalog);
-    if (!defaultCapability.ok) {
-      return defaultCapability;
-    }
   }
   return success({
     platform: "ios",
@@ -268,16 +178,10 @@ function normalizeAndroid(
   });
 }
 
-/**
- * Duo selectors stay refused with `capability_disabled` unless `capabilities.iosDuo` is set.
- * Enabling it never widens other selectors: resolution still requires a configured default
- * to belong to the requested model type, so a phone or tablet request cannot reach a Duo.
- */
 export function normalizeSessionDeviceRequirement(
   request: SessionDeviceRequirement,
   defaults: SessionRequirementDefaults,
   catalog: SessionDeviceCatalog,
-  capabilities: SessionRequirementCapabilities = {},
 ): RequirementResult<NormalizedSessionDeviceRequirement> {
   const parsed = parseSessionDeviceRequirement(request);
   if (!parsed.ok) {
@@ -297,7 +201,7 @@ export function normalizeSessionDeviceRequirement(
     defaults.platform === "ios" &&
     catalog.platform === "ios"
   ) {
-    return normalizeIos(parsed.value, defaults, catalog, capabilities);
+    return normalizeIos(parsed.value, defaults, catalog);
   }
   if (
     parsed.value.platform === "android" &&

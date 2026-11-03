@@ -22,6 +22,8 @@ import {
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
+import { webMapRenderers } from "./webMap";
+import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
@@ -953,6 +955,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   listItem,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
+  ...webMediaRenderers(KIT),
+  ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
 };
 

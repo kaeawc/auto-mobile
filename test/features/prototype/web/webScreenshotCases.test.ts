@@ -13,16 +13,19 @@ import {
 const cases = webScreenshotCases();
 
 describe("prototype web screenshot goldens (#16346)", () => {
-  test("every case has a fixture and a viewport-sized golden", () => {
+  test("every case has a fixture and viewport-sized portrait and landscape goldens", () => {
     expect(cases.length).toBe(14);
     for (const entry of cases) {
       expect(existsSync(entry.fixture)).toBe(true);
       expect(pngSize(readFileSync(entry.golden))).toEqual(WEB_SCREENSHOT_VIEWPORT);
+      expect(pngSize(readFileSync(entry.landscapeGolden))).toEqual(WEB_SCREENSHOT_VIEWPORT);
     }
   });
 
   test("the golden directory holds no golden without a case", () => {
-    const expected = cases.map((entry) => basename(entry.golden)).sort();
+    const expected = cases
+      .flatMap((entry) => [basename(entry.golden), basename(entry.landscapeGolden)])
+      .sort();
     expect(readdirSync(WEB_SCREENSHOT_GOLDEN_DIR).sort()).toEqual(expected);
   });
 

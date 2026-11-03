@@ -41,6 +41,16 @@ enum PrototypePlatformValidator {
         return modules[parts.module]?.calls[parts.member]?.capability
     }
 
+    /// The capability a `map` node's non-default `backend` needs on top of the module's (#14302),
+    /// or nil for the default `auto` backend or any value the table does not list.
+    static func nodeBackendCapability(_ node: [String: JSONValue]) -> String? {
+        guard node["type"] == .string("map"), let backend = node["backend"]?.stringValue else {
+            return nil
+        }
+        return PrototypeContractValidator.platformModules["map"]?.objectFields?["backends"]?
+            .objectFields?[backend]?.objectFields?["capability"]?.stringValue
+    }
+
     struct Module: Equatable {
         let capability: String
         let calls: [String: Call]

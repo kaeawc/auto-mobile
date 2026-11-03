@@ -40,6 +40,19 @@ internal object PrototypePlatformModules {
       ?.takeIf(JsonPrimitive::isString)
       ?.content
 
+  /**
+   * The capability a `map` node's non-default `backend` needs on top of the module's (#14302), or
+   * null for the default `auto` backend or any value the table does not list.
+   */
+  fun nodeBackendCapability(node: JsonObject): String? {
+    if ((node["type"] as? JsonPrimitive)?.content != "map") return null
+    val backend = (node["backend"] as? JsonPrimitive)?.takeIf(JsonPrimitive::isString) ?: return null
+    return (module("map")?.member("backends")?.member(backend.content)?.get("capability")
+        as? JsonPrimitive)
+      ?.takeIf(JsonPrimitive::isString)
+      ?.content
+  }
+
   fun eventModule(event: String): String? {
     val (owner, member) = qualified(event) ?: return null
     return owner.takeIf { module(owner)?.member("events")?.containsKey(member) == true }

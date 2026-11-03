@@ -125,8 +125,13 @@ describe("platform module table", () => {
           }),
     );
     expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability)).toEqual([
-      ...Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
+      ...Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(([name, definition]) => [
         definition.capability,
+        // A backend capability is prototype_platform_<module>_<backend>_vN (#14302).
+        ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => {
+          expect(capability).toMatch(new RegExp(`^prototype_platform_${name}_${backend}_v[0-9]+$`));
+          return capability;
+        }),
         ...(definition.deviceCapability ? [definition.deviceCapability] : []),
       ]),
       ...new Set(callCapabilities),

@@ -25,6 +25,7 @@ internal object PrototypeBundleNodeCapabilities {
         "grid" to "flow_grid_v1",
       )
     typed[type]?.let { caps.add("prototype_$it") }
+    PrototypePlatformModules.nodeBackendCapability(n)?.let(caps::add)
     if (PrototypeGlassRules.needsNamespace(n)) caps.add("prototype_platform_namespace_v1")
     if (type == "icon" && "effect" in n) caps.add("prototype_icon_effects_v1")
     val trigger = (n["effect"] as? JsonObject)?.get("trigger") as? JsonObject

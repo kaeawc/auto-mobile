@@ -90,6 +90,7 @@ enum PrototypeStrictCapabilities {
             if ["topAppBar", "bottomNav", "tabBar"].contains(type),
                fields["onScroll"] != nil || fields["scroll"] != nil { need("bar_scroll") }
             if let feature = types[type] { need(feature) }
+            if let backend = PrototypePlatformValidator.nodeBackendCapability(fields) { result.insert(backend) }
             if (type == "stack" && fields["routes"] != nil) ||
                 (["push", "replace"].contains(type) && fields["params"] != nil) ||
                 (type == "pop" && fields["force"] != nil) || type == "setStack" { need("routes") }

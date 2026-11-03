@@ -37,6 +37,7 @@ import {
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
 import { prototypeSensorsBlockError, prototypeSensorUseError } from "./prototypeSensorsBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { prototypePlatformUnsupported as unsupported } from "./prototypePlatformUnsupported";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { expandPrototypeComponents } from "./prototypeComponents";
@@ -113,6 +114,11 @@ export interface PrototypePlatformStateEntry {
 export interface PrototypePlatformModule {
   capability: string;
   deviceCapability?: string;
+  /**
+   * Non-default SDK backends a node of this module may name in `backend` (#14302), each with the
+   * capability a runtime advertises only while that backend works on the device.
+   */
+  backends?: Record<string, { capability: string }>;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   /** Shared runtime call budget; the host validates metadata but does not count calls. */
@@ -242,7 +248,7 @@ const sortedKeys = (value: Raw): string[] =>
 export type PrototypePlatformUse =
   | { kind: "requires"; path: string }
   | { kind: "declared"; path: string; module: string }
-  | { kind: "node"; path: string; module: string }
+  | { kind: "node"; path: string; module: string; backend?: unknown }
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string; userGesture: boolean }
   | { kind: "call"; path: string; action: Raw; userGesture: boolean }
@@ -429,7 +435,7 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   // positions count: a map-shaped value in a request field or payload is data.
   walkPrototypeNodes(root, (node, path) => {
     if (node.type === "map") {
-      uses.push({ kind: "node", path, module: "map" });
+      uses.push({ kind: "node", path, module: "map", backend: node.backend });
     }
   });
   return uses;
@@ -893,21 +899,6 @@ export function prototypePlatformModuleFields(spec: unknown, name: string): stri
   );
 }
 
-function unsupported(
-  fields: readonly string[],
-  platform: "android" | "ios",
-  capability: string,
-  what: string,
-): string {
-  const device = platform === "android" ? "connected CtrlProxy" : "connected iOS prototype agent";
-  const update =
-    platform === "android"
-      ? "Update the connected CtrlProxy"
-      : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
-  const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
-  return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${update}, or use a spec without it.`;
-}
-
 export function prototypePlatformUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
@@ -925,6 +916,19 @@ export function prototypePlatformCallCapabilityFields(spec: unknown, capability:
           prototypePlatformCall(use.action.call)?.definition.capability === capability,
       )
       .map((use) => use.path),
+  );
+}
+
+/** Authored `backend` paths of the module's nodes that name `backend` (#14302). */
+export function prototypePlatformBackendFields(
+  spec: unknown,
+  name: string,
+  backend: string,
+): string[] {
+  return unique(
+    authoredUses(spec)
+      .filter((use) => use.kind === "node" && use.module === name && use.backend === backend)
+      .map((use) => `${use.path}.backend`),
   );
 }
 
@@ -983,6 +987,12 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
       unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
         unsupported(fields, platform, definition.capability, `the ${name} platform module`),
     },
+    ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => ({
+      capability,
+      fields: (spec: unknown) => prototypePlatformBackendFields(spec, name, backend),
+      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+        unsupported(fields, platform, capability, `the ${name} \`${backend}\` backend`),
+    })),
     ...(definition.deviceCapability
       ? [
           {

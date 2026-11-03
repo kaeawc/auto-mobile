@@ -445,6 +445,7 @@ internal object PrototypeStrictPolicy {
         if (keys.any { fields[it] != null }) need(feature)
       }
       listAndRequestFeatures(type, fields)
+      PrototypePlatformModules.nodeBackendCapability(fields)?.let(result::add)
     }
 
     private fun listAndRequestFeatures(type: String, fields: JsonObject) {

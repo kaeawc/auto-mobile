@@ -1916,6 +1916,7 @@ data class PrototypeMapNode(
   override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val mapStyle: String? = null,
+  val backend: String? = null,
   val camera: JsonObject? = null,
   val fit: String? = null,
   val markers: JsonObject? = null,

@@ -283,7 +283,11 @@ export function renderPlatformModules(
       const state = Object.keys(module.state ?? {}).map(
         (key) => `\`/${name}/${platformStateScope(name, key)}${key}\``,
       );
-      const capabilities = [module.capability, module.deviceCapability].filter(Boolean);
+      const capabilities = [
+        module.capability,
+        module.deviceCapability,
+        ...Object.values(module.backends ?? {}).map((backend) => backend.capability),
+      ].filter(Boolean);
       return `| \`${name}\` | ${code(capabilities as string[])} | ${calls.join("<br>") || "-"} | ${events.join(", ") || "-"} | ${state.join(", ") || "-"} |`;
     });
   return [

@@ -10,6 +10,7 @@ import { planCallerContext } from "../../src/server/planCallerIdentity";
 import {
   currentAutolockMcpSessionId,
   currentExecution,
+  currentOneShotCli,
   currentRequestDeadline,
   getToolSelectionContext,
   runWithToolSelectionContext,
@@ -268,6 +269,21 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       );
 
       expect(seen).toEqual({ autolock: undefined, caller: "conn-A" });
+    });
+
+    test("a nested call is never a one-shot CLI call, though its caller is", async () => {
+      const seen: boolean[] = [];
+      ToolRegistry.register("clipboard", "Mock clipboard", schema, async () => {
+        seen.push(currentOneShotCli());
+        return SENTINEL;
+      });
+
+      await runWithToolSelectionContext({ oneShotCli: true }, async () => {
+        seen.push(currentOneShotCli());
+        await ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true });
+      });
+
+      expect(seen).toEqual([true, false]);
     });
 
     test("executePlan's steps run for the connection that called it", async () => {

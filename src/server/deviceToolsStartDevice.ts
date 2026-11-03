@@ -1,6 +1,8 @@
-import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
 import {
-  internalOneShotCli,
+  currentAutolockMcpSessionId,
+  currentOneShotCli,
+} from "../features/toolSelection/toolSelectionContext";
+import {
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
 } from "./internalToolParams";
@@ -373,7 +375,7 @@ async function reserveBootReadiness(
         } else {
           await reserveInitialDeviceForReadiness(daemonState, state.boot!, initialReservations, {
             mcpSessionId: currentAutolockMcpSessionId(),
-            oneShotCli: internalOneShotCli(args),
+            oneShotCli: currentOneShotCli(),
           });
         }
         // A grant can win the mutex just as the caller loses its deadline race.
@@ -660,7 +662,7 @@ export async function bindBootedDeviceSession(
   // A one-shot `--cli` call is anonymous: autolock keys its session on the per-connection MCP id,
   // which the next CLI call never shares, so it would refuse that call. Bind it as an anonymous
   // acquisition below, which later one-shot calls reuse (#11096, #11148).
-  const useAutolock = autolockEnabled && !internalOneShotCli(args);
+  const useAutolock = autolockEnabled && !currentOneShotCli();
   if (useAutolock && !resumeSessionId) {
     const autolockSessionId = await daemonState
       .getDevicePool()
@@ -700,7 +702,7 @@ export async function bindBootedDeviceSession(
       readinessReservationOwners,
       verifiedAndroidAvdIdentity,
       mcpSessionId: currentAutolockMcpSessionId(),
-      oneShotCli: internalOneShotCli(args),
+      oneShotCli: currentOneShotCli(),
       receipt,
       refusePreparedForOtherRequest: false,
       recoveryTarget,
@@ -954,7 +956,6 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       ...parsed,
       platform: requireAndroidOrIosPlatform(parsed.platform, "startDevice"),
       __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-      ...(internalOneShotCli(rawArgs) ? { __oneShotCli: true } : {}),
     };
     validateCameraPosterPlatform(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;

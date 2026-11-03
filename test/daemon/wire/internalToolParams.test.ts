@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  internalOneShotCli,
-  internalOptionalOneShotCli,
-  internalRequesterSessionUuid,
-} from "../../../src/daemon/wire/internalToolParams";
+import { internalRequesterSessionUuid } from "../../../src/daemon/wire/internalToolParams";
 
 describe("shared internal tool parameter readers", () => {
   test.each([["__requesterSessionUuid", internalRequesterSessionUuid]] as const)(
@@ -17,22 +13,4 @@ describe("shared internal tool parameter readers", () => {
       }
     },
   );
-
-  test("the optional one-shot marker preserves false and absence", () => {
-    for (const value of [true, false]) {
-      expect(internalOptionalOneShotCli({ __oneShotCli: value })).toBe(value);
-    }
-    expect(internalOptionalOneShotCli({})).toBeUndefined();
-    for (const value of [undefined, null, "true", 1, {}, []]) {
-      expect(internalOptionalOneShotCli({ __oneShotCli: value })).toBeUndefined();
-    }
-  });
-
-  test("the existing one-shot predicate stays exact-true with an absent false default", () => {
-    expect(internalOneShotCli({ __oneShotCli: true })).toBe(true);
-    expect(internalOneShotCli({})).toBe(false);
-    for (const value of [false, undefined, null, "true", 1, {}, []]) {
-      expect(internalOneShotCli({ __oneShotCli: value })).toBe(false);
-    }
-  });
 });

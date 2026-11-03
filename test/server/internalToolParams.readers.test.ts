@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
-  internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
 } from "../../src/server/internalToolParams";
@@ -28,12 +27,6 @@ describe("call execution identity (#15663)", () => {
 });
 
 describe("start-device handoff readers", () => {
-  test("one-shot CLI is only an exact true", () => {
-    expect(internalOneShotCli({ __oneShotCli: true })).toBe(true);
-    expect(internalOneShotCli({ __oneShotCli: "true" })).toBe(false);
-    expect(internalOneShotCli({})).toBe(false);
-  });
-
   test("restart-resume fields read through with their declared types", () => {
     const targets = [{ sessionId: "s1" }] as const;
     const args = { __restartResumeTargets: targets, __restartResumeSessionUuid: "s1" };

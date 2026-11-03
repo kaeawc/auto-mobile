@@ -6,7 +6,6 @@ import {
   type DeviceToolsDependencies,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
-import { internalOneShotCli } from "./internalToolParams";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 
 /** Bind at booted readiness, undoing a session its caller never receives. */
@@ -41,6 +40,5 @@ export async function bindBootedSimulatorSession(
 function sessionArgs(rawArgs: object) {
   return {
     __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-    ...(internalOneShotCli(rawArgs) ? { __oneShotCli: true } : {}),
   };
 }

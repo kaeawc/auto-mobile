@@ -16,6 +16,9 @@ import {
 import {
   defaultFillAxes,
   filling,
+  isUnsizedSpacer,
+  lineMainAxis,
+  spacerFilled,
   webCollectionRenderers,
   withPagerLocals,
   type WebAxis,
@@ -225,28 +228,30 @@ export function children(
   cell?: WebCellDecorator,
 ): WebChild[] {
   const list = Array.isArray(node.children) ? node.children : [];
+  return childScopes(node, scope).flatMap((itemScope) =>
+    list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell)),
+  );
+}
+
+/** The scopes a container's children render in: its own, or one per repeat row. */
+function childScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
   const repeat = record(node.repeat);
   if (!repeat) {
-    return list.flatMap((entry, index) =>
-      renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
-    );
+    return [scope];
   }
   const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  return rows.flatMap((item, index) => {
+  return rows.map((item, index) => {
     const values = record(item) ?? {};
     const instance: Instance = {
       binding: { alias, index: true },
       values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
       index,
     };
-    const itemScope = child(scope, { instances: [...scope.instances, instance] });
-    return list.flatMap((entry, at) =>
-      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
-    );
+    return child(scope, { instances: [...scope.instances, instance] });
   });
 }
 
@@ -259,23 +264,6 @@ function renderOrSkip(
   const rendered = renderWebNode(node, scope, path);
   const drawn = cell ? cell(rendered, record(node) ?? {}) : rendered;
   return drawn ? [drawn] : [];
-}
-
-/** A spacer with no width, height or weight fills its parent, as the native spacer does. */
-function isUnsizedSpacer(node: unknown): boolean {
-  const raw = record(node);
-  const style = record(raw?.style) ?? {};
-  return (
-    raw?.type === "spacer" &&
-    style.width === undefined &&
-    style.height === undefined &&
-    style.weight === undefined
-  );
-}
-
-/** Missing width and height default to `fill`, without touching authored sizes. */
-function fillMissing(node: Raw): Raw {
-  return filling(node, ["width", "height"]);
 }
 
 /**
@@ -297,7 +285,9 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
-    ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
+    ? lineFillAxes(styled, local, path, lineMainAxis(styled)).filter(
+        (axis) => style[axis] === undefined,
+      )
     : defaultFillAxes(styled);
   return [...authored, ...inferred];
 }
@@ -305,35 +295,45 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
 /** Containers that grow on an axis when a child fills it, as a Compose parent does. */
 const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box", "card"]);
 
+/** A visible child with a positive weight, which takes a share of its line's main axis. */
+function isWeighted(entry: unknown, scope: WebRenderScope, path: string): boolean {
+  const weight = record(preparedNode(entry, scope, path)?.styled.style)?.weight;
+  return typeof weight === "number" && weight > 0;
+}
+
 /**
  * The axes on which a container grows because a child fills them; a repeat with no rows renders
- * no children.
+ * no children. A line with a weighted child also grows on its main axis, as a bounded Compose
+ * Row or Column takes its max size there and shares what is left among its weighted children.
  */
-function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
-  const repeat = record(raw.repeat);
-  if (
-    !Array.isArray(raw.children) ||
-    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
-  ) {
+function lineFillAxes(
+  raw: Raw,
+  scope: WebRenderScope,
+  path: string,
+  mainAxis?: WebAxis,
+): WebAxis[] {
+  const scopes = childScopes(raw, scope);
+  if (!Array.isArray(raw.children) || scopes.length === 0) {
     return [];
   }
+  // Each child is judged in the scope it renders in, so a repeat's bound conditions apply.
+  const slots = scopes.flatMap((s) => (raw.children as unknown[]).map((e) => [e, s] as const));
   const own = rowFillAxes(raw, path, prepareIn(scope));
-  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
+  const axes = new Set([...own, ...slots.flatMap(([e, s]) => childFillAxes(e, s, path))]);
+  if (mainAxis && slots.some(([entry, s]) => isWeighted(entry, s, path))) {
+    axes.add(mainAxis);
+  }
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
-
-function spacerFilled(node: Raw): Raw {
-  return isUnsizedSpacer(node) ? fillMissing(node) : node;
-}
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>
   (raw, scope, path) => {
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
-    const node = filling(raw, lineFillAxes(raw, scope, path));
+    const node = filling(raw, lineFillAxes(raw, scope, path, axis === "row" ? "width" : "height"));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     const rowed = rowMeasured(node, path, prepareIn(inner));

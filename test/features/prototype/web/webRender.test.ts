@@ -480,6 +480,116 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(still, "sized")[0]!.style).not.toHaveProperty("flex");
   });
 
+  test("a wrap-sized line with a weighted child grows on its main axis (#16682)", () => {
+    const styleOf = (root: Record<string, unknown>, tag: string) =>
+      byTag(renderPrototypeStill({ ...reference, root }), tag)[0]!.style;
+    const weighted = (style: Record<string, unknown>) => ({
+      type: "box",
+      testTag: "w",
+      style,
+    });
+    const rowWith = (child: Record<string, unknown>, style: Record<string, unknown> = {}) => ({
+      type: "column",
+      children: [
+        { type: "row", testTag: "r", style, children: [{ type: "text", text: "abc" }, child] },
+      ],
+    });
+    const box = weighted({ weight: 1, height: { dp: 10 } });
+    expect(styleOf(rowWith(box), "r")).toMatchObject({ width: "100%" });
+    expect(styleOf(rowWith(box), "w")).toMatchObject({ flex: "1 1 0" });
+    // No weight, a zero weight, or an authored width keeps the row at its own size.
+    expect(styleOf(rowWith(weighted({ height: { dp: 10 } })), "r")).not.toHaveProperty("width");
+    expect(styleOf(rowWith(weighted({ weight: 0 })), "r")).not.toHaveProperty("width");
+    expect(styleOf(rowWith(box, { width: { dp: 120 } }), "r")).toMatchObject({ width: "120px" });
+    // A column grows on its height, inside a row, and only on that axis.
+    const column = styleOf(
+      {
+        type: "row",
+        children: [{ type: "column", testTag: "c", children: [weighted({ weight: 2 })] }],
+      },
+      "c",
+    );
+    expect(column).toMatchObject({ height: "100%" });
+    expect(column).not.toHaveProperty("width");
+  });
+
+  test("a hidden weighted child does not grow its line (#16682)", () => {
+    const rowOf = (show: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { show },
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "row",
+                testTag: "r",
+                children: [
+                  {
+                    type: "box",
+                    style: { weight: 1 },
+                    visibleWhen: { key: "show", equals: true },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "r",
+      )[0]!.style;
+    expect(rowOf(true)).toMatchObject({ width: "100%" });
+    expect(rowOf(false)).not.toHaveProperty("width");
+  });
+
+  test("a repeated weighted child grows its line only where its bound visibleWhen keeps it", () => {
+    const rowOf = (show: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { "show.a": show },
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "row",
+                testTag: "r",
+                repeat: { as: "item", items: [{ id: "a" }] },
+                children: [
+                  {
+                    type: "box",
+                    style: { weight: 1 },
+                    visibleWhen: { key: "show.{item.id}", equals: true },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "r",
+      )[0]!;
+    expect(rowOf(true).style).toMatchObject({ width: "100%" });
+    expect(rowOf(false).children).toEqual([]);
+    expect(rowOf(false).style).not.toHaveProperty("width");
+  });
+
+  test("a box does not grow around a weighted child (#16682)", () => {
+    const style = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            { type: "box", testTag: "b", children: [{ type: "box", style: { weight: 1 } }] },
+          ],
+        },
+      }),
+      "b",
+    )[0]!.style;
+    expect(style).not.toHaveProperty("width");
+    expect(style).not.toHaveProperty("flex");
+  });
+
   test("draws list-item and text-field icon slots", () => {
     const iconsOf = (root: Record<string, unknown>) =>
       find(

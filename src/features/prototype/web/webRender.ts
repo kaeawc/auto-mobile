@@ -16,6 +16,8 @@ import {
 import {
   defaultFillAxes,
   filling,
+  isUnsizedSpacer,
+  spacerFilled,
   webCollectionRenderers,
   withPagerLocals,
   type WebAxis,
@@ -40,6 +42,8 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import { rowFillAxes, rowMeasured } from "./webRowAspect";
+import { withChildHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -260,23 +264,6 @@ function renderOrSkip(
   return drawn ? [drawn] : [];
 }
 
-/** A spacer with no width, height or weight fills its parent, as the native spacer does. */
-function isUnsizedSpacer(node: unknown): boolean {
-  const raw = record(node);
-  const style = record(raw?.style) ?? {};
-  return (
-    raw?.type === "spacer" &&
-    style.width === undefined &&
-    style.height === undefined &&
-    style.weight === undefined
-  );
-}
-
-/** Missing width and height default to `fill`, without touching authored sizes. */
-function fillMissing(node: Raw): Raw {
-  return filling(node, ["width", "height"]);
-}
-
 /**
  * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
  * fills by default (a slider's width, say). Its repeat placeholders bind, its visibleWhen must keep
@@ -296,7 +283,9 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
-    ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
+    ? lineFillAxes(heightsIn(styled, local, path), local, path).filter(
+        (axis) => style[axis] === undefined,
+      )
     : defaultFillAxes(styled);
   return [...authored, ...inferred];
 }
@@ -316,28 +305,32 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
   ) {
     return [];
   }
-  const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));
+  const own = rowFillAxes(raw, path, prepareIn(scope));
+  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
-function spacerFilled(node: Raw): Raw {
-  return isUnsizedSpacer(node) ? fillMissing(node) : node;
-}
+const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
+const heightsIn = (n: Raw, s: WebRenderScope, at: string) => withChildHeights(n, at, prepareIn(s));
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>
   (raw, scope, path) => {
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
-    const node = filling(raw, lineFillAxes(raw, scope, path));
-    const { attrs, style } = base(node, scope, lineCss(axis, node.style));
+    const sized = heightsIn(raw, scope, path);
+    const node = filling(sized, lineFillAxes(sized, scope, path));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    return el("div", { attrs, style }, children(node, inner, path));
+    const rowed = rowMeasured(node, path, prepareIn(inner));
+    const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
+    return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
-  // A wrap-sized box grows around a filling child, as a Compose Box does.
-  const node = filling(raw, lineFillAxes(raw, scope, path));
+  // A wrap-sized box grows around a filling child, as a Compose Box does; each child carries the
+  // height the box hands it.
+  const sized = heightsIn(raw, scope, path);
+  const node = filling(sized, lineFillAxes(sized, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
   const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
   return el("div", { attrs, style }, children(node, inner, path));

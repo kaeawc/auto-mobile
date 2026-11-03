@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import path from "node:path";
 import {
   fileStem,
   shareProtoViewerBundle,
@@ -47,7 +48,7 @@ describe("prototype share", () => {
     const share = result.share!;
     const bundle = files.written.get(share.bundlePath)!;
     expect(share.bundlePath).toBe(
-      `/data/prototype-shares/demo-${share.sha256.slice(0, 12)}.automobile-proto`,
+      path.join("/data/prototype-shares", `demo-${share.sha256.slice(0, 12)}.automobile-proto`),
     );
     expect(share.sha256).toBe(sha256(bundle));
     expect(share.bytes).toBe(bundle.length);

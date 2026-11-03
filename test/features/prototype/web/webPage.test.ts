@@ -573,7 +573,7 @@ describe("prototype web page postures (#16445)", () => {
     expect(prototypeWebViewMatches({ ...view, orientation: "landscape" }, key)).toBe(false);
     expect(prototypeWebViewMatches({ ...view, revision: "2" }, key)).toBe(false);
     // A frame without postures: the key's posture is empty and its views carry none.
-    const { posture: _posture, ...plain } = view;
+    const plain = { variant: "a", revision: "1", orientation: "portrait" };
     expect(prototypeWebViewMatches(plain, { ...key, posture: "" })).toBe(true);
     expect(prototypeWebViewMatches(plain, key)).toBe(false);
   });

@@ -173,11 +173,12 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const postureSelect = pick("posture") as HTMLSelectElement | null;
   const revisionList = pick("revisions");
   const zoomLabel = pick("zoom-level");
+  const bodyData = (name: string) => doc.body.dataset[name] ?? "";
   const state = {
-    variant: doc.body.dataset.variant ?? "",
-    revision: doc.body.dataset.revision ?? "",
+    variant: bodyData("variant"),
+    revision: bodyData("revision"),
     orientation: "portrait" as "portrait" | "landscape",
-    posture: doc.body.dataset.posture ?? "",
+    posture: bodyData("posture"),
     // The first apply sets the shown view's screen.
     screen: "",
     scale: 1,

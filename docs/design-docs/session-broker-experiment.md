@@ -325,8 +325,9 @@ hoc host signature.
 
 `androidProfileArchetypes` and `iosClassifications` classify installed AVD
 profiles (`phone`, `tablet`, or `foldable`) and simulator device types; without them Android acquisition fails with
-`catalog_metadata_invalid`. `capabilities.iosDuo` (default `false`, requires
-`defaults.ios`) lets the host execute iPhone Duo requests. Creating a Duo for a
+`catalog_metadata_invalid`. iPhone Duo requests are supported whenever the simulator
+device type and a compatible runtime are installed, without an opt-in or separate
+capability advertisement. Creating a Duo for a
 `duo` archetype request needs both a Duo `archetypes` entry and a Duo
 `modelTypes` entry; a Duo model-type request needs only the `modelTypes` entry;
 an exact Duo model needs neither. Android `os` selectors use the release version (`16`),

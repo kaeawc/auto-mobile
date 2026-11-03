@@ -30,6 +30,7 @@ dependencies {
   implementation(libs.kotlinx.serialization)
   // The device-side HTTP transport and its egress policy (no Ktor, no host link).
   implementation(libs.okhttp)
+  implementation(libs.okhttp.sse)
   implementation(libs.retrofit)
 
   testImplementation(libs.bundles.unit.test)

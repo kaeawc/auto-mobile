@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   iosReusePolicy,
   parseSessionBrokerHostConfig,
 } from "../../../src/daemon/sessionBroker/hostConfig";
 import { androidDefaults, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import { logger } from "../../../src/utils/logger";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../../../src/utils/SystemTimer";
 
 function config(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -242,28 +243,46 @@ describe("session broker host configuration", () => {
       iosClassifications: [],
       reuseCleanDevices: false,
       reuseAndroidCleanDevices: false,
-      capabilities: { iosDuo: false },
+      capabilities: {},
     });
     expect(() => parseSessionBrokerHostConfig(config({ defaults: {} }))).toThrow(
       "At least one platform must have an explicit default policy",
     );
   });
 
-  test("iOS Duo execution is an explicit operator capability that needs iOS defaults", () => {
-    expect(
-      parseSessionBrokerHostConfig(config({ capabilities: { iosDuo: true } })).capabilities,
-    ).toEqual({ iosDuo: true });
-    expect(parseSessionBrokerHostConfig(config({ capabilities: {} })).capabilities).toEqual({
-      iosDuo: false,
-    });
-    expect(() =>
-      parseSessionBrokerHostConfig(
-        config({ defaults: { android: androidDefaults() }, capabilities: { iosDuo: true } }),
-      ),
-    ).toThrow("capabilities.iosDuo requires an explicit defaults.ios policy");
-    expect(() =>
-      parseSessionBrokerHostConfig(config({ capabilities: { iosDuo: true, androidFold: true } })),
-    ).toThrow("Invalid session broker host configuration");
+  test.each([true, false, "legacy"])(
+    "ignores retired iosDuo value %s without requiring iOS defaults",
+    (iosDuo) => {
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(
+          parseSessionBrokerHostConfig(
+            config({
+              defaults: { android: androidDefaults() },
+              capabilities: { iosDuo },
+            }),
+          ).capabilities,
+        ).toEqual({});
+        expect(warning).toHaveBeenCalledWith(
+          "capabilities.iosDuo is deprecated and ignored; Duo support follows installed hardware.",
+        );
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test("rejects unrelated capabilities and does not warn for an empty capability object", () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(parseSessionBrokerHostConfig(config({ capabilities: {} })).capabilities).toEqual({});
+      expect(warning).not.toHaveBeenCalled();
+      expect(() =>
+        parseSessionBrokerHostConfig(config({ capabilities: { androidFold: true } })),
+      ).toThrow("Invalid session broker host configuration");
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   test("preserves operator defaults, classifications, and zero or bounded caps", () => {

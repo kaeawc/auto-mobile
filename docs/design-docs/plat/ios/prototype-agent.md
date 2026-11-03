@@ -1311,3 +1311,21 @@ native effect or default fallback; explicit fadeEdges still apply on every iOS v
 Reduce Transparency and Increase Contrast use system behaviour. Tests assert
 structure and bounds with pinned settings; group morphing and the visual result
 still require an iOS 26 simulator check. Android rendering is a separate slice.
+
+## Disposable apps (#14184, host core only)
+
+The host core in `src/features/prototype/disposableApp/` is shared with Android. See "Disposable
+apps" in `docs/design-docs/plat/android/prototype-ux.md` for the registry, template choice, TTL and
+removal rules. iOS stamping (#14186) is not wired yet. The iOS-specific parts are:
+
+- **Identity.** The bundle id is `dev.jasonpearson.automobile.app.<slug>-<sha256(slug) 8 hex>`. It
+  keeps the slug's hyphens, the same pattern `prototypeBundleId` uses for saved Viewer copies under
+  `dev.jasonpearson.automobile.proto.`.
+- **Info.plist.** Usage descriptions come from `requires.permissions`: each entry's `purpose` is
+  written under its usage key. The table is `DISPOSABLE_APP_IOS_USAGE_KEYS`, which the saved-Viewer
+  installer also reads. `notifications` and `nearbyWifi` have no usage key. `UIBackgroundModes`
+  comes from `requires.background`: `audio` and `microphone` map to `audio`, `location` to
+  `location`, `call` to `voip`, `connectedDevice` to `bluetooth-central`, `transfer` to
+  `processing` and `remoteNotification` to `remote-notification`. `camera` has no iOS background
+  mode.
+- **Signer.** A simulator does not report a signer, so removal relies on the reserved prefix alone.

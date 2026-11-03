@@ -1,5 +1,4 @@
 import type { ToolHandlerResult } from "../../toolRegistryTypes";
-import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../../../daemon/wire/constants";
 import { getSessionToolSelectionService } from "../../../features/toolSelection/SessionToolSelectionService";
 import {
   type RequestDeadline,
@@ -46,19 +45,16 @@ export interface InvocationPlan {
 }
 
 /**
- * The handler's arguments: the validated parameters plus the call context the
- * handler needs, re-attached under the internal `__*` keys. This is the only
- * place a parsed {@link CallContext} is written back in-band.
+ * The handler's arguments: the validated parameters, plus the routed session for a tool that
+ * selects the active device. The rest of the parsed {@link CallContext} reaches the handler as
+ * ambient call context, never in-band (#15663).
  */
 export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown> {
-  const { parsedParams, context } = plan;
+  const { parsedParams } = plan;
   return {
     ...parsedParams,
     ...(plan.tool.selectsActiveDevice === true && plan.routingSessionUuid
       ? { sessionUuid: plan.routingSessionUuid }
-      : {}),
-    ...(context.requestAcceptanceDiscoveryOrder !== undefined
-      ? { [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: context.requestAcceptanceDiscoveryOrder }
       : {}),
   };
 }
@@ -104,6 +100,7 @@ export async function invokeHandler(plan: InvocationPlan): Promise<ToolHandlerRe
         autolockMcpSessionId: plan.implicitAutolockMcpSessionId,
         // Always present, so a call that is not one-shot never inherits the marker (#15663).
         oneShotCli: plan.context.requestOneShotCli ? true : undefined,
+        acceptanceDiscoveryOrder: plan.context.requestAcceptanceDiscoveryOrder,
         deviceConnectionKey: plan.bindingKey,
         ownsDeviceSession: (sessionUuid) => sessionToolBinding.ownsSession(sessionId, sessionUuid),
         execution: {

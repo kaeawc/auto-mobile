@@ -653,7 +653,7 @@ async function getAndroidHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  const presentationOrder = acceptancePresentationOrder(rawArgs);
+  const presentationOrder = acceptancePresentationOrder();
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
   const args = getAndroidSchema.parse(externalArgs);
   const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
@@ -728,7 +728,7 @@ async function getAppleHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  const presentationOrder = acceptancePresentationOrder(rawArgs);
+  const presentationOrder = acceptancePresentationOrder();
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
   const args = getAppleSchema.parse(externalArgs);
   // #5870: `deviceId` is an accepted alias for `udid` on iOS.

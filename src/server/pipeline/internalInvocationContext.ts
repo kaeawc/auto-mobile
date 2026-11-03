@@ -44,6 +44,7 @@ export function internalToolInvocationContext(
     requestDeadline: internalCallRequestDeadline(context, options),
     autolockMcpSessionId: undefined,
     oneShotCli: undefined,
+    acceptanceDiscoveryOrder: undefined,
     routingSessionUuid: sessionUuid,
     toolSelectionProfileUuid: context?.toolSelectionProfileUuid,
     sessionToolSelectionService:

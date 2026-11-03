@@ -8,6 +8,7 @@ import { deviceActionClock } from "../../src/server/pipeline/deviceActionClock";
 import { resolveTransportDeadlineMs } from "../../src/server/transportDeadline";
 import { planCallerContext } from "../../src/server/planCallerIdentity";
 import {
+  currentAcceptanceDiscoveryOrder,
   currentAutolockMcpSessionId,
   currentExecution,
   currentOneShotCli,
@@ -284,6 +285,21 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       });
 
       expect(seen).toEqual([true, false]);
+    });
+
+    test("a nested call never inherits the acceptance discovery order", async () => {
+      const seen: (string | undefined)[] = [];
+      ToolRegistry.register("clipboard", "Mock clipboard", schema, async () => {
+        seen.push(currentAcceptanceDiscoveryOrder());
+        return SENTINEL;
+      });
+
+      await runWithToolSelectionContext({ acceptanceDiscoveryOrder: "reverse" }, async () => {
+        seen.push(currentAcceptanceDiscoveryOrder());
+        await ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true });
+      });
+
+      expect(seen).toEqual(["reverse", undefined]);
     });
 
     test("executePlan's steps run for the connection that called it", async () => {

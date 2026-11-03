@@ -32,7 +32,7 @@ internal object PrototypeSensitiveSinkRules {
     val seeds = sensitiveDataPointers(spec, context)
     if (seeds.isEmpty() && platformTaints.isEmpty()) return emptyList()
     val dataTaints =
-      propagateCopies(seeds, platformTaints, context)
+      PrototypeCopyTaint.propagate(seeds, platformTaints, context, ::overlaps)
         ?: return listOf(
           PrototypeSpecError("$", "Secure binding scan exceeds 4194304 expanded UTF-8 bytes"),
         )
@@ -73,73 +73,6 @@ internal object PrototypeSensitiveSinkRules {
       .filterIsInstance<PrototypePlatformUses.Use.Call>()
       .filter { callDefinition(it.action.text("call"))?.second?.flag("sensitive") == true }
       .mapNotNull { it.action.text("into")?.let(PrototypeDataWriter::pathPointer) }
-
-  /**
-   * A data action copying a tainted read into `/data` taints its destination, transitively. A
-   * worklist over copies bucketed by their source's first segment keeps long chains linear; null
-   * means the check cap was exceeded, so callers fail closed.
-   */
-  private fun propagateCopies(
-    seeds: List<String>,
-    platformTaints: List<String>,
-    context: PrototypeStateChecks.Context,
-  ): List<String>? {
-    val copies =
-      context.actions
-        .filter { it.value.text("type") in DATA_WRITES }
-        .mapNotNull { action ->
-          val into = action.value.text("path")?.let(PrototypeDataWriter::pathPointer)
-          val read = action.value["value"] as? JsonObject
-          val data = read?.text("data")
-          val platform = read?.text("platform")
-          when {
-            into == null -> null
-            data != null -> Triple(into, "data", data)
-            platform != null -> Triple(into, "platform", platform)
-            else -> null
-          }
-        }
-    val taints = seeds.toMutableList()
-    val known = seeds.toMutableSet()
-    val queue = ArrayDeque(seeds)
-    val mark = { pointer: String ->
-      if (known.add(pointer)) {
-        taints.add(pointer)
-        queue.add(pointer)
-      }
-    }
-    var checks = 0L
-    val buckets = mutableMapOf<String, MutableList<Pair<String, String>>>()
-    for ((into, source, from) in copies) {
-      if (source == "data") {
-        buckets.getOrPut(firstSegment(from)) { mutableListOf() }.add(into to from)
-      } else {
-        checks += platformTaints.size
-        if (platformTaints.any { overlaps(it, from, false) }) mark(into)
-      }
-    }
-    while (queue.isNotEmpty()) {
-      val taint = queue.removeFirst()
-      val key = firstSegment(taint)
-      // A leading {index} taint segment matches any source segment.
-      for (name in if (key == "{index}") buckets.keys.toList() else listOf(key)) {
-        val rest = mutableListOf<Pair<String, String>>()
-        for (copy in buckets[name].orEmpty()) {
-          checks++
-          if (overlaps(taint, copy.second, false)) mark(copy.first) else rest.add(copy)
-        }
-        buckets[name] = rest
-      }
-      if (checks > MAX_COPY_TAINT_CHECKS) return null
-    }
-    return if (checks > MAX_COPY_TAINT_CHECKS) null else taints
-  }
-
-  private fun firstSegment(pointer: String): String = pointer.drop(1).substringBefore('/')
-
-  private const val MAX_COPY_TAINT_CHECKS = 4_000_000L
-
-  private val DATA_WRITES = setOf("setData", "appendData", "prependData", "upsertData")
 
   private fun sensitivePlatformPointers(spec: JsonObject): List<String> {
     val declared =
@@ -210,7 +143,7 @@ internal object PrototypeSensitiveSinkRules {
       .ifEmpty { listOf(field.text) }
   }
 
-  private fun overlaps(taint: String, pointer: String, pointerIndexWildcard: Boolean): Boolean =
+  internal fun overlaps(taint: String, pointer: String, pointerIndexWildcard: Boolean): Boolean =
     taint.drop(1).split('/').zip(pointer.drop(1).split('/')).all { (left, right) ->
       left == right || left == "{index}" || (pointerIndexWildcard && right == "{index}")
     }

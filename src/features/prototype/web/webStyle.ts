@@ -223,12 +223,13 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
       css[property] = px(style[field] as number);
     }
   }
-  rowMeasureStyle(css, style, context);
   if (style[ROW_BOUND_KEY] === true && context.unboundedWidth !== true) {
     // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
     const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
     css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
   }
+  // After the bound: a nested row its parent row measures against no width stays at zero.
+  rowMeasureStyle(css, style, context);
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);
   }

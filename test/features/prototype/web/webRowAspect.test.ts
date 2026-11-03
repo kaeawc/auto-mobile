@@ -264,3 +264,9 @@ test("a row in a horizontal scroll is not bounded to the scroll's width", () => 
   expect(nodeCss({ [ROW_BOUND_KEY]: true }, inScroll)).not.toHaveProperty("max-width");
   expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, inScroll)["max-width"]).toBe("50px");
 });
+
+test("a nested bounded row that its parent row zeroes keeps no width", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const nested = { [ROW_BOUND_KEY]: true, [ROW_MEASURE_KEY]: { zero: true } };
+  expect(nodeCss(nested, context)["max-width"]).toBe("0px");
+});

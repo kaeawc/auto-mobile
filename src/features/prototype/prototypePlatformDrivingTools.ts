@@ -16,7 +16,7 @@ export const PROTOTYPE_PLATFORM_DRIVING_TOOLS: Readonly<
 > = {
   device: {
     tools: ["rotate", "displayConfig", "setPosture", "windowMode"],
-    note: "orientation, window size, posture and windowing mode fire `device.changed`",
+    note: "orientation, window size, posture and windowing mode update `/platform/device`; `device.changed` fires only when a size class, posture or idiom changes (on iOS, only width class or idiom), so a rotation that keeps the size class sends no event",
   },
   realtime: {
     tools: [],

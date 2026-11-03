@@ -548,8 +548,9 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
   // Marker taps run actions like onTap; the marker templates bind only the marker's own item (#14309).
   map: (node, path, visit) =>
     mapList(node, "onMarkerTap", path, (entry, entryPath) => mapAction(entry, entryPath, visit)),
-  // Navigation callbacks run actions like onTap (#14312).
+  // The url binds placeholders like a request url; navigation callbacks run actions (#14312).
   webView: (node, path, visit) => {
+    mapField(node, "url", path, { kind: "text", visit });
     for (const field of ["onNavigate", "onBlockedNavigation"]) {
       mapList(node, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
     }

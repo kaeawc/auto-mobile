@@ -121,3 +121,14 @@ test("a component prop used in onNavigate binds like one in onTap", () => {
     root: { type: "webView", onNavigate: [{ type: "emit", name: "page_loaded" }] },
   });
 });
+
+test("a component prop used in the url binds like one in a request url", () => {
+  const expansion = expandPrototypeComponents({
+    requires: { platform: ["webview"] },
+    components: { page: { root: webView({ url: "https://example.com/{props.slug}" }) } },
+    root: { type: "use", component: "page", props: { slug: "article" } },
+  });
+  expect(expansion.success && expansion.spec).toMatchObject({
+    root: { type: "webView", url: "https://example.com/article" },
+  });
+});

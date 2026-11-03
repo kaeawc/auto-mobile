@@ -335,3 +335,19 @@ test("a solid border takes layout like padding; a gradient border does not", () 
   const bordered = { type: "row", style: { height: { dp: 10 }, border } };
   expect(columnChildHeights([bordered, { type: "box" }], 40, 0)).toEqual([40, 10]);
 });
+
+test("a component sibling keeps a weight share a max, since its renderer may set a min height", () => {
+  const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
+  const exactBeside = (sibling: Raw) =>
+    childrenOf(
+      withChildHeights(
+        { type: "column", style: { height: { dp: 80 } }, children: [sibling, weighted] },
+        "root",
+        prepare,
+      ),
+    ).map(exactOf)[1];
+  expect(exactBeside({ type: "box", style: { height: { dp: 10 } } })).toBe(true);
+  expect(exactBeside({ type: "spacer", style: { height: { dp: 10 } } })).toBe(true);
+  expect(exactBeside({ type: "button", style: { height: { dp: 10 } } })).toBeUndefined();
+  expect(exactBeside({ type: "image", style: { height: { dp: 10 } } })).toBeUndefined();
+});

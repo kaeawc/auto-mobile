@@ -142,15 +142,20 @@ function withHeight(entry: unknown, height: number | undefined, exact = false): 
   return { ...node, style };
 }
 
+/** Node types the web draws with no minimum height of their own, so a dp height sizes them. */
+const PLAIN_LAYOUT = new Set(["row", "column", "box", "spacer"]);
+
 /**
- * Whether a visible unweighted column child leaves the weight shares as computed: only one with a
- * dp height does. A sibling that wraps its content or fills (CSS shares a `fill` child's height
- * with the weights) is only known at layout time.
+ * Whether a visible unweighted column child leaves the weight shares as computed: only a plain
+ * layout node (see PLAIN_LAYOUT) with a dp height does. A sibling that wraps its content or fills
+ * (CSS shares a `fill` child's height with the weights) is only known at layout time, and a
+ * component (a button, text field, image…) can carry a renderer `min-height` above its dp height.
  */
 const fixedSibling = (node: Raw | undefined): boolean =>
   !node ||
   weightOf(node) !== undefined ||
-  typeof record(record(node.style)?.height)?.dp === "number";
+  (PLAIN_LAYOUT.has(String(node.type)) &&
+    typeof record(record(node.style)?.height)?.dp === "number");
 
 /**
  * Whether CSS gives a column a definite height to share: a dp height, or an exact allocation of
@@ -165,9 +170,9 @@ const definite = (style: Raw | undefined): boolean =>
  * one, when the column's height is definite (see definite), its weight is at least 1 (CSS grow
  * factors summing below 1 take only that fraction of the free space), it is the column's only
  * visible weighted child, and every unweighted sibling has a dp height (see fixedSibling). Its
- * own `minHeight`/`maxHeight` are applied by contentHeight. With two or more weighted children,
- * CSS flex items keep `min-height: auto`, so a sibling's padding, content or bounds can move
- * height between them. Otherwise the shares are only upper bounds and stay a max.
+ * own `minHeight`/`maxHeight` are applied by contentHeight. With two or more weighted children, a
+ * sibling's padding, border or `minHeight`/`maxHeight` makes flex move height between them.
+ * Otherwise the shares are only upper bounds and stay a max.
  */
 function exactShares(column: Raw | undefined, prepared: readonly (Raw | undefined)[]): boolean[] {
   const weights = prepared.flatMap((node) => weightOf(node) ?? []);

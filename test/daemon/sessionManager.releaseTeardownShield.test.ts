@@ -446,7 +446,7 @@ test("a release forced while it waits for the IME lock discards the pending rest
     operation.forcedAbort!.abort(new Error("forced"));
     lockHeld.resolve();
     await holder;
-    await drain;
+    await Promise.all(await drain);
 
     expect(restores).toEqual([]);
     expect(pendingImeRestores.hasPending(device.deviceId)).toBe(false);

@@ -167,3 +167,68 @@ test("an expired timer queued on the mutex cannot consume a newly reset idle per
   await drainUntil(() => h.restored.length === 1, { description: "reset idle IME restoration" });
   expect(h.restored).toHaveLength(1);
 });
+
+test("an idle restore in flight stays pending and a flush waits for it to finish", async () => {
+  const deviceId = `lazy-ime-${++serial}`;
+  const timer = new FakeTimer();
+  const registry = new DevicePendingImeRestores();
+  const gate = Promise.withResolvers<void>();
+  const events: string[] = [];
+  registry.store(
+    deviceId,
+    {
+      snapshot,
+      userId: 10,
+      restore: async () => {
+        events.push("restore-start");
+        await gate.promise;
+        events.push("restore-end");
+      },
+    },
+    timer,
+  );
+  timer.advanceTime(IME_IDLE_RESTORE_MS);
+  await drainUntil(() => events.includes("restore-start"), { description: "idle restore start" });
+
+  expect(registry.hasPending(deviceId)).toBe(true);
+  let flushed = false;
+  const flush = registry.flush(deviceId).then(() => {
+    flushed = true;
+    events.push("flushed");
+  });
+  await drainMicrotasks(50);
+  expect(flushed).toBe(false);
+
+  gate.resolve();
+  await flush;
+  expect(events).toEqual(["restore-start", "restore-end", "flushed"]);
+  expect(registry.hasPending(deviceId)).toBe(false);
+});
+
+test("a forced flush discards the pending restore once it holds the lock", async () => {
+  const deviceId = `lazy-ime-${++serial}`;
+  const registry = new DevicePendingImeRestores();
+  let restores = 0;
+  registry.store(
+    deviceId,
+    {
+      snapshot,
+      userId: 10,
+      restore: async () => {
+        restores++;
+      },
+    },
+    new FakeTimer(),
+  );
+  let forced = false;
+  const lockHeld = Promise.withResolvers<void>();
+  const holder = withAndroidImeLock(deviceId, () => lockHeld.promise);
+  const flush = registry.flush(deviceId, { isForced: () => forced });
+  await drainMicrotasks(50);
+  forced = true;
+  lockHeld.resolve();
+  await holder;
+  await flush;
+  expect(restores).toBe(0);
+  expect(registry.hasPending(deviceId)).toBe(false);
+});

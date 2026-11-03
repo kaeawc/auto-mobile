@@ -13,12 +13,21 @@ export interface PendingImeRestore {
   restore(): Promise<void>;
 }
 
+/** Bounds a flush for a caller that must not restore after it lost the device. */
+export interface ImeFlushOptions {
+  /** Abandons the wait for the device IME lock. */
+  signal?: AbortSignal;
+  /** Rechecked once the lock is held: when true the pending restore is discarded, not run. */
+  isForced?: () => boolean;
+}
+
 /** take/store run under the device IME lock; flush acquires it itself. */
 export interface PendingImeRestoreRegistry {
+  /** True while a restore is stored or being run: its device IME state is not yet settled. */
   hasPending(deviceId: string): boolean;
   take(deviceId: string): PendingImeRestore | undefined;
   store(deviceId: string, pending: PendingImeRestore, timer: Timer): void;
-  flush(deviceId: string): Promise<void>;
+  flush(deviceId: string, options?: ImeFlushOptions): Promise<void>;
   discard(deviceId: string): void;
 }
 
@@ -30,11 +39,13 @@ interface Entry {
 
 export class DevicePendingImeRestores implements PendingImeRestoreRegistry {
   private readonly entries = new Map<string, Entry>();
+  /** Devices whose taken restore is still running under the IME lock; it cannot be cancelled. */
+  private readonly inFlight = new Set<string>();
 
   constructor(private readonly log: Pick<Logger, "warn"> = logger) {}
 
   hasPending(deviceId: string): boolean {
-    return this.entries.has(deviceId);
+    return this.entries.has(deviceId) || this.inFlight.has(deviceId);
   }
 
   take(deviceId: string): PendingImeRestore | undefined {
@@ -63,14 +74,19 @@ export class DevicePendingImeRestores implements PendingImeRestoreRegistry {
     this.take(deviceId);
   }
 
-  flush(deviceId: string): Promise<void> {
-    return this.flushEntry(deviceId);
+  flush(deviceId: string, options?: ImeFlushOptions): Promise<void> {
+    return this.flushEntry(deviceId, undefined, options);
   }
 
-  private async flushEntry(deviceId: string, expected?: Entry): Promise<void> {
-    if (!expected && !this.entries.has(deviceId)) {
+  private async flushEntry(
+    deviceId: string,
+    expected?: Entry,
+    options: ImeFlushOptions = {},
+  ): Promise<void> {
+    if (!expected && !this.hasPending(deviceId)) {
       return;
     }
+    // A restore in flight holds the IME lock, so acquiring it here waits that restore out.
     await withAndroidImeLock(
       deviceId,
       async () => {
@@ -78,9 +94,22 @@ export class DevicePendingImeRestores implements PendingImeRestoreRegistry {
         if (expected && this.entries.get(deviceId) !== expected) {
           return;
         }
-        await this.take(deviceId)?.restore();
+        if (options.isForced?.() || options.signal?.aborted) {
+          this.discard(deviceId);
+          return;
+        }
+        const pending = this.take(deviceId);
+        if (!pending) {
+          return;
+        }
+        this.inFlight.add(deviceId);
+        try {
+          await pending.restore();
+        } finally {
+          this.inFlight.delete(deviceId);
+        }
       },
-      undefined,
+      options.signal,
       { allowQuarantined: true },
     );
   }

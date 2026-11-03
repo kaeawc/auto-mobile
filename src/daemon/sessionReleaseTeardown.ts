@@ -3,7 +3,7 @@ import {
   type PendingImeRestoreRegistry,
 } from "../features/action/sendkeys/PendingImeRestore";
 import { ActionableError } from "../models/ActionableError";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
@@ -85,23 +85,49 @@ export class SessionReleaseTeardown {
     if (options.deviceIdentityReplaced || releaseWasForced(operation)) {
       // Never apply an old snapshot after identity or ownership was forcibly replaced.
       this.pendingIme.discard(deviceId);
-    } else if (this.pendingIme.hasPending(deviceId)) {
-      try {
-        await this.pendingIme.flush(deviceId);
-      } catch (error) {
-        // ImeRestore quarantines unsafe state; release still completes with a visible diagnostic.
-        logger.warn(`[SendKeys] Session-end IME restoration failed on ${deviceId}`, error);
-      }
     }
-    if (!options.deviceIdentityReplaced && !this.releaseNeedsTeardown(session)) {
+    const needsIme =
+      !options.deviceIdentityReplaced &&
+      !releaseWasForced(operation) &&
+      this.pendingIme.hasPending(deviceId);
+    const needsTeardown = options.deviceIdentityReplaced || this.releaseNeedsTeardown(session);
+    if (!needsIme && !needsTeardown) {
       return [];
     }
     const forcedSignal = operation?.forcedAbort?.signal;
     return this.runUnderTeardownShield(async () => {
+      if (needsIme) {
+        await this.flushPendingIme(deviceId, operation);
+      }
+      if (!needsTeardown) {
+        return [];
+      }
       const stages = await this.startReleaseTeardown(sessionId, session, operation, options);
       // Setup remains in flight; skipped/aborted restores must arm neither quarantine nor retries.
       return options.deviceIdentityReplaced ? stages.filter((stage) => stage.setup) : stages;
     }, forcedSignal);
+  }
+
+  /**
+   * Restore the typing IME under the teardown shield, so the cap and a forced release bound the
+   * wait for the IME lock and a release forced meanwhile discards the snapshot instead.
+   */
+  private async flushPendingIme(
+    deviceId: string,
+    operation: SessionReleaseOperation | undefined,
+  ): Promise<void> {
+    try {
+      await this.pendingIme.flush(deviceId, {
+        signal: getAbortSignal(),
+        isForced: () => releaseWasForced(operation),
+      });
+    } catch (error) {
+      // ImeRestore quarantines unsafe state; release still completes with a visible diagnostic.
+      logger.warn(`[SendKeys] Session-end IME restoration failed on ${deviceId}`, error);
+      if (releaseWasForced(operation) || getAbortSignal()?.aborted) {
+        this.pendingIme.discard(deviceId);
+      }
+    }
   }
 
   /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */

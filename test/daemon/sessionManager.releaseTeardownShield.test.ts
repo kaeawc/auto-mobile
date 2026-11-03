@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { SESSION_RELEASE_TEARDOWN_CAP_MS, SessionManager } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  SessionManager,
+  type SessionReleaseOperation,
+} from "../../src/daemon/sessionManager";
+import type { SessionDeviceStateRestore } from "../../src/daemon/sessionDeviceStateRestore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   getAbortSignal,
@@ -396,6 +401,55 @@ test("session release restores a pending typing IME exactly once before handing 
     await h.manager.releaseSession("old", "plan-auto-release");
     await h.manager.releaseSession("old", "plan-auto-release");
     expect(restored).toEqual(["restore"]);
+  } finally {
+    pendingImeRestores.discard(device.deviceId);
+  }
+});
+
+test("a release forced while it waits for the IME lock discards the pending restore", async () => {
+  const h = await harness();
+  await ownDevice(h, []);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const { withAndroidImeLock } = await import("../../src/features/action/androidImeLock");
+  const restores: string[] = [];
+  pendingImeRestores.store(
+    device.deviceId,
+    {
+      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+      userId: 10,
+      restore: async () => {
+        restores.push("restore");
+      },
+    },
+    h.timer,
+  );
+  const session = h.manager.getSession("old");
+  const stateRestore = Reflect.get(h.manager, "stateRestore") as SessionDeviceStateRestore;
+  const operation: SessionReleaseOperation = {
+    session: session!,
+    promise: Promise.resolve(null),
+    reason: { value: "plan-auto-release" },
+    options: {},
+    startedAtMs: 0,
+    stuckDeadlineMs: 1000,
+    forcedAbort: new AbortController(),
+  };
+  const lockHeld = Promise.withResolvers<void>();
+  const holder = withAndroidImeLock(device.deviceId, () => lockHeld.promise);
+  try {
+    const drain = stateRestore.drainReleaseTeardown("old", session!, operation);
+    await flush();
+    expect(pendingImeRestores.hasPending(device.deviceId)).toBe(true);
+
+    operation.forced = true;
+    operation.forcedAbort!.abort(new Error("forced"));
+    lockHeld.resolve();
+    await holder;
+    await drain;
+
+    expect(restores).toEqual([]);
+    expect(pendingImeRestores.hasPending(device.deviceId)).toBe(false);
   } finally {
     pendingImeRestores.discard(device.deviceId);
   }

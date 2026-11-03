@@ -1,4 +1,5 @@
 import type {
+  ImeFlushOptions,
   PendingImeRestore,
   PendingImeRestoreRegistry,
 } from "../../src/features/action/sendkeys/PendingImeRestore";
@@ -22,10 +23,14 @@ export class FakePendingImeRestoreRegistry implements PendingImeRestoreRegistry 
   discard(deviceId: string): void {
     this.entries.delete(deviceId);
   }
-  async flush(deviceId: string): Promise<void> {
+  async flush(deviceId: string, options?: ImeFlushOptions): Promise<void> {
     this.flushes.push(deviceId);
     if (this.error) {
       throw this.error;
+    }
+    if (options?.isForced?.() || options?.signal?.aborted) {
+      this.discard(deviceId);
+      return;
     }
     await this.take(deviceId)?.restore();
   }

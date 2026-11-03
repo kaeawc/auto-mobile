@@ -86,10 +86,9 @@ expect to move. It is not listed by default; enable it with `setToolEnabled` (se
   `warningCode: "not_watch"` and a `warning`: phones usually ignore rotary input, so use `swipeOn`
   for lists on this device or run the test on a Wear OS image such as `wearos_small_round`.
 
-On the verified emulator `input rotaryencoder scroll` moves both plain and curved
-(`ScalingLazyColumn`) lists in either direction, and the emulator-console attempt always fails;
-the swipe fallback covers images where neither native method works. Check `attempts` on other
-images.
+On the verified emulator `input rotaryencoder scroll` moves both plain and curved lists in either
+direction, and the emulator-console attempt always fails; the swipe fallback covers images where
+neither native method works. Check `attempts` on other images.
 
 `swipeOn` with `lookFor` still scrolls with touch swipes on a watch, which is enough for the
 system lists tested.

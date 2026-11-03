@@ -217,7 +217,7 @@ export function prototypeWeb3dBodyAttributes(fold: PrototypeWebFold | undefined)
 export const PROTOTYPE_WEB_3D_CSS = [
   "@supports not (transform-style:preserve-3d){[data-3d-control]{display:none!important}}",
   "[data-device3d] [data-viewport]{perspective:2400px}",
-  "[data-orbit]{position:absolute;inset:0;transform-style:preserve-3d}",
+  "[data-orbit]{position:absolute;left:0;top:0;transform-style:preserve-3d}",
   "[data-device3d] [data-stage],[data-wrapped]{transform-style:preserve-3d}",
   "[data-wrapped]>*,[data-face],[data-back]{backface-visibility:hidden}",
   "[data-back]{background:linear-gradient(135deg,#3a3a3e,#1c1c1f)}",
@@ -470,8 +470,9 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
   const hinge = rules.bodyHinge(doc.body);
   const state = { on: false, orbit: rules.flat, hinge: 180 };
   let wrapped: PrototypeWeb3dWrapped | undefined;
-  // The orbit turns a box around the stage, not the view: a rotate animates the views' own
-  // transforms, so both views keep the orbit through the turn.
+  // The orbit turns a box inside the stage that holds the views, not a view: a rotate animates the
+  // views' own transforms, so both keep the orbit through the turn, and the stage's pan and zoom
+  // stay in screen space outside it.
   let orbitBox: HTMLElement | undefined;
   // Each exit's transitions may settle after a later enter and exit; only the latest one unwraps.
   let exits = 0;
@@ -500,8 +501,9 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     if (!orbitBox) {
       orbitBox = doc.createElement("div");
       orbitBox.setAttribute("data-orbit", "");
-      stage.before(orbitBox);
-      orbitBox.append(stage);
+      const children = Array.from(stage.children);
+      stage.append(orbitBox);
+      orbitBox.append(...children);
     }
     wrapped = rules.wrap(
       view,
@@ -559,7 +561,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     const done = () => {
       if (exit === exits && !state.on && orbitBox === leaving && leaving) {
         unwrap();
-        leaving.before(stage);
+        stage.append(...Array.from(leaving.children));
         leaving.remove();
         orbitBox = undefined;
       }

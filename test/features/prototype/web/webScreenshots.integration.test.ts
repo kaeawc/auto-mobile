@@ -205,6 +205,23 @@ async function checkDevice3d(page: Page): Promise<void> {
     await page.click('[data-control="rotate"]');
     await finishAnimations(page);
   }
+  // A plain drag still pans in screen space with the device turned around (185° yaw).
+  await page.focus("[data-viewport]");
+  for (let step = 0; step < 10; step++) {
+    await page.keyboard.press("Shift+ArrowRight");
+  }
+  expect((await device3dState(page)).transform).toContain("rotateY(185deg)");
+  const centreX = () =>
+    page.evaluate(() => {
+      const box = document.querySelector("[data-view]:not([hidden]) > *")?.getBoundingClientRect();
+      return box ? box.left + box.width / 2 : 0;
+    });
+  const before3dPan = await centreX();
+  await page.mouse.move(400, 500);
+  await page.mouse.down();
+  await page.mouse.move(460, 500, { steps: 4 });
+  await page.mouse.up();
+  expect((await centreX()) - before3dPan).toBeGreaterThan(30);
   await page.click('[data-control="3d"]');
   await page.waitForFunction(() => !document.querySelector("[data-orbit]"));
   expect(await device3dState(page)).toEqual({ pressed: "false", wrapped: false, transform: "" });

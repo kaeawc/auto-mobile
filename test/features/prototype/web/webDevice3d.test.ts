@@ -171,6 +171,19 @@ describe("prototype web 3D page wiring (#16458)", () => {
     );
   });
 
+  test("without a flat posture the select starts on the posture the flat hinge shows", () => {
+    const fold = {
+      hinge: { axis: "horizontal" as const, at: 0.5 },
+      postures: [
+        { posture: "closed", hingeDegrees: 0 },
+        { posture: "half_opened", hingeDegrees: 150 },
+      ],
+    };
+    const html = prototypeWeb3dControls(fold).map(toHtml).join("");
+    expect(html).toContain('<option data-hinge="150" selected="" value="half_opened">');
+    expect(html).not.toContain('data-hinge="0" selected=""');
+  });
+
   test("3D CSS applies only while wrapped, honours reduced motion and hides without CSS 3D", () => {
     expect(PROTOTYPE_WEB_3D_CSS).toContain(
       "@supports not (transform-style:preserve-3d){[data-3d-control]{display:none!important}}",

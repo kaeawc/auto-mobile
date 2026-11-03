@@ -151,7 +151,8 @@ export function prototypeWeb3dControls(fold: PrototypeWebFold | undefined): WebE
   if (!fold) {
     return [toggle];
   }
-  const flat = fold.postures.find((entry) => entry.hingeDegrees === FLAT_HINGE_DEGREES);
+  // The select starts on the posture whose layout the flat hinge shows, as the status line names.
+  const flat = prototypeWebPostureAt(FLAT_HINGE_DEGREES, fold.postures);
   return [
     toggle,
     el(
@@ -171,7 +172,7 @@ export function prototypeWeb3dControls(fold: PrototypeWebFold | undefined): WebE
             attrs: {
               value: entry.posture,
               "data-hinge": String(entry.hingeDegrees),
-              ...(entry === flat ? { selected: "" } : {}),
+              ...(entry.posture === flat ? { selected: "" } : {}),
             },
           },
           [entry.posture],
@@ -370,14 +371,15 @@ export function prototypeWeb3dDragOrbit(
   isOn: () => boolean,
   orbitBy: (delta: PrototypeWebOrbit) => void,
 ): void {
-  let drag: { x: number; y: number } | undefined;
+  // Only the pointer that started the drag orbits, and a cancelled pointer ends it.
+  let drag: { id: number; x: number; y: number } | undefined;
   const capture = { capture: true };
   viewport.addEventListener(
     "pointerdown",
     (event) => {
       if (isOn() && event.shiftKey) {
         event.stopImmediatePropagation();
-        drag = { x: event.clientX, y: event.clientY };
+        drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
         viewport.setPointerCapture(event.pointerId);
       }
     },
@@ -386,21 +388,23 @@ export function prototypeWeb3dDragOrbit(
   viewport.addEventListener(
     "pointermove",
     (event) => {
-      if (drag) {
+      if (drag?.id === event.pointerId) {
         event.stopImmediatePropagation();
         const delta = {
           yaw: (event.clientX - drag.x) * 0.4,
           pitch: (drag.y - event.clientY) * 0.4,
         };
-        drag = { x: event.clientX, y: event.clientY };
+        drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
         orbitBy(delta);
       }
     },
     capture,
   );
-  viewport.addEventListener("pointerup", () => {
-    drag = undefined;
-  });
+  const end = (event: PointerEvent) => {
+    drag = drag?.id === event.pointerId ? undefined : drag;
+  };
+  viewport.addEventListener("pointerup", end);
+  viewport.addEventListener("pointercancel", end);
 }
 
 /** The pure rules and DOM helpers the 3D runtime is handed as arguments, so they are unit-tested and inlined with it. */
@@ -469,6 +473,8 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
   // The orbit turns a box around the stage, not the view: a rotate animates the views' own
   // transforms, so both views keep the orbit through the turn.
   let orbitBox: HTMLElement | undefined;
+  // Each exit's transitions may settle after a later enter and exit; only the latest one unwraps.
+  let exits = 0;
   doc.querySelectorAll<HTMLElement>("[data-3d-control]").forEach((control) => {
     control.hidden = false;
   });
@@ -518,6 +524,17 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
       wrapped.leaf?.style.setProperty("transform", pose.leaf);
     }
   };
+  // The posture select follows the hinge: it names the posture whose layout the hinge shows.
+  const moveHinge = (degrees: number) => {
+    state.hinge = Math.max(0, Math.min(360, degrees));
+    if (hingeInput) {
+      hingeInput.value = String(state.hinge);
+    }
+    const layout = rules.postureAt(state.hinge, postures);
+    if (postureSelect && layout) {
+      postureSelect.value = layout;
+    }
+  };
   const enter = () => {
     state.on = true;
     toggle.setAttribute("aria-pressed", "true");
@@ -535,18 +552,12 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     state.on = false;
     toggle.setAttribute("aria-pressed", "false");
     state.orbit = rules.flat;
-    state.hinge = 180;
-    if (hingeInput) {
-      hingeInput.value = "180";
-    }
-    const flat = postures.find((entry) => entry.hingeDegrees === 180);
-    if (postureSelect && flat) {
-      postureSelect.value = flat.posture;
-    }
+    moveHinge(180);
     apply();
     const leaving = orbitBox;
+    const exit = ++exits;
     const done = () => {
-      if (!state.on && orbitBox === leaving && leaving) {
+      if (exit === exits && !state.on && orbitBox === leaving && leaving) {
         unwrap();
         leaving.before(stage);
         leaving.remove();
@@ -563,10 +574,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     void Promise.allSettled(running.map((animation) => animation.finished)).then(done);
   };
   const setHinge = (degrees: number) => {
-    state.hinge = Math.max(0, Math.min(360, degrees));
-    if (hingeInput) {
-      hingeInput.value = String(state.hinge);
-    }
+    moveHinge(degrees);
     if (state.on) {
       apply();
     } else {

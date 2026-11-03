@@ -11,7 +11,7 @@ describe("generated prototype render contract (#16451)", () => {
     const current = readFileSync(
       new URL(`../../../${renderContractOutputPath}`, import.meta.url),
       "utf8",
-    );
+    ).replace(/\r\n/g, "\n"); // Windows checkouts may convert the file to CRLF
     expect(current).toBe(renderPrototypeRenderContract(contract));
   });
 

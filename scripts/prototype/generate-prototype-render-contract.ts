@@ -84,7 +84,7 @@ if (import.meta.main) {
   const expected = renderPrototypeRenderContract(contract);
   const url = new URL(`../../${renderContractOutputPath}`, import.meta.url);
   if (process.argv.includes("--check")) {
-    const current = readFileSync(url, "utf8");
+    const current = readFileSync(url, "utf8").replace(/\r\n/g, "\n");
     if (current !== expected) {
       console.error(
         `${renderContractOutputPath} is stale; regenerate: bun scripts/prototype/generate-prototype-render-contract.ts`,

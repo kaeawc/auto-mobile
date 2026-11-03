@@ -164,6 +164,7 @@ describe("getStaticToolDefinitions", () => {
             "defineBackend",
             "clearBackend",
             "backendLog",
+            "publish",
           ],
         },
       ],

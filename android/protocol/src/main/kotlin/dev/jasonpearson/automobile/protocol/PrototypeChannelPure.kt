@@ -4,8 +4,10 @@ import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.pow
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /**
  * The pure rules of realtime channels (#14261), Kotlin twins of `prototypeChannelBackoff.ts` and
@@ -68,5 +70,34 @@ object PrototypeChannelCoalescer {
       previous = signature
     }
     return kept
+  }
+}
+
+/**
+ * Channel route matching (#14269): routes are ordered and the first whose `when` matches a frame
+ * wins. `{pointer, equals}` compares JSON values (numbers by value), `{pointer, exists}` tests
+ * presence, and `{event}` names an SSE event (`message` when the stream gives none). A route with
+ * no `when` matches every frame.
+ */
+object PrototypeChannelRoutes {
+  const val DEFAULT_SSE_EVENT = "message"
+
+  /** The actions of the first matching route, or null when none matches. */
+  fun match(routes: JsonArray?, data: JsonElement, event: String?): JsonArray? =
+    routes
+      ?.firstOrNull { (it as? JsonObject)?.let { route -> matches(route, data, event) } == true }
+      ?.let { (it as JsonObject)["actions"] as? JsonArray }
+
+  private fun matches(route: JsonObject, data: JsonElement, event: String?): Boolean {
+    val condition = route["when"] as? JsonObject ?: return true
+    (condition["event"] as? JsonPrimitive)?.let {
+      return it.isString && it.content == (event ?: DEFAULT_SSE_EVENT)
+    }
+    val pointer = (condition["pointer"] as? JsonPrimitive)?.content ?: return false
+    val value = PrototypeDataPointer.resolve(data, pointer)
+    condition["exists"]?.let {
+      return (it as? JsonPrimitive)?.booleanOrNull == (value != null)
+    }
+    return PrototypePatchValues.equal(value, condition["equals"])
   }
 }

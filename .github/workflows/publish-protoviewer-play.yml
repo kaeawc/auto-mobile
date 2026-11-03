@@ -1,0 +1,233 @@
+name: "Publish ProtoViewer to Google Play"
+
+# Google Play pipeline for ProtoViewer (#14147). A `protoviewer/MAJOR.MINOR.PATCH` tag builds
+# the AAB once and uploads it to the internal track. Closed testing and production are
+# promotions of that same versionCode, never a rebuild, and each one is a separate job in
+# the reviewer-protected `google-play-release` environment. Production starts as a staged
+# rollout. A manual dispatch re-runs one promotion, changes the rollout fraction, or halts
+# it. Resume and environment setup are in docs/design-docs/protoviewer.md section 8.3.
+#
+# PLAY_SERVICE_ACCOUNT_JSON is an environment secret of `google-play-internal` and
+# `google-play-release` only, and is never a repository secret.
+# test/bats/protoviewer-play-publish.bats pins that scoping and the no-rebuild rule.
+
+"on":
+  push:
+    tags:
+      - "protoviewer/*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "ProtoViewer version already uploaded to Play (MAJOR.MINOR.PATCH)"
+        required: true
+        type: string
+      operation:
+        description: "promote-closed, promote-production, rollout (change fraction; 1 completes) or halt"
+        required: true
+        type: choice
+        options:
+          - promote-closed
+          - promote-production
+          - rollout
+          - halt
+      fraction:
+        description: "Production user fraction for promote-production, rollout and halt (0 < f <= 1)"
+        required: false
+        type: string
+        default: "0.1"
+
+# One run per version: a tag run and a dispatch for the same version queue behind each other,
+# but a halt for a version in production never waits behind another version's pending approvals.
+concurrency:
+  group: protoviewer-play-${{ github.event_name == 'push' && github.ref_name || format('protoviewer/{0}', inputs.version) }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# Publishing jobs must not consume or seed Actions caches (see release.yml).
+cache-mode: none
+
+env:
+  PLAY_CLOSED_TRACK: alpha
+  PLAY_INITIAL_PRODUCTION_ROLLOUT: "0.1"
+
+jobs:
+  resolve:
+    name: "Resolve ProtoViewer version"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      version_code: ${{ steps.resolve.outputs.version_code }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: "Resolve version and versionCode"
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            version="$(bash scripts/release/protoviewer-play.sh tag-version "$REF_NAME")"
+          else
+            version="$INPUT_VERSION"
+          fi
+          code="$(bash scripts/release/protoviewer-play.sh version-code "$version")"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            bash scripts/release/protoviewer-play.sh check-changelog "$code"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_code=$code" >> "$GITHUB_OUTPUT"
+          echo "ProtoViewer $version (versionCode $code)" >> "$GITHUB_STEP_SUMMARY"
+
+  # The only build in this workflow. Every later job uses this AAB or its versionCode.
+  build:
+    if: github.event_name == 'push'
+    needs: resolve
+    uses: ./.github/workflows/build-protoviewer-apk.yml
+    with:
+      release-version: ${{ needs.resolve.outputs.version }}
+      checkout-ref: ${{ github.sha }}
+      build-aab: true
+      artifact-retention-days: 90
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+  upload-internal:
+    name: "Upload to internal testing"
+    if: github.event_name == 'push'
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: google-play-internal
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: "Download ProtoViewer AAB"
+        uses: actions/download-artifact@v7
+        with:
+          name: protoviewer-aab
+          path: /tmp/protoviewer-aab
+
+      - name: "Verify AAB is the one the build job hashed"
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.aab-sha256 }}
+        run: |
+          set -euo pipefail
+          actual="$(sha256sum /tmp/protoviewer-aab/automobile-protoviewer.aab | cut -d' ' -f1)"
+          if [[ -z "$EXPECTED_SHA256" || "$actual" != "$EXPECTED_SHA256" ]]; then
+            echo "AAB checksum $actual does not match the build output '$EXPECTED_SHA256'" >&2
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup-fastlane
+
+      - name: "Upload AAB to the internal track"
+        env:
+          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          VERSION_CODE: ${{ needs.resolve.outputs.version_code }}
+          # `draft` until the app's first production release is live; see design doc 8.3.
+          RELEASE_STATUS: ${{ vars.PROTOVIEWER_PLAY_INTERNAL_STATUS || 'completed' }}
+        run: |
+          set -euo pipefail
+          bash scripts/release/protoviewer-play.sh upload-internal \
+            --aab /tmp/protoviewer-aab/automobile-protoviewer.aab \
+            --version-code "$VERSION_CODE" \
+            --release-status "$RELEASE_STATUS"
+
+  promote-closed:
+    name: "Promote internal to closed testing"
+    if: github.event_name == 'push'
+    needs: [resolve, upload-internal]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: google-play-release
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-fastlane
+
+      - name: "Promote the uploaded versionCode"
+        env:
+          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          VERSION_CODE: ${{ needs.resolve.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          bash scripts/release/protoviewer-play.sh operate promote-closed \
+            --version-code "$VERSION_CODE"
+
+  promote-production:
+    name: "Promote closed testing to production (staged)"
+    if: github.event_name == 'push'
+    needs: [resolve, promote-closed]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: google-play-release
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-fastlane
+
+      - name: "Start the staged production rollout"
+        env:
+          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          VERSION_CODE: ${{ needs.resolve.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          bash scripts/release/protoviewer-play.sh operate promote-production \
+            --version-code "$VERSION_CODE" \
+            --fraction "$PLAY_INITIAL_PRODUCTION_ROLLOUT"
+
+  operate:
+    name: "Play operation (${{ inputs.operation }})"
+    if: github.event_name == 'workflow_dispatch'
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: google-play-release
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-fastlane
+
+      - name: "Run the requested operation"
+        env:
+          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          VERSION_CODE: ${{ needs.resolve.outputs.version_code }}
+          OPERATION: ${{ inputs.operation }}
+          FRACTION: ${{ inputs.fraction }}
+        run: |
+          set -euo pipefail
+          args=(operate "$OPERATION" --version-code "$VERSION_CODE")
+          if [[ "$OPERATION" != "promote-closed" ]]; then
+            args+=(--fraction "$FRACTION")
+          fi
+          bash scripts/release/protoviewer-play.sh "${args[@]}"

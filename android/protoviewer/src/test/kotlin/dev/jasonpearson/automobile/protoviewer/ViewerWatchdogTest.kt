@@ -82,16 +82,20 @@ class ViewerWatchdogTest {
     compose.onNodeWithText("This prototype could not be opened.").assertDoesNotExist()
     compose.runOnIdle { timer.advanceBy(1) }
     compose.onNodeWithText("This prototype could not be opened.").assertIsDisplayed()
+    val diagnostics = activity.diagnostics
+    assertTrue(diagnostics.watchdogTripped)
+    assertEquals(ViewerFailure.Watchdog, diagnostics.lastFailure)
     compose.onNodeWithText("Back").performClick()
     assertTrue(activity.isFinishing)
   }
 
   @Test
   fun readyRenderCancelsWatchdogAndIgnoresLateExpiry() {
-    launch()
+    val activity = launch()
     compose.onNodeWithText("Prototype content").assertIsDisplayed()
     compose.runOnIdle { timer.advanceBy(RENDER_READY_BUDGET_MILLIS) }
     compose.onNodeWithText("Prototype content").assertIsDisplayed()
+    assertFalse(activity.diagnostics.watchdogTripped)
     assertEquals(1, timer.tasks.size)
     assertTrue(timer.tasks.all { it.cancelled })
   }

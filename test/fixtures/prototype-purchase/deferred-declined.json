@@ -1,0 +1,84 @@
+{
+  "name": "A deferred (Ask to Buy) purchase that is declined grants nothing",
+  "products": [
+    {
+      "id": "pro_monthly",
+      "kind": "subscription"
+    },
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    },
+    {
+      "id": "coins_100",
+      "kind": "consumable"
+    }
+  ],
+  "state": {
+    "entitlements": {},
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "result": {
+          "status": "deferred",
+          "transactionId": "d1"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "d1",
+            "productId": "pro_monthly",
+            "status": "deferred"
+          }
+        },
+        "into": {
+          "status": "deferred",
+          "transactionId": "d1"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "resolve",
+      "transactionId": "other",
+      "resolution": "approved",
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "d1",
+            "productId": "pro_monthly",
+            "status": "deferred"
+          }
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "No open transaction other"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "resolve",
+      "transactionId": "d1",
+      "resolution": "declined",
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "d1",
+            "productId": "pro_monthly",
+            "status": "declined"
+          }
+        },
+        "entitlementsChanged": false
+      }
+    }
+  ]
+}

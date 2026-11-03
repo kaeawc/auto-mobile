@@ -288,3 +288,15 @@ test("a content-sized reversed line ends where its items do", () => {
   expect(rectOf(painted, "a")?.top).toBe(20);
   expect(rectOf(painted, "b")?.top).toBe(0);
 });
+
+test("a content-sized reversed line keeps its last item at its start when another size is unknown", () => {
+  const root = named("root", { display: "flex", "flex-direction": "column" }, [
+    named("line", { display: "flex", "flex-direction": "column-reverse" }, [
+      named("before", {}, ["text"]),
+      named("last", { width: "400px" }, ["text"]),
+    ]),
+  ]);
+  const painted = topEdgePaintOrder(root, SCREEN);
+  expect(rectOf(painted, "last")?.top).toBe(0);
+  expect(rectOf(painted, "before")?.top).toBeUndefined();
+});

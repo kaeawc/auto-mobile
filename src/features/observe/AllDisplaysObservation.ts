@@ -11,7 +11,7 @@ import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { publishScreenshotPaths } from "./ScreenshotRetention";
 import { computeFreshness } from "./observationFreshness";
 import { displayTransitions } from "./DisplayTransition";
-import { isPhysicalPanel } from "../../models/DisplayPanel";
+import { isPhysicalPanel, type DisplayPanel } from "../../models/DisplayPanel";
 import {
   assertAllDisplayObserveSupported,
   DisplaySelectionError,
@@ -60,11 +60,7 @@ export class AllDisplaysObservation {
       // Discovery omits single-screen inventory: retain exactly the ordinary result.
       return active;
     }
-    const activePanelKey = panels.some((panel) => panel.key === active.display.key)
-      ? active.display.key
-      : resolveTargetDisplay(this.d.device().displays, "active", {
-          focusedPanelKey: displayTransitions.observedPanel(this.d.device().deviceId)?.key,
-        }).key;
+    const activePanelKey = this.activePanelKey(panels, active.display.key);
     const displays: DisplayObservation[] = [];
     for (const panel of panels) {
       const observation =
@@ -111,6 +107,24 @@ export class AllDisplaysObservation {
     const result = { ...active, displays };
     await publishScreenshotPaths(result, this.d.pathProtection());
     return result;
+  }
+
+  /** The physical panel whose read the active capture stands in for, if any. */
+  private activePanelKey(panels: readonly DisplayPanel[], activeKey: string): string | undefined {
+    const device = this.d.device();
+    // An active read that landed on a focused overlay is not any physical panel's capture,
+    // so every physical panel is then read explicitly rather than relabeling that capture.
+    if (
+      device.displays?.panels.some((panel) => panel.key === activeKey && !isPhysicalPanel(panel))
+    ) {
+      return undefined;
+    }
+    if (panels.some((panel) => panel.key === activeKey)) {
+      return activeKey;
+    }
+    return resolveTargetDisplay(device.displays, "active", {
+      focusedPanelKey: displayTransitions.observedPanel(device.deviceId)?.key,
+    }).key;
   }
 
   private async readAggregatePanel(

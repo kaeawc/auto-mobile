@@ -8,6 +8,7 @@ import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import type { WebImageDraw } from "./webImages";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
@@ -23,6 +24,8 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
+  readonly imageSlots?: ReadonlyMap<string, number>;
 }
 
 export interface PrototypeStill {
@@ -31,6 +34,8 @@ export interface PrototypeStill {
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
   /** The outermost stack drawn, if any: its screens and the one drawn. */
   readonly stack?: WebStackScreens;
+  /** Every image drawn with a bound asset, in tree order. */
+  readonly imageDraws: readonly WebImageDraw[];
 }
 
 const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
@@ -195,6 +200,8 @@ function stillScope(
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
     layers: [],
+    ...(options.imageSlots === undefined ? {} : { imageSlots: options.imageSlots }),
+    imageDraws: [],
   };
 }
 
@@ -235,5 +242,6 @@ export function renderPrototypeStill(
     frame: frame.id,
     unsupportedNodes: scope.unsupported,
     ...(stack ? { stack } : {}),
+    imageDraws: scope.imageDraws ?? [],
   };
 }

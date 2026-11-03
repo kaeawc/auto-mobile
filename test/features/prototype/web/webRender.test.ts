@@ -89,7 +89,7 @@ describe("prototype web still (#16346)", () => {
   test("an image draws a placeholder and is listed as not inlined", () => {
     const spec = { ...reference, root: { type: "image", id: "hero", asset: "hero" } };
     expect(renderPrototypeStill(spec).unsupportedNodes).toEqual([
-      { type: "image", id: "hero", path: "root", reason: "assetNotInlined" },
+      { type: "image", id: "hero", path: "root", reason: "assetNotInlined", asset: "hero" },
     ]);
   });
 

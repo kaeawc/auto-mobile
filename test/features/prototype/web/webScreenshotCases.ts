@@ -1,6 +1,10 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/webPage";
+import {
+  buildPrototypeWebPageWithImages,
+  SharpPrototypeWebImageEncoder,
+  type PrototypeWebAssetSource,
+} from "../../../../src/features/prototype/web/webImageEncoding";
 
 /**
  * The reference specs and frames the headless screenshot check renders (#16346), shared by the
@@ -26,6 +30,19 @@ export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
   "material-controls": "prototype-spec/valid/material-controls.json",
   "component-gallery": "prototype-spec/valid/component-gallery.json",
   "doc-example-2": "prototype-spec/valid/doc-example-2.json",
+  "image-gallery": "prototype-web/image-gallery.json",
+};
+
+/** Image assets the cases draw: `<asset id>.png`; an id without a file stays a placeholder. */
+export const WEB_SCREENSHOT_ASSET_DIR = join(FIXTURES, "prototype-web/assets");
+
+export const webScreenshotAssets: PrototypeWebAssetSource = {
+  get: async (id) => {
+    const file = join(WEB_SCREENSHOT_ASSET_DIR, `${id}.png`);
+    return /^[a-z-]+$/.test(id) && existsSync(file)
+      ? { mimeType: "image/png", bytes: new Uint8Array(readFileSync(file)) }
+      : undefined;
+  },
 };
 
 /** The browser viewport, in CSS px at device scale factor 1, so a golden is exactly this size. */
@@ -60,20 +77,28 @@ export function webScreenshotCases(): WebScreenshotCase[] {
   );
 }
 
-/** The page under test: the case's spec as the only revision of the only variant. */
-export function webScreenshotPage(entry: WebScreenshotCase): string {
+/**
+ * The page under test: the case's spec as the only revision of the only variant, its image assets
+ * inlined from the fixture asset directory.
+ */
+export async function webScreenshotPage(entry: WebScreenshotCase): Promise<string> {
   const spec: unknown = JSON.parse(readFileSync(entry.fixture, "utf8"));
-  return buildPrototypeWebPage({
-    title: entry.spec,
-    frame: entry.frame,
-    variants: [
-      {
-        id: entry.spec,
-        label: entry.spec,
-        revisions: [{ revision: 1, operation: "show", spec }],
-      },
-    ],
-  }).html;
+  const page = await buildPrototypeWebPageWithImages(
+    {
+      title: entry.spec,
+      frame: entry.frame,
+      variants: [
+        {
+          id: entry.spec,
+          label: entry.spec,
+          revisions: [{ revision: 1, operation: "show", spec }],
+        },
+      ],
+    },
+    webScreenshotAssets,
+    new SharpPrototypeWebImageEncoder(),
+  );
+  return page.html;
 }
 
 /** A PNG's width and height from its IHDR chunk, without decoding the pixels. */

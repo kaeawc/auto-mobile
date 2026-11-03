@@ -118,14 +118,31 @@ it inlined per variant.
   by its other screens while they fit. The shell (head, toolbar with every screen of the shown
   revision, full history list and script) is measured first. If the kept start screens alone do
   not fit, the build fails with an `ActionableError` naming the largest view.
+- **Images.** `buildPrototypeWebPageWithImages` (`webImageEncoding.ts`) builds the page once to
+  learn every bound asset an `image` draws and its boxes, reads each asset's bytes from a
+  `PrototypeWebAssetSource`, re-encodes it with sharp (`loadSharp`) to WebP quality 80 at the
+  largest size the frame draws it, and builds again with the encoded images. A box is the frame
+  density times the node's fixed dp size; `crop` and `fill` must cover their fixed axes, `fit` and
+  unfixed axes fit inside the screen's long side; the image is never enlarged. Encoding stops once
+  the encoded total alone would fill the page. A missing, non-image or undecodable asset is skipped
+  (an undecodable one is logged). The resource reads assets from the host asset cache of each device currently
+  showing one of the variants (Android caches its uploads); without one, images stay placeholders.
+- **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
+  `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio) and `-on` (1); views only
+  reference the slot, so view bytes do not depend on which images fit and every orientation and
+  revision shares one copy. A rule is charged once, in this order: the images of the shown
+  revision's start screen, then of the other pinned start screens, then each screen's images right
+  after that screen is kept. An image that does not fit is never retried and draws its
+  placeholder; it is reported `assetOverBudget`, and one with no bytes `assetNotInlined`.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Browser check
 
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
 spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
-`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
-`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
+`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery`,
+`doc-example-2` and `image-gallery` (its assets are `test/fixtures/prototype-web/assets/<id>.png`),
+each in `pixel-9` and `iphone-16`, portrait (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
@@ -285,7 +302,15 @@ the host, so the page's script only switches between views it was given and neve
   colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
   or `dp` capped at the window), painted `surface` unless an authored background resolves (the still draws no gradients),
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
-  8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  8 px around it, unless `dragHandle` is false, then its child. An `image` binds its asset id (a
+  light/dark pair picks the mode's side, then placeholders bind as text does); without a slot for it
+  it draws a `surfaceVariant` placeholder with reason `assetNotInlined`. With one, the placeholder
+  colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
+  holds an image layer (the slot's image as a centred background, `contain`, `cover` or
+  `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
+  `filter.tint`, a tint layer that multiplies the tint over the image masked by it, shown only when
+  `-on` is set, as Android's saturation colour matrix then its `Modulate` tint layer; a corner
+  radius clips both. Item images (nav items) are not inlined. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout and the navigation handle (or three generic button marks, which move to

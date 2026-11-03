@@ -203,6 +203,12 @@ names the oldest kept revision. The result's `_meta` reports `revision`, `device
 device's own counter for that patch), `revisions`, `variants`, `frame`, `sha256` and
 `rendererVersion`.
 
+Images draw the assets uploaded with the prototype to an Android device that is still showing it,
+re-encoded at the size the frame draws them. The page stays under 2 MiB: the revision shown first
+gets its images before older revisions, and an image that does not fit, or whose asset the server
+does not have (iOS uploads, or no device showing the prototype any more), draws a grey placeholder.
+Upload the assets again with the next show to bring them back.
+
 `resources/list` lists `automobile:prototype/<id>/web` for every prototype shown in this daemon
 session. Subscribe to that URI, without parameters, to be told about every new revision; a
 subscription to a URI with `revision=` is never notified again.

@@ -18,8 +18,8 @@ function revisions() {
 }
 
 describe("readPrototypeWebResource", () => {
-  test("reads the latest revision by default, with _meta", () => {
-    const web = readPrototypeWebResource(revisions(), { id: "checkout" }, "1.2.3");
+  test("reads the latest revision by default, with _meta", async () => {
+    const web = await readPrototypeWebResource(revisions(), { id: "checkout" }, "1.2.3");
     expect(web.html).toContain('data-revision="2"');
     expect(web.meta).toEqual({
       revision: 2,
@@ -32,8 +32,8 @@ describe("readPrototypeWebResource", () => {
     });
   });
 
-  test("reads revision=N", () => {
-    const web = readPrototypeWebResource(revisions(), { id: "checkout", revision: "1" }, "v");
+  test("reads revision=N", async () => {
+    const web = await readPrototypeWebResource(revisions(), { id: "checkout", revision: "1" }, "v");
     expect(web.meta.revision).toBe(1);
     expect(web.meta.deviceRevision).toBeUndefined();
     expect(web.html).toContain(
@@ -41,12 +41,14 @@ describe("readPrototypeWebResource", () => {
     );
   });
 
-  test("the default frame follows the platform that showed the revision", () => {
+  test("the default frame follows the platform that showed the revision", async () => {
     const store = new PrototypeSpecRevisions(new FakeTimer());
     store.recordShow("checkout", { spec: spec("checkout", "x"), platform: "ios" });
-    expect(readPrototypeWebResource(store, { id: "checkout" }, "v").meta.frame).toBe("iphone-16");
+    expect((await readPrototypeWebResource(store, { id: "checkout" }, "v")).meta.frame).toBe(
+      "iphone-16",
+    );
     expect(
-      readPrototypeWebResource(store, { id: "checkout", frame: "pixel-9" }, "v").meta.frame,
+      (await readPrototypeWebResource(store, { id: "checkout", frame: "pixel-9" }, "v")).meta.frame,
     ).toBe("pixel-9");
   });
 
@@ -59,28 +61,28 @@ describe("readPrototypeWebResource", () => {
     ],
     [{ id: "checkout", revision: "9" }, "Kept revisions: 1, 2"],
     [{ id: "checkout", revision: "two" }, 'Invalid prototype revision "two"'],
-  ])("%p is an actionable error", (query, message) => {
-    expect(() => readPrototypeWebResource(revisions(), query, "v")).toThrow(message);
+  ])("%p is an actionable error", async (query, message) => {
+    await expect(readPrototypeWebResource(revisions(), query, "v")).rejects.toThrow(message);
   });
 
-  test("ids sharing a variant group are variants of one page", () => {
+  test("ids sharing a variant group are variants of one page", async () => {
     const store = new PrototypeSpecRevisions(new FakeTimer());
     const variant = (label: string) => ({ group: "checkout-ideas", label });
     store.recordShow("compact", { spec: spec("compact", "c"), variant: variant("Compact") });
     store.recordShow("other", { spec: spec("other", "o") });
     store.recordShow("roomy", { spec: spec("roomy", "r"), variant: variant("Roomy") });
-    const web = readPrototypeWebResource(store, { id: "roomy" }, "v");
+    const web = await readPrototypeWebResource(store, { id: "roomy" }, "v");
     expect(web.meta.variants).toEqual(["compact", "roomy"]);
     expect(web.html).toContain('<body data-variant="roomy"');
     expect(web.html).toContain(">Compact</option>");
     expect(web.html).toContain(">Roomy</option>");
-    const first = readPrototypeWebResource(store, { id: "roomy", variant: "compact" }, "v");
+    const first = await readPrototypeWebResource(store, { id: "roomy", variant: "compact" }, "v");
     expect(first.html).toContain('<body data-variant="compact"');
   });
 
-  test("the same input yields the same bytes and sha256", () => {
-    const a = readPrototypeWebResource(revisions(), { id: "checkout" }, "v");
-    const b = readPrototypeWebResource(revisions(), { id: "checkout" }, "v");
+  test("the same input yields the same bytes and sha256", async () => {
+    const a = await readPrototypeWebResource(revisions(), { id: "checkout" }, "v");
+    const b = await readPrototypeWebResource(revisions(), { id: "checkout" }, "v");
     expect(a.html).toBe(b.html);
     expect(a.meta.sha256).toBe(b.meta.sha256);
   });

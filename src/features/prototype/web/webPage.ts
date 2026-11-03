@@ -16,6 +16,13 @@ import {
 import { renderPrototypeStill } from "./webStill";
 import type { UnsupportedWebNode } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import {
+  webImageBox,
+  webImageRule,
+  type PrototypeWebImage,
+  type WebImageBox,
+  type WebImageDraw,
+} from "./webImages";
 
 /** One spec revision: its number, the operation that created it and the spec itself. */
 export interface PrototypeWebRevision {
@@ -45,6 +52,14 @@ export interface PrototypeWebPageInput {
   readonly nowMs?: number;
   /** Total page budget; defaults to MAX_PROTOTYPE_WEB_PAGE_BYTES. */
   readonly maxBytes?: number;
+  /** Encoded assets the page inlines while the budget allows; the first entry per id counts. */
+  readonly images?: readonly PrototypeWebImage[];
+}
+
+/** An asset the page draws and the pixel boxes it is drawn in, to encode it at the right size. */
+export interface PrototypeWebImageRequest {
+  readonly id: string;
+  readonly boxes: readonly WebImageBox[];
 }
 
 export interface PrototypeWebPage {
@@ -55,6 +70,13 @@ export interface PrototypeWebPage {
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
   /** Revisions inlined per variant, newest first; older ones are not in the page. */
   readonly inlinedRevisions: Readonly<Record<string, readonly number[]>>;
+  /**
+   * Every asset any rendered view draws, the revision shown first, then the other pinned ones,
+   * then older revisions newest first: the order the page inlines them in.
+   */
+  readonly imageRequests: readonly PrototypeWebImageRequest[];
+  /** Asset ids inlined into the page. */
+  readonly inlinedImages: readonly string[];
 }
 
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
@@ -102,6 +124,7 @@ interface RenderedView {
   readonly screen?: string;
   readonly html: string;
   readonly unsupported: readonly UnsupportedWebNode[];
+  readonly draws: readonly WebImageDraw[];
 }
 
 /** One screen of one revision in both orientations: the unit the budget keeps or drops. */
@@ -126,7 +149,7 @@ function pickerScreens(stack: WebStackScreens | undefined): string[] {
 }
 
 function renderView(
-  input: PrototypeWebPageInput,
+  input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
   frame: string,
   at: { variant: string; revision: PrototypeWebRevision; screen?: string },
   orientation: WebOrientation,
@@ -136,6 +159,7 @@ function renderView(
     orientation,
     mode: input.mode,
     nowMs: input.nowMs,
+    imageSlots: input.slots,
     ...(at.screen === undefined ? {} : { screen: at.screen }),
   });
   const view = el(
@@ -159,6 +183,7 @@ function renderView(
     ...(at.screen === undefined ? {} : { screen: at.screen }),
     html: toHtml(view),
     unsupported: still.unsupportedNodes,
+    draws: still.imageDraws,
     ...(still.stack ? { stack: still.stack } : {}),
   };
 }
@@ -168,7 +193,7 @@ function renderView(
  * (just one group without a multi-screen stack). The default portrait still finds the screens.
  */
 function renderViews(
-  input: PrototypeWebPageInput,
+  input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
   frame: string,
   variant: PrototypeWebVariant,
 ): RevisionViews[] {
@@ -347,18 +372,43 @@ function refuseOverBudget(limit: number, pinned: readonly RevisionViews[]): neve
   );
 }
 
+/** What the budget kept: revisions with their screens, and the inlined assets in slot order. */
+interface Budgeted {
+  readonly revisions: RevisionViews[];
+  readonly images: readonly string[];
+}
+
+/** Assets a revision's kept screens draw, in view and tree order, each once. */
+function drawnAssets(groups: readonly ScreenGroup[]): string[] {
+  return [
+    ...new Set(groups.flatMap((group) => group.flatMap((view) => view.draws.map((d) => d.asset)))),
+  ];
+}
+
 /**
- * The pinned revisions' start screens always; then their other screens while they fit; then older
- * revisions newest first, each while its start screen and history entry fit, followed by its other
- * screens while they fit. The budget is the page limit minus the shell (head, toolbar, script and
- * the pinned revisions' history entries), so it counts exactly what the final page holds.
+ * The pinned revisions' start screens always, then the images they draw; then their other screens
+ * and those screens' images while they fit; then older revisions newest first, each while its start
+ * screen and history entry fit, followed by its images, then its other screens and their images
+ * while they fit. Each image is charged once, as the page rule that inlines it; one that does not
+ * fit stays a placeholder. The shown revision's images go first among the pinned. The budget is the page
+ * limit minus the shell (head, toolbar, script and the pinned revisions' history entries), so it
+ * counts exactly what the final page holds.
  */
 function budgetedViews(
   input: PrototypeWebPageInput,
   revisions: readonly RevisionViews[],
   shellBytes: number,
-  pinned: Pinned,
-): RevisionViews[] {
+  {
+    pinned,
+    isShown,
+    rules,
+  }: {
+    readonly pinned: Pinned;
+    readonly isShown: (revision: RevisionViews) => boolean;
+    /** Each inlinable image's page rule by asset id, in slot order. */
+    readonly rules: ReadonlyMap<string, string>;
+  },
+): Budgeted {
   const limit = input.maxBytes ?? MAX_PROTOTYPE_WEB_PAGE_BYTES;
   let room = limit - shellBytes + HIDDEN_ATTRIBUTE_BYTES;
   const fits = (cost: number) => {
@@ -371,23 +421,72 @@ function budgetedViews(
   if (!fits(latest.reduce((sum, revision) => sum + groupBytes(revision.screens[0]!), 0))) {
     refuseOverBudget(limit, latest);
   }
+  const images = new Set<string>();
+  const considered = new Set<string>();
+  const addImages = (groups: readonly ScreenGroup[]) => {
+    for (const asset of drawnAssets(groups)) {
+      const rule = rules.get(asset);
+      if (rule !== undefined && !considered.has(asset)) {
+        considered.add(asset);
+        if (fits(Buffer.byteLength(rule))) {
+          images.add(asset);
+        }
+      }
+    }
+  };
   const kept = new Map(latest.map((revision) => [revision, [revision.screens[0]!]]));
-  const addScreens = (revision: RevisionViews) =>
-    kept
-      .get(revision)!
-      .push(...revision.screens.slice(1).filter((group) => fits(groupBytes(group))));
+  const addScreens = (revision: RevisionViews) => {
+    const added = revision.screens.slice(1).filter((group) => fits(groupBytes(group)));
+    kept.get(revision)!.push(...added);
+    addImages(added);
+  };
+  [...latest.filter(isShown), ...latest.filter((revision) => !isShown(revision))].forEach(
+    (revision) => addImages([revision.screens[0]!]),
+  );
   latest.forEach(addScreens);
   for (const revision of revisions.filter((entry) => !isPinned(entry))) {
     const history = historyEntryBytes(input, revision.variant, revision.revision);
     if (fits(groupBytes(revision.screens[0]!) + history)) {
       kept.set(revision, [revision.screens[0]!]);
+      addImages([revision.screens[0]!]);
       addScreens(revision);
     }
   }
   // Keep the page's own order: variants in input order, revisions newest first, start first.
-  return revisions
-    .filter((revision) => kept.has(revision))
-    .map((revision) => ({ ...revision, screens: kept.get(revision)! }));
+  return {
+    revisions: revisions
+      .filter((revision) => kept.has(revision))
+      .map((revision) => ({ ...revision, screens: kept.get(revision)! })),
+    images: [...rules.keys()].filter((asset) => images.has(asset)),
+  };
+}
+
+/**
+ * Every asset the rendered views draw with the boxes it is drawn in, in the order the budget
+ * considers images: the shown revision, the other pinned ones, then the rest newest first.
+ */
+function imageRequests(
+  revisions: readonly RevisionViews[],
+  isShown: (revision: RevisionViews) => boolean,
+  isPinned: (revision: RevisionViews) => boolean,
+  frame: string,
+): PrototypeWebImageRequest[] {
+  const screen = deviceFrameOrThrow(frame).screen;
+  const ordered = [
+    ...revisions.filter(isShown),
+    ...revisions.filter((revision) => isPinned(revision) && !isShown(revision)),
+    ...revisions.filter((revision) => !isPinned(revision)),
+  ];
+  const boxes = new Map<string, Map<string, WebImageBox>>();
+  for (const revision of ordered) {
+    for (const draw of revision.screens.flat().flatMap((view) => view.draws)) {
+      const box = webImageBox(draw, screen);
+      const forAsset = boxes.get(draw.asset) ?? new Map<string, WebImageBox>();
+      forAsset.set(JSON.stringify(box), box);
+      boxes.set(draw.asset, forAsset);
+    }
+  }
+  return [...boxes].map(([id, unique]) => ({ id, boxes: [...unique.values()] }));
 }
 
 /**
@@ -420,9 +519,22 @@ function chooseVariant(input: PrototypeWebPageInput): PrototypeWebVariant {
   return chosen;
 }
 
+/** Each image's inlining rule by asset id, in slot order; a repeated id keeps its first entry. */
+function imageRules(images: readonly PrototypeWebImage[]): Map<string, string> {
+  const rules = new Map<string, string>();
+  for (const image of images) {
+    if (!rules.has(image.id)) {
+      rules.set(image.id, webImageRule(rules.size, image));
+    }
+  }
+  return rules;
+}
+
 interface PageParts {
   readonly frame: PageFrame;
   readonly views: string;
+  /** Rules that inline the page's images, in slot order. */
+  readonly images?: string;
   readonly history: WebElement | undefined;
   readonly screens: ScreenPicker;
 }
@@ -430,10 +542,10 @@ interface PageParts {
 function pageHtml(
   input: PrototypeWebPageInput,
   first: { variant: PrototypeWebVariant; revision: number },
-  { frame, views, history, screens }: PageParts,
+  { frame, views, history, screens, images = "" }: PageParts,
 ): string {
   const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}">${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
-  const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}</style></head>`;
+  const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}${images}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
 
@@ -461,7 +573,14 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     input.variants.some(
       (entry) => entry.id === variant && entry.revisions.at(-1)?.revision === revision,
     );
-  const rendered = input.variants.flatMap((variant) => renderViews(input, frame, variant));
+  const rules = imageRules(input.images ?? []);
+  const slots = new Map([...rules.keys()].map((id, slot) => [id, slot]));
+  const rendered = input.variants.flatMap((variant) =>
+    renderViews({ ...input, slots }, frame, variant),
+  );
+  const isShown = (revision: RevisionViews) =>
+    revision.variant === chosen.id && revision.revision === shown.revision;
+  const isPinned = (revision: RevisionViews) => pinned(revision.variant, revision.revision);
   // The shell's picker lists every screen of the shown revision. A dropped screen removes an
   // option longer than the `hidden` attribute it may add, so the page never outgrows the budget.
   const shellBytes = Buffer.byteLength(
@@ -472,7 +591,9 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
       screens: pickerFor(rendered, shown),
     }),
   );
-  const revisions = budgetedViews(input, rendered, shellBytes, pinned);
+  const budgeted = budgetedViews(input, rendered, shellBytes, { pinned, isShown, rules });
+  const { revisions } = budgeted;
+  const inlined = new Set(budgeted.images);
   const views = revisions.flatMap((revision) => revision.screens.flat());
   const first = views.find(
     (view) =>
@@ -499,6 +620,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     views: viewsHtml,
     history: revisionHistory(input, (variant, revision) => kept.has(`${variant}\u0000${revision}`)),
     screens: pickerFor(revisions, shown),
+    images: budgeted.images.map((id) => rules.get(id)!).join(""),
   });
   const inlinedRevisions = Object.fromEntries(
     input.variants.map((variant) => [
@@ -512,7 +634,12 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     html,
     sha256: createHash("sha256").update(html).digest("hex"),
     frame,
-    unsupportedNodes: first.unsupported,
+    // An image whose asset the page inlined is drawn, not a placeholder.
+    unsupportedNodes: first.unsupported.filter(
+      (node) => !(node.reason === "assetOverBudget" && inlined.has(node.asset ?? "")),
+    ),
     inlinedRevisions,
+    imageRequests: imageRequests(rendered, isShown, isPinned, frame),
+    inlinedImages: budgeted.images,
   };
 }

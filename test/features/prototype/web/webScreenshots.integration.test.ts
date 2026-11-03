@@ -179,7 +179,7 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
     test(
       entry.name,
       async () => {
-        const { page, ...problems } = await openPage(browser, webScreenshotPage(entry));
+        const { page, ...problems } = await openPage(browser, await webScreenshotPage(entry));
         try {
           const first = await shownView(page);
           expect(first.count).toBe(1);

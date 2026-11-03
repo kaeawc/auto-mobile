@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PrototypeShownSpecs } from "../../src/features/prototype/PrototypeShownSpecs";
 import { PrototypeSpecRevisions } from "../../src/features/prototype/prototypeSpecRevisions";
 import {
+  cachedPrototypeWebAssets,
   prototypeWebNotificationsSettled,
   registerPrototypeResources,
 } from "../../src/server/prototypeResources";
@@ -206,5 +207,55 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
     expect(request("resources/read", { uri: "automobile:prototype/nope/web" })).rejects.toThrow(
       "Known prototypes: checkout.",
     );
+  });
+});
+
+describe("web page images from the host asset cache (#16533)", () => {
+  const cache = {
+    get: async (serial: string, id: string) =>
+      serial === "pixel" && id === "hero"
+        ? { id, mimeType: "image/png" as const, bytes: Uint8Array.of(1) }
+        : undefined,
+  };
+
+  test("reads an asset from the first device showing a variant that cached it", async () => {
+    const devices: Record<string, string[]> = { a: ["sim"], b: ["pixel", "sim"] };
+    const source = cachedPrototypeWebAssets((id) => devices[id] ?? [], cache)(["a", "b"]);
+    expect((await source.get("hero"))?.mimeType).toBe("image/png");
+    expect(await source.get("other")).toBeUndefined();
+    expect(await cachedPrototypeWebAssets(() => [], cache)(["a"]).get("hero")).toBeUndefined();
+  });
+
+  test("the web resource inlines a cached asset the page draws", async () => {
+    const before = ResourceRegistry.snapshotForTesting();
+    ResourceRegistry.clearServersForTesting();
+    const store = new PrototypeSpecRevisions(new FakeTimer());
+    const shown = new PrototypeShownSpecs(store);
+    registerPrototypeResources(undefined, {
+      revisions: store,
+      rendererVersion: () => "v",
+      images: {
+        assets: cachedPrototypeWebAssets((id) => shown.devicesShowing(id), cache),
+        encoder: { encode: async () => ({ bytes: Uint8Array.of(7), width: 2, height: 1 }) },
+      },
+    });
+    const fake = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(fake);
+    try {
+      const ticket = shown.beginShow("pixel", "checkout", true, "android");
+      shown.endShow("pixel", ticket, {
+        id: "checkout",
+        spec: { id: "checkout", root: { type: "image", asset: "hero" } },
+      });
+      const handler = fake.server.handlersBySchema.get("resources/read")!;
+      const read = (await handler(
+        { params: { uri: URI } },
+        { mcpReq: { signal: new AbortController().signal } },
+      )) as { contents: { text: string }[] };
+      expect(read.contents[0]!.text).toContain("--pa-0:url(data:image/webp;base64,Bw==)");
+    } finally {
+      ResourceRegistry.clearServersForTesting();
+      ResourceRegistry.restoreForTesting(before);
+    }
   });
 });

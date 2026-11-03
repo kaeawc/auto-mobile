@@ -37,13 +37,20 @@ import {
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { webImageRenderer, type WebImageDraw } from "./webImages";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
   readonly type: string;
   readonly id?: string;
   readonly path: string;
-  readonly reason: "unsupportedType" | "assetNotInlined";
+  /**
+   * `assetNotInlined`: the host has no bytes for the asset; `assetOverBudget`: it has them, but the
+   * page's 2 MiB budget left no room for them.
+   */
+  readonly reason: "unsupportedType" | "assetNotInlined" | "assetOverBudget";
+  /** The asset an `image` node draws, once bound. */
+  readonly asset?: string;
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -73,6 +80,10 @@ export interface WebRenderScope {
   readonly stacks?: WebStackScreens[];
   /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
   readonly layers: WebElement[];
+  /** Encoded assets the page may inline, by asset id, to the CSS slot that would hold them. */
+  readonly imageSlots?: ReadonlyMap<string, number>;
+  /** Collects every image drawn with a bound asset, so the page can size and inline it. */
+  readonly imageDraws?: WebImageDraw[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
@@ -454,20 +465,7 @@ const icon: NodeRenderer = (node, scope) => {
   ]);
 };
 
-const image: NodeRenderer = (node, scope, path) => {
-  scope.unsupported.push({
-    type: "image",
-    ...(typeof node.id === "string" ? { id: node.id } : {}),
-    path,
-    reason: "assetNotInlined",
-  });
-  const { attrs, style } = base(node, scope, {
-    "background-color": cssColor("surfaceVariant", scope.style) ?? "#e7e0ec",
-    "min-height": "48px",
-    "min-width": "48px",
-  });
-  return el("div", { attrs: { ...attrs, role: "img" }, style });
-};
+const image = webImageRenderer({ base, bound });
 
 function roleCss(
   scope: WebRenderScope,

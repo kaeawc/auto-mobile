@@ -163,3 +163,18 @@ test("a sheet leaves the status area on the screen background", () => {
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
+
+test("a root padded by the top safe area keeps its own colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "padded",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#ffffff" },
+      safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+      children: [{ type: "topAppBar", title: "Inbox", style: { background: "#1d1b20" } }],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});

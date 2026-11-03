@@ -90,7 +90,8 @@ function opaqueBackground(element: WebElement): string | undefined {
 /**
  * The app's top colour: the innermost opaque background along the content's leading children that
  * spans the screen, since it paints over its ancestors (a top app bar over a root column), else
- * `fallback` (the screen background).
+ * `fallback` (the screen background). The walk stops at an element padded by the top safe area,
+ * whose children start below the status bar.
  */
 export function appTopColor(content: WebChild, fallback: string): string {
   let top = fallback;
@@ -98,7 +99,9 @@ export function appTopColor(content: WebChild, fallback: string): string {
   for (let depth = 0; depth < 32 && current !== undefined && typeof current !== "string"; depth++) {
     const background = depth === 0 || stretches(current) ? opaqueBackground(current) : undefined;
     top = background ?? top;
-    current = current.children.find((child) => typeof child !== "string");
+    // Top safe-area padding moves the children below the status area, so this background shows.
+    const clears: boolean = current.style["padding-top"]?.includes("--safe-top") ?? false;
+    current = clears ? undefined : current.children.find((child) => typeof child !== "string");
   }
   return top;
 }

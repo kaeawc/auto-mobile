@@ -57,8 +57,8 @@ interface PrototypeChannelSink {
  * any thread; their callbacks go through one ordered inbox so frames keep their order, and every
  * effect reaches the [sink] under a single lock.
  *
- * Attempts reset once a connection has stayed open for [stableOpenMs], so a server that accepts and
- * drops at once still backs off. Sends made while connecting or reconnecting wait in a bounded
+ * Attempts reset once a connection has stayed open for [STABLE_OPEN_MS], so a server that accepts
+ * and drops at once still backs off. Sends made while connecting or reconnecting wait in a bounded
  * queue that is flushed on open and dropped when the channel closes.
  */
 @InternalAutoMobilePrototypeApi
@@ -70,7 +70,6 @@ class PrototypeChannelController(
   private val scope: CoroutineScope,
   private val random: Random = Random.Default,
   private val newId: () -> String,
-  private val stableOpenMs: Long = STABLE_OPEN_MS,
 ) {
   private class Slot(val id: String, val declaration: PrototypeChannelDeclaration) {
     var status = PrototypeChannelStatus.IDLE
@@ -131,7 +130,8 @@ class PrototypeChannelController(
       publish(slot)
       // A changed channel keeps its state: only live ones reconnect, and only a newly declared
       // channel connects on show.
-      if (live || (previous == null && started && declaration.connectOnShow)) connect(slot)
+      val newOnShow = previous == null && started && declaration.connectOnShow
+      if (live || newOnShow) connect(slot)
     }
   }
 
@@ -270,7 +270,7 @@ class PrototypeChannelController(
     setStatus(slot, PrototypeChannelStatus.OPEN)
     while (slot.queue.isNotEmpty()) slot.connection?.send(slot.queue.removeFirst())
     slot.timer =
-      timer(stableOpenMs) {
+      timer(STABLE_OPEN_MS) {
         if (slot.generation == generation && slot.attempt != 0) {
           slot.attempt = 0
           publish(slot)

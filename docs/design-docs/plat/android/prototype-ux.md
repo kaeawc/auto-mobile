@@ -3967,6 +3967,11 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   `width` (1 to 16) and `color`.
 - `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
   path that receives the settled camera.
+- Every `emit` a marker tap runs, including those in its nested `onSuccess`, `onError` and `startTimer`
+  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context after the authored
+  entries, under the same byte budget. The contract lists the name in
+  `platformModules.map.events.markerTap.emitContext`. All three validators refuse an authored
+  `context.markerId` inside `onMarkerTap`. Outside it, `markerId` is an ordinary context name.
 - `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
   and the `location` permission in `requires.permissions`.
 - The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a

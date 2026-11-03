@@ -80,16 +80,18 @@
                 "call": "audioRecorder.stop",
                 "args": {},
                 "into": "/data/note",
-                "statusKey": "recStatus"
-              },
-              {
-                "type": "emit",
-                "name": "voice_note_recorded"
-              },
-              {
-                "type": "push",
-                "stack": "nav",
-                "screen": "review"
+                "statusKey": "recStatus",
+                "onSuccess": [
+                  {
+                    "type": "emit",
+                    "name": "voice_note_recorded"
+                  },
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "review"
+                  }
+                ]
               }
             ]
           },

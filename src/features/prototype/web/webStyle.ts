@@ -43,9 +43,14 @@ const SHAPE_TOKENS: Readonly<Record<string, number>> = {
   full: 9999,
 };
 
+/** A resolved colour as a CSS `rgba()` string, alpha rounded to three places. */
+export function rgbaCss(color: Rgba): string {
+  return `rgba(${color.r},${color.g},${color.b},${Number(color.a.toFixed(3))})`;
+}
+
 export function cssColor(value: unknown, context: WebStyleContext): string | undefined {
   const color = resolvePrototypeColor(value, context.mode, context.palette);
-  return color ? `rgba(${color.r},${color.g},${color.b},${Number(color.a.toFixed(3))})` : undefined;
+  return color ? rgbaCss(color) : undefined;
 }
 
 function dimension(css: Css, axis: "width" | "height", value: unknown, context: WebStyleContext) {

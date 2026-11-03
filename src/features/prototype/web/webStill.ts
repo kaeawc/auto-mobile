@@ -54,7 +54,7 @@ const LAYER = {
   "align-items": "flex-start",
 };
 
-function sheetWindow(placement: Raw, children: WebElement[]): WebElement {
+function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): WebElement {
   const height = typeof placement.height === "number" ? placement.height : 0;
   const sheet = el(
     "div",
@@ -66,6 +66,8 @@ function sheetWindow(placement: Raw, children: WebElement[]): WebElement {
         // A sheet spans the screen width (native MATCH_PARENT); its content keeps start alignment.
         "align-self": "stretch",
         height: `${height}px`,
+        // Layers cover this region, not the whole screen.
+        ...(layered ? { position: "relative" } : {}),
       },
     },
     children,
@@ -119,8 +121,12 @@ function sizedRoot(spec: unknown): unknown {
  * The window's content with the spec's explicit layout direction, so rows, start/end alignment and
  * logical padding follow it; the device chrome around it is never mirrored.
  */
-function placed(spec: unknown, content: WebElement | undefined): WebElement {
-  const window = placedWindow(spec, content);
+function placed(
+  spec: unknown,
+  content: WebElement | undefined,
+  layers: readonly WebElement[],
+): WebElement {
+  const window = placedWindow(spec, content, layers);
   const direction = record(record(spec)?.window)?.layoutDirection;
   if (direction !== "rtl" && direction !== "ltr") {
     return window;
@@ -137,11 +143,16 @@ function placed(spec: unknown, content: WebElement | undefined): WebElement {
   };
 }
 
-function placedWindow(spec: unknown, content: WebElement | undefined): WebElement {
+/** The window region holds the content, then its layers; a floating window's transform anchors them. */
+function placedWindow(
+  spec: unknown,
+  content: WebElement | undefined,
+  layers: readonly WebElement[],
+): WebElement {
   const placement = record(record(record(spec)?.window)?.placement) ?? {};
-  const children = content ? [content] : [];
+  const children = [...(content ? [content] : []), ...layers];
   if (placement.type === "sheet") {
-    return sheetWindow(placement, children);
+    return sheetWindow(placement, children, layers.length > 0);
   }
   if (placement.type === "floating") {
     return floatingWindow(placement, children);
@@ -175,6 +186,7 @@ function stillScope(
     screenWidth: screenSize(frame, options.orientation ?? "portrait").width,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
+    layers: [],
   };
 }
 
@@ -207,7 +219,7 @@ export function renderPrototypeStill(
     frame,
     options.orientation ?? "portrait",
     { dark, textColor, background: screenBackground(scope.style) },
-    placed(expanded, root),
+    placed(expanded, root, scope.layers),
   );
   const stack = scope.stacks?.[0];
   return {

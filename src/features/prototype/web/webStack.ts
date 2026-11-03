@@ -2,7 +2,7 @@ import { record, type Raw } from "../prototypeTemplate";
 import { el } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 
-/** The outermost stack a still drew: its screens in authored order and the one it drew. */
+/** The outermost stack a still drew: its screens in key order and the one it drew. */
 export interface WebStackScreens {
   readonly start: string;
   readonly screens: readonly string[];

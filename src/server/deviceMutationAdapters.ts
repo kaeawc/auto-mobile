@@ -9,13 +9,14 @@ import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import { appLocaleJournalKey } from "../daemon/sessionBroker/appLocaleJournalKey";
+import { postedNotificationKey } from "../daemon/sessionBroker/mutations/postedNotification";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
 import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
-import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
+import { appFallback, lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
 import { orchestrationToolMutations } from "./deviceMutationOrchestrationAdapters";
 import {
   deviceConditionSkewsClock,
@@ -272,7 +273,22 @@ function familyToolMutations(
 function namedToolMutations(
   name: string,
   args: Record<string, unknown>,
+  platform?: Platform,
 ): ToolMutation[] | undefined {
+  // An image upload overwrites shared storage cleaning does not restore, so it keeps the tool row.
+  const posted =
+    name === "postNotification" &&
+    platform === "android" &&
+    typeof args.appId === "string" &&
+    args.imagePath === undefined
+      ? postedNotificationKey(args.appId)
+      : undefined;
+  if (posted !== undefined) {
+    // The named app's SDK receiver posts it; force-stopping that app cancels it (#14364). Posting
+    // also persists a notification channel, which only uninstalling a session-installed app
+    // removes, so the app fallback stays unless the session installed the app.
+    return [mutation("notification", posted), appFallback("postNotification", args.appId)];
+  }
   if (name === "rotate") {
     return rotationMutations(args);
   }
@@ -306,7 +322,7 @@ export function deviceToolMutations(
     // A notJournaled tool changes no device state a later session could observe (#14359).
     return [];
   }
-  const named = namedToolMutations(name, args);
+  const named = namedToolMutations(name, args, platform);
   if (named !== undefined) {
     return named;
   }

@@ -225,6 +225,39 @@ describe("AndroidDeviceMutationResetPort", () => {
     ).rejects.toThrow("failed to confirm success");
   });
 
+  describe("posted notification rows (#14364)", () => {
+    const posted = (key = "posted:com.example.probe", prior: MutationValue = ABSENT) =>
+      mutation("notification", key, prior);
+
+    test("force-stops the app on every user and reads back that none of its notifications remain", async () => {
+      adb.setCommandResponse(
+        "shell sh -c",
+        createExecResult("posted-notifications-cancelled\n", ""),
+      );
+      await port.revert(posted(), context);
+      const commands = adb.getExecutedCommands();
+      expect(commands[0]).toBe("shell am force-stop 'com.example.probe'");
+      expect(commands).toHaveLength(2);
+      expect(commands[1]).toStartWith("shell sh -c ");
+      expect(commands[1]).toContain("cmd notification list");
+      expect(commands[1]).toContain(shellQuote("|com.example.probe|"));
+    });
+
+    test("a read-back without the marker fails the revert", async () => {
+      adb.setCommandResponse("shell sh -c", createExecResult("", ""));
+      await expect(port.revert(posted(), context)).rejects.toThrow("failed to confirm success");
+    });
+
+    test("any prior is revertible; a key without a package name is not", () => {
+      expect(port.canRevert(posted("posted:com.example.probe", { state: "unobservable" }))).toBe(
+        true,
+      );
+      expect(port.canRevert(posted("tool:postNotification"))).toBe(false);
+      expect(port.canRevert(posted("posted:not a package"))).toBe(false);
+      expect(port.canRevert(posted("posted:com.example;reboot"))).toBe(false);
+    });
+  });
+
   describe("setPreference systemProperty rows (#15792)", () => {
     const propertyKey = (key: string, overrides: Record<string, unknown> = {}) =>
       JSON.stringify({

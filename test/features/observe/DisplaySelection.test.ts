@@ -3,7 +3,7 @@ import {
   resolveTargetDisplay,
   validateDisplayPin,
 } from "../../../src/features/observe/DisplaySelection";
-import type { DeviceDisplays } from "../../../src/models/DisplayPanel";
+import { isPhysicalPanel, type DeviceDisplays } from "../../../src/models/DisplayPanel";
 
 const displays: DeviceDisplays = {
   panels: [
@@ -147,5 +147,29 @@ describe("overlay displays (#13138)", () => {
     expect(resolveTargetDisplay(withOverlay, undefined, { displayPin: "overlay" }).key).toBe(
       "overlay:1",
     );
+  });
+});
+
+describe("virtual displays (#16462)", () => {
+  const virtualKey = "virtual:com.example.app:Presentation";
+  const withVirtual: DeviceDisplays = {
+    panels: [
+      { key: "phone-id", role: "unknown", sizePx: { width: 100, height: 200 } },
+      { key: virtualKey, role: "virtual", sizePx: { width: 128, height: 72 } },
+    ],
+    postures: ["unknown"],
+  };
+
+  test("are addressable by key, role and pin", () => {
+    expect(resolveTargetDisplay(withVirtual, virtualKey, {}).key).toBe(virtualKey);
+    expect(resolveTargetDisplay(withVirtual, "virtual", {}).key).toBe(virtualKey);
+    expect(validateDisplayPin(withVirtual, "virtual")).toBe("virtual");
+  });
+
+  test("are never the inventory-order fallback or a physical panel", () => {
+    expect(resolveTargetDisplay(withVirtual, "active", {}).key).toBe("phone-id");
+    expect(withVirtual.panels.filter(isPhysicalPanel).map((panel) => panel.key)).toEqual([
+      "phone-id",
+    ]);
   });
 });

@@ -88,17 +88,19 @@ function twoPanes(first: WebElement, second: WebElement): WebChild[] {
 
 /**
  * List-detail: an expanded window shows both panes; otherwise the detail pane replaces the list
- * once the selection key holds a value, with a Back button above it.
+ * once the selection key holds a value, with a Back button above it. A slot is rendered only when
+ * its pane shows, so a hidden pane's open sheet adds no layer.
  */
 function listDetail(ctx: AdaptiveContext): WebChild[] {
   const selected = stateValue(ctx.node.selectionKey, ctx);
   const hasSelection = selected !== undefined && selected !== null && selected !== "";
-  const list = pane("list", {}, slot("list", ctx));
+  const list = () => pane("list", {}, slot("list", ctx));
   if (webWidthClass(ctx.scope.screenWidth) === "expanded") {
-    return twoPanes(list, pane("detail", {}, slot("detail", ctx)));
+    return twoPanes(list(), pane("detail", {}, slot("detail", ctx)));
   }
   if (!hasSelection) {
-    return [{ ...list, style: { ...list.style, flex: "1 1 auto" } }];
+    const only = list();
+    return [{ ...only, style: { ...only.style, flex: "1 1 auto" } }];
   }
   const back = textButton("Back", `${testTagOf(ctx, ctx.path)}.back`, ctx);
   return [pane("detail", { flex: "1 1 auto" }, [back, ...slot("detail", ctx)])];
@@ -106,19 +108,23 @@ function listDetail(ctx: AdaptiveContext): WebChild[] {
 
 /**
  * Supporting pane: closed, only the main pane; open, an expanded window shows both, and a smaller
- * one shows the supporting pane alone. The supporting pane starts with a Close button.
+ * one shows the supporting pane alone. The supporting pane starts with a Close button. A slot is
+ * rendered only when its pane shows.
  */
 function supporting(ctx: AdaptiveContext): WebChild[] {
   const open = stateValue(ctx.node.openKey, ctx) === true;
-  const main = pane("main", {}, slot("main", ctx));
+  const main = () => pane("main", {}, slot("main", ctx));
   if (!open) {
-    return [{ ...main, style: { ...main.style, flex: "1 1 auto" } }];
+    const only = main();
+    return [{ ...only, style: { ...only.style, flex: "1 1 auto" } }];
   }
   const close = textButton("Close", `${testTagOf(ctx, ctx.path)}.close`, ctx);
+  const expanded = webWidthClass(ctx.scope.screenWidth) === "expanded";
+  const shown = expanded ? [main()] : [];
   const side = pane("supporting", {}, [close, ...slot("supporting", ctx)]);
-  if (webWidthClass(ctx.scope.screenWidth) === "expanded") {
+  if (expanded) {
     return [
-      { ...main, style: { ...main.style, flex: "1 1 0" } },
+      { ...shown[0]!, style: { ...shown[0]!.style, flex: "1 1 0" } },
       el("div", { attrs: { "data-part": "spacer" }, style: { flex: `0 0 ${PANE_SPACER_DP}px` } }),
       { ...side, style: { ...side.style, flex: `0 0 ${PANE_DP}px` } },
     ];

@@ -298,6 +298,41 @@ describe("adaptive", () => {
   });
 });
 
+describe("adaptive hidden panes", () => {
+  const sheet = {
+    type: "bottomSheet",
+    openWhen: { key: "sheet", equals: true },
+    detents: ["half"],
+    child: { type: "text", text: "Sheet" },
+  };
+  const layers = (root: Spec, state: Spec, options: PrototypeStillOptions = {}) =>
+    byAttr(
+      still(rootOf(root, { state: { sheet: true, ...state } }), options).element,
+      "data-node",
+    ).filter((element) => element.attrs["data-node"] === "bottomSheet").length;
+
+  test("a hidden list or main pane adds no sheet layer", () => {
+    const listDetail = {
+      type: "adaptive",
+      kind: "listDetail",
+      selectionKey: "selection",
+      list: sheet,
+      detail: { type: "text", text: "Detail" },
+    };
+    expect(layers(listDetail, { selection: "" })).toBe(1);
+    expect(layers(listDetail, { selection: "a" })).toBe(0);
+    const supportingPane = {
+      type: "adaptive",
+      kind: "supporting",
+      openKey: "open",
+      main: sheet,
+      supporting: { type: "text", text: "Side" },
+    };
+    expect(layers(supportingPane, { open: false })).toBe(1);
+    expect(layers(supportingPane, { open: true })).toBe(0);
+  });
+});
+
 describe("swipe actions", () => {
   test("a list item keeps its swipe actions as hidden edge panels", () => {
     const { rendered, found } = nodes(fixture("swipe-actions-list-item"), "listItem");

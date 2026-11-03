@@ -20,12 +20,21 @@ const FOCUS_RING = {
   "box-shadow": "0 0 0 5px rgba(0, 0, 0, 0.6)",
 } as const;
 
-function isFocusable(element: WebElement): boolean {
-  return (
-    element.attrs["data-node"] !== undefined &&
-    FOCUSABLE_ROLES.has(element.attrs.role ?? "") &&
-    element.attrs["aria-disabled"] !== "true"
-  );
+/**
+ * A spec node with a focusable role, or an item of a spec node's tab list: `tabBar` and
+ * `bottomNav` draw their items as `role="tab"` children without a node annotation of their own.
+ */
+function isFocusable(element: WebElement, inTablist: boolean): boolean {
+  const role = element.attrs.role ?? "";
+  const target =
+    element.attrs["data-node"] !== undefined
+      ? FOCUSABLE_ROLES.has(role)
+      : inTablist && role === "tab";
+  return target && element.attrs["aria-disabled"] !== "true";
+}
+
+function isSpecTablist(element: WebElement): boolean {
+  return element.attrs["data-node"] !== undefined && element.attrs.role === "tablist";
 }
 
 function marked(element: WebElement): WebElement {
@@ -37,15 +46,16 @@ function marked(element: WebElement): WebElement {
 }
 
 /** Depth-first, document order; `found` flips once the first focusable node is marked. */
-function walk(child: WebChild, state: { found: boolean }): WebChild {
+function walk(child: WebChild, state: { found: boolean }, inTablist = false): WebChild {
   if (typeof child === "string" || state.found) {
     return child;
   }
-  if (isFocusable(child)) {
+  if (isFocusable(child, inTablist)) {
     state.found = true;
     return marked(child);
   }
-  const children = child.children.map((grandchild) => walk(grandchild, state));
+  const tablist = inTablist || isSpecTablist(child);
+  const children = child.children.map((grandchild) => walk(grandchild, state, tablist));
   return state.found ? { ...child, children } : child;
 }
 

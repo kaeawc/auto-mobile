@@ -39,6 +39,18 @@ describe("markInitialFocus (#16446)", () => {
     expect(ringed(markInitialFocus(tree))).toEqual(["textField"]);
   });
 
+  test("an item of a spec tab list takes focus; a stray tab outside one does not", () => {
+    const tab = (label: string) => el("div", { attrs: { role: "tab" } }, [label]);
+    const tablist = el("div", { attrs: { "data-node": "tabBar", role: "tablist" } }, [
+      tab("first"),
+      tab("second"),
+    ]);
+    const marked = markInitialFocus(el("div", {}, [tab("stray"), tablist]));
+    const items = (marked.children[1] as WebElement).children as WebElement[];
+    expect(items.map((item) => item.attrs["data-focus"] ?? "none")).toEqual(["ring", "none"]);
+    expect((marked.children[0] as WebElement).attrs["data-focus"]).toBeUndefined();
+  });
+
   test("each focusable role can take focus", () => {
     for (const role of ["button", "checkbox", "switch", "slider", "tab", "textbox"]) {
       expect(ringed(markInitialFocus(el("div", {}, [node(role, role)])))).toEqual([role]);

@@ -69,7 +69,8 @@ posture lights and how the hinge splits it.
   behaviour. A watch is `compact` and has no landscape view.
 - **TV.** A TV frame has no bezel padding beyond its stand, no status or navigation bar and
   `input: "dpad"`. On a `dpad` frame the renderer marks the first focusable node (a spec node
-  whose role is button, checkbox, switch, slider, tab or text box, and not disabled) with a focus
+  whose role is button, checkbox, switch, slider, tab or text box, or an item of a `tabBar` or
+  `bottomNav`, and not disabled) with a focus
   ring, because a 10-foot UI with no focus is not a usable preview. A TV is landscape only.
 - **Orientation.** A watch draws only portrait; a TV or car draws only landscape and its page opens
   there. Every frame records its geometry in portrait, so a landscape-only frame is its portrait

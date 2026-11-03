@@ -35,6 +35,27 @@ describe("still on watch, TV and car frames (#16446)", () => {
     }
   });
 
+  test("tabBar and bottomNav items take initial focus from the real renderer output", () => {
+    for (const type of ["tabBar", "bottomNav"]) {
+      const nav = {
+        id: "nav",
+        window: { placement: { type: "fullscreen" } },
+        root: {
+          type: "column",
+          children: [
+            { type: "text", text: "Home" },
+            { type: type, items: [{ label: "Movies" }, { label: "Shows" }] },
+            { type: "button", label: "Play" },
+          ],
+        },
+      };
+      const { element } = renderPrototypeStill(nav, { frame: "android-tv-1080p" });
+      const rings = ringed(element);
+      expect(rings.map((node) => node.attrs.role)).toEqual(["tab"]);
+      expect(JSON.stringify(rings[0])).toContain("Movies");
+    }
+  });
+
   test("touch and rotary frames draw no focus ring", () => {
     for (const frame of ["pixel-9", "iphone-16", "wearos-small-round", "car-1024p-landscape"]) {
       expect(ringed(renderPrototypeStill(spec, { frame }).element)).toEqual([]);

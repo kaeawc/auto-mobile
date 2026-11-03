@@ -87,7 +87,12 @@ function line(
   if (typeof text !== "string") {
     return [];
   }
-  const css: Css = { ...textCss({ textStyle }, scope.style), color: role(colorRole, scope) };
+  // Authored and bound newlines break the line, as a device Text does.
+  const css: Css = {
+    ...textCss({ textStyle }, scope.style),
+    color: role(colorRole, scope),
+    "white-space": "pre-wrap",
+  };
   return [el("div", { attrs: { "data-part": textStyle }, style: css }, [kit.bound(text, scope)])];
 }
 
@@ -198,7 +203,10 @@ function snackbarLayer(node: Raw, scope: WebRenderScope, _path: string, kit: Web
   });
   const text = el(
     "span",
-    { attrs: { "data-part": "text" }, style: { flex: "1 1 auto", padding: "14px 0" } },
+    {
+      attrs: { "data-part": "text" },
+      style: { flex: "1 1 auto", padding: "14px 0", "white-space": "pre-wrap" },
+    },
     [kit.bound(node.text, scope)],
   );
   const snackbar = el("div", { attrs: { ...attrs, "data-part": "snackbar" }, style }, [

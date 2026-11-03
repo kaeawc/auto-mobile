@@ -204,4 +204,14 @@ describe("web still snackbar (#16536)", () => {
     );
     expect(parts).toEqual(["dialogLayer", "snackbarLayer"]);
   });
+
+  test("modal text keeps authored newlines", () => {
+    const still = renderPrototypeStill(
+      specWith([dialog({ title: "One\nTwo", text: "A\nB" }), snackbar({ text: "X\nY" })]),
+    );
+    for (const part of ["headlineSmall", "bodyMedium", "text"]) {
+      expect(byPart(still.element, part)[0]!.style["white-space"]).toBe("pre-wrap");
+    }
+    expect(textOf(byPart(still.element, "headlineSmall")[0]!)).toBe("One\nTwo");
+  });
 });

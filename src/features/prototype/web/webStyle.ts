@@ -60,13 +60,16 @@ export const ROW_BOUND_KEY = "webRowBound";
 
 /**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
- * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one.
+ * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
+ * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
+ * remains.
  */
 export interface RowMeasure {
   readonly take?: true;
   readonly zero?: true;
   readonly shrink?: number;
   readonly basis?: number;
+  readonly later?: true;
 }
 
 function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
@@ -77,6 +80,28 @@ function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
     css.width = px(basis);
   }
   css["flex-shrink"] = String(shrink);
+}
+
+/**
+ * A later sibling's authored `minWidth`, folded into its width (`max(width, minWidth)`) with
+ * `min-width: 0`. Android's `sizeIn` intersects the minimum with the width the row has left, so the
+ * sibling still gets its minimum while width remains but gives it all up, down to zero, before the
+ * capped aspect ratio does. A CSS `min-width` would hold against flex shrinking and reserve the
+ * width ahead of the cap. A content or `fill` width has no px value, so it folds through
+ * `calc-size()`.
+ */
+function laterMinWidth(css: Css, style: Raw, min: number, basis: unknown) {
+  css["min-width"] = "0";
+  const dp = record(style.width)?.dp;
+  if (typeof basis === "number" || typeof dp === "number") {
+    const width = px(Math.max(typeof basis === "number" ? basis : (dp as number), min));
+    css.width = width;
+    if (typeof basis === "number") {
+      css["flex-basis"] = width;
+    }
+    return;
+  }
+  css.width = `calc-size(max-content, max(size, ${px(min)}))`;
 }
 
 /** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
@@ -90,6 +115,10 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
   if (typeof measure.shrink === "number") {
     rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (measure.later === true && typeof style.minWidth === "number") {
+    laterMinWidth(css, style, style.minWidth, measure.basis);
+    return;
   }
   if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
     css["min-width"] = "0";

@@ -605,10 +605,14 @@ export function assertCreatableRequirements(
       "requires.playStore applies to Android emulators only: no device was created. Remove it for an iOS request.",
     );
   }
-  if (
-    criteria.requires?.vehicle?.motion !== undefined &&
-    (criteria.platform !== "android" || criteria.formFactor !== "automotive")
-  ) {
+  assertCreatableVehicleRequirement(criteria);
+}
+
+function assertCreatableVehicleRequirement(criteria: DeviceMatchCriteria): void {
+  if (criteria.requires?.vehicle?.motion === undefined) {
+    return;
+  }
+  if (criteria.platform !== "android" || criteria.formFactor !== "automotive") {
     throw new ActionableError(
       "requires.vehicle applies to Android Automotive emulators only: no device was created. " +
         "Pass platform 'android' and formFactor 'automotive', or remove requires.vehicle.",

@@ -1,5 +1,12 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.util.Log
+import android.widget.Toast
 import dev.jasonpearson.automobile.prototype.PrototypeLoadError
 
 /**
@@ -65,4 +72,24 @@ data class ViewerDiagnostics(
         "watchdog-tripped: $watchdogTripped",
       )
       .joinToString("\n")
+}
+
+internal fun Context.appVersionName(): String =
+  try {
+    packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+  } catch (error: PackageManager.NameNotFoundException) {
+    // Our own package always resolves; keep the action usable if it somehow does not.
+    Log.w("ProtoViewer", "Cannot read the app version", error)
+    "unknown"
+  }
+
+/** Puts [diagnostics] on the clipboard; Android 13+ confirms clipboard writes itself. */
+internal fun Context.copyDiagnostics(diagnostics: ViewerDiagnostics) {
+  val clipboard = getSystemService(ClipboardManager::class.java) ?: return
+  clipboard.setPrimaryClip(
+    ClipData.newPlainText(getString(R.string.diagnostics_label), diagnostics.format()),
+  )
+  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+    Toast.makeText(this, R.string.diagnostics_copied, Toast.LENGTH_SHORT).show()
+  }
 }

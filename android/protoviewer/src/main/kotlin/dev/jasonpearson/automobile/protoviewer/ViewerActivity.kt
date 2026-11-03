@@ -1,11 +1,8 @@
 package dev.jasonpearson.automobile.protoviewer
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -124,7 +121,7 @@ class ViewerActivity : ComponentActivity() {
         restarting,
         { lifecycleScope.launch { relaunch(false) } },
         { confirmReset = true },
-        { copyDiagnostics() },
+        { copyDiagnostics(diagnostics) },
       )
       // Spec dialogs, menus, dropdowns, sheets and anchored overlays are all in-window renderer
       // layers. Clip that whole surface, including its scrims, below the app-owned provenance.
@@ -209,34 +206,16 @@ class ViewerActivity : ComponentActivity() {
     ViewerLaunch.open(this, id, relaunch = true)
   }
 
-  internal fun diagnostics(): ViewerDiagnostics =
-    ViewerDiagnostics(
-      appVersion = appVersion(),
-      androidSdk = Build.VERSION.SDK_INT,
-      capabilities = AutoMobilePrototype.capabilities,
-      lastFailure = lastFailure,
-      watchdogTripped = watchdogTripped,
-    )
-
-  private fun appVersion(): String =
-    try {
-      packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
-    } catch (error: android.content.pm.PackageManager.NameNotFoundException) {
-      // Our own package always resolves; keep the action usable if it somehow does not.
-      Log.w("ProtoViewer", "Cannot read the app version", error)
-      "unknown"
-    }
-
-  private fun copyDiagnostics() {
-    val clipboard = getSystemService(ClipboardManager::class.java) ?: return
-    clipboard.setPrimaryClip(
-      ClipData.newPlainText(getString(R.string.diagnostics_label), diagnostics().format()),
-    )
-    // Android 13+ confirms clipboard writes itself; earlier versions show nothing.
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-      Toast.makeText(this, R.string.diagnostics_copied, Toast.LENGTH_SHORT).show()
-    }
-  }
+  // A property, not a function: detekt's TooManyFunctions caps this activity at 11.
+  internal val diagnostics: ViewerDiagnostics
+    get() =
+      ViewerDiagnostics(
+        appVersion = appVersionName(),
+        androidSdk = Build.VERSION.SDK_INT,
+        capabilities = AutoMobilePrototype.capabilities,
+        lastFailure = lastFailure,
+        watchdogTripped = watchdogTripped,
+      )
 
   override fun onResume() {
     super.onResume()

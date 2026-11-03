@@ -100,6 +100,47 @@ export function prototypeWebClockDelay(nowMs: number): number {
   return 60_000 - (((nowMs % 60_000) + 60_000) % 60_000);
 }
 
+/** The time source and timer the status bar clock runs on: the browser's in the page, a fake in tests. */
+export interface PrototypeWebClock {
+  now(): number;
+  schedule(run: () => void, ms: number): void;
+}
+
+/** The page's clock: the browser's own time and timers, since the page has no Timer seam to import. */
+export function prototypeWebBrowserClock(): PrototypeWebClock {
+  return {
+    now: () => Date.now(),
+    schedule: (run, ms) => void globalThis.setTimeout(run, ms),
+  };
+}
+
+/**
+ * Keeps every status bar clock (`[data-status="clock"]`) under `root` on the clock's local time:
+ * writes the text now and again at each minute boundary. Nothing is scheduled without a clock.
+ */
+export function prototypeWebStartClock(
+  root: { querySelectorAll(selector: string): Iterable<{ textContent: string | null }> },
+  clock: PrototypeWebClock,
+  format: {
+    readonly clockText: typeof prototypeWebClockText;
+    readonly clockDelay: typeof prototypeWebClockDelay;
+  },
+): void {
+  const marks = Array.from(root.querySelectorAll('[data-status="clock"]'));
+  if (marks.length === 0) {
+    return;
+  }
+  const tick = () => {
+    const now = clock.now();
+    const text = format.clockText(new Date(now));
+    marks.forEach((mark) => {
+      mark.textContent = text;
+    });
+    clock.schedule(tick, format.clockDelay(now));
+  };
+  tick();
+}
+
 /** The elements one turn moves. */
 export interface PrototypeWebTurnTargets {
   readonly from: HTMLElement | undefined;
@@ -148,11 +189,12 @@ export interface PrototypeWebRuntimeRules {
   readonly animateTurn: typeof prototypeWebAnimateTurn;
   readonly clockText: typeof prototypeWebClockText;
   readonly clockDelay: typeof prototypeWebClockDelay;
+  readonly startClock: typeof prototypeWebStartClock;
+  readonly browserClock: typeof prototypeWebBrowserClock;
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const { zoomScale, fitScale: fitted, wheelFactor, screenView, rotation, animateTurn } = rules;
-  const { clockText, clockDelay } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -302,18 +344,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   });
   viewport.addEventListener("dblclick", fitView);
   globalThis.addEventListener("resize", apply);
-  // Every view's status bar clock follows the browser clock, re-armed at each minute boundary.
-  const clocks = Array.from(doc.querySelectorAll<HTMLElement>('[data-status="clock"]'));
-  const tick = () => {
-    const now = Date.now();
-    const text = clockText(new Date(now));
-    clocks.forEach((clock) => {
-      clock.textContent = text;
-    });
-    setTimeout(tick, clockDelay(now));
-  };
-  if (clocks.length > 0) {
-    tick();
-  }
+  // Every view's status bar clock follows the browser clock (#16585).
+  rules.startClock(doc, rules.browserClock(), rules);
   apply();
 }

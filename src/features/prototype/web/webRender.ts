@@ -1040,6 +1040,10 @@ export function renderWebNode(
   }
   const { styled, scope: local } = prepared;
   const own: WebRenderScope = { ...local, ownInsets: safeAreaEdges(styled) };
+  const shaded = shaderFallback(styled, path);
+  if (shaded) {
+    own.unsupported.push(shaded);
+  }
   const layer = WEB_LAYER_RENDERERS[String(styled.type)];
   if (layer) {
     layer(styled, own, path);
@@ -1047,9 +1051,5 @@ export function renderWebNode(
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
   const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
-  const shaded = shaderFallback(styled, path);
-  if (shaded) {
-    own.unsupported.push(shaded);
-  }
   return withOverContentLayers(element, styled.style, own.style);
 }

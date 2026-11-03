@@ -142,6 +142,25 @@ describe("shadows and elevation (#16540)", () => {
   });
 });
 
+test("an open bottom sheet carries the layers too (#16540)", () => {
+  const still = stillOf(
+    {
+      type: "column",
+      children: [
+        {
+          type: "bottomSheet",
+          openWhen: { key: "open", equals: true },
+          style: { shadows: [{ color: "#000000", radius: 4, inner: true }] },
+          child: { type: "text", text: "sheet" },
+        },
+      ],
+    },
+    { state: { open: true } },
+  );
+  const [sheet] = find(still.element, (element) => element.attrs["data-part"] === "sheet");
+  expect((sheet!.children.at(-1) as WebElement).attrs["data-layer"]).toBe("innerShadow");
+});
+
 describe("glass (#16540)", () => {
   const glassy = { surface: "glass", glass: { tint: "#0000FF" } };
 
@@ -174,11 +193,11 @@ describe("glass (#16540)", () => {
 describe("fade edges (#16540)", () => {
   test("a still opens at the start, so only the trailing edge fades", () => {
     expect(fadeEdgesCss({ fadeEdges: { top: 8, bottom: 24 } }, context)).toEqual({
-      "mask-image": "linear-gradient(to top,rgba(0,0,0,0) 0,#000 24px)",
+      "mask-image": "linear-gradient(to top,rgba(0,0,0,0) 0,#000 min(24px,100%))",
     });
     expect(fadeEdgesCss({ fadeEdges: { top: 8 } }, context)).toEqual({});
     expect(fadeEdgesCss({ reverse: true, fadeEdges: { top: 8 } }, context)).toEqual({
-      "mask-image": "linear-gradient(to bottom,rgba(0,0,0,0) 0,#000 8px)",
+      "mask-image": "linear-gradient(to bottom,rgba(0,0,0,0) 0,#000 min(8px,100%))",
     });
   });
 
@@ -197,7 +216,7 @@ describe("fade edges (#16540)", () => {
       fadeEdges: { bottom: 12 },
       child: { type: "text", text: "rows" },
     });
-    expect(tagged(still, "list").style["mask-image"]).toContain("#000 12px");
+    expect(tagged(still, "list").style["mask-image"]).toContain("#000 min(12px,100%)");
   });
 });
 

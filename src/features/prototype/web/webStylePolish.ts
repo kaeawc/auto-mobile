@@ -232,7 +232,10 @@ export function fadeEdgesCss(node: Raw, context: WebStyleContext): Css {
     : field === "bottom"
       ? "to top"
       : "to bottom";
-  return { "mask-image": `linear-gradient(${toward},rgba(0,0,0,0) 0,#000 ${px(length)})` };
+  // Clamped to the viewport, as Android's prototypeFadeLine does, so the far edge stays opaque.
+  return {
+    "mask-image": `linear-gradient(${toward},rgba(0,0,0,0) 0,#000 min(${px(length)},100%))`,
+  };
 }
 
 /**

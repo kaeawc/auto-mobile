@@ -3,6 +3,7 @@ import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
 import type { WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor, rgbaCss, type WebStyleContext } from "./webStyle";
+import { withOverContentLayers } from "./webStylePolish";
 
 /**
  * A node drawn in the window's layer above the whole tree instead of in place. It appends what it
@@ -96,8 +97,8 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
     "max-height": "100%",
     "flex-shrink": "0",
   });
-  // An authored background that resolves paints the sheet; otherwise (none, a gradient the still
-  // does not draw, or an unresolved colour) it keeps the `surface` the devices fall back to.
+  // An authored background that resolves paints the sheet; otherwise (none, or an unresolved
+  // colour) it keeps the `surface` the devices fall back to, under any authored gradient.
   const style = base["background-color"]
     ? base
     : { ...base, "background-color": rgbaCss(roleColor("surface", scope.style)) };
@@ -111,10 +112,15 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
       "background-color": scrimCss(node.scrim, scope.style),
     },
   });
-  const sheet = el("div", { attrs: { ...attrs, "data-part": "sheet" }, style }, [
-    ...(node.dragHandle === false ? [] : [dragHandle(scope.style)]),
-    ...(content ? [content] : []),
-  ]);
+  // A gradient border and inner shadows paint over the sheet's content, as on any other node.
+  const sheet = withOverContentLayers(
+    el("div", { attrs: { ...attrs, "data-part": "sheet" }, style }, [
+      ...(node.dragHandle === false ? [] : [dragHandle(scope.style)]),
+      ...(content ? [content] : []),
+    ]),
+    node.style,
+    scope.style,
+  );
   return el("div", { attrs: { "data-part": "sheetLayer" }, style: { ...LAYER_CSS } }, [
     scrim,
     sheet,

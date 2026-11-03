@@ -33,8 +33,8 @@ let serial = 0;
 
 function harness(observe: SendKeysObserver = observer, initialIme = priorIme) {
   const device = { ...android, deviceId: `ime-span-10406-${++serial}` };
-  const h = createSendKeysHarness(device, observe);
   const timer = new FakeTimer();
+  const h = createSendKeysHarness(device, observe, timer);
   // Model selection across repeated captures, beyond the harness's two-read stub.
   let selectedIme = initialIme;
   const execute = h.adb.executeCommand.bind(h.adb);
@@ -107,9 +107,10 @@ test("three IME commands perform one light verification read each", async () => 
     success: true,
     completedCommands: 3,
   });
+  // One pre-activation baseline, then the existing per-command verification reads.
   // SendKeys also takes a terminal observation after the command span.
-  expect(reads.filter((read) => read?.hierarchyOnly)).toHaveLength(3);
-  expect(verifiedCommands).toEqual([1, 2, 3]);
+  expect(reads.filter((read) => read?.hierarchyOnly)).toHaveLength(4);
+  expect(verifiedCommands).toEqual([0, 1, 2, 3]);
 });
 
 // #10411 keeps one IME input session across consecutive type commands; the device must append
@@ -142,7 +143,7 @@ test("two multi-character IME types in one span append in order without a keyboa
   expect(result).toMatchObject({ success: true, completedCommands: 2 });
   expect(h.committed).toEqual(["abc", "def"]);
   expect(field()).toBe("abcdef");
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test("a second IME type that lands reversed in the span is a verification failure", async () => {
@@ -254,7 +255,7 @@ function modelDeviceSideRestore(h: ReturnType<typeof harness>) {
   return { priors, selectionsAtCommit };
 }
 
-test("IME span keeps the service active for three commits and restores only at the end", async () => {
+test("IME span keeps the service active for three commits and leaves restoration pending", async () => {
   const h = harness();
   const fake = modelDeviceSideRestore(h);
   const result = await h.action.execute([type("a"), type("b"), type("c")]);
@@ -262,7 +263,7 @@ test("IME span keeps the service active for three commits and restores only at t
   expect(fake.priors).toEqual([null, null, null]);
   expect(h.committed).toEqual(["a", "b", "c"]);
   expect(fake.selectionsAtCommit).toEqual([[activate], [activate], [activate]]);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test("failure on command k restores once and stops subsequent commands", async () => {
@@ -293,7 +294,7 @@ test("auto and IME key-event types leave restoration to the host", async () => {
   expect(result).toMatchObject({ success: true, completedCommands: 3 });
   expect(fake.priors).toEqual([null, null, null]);
   expect(h.committed).toEqual(["a", "b", "c"]);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test("an auto type falls back to key events before a host-restored IME commit", async () => {
@@ -312,7 +313,7 @@ test("an auto type falls back to key events before a host-restored IME commit", 
   expect(h.adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_A");
   expect(h.committed).toEqual(["b"]);
   expect(fake.priors).toEqual([null]);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test("IME, key, IME keeps the IME active while delivering the key", async () => {
@@ -327,7 +328,7 @@ test("IME, key, IME keeps the IME active while delivering the key", async () => 
   expect(result.success).toBe(true);
   expect(h.clientCalls).toEqual(["commit:a", "ime", "commit:b"]);
   expect(selectionsAtKey).toEqual([activate]);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test("IME, clear, IME uses the active input connection", async () => {
@@ -344,7 +345,7 @@ test("IME, clear, IME uses the active input connection", async () => {
   expect(result.success).toBe(true);
   expect(h.clientCalls).toEqual(["commit:a", "clearField", "commit:b"]);
   expect(selectionsAtClear).toEqual([activate]);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 /** A focused field whose text follows IME commits, the IME clear and key-event deletes. */
@@ -393,7 +394,7 @@ test("IME span clear uses the input connection when the capability is present", 
   expect(h.clientCalls).toEqual(["commit:a", "clearField", "commit:b"]);
   expect(h.deletes()).toEqual([]);
   expectNoAccessibilityClear(h);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
 
@@ -415,7 +416,7 @@ test("IME span clear on an older APK deletes with key events, never the accessib
   expect(selectionsAtDelete).toEqual([activate]);
   expect(h.field()).toBe("b");
   expectNoAccessibilityClear(h);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test.each(["ime", "auto", "imeKeyEvents"] as const)(
@@ -428,7 +429,7 @@ test.each(["ime", "auto", "imeKeyEvents"] as const)(
     expect(h.clientCalls).toEqual(["commit:a"]);
     expect(h.deletes().length).toBeGreaterThan(0);
     expectNoAccessibilityClear(h);
-    expect(h.selections()).toEqual([activate, restore]);
+    expect(h.selections()).toEqual([activate]);
   },
 );
 
@@ -470,7 +471,7 @@ test.each(["ime", "auto", "imeKeyEvents"] as const)(
     );
     expect(calls[0]).toEqual(["", null, undefined, { delivery: "clearField" }]);
     expect(h.clientCalls).toEqual(["clearField", "commit:a"]);
-    expect(h.selections()).toEqual([activate, restore]);
+    expect(h.selections()).toEqual([activate]);
   },
 );
 
@@ -491,7 +492,7 @@ test.each([undefined, "auto", "ime"] as const)(
     expect(h.field()).toBe("");
     expect(h.deletes()).toEqual([]);
     expectNoAccessibilityClear(h);
-    expect(h.selections()).toEqual([activate, restore]);
+    expect(h.selections()).toEqual([activate]);
     expect(h.timer.getSleepHistory()).toEqual([]);
   },
 );
@@ -577,7 +578,7 @@ test("an a11y clear inside an IME span uses the accessibility clear and keeps th
   const result = await h.action.execute([type("a"), { action: "clear", mode: "a11y" }, type("b")]);
   expect(result.success).toBe(true);
   expect(h.clientCalls).toEqual(["commit:a", "clear", "commit:b"]);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test("a clear between a11y types still clears through the IME", async () => {
@@ -601,7 +602,7 @@ test("IME replace clears through the input connection before typing", async () =
       .success,
   ).toBe(true);
   expect(h.clientCalls).toEqual(["clearField", "commit:new"]);
-  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 for (const mode of ["ime", "auto", "imeKeyEvents"] as const) {
@@ -614,7 +615,7 @@ for (const mode of ["ime", "auto", "imeKeyEvents"] as const) {
     expect(h.deletes().length > 0).toBe(!supported);
     expect(h.field()).toBe("new");
     expectNoAccessibilityClear(h);
-    expect(h.selections()).toEqual([activate, restore]);
+    expect(h.selections()).toEqual([activate]);
   });
 }
 
@@ -707,16 +708,17 @@ test("non-IME typing restores before a11y delivery; a later IME type reactivates
   expect(result.success).toBe(true);
   expect(h.clientCalls).toEqual(["commit:a", "insert:b", "commit:c"]);
   expect(selectionsAtInsert).toEqual([activate, restore]);
-  expect(h.selections()).toEqual([activate, restore, activate, restore]);
+  expect(h.selections()).toEqual([activate, restore, activate]);
 });
 
-test("single IME type pins the user before the original complete adb command sequence", async () => {
+test("a pending IME restore preserves the original complete adb command sequence", async () => {
   const h = harness();
   const fake = modelDeviceSideRestore(h);
   const result = await h.action.execute([type("x")]);
   expect(result).toMatchObject({ success: true, completedCommands: 1 });
   expect(fake.priors).toEqual([null]);
   expect(fake.selectionsAtCommit).toEqual([[activate]]);
+  await h.pendingImeRestores.flush(h.device.deviceId);
   expect(h.selections()).toEqual([activate, restore]);
   expect(h.clientCalls).toEqual(["commit:x"]);
   expect(h.adb.getExecutedCommands()).toEqual([
@@ -767,6 +769,7 @@ test("an IME span pins a non-zero user once and restores that user after all com
   const executor = new DefaultSendKeysCommandExecutor(h.device, adbFactory, observer, {
     textClient: h.client,
     timer: h.timer,
+    pendingImeRestores: h.pendingImeRestores,
   });
   const action = new SendKeys(h.device, adbFactory, {
     executor,
@@ -781,6 +784,7 @@ test("an IME span pins a non-zero user once and restores that user after all com
   });
   expect(fake.priors).toEqual([null, null, null]);
   expect(h.committed).toEqual(["a", "b", "c"]);
+  await h.pendingImeRestores.flush(h.device.deviceId);
   const commands = adb.getExecutedCommands();
   expect(commands.filter((command) => command === "shell am get-current-user")).toHaveLength(1);
   expect(commands.filter((command) => command.startsWith("shell ime set "))).toEqual([
@@ -819,13 +823,10 @@ test.each([
       // A second call proves the device was not quarantined.
       expect(await h.action.execute([type("c")])).toMatchObject({ success: true });
       const executed = h.adb.getExecutedCommands();
-      expect(h.selections()).toEqual([activate, activate]);
+      expect(h.selections()).toEqual([activate]);
       expect(
         executed.filter((command) => /secure selected_input_method_subtype/.test(command)),
-      ).toEqual([
-        "shell settings get secure selected_input_method_subtype",
-        "shell settings get secure selected_input_method_subtype",
-      ]);
+      ).toEqual(["shell settings get secure selected_input_method_subtype"]);
       expect(executed).not.toContain(`shell ime disable ${AUTO_MOBILE_IME_ID}`);
     } finally {
       clearAndroidImeQuarantine(h.device.deviceId);
@@ -840,47 +841,38 @@ test("direct executor type outside a span retains the device-side restore prior"
   expect(fake.priors).toEqual([priorIme]);
 });
 
-test("multi-command restore failure reports original-keyboard recovery guidance", async () => {
+test("a restore trigger after typing surfaces original-keyboard recovery guidance", async () => {
   const h = harness();
   h.adb.setCommandError(restore, new Error("restore rejected"));
   try {
     const result = await h.action.execute([type("a"), type("b")]);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
     expect(h.committed).toEqual(["a", "b"]);
-    expect(h.selections()).toEqual([activate, restore]);
-    expect(result.error).toContain(
-      "Text commit succeeded, but Could not restore the original keyboard",
+    expect(h.selections()).toEqual([activate]);
+    await expect(h.pendingImeRestores.flush(h.device.deviceId)).rejects.toThrow(
+      `keyboard setIme ${priorIme}`,
     );
-    expect(result.error).toContain(`keyboard setIme ${priorIme}`);
+    expect(h.selections()).toEqual([activate, restore]);
+    await h.pendingImeRestores.flush(h.device.deviceId);
+    expect(h.selections()).toEqual([activate, restore]);
   } finally {
     clearAndroidImeQuarantine(h.device.deviceId);
   }
 });
 
 test.each([{ texts: ["a"] }, { texts: ["a", "b"] }])(
-  "restore failure belongs to the last IME type rather than a trailing enter key (%j)",
+  "a trailing enter retains pending recovery until the next trigger (%j)",
   async ({ texts }) => {
     const h = harness();
     h.adb.setCommandError(restore, new Error("restore rejected"));
     try {
       const result = await h.action.execute([...texts.map(type), { action: "key", key: "enter" }]);
-      const failedIndex = texts.length - 1;
-      expect(result).toMatchObject({
-        success: false,
-        completedCommands: texts.length,
-        failedIndex,
-      });
-      expect(result.commands.slice(0, failedIndex).every((command) => command.success)).toBe(true);
-      expect(result.commands[failedIndex]).toMatchObject({ action: "type", success: false });
-      expect(result.commands[failedIndex].error).toContain("Text commit succeeded, but");
-      expect(result.commands[failedIndex].error).toContain(`keyboard setIme ${priorIme}`);
-      expect(result.error).toBe(result.commands[failedIndex].error);
-      expect(result.commands[texts.length]).toMatchObject({
-        action: "key",
-        key: "enter",
-        success: true,
-      });
-      expect(result.commands[texts.length].error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.commands.at(-1)).toMatchObject({ action: "key", key: "enter", success: true });
+      await expect(h.pendingImeRestores.flush(h.device.deviceId)).rejects.toThrow(
+        `keyboard setIme ${priorIme}`,
+      );
+      expect(h.selections()).toEqual([activate, restore]);
     } finally {
       clearAndroidImeQuarantine(h.device.deviceId);
     }
@@ -986,7 +978,7 @@ test("cancellation between commands restores once outside the request context", 
   expect(await withAndroidImeLock(h.device.deviceId, async () => true)).toBe(true);
 });
 
-test("the device lock remains held across an interleaved key until the final restore", async () => {
+test("the device lock covers interleaved keys and releases while restore is pending", async () => {
   const h = harness();
   let competitor: Promise<void> | undefined;
   let commitsAtAdmission: string[] = [];
@@ -1003,10 +995,10 @@ test("the device lock remains held across an interleaved key until the final res
   ).toBe(true);
   await competitor;
   expect(commitsAtAdmission).toEqual(["a", "b"]);
-  expect(selectionsAtAdmission).toEqual([activate, restore]);
+  expect(selectionsAtAdmission).toEqual([activate]);
 });
 
-test("concurrent calls sharing an executor have separate serialized IME spans", async () => {
+test("concurrent calls sharing an executor serialize and reuse the pending activation", async () => {
   const h = harness();
   const fake = modelDeviceSideRestore(h);
   const results = await Promise.all([
@@ -1016,7 +1008,7 @@ test("concurrent calls sharing an executor have separate serialized IME spans", 
   expect(results.map((result) => result.success)).toEqual([true, true]);
   expect(h.committed).toEqual(["a", "b", "c", "d"]);
   expect(fake.priors).toEqual([null, null, null, null]);
-  expect(h.selections()).toEqual([activate, restore, activate, restore]);
+  expect(h.selections()).toEqual([activate]);
 });
 
 test("budget cancellation between IME commands still reports a restore failure", async () => {
@@ -1250,4 +1242,38 @@ test("IME commit of a marked-up string stays verified when the field shows the h
 
 afterEach(() => {
   mock.restore();
+});
+
+test("three consecutive sendKeys calls reuse the prior keyboard snapshot without IME churn", async () => {
+  const h = harness();
+  const fake = modelDeviceSideRestore(h);
+  for (const text of ["a", "b", "c"]) {
+    expect(await h.action.execute([type(text)])).toMatchObject({ success: true });
+    expect(h.selections()).toEqual([activate]);
+  }
+  expect(fake.priors).toEqual([null, null, null]);
+  expect(
+    h.adb.getExecutedCommands().filter((command) => command === "shell am get-current-user"),
+  ).toHaveLength(1);
+  expect(
+    h.adb
+      .getExecutedCommands()
+      .filter((command) => command === "shell settings get secure selected_input_method_subtype"),
+  ).toHaveLength(1);
+  await h.pendingImeRestores.flush(h.device.deviceId);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test("a non-IME type in the next call restores the original keyboard before delivering", async () => {
+  const h = harness();
+  await h.action.execute([type("a")]);
+  h.client.insert = async () => {
+    expect(h.selections()).toEqual([activate, restore]);
+    return { success: true };
+  };
+  expect(await h.action.execute([{ action: "type", text: "b", mode: "a11y" }])).toMatchObject({
+    success: true,
+  });
+  await h.pendingImeRestores.flush(h.device.deviceId);
+  expect(h.selections()).toEqual([activate, restore]);
 });

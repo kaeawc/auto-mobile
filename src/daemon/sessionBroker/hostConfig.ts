@@ -4,14 +4,13 @@ import { MAX_SETTIMEOUT_DELAY_MS } from "../../utils/SystemTimer";
 import { z } from "zod";
 import { MIN_AVD_RAM_MB } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { logger } from "../../utils/logger";
 import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 
 /** Operator configuration, never a session requester input. */
 export const SESSION_BROKER_HOST_CONFIG_ENV = ENV_SPECS.SESSION_BROKER_CONFIG.name;
 export const SESSION_BROKER_EXPORT_CAPABILITY = "session-broker-export/v1";
 export const SESSION_BROKER_CAPABILITY = "session-broker/v1";
-/** Advertised only when the running broker's host configuration enables `capabilities.iosDuo`. */
-export const SESSION_BROKER_IOS_DUO_CAPABILITY = "session-broker/ios-duo/v1";
 
 /** One private allocation scope in the host-wide registry; no caller chooses these values. */
 export const SESSION_BROKER_SCOPE: BindingScopeIdentity = {
@@ -96,16 +95,18 @@ const androidDefaults = z
   })
   .strict();
 const cap = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-/**
- * Recognized hardware this host may execute. Off by default: an unconfigured host keeps
- * refusing Duo requests with a non-retryable `capability_disabled` failure.
- */
-const capabilities = z
-  .object({
-    /** iPhone Duo simulators; the host needs an iOS 27.1+ runtime that supports them. */
-    iosDuo: z.boolean().default(false),
-  })
-  .strict();
+/** Strip the retired capability while rejecting unrelated configuration mistakes. */
+const capabilities = z.preprocess((value) => {
+  if (typeof value === "object" && value !== null && "iosDuo" in value) {
+    logger.warn(
+      "capabilities.iosDuo is deprecated and ignored; Duo support follows installed hardware.",
+    );
+    const remaining: Record<string, unknown> = { ...value };
+    delete remaining.iosDuo;
+    return remaining;
+  }
+  return value;
+}, z.object({}).strict());
 /** Keep-booted cleaning cannot revert everything, so every Nth release erases instead (#15017). */
 export const DEFAULT_IOS_KEEP_BOOTED_MAX_USES = 10;
 /** Minimal cleaning reverts less than keep-booted, so retire the simulator sooner (#14682). */
@@ -230,11 +231,7 @@ const hostConfig = z
     (config) =>
       config.defaults.ios !== undefined || !config.reuse || config.reuse.ios.mode === "off",
     { message: "iOS reuse requires an explicit defaults.ios policy" },
-  )
-  .refine((config) => config.defaults.ios !== undefined || !config.capabilities.iosDuo, {
-    path: ["capabilities", "iosDuo"],
-    message: "capabilities.iosDuo requires an explicit defaults.ios policy",
-  });
+  );
 
 export type SessionBrokerHostConfig = z.infer<typeof hostConfig>;
 

@@ -126,6 +126,11 @@ Import needs identical accept/reject behaviour on all three platforms.
 - Share rebuilds a clean bundle (section 4) and hands it out through a `FileProvider` scoped to an
   export-cache subdirectory, with a read-only temporary grant and the temp file deleted afterwards.
 - Fonts and images decode off the main thread.
+- **Copy diagnostics** in the viewer toolbar puts plain text on the clipboard: app version, Android
+  SDK level, the renderer capability set, the last failure as a fixed code (`validation`,
+  `storage-load`, `render`, `watchdog` or `library-<error>`) and whether the render watchdog tripped.
+  `ViewerDiagnostics` has no field for spec text, validator paths or messages, labels, library ids,
+  saved state or requests, so none can be copied; `ViewerDiagnosticsTest` asserts this.
 
 ### 3.4 iOS app
 
@@ -444,8 +449,8 @@ The shared request-policy and storage work is tracked in #13622.
 
 ## 8. Distribution
 
-Both platforms ship in the first release, from **GitHub releases only** (no Play Store or App Store
-listing):
+Both platforms ship from GitHub releases. Android also has a Google Play pipeline (section 8.3);
+there is no App Store pipeline yet:
 
 - Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum. Prepare Release
   builds it (`build-protoviewer-apk.yml`, release keystore, fail-closed signing), pins it as
@@ -574,8 +579,70 @@ locally with `-Pautomobile.protoviewer.minifyRelease=false`); `verifyReleaseR8Ke
 the manifest components, the saved-prototype `@Serializable` contract and the reflectively resolved
 icon set survive. Unused `:protocol` wire models are shrunk away.
 
-Not yet wired: the release workflow step that uploads the AAB and mapping,
-`lintRelease` in CI, and the `bundletool build-apks` install smoke test on a device.
+`build-protoviewer-apk.yml` builds the AAB with `build-aab: true` and uploads it with its mapping
+archive. Only the Play pipeline (section 8.3) sets that input. Not yet wired: `lintRelease` in CI
+and the `bundletool build-apks` install smoke test on a device.
+
+### 8.3 Google Play publishing (#14147)
+
+**Uploader: fastlane `supply`.** It is chosen over Gradle Play Publisher because the store metadata
+is already in fastlane layout (`fastlane/metadata/android`, validated by
+`scripts/store-listing/validate-store-listing.ts`). It promotes an existing versionCode between
+tracks, and the iOS pipeline can use the same tool. `fastlane/Gemfile.lock` pins every gem with a
+checksum. The `setup-fastlane` action installs it frozen, with no gem cache.
+`scripts/release/protoviewer-play.sh` builds every `supply` call.
+
+**Flow** (`publish-protoviewer-play.yml`, started by pushing a `protoviewer/MAJOR.MINOR.PATCH` tag;
+release.yml's `*` tag filter does not match a `/`):
+
+1. `resolve` derives the versionCode (same formula as section 8.2). It fails when any locale lacks
+   `fastlane/metadata/android/<locale>/changelogs/<versionCode>.txt`. `default.txt` does not count,
+   because each release must have its own "What's new" text. Fast Validation checks the 500-character
+   limit.
+2. `build` is the only build. It calls `build-protoviewer-apk.yml` with `build-aab: true`.
+3. `upload-internal` (environment `google-play-internal`) checks the AAB against the build job's
+   SHA-256 and uploads it to the **internal** track with its release notes. It runs with no approval.
+4. `promote-closed` and `promote-production` (environment `google-play-release`, with required
+   reviewers) each wait for an approval. They move the same versionCode internal → closed track
+   (`PLAY_CLOSED_TRACK`, default `alpha`) → production. They pass `--skip_upload_aab`, so nothing
+   is rebuilt or uploaded again. Production starts as a staged rollout at
+   `PLAY_INITIAL_PRODUCTION_ROLLOUT` (`0.1`).
+
+**Secrets.** The service-account JSON is the environment secret `PLAY_SERVICE_ACCOUNT_JSON`,
+defined in both Play environments and never as a repository secret. A step reads it only through
+`SUPPLY_JSON_KEY_DATA`, so it is never written to disk. `test/bats/protoviewer-play-publish.bats`
+pins this scoping and the single build. Give the service account release permissions for this app
+only.
+
+**Repository setup** (settings, not YAML):
+
+- `google-play-internal`: deployment refs limited to `protoviewer/*` tags.
+- `google-play-release`: required reviewers, prevent self-review, deployment refs limited to
+  `protoviewer/*` tags and `main` (for dispatches).
+- The Play API cannot create an app. Create the app and its first release in the Play Console.
+  While the app has never been published, Play accepts only `draft` releases. Set the repository
+  variable `PROTOVIEWER_PLAY_INTERNAL_STATUS=draft` until then, and roll the draft out in the
+  console.
+
+**Manual operations.** Run the workflow by dispatch with `version` and one `operation`:
+
+- `promote-closed` or `promote-production`: re-run a promotion, for example after a pending
+  approval expired (GitHub keeps one for 30 days).
+- `rollout` with a `fraction`: widen the staged rollout. `1` completes it.
+- `halt` with the current `fraction`: stop the staged rollout. Users who already updated keep the
+  build.
+
+Every dispatch needs a `google-play-release` approval. Runs are serialized per version only, so a halt never queues behind another version's pending approvals. A job waiting on an environment approval would hold an app-wide group. Play allows one open edit per user, so two versions' operations can still overlap and invalidate each other's edit. `supply` commits last, so the script retries a failed call after 30 s and again after 90 s. **Resume** a halted rollout in the Play
+Console (Production → Releases → Resume rollout): `supply` only updates in-progress or draft
+releases. To roll back, ship a fix under a higher version. Play has no rollback to a lower
+versionCode.
+
+**Closed-test requirement.** The owner enrolled personally (#14144). A personal account created
+after 2023-11-13 gets production access only after a closed test with at least 12 testers opted in
+for 14 continuous days. The testers are a Google Group or email list on the closed track in the
+Play Console. It is kept there and not in this repository, because it is personal data. Until Play
+grants production access, `promote-production` fails at Play, and the release stays on the closed
+track.
 
 ## 9. Phased plan
 
@@ -636,6 +703,7 @@ harnesses and a nightly CI job remain future work.
 | Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
 | Version skew               | Host capability handshake before `save`, signer trust, store link, last 3 releases.                     |
+| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                   |
 
 ## Issues
 

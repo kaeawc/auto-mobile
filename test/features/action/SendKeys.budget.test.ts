@@ -413,7 +413,10 @@ test("budget expiry during IME read-back counts acknowledged delivery without cl
   const h = harness();
   const readback = {
     execute: async () => {
-      h.timer.advanceTime(99_000);
+      // The pre-activation diagnostic read is not the acknowledged commit's read-back.
+      if (h.committed.length) {
+        h.timer.advanceTime(99_000);
+      }
       return observer.execute();
     },
   };

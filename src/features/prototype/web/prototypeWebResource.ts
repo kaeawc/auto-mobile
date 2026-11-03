@@ -63,9 +63,10 @@ function webVariant(source: PrototypeSpecRevisionSource, id: string): PrototypeW
   };
 }
 
-function shownRevision(
+/** The variant `query` shows first and its requested revision; unknown variants are refused. */
+export function shownRevision(
   source: PrototypeSpecRevisionSource,
-  query: PrototypeWebResourceQuery,
+  query: Pick<PrototypeWebResourceQuery, "id" | "revision" | "variant">,
   variantIds: readonly string[],
 ): { id: string; revision: PrototypeSpecRevision } {
   const id = query.variant ?? query.id;

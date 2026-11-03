@@ -15,15 +15,15 @@ import kotlinx.serialization.json.jsonPrimitive
 internal object PrototypeRepeatTree {
   data class Child(val node: JsonObject, val path: String)
 
-  class Budget(
-    var nodes: Int = 0,
-    var images: Int = 0,
-    var effects: Int = 0,
-    var animatedEffects: Int = 0,
-    var loopNodes: Int = 0,
-    var keyframeNodes: Int = 0,
-    var videoNodes: Int = 0,
-  )
+  class Budget {
+    var nodes: Int = 0
+    var images: Int = 0
+    var effects: Int = 0
+    var animatedEffects: Int = 0
+    var loopNodes: Int = 0
+    var keyframeNodes: Int = 0
+    var videoNodes: Int = 0
+  }
 
   fun childrenOf(node: JsonObject, path: String): List<Child> = buildList {
     for ((key, value) in node) when {
@@ -157,6 +157,24 @@ internal object PrototypeRepeatTree {
         prototypeImageSlotUses((it as? JsonObject)?.get("image"))
       }
 
+  /** Charges keyframe, attention-loop and video nodes against their expanded-tree limits. */
+  private fun specialNodeErrors(
+    node: JsonObject,
+    path: String,
+    budget: Budget,
+  ): PrototypeSpecError? {
+    if (
+      "keyframes" in node &&
+        ++budget.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
+    )
+      return fail("$path.keyframes", "Keyframe node limit exceeded")
+    if ("attentionLoop" in node && ++budget.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
+      return fail("$path.attentionLoop", "Loop node limit exceeded")
+    if (prototypeVideoNodeOverLimit(node) { ++budget.videoNodes })
+      return fail(path, "Video node limit exceeded")
+    return null
+  }
+
   /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
   fun expandedErrors(
     node: JsonObject,
@@ -171,15 +189,9 @@ internal object PrototypeRepeatTree {
     budget.images += imageUses(node)
     if (budget.images > PrototypeSpecValidator.MAX_PROTOTYPE_IMAGES)
       return fail(at, "Expanded image limit exceeded")
-    if (
-      "keyframes" in node &&
-        ++budget.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
-    )
-      return fail("$path.keyframes", "Keyframe node limit exceeded")
-    if ("attentionLoop" in node && ++budget.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
-      return fail("$path.attentionLoop", "Loop node limit exceeded")
-    if (prototypeVideoNodeOverLimit(node) { ++budget.videoNodes })
-      return fail(path, "Video node limit exceeded")
+    specialNodeErrors(node, path, budget)?.let {
+      return it
+    }
     PrototypeEffectRules.chargeExpanded(node, at, budget)?.let {
       return it
     }

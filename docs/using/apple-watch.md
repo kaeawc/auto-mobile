@@ -1,0 +1,121 @@
+# Apple Watch simulators
+
+AutoMobile can drive an Apple Watch simulator as its own platform, `platform: "watchos"`. Only a
+fixed set of tools accept a watch; every other tool refuses it. This page covers setting a watch
+up, the supported tools and what is out of scope.
+
+## Supported watches
+
+- Simulators only. A physical Apple Watch is not supported.
+- Standalone watch apps only. AutoMobile never pairs a watch with an iPhone simulator, so flows
+  that need a companion iPhone app cannot be tested.
+- Any Apple Watch device type and watchOS runtime installed in Xcode. Install a missing runtime
+  with `xcodebuild -downloadPlatform watchOS`; AutoMobile never downloads one.
+
+A watch never appears in an iOS listing or iOS tool result. Every watch call names it with
+`platform: "watchos"`.
+
+## List, create and boot a watch
+
+Read the `automobile:devices/images/watchos` resource. It lists existing watch simulators
+(`watchosCount`) and the catalog of installed watchOS runtimes and Apple Watch device types.
+
+Create a watch with `provisionDevice`, passing exact identifiers from that catalog:
+
+```json
+{
+  "name": "provisionDevice",
+  "arguments": {
+    "device": {
+      "platform": "watchos",
+      "name": "Test Watch",
+      "spec": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.watchOS-11-0",
+        "deviceType": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-10-46mm"
+      }
+    },
+    "boot": true
+  }
+}
+```
+
+A watch with the same name, UDID, device type and runtime is reused; otherwise a fresh one is
+created. `resources`, `enableTools` and `readiness: "automation"` are refused.
+
+Boot an existing watch and start a session with `startDevice`, naming it by exact UDID or exact
+name. Every other option is refused.
+
+```json
+{ "name": "startDevice", "arguments": { "platform": "watchos", "deviceId": "<watch UDID>" } }
+```
+
+`startDevice` also starts the watch automation runner. If the runner cannot start, the session is
+still bound at readiness `booted`, the response message says why, and `observe` returns a
+screenshot only. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt runner when using the
+published package (see [Environment variables](environment-variables.md)).
+
+To pick a watch for a connection without a session, call `setActiveDevice` with
+`platform: "watchos"`. A call that does not name `watchos` never reaches a watch.
+
+Stop a watch with `killDevice` (`platform: "watchos"` and its UDID) and delete it with
+`deleteDevice` (`target.platform: "watchos"`, UDID as `target.stableId`). See
+[Device ownership](device-ownership.md#stopping-a-held-device-killdevice-and-deletedevice).
+
+## Supported tools
+
+Besides the device management above, these tools accept a watch:
+
+<!-- watchos-supported-tools:start -->
+
+- `observe`
+- `tapOn`
+- `tapAt`
+- `swipeOn`
+- `pressButton`
+- `rotateCrown`
+- `installApp`
+- `uninstallApp`
+- `listApps`
+- `launchApp`
+- `terminateApp`
+
+<!-- watchos-supported-tools:end -->
+
+Every other tool refuses a watch before doing anything, with:
+
+```text
+<tool> does not support watchOS yet. Target an Android or iOS device instead.
+```
+
+### What each tool does on a watch
+
+- `observe` returns a screenshot. With the automation runner connected and your app in the
+  foreground it also returns the view hierarchy; otherwise the result carries
+  `hierarchyUnavailable` and no hierarchy fields. Bounds and `screenSize` are in points;
+  `screenshotImageSize` is in pixels. `waitFor`, `settled`, `raw`, `includeExtras`, `scope`,
+  `layer`, `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"` are refused.
+- `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. Only
+  elements wholly on screen match. Only `action: "tap"` is supported.
+- `tapAt` takes absolute coordinates in points.
+- `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
+  is on screen, up to `maxSwipes` (default 10, maximum 100). Coordinates and duration cannot be set.
+- `pressButton` supports `home` only.
+- `rotateCrown` turns the Digital Crown by a signed, non-zero `delta`, with an optional positive
+  `velocity` (default 1). It is not listed by default; enable it with `setToolEnabled` (see
+  [Dynamic Tools](dynamic-tools.md)).
+
+  ```json
+  { "name": "rotateCrown", "arguments": { "platform": "watchos", "delta": 2 } }
+  ```
+
+- `installApp` takes a watch simulator `.app` bundle. `uninstallApp` refuses `keepData: true`.
+- `launchApp` reports an app that is not installed without launching anything. `prototype: true`
+  is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch.
+- `terminateApp` succeeds with `wasRunning: false` when the app was not running.
+
+## Limits
+
+- No physical Apple Watch and no paired iPhone (see above).
+- No text input, pinch, multi-touch or drag.
+- Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
+  phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

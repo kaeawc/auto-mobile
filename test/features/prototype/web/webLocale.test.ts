@@ -19,10 +19,11 @@ describe("still locale (#16552)", () => {
   });
 
   test("RTL languages and scripts lay out right to left", () => {
-    for (const tag of ["ar", "ar-XB", "he-IL", "fa", "ur-PK", "az-Arab"]) {
+    for (const tag of ["ar", "ar-XB", "he-IL", "fa", "ur-PK", "az-Arab", "ar-u-nu-latn"]) {
       expect(localeLayoutDirection(tag)).toBe("rtl");
     }
-    for (const tag of ["en-US", "en-XA", "fr", "sd-Deva", "zh-Hant-TW"]) {
+    // A Unicode extension's value is not a script subtag.
+    for (const tag of ["en-US", "en-XA", "fr", "sd-Deva", "zh-Hant-TW", "en-u-nu-arab"]) {
       expect(localeLayoutDirection(tag)).toBe("ltr");
     }
   });

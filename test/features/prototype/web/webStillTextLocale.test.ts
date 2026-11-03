@@ -50,6 +50,19 @@ describe("still font scale and Dynamic Type (#16552)", () => {
     expect(screenOf(still.element).style["font-size"]).toBe("26px");
   });
 
+  test("a multiline field's line bounds are whole scaled lines", () => {
+    const field = {
+      ...spec(),
+      root: { type: "textField", testTag: "notes", multiline: true, minLines: 2, maxLines: 2 },
+    };
+    const still = renderPrototypeStill(field, { frame: "pixel-9", textSize: { fontScale: 2 } });
+    const lines = find(byTag(still.element, "notes"), (el) => el.style["max-height"] !== undefined);
+    // 24 sp is 36 dp at 200 %, so two lines are 72 dp, not the converted 48 sp.
+    expect(lines[0]!.style["line-height"]).toBe("36px");
+    expect(lines[0]!.style["min-height"]).toBe("72px");
+    expect(lines[0]!.style["max-height"]).toBe("72px");
+  });
+
   test("an iOS frame scales every size by the content size and keeps tracking", () => {
     const still = renderPrototypeStill(spec(), {
       frame: "iphone-16",

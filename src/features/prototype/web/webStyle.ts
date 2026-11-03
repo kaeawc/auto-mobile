@@ -335,15 +335,15 @@ export function multilineCss(node: Raw, context: WebStyleContext): Record<string
   if (node.multiline !== true) {
     return {};
   }
-  const css: Record<string, string> = {
-    "white-space": "pre-wrap",
-    "line-height": fontPx(24, context),
-  };
+  // One line scales first; the bounds are whole lines of that height, since the non-linear
+  // Android curve would under-size a multi-line total.
+  const line = context.textScale ? context.textScale.font(24) : 24;
+  const css: Record<string, string> = { "white-space": "pre-wrap", "line-height": px(line) };
   if (typeof node.minLines === "number") {
-    css["min-height"] = fontPx(node.minLines * 24, context);
+    css["min-height"] = px(node.minLines * line);
   }
   if (typeof node.maxLines === "number") {
-    css["max-height"] = fontPx(node.maxLines * 24, context);
+    css["max-height"] = px(node.maxLines * line);
     css.overflow = "hidden";
   }
   return css;

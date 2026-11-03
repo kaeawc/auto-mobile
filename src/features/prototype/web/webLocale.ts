@@ -43,10 +43,10 @@ export function stillLocale(locale: string | undefined): string {
  * sets no `layoutDirection`. Android's `ar-XB` pseudolocale is Arabic, so it is RTL too.
  */
 export function localeLayoutDirection(locale: string): "ltr" | "rtl" {
-  const subtags = locale.toLowerCase().split("-");
-  const script = subtags.slice(1).find((tag) => tag.length === 4);
-  if (script !== undefined) {
-    return RTL_SCRIPTS.has(script) ? "rtl" : "ltr";
+  // Intl.Locale parses the tag, so a Unicode extension (`-u-nu-latn`) is never read as a script.
+  const parsed = new Intl.Locale(locale);
+  if (parsed.script !== undefined) {
+    return RTL_SCRIPTS.has(parsed.script.toLowerCase()) ? "rtl" : "ltr";
   }
-  return RTL_LANGUAGES.has(subtags[0] ?? "") ? "rtl" : "ltr";
+  return RTL_LANGUAGES.has(parsed.language.toLowerCase()) ? "rtl" : "ltr";
 }

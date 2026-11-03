@@ -129,18 +129,30 @@ function withHeight(entry: unknown, height: number | undefined, exact = false): 
 }
 
 /**
+ * Whether a visible unweighted column child leaves the weight shares as computed: only one with a
+ * dp height does. A sibling that wraps its content or fills (CSS shares a `fill` child's height
+ * with the weights) is only known at layout time.
+ */
+const fixedSibling = (node: Raw | undefined): boolean =>
+  !node ||
+  weightOf(node) !== undefined ||
+  typeof record(record(node.style)?.height)?.dp === "number";
+
+const bounded = (node: Raw): boolean => {
+  const style = record(node.style);
+  return typeof style?.minHeight === "number" || typeof style?.maxHeight === "number";
+};
+
+/**
  * Which resolved column children get their incoming height as an exact allocation: the weighted
- * ones, but only when every visible unweighted sibling has a dp height. A sibling that wraps its
- * content or fills (CSS shares a `fill` child's height with the weights) is only known at layout
- * time, so the weight share is an upper bound and stays a max.
+ * ones, when every unweighted sibling has a dp height (see fixedSibling) and no weighted child's
+ * `minHeight`/`maxHeight` makes flex hand its excess or shortfall to another weighted child. A
+ * lone weighted child's own bounds are applied by contentHeight. Otherwise a weight share is an
+ * upper bound and stays a max.
  */
 function exactShares(prepared: readonly (Raw | undefined)[]): boolean[] {
-  const known = prepared.every(
-    (node) =>
-      !node ||
-      weightOf(node) !== undefined ||
-      typeof record(record(node.style)?.height)?.dp === "number",
-  );
+  const weighted = prepared.filter((node): node is Raw => weightOf(node) !== undefined);
+  const known = prepared.every(fixedSibling) && (weighted.length < 2 || !weighted.some(bounded));
   return prepared.map((node) => known && weightOf(node) !== undefined);
 }
 

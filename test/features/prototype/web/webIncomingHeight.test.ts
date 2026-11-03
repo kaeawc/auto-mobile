@@ -268,3 +268,20 @@ test("a weight share stays a max when an unweighted sibling's height depends on 
   );
   expect(childrenOf(column).map(exactOf)).toEqual([undefined, true]);
 });
+
+test("a weight share stays a max when a weighted sibling's bounds make flex redistribute", () => {
+  const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
+  for (const bound of [{ minHeight: 30 }, { maxHeight: 5 }]) {
+    const column = withChildHeights(
+      {
+        type: "column",
+        style: { height: { dp: 40 } },
+        children: [{ type: "row", style: { weight: 1, ...bound } }, weighted],
+      },
+      "root",
+      prepare,
+    );
+    expect(childrenOf(column).map(exactOf)).toEqual([undefined, undefined]);
+    expect(contentHeight(record(record(childrenOf(column)[1])?.style))).toBe(10);
+  }
+});

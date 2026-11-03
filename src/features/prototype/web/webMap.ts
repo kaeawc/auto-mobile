@@ -408,20 +408,23 @@ function markerPin(
 
 /**
  * The canvas on its own layer, turned like the camera: a square centred on the box that reaches
- * `groundReach` (plus a pixel) out, so the tilted, turned plane covers the box at any aspect ratio;
- * the box clips it.
+ * `groundReach` (plus a pixel) out, so the tilted, turned plane covers the box at any aspect ratio.
+ * A `fill` box can render larger than the dp size the reach is computed from, so the square is also
+ * at least three times the box's longer side (`cqmax`, the box being a size container), which
+ * covers it at any bearing; the box clips the rest.
  */
 function groundLayer(background: string, orientation: MapOrientation, size: Size): WebElement {
   const reach = Math.ceil(groundReach(size, orientation.tilt)) + 1;
+  const side = `max(${reach * 2}px,300cqmax)`;
   return el("div", {
     attrs: { "aria-hidden": "true", "data-part": "ground" },
     style: {
       position: "absolute",
       left: "50%",
       top: "50%",
-      width: `${reach * 2}px`,
-      height: `${reach * 2}px`,
-      margin: `-${reach}px 0 0 -${reach}px`,
+      width: side,
+      height: side,
+      margin: `calc(${side} / -2) 0 0 calc(${side} / -2)`,
       background,
       transform: groundTransform(orientation, size.height),
     },
@@ -466,6 +469,9 @@ const mapRenderer =
       position: "relative",
       overflow: "hidden",
       background: turned ? MAP_BACKGROUNDS.plain! : background,
+      // Lets the ground layer size itself from the box as rendered (`cqmax`); the map's content is
+      // all absolutely placed, so size containment changes nothing else.
+      ...(turned ? { "container-type": "size" } : {}),
       "align-self": "stretch",
       height: `${DEFAULT_MAP_HEIGHT}px`,
     });

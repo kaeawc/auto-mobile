@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice, ObserveResult, ViewHierarchyWindowInfo } from "../../../src/models";
 import { SendKeys, type SendKeysCommand } from "../../../src/features/action/SendKeys";
-import { parseAndroidDisplayInfos } from "../../../src/utils/android-cmdline-tools/AndroidDisplayParsers";
+import {
+  panelKeyForUniqueId,
+  parseAndroidDisplayInfos,
+} from "../../../src/utils/android-cmdline-tools/AndroidDisplayParsers";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -159,12 +162,9 @@ function loadConcurrent(focus: ConcurrentFocus) {
 const concurrent = { inner: loadConcurrent("inner"), overlay: loadConcurrent("overlay") };
 const concurrentInfos = parseAndroidDisplayInfos(concurrent.inner.displays);
 const panelKeyOf = (logicalId: string) =>
-  (concurrentInfos.find((info) => info.logicalId === logicalId)?.uniqueId ?? "")
-    .split(":")
-    .slice(1)
-    .join(":");
+  panelKeyForUniqueId(concurrentInfos.find((info) => info.logicalId === logicalId)?.uniqueId ?? "");
 const innerPanel = { key: panelKeyOf("0"), role: "inner" as const, logicalId: 0 as const };
-const overlayPanel = { key: panelKeyOf("7"), role: "external" as const, logicalId: 7 as const };
+const overlayPanel = { key: panelKeyOf("7"), role: "overlay" as const, logicalId: 7 as const };
 const concurrentPanels = [innerPanel, overlayPanel].map((panel) => ({
   key: panel.key,
   role: panel.role,
@@ -222,7 +222,10 @@ function concurrentHarness(
 
 describe("sendKeys pinned-panel focus check over captured concurrent displays (#9208)", () => {
   test("both displays are connected in both captures and focus is on one display at a time", () => {
-    expect(concurrentPanels.map((panel) => panel.key)).toEqual(["4619827259835644672", "1"]);
+    expect(concurrentPanels.map((panel) => panel.key)).toEqual([
+      "4619827259835644672",
+      "overlay:1",
+    ]);
     expect(parseAndroidDisplayInfos(concurrent.overlay.displays)).toEqual(concurrentInfos);
     for (const [focus, focusedId] of [
       ["inner", 0],

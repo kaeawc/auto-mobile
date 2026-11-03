@@ -96,18 +96,25 @@ function inputChrome(node: Raw, error: boolean, scope: WebRenderScope): Css {
   };
 }
 
-/** A multiline field keeps its newlines and its minLines and maxLines, on 22 pt body lines. */
+/**
+ * The input keeps at least one 22 pt body line even when empty, as a TextField does. A multiline
+ * field keeps its newlines and its minLines and maxLines.
+ */
 function lineBounds(node: Raw): Css {
   if (node.multiline !== true) {
-    return { "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" };
+    return {
+      "min-height": "22px",
+      "white-space": "nowrap",
+      overflow: "hidden",
+      "text-overflow": "ellipsis",
+    };
   }
-  const min: Css =
-    typeof node.minLines === "number" ? { "min-height": `${node.minLines * 22}px` } : {};
+  const lines = typeof node.minLines === "number" ? Math.max(node.minLines, 1) : 1;
   const max: Css =
     typeof node.maxLines === "number"
       ? { "max-height": `${node.maxLines * 22}px`, overflow: "hidden" }
       : {};
-  return { "white-space": "pre-wrap", ...min, ...max };
+  return { "white-space": "pre-wrap", "min-height": `${lines * 22}px`, ...max };
 }
 
 function input(node: Raw, text: IosFieldText, error: boolean, scope: WebRenderScope): WebElement {

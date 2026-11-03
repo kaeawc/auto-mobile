@@ -402,6 +402,12 @@ describe("iOS skin text field, navigation bars and sheet (#16646)", () => {
     const empty = field({ label: "Name" });
     expect(textOf(input(empty))).toBe("");
     expect(textOf(input(field({ label: "Name", placeholder: "Your name" })))).toBe("Your name");
+    // An empty field keeps one body line, so typing into it moves nothing below it.
+    const line = (element: WebElement) => (input(element).children[0] as WebElement).style;
+    expect(line(empty)["min-height"]).toBe("22px");
+    expect(line(field({ label: "Notes", multiline: true, minLines: 3 }))["min-height"]).toBe(
+      "66px",
+    );
   });
 
   test("an outlined field is a 1 pt 4 pt-radius outline stroke, red on an error", () => {

@@ -631,6 +631,30 @@ Play Console. It is kept there and not in this repository, because it is persona
 grants production access, `promote-production` fails at Play, and the release stays on the closed
 track.
 
+### 8.4 Staged-rollout release gates (#16516)
+
+There is no crash SDK (section 12), so store vitals are the release signal. A version's rollout
+stops widening when its rate crosses a gate:
+
+| Platform | Signal (for the new version only)      | Gate    | Action                                  |
+| -------- | -------------------------------------- | ------- | --------------------------------------- |
+| Android  | Play Console user-perceived crash rate | > 1.09% | `halt` the staged rollout (section 8.3) |
+| Android  | Play Console user-perceived ANR rate   | > 0.47% | `halt` the staged rollout (section 8.3) |
+| iOS      | Xcode Organizer crash rate             | > 1.09% | Pause the phased release                |
+
+The Android gates are Play's bad-behavior thresholds; crossing them also lowers store ranking. iOS
+uses the same fixed crash-rate threshold (owner, 2026-11-03). The iOS gate applies once phased App
+Store releases exist (#14150).
+
+**Release checklist: check vitals before widening rollout.** The `google-play-release` approver checks the gates, using the new version's vitals,
+before approving every step that widens exposure:
+
+1. Before approving `promote-production`: the closed-track version is under every gate.
+2. Before every `rollout` dispatch: the production version is under every gate at its current
+   fraction.
+3. If a gate is crossed at any point: dispatch `halt` (iOS: pause the phased release) and ship the fix
+   under a higher version.
+
 ## 9. Phased plan
 
 **First release.** Library list; open/switch; relaunch/reset; delete; share a clean bundle; import by
@@ -689,6 +713,7 @@ harnesses and a nightly CI job remain future work.
 | Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
 | Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                   |
+| Rollout gates              | Halt above 1.09% crash or 0.47% ANR (Android), 1.09% crash (iOS) (owner, 2026-11-03, #16516).           |
 
 ## Issues
 

@@ -1,0 +1,43 @@
+{
+  "id": "fade-edges-overflow",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "scroll",
+        "testTag": "vertical-fits",
+        "fadeEdges": { "bottom": 16 },
+        "style": { "width": { "dp": 120 }, "height": { "dp": 80 } },
+        "child": { "type": "spacer", "style": { "width": { "dp": 100 }, "height": { "dp": 40 } } }
+      },
+      {
+        "type": "scroll",
+        "testTag": "vertical-overflows",
+        "fadeEdges": { "bottom": 16 },
+        "style": { "width": { "dp": 120 }, "height": { "dp": 80 } },
+        "child": { "type": "spacer", "style": { "width": { "dp": 100 }, "height": { "dp": 400 } } }
+      },
+      {
+        "type": "scroll",
+        "testTag": "horizontal-fits",
+        "axis": "horizontal",
+        "fadeEdges": { "end": 16 },
+        "style": { "width": { "dp": 120 }, "height": { "dp": 40 } },
+        "child": { "type": "spacer", "style": { "width": { "dp": 60 }, "height": { "dp": 20 } } }
+      },
+      {
+        "type": "scroll",
+        "testTag": "horizontal-overflows",
+        "axis": "horizontal",
+        "fadeEdges": { "end": 16 },
+        "style": { "width": { "dp": 120 }, "height": { "dp": 40 } },
+        "child": { "type": "spacer", "style": { "width": { "dp": 600 }, "height": { "dp": 20 } } }
+      }
+    ]
+  }
+}

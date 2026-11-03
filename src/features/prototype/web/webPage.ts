@@ -38,6 +38,7 @@ import {
   prototypeWebZoomScale,
 } from "./webPageRuntime";
 import { renderPrototypeStill } from "./webStill";
+import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
 import type { UnsupportedWebNode } from "./webRender";
 import type { WebStackScreens } from "./webStack";
 
@@ -108,6 +109,7 @@ const PAGE_CSS = [
   // A narrow window keeps the width for the stage and moves the history below it.
   "@media (max-width:720px){[data-main]{flex-direction:column}[data-control=revisions]{width:auto;max-height:30vh;border-left:0;border-top:1px solid #ccc}}",
   "[hidden]{display:none!important}",
+  FADE_EDGES_PAGE_CSS,
   PROTOTYPE_WEB_3D_CSS,
 ].join("");
 

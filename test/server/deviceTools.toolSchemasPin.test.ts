@@ -22,7 +22,7 @@ describe("device tool schemas", () => {
   test.each([
     ["listDeviceImagesSchema", listDeviceImagesSchema, "82e3009fc71448de"],
     ["listDevicesSchema", listDevicesSchema, "599853357f687c5f"],
-    ["listDevicesOutputSchema", listDevicesOutputSchema, "588d8d2467260c72"],
+    ["listDevicesOutputSchema", listDevicesOutputSchema, "b2e63cc3317d4d64"],
     ["killDeviceSchema", killDeviceSchema, "496e3b3b4185e167"],
     ["teardownDeviceSchema", teardownDeviceSchema, "6339d8cad2d9749c"],
   ])("%s keeps its JSON schema", (_name, schema, expected) => {

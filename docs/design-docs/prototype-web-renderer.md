@@ -222,7 +222,11 @@ the host, so the page's script only switches between views it was given and neve
   frame draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
   keeps its colour. `ios.glassGroup` draws nothing of its own. `scroll.fadeEdges` is a mask on the
   trailing edge only (the leading one in a `reverse` scroll), since a still opens at the scroll's
-  start and cannot measure overflow; horizontal start and end mirror in RTL. `linkify` splits the
+  start; horizontal start and end mirror in RTL. The still cannot measure overflow, so it hands the
+  mask to the page as `--fade-mask`, and a scroll-driven animation on a `scroll(self)` timeline
+  applies it: that timeline is inactive while the content fits, so only an overflowing scroll
+  fades, as Android draws a fade only while it can scroll forward. It depends on layout, not time,
+  so screenshots stay deterministic; a browser without scroll-driven animations always fades. `linkify` splits the
   resolved text into plain runs and one `data-link` span per match in its `style`, and a span with
   `onTap` is marked the same way; links get no style of their own, as on Android. A
   `zoomable` image draws at 1x. A node with `style.shader` draws without it, as a device without

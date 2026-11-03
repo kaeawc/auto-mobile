@@ -57,10 +57,14 @@ mkdir -p "$(dirname "${AUTOMOBILE_DB_PATH}")"
 bun "${script_dir}/enableFeatureFlags.ts" device-condition
 
 export AAOS_SMOKE_OUT_DIR="${out_dir}"
-status=0
-# pipefail makes the pipeline report the smoke's own status (124 on timeout).
+# pipefail makes the pipeline report the smoke's own status (124 on timeout). set -e is
+# lifted around the call rather than using `|| status=$?`, which would disable it inside
+# run_with_timeout (SC2310).
+set +e
 run_with_timeout "${timeout_seconds}" bun "${script_dir}/aaosSmoke.ts" 2>&1 \
-  | tee "${out_dir}/smoke.log" || status=$?
+  | tee "${out_dir}/smoke.log"
+status=$?
+set -e
 
 reason="AAOS smoke exited ${status}"
 if [[ "${status}" -eq 124 ]]; then

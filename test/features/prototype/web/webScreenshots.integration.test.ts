@@ -3,13 +3,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { diffPngs } from "../../../../src/features/visual/VisualDiff";
-import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/webPage";
 import {
   WEB_SCREENSHOT_FONT_CSS,
   WEB_SCREENSHOT_GOLDEN_DIR,
   WEB_SCREENSHOT_VIEWPORT,
   webScreenshotCases,
   webScreenshotPage,
+  webSpecPage,
 } from "./webScreenshotCases";
 
 /**
@@ -327,7 +327,7 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
           ],
         },
       };
-      const { page } = await openPage(browser, singleSpecPage(spec));
+      const { page } = await openPage(browser, webSpecPage(spec, "ratio-padded"));
       try {
         const sizes = await page.evaluate(() => {
           // Layout px: undo the stage's fit-to-viewport scale.
@@ -353,13 +353,47 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
   );
 });
 
-/** A page showing one inline spec on the Pixel 9 frame (411 dp wide). */
-function singleSpecPage(spec: unknown): string {
-  return buildPrototypeWebPage({
-    title: "geometry",
-    frame: "pixel-9",
-    variants: [
-      { id: "geometry", label: "geometry", revisions: [{ revision: 1, operation: "show", spec }] },
-    ],
-  }).html;
-}
+const FADE_FIXTURE = join(
+  import.meta.dir,
+  "../../../fixtures/prototype-web/fade-edges-overflow.json",
+);
+
+describeBrowser("scroll fade edges follow overflow in headless Chromium (#16606)", () => {
+  let browser: Browser;
+
+  beforeAll(async () => {
+    browser = await chromium.launch();
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  for (const direction of ["ltr", "rtl"] as const) {
+    test(
+      `only an overflowing scroll fades its trailing edge (${direction})`,
+      async () => {
+        const base = JSON.parse(readFileSync(FADE_FIXTURE, "utf8")) as Record<string, unknown>;
+        const window = { ...(base.window as Record<string, unknown>), layoutDirection: direction };
+        const { page } = await openPage(browser, webSpecPage({ ...base, window }, "fade-edges"));
+        try {
+          const masks = await page.evaluate(() =>
+            Object.fromEntries(
+              Array.from(
+                document.querySelectorAll<HTMLElement>("[data-view]:not([hidden]) [data-fade]"),
+              ).map((scroll) => [scroll.dataset.testid, getComputedStyle(scroll).maskImage]),
+            ),
+          );
+          const trailing = direction === "rtl" ? "to right" : "to left";
+          expect(masks["vertical-fits"]).toBe("none");
+          expect(masks["horizontal-fits"]).toBe("none");
+          expect(masks["vertical-overflows"]).toStartWith("linear-gradient(to top,");
+          expect(masks["horizontal-overflows"]).toStartWith(`linear-gradient(${trailing},`);
+        } finally {
+          await page.close();
+        }
+      },
+      CASE_TIMEOUT_MS,
+    );
+  }
+});

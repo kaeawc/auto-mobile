@@ -2056,6 +2056,11 @@ values, delivered like `connectivity.changed`: the state updates at once, the ev
 state has been quiet for 500 ms, and a flap that settles back on the last delivered values is not an
 event. Unknown keys and events fail validation with a
 path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
+The host mirrors each delivered `<module>.changed` as `platformStatus.<module>` in `prototype status`
+and `inspect` (`values`, the event's device `timestamp`, the host `receivedAt`, and `simulated` for an
+injected event), so an agent can assert the device's last values without observing. A replayed event
+older than the mirrored reading on the device clock does not replace it. Data with a key or value outside the module's
+state table, or cut by the emit budget, is not mirrored and leaves the previous reading.
 
 | Module (capability)                         | Keys                                                                                                                                                                                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

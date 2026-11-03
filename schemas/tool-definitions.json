@@ -18706,6 +18706,21 @@
                   }
                 ]
               },
+              "vehicle": {
+                "type": "object",
+                "properties": {
+                  "motion": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  },
+                  "nightMode": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  }
+                },
+                "required": ["motion", "nightMode"],
+                "additionalProperties": false
+              },
               "image": {
                 "type": "object",
                 "properties": {
@@ -19358,6 +19373,21 @@
                     "type": "null"
                   }
                 ]
+              },
+              "vehicle": {
+                "type": "object",
+                "properties": {
+                  "motion": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  },
+                  "nightMode": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  }
+                },
+                "required": ["motion", "nightMode"],
+                "additionalProperties": false
               },
               "image": {
                 "type": "object",
@@ -41907,6 +41937,21 @@
                   "type": "null"
                 }
               ]
+            },
+            "vehicle": {
+              "type": "object",
+              "properties": {
+                "motion": {
+                  "type": "string",
+                  "enum": ["supported", "unsupported", "unknown"]
+                },
+                "nightMode": {
+                  "type": "string",
+                  "enum": ["supported", "unsupported", "unknown"]
+                }
+              },
+              "required": ["motion", "nightMode"],
+              "additionalProperties": false
             },
             "image": {
               "type": "object",

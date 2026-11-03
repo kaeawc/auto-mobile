@@ -108,6 +108,12 @@ by default; see [Device condition fixtures](device-condition.md). The `vehicle` 
 
 `vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
 
+To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description. It is
+present only on automotive devices, as `{ "motion": ..., "nightMode": ... }` with each value
+`supported`, `unsupported` or `unknown`: an `android-automotive` image reports motion `supported`, an
+`android-automotive-playstore` image reports it `unsupported`, and motion is `unknown` when no car image
+tag is known. A physical head unit reports both `unsupported`.
+
 Motion uses gear and parking-brake events with continuous speed events that renew while driving is
 active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;
 parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/night override and checks

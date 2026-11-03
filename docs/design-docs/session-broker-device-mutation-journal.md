@@ -136,6 +136,12 @@ ambiguous user, an unreadable API level or grant, the app-op path below API 33,
 notification-policy access, the exact-alarm app-op and device-wide `reset` keep
 escalating rows. Runtime rows for an app absent from the readable baseline
 inventory are not journaled: cleaning uninstalls that app and its permission state.
+An Android `postNotification` naming its `appId` journals `notification:posted:<package>`,
+which the port reverts by force-stopping that app for every user (the system cancels
+all of the app's notifications, including any it showed before the session) and
+reading `cmd notification list` back: the revert succeeds only when every line is a
+notification key and none names the package. A call without an `appId` keeps an
+escalating row.
 
 On iOS, sanitize covers session-installed apps and app groups through inventory
 cleaning, absolute keychain/permission/location/status-bar/clipboard resets,

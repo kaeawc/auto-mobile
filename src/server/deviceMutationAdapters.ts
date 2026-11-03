@@ -9,6 +9,7 @@ import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import { appLocaleJournalKey } from "../daemon/sessionBroker/appLocaleJournalKey";
+import { postedNotificationKey } from "../daemon/sessionBroker/mutations/postedNotification";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
@@ -272,7 +273,16 @@ function familyToolMutations(
 function namedToolMutations(
   name: string,
   args: Record<string, unknown>,
+  platform?: Platform,
 ): ToolMutation[] | undefined {
+  const posted =
+    name === "postNotification" && platform === "android" && typeof args.appId === "string"
+      ? postedNotificationKey(args.appId)
+      : undefined;
+  if (posted !== undefined) {
+    // The named app's SDK receiver posts it; force-stopping that app cancels it (#14364).
+    return [mutation("notification", posted)];
+  }
   if (name === "rotate") {
     return rotationMutations(args);
   }
@@ -306,7 +316,7 @@ export function deviceToolMutations(
     // A notJournaled tool changes no device state a later session could observe (#14359).
     return [];
   }
-  const named = namedToolMutations(name, args);
+  const named = namedToolMutations(name, args, platform);
   if (named !== undefined) {
     return named;
   }

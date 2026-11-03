@@ -405,3 +405,22 @@ test("iOS volume presses force fallback; Android presses do not", () => {
     ).toBe(false);
   }
 });
+
+describe("postNotification journal row (#14364)", () => {
+  test("an Android call naming its app journals a revertible posted row for that app", () => {
+    expect(
+      deviceToolMutations("postNotification", { appId: "com.example.app", title: "Hi" }, "android"),
+    ).toEqual([{ kind: "notification", key: "posted:com.example.app" }]);
+  });
+
+  test.each([
+    [{ title: "Hi" }, "android"],
+    [{ appId: "not a package", title: "Hi" }, "android"],
+    [{ appId: "com.example.app", title: "Hi" }, "ios"],
+    [{ appId: "com.example.app", title: "Hi" }, undefined],
+  ] as const)("%p on %p keeps the escalating tool row", (args, platform) => {
+    expect(deviceToolMutations("postNotification", { ...args }, platform)).toEqual([
+      { kind: "notification", key: "tool:postNotification" },
+    ]);
+  });
+});

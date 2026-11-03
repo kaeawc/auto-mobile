@@ -173,12 +173,44 @@ the host, so the page's script only switches between views it was given and neve
   `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
-  `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card` and
-  `listItem` (with its leading icon and its trailing switch, checkbox or icon). A text field draws
+  `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
+  `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip` and `slider`. Where the devices differ,
+  the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
+  page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
+  it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
+  would reveal are not drawn. Its `dots` indicator is a row of 6 px dots, 8 px apart, the current one
+  in `onSurface` and the rest at 0.38 opacity, 8 px above its bottom edge (a vertical pager: a column
+  8 px from its right edge), or centred in a 22 px strip when `below`, unless a fixed height (a
+  vertical pager: width) under 44 px leaves no room for it, when it overlays as Android does. A grid is a CSS grid of equal
+  columns with `spacing` between columns and `runSpacing` (else `spacing`) between rows; a child
+  spans its `span` clamped to the columns, takes the cell's width and sits at the top of its row. An
+  adaptive grid fits `floor((width + spacing) / (minWidth + spacing))` columns to the screen width,
+  so its tracks and clamped spans agree. A carousel draws its items in a clipped row at `itemWidth`,
+  `itemSpacing` apart, each masked with a 28 px corner, and keeps an empty slot for a hidden child; it does not resize items as multi-browse or
+  hero keylines do. A bottom nav is an 80 px `surfaceContainer` bar whose items draw their icon in a
+  64x32 pill (`secondaryContainer` when selected) over a 12 px label, and it pads its bottom edge by
+  the safe area, as both devices' navigation bars do, unless an ancestor already applied it. A tab bar
+  is a 48 px `surface` row (72 px when a tab has an icon) with an `outlineVariant` bottom divider; the
+  selected tab takes `primary` and a 3 px `primary` indicator, the rest `onSurfaceVariant`, and a
+  `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
+  their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
+  draws its named icon, else a 24 px `surfaceVariant` square, since item images are not inlined. An
+  icon button draws the icon placeholder in a 40 px circle inside a 48 px target: `standard` and
+  `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
+  `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no
+  `stateKey` is an outlined assist chip and one with a `stateKey` a filter chip, whatever its
+  `variant`, as both devices draw them: 32 px tall with an 8 px radius in a 48 px target, outlined
+  in `outlineVariant`, or `secondaryContainer` with a leading check icon while its key is `true`. A
+  slider draws its label above a 16 px track, `primary` up to the value and `secondaryContainer`
+  after it with a stop dot at its end, and a 4x44 px `primary` thumb at the value: its numeric
+  state, else 0, snapped to `step` and clamped to `min`..`max`. A pager fills both axes, and a grid,
+  carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column, box or card
+  around such a child grows on that axis, as a Compose parent does around a `fillMax` child. A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
   and actions as icon placeholders labelled with their action, and its `variant` sets its height,
-  title size and title alignment. A button, switch, checkbox, text field or
-  list item whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
+  title size and title alignment. A button, switch, checkbox, text field,
+  list item, icon button, chip or slider whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, text decorations and built-in font
   families map to CSS, and a span keeps its own background. A text field shows `errorText` with error colours when `errorWhen` is
   decidably true, and otherwise its `supportingText`; it draws filled chrome (the native default) or an outline for `outlined`; its label floats above

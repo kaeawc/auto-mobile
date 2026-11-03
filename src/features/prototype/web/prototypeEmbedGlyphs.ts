@@ -39,6 +39,14 @@ function walkEntries(entries: readonly unknown[], rule: Rule | undefined, found:
   }
 }
 
+/**
+ * Glyphs a renderer draws for a node without an `iconName` slot naming them: a filter chip (one
+ * with a `stateKey`) draws a check while selected, and any state change can select it.
+ */
+const IMPLICIT_GLYPHS: Readonly<Record<string, (node: Record<string, unknown>) => string[]>> = {
+  chip: (node) => (typeof node.stateKey === "string" ? ["filled/check"] : []),
+};
+
 type Walker = (value: unknown, rule: Rule, found: Collected) => void;
 
 const walkRecord: Walker = (value, rule, found) => {
@@ -60,8 +68,12 @@ const WALKERS: Readonly<Record<string, Walker>> = {
   screenMap: walkRecord,
   object: (value, rule, found) => walkObject(value, rule, found),
   tagged: (value, rule, found) => {
-    const variant = isRecord(value) ? rule.variants?.[String(value.type)] : undefined;
+    const type = isRecord(value) ? String(value.type) : "";
+    const variant = rule.variants?.[type];
     if (variant) {
+      for (const key of IMPLICIT_GLYPHS[type]?.(value as Record<string, unknown>) ?? []) {
+        found.keys.add(key);
+      }
       walk(value, variant, found);
     }
   },
@@ -128,7 +140,8 @@ function reachableNames(value: unknown, names: Set<string>): void {
 
 /**
  * The `<variant>/<name>` keys a spec can draw, sorted: every contract `iconName` slot in its
- * own variant (an `icon` node's `variant`, else `filled`), plus each iconName-valid string in
+ * own variant (an `icon` node's `variant`, else `filled`), each glyph a node draws implicitly
+ * (a filter chip's check), plus each iconName-valid string in
  * `state` or `data` in `filled` and in every variant an icon node uses, since a state change can
  * hand that name to any icon.
  */

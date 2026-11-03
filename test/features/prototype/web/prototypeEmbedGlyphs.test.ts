@@ -66,6 +66,21 @@ describe("prototype embed glyph keys (#16609)", () => {
     expect(prototypeGlyphKeys(iconSpec)).not.toContain("filled/settings");
   });
 
+  test("a filter chip names the check it draws while selected, selected now or not", () => {
+    const chips = (stateKey?: string) =>
+      prototypeGlyphKeys({
+        id: "chips",
+        state: { on: false },
+        root: { type: "chip", label: "Wifi", ...(stateKey ? { stateKey } : {}) },
+      });
+    expect(chips("on")).toEqual(["filled/check"]);
+    expect(chips()).toEqual([]);
+    const fixture: Record<string, unknown> = JSON.parse(
+      readFileSync(join(FIXTURES, "material-slider-chip-card.json"), "utf8"),
+    );
+    expect(prototypeGlyphKeys(fixture)).toContain("filled/check");
+  });
+
   test("a spec without icons names no glyph", () => {
     expect(prototypeGlyphKeys({ id: "t", root: { type: "text", text: "home" } })).toEqual([]);
   });

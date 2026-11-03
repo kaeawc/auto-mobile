@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * `permissions` module rules the contract table cannot express (#14297), the twin of TypeScript's
- * `undeclaredRequestedPermissionError`: a literal `permissions.request` list names only permissions
+ * `prototypePermissionRequestError`: a literal `permissions.request` list names only permissions
  * declared in `requires.permissions`, since the declaration carries the usage string and the
  * manifest entry. A bound list is checked by the runtime once it resolves.
  */

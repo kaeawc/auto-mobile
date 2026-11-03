@@ -239,23 +239,40 @@ export const prototypeOutputSchema = z.object({
         .describe("defineBackend: item count per collection"),
       routes: z.number().int().nonnegative().optional(),
       faults: z.number().int().nonnegative().optional(),
+      rooms: z.number().int().nonnegative().optional(),
+      delivered: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("publish: how many open connections in the room received the frame"),
       cleared: z.boolean().optional().describe("clearBackend: false when no such backend existed"),
     })
     .optional()
-    .describe("defineBackend and clearBackend: the mock backend acted on"),
+    .describe("defineBackend, clearBackend and publish: the mock backend acted on"),
   backendLog: z
     .array(
-      z.object({
-        seq: z.number().int().positive(),
-        method: z.string(),
-        path: z.string(),
-        query: z.record(z.string(), z.string()),
-        status: z.number().int(),
-        body: z.json().optional(),
-      }),
+      z.union([
+        z.object({
+          seq: z.number().int().positive(),
+          method: z.string(),
+          path: z.string(),
+          query: z.record(z.string(), z.string()),
+          status: z.number().int(),
+          body: z.json().optional(),
+        }),
+        z.object({
+          seq: z.number().int().positive(),
+          room: z.string(),
+          from: z.enum(["client", "publish", "broadcast"]),
+          data: z.string(),
+        }),
+      ]),
     )
     .optional()
-    .describe("backendLog: requests the backend answered, oldest first (latest 200 kept)"),
+    .describe(
+      "backendLog: requests answered and room frames seen ({room, from, data}), oldest first (latest 200 kept)",
+    ),
   report: z.json().optional(),
   markdown: z.string().optional(),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),

@@ -16,6 +16,12 @@ export const MAX_MOCK_BACKEND_BYTES = 1024 * 1024;
 export const MAX_MOCK_DOCUMENT_BYTES = 2 * MAX_MOCK_BACKEND_BYTES;
 export const MAX_MOCK_LATENCY_MS = 10_000;
 export const MAX_MOCK_ROUTE_DELAY_MS = 10_000;
+/** Room definitions per backend, and connections per room path. */
+export const MAX_MOCK_ROOMS = 64;
+export const MAX_MOCK_ROOM_MEMBERS = 64;
+export const MAX_MOCK_ROOM_FRAMES = 64;
+/** A timeline entry fires at most this long after its connection opened. */
+export const MAX_MOCK_TIMELINE_MS = 600_000;
 
 const MAX_DEPTH = contract.limits.MAX_PROTOTYPE_DATA_DEPTH;
 
@@ -25,6 +31,7 @@ const COLLECTION_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const ROUTE_PATH =
   /^\/(?:[A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9_]*)(?:\/(?:[A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9_]*))*$|^\/$/;
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+const WRITE_METHODS = ["POST", "PUT", "PATCH"] as const;
 
 const jsonValue: z.ZodType<PrototypeRequestJson> = z.lazy(() =>
   z.union([
@@ -108,6 +115,45 @@ const latencySchema = z
   .strict()
   .refine((latency) => latency.min <= latency.max, "latencyMs.min cannot exceed max");
 
+const frameSchema = jsonValue.refine(
+  (frame) => depthOf(frame) <= MAX_DEPTH,
+  `a frame may nest at most ${MAX_DEPTH} levels`,
+);
+
+const roomSchema = z
+  .object({
+    path: z.string().regex(ROUTE_PATH, "path must look like /rooms/:roomId"),
+    /** Sent to each connection as it opens, before anything else. */
+    onConnect: z.array(frameSchema).max(MAX_MOCK_ROOM_FRAMES).optional(),
+    /** A client's send comes back to that client. */
+    echo: z.boolean().optional(),
+    /** A client's send goes to every other member of the same room path. */
+    relay: z.boolean().optional(),
+    /** Scripted frames, each `afterMs` after its connection opened. */
+    timeline: z
+      .array(
+        z
+          .object({
+            afterMs: z.number().int().min(0).max(MAX_MOCK_TIMELINE_MS),
+            frame: frameSchema,
+          })
+          .strict(),
+      )
+      .max(MAX_MOCK_ROOM_FRAMES)
+      .optional(),
+  })
+  .strict();
+
+const broadcastSchema = z
+  .object({
+    /** The room path a write goes to, e.g. `/rooms/{item:/roomId}`. */
+    room: z.string().startsWith("/").max(256),
+    frame: frameSchema,
+    /** The collection writes that broadcast; POST only by default. */
+    on: z.array(z.enum(WRITE_METHODS)).min(1).max(3).optional(),
+  })
+  .strict();
+
 export const mockBackendDefinitionSchema = z
   .object({
     collections: z
@@ -124,6 +170,9 @@ export const mockBackendDefinitionSchema = z
       .optional(),
     routes: z.array(routeSchema).max(MAX_MOCK_ROUTES).optional(),
     faults: z.array(faultSchema).max(MAX_MOCK_FAULTS).optional(),
+    rooms: z.array(roomSchema).max(MAX_MOCK_ROOMS).optional(),
+    /** `{collection: broadcast}`: a successful write to that collection is sent to a room. */
+    broadcasts: z.record(broadcastSchema).optional(),
     latencyMs: latencySchema.optional(),
     /** Seed of the random stream behind latency and `rate` faults. */
     seed: z.number().int().min(0).max(0xffff_ffff).optional(),
@@ -131,12 +180,35 @@ export const mockBackendDefinitionSchema = z
   .strict()
   .refine(
     (definition) =>
-      Buffer.byteLength(JSON.stringify([definition.collections, definition.routes])) <=
-      MAX_MOCK_BACKEND_BYTES,
-    `a backend holds at most ${MAX_MOCK_BACKEND_BYTES} bytes of collections and routes`,
+      Object.keys(definition.broadcasts ?? {}).every((name) =>
+        Object.hasOwn(definition.collections ?? {}, name),
+      ),
+    { message: "every broadcasts key must name a collection", path: ["broadcasts"] },
+  )
+  .refine(
+    (definition) => mockBackendBytes(definition, definition.collections) <= MAX_MOCK_BACKEND_BYTES,
+    `a backend holds at most ${MAX_MOCK_BACKEND_BYTES} bytes of collections, routes, rooms and broadcasts`,
   );
+
+/** The size the backend budget counts: collection data plus every static definition part. */
+export function mockBackendBytes(
+  definition: Pick<MockBackendDefinitionInput, "routes" | "rooms" | "broadcasts">,
+  collections: unknown,
+): number {
+  return Buffer.byteLength(
+    JSON.stringify([collections, definition.routes, definition.rooms, definition.broadcasts]),
+  );
+}
+
+interface MockBackendDefinitionInput {
+  routes?: unknown;
+  rooms?: unknown;
+  broadcasts?: unknown;
+}
 
 export type MockBackendDefinition = z.infer<typeof mockBackendDefinitionSchema>;
 export type MockItem = Record<string, PrototypeRequestJson>;
 export type MockRoute = z.infer<typeof routeSchema>;
 export type MockFault = z.infer<typeof faultSchema>;
+export type MockRoom = z.infer<typeof roomSchema>;
+export type MockBroadcast = z.infer<typeof broadcastSchema>;

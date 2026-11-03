@@ -14,6 +14,7 @@ import {
 import { prototypeSchema } from "../../src/server/prototypeTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerPrototypeResources } from "../../src/server/prototypeResources";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   ICON_LOOKUP_LIMIT,
   renderLimitsTable,
@@ -134,7 +135,7 @@ describe("automobile:prototype resource", () => {
     expect(() =>
       new PrototypeMockBackendRegistry({
         ids: new CountingIdGenerator(),
-        timer: { sleep: async () => {} },
+        timer: new FakeTimer(),
       }).define(mockCall.backendId, mockCall.backend),
     ).not.toThrow();
     expect(validatePrototypeSpec(components)).toMatchObject({ success: true });

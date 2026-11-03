@@ -163,8 +163,95 @@ test("a host request to the mock origin reaches the backend defined through the 
   ]);
 });
 
-test("the three actions are device-read-only and need no device request", () => {
-  for (const action of ["defineBackend", "clearBackend", "backendLog"]) {
+test("two channels chat through a collection broadcast and an agent publish, with no server", async () => {
+  await call({
+    action: "defineBackend",
+    backendId: "chat",
+    backend: {
+      collections: { messages: [] },
+      rooms: [{ path: "/rooms/:roomId", relay: true, onConnect: [{ type: "welcome" }] }],
+      broadcasts: { messages: { room: "/rooms/{item:/roomId}", frame: { message: "{item}" } } },
+    },
+  });
+  expect((await call({ action: "show", spec: shownSpec })).success).toBe(true);
+  const channels = client.getPrototypeChannelHost()!;
+  const received: Record<string, unknown[]> = { a: [], b: [] };
+  for (const connectionId of ["a", "b"]) {
+    channels.handleOpen(
+      {
+        type: "prototype_channel_open",
+        connectionId,
+        prototypeId: "p",
+        channel: "chat",
+        kind: "websocket",
+        url: "wss://chat.mock.automobile.invalid/rooms/general",
+      },
+      (frame) => received[connectionId]!.push(frame),
+    );
+  }
+  expect(received.b).toEqual([
+    { type: "prototype_channel_opened", connectionId: "b" },
+    { type: "prototype_channel_frame", connectionId: "b", data: '{"type":"welcome"}' },
+  ]);
+  await requestBody("https://chat.mock.automobile.invalid/messages");
+  const sent: unknown[] = [];
+  await client.getPrototypeRequestHost()!.handleRequest(
+    {
+      type: "prototype_request",
+      requestId: "post",
+      prototypeId: "p",
+      method: "POST",
+      url: "https://chat.mock.automobile.invalid/messages",
+      body: { roomId: "general", text: "hi" },
+    },
+    (response) => {
+      sent.push(response);
+    },
+  );
+  expect(sent[0]).toMatchObject({ ok: true, status: 201 });
+  channels.handleSend({ type: "prototype_channel_send", connectionId: "a", data: "typing" });
+  const published = await call({
+    action: "publish",
+    backendId: "chat",
+    room: "/rooms/general",
+    frame: { from: "agent" },
+  });
+  expect(published.backend?.delivered).toBe(2);
+  expect(received.b!.slice(2)).toEqual([
+    {
+      type: "prototype_channel_frame",
+      connectionId: "b",
+      data: JSON.stringify({ message: (sent[0] as { body: unknown }).body }),
+    },
+    { type: "prototype_channel_frame", connectionId: "b", data: "typing" },
+    { type: "prototype_channel_frame", connectionId: "b", data: '{"from":"agent"}' },
+  ]);
+  const log = (await call({ action: "backendLog", backendId: "chat" })).backendLog!;
+  expect(
+    log.map((entry) => ("room" in entry ? `${entry.from} ${entry.room}` : entry.method)),
+  ).toEqual([
+    "GET",
+    "POST",
+    "broadcast /rooms/general",
+    "client /rooms/general",
+    "publish /rooms/general",
+  ]);
+  await call({ action: "clearBackend", backendId: "chat" });
+  expect(received.a!.at(-1)).toEqual({
+    type: "prototype_channel_closed",
+    connectionId: "a",
+    code: 1001,
+    reason: 'Mock backend "chat" was cleared.',
+  });
+});
+
+test("publish to an unknown backend says so", async () => {
+  const result = await call({ action: "publish", backendId: "nobody", room: "/r", frame: 1 });
+  expect(result).toMatchObject({ success: false, error: 'No mock backend "nobody" is defined.' });
+});
+
+test("the mock backend actions are device-read-only and need no device request", () => {
+  for (const action of ["defineBackend", "clearBackend", "backendLog", "publish"]) {
     expect(PROTOTYPE_READ_ACTIONS).toContain(action);
   }
 });
@@ -182,6 +269,22 @@ test.each<[string, Record<string, unknown>, RegExp]>([
   ],
   ["clearBackend without backendId", { action: "clearBackend" }, /requires backendId/],
   ["backendLog without backendId", { action: "backendLog" }, /requires backendId/],
+  ["publish without room", { action: "publish", backendId: "a", frame: 1 }, /requires room/],
+  [
+    "publish without frame",
+    { action: "publish", backendId: "a", room: "/r" },
+    /requires room and frame/,
+  ],
+  [
+    "publish to a non-path room",
+    { action: "publish", backendId: "a", room: "r", frame: 1 },
+    /room/,
+  ],
+  [
+    "room on another action",
+    { action: "backendLog", backendId: "a", room: "/r" },
+    /backendLog allows/,
+  ],
   ["an invalid backendId", { action: "clearBackend", backendId: "Bad_Id" }, /backendId must match/],
   ["a negative since", { action: "backendLog", backendId: "a", since: -1 }, /since/],
   [
@@ -196,11 +299,12 @@ test.each<[string, Record<string, unknown>, RegExp]>([
   expect(JSON.stringify(parsed.error?.issues)).toMatch(message);
 });
 
-test("schema accepts the three actions with their fields", () => {
+test("schema accepts the mock backend actions with their fields", () => {
   for (const args of [
     { action: "defineBackend", backendId: "a", backend: { seed: 1 } },
     { action: "clearBackend", backendId: "a" },
     { action: "backendLog", backendId: "a", since: 3 },
+    { action: "publish", backendId: "a", room: "/rooms/x", frame: { n: 1 } },
   ]) {
     expect(prototypeSchema.safeParse(args).success).toBe(true);
   }

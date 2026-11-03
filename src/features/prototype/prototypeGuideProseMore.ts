@@ -50,6 +50,22 @@ sent, replacing backends of the same id, and a saved prototype does not carry th
   that fraction of them with \`{error:"mock fault"}\`.
 - A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
   with \`too_large\`.
+- **Rooms** serve realtime channels with \`via: "host"\`: a WebSocket to
+  \`wss://<backendId>.mock.automobile.invalid/rooms/general\` or an SSE stream to the \`https://\` form
+  joins the first room whose \`path\` (\`/rooms/:roomId\`) matches; no match is \`handshake_failed\`
+  with status 404. A room \`{path, onConnect?, echo?, relay?, timeline?}\` sends its \`onConnect\` frames
+  to each new connection, \`timeline [{afterMs, frame}]\` frames that long after each connection
+  opened, returns a send to its sender with \`echo\`, and passes it to the room's other connections
+  with \`relay\`. Frames bind \`{params.x}\` and \`{query.x}\` from the channel URL; a string frame is sent
+  as written, other JSON as JSON text.
+- **Broadcasts** \`{collection: {room, frame, on?}}\` send a successful collection write (\`POST\` by
+  default; \`on\` takes \`POST\`, \`PUT\`, \`PATCH\`) to a room. \`{item}\` and \`{item:/pointer}\` bind the
+  stored item, so \`{"messages":{"room":"/rooms/{item:/roomId}","frame":{"message":"{item}"}}}\` makes a
+  message one device posts appear on every device in that room.
+- \`publish {backendId, room, frame}\` speaks as the other side to every connection in \`room\` and
+  returns \`delivered\`. \`backendLog\` lists room frames (\`{room, from, data}\`, \`from\` is \`client\`,
+  \`publish\` or \`broadcast\`) beside requests. Redefining or clearing a backend closes its channels
+  with code 1001.
 
 ## Value formatters (#14227)
 

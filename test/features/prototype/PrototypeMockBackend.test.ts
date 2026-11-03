@@ -3,12 +3,13 @@ import { PrototypeMockBackend } from "../../../src/features/prototype/PrototypeM
 import type { MockBackendDefinition } from "../../../src/features/prototype/prototypeMockSchema";
 import type { PrototypeRequestJson } from "../../../src/features/prototype/prototypeRequestProtocol";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { SeededRandom } from "../../fakes/SeededRandom";
 import fixture from "../../fixtures/prototype-mock/requests.json";
 
-class RecordingTimer {
+class RecordingTimer extends FakeTimer {
   readonly sleeps: number[] = [];
-  async sleep(ms: number): Promise<void> {
+  override async sleep(ms: number): Promise<void> {
     this.sleeps.push(ms);
   }
 }
@@ -222,5 +223,97 @@ describe("PrototypeMockBackend", () => {
     expect(
       (await withRoute.answer({ method: "POST", path: "/a", query: {}, body: small })).status,
     ).toBe(201);
+  });
+});
+
+describe("PrototypeMockBackend rooms and broadcasts", () => {
+  const chat: MockBackendDefinition = {
+    collections: { messages: [] },
+    rooms: [{ path: "/rooms/:roomId", relay: true }],
+    broadcasts: {
+      messages: { room: "/rooms/{item:/roomId}", frame: { type: "message", message: "{item}" } },
+    },
+  };
+
+  function member(engine: PrototypeMockBackend, path: string): string[] {
+    const frames: string[] = [];
+    const joined = engine.join(path, {}, { deliver: (data) => frames.push(data), close: () => {} });
+    expect(joined.ok).toBe(true);
+    return frames;
+  }
+
+  test("a POST to a broadcasting collection reaches the room the stored item names", async () => {
+    const { engine } = backend(chat);
+    const general = member(engine, "/rooms/general");
+    const other = member(engine, "/rooms/other");
+    const response = await engine.answer({
+      method: "POST",
+      path: "/messages",
+      query: {},
+      body: { roomId: "general", text: "hi" },
+    });
+    expect(response.status).toBe(201);
+    expect(general.map((data) => JSON.parse(data))).toEqual([
+      { type: "message", message: response.body },
+    ]);
+    expect(other).toEqual([]);
+    expect(
+      engine.requestLog().map((entry) => ("room" in entry ? entry.from : entry.method)),
+    ).toEqual(["POST", "broadcast"]);
+  });
+
+  test("only the configured write methods with a 2xx answer broadcast", async () => {
+    const { engine } = backend({
+      ...chat,
+      collections: { messages: [{ id: 1, roomId: "general" }] },
+      faults: [{ path: "/messages", method: "POST", status: 500, every: 1 }],
+    });
+    const general = member(engine, "/rooms/general");
+    await engine.answer({
+      method: "POST",
+      path: "/messages",
+      query: {},
+      body: { roomId: "general" },
+    });
+    await engine.answer({ method: "PATCH", path: "/messages/1", query: {}, body: { text: "x" } });
+    await engine.answer({ method: "DELETE", path: "/messages/1", query: {}, body: undefined });
+    expect(general).toEqual([]);
+  });
+
+  test("on selects PATCH, and a route body's literal {item} text is not bound", async () => {
+    const { engine } = backend({
+      ...chat,
+      collections: { messages: [{ id: 1, roomId: "general" }] },
+      routes: [{ method: "GET", path: "/literal", body: "{item}" }],
+      broadcasts: {
+        messages: { room: "/rooms/{item:/roomId}", frame: "{item:/text}", on: ["PATCH"] },
+      },
+    });
+    const general = member(engine, "/rooms/general");
+    await engine.answer({
+      method: "PATCH",
+      path: "/messages/1",
+      query: {},
+      body: { text: "edited" },
+    });
+    expect(general).toEqual(["edited"]);
+    expect(
+      (await engine.answer({ method: "GET", path: "/literal", query: {}, body: undefined })).body,
+    ).toBe("{item}");
+  });
+
+  test("publish speaks to a room and dispose closes its connections", () => {
+    const { engine } = backend(chat);
+    const closes: number[] = [];
+    const frames: string[] = [];
+    engine.join(
+      "/rooms/a",
+      {},
+      { deliver: (data) => frames.push(data), close: (code) => closes.push(code) },
+    );
+    expect(engine.publish("/rooms/a", { hello: true })).toBe(1);
+    engine.dispose("bye");
+    expect([frames, closes]).toEqual([['{"hello":true}'], [1001]]);
+    expect(engine.roomCount).toBe(1);
   });
 });

@@ -188,7 +188,8 @@ LAN address (private addresses are allowed on ports other than the daemon's) or 
 
 To look at a prototype without a device or an app, read `automobile:prototype/<id>/web`. It is one
 self-contained HTML page (`text/html`, no network access) with the prototype in a device frame,
-rotate and zoom controls, and its revision history.
+rotate and zoom controls, a screen picker when the prototype's stack has more than one screen, and
+its revision history.
 
 | Parameter  | Meaning                                                                                                 |
 | ---------- | ------------------------------------------------------------------------------------------------------- |

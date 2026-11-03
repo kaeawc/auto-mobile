@@ -6,6 +6,7 @@ import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./de
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import type { WebStackScreens } from "./webStack";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
@@ -19,12 +20,16 @@ export interface PrototypeStillOptions {
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
+  /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
+  readonly screen?: string;
 }
 
 export interface PrototypeStill {
   readonly element: WebElement;
   readonly frame: string;
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
+  /** The outermost stack drawn, if any: its screens and the one drawn. */
+  readonly stack?: WebStackScreens;
 }
 
 const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
@@ -168,6 +173,8 @@ function stillScope(
     inBox: false,
     unsupported: [],
     screenWidth: screenSize(frame, options.orientation ?? "portrait").width,
+    ...(options.screen === undefined ? {} : { screen: options.screen }),
+    stacks: [],
   };
 }
 
@@ -202,5 +209,11 @@ export function renderPrototypeStill(
     { dark, textColor, background: screenBackground(scope.style) },
     placed(expanded, root),
   );
-  return { element, frame: frame.id, unsupportedNodes: scope.unsupported };
+  const stack = scope.stacks?.[0];
+  return {
+    element,
+    frame: frame.id,
+    unsupportedNodes: scope.unsupported,
+    ...(stack ? { stack } : {}),
+  };
 }

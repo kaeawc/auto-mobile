@@ -22,6 +22,7 @@ import {
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
+import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
@@ -62,6 +63,10 @@ export interface WebRenderScope {
    * control's own value and a pager's selection never do.
    */
   readonly textLocals?: Readonly<Record<string, unknown>>;
+  /** The screen the outermost stack draws instead of its start; an unknown id draws the start. */
+  readonly screen?: string;
+  /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
+  readonly stacks?: WebStackScreens[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
@@ -370,25 +375,6 @@ const text: NodeRenderer = (node, scope) => {
       : {};
   const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
   return el("span", { attrs, style }, textContent(node, scope));
-};
-
-const stack: NodeRenderer = (node, scope, path) => {
-  const screens = record(node.screens) ?? {};
-  const start = typeof node.start === "string" ? node.start : Object.keys(screens)[0];
-  const { attrs, style } = base(node, scope, { display: "flex", "flex-direction": "column" });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
-  const screen = start === undefined ? undefined : screens[start];
-  const content = renderWebNode(screen, inner, `${path}.screens[${JSON.stringify(start)}]`);
-  // A stack screen fills the stack, as on both devices.
-  const filled = content
-    ? [
-        {
-          ...content,
-          style: { ...content.style, flex: "1 1 auto", "min-height": "0", "align-self": "stretch" },
-        },
-      ]
-    : [];
-  return el("div", { attrs, style }, filled);
 };
 
 const scroll: NodeRenderer = (node, scope, path) => {
@@ -948,7 +934,6 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   box,
   row: line("row"),
   column: line("column"),
-  stack,
   scroll,
   text,
   spacer,
@@ -964,6 +949,7 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   listItem,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
+  ...webStackRenderers(KIT),
 };
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {

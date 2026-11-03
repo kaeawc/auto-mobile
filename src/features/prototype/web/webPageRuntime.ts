@@ -35,15 +35,27 @@ export function prototypeWebWheelFactor(deltaY: number): number | undefined {
   return deltaY < 0 ? 1.1 : 1 / 1.1;
 }
 
+/**
+ * The view to show among one revision's views for one orientation: the chosen screen's, else the
+ * first, which is the revision's start screen (or its only view when it has no screen picker).
+ */
+export function prototypeWebScreenView<View extends { dataset: { screen?: string } }>(
+  views: readonly View[],
+  screen: string,
+): View | undefined {
+  return views.find((view) => view.dataset.screen === screen) ?? views[0];
+}
+
 /** The pure rules the runtime is handed as arguments, so they are unit-tested and inlined with it. */
 export interface PrototypeWebRuntimeRules {
   readonly zoomScale: typeof prototypeWebZoomScale;
   readonly fitScale: typeof prototypeWebFitScale;
   readonly wheelFactor: typeof prototypeWebWheelFactor;
+  readonly screenView: typeof prototypeWebScreenView;
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
-  const { zoomScale, fitScale: fitted, wheelFactor } = rules;
+  const { zoomScale, fitScale: fitted, wheelFactor, screenView } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -53,24 +65,45 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const views = Array.from(doc.querySelectorAll<HTMLElement>("[data-view]"));
   const pick = (name: string) => doc.querySelector<HTMLElement>(`[data-control="${name}"]`);
   const variantSelect = pick("variant") as HTMLSelectElement | null;
+  const screenSelect = pick("screen") as HTMLSelectElement | null;
   const revisionList = pick("revisions");
   const zoomLabel = pick("zoom-level");
   const state = {
     variant: doc.body.dataset.variant ?? "",
     revision: doc.body.dataset.revision ?? "",
     orientation: "portrait",
+    // The first apply sets the shown view's screen.
+    screen: "",
     scale: 1,
     x: 0,
     y: 0,
     fit: true,
   };
-  const current = () =>
-    views.find(
+  const revisionViews = () =>
+    views.filter(
       (view) =>
         view.dataset.variant === state.variant &&
         view.dataset.revision === state.revision &&
         view.dataset.orientation === state.orientation,
     );
+  const current = () => screenView(revisionViews(), state.screen);
+  // The picker lists the shown revision's own screens, so it never offers a view the page lacks.
+  // A revision without the chosen screen shows its start, which becomes the chosen screen.
+  let listed = "";
+  const syncScreens = (shown: HTMLElement | undefined) => {
+    state.screen = shown?.dataset.screen ?? state.screen;
+    if (!screenSelect) {
+      return;
+    }
+    const key = `${state.variant} ${state.revision}`;
+    if (key !== listed) {
+      listed = key;
+      const screens = revisionViews().flatMap((view) => view.dataset.screen ?? []);
+      screenSelect.replaceChildren(...screens.map((screen) => new Option(screen, screen)));
+      screenSelect.hidden = screens.length < 2;
+    }
+    screenSelect.value = state.screen;
+  };
   const fitScale = (view: HTMLElement) => {
     const frame = view.firstElementChild as HTMLElement | null;
     if (!frame) {
@@ -83,6 +116,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   };
   const apply = () => {
     const shown = current();
+    syncScreens(shown);
     views.forEach((view) => {
       view.hidden = view !== shown;
     });
@@ -121,6 +155,10 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     const option = variantSelect.selectedOptions[0];
     state.revision = option?.dataset.latest ?? state.revision;
     state.fit = true;
+    apply();
+  });
+  screenSelect?.addEventListener("change", () => {
+    state.screen = screenSelect.value;
     apply();
   });
   revisionList?.addEventListener("click", (event) => {

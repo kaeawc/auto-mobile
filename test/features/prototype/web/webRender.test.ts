@@ -1209,3 +1209,60 @@ describe("prototype web still parity (#16382)", () => {
     expect(iconOf("search").style).toMatchObject({ width: "24px", height: "24px" });
   });
 });
+
+describe("prototype web still stack screens (#16382)", () => {
+  const nested = {
+    id: "nested",
+    root: {
+      type: "stack",
+      start: "home",
+      screens: {
+        home: {
+          type: "column",
+          children: [
+            { type: "text", text: "Home" },
+            {
+              type: "stack",
+              start: "inner",
+              screens: {
+                inner: { type: "text", text: "Inner" },
+                other: { type: "text", text: "Other" },
+              },
+            },
+          ],
+        },
+        pay: { type: "text", text: "Pay" },
+      },
+    },
+  };
+
+  test("draws the chosen screen of the outermost stack instead of its start", () => {
+    const done = renderPrototypeStill(reference, { frame: "pixel-9", screen: "done" });
+    expect(toHtml(done.element)).toContain("Thanks");
+    expect(done.stack).toEqual({ start: "cart", screens: ["cart", "done"], screen: "done" });
+  });
+
+  test("an unknown screen draws the start screen", () => {
+    const start = renderPrototypeStill(reference, { frame: "pixel-9" });
+    const unknown = renderPrototypeStill(reference, { frame: "pixel-9", screen: "nope" });
+    expect(toHtml(unknown.element)).toBe(toHtml(start.element));
+    expect(unknown.stack).toEqual({ start: "cart", screens: ["cart", "done"], screen: "cart" });
+  });
+
+  test("a nested stack keeps drawing its own start screen", () => {
+    for (const screen of ["home", "other"]) {
+      const still = renderPrototypeStill(nested, { screen });
+      const html = toHtml(still.element);
+      expect(html).toContain("Home");
+      expect(html).toContain("Inner");
+      expect(html).not.toContain("Other");
+      expect(still.stack).toEqual({ start: "home", screens: ["home", "pay"], screen: "home" });
+    }
+    expect(toHtml(renderPrototypeStill(nested, { screen: "pay" }).element)).toContain("Pay");
+  });
+
+  test("a spec without a stack reports none", () => {
+    const still = renderPrototypeStill({ id: "bare", root: { type: "column", children: [] } });
+    expect(still.stack).toBeUndefined();
+  });
+});

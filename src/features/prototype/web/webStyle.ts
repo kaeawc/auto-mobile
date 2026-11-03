@@ -231,13 +231,25 @@ const SIZE_BOUNDS = [
  * The authored min/max bounds, except on the main axis of a weighted child whose parent shares by
  * weight: both devices pin that axis to its share, so the bounds there do not apply.
  */
-function boundsStyle(css: Css, style: Raw, context: WebStyleContext, weighted: boolean) {
-  const pinnedAxis = weighted && context.weightsChildren === true ? context.parentAxis : undefined;
+function boundsStyle(css: Css, style: Raw, pinnedAxis: WebStyleContext["parentAxis"]) {
   for (const [field, property, axis] of SIZE_BOUNDS) {
     if (typeof style[field] === "number" && axis !== pinnedAxis) {
       css[property] = px(style[field] as number);
     }
   }
+}
+
+/**
+ * A row bounded to its parent's width (ROW_BOUND_KEY), intersected with its authored maxWidth as
+ * Compose's sizeIn does, unless a weight pins its width to its share.
+ */
+function rowBoundStyle(css: Css, style: Raw, pinnedAxis: WebStyleContext["parentAxis"]) {
+  if (style[ROW_BOUND_KEY] !== true) {
+    return;
+  }
+  const authored =
+    typeof style.maxWidth === "number" && pinnedAxis !== "row" ? px(style.maxWidth) : undefined;
+  css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
 }
 
 function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
@@ -248,13 +260,11 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     css.flex = `${style.weight} ${style.weight} 0`;
     css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
   }
-  boundsStyle(css, style, context, weighted);
+  // A weight pins its main axis to its share on both devices, where its parent shares by weight.
+  const pinnedAxis = weighted && context.weightsChildren === true ? context.parentAxis : undefined;
+  boundsStyle(css, style, pinnedAxis);
   rowMeasureStyle(css, style, context);
-  if (style[ROW_BOUND_KEY] === true) {
-    // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
-    const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
-    css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
-  }
+  rowBoundStyle(css, style, pinnedAxis);
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);
   }

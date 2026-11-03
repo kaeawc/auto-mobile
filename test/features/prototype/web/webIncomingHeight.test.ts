@@ -10,6 +10,7 @@ import { CAPPED_SHRINK, rowMeasured } from "../../../../src/features/prototype/w
 import {
   INCOMING_HEIGHT_KEY,
   nodeCss,
+  ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
   WEIGHTED_HEIGHT_KEY,
 } from "../../../../src/features/prototype/web/webStyle";
@@ -246,4 +247,15 @@ test("a weight share is exact only when every unweighted sibling has a dp height
   const row = record(childrenOf(column)[1])!;
   expect(weightedOf(row)).toBeUndefined();
   expect(contentHeight(record(row.style))).toBe(10);
+});
+
+test("a weighted row bounded around a capped aspect ratio keeps its share over its maxWidth", () => {
+  const row = { weight: 1, maxWidth: 20, [ROW_BOUND_KEY]: true };
+  const weighting = { ...light, parentAxis: "row", weightsChildren: true } as const;
+  expect(nodeCss(row, weighting)["max-width"]).toBe("100%");
+  // In a column the weight pins its height, so the authored maxWidth still bounds it.
+  expect(nodeCss(row, { ...weighting, parentAxis: "column" })["max-width"]).toBe("min(100%, 20px)");
+  expect(nodeCss({ maxWidth: 20, [ROW_BOUND_KEY]: true }, light)["max-width"]).toBe(
+    "min(100%, 20px)",
+  );
 });

@@ -364,6 +364,7 @@ const text: NodeRenderer = (node, scope) => {
 
 const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
+  const fade = fadeEdgesCss(node, scope.style);
   const { attrs, style } = base(node, scope, {
     display: "flex",
     // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
@@ -371,13 +372,14 @@ const scroll: NodeRenderer = (node, scope, path) => {
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
-    ...fadeEdgesCss(node, scope.style),
+    ...fade.style,
   });
   const inner = child(scope, {
     inBox: false,
     style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
   });
-  return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
+  const scrollAttrs = { ...attrs, ...fade.attrs };
+  return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
 
 const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node), scope));

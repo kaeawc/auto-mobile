@@ -140,7 +140,9 @@ function withEntitlement(
   lastTransaction: PrototypeCommerceTransaction | null = state.lastTransaction,
 ): PrototypeCommerceStep {
   const previous = entitlementOf(state, productId);
-  const { [productId]: _removed, ...rest } = state.entitlements;
+  const rest = Object.fromEntries(
+    Object.entries(state.entitlements).filter(([id]) => id !== productId),
+  );
   const entitlements = status === undefined ? rest : { ...rest, [productId]: status };
   return {
     state: {

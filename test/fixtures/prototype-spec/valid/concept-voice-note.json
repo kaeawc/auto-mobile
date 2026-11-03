@@ -1,0 +1,144 @@
+{
+  "id": "concept-voice-note",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "note": {}
+  },
+  "state": {
+    "recStatus": ""
+  },
+  "requires": {
+    "platform": ["audioRecorder"],
+    "permissions": [
+      {
+        "name": "microphone",
+        "purpose": "Record a voice note"
+      }
+    ]
+  },
+  "platform": {
+    "on": {
+      "audioRecorder.statusChanged": [
+        {
+          "type": "emit",
+          "name": "recorder_status"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "record",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "record": {
+        "type": "column",
+        "children": [
+          {
+            "type": "text",
+            "text": "Voice note",
+            "style": {
+              "textStyle": "headlineSmall"
+            }
+          },
+          {
+            "type": "text",
+            "testTag": "recorder_status",
+            "text": "{platform:/audioRecorder/status} {platform:/audioRecorder/elapsedMs} ms"
+          },
+          {
+            "type": "button",
+            "testTag": "record_start",
+            "label": "Record",
+            "onTap": [
+              {
+                "type": "platform",
+                "call": "audioRecorder.start",
+                "args": {
+                  "maxDurationMs": {
+                    "value": 60000
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "testTag": "record_stop",
+            "label": "Stop",
+            "onTap": [
+              {
+                "type": "platform",
+                "call": "audioRecorder.stop",
+                "args": {},
+                "into": "/data/note",
+                "statusKey": "recStatus",
+                "onSuccess": [
+                  {
+                    "type": "emit",
+                    "name": "voice_note_recorded"
+                  },
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "review"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "testTag": "record_discard",
+            "label": "Discard",
+            "onTap": [
+              {
+                "type": "platform",
+                "call": "audioRecorder.cancel",
+                "args": {}
+              }
+            ]
+          }
+        ]
+      },
+      "review": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "review_bar",
+            "title": "Review",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "testTag": "note_duration",
+            "text": "{data:/note/durationMs} ms"
+          },
+          {
+            "type": "text",
+            "testTag": "note_status",
+            "text": "{recStatus}"
+          }
+        ]
+      }
+    }
+  }
+}

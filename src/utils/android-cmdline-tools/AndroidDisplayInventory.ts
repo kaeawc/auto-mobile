@@ -8,7 +8,7 @@ import { parseSurfaceFlingerDisplayIds } from "./AndroidDisplayParsers";
 
 interface AndroidDisplayRecord {
   key: string;
-  type: "INTERNAL" | "EXTERNAL" | "VIRTUAL";
+  type: "INTERNAL" | "EXTERNAL" | "VIRTUAL" | "OVERLAY";
   sizePx: DisplayPanel["sizePx"];
 }
 
@@ -92,10 +92,21 @@ function parseDisplayType(value: string | undefined): AndroidDisplayRecord["type
     case "INTERNAL":
     case "EXTERNAL":
     case "VIRTUAL":
+    case "OVERLAY":
       return value;
     default:
       return undefined;
   }
+}
+
+/** Overlay displays keep their whole `overlay:<n>` id; physical panels key by the bare id. */
+function displayRecordKey(
+  type: AndroidDisplayRecord["type"] | undefined,
+  uniqueId: string,
+): string | undefined {
+  return type === "OVERLAY"
+    ? /^overlay:.+$/.exec(uniqueId)?.[0]
+    : /^(?:local|external|virtual):(.+)$/.exec(uniqueId)?.[1];
 }
 
 function parseAndroidDisplayDeviceInfo(line: string): AndroidDisplayRecord | undefined {
@@ -119,7 +130,7 @@ function parseAndroidDisplayDeviceInfo(line: string): AndroidDisplayRecord | und
   const sizePx = dimensions
     ? { width: Number(dimensions[1]), height: Number(dimensions[2]) }
     : undefined;
-  const key = /^(?:local|external|virtual):(.+)$/.exec(uniqueId ?? "")?.[1];
+  const key = displayRecordKey(type, uniqueId ?? "");
   return key && type && sizePx ? { key, type, sizePx } : undefined;
 }
 
@@ -179,18 +190,36 @@ export function parseAndroidPostures(output: string): Posture[] {
   return postures.size ? [...postures] : ["unknown"];
 }
 
-/** Join SurfaceFlinger physical IDs to display service physical-panel records. */
+/**
+ * Split display-service records into SurfaceFlinger-backed physical panels and overlay displays.
+ * Overlay displays (`settings put global overlay_display_devices ...`) have no SurfaceFlinger
+ * physical id; they are kept so tools can address them by their `overlay:<n>` key.
+ */
+function partitionDisplayRecords(
+  physicalIdsOutput: string,
+  displayDeviceInfosOutput: string,
+): { physical: AndroidDisplayRecord[]; overlays: AndroidDisplayRecord[] } {
+  const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
+  const records = parseAndroidDisplayDeviceInfos(displayDeviceInfosOutput);
+  return {
+    physical: records.filter((record) => record.type !== "OVERLAY" && ids.has(record.key)),
+    overlays: records.filter((record) => record.type === "OVERLAY"),
+  };
+}
+
+/** Join SurfaceFlinger physical IDs to display service physical-panel records, then overlays. */
 export function parseAndroidDeviceDisplays(
   physicalIdsOutput: string,
   displayDeviceInfosOutput: string,
   statesOutput: string,
 ): DeviceDisplays | undefined {
-  const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
-  const records = parseAndroidDisplayDeviceInfos(displayDeviceInfosOutput).filter((record) =>
-    ids.has(record.key),
+  const { physical: records, overlays } = partitionDisplayRecords(
+    physicalIdsOutput,
+    displayDeviceInfosOutput,
   );
-  // Single-screen devices retain their pre-existing inventory JSON shape.
-  if (records.length < 2) {
+  // Single-screen devices without an overlay display retain their pre-existing inventory JSON
+  // shape; overlays alone (no readable physical panel) cannot establish an inventory.
+  if (records.length === 0 || records.length + overlays.length < 2) {
     return undefined;
   }
   const internal = records.filter((record) => record.type === "INTERNAL");
@@ -207,7 +236,13 @@ export function parseAndroidDeviceDisplays(
     }
     return { key: record.key, role, sizePx: record.sizePx };
   });
-  return { panels, postures: parseAndroidPostures(statesOutput) };
+  // Physical panels come first so inventory-order fallbacks never land on an overlay.
+  const overlayPanels: DisplayPanel[] = overlays.map((record) => ({
+    key: record.key,
+    role: "overlay",
+    sizePx: record.sizePx,
+  }));
+  return { panels: [...panels, ...overlayPanels], postures: parseAndroidPostures(statesOutput) };
 }
 
 /** Distinguish a proven single panel from a failed physical-display join. */
@@ -216,14 +251,14 @@ export function parseAndroidDeviceDisplayOutcome(
   displayDeviceInfosOutput: string,
   statesOutput: string,
 ): DisplayInventoryOutcome {
-  const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
-  const matched = parseAndroidDisplayDeviceInfos(displayDeviceInfosOutput).filter((record) =>
-    ids.has(record.key),
+  const { physical: matched, overlays } = partitionDisplayRecords(
+    physicalIdsOutput,
+    displayDeviceInfosOutput,
   );
   if (matched.length === 0) {
     return { kind: "unreadable", reason: "no matched physical display records" };
   }
-  if (matched.length === 1) {
+  if (matched.length === 1 && overlays.length === 0) {
     return { kind: "single" };
   }
   // The existing parser owns panel roles and posture extraction.

@@ -16,7 +16,7 @@ import {
 
 export interface MockBackendRegistryDeps {
   ids: IdGenerator;
-  timer: Pick<Timer, "sleep">;
+  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
   /** The stream behind a backend: seeded when the definition has a seed, so a run replays. */
   createRandom?: (seed: number | undefined) => Random;
 }
@@ -63,6 +63,7 @@ export class PrototypeMockBackendRegistry {
     }
     const createRandom = this.deps.createRandom ?? defaultCreateRandom;
     for (const [backendId, definition] of parsed) {
+      this.backends.get(backendId)?.dispose(`Mock backend "${backendId}" was replaced.`);
       this.backends.set(
         backendId,
         new PrototypeMockBackend(definition, {
@@ -78,13 +79,17 @@ export class PrototypeMockBackendRegistry {
     return this.backends.get(backendId);
   }
 
+  /** Removes `backendId`, closing its open channels. */
   clear(backendId: string): boolean {
+    this.backends.get(backendId)?.dispose(`Mock backend "${backendId}" was cleared.`);
     return this.backends.delete(backendId);
   }
 
   /** Session end. */
   clearAll(): void {
-    this.backends.clear();
+    for (const backendId of this.ids()) {
+      this.clear(backendId);
+    }
   }
 
   ids(): string[] {

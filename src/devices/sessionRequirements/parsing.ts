@@ -194,6 +194,33 @@ function parseIosHardware(value: unknown): RequirementResult<IosHardwareSelector
   });
 }
 
+function parseAndroidArchetype(
+  value: Record<string, unknown>,
+): RequirementResult<AndroidHardwareSelector> {
+  const keys = hasOnlyKeys(value, ["kind", "archetype"]);
+  if (!keys.ok) {
+    return keys;
+  }
+  return value.archetype === "phone" ||
+    value.archetype === "tablet" ||
+    value.archetype === "foldable"
+    ? success({ kind: "archetype", archetype: value.archetype })
+    : failure("invalid_request", "Android hardware supports only phone, tablet or foldable.", {
+        field: "hardware.archetype",
+      });
+}
+
+function parseAndroidExactProfile(
+  value: Record<string, unknown>,
+): RequirementResult<AndroidHardwareSelector> {
+  const keys = hasOnlyKeys(value, ["kind", "profileId"]);
+  if (!keys.ok) {
+    return keys;
+  }
+  const profileId = nonEmptyString(value.profileId, "hardware.profileId");
+  return profileId.ok ? success({ kind: "exact-profile", profileId: profileId.value }) : profileId;
+}
+
 function parseAndroidHardware(value: unknown): RequirementResult<AndroidHardwareSelector> {
   if (!isRecord(value) || typeof value.kind !== "string") {
     return failure("invalid_request", "hardware must have an explicit selector kind.", {
@@ -205,17 +232,10 @@ function parseAndroidHardware(value: unknown): RequirementResult<AndroidHardware
     return keys.ok ? success({ kind: "omitted" }) : keys;
   }
   if (value.kind === "archetype") {
-    const keys = hasOnlyKeys(value, ["kind", "archetype"]);
-    if (!keys.ok) {
-      return keys;
-    }
-    return value.archetype === "phone" ||
-      value.archetype === "tablet" ||
-      value.archetype === "foldable"
-      ? success({ kind: "archetype", archetype: value.archetype })
-      : failure("invalid_request", "Android hardware supports only phone, tablet or foldable.", {
-          field: "hardware.archetype",
-        });
+    return parseAndroidArchetype(value);
+  }
+  if (value.kind === "exact-profile") {
+    return parseAndroidExactProfile(value);
   }
   return failure("invalid_request", `Unsupported Android hardware selector '${value.kind}'.`, {
     field: "hardware.kind",

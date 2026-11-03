@@ -9,7 +9,6 @@ import {
   WEB_SCREENSHOT_VIEWPORT,
   webScreenshotCases,
   webScreenshotPage,
-  type WebScreenshotCase,
 } from "./webScreenshotCases";
 
 /**
@@ -90,22 +89,66 @@ function shownView(page: Page): Promise<ShownView> {
   });
 }
 
+interface MidRotation {
+  readonly animations: number;
+  /** The orientations of the views shown halfway through the turn. */
+  readonly shown: string[];
+  /** Each shown view's rotation in degrees, read from its computed transform. */
+  readonly angles: number[];
+}
+
+/** Pauses the running turn halfway, so its frame can be inspected. */
+function midRotation(page: Page): Promise<MidRotation> {
+  return page.evaluate(() => {
+    const animations = document.getAnimations();
+    animations.forEach((animation) => {
+      animation.pause();
+      const duration = Number(animation.effect?.getTiming().duration ?? 0);
+      animation.currentTime = duration / 2;
+    });
+    const shown = Array.from(document.querySelectorAll<HTMLElement>("[data-view]")).filter(
+      (view) => !view.hidden,
+    );
+    return {
+      animations: animations.length,
+      shown: shown.map((view) => view.dataset.orientation ?? ""),
+      angles: shown.map((view) => {
+        const matrix = new DOMMatrix(getComputedStyle(view).transform);
+        return (Math.atan2(matrix.b, matrix.a) * 180) / Math.PI;
+      }),
+    };
+  });
+}
+
+/** Finishes the turn and waits for its finish handler to hide the outgoing view. */
+async function finishAnimations(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.getAnimations().forEach((animation) => animation.finish());
+  });
+  await page.waitForFunction(
+    () =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-view]")).filter(
+        (view) => !view.hidden,
+      ).length === 1,
+  );
+}
+
 function writeOutput(name: string, png: Buffer): void {
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(join(OUT_DIR, name), png);
 }
 
-/** Compares against the golden; a mismatch leaves `<case>.png` and `<case>.diff.png` in OUT_DIR. */
-function compareToGolden(entry: WebScreenshotCase, actual: Buffer): string | undefined {
+/** Compares against a golden; a mismatch leaves `<name>.png` and `<name>.diff.png` in OUT_DIR. */
+function compareToGolden(name: string, golden: string, actual: Buffer): string | undefined {
   if (UPDATE) {
     mkdirSync(WEB_SCREENSHOT_GOLDEN_DIR, { recursive: true });
-    writeFileSync(entry.golden, actual);
+    writeFileSync(golden, actual);
     return undefined;
   }
-  if (!existsSync(entry.golden)) {
-    return `no golden at ${entry.golden}`;
+  if (!existsSync(golden)) {
+    return `no golden at ${golden}`;
   }
-  const result = diffPngs(readFileSync(entry.golden), actual, {
+  const result = diffPngs(readFileSync(golden), actual, {
     perPixelDelta: PER_PIXEL_DELTA,
     pixelRatio: PIXEL_RATIO,
   });
@@ -114,7 +157,7 @@ function compareToGolden(entry: WebScreenshotCase, actual: Buffer): string | und
   }
   if (!result.match) {
     if (result.diffPng) {
-      writeOutput(`${entry.name}.diff.png`, result.diffPng);
+      writeOutput(`${name}.diff.png`, result.diffPng);
     }
     return `${(result.diffRatio * 100).toFixed(3)}% of pixels differ (limit ${PIXEL_RATIO * 100}%)`;
   }
@@ -159,11 +202,26 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
           // Saved before any assertion, so a case that fails a functional check keeps its image.
           writeOutput(`${entry.name}.png`, screenshot);
 
+          // Mid-rotation (#16545): both views are shown and turned; then the turn ends upright.
           await page.click('[data-control="rotate"]');
+          const turning = await midRotation(page);
+          expect(turning.animations).toBe(3);
+          expect(turning.shown.sort()).toEqual(["landscape", "portrait"]);
+          expect(turning.angles.every((angle) => Math.abs(angle) > 1)).toBe(true);
+          await finishAnimations(page);
           const rotated = await shownView(page);
           expect(rotated.count).toBe(1);
           expect(rotated.orientation).toBe("landscape");
           expect(rotated.width).toBeGreaterThan(rotated.height);
+          const landscape = await page.screenshot({ animations: "disabled", caret: "hide" });
+          writeOutput(`${entry.name}--landscape.png`, landscape);
+
+          // Reduced motion skips the turn.
+          await page.emulateMedia({ reducedMotion: "reduce" });
+          await page.click('[data-control="rotate"]');
+          expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+          expect((await shownView(page)).orientation).toBe("portrait");
+          await page.emulateMedia({ reducedMotion: "no-preference" });
 
           // A multi-screen stack's picker shows exactly the picked screen's view.
           const screens = await page.$$eval(
@@ -190,7 +248,10 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
             violations,
           }).toEqual({ consoleErrors: [], pageErrors: [], requests: [], violations: [] });
 
-          expect(compareToGolden(entry, screenshot)).toBeUndefined();
+          expect(compareToGolden(entry.name, entry.golden, screenshot)).toBeUndefined();
+          expect(
+            compareToGolden(`${entry.name}--landscape`, entry.landscapeGolden, landscape),
+          ).toBeUndefined();
         } finally {
           await page.close();
         }

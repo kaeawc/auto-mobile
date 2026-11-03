@@ -11,6 +11,7 @@ import {
 import { TargetFocus } from "./sendkeys/TargetFocus";
 import { TargetState } from "./sendkeys/TargetState";
 import { CommandRunner } from "./sendkeys/CommandRunner";
+import { withImeEditorWarnings, type ImeEditorState } from "./sendkeys/ImeEditorState";
 import {
   SendKeysRequestBudget,
   isSendKeysBudgetExhausted,
@@ -212,6 +213,8 @@ export interface SendKeysResult extends BaseActionResult {
   error?: string;
   retryable?: boolean;
   warning?: string;
+  /** Observed editor/keyboard state changes after Android IME typing and restoration. */
+  warnings?: string[];
 }
 
 export interface SendKeysFailure {
@@ -223,6 +226,8 @@ export interface SendKeysCommandExecution {
   results: SendKeysCommandResult[];
   failure?: SendKeysFailure;
   restorationFailed?: boolean;
+  /** Internal pre-activation snapshot; compared with the terminal observation. */
+  imeEditorState?: ImeEditorState;
 }
 
 export interface SendKeysCommandExecutor {
@@ -711,7 +716,7 @@ export class SendKeys {
           : await observe();
       return this.buildResult([], focusFailure, observation);
     }
-    const execution =
+    const execution: SendKeysCommandExecution =
       preflight ?? (await this.executeCommands(commands, progress, signal, routing));
     const terminal = this.terminalCommandFailure(commands.length, execution, signal);
     if (terminal) {
@@ -719,7 +724,10 @@ export class SendKeys {
     }
     signal?.throwIfAborted();
     const observation = await observe(actionStartTimestamp);
-    return this.buildResult(execution.results, execution.failure, observation);
+    return withImeEditorWarnings(
+      this.buildResult(execution.results, execution.failure, observation),
+      execution.imeEditorState,
+    );
   }
 
   private terminalCommandFailure(

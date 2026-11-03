@@ -1,0 +1,195 @@
+{
+  "name": "Queued errors leave the state untouched and are typed",
+  "products": [
+    {
+      "id": "pro_monthly",
+      "kind": "subscription"
+    },
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    },
+    {
+      "id": "coins_100",
+      "kind": "consumable"
+    }
+  ],
+  "state": {
+    "entitlements": {
+      "no_ads": "billingRetry"
+    },
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "error": {
+          "code": "cancelled",
+          "message": "User cancelled"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "billingRetry"
+          },
+          "lastTransaction": null
+        },
+        "error": {
+          "code": "cancelled",
+          "message": "User cancelled"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "error": {
+          "code": "cancelled",
+          "message": "x",
+          "reason": "network"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "billingRetry"
+          },
+          "lastTransaction": null
+        },
+        "error": {
+          "code": "cancelled",
+          "message": "x"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "error": {
+          "code": "platform_error",
+          "message": "Card declined",
+          "reason": "declined"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "billingRetry"
+          },
+          "lastTransaction": null
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "Card declined",
+          "reason": "declined"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "error": {
+          "code": "store_on_fire",
+          "message": "boom",
+          "reason": "melted"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "billingRetry"
+          },
+          "lastTransaction": null
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "boom"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "gems_5",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "g1"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "billingRetry"
+          },
+          "lastTransaction": null
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "Unknown product gems_5",
+          "reason": "unavailable"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": ""
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "billingRetry"
+          },
+          "lastTransaction": null
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "Invalid transaction id"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "no_ads",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "n1"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "n1",
+            "productId": "no_ads",
+            "status": "purchased"
+          }
+        },
+        "into": {
+          "status": "purchased",
+          "transactionId": "n1"
+        },
+        "entitlementsChanged": true
+      }
+    }
+  ]
+}

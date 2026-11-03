@@ -318,9 +318,11 @@
     [ "$status" -eq 0 ]
     [ "$output" = "7" ]
 
+    # Every upload in the builder (the ProtoViewer AAB and mapping too) honours the retention input.
     run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .with."retention-days"' "$workflow"
     [ "$status" -eq 0 ]
-    [ "$output" = '${{ inputs.artifact-retention-days }}' ]
+    [ -n "$output" ]
+    [ "$(sort -u <<<"$output")" = '${{ inputs.artifact-retention-days }}' ]
   done
 
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with."retention-days"' .github/workflows/prepare-release.yml
@@ -936,7 +938,10 @@ wiring_requires_yq() {
 
   run yq -r '.jobs.build.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
   [ "$status" -eq 0 ]
-  [ "$output" = ":protoviewer:assembleRelease" ]
+  # The Play pipeline (#14147) adds bundleRelease through build-aab; releases build the APK only.
+  [ "$output" = "\${{ inputs.build-aab && ':protoviewer:assembleRelease :protoviewer:bundleRelease' || ':protoviewer:assembleRelease' }}" ]
+  run yq -r '.jobs."build-candidate-protoviewer-apk".with."build-aab"' .github/workflows/prepare-release.yml
+  [ "$output" = "null" ]
 
   run yq -r '.jobs.build.env.PROTOVIEWER_REQUIRE_RELEASE_SIGNING' "$workflow"
   [ "$status" -eq 0 ]

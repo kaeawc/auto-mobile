@@ -46,12 +46,14 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShor
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
+import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeChannelTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeChannelHostLink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundTracker
@@ -439,6 +441,17 @@ class CtrlProxy : AccessibilityService() {
         if (target is WebSocketServer.ConnectedClient) {
           webSocketServerOrNull?.sendToClient(target, frame)
         }
+      },
+    )
+  /** `via: "host"` prototype channels: relayed over the socket by the connected host (#14269). */
+  internal val hostPrototypeChannels =
+    HostPrototypeChannelTransport(
+      object : PrototypeChannelHostLink {
+        override fun send(frame: String): Any? = webSocketServerOrNull?.sendToHost(frame)
+
+        override fun sendTo(target: Any, frame: String): Boolean =
+          target is WebSocketServer.ConnectedClient &&
+            webSocketServerOrNull?.sendToClient(target, frame) == true
       },
     )
   private val prototypeRefreshCoalescer =

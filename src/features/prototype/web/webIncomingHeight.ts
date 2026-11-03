@@ -72,7 +72,8 @@ const fixedHeight = (node: Raw): number => {
 
 /**
  * Each weighted node's share of `free`, as CSS's flexible-length algorithm resolves `flex: w w 0`
- * items: split what is left over the unfrozen weights, clamp each share by its node's `maxHeight`
+ * items: split what is left over the unfrozen weights (only `free × weights` of it when those
+ * weights sum below 1), clamp each share by its node's `maxHeight`
  * then `minHeight` (see clamped), freeze the min violators when the clamps add height, the max
  * violators when they take it away, or every share when they cancel, and repeat until every
  * share is frozen. A share clamped by its own bound so hands what it gives up to its siblings.
@@ -83,8 +84,11 @@ function weightShares(nodes: readonly Raw[], free: number): Map<Raw, number> {
   while (open.length > 0) {
     const weights = open.reduce((sum, node) => sum + (weightOf(node) ?? 0), 0);
     const left = free - [...frozen.values()].reduce((sum, height) => sum + height, 0);
+    // Weights summing below 1 take only that fraction of the initial free space, when less.
+    const fraction = free * weights;
+    const space = weights < 1 && Math.abs(fraction) < Math.abs(left) ? fraction : left;
     const targets = open.map((node) => {
-      const share = (left * (weightOf(node) ?? 0)) / (weights || 1);
+      const share = (space * (weightOf(node) ?? 0)) / weights;
       return { node, share, height: clamped(record(node.style), share) };
     });
     const violation = targets.reduce((sum, target) => sum + target.height - target.share, 0);

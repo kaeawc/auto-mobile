@@ -292,3 +292,25 @@ test("a weighted row beside a maxHeight-clamped sibling caps its aspect ratio by
     basis: 160,
   });
 });
+
+test("weights summing below 1 take only that fraction of the free space, as CSS flex does (#16763)", () => {
+  const weighted = (weight: number, bounds: Raw = {}) => ({
+    type: "row",
+    style: { weight, ...bounds },
+  });
+  expect(columnChildHeights([weighted(0.5)], 100, 0)).toEqual([50]);
+  // Freezing a sibling leaves 0.5 of weight, which takes half the initial free space, not the rest.
+  expect(columnChildHeights([weighted(0.5, { maxHeight: 20 }), weighted(0.5)], 100, 0)).toEqual([
+    20, 50,
+  ]);
+  expect(
+    columnChildHeights([weighted(0.25, { maxHeight: 10 }), weighted(0.25), weighted(0.25)], 100, 0),
+  ).toEqual([10, 25, 25]);
+  expect(columnChildHeights([weighted(0.25, { minHeight: 60 }), weighted(0.25)], 100, 0)).toEqual([
+    60, 25,
+  ]);
+  // When less is left than that fraction, the rest is what the weights share.
+  expect(columnChildHeights([weighted(0.4, { minHeight: 90 }), weighted(0.4)], 100, 0)).toEqual([
+    90, 10,
+  ]);
+});

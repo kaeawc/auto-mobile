@@ -46,7 +46,8 @@ internal object PrototypePlatformModules {
    */
   fun nodeBackendCapability(node: JsonObject): String? {
     if ((node["type"] as? JsonPrimitive)?.content != "map") return null
-    val backend = (node["backend"] as? JsonPrimitive)?.takeIf(JsonPrimitive::isString) ?: return null
+    val backend =
+      (node["backend"] as? JsonPrimitive)?.takeIf(JsonPrimitive::isString) ?: return null
     return (module("map")?.member("backends")?.member(backend.content)?.get("capability")
         as? JsonPrimitive)
       ?.takeIf(JsonPrimitive::isString)

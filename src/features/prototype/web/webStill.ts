@@ -4,12 +4,17 @@ import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContr
 import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
-import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
+import { renderDeviceFrame, safeAreaVars, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
-import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
+import {
+  appTopColor,
+  statusBarContentFor,
+  type WebScreenSize,
+  type WebStatusBarContent,
+} from "./webStatusBar";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
@@ -214,24 +219,29 @@ function screenBackground(style: WebStyleContext): string {
   );
 }
 
+/** What the status bar's top colour is read from: the window's content on the screen. */
+interface StatusBarSample {
+  readonly content: WebElement;
+  readonly background: string;
+  readonly dark: boolean;
+  readonly screen: WebScreenSize;
+  /** The screen's custom properties: the safe-area insets. */
+  readonly vars: Readonly<Record<string, string>>;
+}
+
 /**
- * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
- * colour (a fullscreen window's), as both platforms' edge-to-edge defaults do.
+ * `window.statusBar` light or dark picks the content style; `auto` or none follows the colour the
+ * window paints at the screen's top edge, as both platforms' edge-to-edge defaults do. The window
+ * placement is part of that layout, so a bottom sheet or a floating window leaves the screen
+ * background there.
  */
-function stillStatusBarContent(
-  spec: unknown,
-  content: WebElement,
-  background: string,
-  dark: boolean,
-): WebStatusBarContent {
+function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
+  const { content, background, dark, screen, vars } = sample;
   const authored = record(record(spec)?.window)?.statusBar;
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  // A sheet or floating window leaves the status area on the screen background.
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  const fullscreen = placement === undefined || placement === "fullscreen";
-  const top = fullscreen ? appTopColor(content, background) : background;
+  const top = appTopColor(content, background, screen, vars);
   return statusBarContentFor(top, dark ? "light" : "dark");
 }
 
@@ -250,14 +260,21 @@ export function renderPrototypeStill(
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
   const content = placed(expanded, root, scope.layers);
+  const orientation = options.orientation ?? "portrait";
   const element = renderDeviceFrame(
     frame,
-    options.orientation ?? "portrait",
+    orientation,
     {
       dark,
       textColor,
       background,
-      statusBarContent: stillStatusBarContent(expanded, content, background, dark),
+      statusBarContent: stillStatusBarContent(expanded, {
+        content,
+        background,
+        dark,
+        screen: screenSize(frame, orientation),
+        vars: safeAreaVars(frame, orientation),
+      }),
     },
     content,
   );

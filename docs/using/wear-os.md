@@ -3,10 +3,10 @@
 AutoMobile can drive a Wear OS emulator with the same tools it uses on a phone. This guide covers
 setting one up, the watch-specific behaviour, and what is out of scope.
 
-> [!WARNING]
-> **Verification limits.** Watch-specific behaviour remains unverified unless stated below.
-> Sleep/wake power-state changes have been measured on a Wear OS emulator; ambient mode itself
-> has no usable readback.
+> [!NOTE]
+> **Verified on** a Wear OS 7.0 emulator (API 37 `android-wear-signed` image, `wearos_small_round`
+> profile, 384x384). Other images, square watches and physical watches are unverified. Sleep/wake
+> power-state changes have been measured; ambient mode itself has no usable readback.
 
 ## Create the emulator by hand
 
@@ -16,39 +16,56 @@ error. Create the AVD with the Android command-line tools, or pass `provisionDev
 Wear OS `runtime` and `deviceType` (unverified).
 
 ```bash
-# Pick a Wear OS system image. Use API 34 or newer.
+# Pick a Wear OS system image. Use API 34 or newer; API 37 is the verified one.
 sdkmanager --list | grep android-wear
-sdkmanager "system-images;android-34;android-wear;x86_64"
+sdkmanager "system-images;android-37.0;android-wear-signed;arm64-v8a"
 
 # List device profiles and pick a round one.
 avdmanager list device | grep -i wear
 
 avdmanager create avd \
-  --name wear-34-round \
-  --package "system-images;android-34;android-wear;x86_64" \
-  --device wearos_large_round
+  --name wear-37-round \
+  --package "system-images;android-37.0;android-wear-signed;arm64-v8a" \
+  --device wearos_small_round
 
-emulator -avd wear-34-round
+emulator -avd wear-37-round
 ```
 
-The exact image and profile ids vary by SDK version; take them from `sdkmanager --list` and
-`avdmanager list device`.
+The exact image and profile ids vary by SDK version and host architecture (use `x86_64` on an
+Intel host); take them from `sdkmanager --list` and `avdmanager list device`.
 
-AutoMobile classifies the emulator as `watch` from the system-image tag (`android-wear`) and the
-profile id, so `formFactor: "watch"` appears in the device description and can be asked for in a
-device `requires` clause. The device resources also report `traits.formFactor: "watch"` when the
-build announces it in `ro.build.characteristics`.
+AutoMobile classifies the emulator as `watch` from the system-image tag (`android-wear`) or a
+`wear_`/`wearos_` profile id, so `formFactor: "watch"` appears in the device description and can
+be asked for in a device `requires` clause. The device resources also report
+`traits.formFactor: "watch"` when the build announces it in `ro.build.characteristics`.
 
 ## What to expect
 
 A Wear OS image is an Android build, so the tools that need only adb and the accessibility tree
-(`observe`, `tapOn`, `swipeOn`, `pressButton`, `launchApp`, screenshots) are expected to work
-unchanged. The screen is small, and on a round display content near the corners is cut off.
+work unchanged. On the verified emulator:
+
+| Tool                                    | Result                                                              |
+| --------------------------------------- | ------------------------------------------------------------------- |
+| `startDevice`, `listDevices`            | Pass: the emulator is adopted and reported as `formFactor: "watch"` |
+| `observe`                               | Pass: view hierarchy, screenshot and `isScreenRound`                |
+| `launchApp`, `terminateApp`, `listApps` | Pass                                                                |
+| `tapOn`, `tapAt`                        | Pass, including rows at the bottom edge of a round screen           |
+| `swipeOn`, `swipeOn` with `lookFor`     | Pass: touch drags scroll watch lists                                |
+| `pressButton` `back`, `home`            | Pass (see below)                                                    |
+| `rotaryScroll`                          | Pass (see below)                                                    |
+| `performanceTrace`                      | Pass                                                                |
+| `prototype` `show`, `dismiss`, `save`   | Pass (see below)                                                    |
+
+The screen is small, and on a round display content near the corners is cut off. `swipeOn` with
+`lookFor` taps the centre of the found element, and on a round watch list that centre lies inside
+the visible circle, edge rows included.
 
 - `observe` reports `isScreenRound` on a watch: `true` on a round display, `false` on a square one,
   absent when it cannot be read.
-- Back on Wear OS is a swipe from the left edge. Whether `pressButton` `back` and `home` behave like
-  that gesture and return to the watch face is unverified.
+- `pressButton` `back` behaves like the Wear OS swipe-from-the-left-edge gesture: it closes the
+  current screen, and repeated presses return to the watch face. `home` from inside an app returns
+  to the watch face; from the watch face it opens the app list, which is the platform's own
+  behaviour.
 
 ## Scrolling with the crown
 
@@ -69,9 +86,13 @@ expect to move. It is not listed by default; enable it with `setToolEnabled` (se
   `warningCode: "not_watch"` and a `warning`: phones usually ignore rotary input, so use `swipeOn`
   for lists on this device or run the test on a Wear OS image such as `wearos_small_round`.
 
-Which of the three methods works on a given image is unverified; check `attempts`.
+On the verified emulator `input rotaryencoder scroll` moves both plain and curved
+(`ScalingLazyColumn`) lists in either direction, and the emulator-console attempt always fails;
+the swipe fallback covers images where neither native method works. Check `attempts` on other
+images.
 
-`swipeOn` with `lookFor` still scrolls with touch swipes on a watch.
+`swipeOn` with `lookFor` still scrolls with touch swipes on a watch, which is enough for the
+system lists tested.
 
 ## Ambient power state
 
@@ -95,9 +116,10 @@ error; check the device connection before retrying.
 
 `prototype` `show` renders on a watch with the phone overlay and components; there are no
 watch-specific components or rotary input in a prototype. A successful `show` on a watch reports
-`screenRound`, so you can tell why content in the corners is clipped. Wear launchers are not
-expected to support pinned shortcuts, so `save` with `pin: true` keeps the save and reports
-`pinned: "unsupported"`.
+`screenRound`, so you can tell why content in the corners is clipped. On a round display the
+dismiss control and non-fullscreen windows are inset into the square inscribed in the circle, so
+they stay tappable. Wear launchers are not expected to support pinned shortcuts, so `save` with
+`pin: true` keeps the save and reports `pinned: "unsupported"`.
 
 ## Not supported
 

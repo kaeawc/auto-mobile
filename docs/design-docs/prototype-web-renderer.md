@@ -428,8 +428,20 @@ the host, so the page's script only switches between views it was given and neve
   (medium) or `.largeTitle` (large) line below the row, framed at 48 or 88 px with an
   `enterAlways` or `exitUntilCollapsed` `onScroll`; `card` is `surfaceContainerHigh` when
   filled, else `surface`, with an `outlineVariant` outline when outlined. Like the iOS renderer,
-  the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField`, `bottomNav`, `tabBar`
-  and `bottomSheet` still draw the shared renderer.
+  the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField` with a label,
+  variant, supporting text or `maxLength` puts its `.footnote` `onSurfaceVariant` label 4 px above
+  an input padded 12 px (`filled`: a `surfaceContainerHighest` fill with 4 px top corners over a
+  1 px `outline` line; `outlined`: a 1 px 4 px-radius `outline` stroke; red on an error) and a
+  `.caption` row of supporting text and the `count/max` counter below; otherwise it is a
+  rounded-border input. The label never floats, an empty field shows only its placeholder, icons sit
+  4 px beside the field and the error message is a red `.caption` line below it. `bottomNav`
+  spaces items 8 px on `surfaceContainer`, padded 12 px above and 4 px below, each a 64x32
+  `secondaryContainer` capsule over a `.caption` label (semibold when selected, else medium) in at
+  least 64 px. `tabBar` has no background or divider: each tab is its icon over a `.caption` label,
+  2 px apart, at least 44 px tall (64 px when it minimizes), the selected one in a capsule. An
+  iOS `bottomSheet` centres its child 8 px below a 36x5 handle 6 px from the top, on `surface`
+  with a 16 px radius. `timePicker`, `datePicker` and `pasteButton`
+  are still placeholders on both skins.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
   navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to

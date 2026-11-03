@@ -16,6 +16,7 @@ const IOS_TEXT_STYLES = {
   body: [17, 22],
   subheadline: [15, 20],
   footnote: [13, 18],
+  caption: [12, 16],
 } as const satisfies Record<string, readonly [number, number]>;
 
 export type IosTextStyle = keyof typeof IOS_TEXT_STYLES;
@@ -31,17 +32,17 @@ export function iosText(textStyle: IosTextStyle, scope: WebRenderScope, weight =
 }
 
 /** A theme role as CSS, else the system colour the iOS renderer falls back to. */
-function role(name: string, fallback: string, scope: WebRenderScope): string {
+export function iosRole(name: string, fallback: string, scope: WebRenderScope): string {
   return cssColor(name, scope.style) ?? fallback;
 }
 
 /** Whether a state key, with repeat placeholders bound first, holds `true`. */
-function stateOn(stateKey: unknown, scope: WebRenderScope, kit: WebRenderKit): boolean {
+export function stateOn(stateKey: unknown, scope: WebRenderScope, kit: WebRenderKit): boolean {
   const key = typeof stateKey === "string" ? kit.bound(stateKey, scope) : undefined;
   return key !== undefined && scope.condition.state[key] === true;
 }
 
-function glyph(name: string, scope: WebRenderScope, kit: WebRenderKit): WebElement {
+export function glyph(name: string, scope: WebRenderScope, kit: WebRenderKit): WebElement {
   return kit.icon({ type: "icon", name }, scope, "");
 }
 
@@ -57,13 +58,13 @@ export function iosSwitchTrack(on: boolean, scope: WebRenderScope): WebElement {
       width: "27px",
       height: "27px",
       "border-radius": "50%",
-      "background-color": role("onPrimary", "#ffffff", scope),
+      "background-color": iosRole("onPrimary", "#ffffff", scope),
       "box-shadow": "0 1px 1px rgba(0,0,0,0.2)",
     },
   });
   const fill = on
-    ? role("primary", "rgba(52,199,89,1)", scope)
-    : role("surfaceContainerHighest", "rgba(120,120,128,0.16)", scope);
+    ? iosRole("primary", "rgba(52,199,89,1)", scope)
+    : iosRole("surfaceContainerHighest", "rgba(120,120,128,0.16)", scope);
   return el(
     "span",
     {
@@ -223,7 +224,7 @@ export const iosChipRenderer =
       "align-items": "center",
       "min-height": "44px",
       "flex-shrink": "0",
-      color: role("onSurface", "currentColor", scope),
+      color: iosRole("onSurface", "currentColor", scope),
       ...disabled.css,
     });
     const body = el(
@@ -238,9 +239,9 @@ export const iosChipRenderer =
           "padding-inline": "12px",
           "border-radius": "8px",
           ...iosText("subheadline", scope, 500),
-          border: `1px solid ${selected ? "transparent" : role("outlineVariant", "rgba(60,60,67,0.29)", scope)}`,
+          border: `1px solid ${selected ? "transparent" : iosRole("outlineVariant", "rgba(60,60,67,0.29)", scope)}`,
           ...(selected
-            ? { "background-color": role("secondaryContainer", "transparent", scope) }
+            ? { "background-color": iosRole("secondaryContainer", "transparent", scope) }
             : {}),
         },
       },
@@ -397,14 +398,14 @@ export const iosTopAppBarRenderer =
 export function iosCardChrome(variant: unknown, scope: WebRenderScope): Css {
   const filled = variant === undefined || variant === "filled";
   const fill = filled
-    ? role("surfaceContainerHigh", "rgba(242,242,247,1)", scope)
-    : role("surface", "rgba(255,255,255,1)", scope);
+    ? iosRole("surfaceContainerHigh", "rgba(242,242,247,1)", scope)
+    : iosRole("surface", "rgba(255,255,255,1)", scope);
   const content = cssColor("onSurface", scope.style);
   return {
     "background-color": fill,
     ...(content ? { color: content } : {}),
     ...(variant === "outlined"
-      ? { border: `1px solid ${role("outlineVariant", "rgba(60,60,67,0.29)", scope)}` }
+      ? { border: `1px solid ${iosRole("outlineVariant", "rgba(60,60,67,0.29)", scope)}` }
       : {}),
     ...(variant === "elevated" ? { "box-shadow": "0 1px 2px rgba(0,0,0,0.2)" } : {}),
   };

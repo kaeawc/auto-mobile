@@ -123,16 +123,63 @@ function dragHandle(style: WebStyleContext): WebElement {
 }
 
 /**
- * Android's in-window sheet: a scrim over the window and, at its bottom, a full-width column as
+ * The iOS renderer's drag handle: a 36x5 capsule 6 px from the sheet's top, `onSurfaceVariant`
+ * (else the secondary label colour at half opacity).
+ */
+function iosDragHandle(style: WebStyleContext): WebElement {
+  const fallback = style.mode === "dark" ? "rgba(235,235,245,0.3)" : "rgba(60,60,67,0.3)";
+  return el("div", {
+    attrs: { [DATA_PART]: "handle" },
+    style: {
+      width: "36px",
+      height: "5px",
+      "margin-top": "6px",
+      [BORDER_RADIUS]: "2.5px",
+      [ALIGN_SELF]: CENTER,
+      [FLEX_SHRINK]: "0",
+      [BACKGROUND_COLOR]: cssColor("onSurfaceVariant", style) ?? fallback,
+    },
+  });
+}
+
+/**
+ * The sheet's own chrome per skin. Android's column starts its child at the leading edge under an
+ * 8 px-margined handle on `surface`; the iOS renderer's VStack centres it 8 px below the handle,
+ * clipped to a 16 px radius on `surface` (else the system background). `ios.sheet.sizing` is
+ * ignored, as the iOS renderer ignores it.
+ */
+function sheetSkin(scope: WebRenderScope): {
+  css: Record<string, string>;
+  surface: string;
+  handle: WebElement;
+} {
+  if (scope.skin === "ios") {
+    const fallback = scope.style.mode === "dark" ? "rgba(0,0,0,1)" : "rgba(255,255,255,1)";
+    return {
+      css: { [ALIGN_ITEMS]: CENTER, gap: "8px", [BORDER_RADIUS]: "16px", overflow: "hidden" },
+      surface: cssColor("surface", scope.style) ?? fallback,
+      handle: iosDragHandle(scope.style),
+    };
+  }
+  return {
+    css: { [ALIGN_ITEMS]: "flex-start" },
+    surface: rgbaCss(roleColor("surface", scope.style)),
+    handle: dragHandle(scope.style),
+  };
+}
+
+/**
+ * The in-window sheet: a scrim over the window and, at its bottom, a full-width column as
  * tall as the first detent, painted `surface` unless an authored background resolves. The
  * handle comes first, then the child. Authored style applies to the sheet and wins.
  */
 function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRenderKit) {
   const hoisted = hoistedScope(scope);
+  const skin = sheetSkin(scope);
   const { attrs, style: base } = kit.base(node, hoisted, {
     display: FLEX,
     [FLEX_DIRECTION]: COLUMN,
-    [ALIGN_ITEMS]: "flex-start",
+    ...skin.css,
     position: RELATIVE,
     width: "100%",
     height: detentHeight(node.detents),
@@ -141,9 +188,7 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
   });
   // An authored background that resolves paints the sheet; otherwise (none, or an unresolved
   // colour) it keeps the `surface` the devices fall back to, under any authored gradient.
-  const style = base[BACKGROUND_COLOR]
-    ? base
-    : { ...base, [BACKGROUND_COLOR]: rgbaCss(roleColor("surface", scope.style)) };
+  const style = base[BACKGROUND_COLOR] ? base : { ...base, [BACKGROUND_COLOR]: skin.surface };
   const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: COLUMN } });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const scrim = el("div", {
@@ -157,7 +202,7 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
   // A gradient border and inner shadows paint over the sheet's content, as on any other node.
   const sheet = withOverContentLayers(
     el("div", { attrs: { ...attrs, [DATA_PART]: "sheet" }, style }, [
-      ...(node.dragHandle === false ? [] : [dragHandle(scope.style)]),
+      ...(node.dragHandle === false ? [] : [skin.handle]),
       ...(content ? [content] : []),
     ]),
     node.style,

@@ -33,10 +33,11 @@ export const ANDROID_PARITY_VIEWPORT = { width: 360, height: 640 } as const;
 /**
  * Hosted runners do not all rasterize alike: one spec has moved by up to ~180 pixels between CI
  * runs of the same commit, while one machine repeats its counts exactly. A case fails only beyond
- * this allowance over its budget, so the budget tracks the renderer gap, not the runner.
+ * this allowance over its budget, so the budget tracks the renderer gap, not the runner. It stays
+ * below the golden's pixel count, so a screenshot that differs everywhere always fails.
  */
-export function parityAllowance(budget: number): number {
-  return budget + Math.max(256, Math.ceil(budget * 0.01));
+export function parityAllowance(budget: number, goldenPixels: number): number {
+  return Math.min(budget + Math.max(256, Math.ceil(budget * 0.01)), goldenPixels - 1);
 }
 
 type Json = Record<string, unknown>;

@@ -134,7 +134,9 @@ describeBrowser("prototype web still against the Android goldens (#16534)", () =
             if (budget === undefined) {
               throw new Error(`${entry.golden}: no budget; record one with --update`);
             }
-            expect(result.diffPixels).toBeLessThanOrEqual(parityAllowance(budget));
+            expect(result.diffPixels).toBeLessThanOrEqual(
+              parityAllowance(budget, clip.width * clip.height),
+            );
           }
         } finally {
           await page.close();

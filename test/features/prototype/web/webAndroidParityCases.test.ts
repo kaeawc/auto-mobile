@@ -93,10 +93,20 @@ describe("prototype web parity with the Android goldens (#16534)", () => {
     expect(androidParityHtml(entry)).not.toContain('data-window="sheet"');
   });
 
-  test("the runner allowance is 256 pixels or 1% of the budget, whichever is larger", () => {
-    expect(parityAllowance(0)).toBe(256);
-    expect(parityAllowance(1675)).toBe(1675 + 256);
-    expect(parityAllowance(69_282)).toBe(69_282 + 693);
+  test("the runner allowance is 256 pixels or 1% of the budget, below the golden's pixel count", () => {
+    const screen = 360 * 640;
+    expect(parityAllowance(0, screen)).toBe(256);
+    expect(parityAllowance(1675, screen)).toBe(1675 + 256);
+    expect(parityAllowance(69_282, screen)).toBe(69_282 + 693);
+    // A budget near the whole screen still fails a screenshot that differs everywhere.
+    expect(parityAllowance(229_179, screen)).toBe(screen - 1);
+  });
+
+  test("every budget leaves some pixels that must match", () => {
+    for (const [golden, pixels] of Object.entries(budgets)) {
+      const { width, height } = pngSize(readFileSync(join(ANDROID_GOLDEN_DIR, `${golden}.png`)));
+      expect({ golden, below: pixels < width * height }).toEqual({ golden, below: true });
+    }
   });
 
   test("the page is the chromeless still alone, transparent and inset-free", () => {

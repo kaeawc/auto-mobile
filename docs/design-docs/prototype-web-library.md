@@ -21,7 +21,7 @@ link to a running daemon are separate decisions with their own gates, below.
 - `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 73 KB
   minified (23 KB gzip). The renderer's closure reads only the contract values in the generated
   `prototypeRenderContract.generated.ts`, not the whole contract JSON; the string-table zod
-  schema lives in `prototypeSpec.ts` and the frame schema in `deviceFrameSchema.ts`, outside
+  schema lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside
   the closure; and the derived-format path takes an optional injected logger instead of
   importing the server's. `stillBrowserBundle.test.ts` fails on any Node builtin, on the contract
   JSON, zod or the server logger in the closure, and on the core budget below.

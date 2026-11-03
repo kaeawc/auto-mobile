@@ -16,7 +16,7 @@ import {
   prototypePresentationNamespaceShape,
 } from "./prototypePlatformNamespaceSchema";
 import * as timers from "./prototypeTimerSchema";
-import { prototypeStringsTableError, type PrototypeStrings } from "./prototypeStrings";
+import { prototypeStringsSchema } from "./prototypeStringsSchema";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
@@ -172,10 +172,6 @@ timers.bindPrototypeTimerActions(() => actionSchema);
 bindPrototypeRequestFollowUps(() => actionSchema);
 bindPrototypePlatformFollowUps(() => actionSchema);
 const actionListSchema = buildPrototypeActionListSchema(actionSchema);
-/** The spec `strings` field; the shared table check decides validity. */
-const prototypeStringsSchema = z.custom<PrototypeStrings>(
-  (value) => prototypeStringsTableError(value) === undefined,
-);
 const gestureNodeShape = {
   onLongPress: actionListSchema.optional(),
   onDoubleTap: actionListSchema.optional(),

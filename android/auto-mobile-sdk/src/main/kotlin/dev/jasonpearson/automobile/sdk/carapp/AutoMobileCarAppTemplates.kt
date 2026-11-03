@@ -84,20 +84,28 @@ internal object LooperMainThreadRunner : MainThreadRunner {
 
 internal const val MAIN_THREAD_TIMEOUT = "main_thread_timeout"
 
-/** Holds the recorded templates; weak keys so a finished screen or session is never retained. */
+private const val TEMPLATE_ID = "template"
+
+/**
+ * Holds the recorded templates as callback-free nodes. A `Template` keeps its click, search and
+ * toggle listeners, which usually capture their `Screen`; holding it as a weak map's value would
+ * keep that key alive. The node holds only strings and flags, so a finished screen is collected.
+ */
 internal class CarAppTemplateRecorder(private val mainThread: MainThreadRunner) {
   @Volatile var enabled: Boolean = false
 
   private val lock = Any()
-  private val templates = WeakHashMap<Screen, Template>()
+  private val templates = WeakHashMap<Screen, CarAppTemplateNode>()
   private val sessionIds = WeakHashMap<ScreenManager, Int>()
   private var nextSessionId = 0
 
   fun record(screen: Screen, template: Template) {
     // A screen's manager is fixed for its CarContext, so read it once while recording.
     val manager = screen.screenManager
+    // Ids are relative here; the snapshot prefixes the screen's position in its stack.
+    val node = CarAppTemplateMapper.map(template, TEMPLATE_ID)
     synchronized(lock) {
-      templates[screen] = template
+      templates[screen] = node
       sessionIds.getOrPut(manager) { nextSessionId++ }
     }
   }
@@ -127,7 +135,7 @@ internal class CarAppTemplateRecorder(private val mainThread: MainThreadRunner) 
   private fun walk(
     manager: ScreenManager,
     sessionId: String,
-    recorded: Map<Screen, Template>,
+    recorded: Map<Screen, CarAppTemplateNode>,
   ): CarAppSessionSnapshot? {
     // getScreenStack iterates from the top screen down; report the root first.
     val stack = manager.screenStack.reversed()
@@ -140,7 +148,7 @@ internal class CarAppTemplateRecorder(private val mainThread: MainThreadRunner) 
         screenClass = screen.javaClass.name,
         top = screen === top,
         marker = screen.marker,
-        template = recorded[screen]?.let { CarAppTemplateMapper.map(it, "$id/template") },
+        template = recorded[screen]?.withIdPrefix("$id/"),
       )
     }
     return CarAppSessionSnapshot(id = sessionId, screens = screens)

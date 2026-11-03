@@ -97,6 +97,30 @@ internal data class CarAppTabNode(
   val active: Boolean = false,
 )
 
+/** The same node with [prefix] put in front of every id in it. */
+internal fun CarAppTemplateNode.withIdPrefix(prefix: String): CarAppTemplateNode =
+  copy(
+    id = prefix + id,
+    headerActions = headerActions.map { it.copy(id = prefix + it.id) },
+    items =
+      items.map { item ->
+        item.copy(
+          id = prefix + item.id,
+          actions = item.actions.map { it.copy(id = prefix + it.id) },
+        )
+      },
+    actions = actions.map { it.copy(id = prefix + it.id) },
+    actionStrips =
+      actionStrips.map { strip ->
+        strip.copy(
+          id = prefix + strip.id,
+          actions = strip.actions.map { it.copy(id = prefix + it.id) },
+        )
+      },
+    tabs = tabs.map { it.copy(id = prefix + it.id) },
+    tabContent = tabContent?.withIdPrefix(prefix),
+  )
+
 private val documentJson = Json {
   encodeDefaults = true
   explicitNulls = false

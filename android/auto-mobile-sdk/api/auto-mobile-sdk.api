@@ -831,6 +831,7 @@ public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument
 }
 Compiled from "CarAppTemplateDocument.kt"
 public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocumentKt {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode withIdPrefix(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, java.lang.String);
   public static final java.lang.String toJson(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument);
   public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument decodeCarAppTemplateDocument(java.lang.String);
 }

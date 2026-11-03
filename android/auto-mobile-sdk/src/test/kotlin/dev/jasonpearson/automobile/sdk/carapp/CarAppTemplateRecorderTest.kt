@@ -76,6 +76,19 @@ class CarAppTemplateRecorderTest {
   }
 
   @Test
+  fun `nested ids carry the screen's stack position`() {
+    val root = FixedScreen(carContext, message("Root"))
+    val top = FixedScreen(carContext, message("Top"))
+    push(root, top)
+    recorder.record(top, top.onGetTemplate())
+
+    val template = recorder.snapshot().sessions.single().screens[1].template!!
+
+    assertEquals("session0/screen1/template", template.id)
+    assertEquals("session0/screen1/template/header/actions/0", template.headerActions.single().id)
+  }
+
+  @Test
   fun `the latest recorded template replaces the earlier one`() {
     val screen = FixedScreen(carContext, message("First"))
     push(screen)

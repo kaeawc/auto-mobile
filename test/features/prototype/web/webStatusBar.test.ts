@@ -328,6 +328,62 @@ test("a padded transparent overlay in a fullscreen box leaves the full-fill colo
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("the walk follows a child only when its container places it at the top", () => {
+  const white = (style: Record<string, string> = {}) =>
+    el("div", {
+      style: { width: "100%", height: "80px", "background-color": "#ffffff", ...style },
+    });
+  const column = (style: Record<string, string>, children: WebElement[]) =>
+    el("div", { style: { display: "flex", "flex-direction": "column", width: "100%", ...style } }, [
+      ...children,
+    ]);
+  expect(appTopColor(column({ "justify-content": "flex-end" }, [white()]), "#000000")).toBe(
+    "#000000",
+  );
+  expect(appTopColor(column({ "justify-content": "center" }, [white()]), "#000000")).toBe(
+    "#000000",
+  );
+  // A growing child fills the column from its top whatever the arrangement.
+  expect(
+    appTopColor(column({ "justify-content": "flex-end" }, [white({ flex: "1 1 auto" })]), "#000"),
+  ).toBe("#ffffff");
+  expect(appTopColor(column({}, [white()]), "#000000")).toBe("#ffffff");
+  // In a row the vertical axis is align-items, and a full-height child that is narrow does not
+  // span the width.
+  const row = (style: Record<string, string>, children: WebElement[]) =>
+    el("div", { style: { display: "flex", "flex-direction": "row", width: "100%", ...style } }, [
+      ...children,
+    ]);
+  expect(appTopColor(row({ "align-items": "flex-end" }, [white()]), "#000000")).toBe("#000000");
+  const rail = el("div", {
+    style: { width: "20px", "align-self": "stretch", "background-color": "#ffffff" },
+  });
+  expect(appTopColor(row({}, [rail]), "#000000")).toBe("#000000");
+});
+
+test("a bottom-arranged footer inside a box overlay leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "nested-footer",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", arrangement: "end" },
+          children: [
+            { type: "column", style: { width: "fill", height: { dp: 80 }, background: "#ffffff" } },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

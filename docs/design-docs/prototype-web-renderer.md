@@ -314,11 +314,15 @@ the host, so the page's script only switches between views it was given and neve
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
   app's top colour, else the screen background. The top colour is sampled only when the window's content
   starts behind the status bar (a fullscreen window or a `top` sheet; a bottom sheet or floating window
-  keeps the screen background). It is the innermost opaque background spanning the screen along the
-  content's leading children (a top app bar); in a `box` the walk samples the children that span its
-  width and reach its top, from the last painted to the first, and the first with an opaque top colour wins. Element opacity multiplies down the walk, so a background counts only
-  when it is opaque after that opacity, and a fully transparent subtree is skipped. The walk stops at an element with top padding (authored or
-  the top safe area), whose children start below its top edge. Landscape swaps the screen size, uses
+  keeps the screen background). It is the innermost opaque background along the content's leading children (a top app bar). The walk
+  follows a child only when its container places it at the top (a column's first child under a start
+  arrangement or growing, a box or row child aligned to the top, or one filling the height), and a
+  background counts only on a child spanning its container's width, read on that container's axes. In a
+  `box` the walk samples the children that span it and reach its top, from the last painted to the first,
+  and the first with an opaque top colour wins. Element opacity multiplies down the walk, so a background
+  counts only when it is opaque after that opacity, and a fully transparent subtree is skipped. The walk
+  stops at an element with top padding (authored or the top safe area), whose children start below its
+  top edge. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own

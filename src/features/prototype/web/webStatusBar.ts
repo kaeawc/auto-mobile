@@ -78,14 +78,6 @@ export function statusBarContentFor(
   return luminance(color) > 0.179 ? "dark" : "light";
 }
 
-function stretches(element: WebElement): boolean {
-  return (
-    element.style["align-self"] === "stretch" ||
-    element.style["justify-self"] === "stretch" ||
-    element.style.width === "100%"
-  );
-}
-
 /** The element's own `opacity` (1 when unset or unparseable). */
 function opacity(element: WebElement): number {
   const value = Number(element.style.opacity);
@@ -99,44 +91,104 @@ function opaqueBackground(element: WebElement, composite: number): string | unde
   return alpha !== undefined && alpha * composite === 1 ? background : undefined;
 }
 
-/** A box (`boxLayoutCss`) stacks its children in one grid cell, so later ones paint over earlier. */
-function isBox(element: WebElement): boolean {
-  return element.style.display === "grid" && element.style["grid-template-areas"] === '"cell"';
+/**
+ * How a container lays out its children: a box (`boxLayoutCss`) stacks them in one grid cell, so
+ * later ones paint over earlier; a flex line places them along its axis; anything else flows them
+ * as blocks, each as wide as the container.
+ */
+type Layout = "box" | "column" | "row" | "flow";
+
+function layoutOf(element: WebElement): Layout {
+  const { style } = element;
+  if (style.display === "grid" && style["grid-template-areas"] === '"cell"') {
+    return "box";
+  }
+  if (style.display === "flex") {
+    return style["flex-direction"] === "column" ? "column" : "row";
+  }
+  return "flow";
 }
 
 const elementChildren = (element: WebElement): WebElement[] =>
   element.children.filter((child): child is WebElement => typeof child !== "string");
 
-/** Whether a box child's top edge is the box's: it fills the height or aligns to the top. */
-function reachesBoxTop(child: WebElement, box: WebElement): boolean {
-  if (child.style.height === "100%") {
-    return true;
+const startAligned = (align: string | undefined): boolean =>
+  align === undefined || align === "stretch" || align === "start" || align === "flex-start";
+
+const MAIN_START = new Set([
+  undefined,
+  "normal",
+  "start",
+  "flex-start",
+  "stretch",
+  "space-between",
+]);
+
+/**
+ * Whether a child spans its container's width. The horizontal axis is `justify-self` in a box,
+ * `align-self` in a column and the main axis in a row, where only a full width counts.
+ */
+function spansWidth(child: WebElement, layout: Layout): boolean {
+  const { style } = child;
+  const full = style.width === "100%";
+  switch (layout) {
+    case "box":
+      return full || style["justify-self"] === "stretch";
+    case "column":
+      return full || style["align-self"] === "stretch";
+    case "row":
+      return full;
+    case "flow":
+      return full || style["align-self"] === "stretch" || style["justify-self"] === "stretch";
   }
-  const align = child.style["align-self"] ?? box.style["align-items"];
-  return align === undefined || align === "stretch" || align === "start" || align === "flex-start";
 }
 
 /**
- * Whether a box child spans the box's width. In a grid `align-self` is the vertical axis, so only
- * `justify-self` or a full width counts.
+ * Whether a child's top edge is its container's: it fills the height, or the container places it
+ * at the top (cross-axis alignment in a box or row; main-axis arrangement, or growing, as a
+ * column's first child).
  */
-function coversBoxWidth(child: WebElement): boolean {
-  return child.style["justify-self"] === "stretch" || child.style.width === "100%";
+function reachesTop(child: WebElement, parent: WebElement, layout: Layout): boolean {
+  if (child.style.height === "100%") {
+    return true;
+  }
+  switch (layout) {
+    case "box":
+    case "row":
+      return startAligned(child.style["align-self"] ?? parent.style["align-items"]);
+    case "column":
+      return (
+        (child.style.flex?.startsWith("1") ?? false) ||
+        MAIN_START.has(parent.style["justify-content"])
+      );
+    case "flow":
+      return true;
+  }
+}
+
+interface Candidate {
+  readonly child: WebElement;
+  readonly spans: boolean;
 }
 
 /**
  * The children that can show at the top, in the order to sample them: a box's children that span
- * its width and reach its top, last painted first, since a later child paints over the earlier ones in the one cell;
- * else the leading child.
+ * its width and reach its top, last painted first, since a later child paints over the earlier
+ * ones in the one cell; else the leading child, when it reaches the top.
  */
-function topCandidates(element: WebElement): WebElement[] {
+function topCandidates(element: WebElement): Candidate[] {
+  const layout = layoutOf(element);
   const children = elementChildren(element);
-  if (isBox(element)) {
+  if (layout === "box") {
     return children
-      .filter((child) => coversBoxWidth(child) && reachesBoxTop(child, element))
-      .reverse();
+      .filter((child) => spansWidth(child, layout) && reachesTop(child, element, layout))
+      .reverse()
+      .map((child) => ({ child, spans: true }));
   }
-  return children.slice(0, 1);
+  const leading = children[0];
+  return leading && reachesTop(leading, element, layout)
+    ? [{ child: leading, spans: spansWidth(leading, layout) }]
+    : [];
 }
 
 const MAX_DEPTH = 32;
@@ -152,20 +204,21 @@ function subtreeTopColor(
   element: WebElement,
   inherited: number,
   depth: number,
+  spans: boolean,
 ): string | undefined {
   const composite = inherited * opacity(element);
   if (composite <= 0) {
     // Nothing in a fully transparent subtree paints.
     return undefined;
   }
-  const own = depth === 0 || stretches(element) ? opaqueBackground(element, composite) : undefined;
+  const own = spans ? opaqueBackground(element, composite) : undefined;
   // Top padding (authored or the safe area) moves the children down, so this background shows.
   if (paddedAtTop(element) || depth >= MAX_DEPTH) {
     return own;
   }
   // A candidate that paints nothing opaque at the top lets the one beneath it show.
-  for (const child of topCandidates(element)) {
-    const inner = subtreeTopColor(child, composite, depth + 1);
+  for (const candidate of topCandidates(element)) {
+    const inner = subtreeTopColor(candidate.child, composite, depth + 1, candidate.spans);
     if (inner !== undefined) {
       return inner;
     }
@@ -176,14 +229,19 @@ function subtreeTopColor(
 /**
  * The app's top colour: the innermost opaque background along the content's leading children that
  * spans the screen, since it paints over its ancestors (a top app bar over a root column), else
- * `fallback` (the screen background). In a box the walk samples the children that reach its top
- * from the last painted to the first, and the first that paints an opaque top colour wins. Element
+ * `fallback` (the screen background). The walk follows only children that start at their
+ * container's top, and a background counts only on a child that spans its container's width, each
+ * read on that container's axes. In a box the walk samples the children that span it and reach
+ * its top from the last painted to the first, and the first that paints an opaque top colour
+ * wins. Element
  * opacity multiplies down the walk: a background is opaque only when its alpha times that
  * composite is 1, and a fully transparent subtree paints nothing. The walk stops at an element
  * with top padding (authored or the top safe area), whose children start below its top edge.
  */
 export function appTopColor(content: WebChild, fallback: string): string {
-  return typeof content === "string" ? fallback : (subtreeTopColor(content, 1, 0) ?? fallback);
+  return typeof content === "string"
+    ? fallback
+    : (subtreeTopColor(content, 1, 0, true) ?? fallback);
 }
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;

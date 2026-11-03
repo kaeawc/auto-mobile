@@ -1,0 +1,6 @@
+# Ruby tooling for ProtoViewer store publishing (#14147). Only fastlane `supply` is used, from
+# .github/workflows/publish-protoviewer-play.yml through scripts/release/protoviewer-play.sh.
+# Gemfile.lock pins every transitive gem with a checksum; CI installs it frozen.
+source "https://rubygems.org"
+
+gem "fastlane", "2.241.1"

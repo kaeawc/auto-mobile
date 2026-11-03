@@ -175,4 +175,71 @@ describe("prototype web still mode resolution (#16654)", () => {
     });
     expect(screenOf(drawn.element).style["background-color"]).toBe("rgba(0,0,0,1)");
   });
+
+  test("a scroll's child continues the chain (#16670)", () => {
+    const spec = {
+      id: "scroll",
+      root: { type: "scroll", child: column([], { background: "#111111" }) },
+    };
+    const element = renderPrototypeStill(spec, { frame: "pixel-9", mode: "light" }).element;
+    expect(screenOf(element).style["background-color"]).toBe("rgba(17,17,17,1)");
+  });
+
+  test("a stack continues through the screen it draws (#16670)", () => {
+    const spec = {
+      id: "stack",
+      root: {
+        type: "stack",
+        id: "nav",
+        start: "home",
+        screens: {
+          home: column([], { background: "#111111" }),
+          detail: column([], { background: "#FAFAFA" }),
+        },
+      },
+    };
+    const start = renderPrototypeStill(spec, { frame: "pixel-9", mode: "light" });
+    expect(screenOf(start.element).style["background-color"]).toBe("rgba(17,17,17,1)");
+    const chosen = renderPrototypeStill(spec, { frame: "pixel-9", mode: "dark", screen: "detail" });
+    expect(screenOf(chosen.element).style["background-color"]).toBe("rgba(250,250,250,1)");
+    expect(chosen.stack?.screen).toBe("detail");
+  });
+
+  test("a nested stack draws its own start, not the chosen screen (#16670)", () => {
+    const inner = {
+      type: "stack",
+      id: "inner",
+      start: "a",
+      screens: {
+        a: column([], { background: "#111111" }),
+        b: column([], { background: "#FAFAFA" }),
+      },
+    };
+    const spec = {
+      id: "nested",
+      root: { type: "stack", id: "outer", start: "b", screens: { b: inner } },
+    };
+    const element = renderPrototypeStill(spec, { frame: "pixel-9", mode: "light", screen: "b" });
+    expect(screenOf(element.element).style["background-color"]).toBe("rgba(17,17,17,1)");
+  });
+
+  test("a closed sheet is not the first drawn child; an open one is (#16670)", () => {
+    const sheeted = (open: boolean) => ({
+      id: "sheet",
+      state: { open },
+      root: column([
+        {
+          type: "bottomSheet",
+          openWhen: { key: "open", equals: true },
+          style: { background: "#000000" },
+          child: text("inside"),
+        },
+        text("body", { background: "#FAFAFA" }),
+      ]),
+    });
+    const closed = renderPrototypeStill(sheeted(false), { frame: "pixel-9", mode: "dark" });
+    expect(screenOf(closed.element).style["background-color"]).toBe("rgba(250,250,250,1)");
+    const open = renderPrototypeStill(sheeted(true), { frame: "pixel-9", mode: "light" });
+    expect(screenOf(open.element).style["background-color"]).toBe("rgba(0,0,0,1)");
+  });
 });

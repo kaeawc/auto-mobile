@@ -18,7 +18,8 @@ interface Workflow {
 const workflow = load(
   readGuardFile(join(import.meta.dir, "../../.github/workflows/pull_request.yml")),
 ) as Workflow;
-const guardedDoc = "docs/using/screen-control.md";
+const guardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md"];
+const guardedDoc = guardedDocs[0];
 
 interface ListFilesParameters {
   per_page?: number;
@@ -128,26 +129,30 @@ describe("contract-bearing docs keep their Node test guard in CI", () => {
     ["filter", "docs_only"],
     ["check-auto-chore", "auto_chore"],
   ]) {
-    test(`${step} runs code gates for the guarded page alone or with ordinary docs`, async () => {
-      expect((await classify(step, [guardedDoc]))[output]).toBe("false");
-      expect((await classify(step, ["docs/using/overview.md", guardedDoc]))[output]).toBe("false");
-    });
+    for (const doc of guardedDocs) {
+      test(`${step} runs code gates for ${doc} alone or with ordinary docs`, async () => {
+        expect((await classify(step, [doc]))[output]).toBe("false");
+        expect((await classify(step, ["docs/using/overview.md", doc]))[output]).toBe("false");
+      });
+    }
     test(`${step} preserves ordinary docs-only and empty-change classification`, async () => {
       expect((await classify(step, ["docs/using/overview.md", "README.md"]))[output]).toBe("true");
       expect((await classify(step, []))[output]).toBe("false");
       expect((await classify(step, ["src/daemon/socketServer.ts"]))[output]).toBe("false");
     });
-    test(`${step} negative control would skip the page without its exemption`, async () => {
-      const script = workflow.jobs["detect-changes"].steps.find((item) => item.id === step)?.with
-        ?.script;
-      if (!script) {
-        throw new Error(`Missing classifier script ${step}`);
-      }
-      // Remove just the known path, then prove the broken script skips the guard.
-      expect(script).toContain(JSON.stringify(guardedDoc));
-      const broken = script.replace(JSON.stringify(guardedDoc), '"docs/unused.md"');
-      expect((await classify(step, [guardedDoc], broken))[output]).toBe("true");
-    });
+    for (const doc of guardedDocs) {
+      test(`${step} negative control would skip ${doc} without its exemption`, async () => {
+        const script = workflow.jobs["detect-changes"].steps.find((item) => item.id === step)?.with
+          ?.script;
+        if (!script) {
+          throw new Error(`Missing classifier script ${step}`);
+        }
+        // Remove just the known path, then prove the broken script skips the guard.
+        expect(script).toContain(JSON.stringify(doc));
+        const broken = script.replace(JSON.stringify(doc), '"docs/unused.md"');
+        expect((await classify(step, [doc], broken))[output]).toBe("true");
+      });
+    }
 
     for (const count of [30, 100, 101, 150]) {
       test(`${step} accepts all ${count} docs files across pagination boundaries`, async () => {

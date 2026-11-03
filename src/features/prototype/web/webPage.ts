@@ -193,26 +193,40 @@ function viewPoints(frame: ViewFrame): ViewAt[] {
 }
 
 /**
- * Each revision newest first, one group of both orientations and every posture per screen of its
- * outermost stack (just one group without a multi-screen stack). The default posture's portrait
- * still finds the screens.
+ * One orientation and posture's views of a revision: its start view first, then its other screens.
+ * Each still finds its own stack, since a `visibleWhen` on orientation or posture can show a
+ * different stack (or none) in each.
+ */
+function pointViews(
+  input: PrototypeWebPageInput,
+  frame: string,
+  at: { variant: string; revision: PrototypeWebRevision },
+  point: ViewAt,
+): RenderedView[] {
+  const probe = renderView(input, frame, at, point);
+  const screens = pickerScreens(probe.stack);
+  return screens.length === 0
+    ? [probe]
+    : screens.map((screen) => renderView(input, frame, { ...at, screen }, point));
+}
+
+/**
+ * Each revision newest first, grouped by screen index across every orientation and posture: group
+ * 0 holds each one's start view (the default posture's portrait first), group i each one's i-th
+ * screen where it has one.
  */
 function renderViews(
   input: PrototypeWebPageInput,
   frame: ViewFrame,
   variant: PrototypeWebVariant,
 ): RevisionViews[] {
-  const [first, ...rest] = viewPoints(frame);
   return [...variant.revisions].reverse().map((revision) => {
     const at = { variant: variant.id, revision };
-    const probe = renderView(input, frame.id, at, first!);
-    const screens = pickerScreens(probe.stack);
-    const groups =
-      screens.length === 0
-        ? [[probe, ...rest.map((point) => renderView(input, frame.id, at, point))]]
-        : screens.map((screen) =>
-            viewPoints(frame).map((point) => renderView(input, frame.id, { ...at, screen }, point)),
-          );
+    const perPoint = viewPoints(frame).map((point) => pointViews(input, frame.id, at, point));
+    const count = Math.max(...perPoint.map((views) => views.length));
+    const groups = Array.from({ length: count }, (_, index) =>
+      perPoint.flatMap((views) => views.slice(index, index + 1)),
+    );
     return { variant: variant.id, revision: revision.revision, screens: groups };
   });
 }
@@ -457,7 +471,8 @@ function budgetedViews(
 
 /**
  * The picker for a page holding these revisions: none unless one of them has a multi-screen stack,
- * else the shown revision's screens (none or one hide it; the runtime lists each revision's own).
+ * else every screen the shown revision has in any orientation or posture (none or one hide it; the
+ * runtime lists the shown view's own), so the shell never undercounts the final picker.
  */
 function pickerFor(
   revisions: readonly RevisionViews[],
@@ -469,7 +484,8 @@ function pickerFor(
   const current = revisions.find(
     (revision) => revision.variant === shown.variant.id && revision.revision === shown.revision,
   );
-  return (current?.screens ?? []).flatMap((group) => (group[0]?.screen ? [group[0].screen] : []));
+  const screens = (current?.screens ?? []).flat().flatMap((view) => view.screen ?? []);
+  return [...new Set(screens)];
 }
 
 function chooseVariant(input: PrototypeWebPageInput): PrototypeWebVariant {

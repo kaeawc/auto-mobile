@@ -196,7 +196,8 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     if (!screenSelect) {
       return;
     }
-    const key = `${state.variant} ${state.revision}`;
+    // Each orientation and posture can show a different stack, so it lists its own screens.
+    const key = `${state.variant} ${state.revision} ${state.orientation} ${state.posture}`;
     if (key !== listed) {
       listed = key;
       const screens = revisionViews().flatMap((view) => view.dataset.screen ?? []);

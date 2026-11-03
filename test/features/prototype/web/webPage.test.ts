@@ -558,6 +558,44 @@ describe("prototype web page postures (#16445)", () => {
     );
   });
 
+  test("a stack shown only in one posture keeps its screens there (#16632 review)", () => {
+    const text = (value: string) => ({ type: "text", text: value });
+    const spec = {
+      id: "book-only",
+      window: { placement: { type: "fullscreen" } },
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "stack",
+            visibleWhen: { platform: "/device/posture", equals: "book" },
+            start: "list",
+            screens: { list: text("list"), detail: text("detail") },
+          },
+        ],
+      },
+    };
+    const { html } = buildPrototypeWebPage({
+      ...foldInput("pixel-fold"),
+      variants: [{ id: "a", label: "A", revisions: [{ revision: 1, operation: "show", spec }] }],
+    });
+    const screens = [
+      ...html.matchAll(
+        /data-orientation="(\w+)" data-posture="(\w+)" data-revision="1"(?: data-screen="(\w+)")? data-variant="a" data-view=""/g,
+      ),
+    ].map((match) => `${match[2]}/${match[1]}/${match[3] ?? "-"}`);
+    expect(screens.filter((key) => key.startsWith("half_opened/portrait"))).toEqual([
+      "half_opened/portrait/list",
+      "half_opened/portrait/detail",
+    ]);
+    expect(screens.filter((key) => key.startsWith("opened/portrait"))).toEqual([
+      "opened/portrait/-",
+    ]);
+    // The picker offers the screens some view has; the runtime narrows it to the shown view's.
+    expect(html).toMatch(/data-control="screen" hidden=""|data-control="screen"[^>]*>/);
+    expect(html).toContain('<option value="detail">detail</option>');
+  });
+
   test("a frame without postures has no posture picker, attribute or posture views", () => {
     const { html } = buildPrototypeWebPage(foldInput("pixel-9"));
     expect(html).not.toContain("data-posture");

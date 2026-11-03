@@ -84,11 +84,13 @@ document, its `sha256`, the frame used, the unsupported nodes of the first view 
 it inlined per variant.
 
 - **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape,
-  in every posture of a foldable frame (such views carry `data-posture`), once per screen of its
-  outermost stack when that stack has more than one screen (start first, then the others in key
-  order; such views carry `data-screen`). The first view is the chosen variant's chosen revision
-  (default: latest) in portrait, in the frame's default posture, on its start screen; the rest are
-  `hidden`. A screen's views in every orientation and posture are kept or dropped together.
+  in every posture of a foldable frame (such views carry `data-posture`), once per screen of the
+  outermost stack each orientation and posture draws when that stack has more than one screen
+  (start first, then the others in key order; such views carry `data-screen`), since a
+  `visibleWhen` can show a different stack in each. The first view is the chosen variant's chosen
+  revision (default: latest) in portrait, in the frame's default posture, on its start screen; the
+  rest are `hidden`. Views are kept or dropped by screen index: every orientation and posture's
+  start together, then each one's next screen together.
 - **Controls.** Only six: rotate (portrait/landscape; absent for watch and TV frames, which
   never rotate), a posture select (only for a frame with postures, in registry order; switching
   fits the new view), zoom and pan (fit, 50–400 %, wheel, drag,
@@ -97,7 +99,8 @@ it inlined per variant.
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
   screen select lists the shown revision's own screen views and is hidden with fewer than two, so
   it never offers a view the page lacks; switching variant or revision keeps the chosen screen
-  when the new revision has it, else shows that revision's start. Controls are buttons and a select with labels. A toolbar note says the preview is
+  when the new revision has it, else shows that revision's start. Rotating or changing posture
+  relists the shown view's own screens. Controls are buttons and a select with labels. A toolbar note says the preview is
   static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay

@@ -61,6 +61,8 @@
   <string name="import_interrupted">Import interrupted; open the file again</string>
   <!-- Import screen error when the import service is unavailable. -->
   <string name="import_unavailable">Import unavailable</string>
+  <!-- Import screen error when the user previously hid this prototype or blocked its link host. -->
+  <string name="import_hidden">Not imported: this prototype is hidden on this device</string>
   <!-- Library row and screen title that opens the bundled third-party license list. -->
   <string name="open_source_licenses">Open-source licenses</string>
   <!-- Licenses screen error when the bundled license list cannot be read. -->

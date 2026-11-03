@@ -52,11 +52,23 @@ class SharedPreferencesContentBlocklist(private val preferences: SharedPreferenc
 }
 
 /** Report, Hide and Block apply to content another person sent, not the user's own prototypes. */
+internal val LibrarySource.isReceived: Boolean
+  get() = this == LibrarySource.file || this == LibrarySource.share
+
 internal val LibraryEntry.isReceived: Boolean
-  get() = source == LibrarySource.file || source == LibrarySource.share
+  get() = source.isReceived
 
 internal fun LibraryEntry.isBlockedBy(hidden: Set<String>, hosts: Set<String>): Boolean =
-  isReceived && (specSha256 in hidden || (sourceHost != null && sourceHost in hosts))
+  isBlocked(source, specSha256, sourceHost, hidden, hosts)
+
+private fun isBlocked(
+  source: LibrarySource,
+  specSha256: String,
+  sourceHost: String?,
+  hidden: Set<String>,
+  hosts: Set<String>,
+): Boolean =
+  source.isReceived && (specSha256 in hidden || (sourceHost != null && sourceHost in hosts))
 
 /** Lowercase DNS host name, as the link importer records it; no port, user info or IP literal. */
 internal fun validSourceHost(host: String): Boolean =
@@ -65,6 +77,13 @@ internal fun validSourceHost(host: String): Boolean =
 private const val MAX_HOST_LENGTH = 253
 private val SOURCE_HOST =
   Regex("(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+/** Whether received content with this hash or link host is hidden or blocked on this device. */
+internal fun ContentBlocklist.rejects(
+  source: LibrarySource,
+  specSha256: String,
+  sourceHost: String? = null,
+): Boolean = isBlocked(source, specSha256, sourceHost, hiddenSpecHashes(), blockedHosts())
 
 /**
  * Hides received content from a hidden spec or blocked host everywhere the library is read: the
@@ -91,5 +110,24 @@ class BlocklistLibraryRepository(
         if (loaded.value.entry.isBlockedBy(blocklist.hiddenSpecHashes(), blocklist.blockedHosts()))
           LibraryResult.Failure(LibraryError.NotFound)
         else loaded
+    }
+
+  /**
+   * Deletes every stored entry the blocklist hides, so hidden content never holds library quota
+   * (#16631). Only the hash or host stays, in the blocklist. Returns the deleted entries; an entry
+   * whose delete fails stays hidden and is retried on the next purge.
+   */
+  fun purgeBlocked(): LibraryResult<List<LibraryEntry>> =
+    when (val listed = delegate.list()) {
+      is LibraryResult.Failure -> listed
+      is LibraryResult.Success -> {
+        val hidden = blocklist.hiddenSpecHashes()
+        val hosts = blocklist.blockedHosts()
+        LibraryResult.Success(
+          listed.value
+            .filter { it.isBlockedBy(hidden, hosts) }
+            .filter { delegate.delete(it.libraryId) is LibraryResult.Success },
+        )
+      }
     }
 }

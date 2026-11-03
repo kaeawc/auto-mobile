@@ -58,6 +58,8 @@ enum class LibraryError {
   Storage,
   Limit,
   Invalid,
+  /** Received content the user hid, or whose link host they blocked, on this device. */
+  Hidden,
 }
 
 sealed interface LibraryResult<out T> {

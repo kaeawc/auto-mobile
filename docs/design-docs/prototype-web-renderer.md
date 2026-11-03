@@ -204,6 +204,22 @@ the host, so the page's script only switches between views it was given and neve
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill` (inside a box grid, only on its own axis), `{dp}`, `weight`, padding (logical
   start and end), corner radius (per-corner radii are logical, so RTL mirrors them), border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
+- **Style polish.** A `gradient` paints over the background across the whole node: a linear
+  angle is clockwise from left-to-right (CSS's angle plus 90) and a radial one is centred and
+  reaches the corners; stop positions apply only when every stop has one, made non-decreasing.
+  `shadows` map to `box-shadow` with the authored blur as the CSS blur (sigma b/2), and `elevation`
+  takes its `shadowColor` tint. A gradient border and inner shadows are absolutely placed layers
+  after the node's children, so they paint over the content, inside its bounds, as Compose draws
+  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: an iOS frame blurs and
+  saturates the backdrop under a translucent tint (else white) with a light rim, and an Android
+  frame draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
+  keeps its colour. `ios.glassGroup` draws nothing of its own. `scroll.fadeEdges` is a mask on the
+  trailing edge only (the leading one in a `reverse` scroll), since a still opens at the scroll's
+  start and cannot measure overflow; horizontal start and end mirror in RTL. `linkify` splits the
+  resolved text into plain runs and one `data-link` span per match in its `style`, and a span with
+  `onTap` is marked the same way; links get no style of their own, as on Android. A
+  `zoomable` image draws at 1x. A node with `style.shader` draws without it, as a device without
+  shader support does, and is listed with reason `shaderFallback`.
 - **Typography.** `theme.typography` scales every type-scale role and sets its family, as the
   native theme does.
 - **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
@@ -283,13 +299,21 @@ the host, so the page's script only switches between views it was given and neve
   sheet before those inside it, and takes no ancestor's grid cell or consumed insets. It is a scrim
   filling the window (the `scrim` role at 0.4 opacity by default or when named, else the authored
   colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
-  or `dp` capped at the window), painted `surface` unless an authored background resolves (the still draws no gradients),
+  or `dp` capped at the window), painted `surface` unless an authored background resolves,
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
   8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
-  generic status bar, the cutout and the navigation handle (or three generic button marks, which move to
-  the right edge in landscape when the frame reserves that inset). Landscape swaps the screen size, uses
+  generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
+  navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to
+  the right edge in landscape when the frame reserves that inset, and iOS's home indicator
+  (`data-nav="homeIndicator"`). The status bar is never a picture of a real OS: a clock and generic
+  cellular, Wi-Fi and battery marks (`data-status` with a `data-level`) drawn from a fixed state (9:41,
+  four bars, Wi-Fi on, full battery). An iPhone with an island centres the clock and the marks in the
+  ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
+  `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
+  app's top colour, which is the first opaque background spanning the screen along the content's leading
+  children (a top app bar), else the screen background. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own

@@ -39,7 +39,14 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
-import { prototypeIconVariant, type PrototypeIconGlyphSource } from "./webIconGlyphs";
+import {
+  glyphSvg,
+  ICON_BOX,
+  ICON_PLACEHOLDER,
+  iconInitial,
+  prototypeIconVariant,
+  type PrototypeIconGlyphSource,
+} from "./webIconGlyphs";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -427,52 +434,17 @@ const divider: NodeRenderer = (node, scope) => {
   );
 };
 
-/** The first letter of an icon's name, so a placeholder reads as that icon; none without a name. */
-function iconInitial(name: unknown): string {
-  const letter = typeof name === "string" ? /[a-z0-9]/i.exec(name)?.[0] : undefined;
-  return letter ? letter.toUpperCase() : "";
-}
-
-/** An icon's glyph from the scope's source, or undefined when it has none or no source is set. */
-function iconGlyph(node: Raw, scope: WebRenderScope): readonly WebElement[] | undefined {
-  return typeof node.name === "string"
-    ? scope.glyphs?.glyph(node.name, prototypeIconVariant(node.variant))
-    : undefined;
-}
-
-const ICON_BOX = { display: "inline-flex", width: "24px", height: "24px", "flex-shrink": "0" };
-
 const icon: NodeRenderer = (node, scope, path) => {
-  const glyph = iconGlyph(node, scope);
-  const title = String(node.name ?? "");
-  if (glyph) {
-    // Tinted by `currentColor`, as Compose tints by LocalContentColor unless the style sets one.
-    const { attrs, style } = base(node, scope, ICON_BOX);
-    const svgAttrs = { viewbox: "0 0 24 24", width: "100%", height: "100%", fill: "currentColor" };
-    return el("span", { attrs: { ...attrs, title, role: "img" }, style }, [
-      el("svg", { attrs: { ...svgAttrs, "aria-hidden": "true" } }, glyph),
-    ]);
+  const name = typeof node.name === "string" ? node.name : undefined;
+  const glyph = name ? scope.glyphs?.glyph(name, prototypeIconVariant(node.variant)) : undefined;
+  if (!glyph && scope.glyphs) {
+    const id = typeof node.id === "string" ? { id: node.id } : {};
+    scope.unsupported.push({ type: "icon", ...id, path, reason: "iconMissing" });
   }
-  if (scope.glyphs) {
-    scope.unsupported.push({
-      type: "icon",
-      ...(typeof node.id === "string" ? { id: node.id } : {}),
-      path,
-      reason: "iconMissing",
-    });
-  }
-  // No glyph: a tinted ring around the name's initial, titled with the full name.
-  const { attrs, style } = base(node, scope, {
-    ...ICON_BOX,
-    "align-items": "center",
-    "justify-content": "center",
-    border: "2px solid currentColor",
-    "border-radius": "6px",
-    "font-size": "11px",
-    "font-weight": "700",
-    "line-height": "1",
-  });
-  return el("span", { attrs: { ...attrs, title, role: "img" }, style }, [iconInitial(node.name)]);
+  const { attrs, style } = base(node, scope, glyph ? ICON_BOX : ICON_PLACEHOLDER);
+  return el("span", { attrs: { ...attrs, title: name ?? "", role: "img" }, style }, [
+    glyph ? glyphSvg(glyph) : iconInitial(node.name),
+  ]);
 };
 
 const image: NodeRenderer = (node, scope, path) => {

@@ -120,8 +120,16 @@ function typedError(error: {
     : { code, message: error.message };
 }
 
+/** The held status; own properties only, so an id such as `constructor` is never inherited. */
+function entitlementOf(
+  state: PrototypeCommerceState,
+  productId: string,
+): PrototypeEntitlementStatus | undefined {
+  return Object.hasOwn(state.entitlements, productId) ? state.entitlements[productId] : undefined;
+}
+
 function isOwned(state: PrototypeCommerceState, productId: string): boolean {
-  const status = state.entitlements[productId];
+  const status = entitlementOf(state, productId);
   return status === "active" || status === "gracePeriod";
 }
 
@@ -131,7 +139,8 @@ function withEntitlement(
   status: PrototypeEntitlementStatus | undefined,
   lastTransaction: PrototypeCommerceTransaction | null = state.lastTransaction,
 ): PrototypeCommerceStep {
-  const { [productId]: previous, ...rest } = state.entitlements;
+  const previous = entitlementOf(state, productId);
+  const { [productId]: _removed, ...rest } = state.entitlements;
   const entitlements = status === undefined ? rest : { ...rest, [productId]: status };
   return {
     state: {
@@ -240,7 +249,7 @@ export function applyPrototypeEntitlementChange(
       message: `Only a subscription can ${change}`,
     });
   }
-  if (status !== undefined && state.entitlements[productId] === undefined) {
+  if (status !== undefined && entitlementOf(state, productId) === undefined) {
     return failed(state, { code: "platform_error", message: `${productId} is not held` });
   }
   return withEntitlement(state, productId, status);

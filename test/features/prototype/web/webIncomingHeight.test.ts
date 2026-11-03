@@ -234,10 +234,15 @@ test("a column marks only its weighted children's shares exact; a row marks none
     undefined,
     undefined,
   ]);
+  // A single instance's weighted share is exact; two weighted instances share it, so stay a max.
+  expect(repeatInstanceChildren(repeated, "root", [prepare])[0]!.map(exactOf)).toEqual([
+    true,
+    undefined,
+  ]);
   const lists = repeatInstanceChildren(repeated, "root", [prepare, prepare]);
   expect(lists.map((list) => list.map(exactOf))).toEqual([
-    [true, undefined],
-    [true, undefined],
+    [undefined, undefined],
+    [undefined, undefined],
   ]);
   // The boxes take 10 dp each in order; the two weighted rows share the 20 dp left.
   expect(lists.map((list) => list.map(heightOf))).toEqual([
@@ -269,14 +274,16 @@ test("a weight share stays a max when an unweighted sibling's height depends on 
   expect(childrenOf(column).map(exactOf)).toEqual([undefined, true]);
 });
 
-test("a weight share stays a max when a weighted sibling's bounds make flex redistribute", () => {
+test("weight shares stay a max when two or more children are weighted", () => {
   const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
-  for (const bound of [{ minHeight: 30 }, { maxHeight: 5 }]) {
+  // A sibling's bounds or padding make CSS flex move height between the weighted rows.
+  const siblings = [{}, { minHeight: 30 }, { maxHeight: 5 }, { padding: { top: 30 } }];
+  for (const style of siblings) {
     const column = withChildHeights(
       {
         type: "column",
         style: { height: { dp: 40 } },
-        children: [{ type: "row", style: { weight: 1, ...bound } }, weighted],
+        children: [{ type: "row", style: { weight: 1, ...style } }, weighted],
       },
       "root",
       prepare,

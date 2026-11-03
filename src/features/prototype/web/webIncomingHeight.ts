@@ -138,21 +138,17 @@ const fixedSibling = (node: Raw | undefined): boolean =>
   weightOf(node) !== undefined ||
   typeof record(record(node.style)?.height)?.dp === "number";
 
-const bounded = (node: Raw): boolean => {
-  const style = record(node.style);
-  return typeof style?.minHeight === "number" || typeof style?.maxHeight === "number";
-};
-
 /**
  * Which resolved column children get their incoming height as an exact allocation: the weighted
- * ones, when every unweighted sibling has a dp height (see fixedSibling) and no weighted child's
- * `minHeight`/`maxHeight` makes flex hand its excess or shortfall to another weighted child. A
- * lone weighted child's own bounds are applied by contentHeight. Otherwise a weight share is an
- * upper bound and stays a max.
+ * one, when it is the column's only visible weighted child and every unweighted sibling has a dp
+ * height (see fixedSibling). Its own `minHeight`/`maxHeight` are applied by contentHeight. With
+ * two or more weighted children, CSS flex items keep `min-height: auto`, so a sibling's padding,
+ * content or bounds can move height between them; the shares are then only upper bounds and stay
+ * a max.
  */
 function exactShares(prepared: readonly (Raw | undefined)[]): boolean[] {
-  const weighted = prepared.filter((node): node is Raw => weightOf(node) !== undefined);
-  const known = prepared.every(fixedSibling) && (weighted.length < 2 || !weighted.some(bounded));
+  const weighted = prepared.filter((node) => weightOf(node) !== undefined).length;
+  const known = weighted === 1 && prepared.every(fixedSibling);
   return prepared.map((node) => known && weightOf(node) !== undefined);
 }
 
@@ -163,9 +159,10 @@ function exactShares(prepared: readonly (Raw | undefined)[]): boolean[] {
  * in order (see columnChildHeights), except a repeat, whose children are one template, so each
  * gets the whole content height as a bound until repeatInstanceChildren hands each instance its
  * own share. A column's weighted child gets its share as an exact allocation
- * (INCOMING_HEIGHT_EXACT_KEY) when every unweighted sibling's height is known; a row's weight is horizontal, so its children's dp heights still
- * hold. A height that depends on layout (a sibling's wrap
- * height, the screen) is left out, so the bound stays an upper one or is absent.
+ * (INCOMING_HEIGHT_EXACT_KEY) when it is the only one and its siblings' heights are known (see
+ * exactShares); a row's weight is horizontal, so its children's dp heights still hold. A height
+ * that depends on layout (a sibling's wrap height, the screen) is left out, so the bound stays an
+ * upper one or is absent.
  *
  * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
  */

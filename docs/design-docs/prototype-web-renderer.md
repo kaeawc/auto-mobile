@@ -158,10 +158,19 @@ the host, so the page's script only switches between views it was given and neve
   field walk (`mapBindableFields`). A spans-only text node renders each span
   with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a
   caller-supplied clock (default 0), so derived relative times are fixed.
-- **Conditions.** `visibleWhen` evaluates `key` comparisons with `all`, `any` and `not` against
-  spec state. Parts the still cannot decide (`data` and `platform` pointers, unknown keys, validity,
-  string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
-  condition counts as true, so a node is never hidden on a guess.
+- **Platform state.** The frame decides `/device/os`, `/device/widthClass` and `/device/posture`
+  from the active panel in the drawn orientation: `widthClass` is `compact`, `medium` or
+  `expanded` at the contract's 600 and 840 dp breakpoints on Android, and on iOS `regular` on a
+  tablet (smallest side 600 dp or more) or a phone at least 896 dp wide, else `compact`. On
+  Android an `opened` fold is `flat` and a `half_opened` one `tabletop` (horizontal hinge) or
+  `book` (vertical hinge); without a fold, and always on iOS, posture is missing. Other
+  `/platform` pointers stay undecided. `{platform:/pointer}` text binds with the data pass: a
+  decided value inserts (missing is empty) and an undecided placeholder stays literal.
+- **Conditions.** `visibleWhen` evaluates `key` comparisons and decided `platform` pointers with
+  `all`, `any` and `not` against spec and platform state. Parts the still cannot decide (`data`
+  pointers, undecided `platform` pointers, unknown keys, validity, string operators) stay undecided
+  through `all`, `any` and `not`; only an undecided whole condition counts as true, so a node is
+  never hidden on a guess.
 - **Window.** An explicit `window.layoutDirection` sets the content's `dir` (the frame is never
   mirrored), and `start`/`end` safe-area edges read the inset on the matching physical side. Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
   each axis it leaves unsized, as on devices; a sheet spans the screen width, `height` dp tall at its `edge`; a floating window

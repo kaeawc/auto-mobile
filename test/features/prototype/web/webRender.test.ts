@@ -1266,3 +1266,40 @@ describe("prototype web still stack screens (#16382)", () => {
     expect(still.stack).toBeUndefined();
   });
 });
+
+describe("prototype web still platform state (#16448)", () => {
+  const adaptive = {
+    ...reference,
+    root: {
+      type: "column",
+      children: [
+        {
+          type: "text",
+          testTag: "wide",
+          text: "wide",
+          visibleWhen: { platform: "/device/widthClass", equals: "expanded" },
+        },
+        {
+          type: "text",
+          testTag: "label",
+          text: "{platform:/device/os} {platform:/device/widthClass}|{platform:/device/posture}|{platform:/device/idiom}",
+        },
+      ],
+    },
+  };
+
+  test("a widthClass condition resolves per frame and orientation", () => {
+    expect(byTag(renderPrototypeStill(adaptive, { frame: "pixel-9" }), "wide")).toHaveLength(0);
+    expect(
+      byTag(renderPrototypeStill(adaptive, { frame: "pixel-9", orientation: "landscape" }), "wide"),
+    ).toHaveLength(1);
+  });
+
+  test("text binds the platform state the frame decides and leaves other pointers literal", () => {
+    const label = (options: Parameters<typeof renderPrototypeStill>[1]) =>
+      textOf(byTag(renderPrototypeStill(adaptive, options), "label")[0]!);
+    expect(label({ frame: "medium-tablet" })).toBe("android medium||{platform:/device/idiom}");
+    expect(label({ frame: "iphone-16" })).toBe("ios compact||{platform:/device/idiom}");
+    expect(label({ frame: "ipad-10" })).toBe("ios regular||{platform:/device/idiom}");
+  });
+});

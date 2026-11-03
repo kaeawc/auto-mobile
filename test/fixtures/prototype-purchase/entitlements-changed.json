@@ -1,0 +1,275 @@
+{
+  "name": "Simulated entitlement changes move a subscription through its lifecycle",
+  "products": [
+    {
+      "id": "pro_monthly",
+      "kind": "subscription"
+    },
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    },
+    {
+      "id": "coins_100",
+      "kind": "consumable"
+    }
+  ],
+  "state": {
+    "entitlements": {
+      "pro_monthly": "active",
+      "no_ads": "active"
+    },
+    "lastTransaction": {
+      "transactionId": "t1",
+      "productId": "pro_monthly",
+      "status": "purchased"
+    }
+  },
+  "steps": [
+    {
+      "op": "entitlement",
+      "productId": "pro_monthly",
+      "change": "gracePeriod",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "gracePeriod",
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    },
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "result": {
+          "status": "purchased",
+          "transactionId": "t2"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "gracePeriod",
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "error": {
+          "code": "alreadyOwned",
+          "message": "pro_monthly is already owned"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "pro_monthly",
+      "change": "billingRetry",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "billingRetry",
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "pro_monthly",
+      "change": "renew",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "active",
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "pro_monthly",
+      "change": "renew",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "active",
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "pro_monthly",
+      "change": "expire",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "pro_monthly",
+      "change": "expire",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "pro_monthly",
+      "change": "renew",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "pro_monthly is not held"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "no_ads",
+      "change": "gracePeriod",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "Only a subscription can gracePeriod"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "coins_100",
+      "change": "refund",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "coins_100 is a consumable and has no entitlement"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "gems_5",
+      "change": "expire",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "Unknown product gems_5",
+          "reason": "unavailable"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "entitlement",
+      "productId": "no_ads",
+      "change": "refund",
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "t1",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    }
+  ]
+}

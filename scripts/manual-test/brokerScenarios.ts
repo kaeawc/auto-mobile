@@ -317,20 +317,26 @@ async function retryableFailure(ctx: BrokerScenarioContext) {
     SessionConfigError,
   );
   // Unknown archetypes fail config validation before admission. Also exercise a typed
-  // non-retryable broker receipt with the currently disabled Duo archetype.
+  // non-retryable broker receipt for an absent exact Duo model.
   unknown.config = {
     ...unknown.config,
     device: {
       schemaVersion: 1,
       platform: "ios",
-      hardware: { kind: "archetype", archetype: "duo" },
+      hardware: {
+        kind: "exact-model",
+        model: {
+          namespace: "simulator-device-type",
+          value: "com.apple.CoreSimulator.SimDeviceType.AutoMobile-Missing-iPhone-Duo",
+        },
+      },
       os: batchClientDevice(unknown.config).os,
     },
   };
   const refused = await prepare(ctx, unknown);
   assert.equal(refused.outcome, "failed");
   assert.equal(refused.failure?.retryable, false);
-  assert.equal(refused.failure?.code, "capability_disabled");
+  assert.equal(refused.failure?.code, "unsupported_hardware");
   assert.deepEqual(await status(ctx, unknown), refused);
   assert.equal(fake(ctx).prepared().length, 0);
   const next = fresh(ctx, c);

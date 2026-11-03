@@ -36,7 +36,9 @@ describe("readPrototypeWebResource", () => {
     const web = readPrototypeWebResource(revisions(), { id: "checkout", revision: "1" }, "v");
     expect(web.meta.revision).toBe(1);
     expect(web.meta.deviceRevision).toBeUndefined();
-    expect(web.html).toContain('<body data-variant="checkout" data-revision="1">');
+    expect(web.html).toContain(
+      '<body data-variant="checkout" data-revision="1" data-platform="android">',
+    );
   });
 
   test("the default frame follows the platform that showed the revision", () => {

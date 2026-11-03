@@ -46,8 +46,24 @@ iOS hardware has four explicit selector kinds:
 - `archetype` is `phone`, `tablet`, or `duo`;
 - `omitted` requests the configured default archetype.
 
-Android hardware is `phone`, `tablet`, `foldable`, or `omitted`. Exact Android profiles
-and other categories are not accepted at this boundary. Hosts map each archetype through
+Android hardware has three selector kinds:
+
+- `exact-profile` carries one installed AVD device `profileId` (for example
+  `{ "kind": "exact-profile", "profileId": "pixel_9" }`);
+- `archetype` is `phone`, `tablet`, or `foldable`;
+- `omitted` requests the configured default archetype.
+
+An `exact-profile` resolves against the installed catalog `profiles` during
+normalization. An uninstalled profile, or one with no archetype in
+`androidProfileArchetypes`, is refused with non-retryable `unsupported_hardware`
+naming the profile; a stale or duplicated profile is `catalog_metadata_invalid`. It
+never falls back to an archetype default. The session's archetype is the profile's
+classification, so capability gates such as foldable posture still apply. It takes
+the `memoryMb` of the `defaults.android.hardware.profiles` entry naming that profile,
+else of its archetype's entry, else none. Resolution reports
+`resolvedHardwareBy: "explicit-model"` and the exact `profileId`. Pool reuse requires
+an idle device created from the same `profileId` with the same `memoryMb`. `os`
+selectors combine with it as with archetypes. Hosts map each archetype through
 `defaults.android.hardware.profiles` and classify its installed profile in
 `androidProfileArchetypes`; a foldable never falls back to a phone. An unmapped or
 uninstalled foldable profile is refused with non-retryable `unsupported_hardware`.
@@ -173,7 +189,8 @@ Android omitted -> archetype -> exact installed emulator profile
 ```
 
 An explicit archetype starts at the archetype level. An explicit model type
-skips the archetype default. An explicit model skips both preceding levels.
+skips the archetype default. An explicit model or Android exact profile skips
+every preceding level.
 Missing, duplicate, conflicting, unknown, or stale defaults return typed
 configuration or catalog errors.
 
@@ -206,22 +223,13 @@ because Xcode reports its product family as `iPhone`. The catalog, inventory
 form factor, display panels and `setPosture` share that one predicate, and
 inventories report a Duo as `foldable`.
 
-Execution is a host capability, `capabilities.iosDuo` in the session broker
-host configuration, and is off by default. While it is off, normalization
-returns non-retryable `capability_disabled` for an explicit Duo archetype, Duo
-model type, exact model classified as Duo, omitted default archetype of Duo, or
-known Duo model farther down the applicable default path, and resolution
-refuses any model that resolves to Duo. These checks occur before pool matching
-or creation resolution, so a refused request needs no installed Duo model,
-runtime, or creation default.
-
-When it is on, Duo requests resolve like any other iOS hardware and need an
-iOS 27.1+ runtime. Enabling it never widens other selectors: a configured
-default must belong to the requested model type, so a phone or tablet request
-cannot resolve to a Duo. The policy is checked only at admission. A stored Duo
-resource stays readable for recovery, baseline reset and destroy after the
-capability is turned off. A broker with the capability enabled advertises
-`session-broker/ios-duo/v1` from `daemon/capabilities`.
+Duo requests resolve like any other iOS hardware whenever the simulator device
+type and a compatible runtime are installed. Installed device-type metadata
+determines runtime compatibility; there is no fixed minimum runtime version.
+Missing hardware or runtimes produce the normal hardware or runtime failure.
+A configured default must belong to the requested model type, so a phone or
+tablet request cannot resolve to a Duo. Duo support has no separate capability
+advertisement in `daemon/capabilities`.
 
 ## Pure API and provenance
 

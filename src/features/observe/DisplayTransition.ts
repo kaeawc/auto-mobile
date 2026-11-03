@@ -10,6 +10,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { defaultDisplayInventoryProvider } from "../../devices/DisplayInventoryProvider";
+import { panelKeyForUniqueId } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import { ObservedAndroidDisplayCache } from "./ObservationDisplay";
@@ -100,9 +101,8 @@ function pushedPanelKey(
   deviceId: string,
   resolveFingerprint: (deviceId: string, fingerprint: PanelFingerprint) => string | undefined,
 ): string | undefined {
-  const uniqueKey = event.panelUniqueId?.includes(":")
-    ? event.panelUniqueId.split(":").slice(1).join(":")
-    : event.panelUniqueId;
+  const uniqueKey =
+    event.panelUniqueId === undefined ? undefined : panelKeyForUniqueId(event.panelUniqueId);
   return (
     uniqueKey ??
     (event.change !== "device_state" && event.panelFingerprint

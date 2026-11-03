@@ -531,7 +531,7 @@ struct PrototypeSession {
             switch action.type {
             case "emit":
                 events += runEmit(action)
-            case "push", "pop", "popToRoot", "replace":
+            case "push", "pop", "popToRoot", "replace", "setStack":
                 events += runStack(action)
             case "scrollTo":
                 if let id = action.scroll, let target = action.to.flatMap(PrototypeScrollTarget.init) {
@@ -542,7 +542,7 @@ struct PrototypeSession {
                 }
             case "setPage":
                 events += runSetPage(action)
-            case "setData", "appendData", "prependData", "removeData":
+            case "setData", "appendData", "prependData", "upsertData", "removeData":
                 events += runDataWrite(action)
             case "startTimer":
                 timerCommands.append(.start(action))
@@ -562,10 +562,11 @@ struct PrototypeSession {
         return events + emitStateChange(touched.filter { baseline[$0] != state[$0] })
     }
 
-    /// A `setData`, `appendData`, `prependData` or `removeData` action (#12519). The write is applied to the shown
-    /// spec's data with `PrototypeDataWrite`, the drawn tree is rebuilt from the changed data so
-    /// bindings and repeat rows refresh, the data revision is bumped, and one `change` event named
-    /// for the written `/data/...` path reports `{op, value?, revision}`. A refused write (any
+    /// A `setData`, `appendData`, `prependData`, `upsertData` or `removeData` action (#12519, #16620).
+    /// The write is applied to the shown spec's data with `PrototypeDataWrite`, the drawn tree is
+    /// rebuilt from the changed data so bindings and repeat rows refresh, the data revision is
+    /// bumped, and one `change` event named for the written `/data/...` path reports
+    /// `{op, key?, value?, maxItems?, revision}` (`key` for an upsert). A refused write (any
     /// `PrototypeDataWriteCode`, or a tree the changed data cannot rebuild within the show's limits)
     /// changes and emits nothing, and the rest of the action list still runs.
     private mutating func runDataWrite(_ action: PrototypeAction) -> [PrototypeEvent] {
@@ -588,26 +589,35 @@ struct PrototypeSession {
             }
             value = operation == .prepend ? .array([resolved]) : resolved
         }
+        if operation == .upsert {
+            guard let key = action.key else { return [] }
+            return (try? commitDataWrite(.upsert, path: path, value: value, key: key, maxItems: action.maxItems).get())
+                ?? []
+        }
         return (try? commitDataWrite(operation, path: path, value: value).get()) ?? []
     }
 
     /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
     /// bumped revision and the `change` event. A refused write changes nothing.
     private mutating func commitDataWrite(
-        _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?
+        _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?, key: String? = nil,
+        maxItems actionMaxItems: Int? = nil
     )
         -> Result<[PrototypeEvent], PrototypeDataWriteFailure>
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
         let data: [String: JSONValue]
-        let maxItems = operation == .append || operation == .extend || operation == .prepend
-            ? PrototypeLazyList.listMaxItems(spec: spec, dataPath: path) : nil
+        let listMaxItems = operation == .append || operation == .extend || operation == .prepend
+            || operation == .upsert ? PrototypeLazyList.listMaxItems(spec: spec, dataPath: path) : nil
+        // An upsert's own `maxItems` and the list cap both bound the array; the smaller wins.
+        let maxItems = [actionMaxItems, listMaxItems].compactMap(\.self).min()
         switch PrototypeDataWrite.applyWindowed(
             spec.data,
             op: operation,
             path: path,
             value: value,
-            maxItems: maxItems.map(Double.init)
+            maxItems: maxItems.map(Double.init),
+            key: key
         ) {
         case let .success(written): data = written.data
         case let .failure(failure): return .failure(failure)
@@ -627,6 +637,7 @@ struct PrototypeSession {
         let revision = dataRevision + 1
         revisions[rebuilt.id] = revision
         var payload: [String: JSONValue] = ["op": .string(operation.rawValue), "revision": .number(Double(revision))]
+        if let key { payload["key"] = .string(key) }
         if let maxItems { payload["maxItems"] = .number(Double(maxItems)) }
         // The value is left out when the event would not fit the emit payload limit, so the host,
         // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).

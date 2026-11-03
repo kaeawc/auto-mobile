@@ -468,6 +468,73 @@ describe("installed Duo resolution", () => {
 });
 
 describe("iOS catalog and OS resolution", () => {
+  test.each([
+    { kind: "major" as const, major: 27 },
+    { kind: "minimum" as const, version: "26" },
+  ])("selects an installed release within model bounds for %o", (os) => {
+    const defaults = iosDefaults();
+    const catalog = iosCatalog({
+      models: [{ ...IOS_DUO, minOsVersion: "27.1", maxOsVersion: "27.1" }],
+      releases: ["26.4", "27.0", "27.1", "27.2", "28"].map((osVersion) => ({
+        runtimeId: `runtime-${osVersion}`,
+        osVersion,
+        installed: true,
+        metadataState: "current" as const,
+      })),
+    });
+    const request: IosSessionDeviceRequirement = {
+      schemaVersion: 1,
+      platform: "ios",
+      hardware: { kind: "exact-model", model: { namespace: "alias", value: "duo-preview" } },
+      os,
+    };
+    const resolved = resolveIos(normalizeIos(request, defaults, catalog), defaults, catalog);
+    expect(resolved.profile).toMatchObject({
+      runtimeId: "runtime-27.1",
+      osVersion: "27.1",
+      compatibility: "supported",
+    });
+    expect(resolved.provenance.resolvedOsBy).toBe("highest-satisfying");
+
+    const incompatibleCatalog = iosCatalog({
+      ...catalog,
+      releases: catalog.releases.filter((release) => release.osVersion !== "27.1"),
+    });
+    const incompatible = normalizeIos(request, defaults, incompatibleCatalog);
+    expect(
+      unwrapError(resolveSessionDeviceProfile(incompatible, defaults, incompatibleCatalog)),
+    ).toMatchObject({ code: "runtime_incompatible", message: expect.stringContaining("27.0") });
+  });
+
+  test.each(["minOsVersion", "maxOsVersion"] as const)(
+    "preserves invalid %s metadata errors for non-exact selectors",
+    (bound) => {
+      const defaults = iosDefaults();
+      const catalog = iosCatalog({ models: [{ ...IOS_DUO, [bound]: "invalid" }] });
+      for (const os of [
+        { kind: "major" as const, major: 27 },
+        { kind: "minimum" as const, version: "27" },
+      ]) {
+        const normalized = normalizeIos(
+          {
+            schemaVersion: 1,
+            platform: "ios",
+            hardware: {
+              kind: "exact-model",
+              model: { namespace: "alias", value: "duo-preview" },
+            },
+            os,
+          },
+          defaults,
+          catalog,
+        );
+        expect(unwrapError(resolveSessionDeviceProfile(normalized, defaults, catalog)).code).toBe(
+          "catalog_metadata_invalid",
+        );
+      }
+    },
+  );
+
   test("resolves an unambiguous namespaced simulator device type", () => {
     const catalog = iosCatalog();
     const defaults = iosDefaults();

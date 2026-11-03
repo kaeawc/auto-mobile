@@ -336,13 +336,28 @@ function chooseIosRelease(
   selector: EffectiveOsSelector,
   preferredVersion: string,
   releases: readonly IosCatalogRelease[],
+  model: IosCatalogModel,
 ): RequirementResult<ResolvedIosOs> {
   const valid = validIosReleases(releases);
-  const satisfying = valid.filter((release) =>
+  let satisfying = valid.filter((release) =>
     osSelectorMatchesVersion(selector, release.osVersion),
   );
   if (satisfying.length === 0) {
     return noRuntimeResult(selector, releases, "ios");
+  }
+  if (selector.kind !== "exact") {
+    const minimum = compatibilityBound(model.minOsVersion, model, "minimum");
+    const maximum = compatibilityBound(model.maxOsVersion, model, "maximum");
+    // Invalid bounds and empty compatible sets retain the existing compatibility error path.
+    if (minimum.ok && maximum.ok) {
+      const compatible = satisfying.filter(
+        (release) =>
+          !outsideIosCompatibilityBounds(release.osVersion, minimum.value, maximum.value),
+      );
+      if (compatible.length > 0) {
+        satisfying = compatible;
+      }
+    }
   }
   const ordered = stableReleaseSort(
     satisfying,
@@ -596,6 +611,7 @@ function resolveIos(
     requirement.effective.os,
     defaults.os.preferredVersion,
     catalog.releases,
+    hardware.value.model,
   );
   if (!os.ok) {
     return os;

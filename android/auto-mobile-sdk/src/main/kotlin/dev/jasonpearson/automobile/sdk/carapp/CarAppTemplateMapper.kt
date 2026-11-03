@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.sdk.carapp
 
+import androidx.annotation.OptIn
+import androidx.car.app.annotations.ExperimentalCarApi
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.CarText
@@ -63,6 +65,7 @@ internal object CarAppTemplateMapper {
   }
 
   @Suppress("DEPRECATION")
+  @OptIn(markerClass = [ExperimentalCarApi::class]) // GridTemplate.actions is experimental.
   private fun mapGrid(template: GridTemplate, id: String): CarAppTemplateNode =
     CarAppTemplateNode(
       id = id,
@@ -222,6 +225,7 @@ internal object CarAppTemplateMapper {
       )
     }
 
+  @OptIn(markerClass = [ExperimentalCarApi::class]) // TYPE_COMPOSE_MESSAGE is experimental.
   private fun actionType(type: Int): String =
     when (type) {
       Action.TYPE_CUSTOM -> "custom"

@@ -37,10 +37,11 @@ class PrototypeSensitiveSinkRulesTest {
       PrototypeSpecValidator.validate(input) is PrototypeSpecValidation.Success,
       "non-library show must accept: $input",
     )
-    val library = PrototypeSpecValidator.validate(input, library = true)
     if (path == null) {
-      assertTrue(library is PrototypeSpecValidation.Success, "library must accept: $library")
+      // The spec's sensitive source is itself refused in a library (R1), so check R2 directly.
+      assertEquals(emptyList<PrototypeSpecError>(), errors(input), input)
     } else {
+      val library = PrototypeSpecValidator.validate(input, library = true)
       assertEquals(
         PrototypeSpecError(path, message),
         (library as? PrototypeSpecValidation.Failure)?.error,

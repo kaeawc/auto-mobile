@@ -165,7 +165,7 @@ function swiftStateLines(g: Generated): string[] {
     'func top(_ stack: String) -> String { path(stack).last ?? "" }',
     "func push(_ stack: String, _ screen: String) { stacks[stack] = path(stack) + [screen] }",
     "func pop(_ stack: String) { let p = path(stack); if p.count > 1 { stacks[stack] = Array(p.dropLast()) } }",
-    'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?: ""] }',
+    'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?? ""] }',
     "func replace(_ stack: String, _ screen: String) { stacks[stack] = Array(path(stack).dropLast()) + [screen] }",
     ...block("func text(_ key: String) -> Binding<String> {", [
       'Binding(get: { self.texts[key] ?? "" }, set: { self.texts[key] = $0 })',

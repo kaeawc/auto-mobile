@@ -269,8 +269,13 @@ describe("automobile:prototype/eject result", () => {
       'fun popToRoot(stack: String) { stacks[stack] = listOf(starts[stack] ?: "") }',
     );
     expect(swift).toContain(
-      'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?: ""] }',
+      'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?? ""] }',
     );
+  });
+
+  test("each dialect uses only its own null-coalescing operator", async () => {
+    expect((await eject("ios")).files[0].content).not.toContain("?:");
+    expect((await eject("android")).files[0].content).not.toContain("??");
   });
 
   test("expands reusable components before translating them", async () => {

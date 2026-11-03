@@ -221,3 +221,54 @@ test("an auto dimension is derived from the aspect ratio before its minimum appl
     height: 400,
   });
 });
+
+/** A 400px-square row in a screen-filling column, so `height: 100%` resolves to 400. */
+const shrinkRow = (black: Record<string, string>) =>
+  named("root", { display: "flex", "flex-direction": "column" }, [
+    named("row", { display: "flex", "flex-direction": "row", width: "400px", height: "400px" }, [
+      named("black", { flex: "1 1 auto", height: "100%", "aspect-ratio": "1", ...black }),
+      named("white", { width: "240px", height: "100%", "flex-shrink": "0" }),
+    ]),
+  ]);
+
+test("negative free space shrinks an item with a zero minimum by its shrink factor", () => {
+  // CSS: the 400px square basis and the 240px fixed child overflow 400 by 240; black shrinks.
+  const painted = topEdgePaintOrder(shrinkRow({ "min-width": "0" }), SCREEN);
+  expect(rectOf(painted, "black")).toEqual({ left: 0, top: 0, width: 160, height: 400 });
+  expect(rectOf(painted, "white")).toEqual({ left: 160, top: 0, width: 240, height: 400 });
+});
+
+test("an item's automatic minimum keeps its ratio-derived content size when shrinking", () => {
+  const painted = topEdgePaintOrder(shrinkRow({}), SCREEN);
+  expect(rectOf(painted, "black")).toEqual({ left: 0, top: 0, width: 400, height: 400 });
+  expect(rectOf(painted, "white")?.left).toBe(400);
+});
+
+test("negative free space is shared by shrink factor times basis, with minimums frozen", () => {
+  // 600px of bases in 400px: 200 shrinks 300 by 150 and 100 by 50, unless held at a minimum.
+  const row = (minimum: Record<string, string>) =>
+    named("row", { display: "flex", "flex-direction": "row" }, [
+      named("wide", { width: "300px", height: "10px", ...minimum }),
+      named("narrow", { width: "100px", height: "10px" }),
+      named("fixed", { flex: "none", width: "200px", height: "10px" }),
+    ]);
+  const shared = topEdgePaintOrder(row({}), SCREEN);
+  expect(rectOf(shared, "wide")?.width).toBe(150);
+  expect(rectOf(shared, "narrow")).toEqual({ left: 150, top: 0, width: 50, height: 10 });
+  expect(rectOf(shared, "fixed")?.left).toBe(200);
+  // Held at 250, wide leaves the narrow item the whole 200px overflow less its 50px share.
+  const held = topEdgePaintOrder(row({ "min-width": "250px" }), SCREEN);
+  expect(rectOf(held, "wide")?.width).toBe(250);
+  expect(rectOf(held, "narrow")).toEqual({ left: 250, top: 0, width: 0, height: 10 });
+});
+
+test("a sized item with unmeasured content keeps its size rather than shrinking", () => {
+  const row = named("row", { display: "flex", "flex-direction": "row" }, [
+    named("card", { width: "300px", height: "10px" }, [named("label", {})]),
+    named("rest", { width: "300px", height: "10px", overflow: "hidden" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  // The card's content minimum is unknown, so only the clipping item (minimum 0) shrinks.
+  expect(rectOf(painted, "card")?.width).toBe(300);
+  expect(rectOf(painted, "rest")).toEqual({ left: 300, top: 0, width: 100, height: 10 });
+});

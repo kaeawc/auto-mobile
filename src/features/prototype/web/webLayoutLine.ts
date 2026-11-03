@@ -198,39 +198,51 @@ function placeFlow(children: readonly WebChild[], box: Container): PlacedChild[]
   return placed;
 }
 
-/** A flex item's grow factor and basis, from `flex`, `flex-grow` and `flex-basis`. */
-function flexOf(child: WebElement): { grow: number; basis: string } {
+/** A flex item's factors and basis: `flex`, then `flex-grow`, `flex-shrink` and `flex-basis`. */
+function flexOf(child: WebElement): { grow: number; shrink: number; basis: string } {
   const parts = shorthandValues(child.style.flex);
+  const isNumber = (part: string | undefined): boolean =>
+    part !== undefined && /^\d*\.?\d+$/.test(part);
   let grow = 0;
+  let shrink = 1;
   let basis = "auto";
-  if (parts[0] === "auto") {
+  if (parts[0] === "none") {
+    shrink = 0;
+  } else if (parts[0] === "auto") {
     grow = 1;
-  } else if (parts.length > 0 && parts[0] !== "none") {
-    grow = Number(parts[0]);
-    // `flex: 1` and `flex: 1 1` mean a zero basis; a third value (or a length second) names it.
-    const named = parts.length === 3 ? parts[2] : parts[1];
-    basis = named !== undefined && !/^\d+(\.\d+)?$/.test(named) ? named : "0";
+  } else if (parts.length > 0 && parts[0] !== "initial") {
+    // `flex: 1` and `flex: 1 1` mean a zero basis; a lone length means `1 1 <length>`.
+    const numbers = parts.filter(isNumber);
+    grow = numbers.length > 0 ? Number(numbers[0]) : 1;
+    shrink = numbers.length > 1 ? Number(numbers[1]) : 1;
+    basis = parts.find((part) => !isNumber(part)) ?? "0";
   }
-  const explicitGrow = Number(child.style["flex-grow"]);
+  const longhand = (name: string, fallback: number): number => {
+    const value = Number(child.style[name]);
+    return child.style[name] && Number.isFinite(value) ? value : fallback;
+  };
   return {
-    grow: Number.isFinite(explicitGrow) && child.style["flex-grow"] ? explicitGrow : grow || 0,
+    grow: longhand("flex-grow", grow),
+    shrink: longhand("flex-shrink", shrink),
     basis: child.style["flex-basis"] ?? basis,
   };
 }
 
 /**
- * A line item. `base` is its hypothetical main size (clamped by its min and max); `start` is
- * what it takes when growth begins: a flexible item's unclamped flex basis, else `base`. Its
- * minimum and maximum are resolved in the freeze rounds, as CSS does.
+ * A line item. `basis` is its flex base size and `base` its hypothetical main size (the basis
+ * clamped by its min and max). Its minimum and maximum are resolved in the freeze rounds, as CSS
+ * does. `min` is the declared `min-*`, else the automatic minimum when the pass can know it;
+ * `minUnknown` marks an automatic minimum that depends on unmeasured content.
  */
 interface LineItem {
   readonly element?: WebElement;
+  readonly basis: Len;
   readonly base: Len;
-  readonly start: Len;
-  readonly flexible: boolean;
   readonly grow: number;
+  readonly shrink: number;
   readonly min: Len;
   readonly max: Len;
+  readonly minUnknown: boolean;
 }
 
 /** A line item's self-alignment on the cross axis: `align-self`, else the line's `align-items`. */
@@ -249,31 +261,59 @@ function ratioMainSize(child: WebElement, main: Axis, box: Container): Len {
   return withAspectRatio(child, rect, box.content, box.vars)[main];
 }
 
+const REPLACED_TAGS = new Set(["img", "svg", "video", "canvas", "iframe", "input"]);
+
+/**
+ * A line item's automatic minimum (CSS `min-*: auto`): zero for a scroll container, else its
+ * content size, capped by a declared size. The content size is the ratio-derived size when there
+ * is one, zero for an empty box, and unknown otherwise, since content is not measured.
+ */
+function automaticMinimum(child: WebElement, main: Axis, box: Container): Len {
+  const overflow =
+    child.style.overflow ?? child.style[main === "width" ? "overflow-x" : "overflow-y"];
+  if (overflow !== undefined && overflow !== "visible") {
+    return 0;
+  }
+  const empty =
+    !REPLACED_TAGS.has(child.tag) &&
+    child.children.every(
+      (grandchild) => typeof grandchild === "string" && grandchild.trim() === "",
+    );
+  const content = ratioMainSize(child, main, box) ?? (empty ? 0 : undefined);
+  const declared = declaredSize(child, main, box.content[main], box.vars);
+  const specified = declared === "auto" ? undefined : declared;
+  if (specified === undefined || content === undefined) {
+    return content;
+  }
+  return Math.min(specified, content);
+}
+
 function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   if (typeof child === "string") {
     const none = undefined;
-    return { base: none, start: none, flexible: false, grow: 0, min: none, max: none };
+    return { basis: none, base: none, grow: 0, shrink: 0, min: none, max: none, minUnknown: true };
   }
   const room = box.content[main];
-  const context = { base: room, vars: box.vars };
-  const { grow, basis } = flexOf(child);
+  const { grow, shrink, basis: basisValue } = flexOf(child);
   const declared =
-    basis === "auto" ? declaredSize(child, main, room, box.vars) : cssLength(basis, box.vars, room);
-  const min = cssLength(child.style[`min-${main}`], box.vars, room);
+    basisValue === "auto"
+      ? declaredSize(child, main, room, box.vars)
+      : cssLength(basisValue, box.vars, room);
+  const explicitMin = cssLength(child.style[`min-${main}`], box.vars, room);
   const max = cssLength(child.style[`max-${main}`], box.vars, room);
+  const automatic = explicitMin === undefined ? automaticMinimum(child, main, box) : undefined;
+  const min = explicitMin ?? automatic;
+  const minUnknown = explicitMin === undefined && automatic === undefined;
   // A content-sized item with an aspect ratio and a known cross size takes its main size from both.
   const size = declared === "auto" ? ratioMainSize(child, main, box) : declared;
-  if (grow <= 0) {
-    const base = clampSize(size, child, main, context);
-    return { element: child, base, start: base, flexible: false, grow, min, max };
-  }
   // A growing item's unmeasured content basis is taken as zero, so it shares the room as
   // `flex: 1` would; its growth, not its content, decides its size.
-  const start = size ?? 0;
-  const base = clampSize(start, child, main, context) ?? start;
-  // A basis above the maximum freezes the item at its maximum before growth begins.
-  const flexible = start <= base;
-  return { element: child, base, start: Math.min(start, base), flexible, grow, min, max };
+  const basis = grow > 0 ? (size ?? 0) : size;
+  const base =
+    basis === undefined
+      ? clampSize(undefined, child, main, { base: room, vars: box.vars })
+      : Math.max(min ?? 0, Math.min(max ?? Infinity, basis));
+  return { element: child, basis, base, grow, shrink, min, max, minUnknown };
 }
 
 /** The items to freeze this round: those at the clamp the total violation's sign names. */
@@ -296,27 +336,65 @@ function violators(
   );
 }
 
+/** Whether the line grows into positive free space or shrinks out of negative free space. */
+type FlexMode = "grow" | "shrink";
+
 /**
- * Free space shared among growing items, each held between its minimum and maximum (CSS flex
- * resolution, 9.7). Each round shares what the frozen items left of the initial free space; when
- * the unfrozen grow factors sum below 1, they take at most that fraction of the initial free space.
+ * Whether an item flexes: it has a factor for the mode and its hypothetical size does not already
+ * pass its basis in the mode's direction (CSS 9.7 step 2). A shrinking item whose automatic
+ * minimum depends on unmeasured content keeps its size.
  */
-function distribute(items: readonly LineItem[], free: number): { sizes: Len[]; remaining: Len } {
-  const starts: number[] = items.map((item) => item.start ?? 0);
+function isFlexible(item: LineItem, mode: FlexMode): boolean {
+  if (item.basis === undefined || item.base === undefined) {
+    return false;
+  }
+  return mode === "grow"
+    ? item.grow > 0 && item.basis <= item.base
+    : item.shrink > 0 && item.basis >= item.base && !item.minUnknown;
+}
+
+/** An item's target in a round: its basis plus its share of the round's free space. */
+function targetOf(item: LineItem, active: readonly LineItem[], share: number, mode: FlexMode) {
+  const basis = item.basis ?? 0;
+  if (mode === "grow") {
+    const total = active.reduce((sum, other) => sum + other.grow, 0);
+    return basis + (share * item.grow) / total;
+  }
+  // Negative free space is shared by flex-shrink scaled by the flex basis (9.7 step 4c).
+  const scaled = active.reduce((sum, other) => sum + other.shrink * (other.basis ?? 0), 0);
+  return scaled === 0 ? basis : basis + (share * item.shrink * basis) / scaled;
+}
+
+/**
+ * Free space shared among flexible items, each held between its minimum and maximum (CSS flex
+ * resolution, 9.7). Positive space grows items by grow factor; negative space shrinks them by
+ * shrink factor times basis. Each round shares what the frozen items left of the initial free
+ * space; when the unfrozen factors sum below 1, they take at most that fraction of it.
+ */
+function distribute(
+  items: readonly LineItem[],
+  free: number,
+  mode: FlexMode,
+): { sizes: Len[]; remaining: Len } {
+  const starts: number[] = items.map((item) =>
+    isFlexible(item, mode) ? item.basis! : (item.base ?? 0),
+  );
   const sizes = [...starts];
-  const frozen = new Set(items.flatMap((item, index) => (item.flexible ? [] : [index])));
-  const grownBy = (): number => sizes.reduce((sum, size, index) => sum + size - starts[index]!, 0);
+  const frozen = new Set(items.flatMap((item, index) => (isFlexible(item, mode) ? [] : [index])));
+  const flexedBy = (): number => sizes.reduce((sum, size, index) => sum + size - starts[index]!, 0);
   while (frozen.size < items.length) {
     const active = items.flatMap((_, index) => (frozen.has(index) ? [] : [index]));
-    const total = active.reduce((sum, index) => sum + items[index]!.grow, 0);
-    const share = total < 1 ? Math.min(free - grownBy(), free * total) : free - grownBy();
+    const activeItems = active.map((index) => items[index]!);
+    const total = activeItems.reduce((sum, item) => sum + item[mode], 0);
+    const left = free - flexedBy();
+    const share = total < 1 && Math.abs(free * total) < Math.abs(left) ? free * total : left;
     const targets = new Map(
-      active.map((index) => [index, starts[index]! + (share * items[index]!.grow) / total]),
+      active.map((index) => [index, targetOf(items[index]!, activeItems, share, mode)]),
     );
     const clamped = new Map(
       active.map((index) => {
         const { min, max } = items[index]!;
-        return [index, Math.max(min ?? -Infinity, Math.min(max ?? Infinity, targets.get(index)!))];
+        return [index, Math.max(min ?? 0, Math.min(max ?? Infinity, targets.get(index)!))];
       }),
     );
     for (const index of violators(active, targets, clamped)) {
@@ -324,24 +402,45 @@ function distribute(items: readonly LineItem[], free: number): { sizes: Len[]; r
       frozen.add(index);
     }
   }
-  return { sizes, remaining: Math.max(0, free - grownBy()) };
+  const remaining = free - flexedBy();
+  return { sizes, remaining: mode === "grow" ? Math.max(0, remaining) : remaining };
 }
 
-/** Each item's main size after growing, and the free space left for the arrangement. */
-function grownSizes(items: readonly LineItem[], free: Len): { sizes: Len[]; remaining: Len } {
-  const growers = items.filter((item) => item.grow > 0);
-  if (growers.length === 0 || (free !== undefined && free <= 0)) {
-    return { sizes: items.map((item) => item.base), remaining: free };
+/** Each item's main size after flexing, and the free space left for the arrangement. */
+function flexedSizes(
+  items: readonly LineItem[],
+  room: Len,
+  gaps: number,
+): { sizes: Len[]; remaining: Len } {
+  const bases = items.map((item) => item.base);
+  // A container sized by its content hugs it, leaving no free space.
+  if (room === undefined) {
+    return { sizes: bases, remaining: 0 };
   }
-  if (free === undefined) {
-    // Unmeasured room: growing items take it all unless every one is capped.
+  const hypothetical = bases.reduce<Len>((total, base) => add(total, base), gaps);
+  const growers = items.filter((item) => item.grow > 0);
+  if (hypothetical === undefined) {
+    // Unmeasured content: growing items take the room unless every one is capped.
     const capped = growers.every((item) => item.max !== undefined);
     return {
       sizes: items.map((item) => (item.grow > 0 ? undefined : item.base)),
-      remaining: capped ? undefined : 0,
+      remaining: growers.length > 0 && !capped ? 0 : undefined,
     };
   }
-  return distribute(items, free);
+  if (hypothetical === room) {
+    return { sizes: bases, remaining: 0 };
+  }
+  const mode: FlexMode = hypothetical < room ? "grow" : "shrink";
+  const flexible = items.filter((item) => isFlexible(item, mode));
+  if (flexible.length === 0) {
+    return { sizes: bases, remaining: room - hypothetical };
+  }
+  // Initial free space: inflexible items at their hypothetical size, flexible ones at their basis.
+  const used = items.reduce(
+    (total, item) => total + (isFlexible(item, mode) ? item.basis! : item.base!),
+    gaps,
+  );
+  return distribute(items, room - used, mode);
 }
 
 const PACKED_START = new Set([undefined, "normal", "start", "flex-start", "stretch", "left"]);
@@ -403,14 +502,8 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   const cross = crossOf(main);
   const items = children.map((child) => lineItem(child, main, box));
   const gap = mainGap(main, box);
-  const room = box.content[main];
-  const used = items.reduce<Len>(
-    (total, item) => add(total, item.start),
-    gap * Math.max(0, items.length - 1),
-  );
-  // A container sized by its content hugs it, leaving no free space.
-  const free = room === undefined ? 0 : sub(room, used);
-  const { sizes, remaining } = grownSizes(items, free);
+  const gaps = gap * Math.max(0, items.length - 1);
+  const { sizes, remaining } = flexedSizes(items, box.content[main], gaps);
   const [lead, between] = arrangement(box.parent.style["justify-content"], remaining, items.length);
   const placed: PlacedChild[] = [];
   let cursor = add(startOf(box.content, main), lead);

@@ -1,5 +1,8 @@
 import { record, type Raw } from "../prototypeTemplate";
-import { resolvePrototypeColor, type PrototypeColorMode, type Rgba } from "../prototypeContrast";
+import type { PrototypeColorMode, Rgba } from "../prototypeContrast";
+import { cssColor, elevationCss, glassCss, gradientCss, shadowsCss } from "./webStylePolish";
+
+export { cssColor, rgbaCss } from "./webStylePolish";
 
 /** What a node's style needs from its surroundings: the colour mode and the parent's main axis. */
 export interface WebStyleContext {
@@ -9,6 +12,10 @@ export interface WebStyleContext {
   readonly parentAxis?: "row" | "column";
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
+  /** The frame's platform, for looks the devices draw differently (glass). Android when unset. */
+  readonly platform?: "android" | "ios";
+  /** The window's explicit `rtl` direction, for physical edges such as a fade's. */
+  readonly rtl?: boolean;
 }
 
 const THEME_FONT_FAMILY: Readonly<Record<string, string>> = {
@@ -42,16 +49,6 @@ const SHAPE_TOKENS: Readonly<Record<string, number>> = {
   extraLarge: 28,
   full: 9999,
 };
-
-/** A resolved colour as a CSS `rgba()` string, alpha rounded to three places. */
-export function rgbaCss(color: Rgba): string {
-  return `rgba(${color.r},${color.g},${color.b},${Number(color.a.toFixed(3))})`;
-}
-
-export function cssColor(value: unknown, context: WebStyleContext): string | undefined {
-  const color = resolvePrototypeColor(value, context.mode, context.palette);
-  return color ? rgbaCss(color) : undefined;
-}
 
 function dimension(css: Css, axis: "width" | "height", value: unknown, context: WebStyleContext) {
   const mainAxis = context.parentAxis === (axis === "width" ? "row" : "column");
@@ -117,15 +114,36 @@ function boxStyle(css: Css, style: Raw, context: WebStyleContext) {
     Object.assign(css, radius);
     css.overflow = "hidden";
   }
-  const border = record(style.border);
-  if (typeof border?.width === "number") {
-    css.border = `${px(border.width)} solid ${cssColor(border.color, context) ?? "currentColor"}`;
-  }
-  if (typeof style.elevation === "number" && style.elevation > 0) {
-    css["box-shadow"] = `0 ${px(style.elevation / 2)} ${px(style.elevation)} rgba(0,0,0,0.25)`;
-  }
+  paintStyle(css, style, context);
   if (typeof style.alpha === "number") {
     css.opacity = String(style.alpha);
+  }
+}
+
+/** Gradient, border, glass and shadows, after the background and shape they paint with. */
+function paintStyle(css: Css, style: Raw, context: WebStyleContext) {
+  // Android paints the gradient over the background, across the whole node.
+  const gradient = gradientCss(style.gradient, context);
+  if (gradient) {
+    css["background-image"] = gradient;
+    css["background-origin"] = "border-box";
+  }
+  // A gradient border is drawn over the content by the node's overlay layers instead.
+  const border = record(style.border);
+  if (typeof border?.width === "number" && border.gradient === undefined) {
+    css.border = `${px(border.width)} solid ${cssColor(border.color, context) ?? "currentColor"}`;
+  }
+  // Glass tints behind an authored background, which keeps its own colour.
+  const { "background-color": glassFill, "box-shadow": rim, ...glass } = glassCss(style, context);
+  Object.assign(css, glass);
+  if (glassFill && !css["background-color"]) {
+    css["background-color"] = glassFill;
+  }
+  const shadow = [elevationCss(style, context), shadowsCss(style, false, context), rim]
+    .filter((value): value is string => value !== undefined)
+    .join(",");
+  if (shadow) {
+    css["box-shadow"] = shadow;
   }
 }
 

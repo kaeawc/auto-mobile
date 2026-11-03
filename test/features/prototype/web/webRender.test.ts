@@ -338,6 +338,44 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(renderPrototypeStill(ime), "padded")[0]!.style["padding-bottom"]).toBe("8px");
   });
 
+  describe("landscape left inset on an iPhone frame (#16588)", () => {
+    const screens = (reference.root as { screens: Record<string, Record<string, unknown>> })
+      .screens;
+    const landscape = (cart: Record<string, unknown>) =>
+      renderPrototypeStill(
+        { ...reference, root: { ...(reference.root as object), screens: { ...screens, cart } } },
+        { frame: "iphone-16", orientation: "landscape" },
+      ).element;
+    const screenOf = (element: WebElement) =>
+      find(element, (node) => node.attrs["data-chrome"] === "screen")[0]!;
+    const insetUsers = (element: WebElement) =>
+      find(element, (node) => node.attrs["data-chrome"] === undefined).filter((node) =>
+        Object.values(node.style).some((value) => /--safe-(start|left)/.test(value)),
+      );
+
+    test("the screen resolves the start inset to the frame's 59 px landscape left inset", () => {
+      const screen = screenOf(landscape(screens.cart!)).style;
+      expect(screen["--safe-left"]).toBe("59px");
+      expect(screen["--safe-start"]).toBe("var(--safe-left)");
+    });
+
+    test("without safeAreaPadding no content takes the left inset, as both devices draw edge to edge", () => {
+      expect(insetUsers(landscape(screens.cart!))).toEqual([]);
+    });
+
+    test("safeAreaPadding on the screen column insets every row once", () => {
+      const users = insetUsers(
+        landscape({
+          ...screens.cart,
+          testTag: "cart",
+          safeAreaPadding: { edges: ["start", "end"], types: ["systemBars", "cutout"] },
+        }),
+      );
+      expect(users.map((node) => node.attrs["data-testid"])).toEqual(["cart"]);
+      expect(users[0]!.style["padding-inline-start"]).toBe("calc(0px + var(--safe-start))");
+    });
+  });
+
   test("draws a button disabled only when its enabledWhen is decidably false", () => {
     const buttonOf = (enabledWhen?: unknown) =>
       byTag(
@@ -1225,12 +1263,33 @@ describe("prototype web still parity (#16382)", () => {
     expect(toHtml(screen)).not.toContain("conic-gradient");
   });
 
-  test("a seed or device scheme paints the Material 3 baseline background for the mode", () => {
+  test("a seed paints its derived background; a device source without one, the baseline", () => {
     const seeded = { ...bare, theme: { colors: { seed: "#336699" } } };
-    expect(screenOf(seeded).style["background-color"]).toBe("rgba(254,247,255,1)");
-    expect(screenOf(seeded, { mode: "dark" }).style["background-color"]).toBe("rgba(20,18,24,1)");
+    expect(screenOf(seeded).style["background-color"]).toBe("rgba(250,250,250,1)");
+    expect(screenOf(seeded, { mode: "dark" }).style["background-color"]).toBe("rgba(17,18,19,1)");
     const device = { ...bare, theme: { colors: { source: "device" } } };
     expect(screenOf(device).style["background-color"]).toBe("rgba(254,247,255,1)");
+  });
+
+  test("seed-derived roles reach node styles, under the theme's explicit overrides (#16611)", () => {
+    const spec = {
+      ...bare,
+      theme: { colors: { seed: "#6750A4", primary: "#B3261E", dark: { primary: "#F2B8B5" } } },
+      root: {
+        type: "column",
+        style: { background: "primaryContainer", border: { width: 1, color: "primary" } },
+        children: [],
+      },
+    };
+    const root = (mode: "light" | "dark") =>
+      find(
+        renderPrototypeStill(spec, { mode }).element,
+        (e) => e.attrs["data-node"] === "column",
+      )[0]!.style;
+    // The seed's dark primaryContainer is hsl(256, 0.34, 0.30), not the baseline's #4F378B.
+    expect(root("dark")["background-color"]).toBe("rgba(65,50,103,1)");
+    expect(root("dark").border).toBe("1px solid rgba(242,184,181,1)");
+    expect(root("light").border).toBe("1px solid rgba(179,38,30,1)");
   });
 
   test("a top app bar without safeAreaPadding takes no status-bar inset, as on the devices", () => {

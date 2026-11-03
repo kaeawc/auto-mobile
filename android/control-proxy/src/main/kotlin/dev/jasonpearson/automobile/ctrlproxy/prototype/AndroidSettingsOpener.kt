@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -27,8 +28,11 @@ internal data class SettingsPlan(
 /**
  * Below API 26 there is no per-app notification page, so `notifications` opens the app's details
  * page, which hosts its notification toggle on those versions. Below API 29 there is no Wi-Fi
- * panel, so `wifi` opens the full Wi-Fi settings screen.
+ * panel, so `wifi` opens the full Wi-Fi settings screen. The newer constants are gated on [sdkInt],
+ * which the system gateway reads from `Build.VERSION.SDK_INT`; lint cannot see through the
+ * parameter, so InlinedApi is suppressed here and in [settingsIntent].
  */
+@SuppressLint("InlinedApi")
 internal fun settingsPlan(page: SettingsPage, sdkInt: Int): SettingsPlan =
   when (page) {
     SettingsPage.APP ->
@@ -51,7 +55,11 @@ internal fun settingsPlan(page: SettingsPage, sdkInt: Int): SettingsPlan =
     SettingsPage.DISPLAY -> SettingsPlan(Settings.ACTION_DISPLAY_SETTINGS)
   }
 
-/** The overlay is not an activity, so every intent starts a new task. */
+/**
+ * The overlay is not an activity, so every intent starts a new task. [SettingsPlan.appPackageExtra]
+ * is only set by [settingsPlan] on API 26 and later.
+ */
+@SuppressLint("InlinedApi")
 internal fun settingsIntent(plan: SettingsPlan, ownPackage: String): Intent =
   Intent(plan.action).apply {
     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

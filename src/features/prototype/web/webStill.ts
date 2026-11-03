@@ -10,7 +10,7 @@ import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
 import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
-import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
+import { cssColor, INCOMING_HEIGHT_KEY, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
 const STILL_LOCALE = "en-US";
@@ -100,19 +100,32 @@ function floatingWindow(placement: Raw, children: WebElement[]): WebElement {
 }
 
 /**
+ * The height a window hands its root (INCOMING_HEIGHT_KEY), where it is statically known: a
+ * sheet's dp `height`. A fullscreen window's height is the screen less bars and insets, known only
+ * at layout time, so it hands none.
+ */
+function windowHeight(placement: Raw | undefined): Raw {
+  const height = placement?.type === "sheet" ? placement.height : undefined;
+  return typeof height === "number" && Number.isFinite(height) && height >= 0
+    ? { [INCOMING_HEIGHT_KEY]: height }
+    : {};
+}
+
+/**
  * A fullscreen or sheet root fills its window on each axis it leaves unsized, as both devices do
- * (#16190); explicit sizes stay, and a floating root keeps its content size.
+ * (#16190); explicit sizes stay, and a floating root keeps its content size. A sheet's root also
+ * carries the sheet's height as its bound (see windowHeight).
  */
 function sizedRoot(spec: unknown): unknown {
   const root = record(record(spec)?.root);
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  if (!root || placement === "floating") {
+  const placement = record(record(record(spec)?.window)?.placement);
+  if (!root || placement?.type === "floating") {
     return root;
   }
   const style = record(root.style) ?? {};
   return {
     ...root,
-    style: { width: "fill", height: "fill", ...style },
+    style: { width: "fill", height: "fill", ...style, ...windowHeight(placement) },
   };
 }
 

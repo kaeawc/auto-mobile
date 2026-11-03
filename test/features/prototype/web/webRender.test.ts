@@ -580,6 +580,128 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")["max-width"]).toBe("0px");
   });
 
+  test("a row's capped aspect ratio takes its cap and the row stays within its parent (#16673)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2, maxHeight: 30 } },
+                { type: "text", text: "b", testTag: "after" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // The row wraps its children but never outgrows its parent, as a Compose Row's max does.
+    expect(row.style["max-width"]).toBe("100%");
+    expect(row.style).not.toHaveProperty("width");
+    const style = (tag: string) => byTag({ element: row }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({
+      "aspect-ratio": "2",
+      "flex-basis": "60px",
+      "flex-grow": "0",
+      "min-width": "0",
+      width: "60px",
+    });
+    // The later sibling keeps its width while the cap leaves room, and gives it up first.
+    expect(style("after")).toMatchObject({ "flex-shrink": "1000000000", "min-width": "0" });
+    expect(style("after")).not.toHaveProperty("max-width");
+  });
+
+  test("a row whose height comes from fill or a weight caps its aspect ratio by it (#16686)", () => {
+    const ratioIn = (row: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            style: { height: { dp: 100 } },
+            children: [
+              { type: "box", style: { height: { dp: 60 } } },
+              {
+                ...row,
+                type: "row",
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                  { type: "text", text: "b" },
+                ],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // 100 dp less the 60 dp sibling leaves 40 dp, so the ratio is at most 80 dp wide.
+    expect(ratioIn({ style: { height: "fill" } })).toMatchObject({ "flex-basis": "80px" });
+    expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
+    // A wrap row is bounded by what is left too.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
+  });
+
+  test("a fill or weighted row in a fixed-height card caps its aspect ratio by it (#16690)", () => {
+    const ratioIn = (row: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "card",
+                style: { height: { dp: 100 } },
+                children: [
+                  { type: "box", style: { height: { dp: 60 } } },
+                  {
+                    ...row,
+                    type: "row",
+                    children: [
+                      { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                      { type: "text", text: "b" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // 100 dp less the 60 dp sibling leaves 40 dp, so the ratio is at most 80 dp wide.
+    expect(ratioIn({ style: { height: "fill" } })).toMatchObject({ "flex-basis": "80px" });
+    expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
+  });
+
+  test("a sheet window hands its height to a fill row at the root (#16690)", () => {
+    const ratioIn = (placement: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          window: { placement },
+          root: {
+            type: "row",
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+              { type: "text", text: "b" },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    expect(ratioIn({ type: "sheet", height: 50, edge: "bottom" })).toMatchObject({
+      "flex-basis": "100px",
+    });
+    // A fullscreen window's height depends on bars and insets, so its root stays unbounded.
+    expect(ratioIn({ type: "fullscreen" })).not.toHaveProperty("flex-basis");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

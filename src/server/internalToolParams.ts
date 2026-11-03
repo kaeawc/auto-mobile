@@ -1,5 +1,4 @@
 import { deleteInternalToolParams, INTERNAL_TOOL_PARAM_NAMES } from "../daemon/wire/constants";
-export { internalMcpSessionId, internalOneShotCli } from "../daemon/wire/internalToolParams";
 
 export function stripInternalToolParams(params: unknown): unknown {
   if (!params || typeof params !== "object" || Array.isArray(params)) {

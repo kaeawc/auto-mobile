@@ -5,6 +5,7 @@ import { parseSync, Visitor, type Expression } from "oxc-parser";
 import {
   INTERNAL_TOOL_PARAM_NAMES,
   INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
 } from "../../src/daemon/wire/constants";
@@ -21,6 +22,11 @@ import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/vir
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { asMcpConnection } from "../helpers/mcpConnection";
+import {
+  currentAutolockMcpSessionId,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 
 const metadata = Object.freeze({
   ...Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true])),
@@ -151,6 +157,90 @@ function unsafeSchemaParses(file: string, source: string): string[] {
   return offenders;
 }
 
+/** The in-band keys only ingress reads, by constant name and wire key (#15663). */
+const INGRESS_ONLY_KEYS = new Map([
+  ["INTERNAL_MCP_SESSION_PARAM", INTERNAL_MCP_SESSION_PARAM],
+  ["INTERNAL_ONE_SHOT_CLI_PARAM", INTERNAL_ONE_SHOT_CLI_PARAM],
+  ["INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM", INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM],
+]);
+const INGRESS_ONLY_NAMES = new Set([...INGRESS_ONLY_KEYS.keys(), ...INGRESS_ONLY_KEYS.values()]);
+const INGRESS_ONLY_WIRE_KEYS = new Set<unknown>(INGRESS_ONLY_KEYS.values());
+
+/**
+ * Every place outside comments that names an ingress-only key: its constant or the literal key.
+ * Handlers read the connection and the one-shot marker from the ambient call context (#15663).
+ */
+function inBandConnectionReads(file: string, source: string): string[] {
+  const { program, errors } = parseSync(file, source);
+  expect(errors).toEqual([]);
+  const offenders: string[] = [];
+  const line = (start: number) => `${file}:${source.slice(0, start).split("\n").length}`;
+  new Visitor({
+    Identifier(node) {
+      if (INGRESS_ONLY_NAMES.has(node.name)) {
+        offenders.push(line(node.start));
+      }
+    },
+    Literal(node) {
+      if (INGRESS_ONLY_WIRE_KEYS.has(node.value)) {
+        offenders.push(line(node.start));
+      }
+    },
+  }).visit(program);
+  // A shorthand `{ __mcpSessionId }` is both a key and a binding: report its line once.
+  return [...new Set(offenders)];
+}
+
+describe("the in-band connection keys stay at the ingress boundary (#15663)", () => {
+  // `parseCallContext` reads the forwarded wire key once; nothing past it may.
+  const ALLOWED = new Set(["server/pipeline/ingress/callContext.ts"]);
+
+  let offenders: string[];
+  beforeAll(() => {
+    const src = join(import.meta.dir, "../../src");
+    const files = ["server", "features"].flatMap((dir) =>
+      Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: join(src, dir) }), (file) =>
+        `${dir}/${file}`.replaceAll("\\", "/"),
+      ),
+    );
+    expect(files.length).toBeGreaterThan(0);
+    offenders = files
+      .filter((file) => !ALLOWED.has(file))
+      .flatMap((file) => inBandConnectionReads(file, readFileSync(join(src, file), "utf8")));
+  });
+
+  test("no src/server or src/features file names an ingress-only key outside ingress", () => {
+    expect(offenders).toEqual([]);
+  });
+
+  test("the scan finds the constant and the literal key, and ignores comments", () => {
+    expect(
+      inBandConnectionReads(
+        "fixture.ts",
+        `
+      // a comment naming __mcpSessionId is fine
+      const a = args[INTERNAL_MCP_SESSION_PARAM];
+      const b = args["__mcpSessionId"];
+      const { __mcpSessionId } = args;
+      // nor is one naming __oneShotCli
+      const c = args[INTERNAL_ONE_SHOT_CLI_PARAM];
+      const d = { __oneShotCli: true };
+      const e = args["__oneShotCli"];
+      const f = args[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+    `,
+      ),
+    ).toEqual([
+      "fixture.ts:3",
+      "fixture.ts:4",
+      "fixture.ts:5",
+      "fixture.ts:7",
+      "fixture.ts:8",
+      "fixture.ts:9",
+      "fixture.ts:10",
+    ]);
+  });
+});
+
 describe("handler internal metadata regression guard", () => {
   let offenders: string[];
   beforeAll(() => {
@@ -185,7 +275,7 @@ describe("handler internal metadata regression guard", () => {
   });
 
   test.each(["getAndroid", "getApple"] as const)(
-    "%s accepts full metadata and preserves session/presentation order",
+    "%s accepts full metadata and takes session and presentation order from the call context",
     async (name) => {
       const timer = new FakeTimer();
       const manager = new FakeDeviceUtils();
@@ -196,9 +286,11 @@ describe("handler internal metadata regression guard", () => {
         lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
       });
       const calls: unknown[] = [];
+      const bootConnections: (string | undefined)[] = [];
       const handlers = createAcquisitionHandlers({
         bootAndPrepareDevice: async (args) => {
           calls.push(args);
+          bootConnections.push(currentAutolockMcpSessionId());
           throw new ActionableError("fake device boundary");
         },
       });
@@ -207,18 +299,27 @@ describe("handler internal metadata regression guard", () => {
         ...metadata,
       });
       const acquire = name === "getAndroid" ? handlers.getAndroidHandler : handlers.getAppleHandler;
-      await expect(acquire(args)).rejects.toThrow("fake device boundary");
+      // Ingress runs the call under the connection the in-band key names (#15663).
+      // The in-band order ("reverse") is ignored; the ambient one is used (#15663).
+      await expect(
+        runWithToolSelectionContext({ acceptanceDiscoveryOrder: "forward" }, () =>
+          asMcpConnection("session", () => acquire(args)),
+        ),
+      ).rejects.toThrow("fake device boundary");
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         platform: name === "getAndroid" ? "android" : "ios",
-        __mcpSessionId: "session",
-        presentationOrder: "reverse",
+        presentationOrder: "forward",
       });
+      // The rebuilt boot args no longer forward the key; the boot sees the ambient connection.
+      expect(calls[0]).not.toHaveProperty("__mcpSessionId");
+      expect(calls[0]).not.toHaveProperty("__oneShotCli");
+      expect(bootConnections).toEqual(["session"]);
       expect(args).toMatchObject(metadata);
     },
   );
 
-  test("startDevice accepts full metadata and retains the session before stripping", async () => {
+  test("startDevice accepts full metadata and prepares under the ambient session", async () => {
     setDeviceToolsDependencies({ timer: new FakeTimer() });
     const acquisition = createAcquisitionHandlers({
       bootAndPrepareDevice: async () => {
@@ -226,6 +327,7 @@ describe("handler internal metadata regression guard", () => {
       },
     });
     const calls: unknown[] = [];
+    const prepareConnections: (string | undefined)[] = [];
     const handlers = createStartDeviceHandlers({
       stripInternalAcquisitionParams: (args) => {
         const external = acquisition.stripInternalAcquisitionParams(args);
@@ -234,22 +336,26 @@ describe("handler internal metadata regression guard", () => {
       },
       prepareDevice: async (args) => {
         calls.push(args);
+        prepareConnections.push(currentAutolockMcpSessionId());
         return createStructuredToolResponse({ message: "fake preparation" });
       },
     });
     const args = Object.freeze({ platform: "android" as const, avdName: "Fold", ...metadata });
-    await handlers.startDeviceHandler(args);
+    await asMcpConnection("session", () => handlers.startDeviceHandler(args));
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       platform: "android",
       name: "Fold",
       matchExactName: true,
-      __mcpSessionId: "session",
     });
+    // The rebuilt args no longer forward the key; preparation sees the ambient connection.
+    expect(calls[0]).not.toHaveProperty("__mcpSessionId");
+    expect(calls[0]).not.toHaveProperty("__oneShotCli");
+    expect(prepareConnections).toEqual(["session"]);
     expect(args).toMatchObject(metadata);
   });
 
-  test("provisionDevice argument seam strips full metadata, keeps session/CLI marker, takes the request's deadline", () => {
+  test("provisionDevice argument seam strips full metadata, the in-band session and CLI marker, takes the request's deadline", () => {
     const args = Object.freeze({
       device: {
         platform: "ios" as const,
@@ -267,13 +373,14 @@ describe("handler internal metadata regression guard", () => {
         device: args.device,
         boot: true,
         readiness: "automation",
-        __mcpSessionId: "session",
-        // The one-shot CLI marker is preserved like the connection identity (#11096).
-        __oneShotCli: true,
+        // The connection identity and the one-shot CLI marker are ambient, not carried in the
+        // parsed args (#15663).
         transportDeadlineMs: 90_000,
         liveDeadlineKey: "live",
       },
     );
+    expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("__mcpSessionId");
+    expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("__oneShotCli");
     expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("transportDeadlineMs");
     expect(args).toMatchObject(metadata);
   });

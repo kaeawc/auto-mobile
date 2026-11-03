@@ -3,7 +3,7 @@ import {
   isPlayStoreSystemImageTag,
   parseAndroidSystemImageRuntime,
 } from "./android-cmdline-tools/AndroidSystemImageRuntime";
-import type { DeviceDisplays, DisplayPanel } from "../models/DisplayPanel";
+import { isPhysicalPanel, type DeviceDisplays, type DisplayPanel } from "../models/DisplayPanel";
 import { displayInventoryOutcome, type DisplayInventoryOutcome } from "../models/DeviceInfo";
 import type {
   DeviceMatchCriteria,
@@ -305,7 +305,8 @@ function matchingDisplays(
     }
   | undefined {
   if (item.displays) {
-    return item.displays;
+    // requires.panels counts physical panels; an overlay display is not a panel.
+    return { ...item.displays, panels: item.displays.panels.filter(isPhysicalPanel) };
   }
   if (
     !booted ||

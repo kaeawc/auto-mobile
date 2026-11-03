@@ -18,6 +18,7 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -133,10 +134,13 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     (ToolRegistry.getTool("observe") as { planExecutable: boolean }).planExecutable = true;
 
     // Seed the agent-facing baseline via a normal (non-plan) observe call.
-    await ToolRegistry.getTool("observe")!.handler({
-      platform: "android",
-      __mcpSessionId: "mcp-session-1",
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => ToolRegistry.getTool("observe")!.handler(args),
+    );
     const baselineAfterObserve = daemonSessionManager!.getLastRenderedObservation(sessionId);
     expect(baselineAfterObserve).toBeDefined();
 

@@ -25,3 +25,10 @@ test("rejects an unsafe tag or attribute name", () => {
   expect(() => toHtml(el("div", { attrs: { "on click": "x" } }))).toThrow("Invalid attribute name");
   expect(() => toHtml(el("div", { attrs: { onclick: "x" } }))).toThrow("Event handler attributes");
 });
+
+test("allows only the named camelCase SVG attributes", () => {
+  expect(toHtml(el("svg", { attrs: { viewBox: "0 0 24 24" } }))).toBe(
+    '<svg viewBox="0 0 24 24"></svg>',
+  );
+  expect(() => toHtml(el("div", { attrs: { onClick: "x" } }))).toThrow("Invalid attribute name");
+});

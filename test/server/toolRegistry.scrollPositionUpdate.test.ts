@@ -14,6 +14,7 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import type { ScrollPosition } from "../../src/utils/interfaces/NavigationGraph";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 /**
  * Integration coverage for issue #2897: the swipeOn scroll-position update block
@@ -142,12 +143,15 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     registerSwipeOn(true);
     const tool = ToolRegistry.getTool("swipeOn")!;
 
-    await tool.handler({
-      platform: "android",
-      direction: "up",
-      lookFor: { text: "Target", elementId: "com.example:id/target" },
-      __mcpSessionId: "mcp-session-1",
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        direction: "up",
+        lookFor: { text: "Target", elementId: "com.example:id/target" },
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     expect(captured.length).toBe(1);
     expect(captured[0].direction).toBe("up");
@@ -161,12 +165,15 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     registerSwipeOn(false);
     const tool = ToolRegistry.getTool("swipeOn")!;
 
-    await tool.handler({
-      platform: "android",
-      direction: "up",
-      lookFor: { text: "Target" },
-      __mcpSessionId: "mcp-session-1",
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        direction: "up",
+        lookFor: { text: "Target" },
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     expect(captured.length).toBe(0);
   });
@@ -177,11 +184,14 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     registerSwipeOn(true);
     const tool = ToolRegistry.getTool("swipeOn")!;
 
-    await tool.handler({
-      platform: "android",
-      direction: "up",
-      __mcpSessionId: "mcp-session-1",
-    });
+    await withWireConnection(
+      {
+        platform: "android",
+        direction: "up",
+        __mcpSessionId: "mcp-session-1",
+      },
+      (args) => tool.handler(args),
+    );
 
     expect(captured.length).toBe(0);
   });

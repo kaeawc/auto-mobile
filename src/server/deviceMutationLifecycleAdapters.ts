@@ -9,6 +9,7 @@ export const APP_FALLBACK_TOOLS = [
   "uninstallApp",
   "clearAppData",
   "measureStartup",
+  "postNotification",
 ] as const;
 
 export function appFallback(

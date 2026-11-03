@@ -57,10 +57,3 @@ export function isWatchObservation(value: unknown): value is WatchObservation {
     (note.platform === "watchos" || note.platform === "tvos")
   );
 }
-
-export type TvosObservation = WatchObservation<"tvos">;
-export type TvosHierarchyUnavailable = WatchHierarchyUnavailable<"tvos">;
-
-export function isTvosObservation(value: unknown): value is TvosObservation {
-  return isWatchObservation(value) && value.hierarchyUnavailable.platform === "tvos";
-}

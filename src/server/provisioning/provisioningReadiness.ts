@@ -1,4 +1,7 @@
-import { internalMcpSessionId, internalOneShotCli } from "../internalToolParams";
+import {
+  currentAutolockMcpSessionId,
+  currentOneShotCli,
+} from "../../features/toolSelection/toolSelectionContext";
 import { disabledDeviceResourceReport } from "../../utils/iosDeviceResourceImpact";
 import { mergeProvenResourceStates } from "../../utils/deviceResourceStates";
 import { observeConfiguredDeviceResources } from "../deviceResourceTools";
@@ -298,9 +301,9 @@ function provisionReadinessStatus(
 export function readinessReservationOwner(
   args: object,
 ): { oneShotCli: true } | { mcpSessionId: string } | undefined {
-  if (internalOneShotCli(args)) {
+  if (currentOneShotCli()) {
     return { oneShotCli: true };
   }
-  const mcpSessionId = internalMcpSessionId(args);
+  const mcpSessionId = currentAutolockMcpSessionId();
   return mcpSessionId ? { mcpSessionId } : undefined;
 }

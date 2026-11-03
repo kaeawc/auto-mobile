@@ -1,6 +1,7 @@
 import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
 import {
   buildDisconnectedPanelMessage,
+  isPhysicalPanel,
   POSTURE_PANEL_ROLES,
   panelKeyForFingerprint,
   type PanelFingerprint,
@@ -14,6 +15,7 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import {
   logicalDisplayIdForPanel,
+  panelKeyForUniqueId,
   parseAndroidDisplayInfos,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
@@ -91,9 +93,7 @@ const androidDisplayCache = new Map<string, CachedAndroidDisplay>();
 const lastKnownAndroidDisplay = new Map<string, ObservedAndroidDisplay>();
 const androidPostureCache = new Map<string, { inventory: string; at: number; posture: Posture }>();
 
-function physicalPanelKey(uniqueId: string): string {
-  return uniqueId.includes(":") ? uniqueId.split(":").slice(1).join(":") : uniqueId;
-}
+const physicalPanelKey = panelKeyForUniqueId;
 
 function postureForState(current: string, supported: string): Posture {
   const stateId = parseAndroidCommittedStateIdentifier(current);
@@ -253,7 +253,7 @@ export class ObservedAndroidDisplayCache {
     signal?: AbortSignal,
     force = false,
   ): Promise<Posture> {
-    if ((device.displays?.panels.length ?? 0) < 2) {
+    if ((device.displays?.panels.filter(isPhysicalPanel).length ?? 0) < 2) {
       return "unknown";
     }
     const inventory = JSON.stringify(device.displays);
@@ -375,11 +375,8 @@ function displayForAndroidInfos(
   panels: readonly DisplayPanel[],
   infos: ReturnType<typeof parseAndroidDisplayInfos>,
 ): ObservedAndroidDisplay {
-  const physicalKey = infos
-    .find((info) => info.logicalId === "0")
-    ?.uniqueId?.split(":")
-    .slice(1)
-    .join(":");
+  const defaultUniqueId = infos.find((info) => info.logicalId === "0")?.uniqueId;
+  const physicalKey = defaultUniqueId ? panelKeyForUniqueId(defaultUniqueId) : undefined;
   const panel = panels.find((candidate) => candidate.key === physicalKey);
   // Single-panel inventories are omitted by discovery. "0" is the stable
   // logical-display fallback; role and posture stay unknown without evidence.

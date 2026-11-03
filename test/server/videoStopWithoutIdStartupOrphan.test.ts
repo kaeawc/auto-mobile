@@ -36,6 +36,7 @@ import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
 import { toolText } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 const videoRecording = createVideoRecordingToolsHarness();
 
@@ -75,9 +76,10 @@ const originalWarn = logger.warn;
 let owningConnection: string | undefined;
 
 const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
+/** One top-level call; an `__mcpSessionId` in `args` is its ambient connection (#15663). */
 const outcome = (args: Record<string, unknown>, target: BootedDevice = device) =>
   Promise.resolve()
-    .then(() => handler()(target, args))
+    .then(() => withWireConnection(args, (rest) => handler()(target, rest)))
     .then(
       (response) => ({ response, error: undefined as (Error & { code?: string }) | undefined }),
       (error: Error & { code?: string }) => ({ response: undefined, error }),

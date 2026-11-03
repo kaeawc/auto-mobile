@@ -52,18 +52,21 @@ certs="$("$apksigner_bin" verify --print-certs "$apk")" || {
   exit 1
 }
 
-signer_count="$(grep -c '^Signer #[0-9]* certificate DN:' <<< "$certs" || true)"
+# apksigner before build-tools 37 prints "Signer #1 certificate DN: ..."; 37 and later print
+# "V2 Signer: certificate DN: ..." (prefixed by the verified scheme). Accept both.
+signer_prefix='^(Signer #[0-9]+|V[0-9.]+ Signer( #[0-9]+)?:) certificate'
+signer_count="$(grep -Ec "${signer_prefix} DN:" <<< "$certs" || true)"
 if [[ "$signer_count" -lt 1 ]]; then
   echo "ERROR: apksigner reported no signer certificate for $apk" >&2
   exit 1
 fi
-if grep -Eq '^Signer #[0-9]+ certificate DN:.*CN=Android Debug' <<< "$certs"; then
+if grep -Eq "${signer_prefix} DN:.*CN=Android Debug" <<< "$certs"; then
   echo "ERROR: $apk is signed with the Android debug certificate, not the release key." >&2
   echo "A release build must run with RELEASE_KEYSTORE_* inputs; refusing to publish." >&2
   exit 1
 fi
 
-digest="$(awk -F ': ' '/^Signer #1 certificate SHA-256 digest:/ { print $2; exit }' <<< "$certs")"
+digest="$(awk -v prefix="$signer_prefix" '$0 ~ (prefix " SHA-256 digest:") { print $NF; exit }' <<< "$certs")"
 if ! [[ "$digest" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: could not read the signer #1 SHA-256 digest from apksigner output" >&2
   exit 1

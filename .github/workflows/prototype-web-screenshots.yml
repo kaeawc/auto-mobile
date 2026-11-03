@@ -1,0 +1,77 @@
+name: "Prototype Web Screenshots (Advisory)"
+
+# Headless Chromium check of the prototype web page's reference specs (#16346):
+# console errors, CSP violations, network requests, the runtime's fit and rotate,
+# and a pixel diff against the goldens in test/fixtures/prototype-web/screenshots/.
+# Advisory, never required, and not in the green-main ruleset. Linux only: the
+# goldens are rendered by the Chromium build that the pinned playwright-core
+# installs here. On a mismatch the actual screenshots and diffs are uploaded as the
+# `prototype-web-screenshots` artifact; adopting them is copying its non-.diff PNGs
+# over the goldens (see docs/design-docs/prototype-web-renderer.md).
+on:
+  pull_request:
+    paths:
+      - "src/features/prototype/web/**"
+      - "src/features/visual/VisualDiff.ts"
+      - "test/features/prototype/web/webScreenshot*"
+      - "test/fixtures/prototype-web/**"
+      - "test/fixtures/prototype-spec/valid/template-feed-detail.json"
+      - "test/fixtures/prototype-spec/valid/pager-indicator-dots.json"
+      - "test/fixtures/prototype-spec/valid/grid-fixed-columns-span.json"
+      - "test/fixtures/prototype-spec/valid/material-controls.json"
+      - "test/fixtures/prototype-spec/valid/component-gallery.json"
+      - "test/fixtures/prototype-spec/valid/doc-example-2.json"
+      - "scripts/prototype/web-screenshots.sh"
+      - ".github/workflows/prototype-web-screenshots.yml"
+      - "package.json"
+      - "bun.lock"
+  schedule:
+    - cron: "40 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prototype-web-screenshots:
+    name: "Prototype Web Screenshots (Advisory)"
+    if: github.event_name != 'schedule' || github.repository == 'kaeawc/auto-mobile'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install dependencies"
+        run: bash scripts/ci/install-bun-deps.sh
+
+      # The browser is a CI-only install of the build the locked playwright-core
+      # names; nothing installs a browser at package install time or at runtime.
+      - name: "Install headless Chromium"
+        run: node_modules/.bin/playwright-core install --with-deps --only-shell chromium
+
+      - name: "Check the reference specs in headless Chromium"
+        env:
+          AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT: "${{ github.workspace }}/scratch/prototype-web-screenshots"
+        run: bash scripts/prototype/web-screenshots.sh
+
+      - name: "Upload actual screenshots and diffs"
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: prototype-web-screenshots
+          path: scratch/prototype-web-screenshots/
+          if-no-files-found: ignore
+          retention-days: 14

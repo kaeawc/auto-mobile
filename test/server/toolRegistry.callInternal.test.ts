@@ -6,8 +6,12 @@ import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constant
 import { ActionableError } from "../../src/models/ActionableError";
 import { deviceActionClock } from "../../src/server/pipeline/deviceActionClock";
 import { resolveTransportDeadlineMs } from "../../src/server/transportDeadline";
+import { planCallerContext } from "../../src/server/planCallerIdentity";
 import {
+  currentAcceptanceDiscoveryOrder,
+  currentAutolockMcpSessionId,
   currentExecution,
+  currentOneShotCli,
   currentRequestDeadline,
   getToolSelectionContext,
   runWithToolSelectionContext,
@@ -249,6 +253,65 @@ describe("ToolRegistry.callInternal (#3108)", () => {
   });
 
   // A plan step runs under the request's ambient deadline (#15663); no deadline key reaches its args.
+  describe("the connection's autolock identity", () => {
+    test("a nested call does not inherit it but keeps the caller identity", async () => {
+      let seen: { autolock?: string; caller?: string } | undefined;
+      ToolRegistry.register("clipboard", "Mock clipboard", schema, async () => {
+        seen = {
+          autolock: currentAutolockMcpSessionId(),
+          caller: getToolSelectionContext()?.callerMcpSessionId,
+        };
+        return SENTINEL;
+      });
+
+      await runWithToolSelectionContext(
+        { autolockMcpSessionId: "conn-A", callerMcpSessionId: "conn-A" },
+        () => ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true }),
+      );
+
+      expect(seen).toEqual({ autolock: undefined, caller: "conn-A" });
+    });
+
+    test("a nested call is never a one-shot CLI call, though its caller is", async () => {
+      const seen: boolean[] = [];
+      ToolRegistry.register("clipboard", "Mock clipboard", schema, async () => {
+        seen.push(currentOneShotCli());
+        return SENTINEL;
+      });
+
+      await runWithToolSelectionContext({ oneShotCli: true }, async () => {
+        seen.push(currentOneShotCli());
+        await ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true });
+      });
+
+      expect(seen).toEqual([true, false]);
+    });
+
+    test("a nested call never inherits the acceptance discovery order", async () => {
+      const seen: (string | undefined)[] = [];
+      ToolRegistry.register("clipboard", "Mock clipboard", schema, async () => {
+        seen.push(currentAcceptanceDiscoveryOrder());
+        return SENTINEL;
+      });
+
+      await runWithToolSelectionContext({ acceptanceDiscoveryOrder: "reverse" }, async () => {
+        seen.push(currentAcceptanceDiscoveryOrder());
+        await ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true });
+      });
+
+      expect(seen).toEqual(["reverse", undefined]);
+    });
+
+    test("executePlan's steps run for the connection that called it", async () => {
+      expect(planCallerContext()).toEqual({});
+      const inside = await runWithToolSelectionContext(
+        { autolockMcpSessionId: "conn-A" },
+        async () => planCallerContext(),
+      );
+      expect(inside).toEqual({ callerMcpSessionId: "conn-A" });
+    });
+  });
+
   describe("plan steps carry no in-band deadline", () => {
     test("nothing is written into a step's args", async () => {
       registerCapturingTool("clipboard");

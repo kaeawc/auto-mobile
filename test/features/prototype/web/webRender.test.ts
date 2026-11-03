@@ -1209,3 +1209,97 @@ describe("prototype web still parity (#16382)", () => {
     expect(iconOf("search").style).toMatchObject({ width: "24px", height: "24px" });
   });
 });
+
+describe("prototype web still stack screens (#16382)", () => {
+  const nested = {
+    id: "nested",
+    root: {
+      type: "stack",
+      start: "home",
+      screens: {
+        home: {
+          type: "column",
+          children: [
+            { type: "text", text: "Home" },
+            {
+              type: "stack",
+              start: "inner",
+              screens: {
+                inner: { type: "text", text: "Inner" },
+                other: { type: "text", text: "Other" },
+              },
+            },
+          ],
+        },
+        pay: { type: "text", text: "Pay" },
+      },
+    },
+  };
+
+  test("draws the chosen screen of the outermost stack instead of its start", () => {
+    const done = renderPrototypeStill(reference, { frame: "pixel-9", screen: "done" });
+    expect(toHtml(done.element)).toContain("Thanks");
+    expect(done.stack).toEqual({ start: "cart", screens: ["cart", "done"], screen: "done" });
+  });
+
+  test("an unknown screen draws the start screen", () => {
+    const start = renderPrototypeStill(reference, { frame: "pixel-9" });
+    const unknown = renderPrototypeStill(reference, { frame: "pixel-9", screen: "nope" });
+    expect(toHtml(unknown.element)).toBe(toHtml(start.element));
+    expect(unknown.stack).toEqual({ start: "cart", screens: ["cart", "done"], screen: "cart" });
+  });
+
+  test("a nested stack keeps drawing its own start screen", () => {
+    for (const screen of ["home", "other"]) {
+      const still = renderPrototypeStill(nested, { screen });
+      const html = toHtml(still.element);
+      expect(html).toContain("Home");
+      expect(html).toContain("Inner");
+      expect(html).not.toContain("Other");
+      expect(still.stack).toEqual({ start: "home", screens: ["home", "pay"], screen: "home" });
+    }
+    expect(toHtml(renderPrototypeStill(nested, { screen: "pay" }).element)).toContain("Pay");
+  });
+
+  test("a spec without a stack reports none", () => {
+    const still = renderPrototypeStill({ id: "bare", root: { type: "column", children: [] } });
+    expect(still.stack).toBeUndefined();
+  });
+});
+
+describe("prototype web still platform state (#16448)", () => {
+  const adaptive = {
+    ...reference,
+    root: {
+      type: "column",
+      children: [
+        {
+          type: "text",
+          testTag: "wide",
+          text: "wide",
+          visibleWhen: { platform: "/device/widthClass", equals: "expanded" },
+        },
+        {
+          type: "text",
+          testTag: "label",
+          text: "{platform:/device/os} {platform:/device/widthClass}|{platform:/device/posture}|{platform:/device/idiom}",
+        },
+      ],
+    },
+  };
+
+  test("a widthClass condition resolves per frame and orientation", () => {
+    expect(byTag(renderPrototypeStill(adaptive, { frame: "pixel-9" }), "wide")).toHaveLength(0);
+    expect(
+      byTag(renderPrototypeStill(adaptive, { frame: "pixel-9", orientation: "landscape" }), "wide"),
+    ).toHaveLength(1);
+  });
+
+  test("text binds the platform state the frame decides and leaves other pointers literal", () => {
+    const label = (options: Parameters<typeof renderPrototypeStill>[1]) =>
+      textOf(byTag(renderPrototypeStill(adaptive, options), "label")[0]!);
+    expect(label({ frame: "medium-tablet" })).toBe("android medium||{platform:/device/idiom}");
+    expect(label({ frame: "iphone-16" })).toBe("ios compact||{platform:/device/idiom}");
+    expect(label({ frame: "ipad-10" })).toBe("ios regular||{platform:/device/idiom}");
+  });
+});

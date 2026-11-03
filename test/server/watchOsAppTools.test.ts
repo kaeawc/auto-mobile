@@ -35,6 +35,7 @@ import * as path from "node:path";
 import { simulatorDataContainer, simulatorOwnership } from "../helpers/simulatorContainerFixture";
 import { toolJson } from "../helpers/toolResponse";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
+import { asMcpConnection } from "../helpers/mcpConnection";
 
 isolateEmptyToolRegistry();
 
@@ -184,8 +185,9 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     return { pool, sessions, readiness, watchSimctl, resumed, wiped };
   }
 
+  /** One top-level call from CONNECTION, its ambient connection as at MCP ingress (#15663). */
   const call = (name: string, args: Record<string, unknown>) =>
-    ToolRegistry.getTool(name)!.handler({ __mcpSessionId: CONNECTION, ...args });
+    asMcpConnection(CONNECTION, () => ToolRegistry.getTool(name)!.handler(args));
 
   const failure = (promise: Promise<unknown>) =>
     promise.then(
@@ -414,11 +416,12 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
 
     const result = listAppsResultSchema.parse(
       toolJson(
-        await ToolRegistry.getTool("listApps")!.handler({
-          __mcpSessionId: "client-b",
-          platform: "watchos",
-          deviceId: watch.deviceId,
-        }),
+        await asMcpConnection("client-b", () =>
+          ToolRegistry.getTool("listApps")!.handler({
+            platform: "watchos",
+            deviceId: watch.deviceId,
+          }),
+        ),
       ),
     );
 

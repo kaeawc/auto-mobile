@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ""
+      release-version:
+        description: "Release version for the APK versionName; empty keeps the -SNAPSHOT default"
+        required: false
+        type: string
+        default: ""
     secrets:
       GRADLE_ENCRYPTION_KEY:
         required: true
@@ -22,6 +27,10 @@ jobs:
     name: "ProtoViewer Android artifact policy"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Release versionName for the policy's -SNAPSHOT check. Without signing inputs the
+      # convention signs with the debug key, which the policy does not judge.
+      PROTOVIEWER_RELEASE_VERSION: ${{ inputs.release-version }}
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v6

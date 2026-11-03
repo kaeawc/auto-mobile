@@ -1,5 +1,7 @@
-import { internalMcpSessionId } from "../internalToolParams";
-import { currentExecution } from "../../features/toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  currentExecution,
+} from "../../features/toolSelection/toolSelectionContext";
 import type { ExecutionTargetInput } from "./executionTarget";
 import type { ConnectedPlatformScan } from "../../daemon/readiness/DeviceReadiness";
 import { BootedDevice, SomePlatform } from "../../models";
@@ -64,8 +66,8 @@ export function createTargetResolution(
     getConnectedPlatforms,
     shouldResolveDevice: options.shouldEnsureDevice ? options.shouldEnsureDevice(args) : true,
     baseSessionUuid: args.sessionUuid,
-    mcpSessionId: internalMcpSessionId(args),
-    deviceConnectionId: deviceConnectionIdFor(args),
+    mcpSessionId: currentAutolockMcpSessionId(),
+    deviceConnectionId: deviceConnectionIdFor(),
     execution: currentExecutionMetadata(),
     keepScreenAwake: typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined,
     internalCall: args[INTERNAL_NO_DIFF_PARAM] === true,

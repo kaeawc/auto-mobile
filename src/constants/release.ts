@@ -58,6 +58,8 @@ export interface ReleaseChecksumEntry {
    * their prior, explicit development-only fallback behavior.
    */
   screenCaptureHelperSha256?: string;
+  /** SHA-256 of the signed, notarized universal macOS audio-loopback helper archive. */
+  audioLoopbackHelperSha256?: string;
   /**
    * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-agent dylib
    * (`AutoMobilePrototypeAgent.dylib`, #10564/#10565). Optional: releases that
@@ -103,6 +105,21 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.89",
+    apkSha256: "b36316762569410a88e9dad7b23ee037e8379b9f9ecaabddd912db1f68646e06",
+    ipaSha256: "d3ca14a76f26f8021de74e0ef3a4417e18d36d61a181ca7779c35250dd15b4b1",
+    protoViewerApkSha256: "ff3ea2c155951c5a64caeb637e4ddd0ad38e7e5c375bdf35a25fd1487b051d5e",
+    runnerSha256: "885d7a96cd2d1ffe7f8db01e18d3ead4a3a9a887e51b5d78aded226aa9680ccb",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
+    screenCaptureHelperSha256: "9c274523a1ab2a72d15e69d01a34ca6409f5d16d1097f0372463f535ccb9dc37",
+    prototypeAgentSha256: "93d8d3ff9e3e5c78b24dbb90bcf069bb6b68390de09e7372da6b6cb927a43713",
+    prototypeViewerSha256: "4b98dee48a8950e2b8626a42509b177e94472aae70a50348f4a231956e243306",
+    networkFilterSha256: "e0d4cbddf645aa7f225019927ff59ca040ae9e90a22e0cb772a5d9753ee675f3",
+    lmkPressureArm64Sha256: "0de62ea4977e1b1be2f7fe2b646319c7988a7df89398a56caa90a0febb7a681c",
+    lmkPressureX8664Sha256: "37a5194393e58b4e715382ff1a81d7e47ad4311307c8a2ea4e6ed76f9f1210fa",
+  },
+  {
     version: "0.0.88",
     apkSha256: "de6b78a022dcb62ff862b137076ac7202866a9896bda6d04be20dd7ab1ae377d",
     ipaSha256: "4fddc878276c9ea0a86008ea45422a41c31885cec70d5060b1ad573d45e8b893",
@@ -110,6 +127,8 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     runnerSha256Target: "xctest",
     videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
     screenCaptureHelperSha256: "bb0696c32e2ef61ebfede73a844817660e6a5aebbc8258dcc03e487afa294fb4",
+    // Pinned after the first release dry-run produces the notarized archive.
+    audioLoopbackHelperSha256: "",
     prototypeAgentSha256: "cc644a6dc81fd4aab561e2b7e8c1ba80a320a5b68da1729b650e750fd1b726e2",
     prototypeViewerSha256: "3fdabb1600c84db71ec8dbd089d8e741c1260bbf7631c48b5505b017713c7d22",
     networkFilterSha256: "ab1455dc7d737d4fc003ffaf11b5d2033c8b70f8648e059d7beef6164ce76336",
@@ -669,11 +688,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "382110a18427df7e60817023389b622eefc3aa56481c555019a0738378b9dac9",
-  ipaSha256: "4e9c206ee83b6c5446b5eeae545969181c3d90ae77669feb8e227c1f9b77b67e",
+  apkSha256: "018c8490a311820f82e66388038feec69264095475bf86fdf8dfd9c0a69ba45e",
+  ipaSha256: "b6d9b110248b8b3dd827c35d4dc26e394f58baac3f61acfd3958932bed21d91b",
   runnerSha256Target: "xctest",
   videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
-  runnerSha256: "3a43d516a4b36935882ede696005cd2a9c822eb8c3d309ef0d03d72ac9995154",
+  runnerSha256: "a979be957ac02648d73c37c22cccfae7855b3a2aee4a857f3efea474cf0b196a",
 };
 
 /**
@@ -993,6 +1012,9 @@ export const VIDEO_SERVER_JAR_FILENAME = "automobile-video.jar";
 /** Fixed GitHub Release asset for the signed universal macOS capture helper. */
 export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-macos-universal.zip";
 
+/** Fixed GitHub Release asset for the signed universal macOS audio-loopback helper. */
+export const AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME = "audio-loopback-helper-macos-universal.zip";
+
 /** Fixed GitHub Release asset for the signed, notarized macOS Network Filter app. */
 export const NETWORK_FILTER_ARCHIVE_FILENAME = "automobile-network-filter-macos-universal.zip";
 
@@ -1094,6 +1116,27 @@ export function resolveScreenCaptureHelperChecksum(
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
 }
 
+/** Download URL for the signed macOS CoreAudio helper archive. */
+export function resolveAudioLoopbackHelperUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected archive SHA-256 for the selected audio-loopback-helper release. */
+export function resolveAudioLoopbackHelperChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.audioLoopbackHelperSha256 ?? "";
+}
+
 /** Download URL for the signed macOS Network Filter app archive. */
 export function resolveNetworkFilterUrl(
   env: EnvLike = process.env,
@@ -1171,3 +1214,6 @@ export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of AutoMobileTest.app
 // per-release target records whether that is the legacy XCTRunner stub or the
 // CtrlProxy xctest executable.
 export const IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM: string = resolveRunnerChecksum({});
+
+/** Empty until the first release dry-run pins the audio-loopback archive. */
+export const AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM: string = resolveAudioLoopbackHelperChecksum({});

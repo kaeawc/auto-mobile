@@ -2,10 +2,12 @@ import { prototypeSpecForDevice } from "../prototypeComponents";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
-import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
-import { renderDeviceFrame, type WebOrientation } from "./webFrame";
+import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
+import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import type { WebStackScreens } from "./webStack";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
@@ -19,12 +21,16 @@ export interface PrototypeStillOptions {
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
+  /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
+  readonly screen?: string;
 }
 
 export interface PrototypeStill {
   readonly element: WebElement;
   readonly frame: string;
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
+  /** The outermost stack drawn, if any: its screens and the one drawn. */
+  readonly stack?: WebStackScreens;
 }
 
 const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
@@ -49,7 +55,7 @@ const LAYER = {
   "align-items": "flex-start",
 };
 
-function sheetWindow(placement: Raw, children: WebElement[]): WebElement {
+function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): WebElement {
   const height = typeof placement.height === "number" ? placement.height : 0;
   const sheet = el(
     "div",
@@ -61,6 +67,8 @@ function sheetWindow(placement: Raw, children: WebElement[]): WebElement {
         // A sheet spans the screen width (native MATCH_PARENT); its content keeps start alignment.
         "align-self": "stretch",
         height: `${height}px`,
+        // Layers cover this region, not the whole screen.
+        ...(layered ? { position: "relative" } : {}),
       },
     },
     children,
@@ -114,8 +122,12 @@ function sizedRoot(spec: unknown): unknown {
  * The window's content with the spec's explicit layout direction, so rows, start/end alignment and
  * logical padding follow it; the device chrome around it is never mirrored.
  */
-function placed(spec: unknown, content: WebElement | undefined): WebElement {
-  const window = placedWindow(spec, content);
+function placed(
+  spec: unknown,
+  content: WebElement | undefined,
+  layers: readonly WebElement[],
+): WebElement {
+  const window = placedWindow(spec, content, layers);
   const direction = record(record(spec)?.window)?.layoutDirection;
   if (direction !== "rtl" && direction !== "ltr") {
     return window;
@@ -132,11 +144,16 @@ function placed(spec: unknown, content: WebElement | undefined): WebElement {
   };
 }
 
-function placedWindow(spec: unknown, content: WebElement | undefined): WebElement {
+/** The window region holds the content, then its layers; a floating window's transform anchors them. */
+function placedWindow(
+  spec: unknown,
+  content: WebElement | undefined,
+  layers: readonly WebElement[],
+): WebElement {
   const placement = record(record(record(spec)?.window)?.placement) ?? {};
-  const children = content ? [content] : [];
+  const children = [...(content ? [content] : []), ...layers];
   if (placement.type === "sheet") {
-    return sheetWindow(placement, children);
+    return sheetWindow(placement, children, layers.length > 0);
   }
   if (placement.type === "floating") {
     return floatingWindow(placement, children);
@@ -147,11 +164,13 @@ function placedWindow(spec: unknown, content: WebElement | undefined): WebElemen
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
-  platform: "android" | "ios",
+  frame: DeviceFrame,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
   const authored = record(spec.theme)?.mode;
+  const size = screenSize(frame, options.orientation ?? "portrait");
+  const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
     style: {
@@ -160,13 +179,22 @@ function stillScope(
       parentAxis: "column",
       typography: themeTypography(expanded),
     },
-    condition: { state: record(spec.state) ?? {}, platform },
+    condition: {
+      state: record(spec.state) ?? {},
+      platform: frame.platform,
+      // The frame's one panel is the active panel; no registry frame has a hinge yet (#16444).
+      platformState: stillPlatformState({ platform: frame.platform, ...screenDp }),
+    },
     data: spec.data,
     spec,
     format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
     instances: [],
     inBox: false,
     unsupported: [],
+    screenWidth: size.width,
+    ...(options.screen === undefined ? {} : { screen: options.screen }),
+    stacks: [],
+    layers: [],
   };
 }
 
@@ -191,7 +219,7 @@ export function renderPrototypeStill(
   );
   // Components expand, then string tables resolve for the still's fixed locale, as on devices.
   const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
-  const scope = stillScope(expanded, options, frame.platform);
+  const scope = stillScope(expanded, options, frame);
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
@@ -199,7 +227,13 @@ export function renderPrototypeStill(
     frame,
     options.orientation ?? "portrait",
     { dark, textColor, background: screenBackground(scope.style) },
-    placed(expanded, root),
+    placed(expanded, root, scope.layers),
   );
-  return { element, frame: frame.id, unsupportedNodes: scope.unsupported };
+  const stack = scope.stacks?.[0];
+  return {
+    element,
+    frame: frame.id,
+    unsupportedNodes: scope.unsupported,
+    ...(stack ? { stack } : {}),
+  };
 }

@@ -1,4 +1,3 @@
-import { internalMcpSessionId } from "./internalToolParams";
 import { holderOf } from "../daemon/deviceBinding";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
@@ -44,8 +43,9 @@ import { isTypedToolRefusal } from "../daemon/shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import {
+  currentAutolockMcpSessionId,
+  currentConnectionMcpSessionId,
   currentExecution,
-  getToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 import { deviceConnectionIdFor } from "./deviceConnectionId";
@@ -56,10 +56,9 @@ export interface SetActiveDeviceArgs {
   display?: string | null;
 }
 
-/** The handler's arguments; the in-band `__*` keys are read through `internalToolParams`. */
+/** The handler's arguments; the call's connection identity is ambient (#15663). */
 interface HandlerArgs extends SetActiveDeviceArgs {
   sessionUuid?: string;
-  __mcpSessionId?: string;
 }
 
 type ResumeCtrlProxy = (deviceId: string, platform: Platform) => Promise<void>;
@@ -143,7 +142,7 @@ function transitionalTransportAttempt(
 
 /** Preserve the existing MCP-owned autolock resolution and explicit UUID precedence. */
 function resolveAutolockSelection(args: HandlerArgs): string | undefined {
-  const mcpSessionId = internalMcpSessionId(args);
+  const mcpSessionId = currentAutolockMcpSessionId();
   const pool = mcpSessionId ? defaultDaemonContext.devicePool() : undefined;
   if (!mcpSessionId || !pool) {
     return undefined;
@@ -173,8 +172,7 @@ function resolveAutolockSelection(args: HandlerArgs): string | undefined {
 function refuseForeignOwnedSession(args: HandlerArgs): void {
   // #11469: a plan step or nested call carries no socket identity of its own and is judged as
   // the connection of the call that started it.
-  const callerMcpSessionId =
-    internalMcpSessionId(args) ?? getToolSelectionContext()?.callerMcpSessionId;
+  const callerMcpSessionId = currentConnectionMcpSessionId();
   refuseControlOnForeignOwnedSession("setActiveDevice", args.sessionUuid, callerMcpSessionId);
   // #11235: a caller with no connection identity is not judged above, but a live autolock session
   // is owned by connection, so it is foreign to that caller too.
@@ -446,7 +444,7 @@ function admitSessionlessSelection(args: HandlerArgs): void {
     pool.getDevice(args.deviceId)?.autolockSessionId;
   if (liveHolder) {
     const ownSession = pool.resolveOwnedDeviceSessionForMcpSession(
-      internalMcpSessionId(args),
+      currentAutolockMcpSessionId(),
       args.deviceId,
     );
     if (ownSession) {
@@ -486,7 +484,7 @@ async function selectLegacyDevice(input: {
   transportAttempt: TransportAttempt;
 }): Promise<void> {
   const { args, resumeCtrlProxy, sessions, signal } = input;
-  const connectionId = deviceConnectionIdFor(args);
+  const connectionId = deviceConnectionIdFor();
   const previousDevice = sessions.getExplicitDevicePin(connectionId);
   const previousPlatform = previousDevice?.platform;
   // #5870: "either" lets deviceId disambiguate when platform is omitted.
@@ -543,7 +541,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       throw new ActionableError("Inject device readiness before selecting a legacy device.");
     });
   return async (args: HandlerArgs, _progress?: unknown, signal?: AbortSignal) => {
-    const mcpSessionId = internalMcpSessionId(args);
+    const mcpSessionId = currentAutolockMcpSessionId();
     const transportAttempt = transitionalTransportAttempt(args, dependencies, signal);
     let prior: PriorSelection | undefined;
     try {

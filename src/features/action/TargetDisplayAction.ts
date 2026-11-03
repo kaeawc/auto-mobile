@@ -19,6 +19,7 @@ import type {
 import { buildDisconnectedPanelMessage, type DisplayPanel } from "../../models/DisplayPanel";
 import {
   logicalDisplayIdForPanel,
+  panelKeyForUniqueId,
   parseAndroidDisplayInfos,
   type AndroidDisplayInfo,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
@@ -58,8 +59,7 @@ async function readActionDisplayInfos(
 
 function connectedActionPanels(infos: readonly AndroidDisplayInfo[], device: BootedDevice) {
   return infos.map((info) => {
-    // Match logicalDisplayIdForPanel's physical-key extraction; that helper is not exported separately.
-    const key = info.uniqueId?.split(":").slice(1).join(":") || info.logicalId;
+    const key = (info.uniqueId && panelKeyForUniqueId(info.uniqueId)) || info.logicalId;
     const role = device.displays?.panels.find((panel) => panel.key === key)?.role;
     return { key, role };
   });

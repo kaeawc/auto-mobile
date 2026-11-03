@@ -53,6 +53,23 @@ export type ToolSelectionContext = {
    * for a call with no originating connection.
    */
   callerMcpSessionId?: string;
+  /**
+   * The connection a top-level call implicitly autolocks and records for (#15663). Unlike
+   * `callerMcpSessionId`, an internal call (plan step, nested tool) never inherits it.
+   */
+  autolockMcpSessionId?: string;
+  /**
+   * The top-level call comes from a one-shot `--cli` connection, which acquires anonymously
+   * (#11096, #15663). Set at MCP ingress; like `autolockMcpSessionId`, an internal call never
+   * inherits it.
+   */
+  oneShotCli?: true;
+  /**
+   * The trusted acceptance harness's discovery presentation order (#7144, #15663). Set at MCP
+   * ingress only for a request carrying the daemon's acceptance capability; an internal call never
+   * inherits it.
+   */
+  acceptanceDiscoveryOrder?: "forward" | "reverse";
   /** The connection key the call's per-connection device pin is stored under (#14385). */
   deviceConnectionKey?: string;
   /** Connection-bound ownership proof for read-only cross-device checks. */
@@ -155,6 +172,27 @@ export const runWithToolSelectionContext = async <T>(
 
 export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
   toolSelectionContext.getStore();
+
+/** The connection this top-level call autolocks and records for; absent inside internal calls. */
+export const currentAutolockMcpSessionId = (): string | undefined =>
+  toolSelectionContext.getStore()?.autolockMcpSessionId;
+
+/** Whether this top-level call comes from a one-shot `--cli` connection; false inside internal calls. */
+export const currentOneShotCli = (): boolean =>
+  toolSelectionContext.getStore()?.oneShotCli === true;
+
+/** The acceptance harness's discovery presentation order for this top-level call, if any. */
+export const currentAcceptanceDiscoveryOrder = (): "forward" | "reverse" | undefined =>
+  toolSelectionContext.getStore()?.acceptanceDiscoveryOrder;
+
+/**
+ * The connection a call runs for: its own autolock identity, else the enclosing call's (#11469). A
+ * plan step or nested call has no autolock identity and is judged as the connection that started it.
+ */
+export const currentConnectionMcpSessionId = (): string | undefined => {
+  const context = toolSelectionContext.getStore();
+  return context?.autolockMcpSessionId ?? context?.callerMcpSessionId;
+};
 
 /**
  * The tracked execution the current call runs under (#15663): set at MCP ingress and inherited by

@@ -48,6 +48,8 @@ interface AndroidProtoViewerDependencies {
   timer: Timer;
   ids: IdGenerator;
   tempFiles: ProtoViewerTempFiles;
+  /** App IDs to drive, in preference order; defaults to the `.dev` build, then the store build. */
+  appIds?: readonly ProtoViewerPackage[];
 }
 
 /** The Android user and the installed ProtoViewer build (store or `.dev`) this host drives. */
@@ -83,7 +85,10 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       noRetry: true,
       signal,
     });
-    const appId = preferredProtoViewerPackage((id) => packageListingContains(listing.stdout, id));
+    const appId = preferredProtoViewerPackage(
+      (id) => packageListingContains(listing.stdout, id),
+      this.deps.appIds,
+    );
     this.target = appId === undefined ? undefined : { userId, appId };
     return this.target !== undefined;
   }

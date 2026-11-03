@@ -26,11 +26,15 @@ export const PROTOVIEWER_DEV_PACKAGE = `${PROTOVIEWER_PACKAGE}.dev`;
 export const PROTOVIEWER_PACKAGES = [PROTOVIEWER_DEV_PACKAGE, PROTOVIEWER_PACKAGE] as const;
 export type ProtoViewerPackage = (typeof PROTOVIEWER_PACKAGES)[number];
 
-/** The first ProtoViewer app ID in preference order that `isInstalled` accepts. */
+/**
+ * The first app ID in `candidates` (preference order) that `isInstalled` accepts. A caller that must
+ * exercise one build, such as the release smoke, passes only that ID.
+ */
 export function preferredProtoViewerPackage(
   isInstalled: (appId: string) => boolean,
+  candidates: readonly ProtoViewerPackage[] = PROTOVIEWER_PACKAGES,
 ): ProtoViewerPackage | undefined {
-  return PROTOVIEWER_PACKAGES.find(isInstalled);
+  return candidates.find(isInstalled);
 }
 
 /**

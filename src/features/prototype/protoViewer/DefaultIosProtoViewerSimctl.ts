@@ -16,10 +16,15 @@ export class DefaultIosProtoViewerSimctl implements IosProtoViewerSimctl {
 
   constructor(
     private readonly client: Pick<SimCtlClient, "listAppsOrThrow" | "executeCommandArgs">,
+    /** Bundle IDs to drive, in preference order; defaults to the `.dev` build, then the store build. */
+    private readonly bundleIdCandidates?: readonly ProtoViewerPackage[],
   ) {}
   async installed(udid: string, signal?: AbortSignal): Promise<boolean> {
     const apps = await this.client.listAppsOrThrow(udid, { signal });
-    const bundleId = preferredProtoViewerPackage((id) => apps.some((app) => app.bundleId === id));
+    const bundleId = preferredProtoViewerPackage(
+      (id) => apps.some((app) => app.bundleId === id),
+      this.bundleIdCandidates,
+    );
     if (bundleId === undefined) {
       this.bundleIds.delete(udid);
       return false;

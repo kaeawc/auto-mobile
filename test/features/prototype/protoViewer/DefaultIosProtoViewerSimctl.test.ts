@@ -3,7 +3,7 @@ import { DefaultIosProtoViewerSimctl } from "../../../../src/features/prototype/
 import type { ExecResult } from "../../../../src/models";
 import type { IosInstalledAppRecord } from "../../../../src/utils/ios-cmdline-tools/iosInstalledApp";
 
-const STORE = "dev.jasonpearson.automobile.protoviewer";
+const STORE = "dev.jasonpearson.automobile.protoviewer" as const;
 const DEV = `${STORE}.dev`;
 const UDID = "00000000-0000-0000-0000-000000000001";
 
@@ -19,9 +19,12 @@ class FakeSimctl {
   }
 }
 
-async function launchedBundle(apps: IosInstalledAppRecord[]): Promise<string | undefined> {
+async function launchedBundle(
+  apps: IosInstalledAppRecord[],
+  candidates?: readonly (typeof STORE)[],
+): Promise<string | undefined> {
   const client = new FakeSimctl(apps);
-  const simctl = new DefaultIosProtoViewerSimctl(client);
+  const simctl = new DefaultIosProtoViewerSimctl(client, candidates);
   if (!(await simctl.installed(UDID))) {
     return undefined;
   }
@@ -49,4 +52,9 @@ test("is not installed when neither build is present", async () => {
   expect(
     await launchedBundle([{ bundleId: "dev.jasonpearson.automobile.prototype-viewer" }]),
   ).toBeUndefined();
+});
+
+test("a caller pinned to the store build ignores a .dev build", async () => {
+  expect(await launchedBundle([{ bundleId: DEV }, { bundleId: STORE }], [STORE])).toBe(STORE);
+  expect(await launchedBundle([{ bundleId: DEV }], [STORE])).toBeUndefined();
 });

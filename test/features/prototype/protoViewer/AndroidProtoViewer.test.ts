@@ -249,6 +249,30 @@ describe("AndroidProtoViewer", () => {
     expect(adb.getExecutedCommands()[0]).toContain(`-n ${DEV_PACKAGE}/${PACKAGE}.McpActivity`);
   });
 
+  test("a caller pinned to the store build ignores a .dev build installed beside it", async () => {
+    const pinned = new AndroidProtoViewer({
+      adb,
+      timer,
+      ids: new FakeIdGenerator(["req1"]),
+      tempFiles: temp,
+      appIds: [PACKAGE],
+    });
+    adb.setCommandResponse(
+      "pm list packages --user 0",
+      exec(`package:${DEV_PACKAGE}\npackage:${PACKAGE}\n`),
+    );
+    expect(await pinned.installed()).toBe(true);
+    adb.clearHistory();
+    adb.whenLaunched(({ request }) =>
+      adb.appWritesResult(request, { ...imported(), status: "opened" }),
+    );
+    expect((await pinned.open(LIBRARY_ID, 5000)).status).toBe("opened");
+    expect(adb.getExecutedCommands()[0]).toContain(`-n ${PACKAGE}/${PACKAGE}.McpActivity`);
+
+    adb.setCommandResponse("pm list packages --user 0", exec(`package:${DEV_PACKAGE}\n`));
+    expect(await pinned.installed()).toBe(false);
+  });
+
   test("the captured API 37 failure: a remote cat of a missing result exits 1 and adb throws", async () => {
     // Why the poll below never runs a bare `cat`: this is what the fake (and the device) does.
     await expect(

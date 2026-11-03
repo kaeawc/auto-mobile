@@ -158,6 +158,7 @@ describe("getStaticToolDefinitions", () => {
             "inspect",
             "listSaved",
             "screenMap",
+            "share",
             "testSessionBegin",
             "testSessionEnd",
             "testSessionReport",

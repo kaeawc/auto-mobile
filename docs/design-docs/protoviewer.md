@@ -264,10 +264,11 @@ Android implements them; the iOS viewer does not yet (#16437).
   decorator applies it to every reader, so a hidden entry is absent from the list, MCP `open` and
   the viewer.
 - Hiding deletes. Confirming Hide or Block deletes every matching received entry (bundle, metadata
-  and viewer storage); only the hash or host stays, in the blocklist. App start repeats the sweep,
-  so an entry whose delete failed is retried. A later file or share import of hidden content, or
-  of content from a blocked host, is rejected as `Hidden` ("hidden on this device") before anything
-  is staged or stored. Hidden content therefore never holds library quota. There is no unhide.
+  and viewer storage); only the hash or host stays, in the blocklist. The confirmation says so. App
+  start repeats the sweep, so an entry whose delete failed before its metadata was removed is
+  retried. A later file or share import of hidden content, or of content from a blocked host, is
+  rejected as `Hidden` ("hidden on this device") before anything is staged or stored, so hidden
+  content does not hold library quota. There is no unhide.
 - Report opens the user's mail app addressed to the published contact
   (`automobile+coc@jasonpearson.dev`, the project's code-of-conduct enforcement address) with the
   label, spec SHA-256, source and host. The app sends nothing itself and attaches no bundle bytes.

@@ -114,8 +114,9 @@ class BlocklistLibraryRepository(
 
   /**
    * Deletes every stored entry the blocklist hides, so hidden content never holds library quota
-   * (#16631). Only the hash or host stays, in the blocklist. Returns the deleted entries; an entry
-   * whose delete fails stays hidden and is retried on the next purge.
+   * (#16631). Only the hash or host stays, in the blocklist. Returns the deleted entries. A delete
+   * that fails before its metadata is removed leaves the entry hidden and listed, so the next purge
+   * retries it; a failure after that point leaves an unlisted bundle that no purge can find.
    */
   fun purgeBlocked(): LibraryResult<List<LibraryEntry>> =
     when (val listed = delegate.list()) {

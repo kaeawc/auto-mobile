@@ -19,12 +19,12 @@ export const PROTOTYPE_WEB_FLAT_ORBIT: PrototypeWebOrbit = { yaw: 0, pitch: 0 };
 /** The three-quarter pose entering 3D transitions to. */
 export const PROTOTYPE_WEB_START_ORBIT: PrototypeWebOrbit = { yaw: 30, pitch: 14 };
 
-/** Yaw wraps into [-180, 180); pitch stops at ±80 so the device never turns over the top. */
+/**
+ * Pitch stops at ±80 so the device never turns over the top. Yaw stays continuous: wrapping it
+ * would turn a 5° step from 175° into a transition to -180°, which animates as a 355° spin back.
+ */
 export function prototypeWebOrbit(orbit: PrototypeWebOrbit): PrototypeWebOrbit {
-  return {
-    yaw: ((((orbit.yaw + 180) % 360) + 360) % 360) - 180,
-    pitch: Math.max(-80, Math.min(80, orbit.pitch)),
-  };
+  return { yaw: orbit.yaw, pitch: Math.max(-80, Math.min(80, orbit.pitch)) };
 }
 
 /** Where the hinge line lies on the shown frame: its axis and its offset as a share of the frame. */
@@ -68,11 +68,10 @@ export function prototypeWebPose(
   hingeDegrees: number,
   axis: "vertical" | "horizontal",
 ): PrototypeWebPose {
-  const yaw = ((((orbit.yaw + 180) % 360) + 360) % 360) - 180;
   const pitch = Math.max(-80, Math.min(80, orbit.pitch));
   const turn = 180 - Math.max(0, Math.min(360, hingeDegrees));
   return {
-    device: `rotateX(${-pitch}deg) rotateY(${yaw}deg)`,
+    device: `rotateX(${-pitch}deg) rotateY(${orbit.yaw}deg)`,
     leaf: axis === "vertical" ? `rotateY(${-turn}deg)` : `rotateX(${turn}deg)`,
   };
 }

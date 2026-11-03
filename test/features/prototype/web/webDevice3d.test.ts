@@ -47,9 +47,9 @@ const bookFrame = () =>
   });
 
 describe("prototype web 3D pose rules (#16458)", () => {
-  test("yaw wraps into [-180, 180) and pitch stops at ±80", () => {
-    expect(prototypeWebOrbit({ yaw: 190, pitch: 95 })).toEqual({ yaw: -170, pitch: 80 });
-    expect(prototypeWebOrbit({ yaw: -190, pitch: -95 })).toEqual({ yaw: 170, pitch: -80 });
+  test("pitch stops at ±80 and yaw stays continuous past a half turn", () => {
+    expect(prototypeWebOrbit({ yaw: 190, pitch: 95 })).toEqual({ yaw: 190, pitch: 80 });
+    expect(prototypeWebOrbit({ yaw: -190, pitch: -95 })).toEqual({ yaw: -190, pitch: -80 });
     expect(prototypeWebOrbit({ yaw: 30, pitch: 14 })).toEqual({ yaw: 30, pitch: 14 });
   });
 
@@ -69,9 +69,12 @@ describe("prototype web 3D pose rules (#16458)", () => {
     expect(prototypeWebPose({ yaw: 0, pitch: 0 }, -10, "horizontal").leaf).toBe("rotateX(180deg)");
   });
 
-  test("the pose clamps its own orbit, since the page inlines it alone", () => {
-    expect(prototypeWebPose({ yaw: 200, pitch: -100 }, 180, "vertical").device).toBe(
-      "rotateX(80deg) rotateY(-160deg)",
+  test("the pose clamps pitch itself and keeps yaw continuous, so a step past 180° turns 5°", () => {
+    expect(prototypeWebPose({ yaw: 180, pitch: -100 }, 180, "vertical").device).toBe(
+      "rotateX(80deg) rotateY(180deg)",
+    );
+    expect(prototypeWebPose({ yaw: 185, pitch: 0 }, 180, "vertical").device).toBe(
+      "rotateX(0deg) rotateY(185deg)",
     );
   });
 

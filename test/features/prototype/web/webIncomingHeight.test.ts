@@ -10,11 +10,14 @@ import {
   INCOMING_HEIGHT_KEY,
   nodeCss,
   ROW_MEASURE_KEY,
+  WEIGHTED_HEIGHT_KEY,
 } from "../../../../src/features/prototype/web/webStyle";
 
 const prepare = (entry: unknown) => record(entry);
 const heightOf = (entry: unknown) => record(record(entry)?.style)?.[INCOMING_HEIGHT_KEY];
 const childrenOf = (node: Raw) => node.children as unknown[];
+const weightedOf = (entry: unknown) => record(record(entry)?.style)?.[WEIGHTED_HEIGHT_KEY];
+const light = { mode: "light", palette: new Map() } as const;
 
 test("a node's content height is the least of its incoming, dp and max height, less padding", () => {
   expect(contentHeight({ height: { dp: 20 } })).toBe(20);
@@ -118,5 +121,92 @@ test("a fill-height row in a 40 dp column caps its aspect ratio at 40 dp × rati
   expect(record(record(ratio)?.style)?.[ROW_MEASURE_KEY]).toEqual({
     shrink: CAPPED_SHRINK,
     basis: 80,
+  });
+});
+
+test("a column's weighted child takes its whole share, whatever its dp height and bounds", () => {
+  const share = { [INCOMING_HEIGHT_KEY]: 100, [WEIGHTED_HEIGHT_KEY]: true };
+  expect(contentHeight({ weight: 1, height: { dp: 10 }, ...share })).toBe(100);
+  expect(
+    contentHeight({ weight: 1, height: { dp: 10 }, maxHeight: 5, minHeight: 200, ...share }),
+  ).toBe(100);
+  expect(contentHeight({ weight: 1, height: { dp: 10 }, padding: { top: 4 }, ...share })).toBe(96);
+  // Unmarked (a row's weighted child, whose weight is horizontal), the dp height still bounds it.
+  expect(contentHeight({ weight: 1, height: { dp: 10 }, [INCOMING_HEIGHT_KEY]: 100 })).toBe(10);
+});
+
+test("a column marks only its weighted children; a row, box or repeat marks none", () => {
+  const children = [
+    { type: "row", style: { weight: 1, height: { dp: 10 } } },
+    { type: "box", style: { height: { dp: 10 } } },
+  ];
+  const column = { type: "column", style: { height: { dp: 100 } }, children };
+  const marked = childrenOf(withChildHeights(column, "root", prepare));
+  expect(marked.map(heightOf)).toEqual([90, 100]);
+  expect(marked.map(weightedOf)).toEqual([true, undefined]);
+  for (const node of [
+    { ...column, type: "row" },
+    { ...column, repeat: { items: [] } },
+  ]) {
+    expect(childrenOf(withChildHeights(node, "root", prepare)).map(weightedOf)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  }
+  // A weight a styleWhen adds counts, as rendering resolves it.
+  const styled = (entry: unknown) => {
+    const node = record(entry);
+    return node?.type === "box" ? { ...node, style: { ...record(node.style), weight: 1 } } : node;
+  };
+  const resolved = childrenOf(withChildHeights(column, "root", styled));
+  expect(resolved.map(weightedOf)).toEqual([true, true]);
+  // The key is internal: it never reaches the CSS.
+  expect(nodeCss({ [WEIGHTED_HEIGHT_KEY]: true }, light)).toEqual({ "box-sizing": "border-box" });
+});
+
+test("a weighted row with a 10 dp height in a 100 dp column caps its aspect ratio by its share", () => {
+  const column = withChildHeights(
+    {
+      type: "column",
+      style: { height: { dp: 100 } },
+      children: [
+        {
+          type: "row",
+          style: { weight: 1, height: { dp: 10 } },
+          children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }],
+        },
+      ],
+    },
+    "root",
+    prepare,
+  );
+  const row = record(childrenOf(column)[0])!;
+  const ratio = childrenOf(rowMeasured(row, "root.children[0]", prepare))[0];
+  expect(record(record(ratio)?.style)?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: CAPPED_SHRINK,
+    basis: 200,
+  });
+});
+
+test("a weight drops the authored bounds on its main axis, as both devices pin it to its share", () => {
+  const bounds = { minWidth: 10, maxWidth: 20, minHeight: 30, maxHeight: 40 };
+  const inColumn = nodeCss(
+    { weight: 1, height: { dp: 10 }, ...bounds },
+    {
+      ...light,
+      parentAxis: "column",
+    },
+  );
+  expect(inColumn).toMatchObject({ flex: "1 1 0", "min-height": "0", "min-width": "10px" });
+  expect(inColumn["max-height"]).toBeUndefined();
+  expect(inColumn["max-width"]).toBe("20px");
+  const inRow = nodeCss({ weight: 1, ...bounds }, { ...light, parentAxis: "row" });
+  expect(inRow).toMatchObject({ flex: "1 1 0", "min-width": "0", "min-height": "30px" });
+  expect(inRow["max-width"]).toBeUndefined();
+  expect(inRow["max-height"]).toBe("40px");
+  // Unweighted, every bound holds.
+  expect(nodeCss(bounds, { ...light, parentAxis: "column" })).toMatchObject({
+    "min-height": "30px",
+    "max-height": "40px",
   });
 });

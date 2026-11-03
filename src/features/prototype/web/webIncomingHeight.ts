@@ -1,6 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
 import type { PrepareChild } from "./webRowAspect";
-import { INCOMING_HEIGHT_KEY } from "./webStyle";
+import { INCOMING_HEIGHT_KEY, WEIGHTED_HEIGHT_KEY } from "./webStyle";
 
 const finite = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : Infinity;
@@ -20,12 +20,16 @@ function ownHeight(style: Raw | undefined): number {
 
 /**
  * The tallest a node lets its children be: its own height (see ownHeight) within the height its
- * parent hands it (INCOMING_HEIGHT_KEY), less its vertical padding. A `fill`, weighted or
- * wrap-sized node is bounded by the incoming height alone, as Compose's incoming max height
- * bounds it. Infinity when no bound is statically known.
+ * parent hands it (INCOMING_HEIGHT_KEY), less its vertical padding. A `fill` or wrap-sized node is
+ * bounded by the incoming height alone, as Compose's incoming max height bounds it. A column's
+ * weighted child (WEIGHTED_HEIGHT_KEY) takes its whole share whatever its dp height and height
+ * bounds, as Compose's fixed weight constraints and SwiftUI's weighted axis pin it. Infinity when
+ * no bound is statically known.
  */
 export function contentHeight(style: Raw | undefined): number {
-  const bound = Math.min(finite(style?.[INCOMING_HEIGHT_KEY]), ownHeight(style));
+  const incoming = finite(style?.[INCOMING_HEIGHT_KEY]);
+  const bound =
+    style?.[WEIGHTED_HEIGHT_KEY] === true ? incoming : Math.min(incoming, ownHeight(style));
   const padding = record(style?.padding);
   return Math.max(0, bound - side(padding, "top") - side(padding, "bottom"));
 }
@@ -84,19 +88,21 @@ export function columnChildHeights(
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
-function withHeight(entry: unknown, height: number | undefined): unknown {
+function withHeight(entry: unknown, height: number | undefined, weighted: boolean): unknown {
   const node = record(entry);
   if (!node || height === undefined || height === Infinity) {
     return entry;
   }
-  return { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height } };
+  const mark = weighted ? { [WEIGHTED_HEIGHT_KEY]: true } : {};
+  return { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height, ...mark } };
 }
 
 /**
  * A row, column or box with each child carrying the incoming max height it hands that child
  * (INCOMING_HEIGHT_KEY), where the node's own content height is statically known; other nodes
  * unchanged. A row or box hands every child its content height. A column measures its children
- * in order (see columnChildHeights), except a repeat, whose children are one template, so each
+ * in order (see columnChildHeights) and marks each weighted child (WEIGHTED_HEIGHT_KEY), except a
+ * repeat, whose children are one template, so each
  * gets the whole content height as a bound. A height that depends on layout (a sibling's wrap
  * height, the screen) is left out, so the bound stays an upper one or is absent.
  *
@@ -112,13 +118,14 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
   if (content === Infinity) {
     return node;
   }
-  const heights =
-    type === "column" && node.repeat === undefined
-      ? columnChildHeights(
-          children.map((entry, index) => prepare(entry, childPath(path, index))),
-          content,
-          typeof style?.spacing === "number" ? style.spacing : 0,
-        )
-      : children.map(() => content);
-  return { ...node, children: children.map((entry, index) => withHeight(entry, heights[index])) };
+  if (type !== "column" || node.repeat !== undefined) {
+    return { ...node, children: children.map((entry) => withHeight(entry, content, false)) };
+  }
+  const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
+  const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
+  const heights = columnChildHeights(prepared, content, spacing);
+  const marked = children.map((entry, index) =>
+    withHeight(entry, heights[index], weightOf(prepared[index]) !== undefined),
+  );
+  return { ...node, children: marked };
 }

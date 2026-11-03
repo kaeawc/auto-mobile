@@ -58,6 +58,13 @@ export const ROW_BOUND_KEY = "webRowBound";
 export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 
 /**
+ * A style key the web renderer adds to a column's weighted child, never authored: the child takes
+ * exactly its weight's share, as Compose's weight constraints and SwiftUI's weighted axis pin it,
+ * so its authored dp height and height bounds do not bound its children (see webIncomingHeight.ts).
+ */
+export const WEIGHTED_HEIGHT_KEY = "webWeightedHeight";
+
+/**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one.
  */
@@ -211,17 +218,19 @@ function paintStyle(css: Css, style: Raw, context: WebStyleContext) {
 function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
   dimension(css, "width", style.width, context);
   dimension(css, "height", style.height, context);
-  if (typeof style.weight === "number" && context.parentAxis) {
+  const weighted = typeof style.weight === "number" && context.parentAxis !== undefined;
+  if (weighted) {
     css.flex = `${style.weight} ${style.weight} 0`;
     css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
   }
-  for (const [field, property] of [
-    ["minWidth", "min-width"],
-    ["maxWidth", "max-width"],
-    ["minHeight", "min-height"],
-    ["maxHeight", "max-height"],
+  for (const [field, property, axis] of [
+    ["minWidth", "min-width", "row"],
+    ["maxWidth", "max-width", "row"],
+    ["minHeight", "min-height", "column"],
+    ["maxHeight", "max-height", "column"],
   ] as const) {
-    if (typeof style[field] === "number") {
+    // A weight pins its main axis to its share on both devices: the bounds there do not apply.
+    if (typeof style[field] === "number" && !(weighted && context.parentAxis === axis)) {
       css[property] = px(style[field] as number);
     }
   }

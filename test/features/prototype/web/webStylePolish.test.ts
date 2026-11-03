@@ -236,9 +236,10 @@ describe("links (#16540)", () => {
       ],
     });
     expect(tagged(still, "plain").children).toEqual(["nothing"]);
-    expect(
-      (tagged(still, "spans").children as WebElement[]).map((span) => span.attrs["data-link"]),
-    ).toEqual([undefined, "true"]);
+    const links = tagged(still, "spans").children.map((span) =>
+      typeof span === "string" ? "text" : (span.attrs["data-link"] ?? "plain"),
+    );
+    expect(links).toEqual(["plain", "true"]);
   });
 });
 

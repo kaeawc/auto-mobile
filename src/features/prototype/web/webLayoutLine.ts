@@ -2,6 +2,7 @@ import { cssLength, type CssVars } from "./webCssLength";
 import {
   add,
   alignOffset,
+  clampKnown,
   clampSize,
   declaredSize,
   shorthandValues,
@@ -68,6 +69,8 @@ const startOf = (rect: WebRect, axis: Axis): Len => (axis === "width" ? rect.lef
 /**
  * A child's size on one axis where self-alignment can stretch it: declared, else the room when
  * stretched, else content-sized. A missing alignment is the renderer's start, never CSS's stretch.
+ * A content size stays unknown so an aspect ratio can still derive it; `withAspectRatio` then
+ * takes it at its minimum.
  */
 function alignedSize(
   child: WebElement,
@@ -79,7 +82,7 @@ function alignedSize(
   const declared = declaredSize(child, axis, room, box.vars);
   const stretched = align === "stretch" || align === "normal";
   const size = declared !== "auto" ? declared : stretched ? room : undefined;
-  return clampSize(size, child, axis, { base: room, vars: box.vars });
+  return clampKnown(size, child, axis, { base: room, vars: box.vars });
 }
 
 /** A cell's column span, from `grid-column: span N`. */
@@ -156,11 +159,11 @@ function isInline(child: WebElement): boolean {
   return display === undefined ? INLINE_TAGS.has(child.tag) : display.startsWith("inline");
 }
 
-/** A size that is declared or else follows the content (never stretched). */
+/** A size that is declared or else follows the content (never stretched), unknown until resolved. */
 function contentSize(child: WebElement, axis: Axis, box: Container): Len {
   const room = box.content[axis];
   const declared = declaredSize(child, axis, room, box.vars);
-  return clampSize(declared === "auto" ? undefined : declared, child, axis, {
+  return clampKnown(declared === "auto" ? undefined : declared, child, axis, {
     base: room,
     vars: box.vars,
   });
@@ -215,10 +218,18 @@ function flexOf(child: WebElement): { grow: number; basis: string } {
   };
 }
 
+/**
+ * A line item. `base` is its hypothetical main size (clamped by its min and max); `start` is
+ * what it takes when growth begins: a flexible item's unclamped flex basis, else `base`. Its
+ * minimum and maximum are resolved in the freeze rounds, as CSS does.
+ */
 interface LineItem {
   readonly element?: WebElement;
   readonly base: Len;
+  readonly start: Len;
+  readonly flexible: boolean;
   readonly grow: number;
+  readonly min: Len;
   readonly max: Len;
 }
 
@@ -240,44 +251,76 @@ function ratioMainSize(child: WebElement, main: Axis, box: Container): Len {
 
 function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   if (typeof child === "string") {
-    return { base: undefined, grow: 0, max: undefined };
+    const none = undefined;
+    return { base: none, start: none, flexible: false, grow: 0, min: none, max: none };
   }
   const room = box.content[main];
+  const context = { base: room, vars: box.vars };
   const { grow, basis } = flexOf(child);
   const declared =
     basis === "auto" ? declaredSize(child, main, room, box.vars) : cssLength(basis, box.vars, room);
-  // A content-sized item with an aspect ratio and a known cross size takes its main size from both.
-  const base =
-    declared === "auto"
-      ? (ratioMainSize(child, main, box) ??
-        clampSize(undefined, child, main, { base: room, vars: box.vars }))
-      : clampSize(declared, child, main, { base: room, vars: box.vars });
+  const min = cssLength(child.style[`min-${main}`], box.vars, room);
   const max = cssLength(child.style[`max-${main}`], box.vars, room);
+  // A content-sized item with an aspect ratio and a known cross size takes its main size from both.
+  const size = declared === "auto" ? ratioMainSize(child, main, box) : declared;
+  if (grow <= 0) {
+    const base = clampSize(size, child, main, context);
+    return { element: child, base, start: base, flexible: false, grow, min, max };
+  }
   // A growing item's unmeasured content basis is taken as zero, so it shares the room as
   // `flex: 1` would; its growth, not its content, decides its size.
-  return { element: child, base: base === undefined && grow > 0 ? 0 : base, grow, max };
+  const start = size ?? 0;
+  const base = clampSize(start, child, main, context) ?? start;
+  // A basis above the maximum freezes the item at its maximum before growth begins.
+  const flexible = start <= base;
+  return { element: child, base, start: Math.min(start, base), flexible, grow, min, max };
+}
+
+/** The items to freeze this round: those at the clamp the total violation's sign names. */
+function violators(
+  active: readonly number[],
+  targets: Map<number, number>,
+  clamped: Map<number, number>,
+): readonly number[] {
+  const violation = active.reduce(
+    (sum, index) => sum + clamped.get(index)! - targets.get(index)!,
+    0,
+  );
+  if (violation === 0) {
+    return active;
+  }
+  return active.filter((index) =>
+    violation > 0
+      ? clamped.get(index)! > targets.get(index)!
+      : clamped.get(index)! < targets.get(index)!,
+  );
 }
 
 /**
- * Free space shared among growing items, each held at its maximum (CSS flex resolution, 9.7).
- * Each round shares what the frozen items left of the initial free space; when the unfrozen grow
- * factors sum below 1, they take at most that fraction of the initial free space.
+ * Free space shared among growing items, each held between its minimum and maximum (CSS flex
+ * resolution, 9.7). Each round shares what the frozen items left of the initial free space; when
+ * the unfrozen grow factors sum below 1, they take at most that fraction of the initial free space.
  */
 function distribute(items: readonly LineItem[], free: number): { sizes: Len[]; remaining: Len } {
-  const bases: number[] = items.map((item) => item.base ?? 0);
-  const sizes = [...bases];
-  const frozen = new Set(items.flatMap((item, index) => (item.grow > 0 ? [] : [index])));
-  const grownBy = (): number => sizes.reduce((sum, size, index) => sum + size - bases[index]!, 0);
+  const starts: number[] = items.map((item) => item.start ?? 0);
+  const sizes = [...starts];
+  const frozen = new Set(items.flatMap((item, index) => (item.flexible ? [] : [index])));
+  const grownBy = (): number => sizes.reduce((sum, size, index) => sum + size - starts[index]!, 0);
   while (frozen.size < items.length) {
     const active = items.flatMap((_, index) => (frozen.has(index) ? [] : [index]));
     const total = active.reduce((sum, index) => sum + items[index]!.grow, 0);
     const share = total < 1 ? Math.min(free - grownBy(), free * total) : free - grownBy();
     const targets = new Map(
-      active.map((index) => [index, bases[index]! + (share * items[index]!.grow) / total]),
+      active.map((index) => [index, starts[index]! + (share * items[index]!.grow) / total]),
     );
-    const capped = active.filter((index) => targets.get(index)! > (items[index]!.max ?? Infinity));
-    for (const index of capped.length > 0 ? capped : active) {
-      sizes[index] = capped.length > 0 ? items[index]!.max! : targets.get(index)!;
+    const clamped = new Map(
+      active.map((index) => {
+        const { min, max } = items[index]!;
+        return [index, Math.max(min ?? -Infinity, Math.min(max ?? Infinity, targets.get(index)!))];
+      }),
+    );
+    for (const index of violators(active, targets, clamped)) {
+      sizes[index] = clamped.get(index)!;
       frozen.add(index);
     }
   }
@@ -362,7 +405,7 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   const gap = mainGap(main, box);
   const room = box.content[main];
   const used = items.reduce<Len>(
-    (total, item) => add(total, item.base),
+    (total, item) => add(total, item.start),
     gap * Math.max(0, items.length - 1),
   );
   // A container sized by its content hugs it, leaving no free space.

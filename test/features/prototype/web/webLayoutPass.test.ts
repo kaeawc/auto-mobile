@@ -190,3 +190,34 @@ test("a ratio-derived dimension is clamped by its own min and max", () => {
     height: 400,
   });
 });
+
+test("a growing item's minimum is resolved in the freeze rounds, not folded into its basis", () => {
+  // CSS: shares of 400 are 133 and 267; the first is frozen at its 180px minimum and the second
+  // takes the 220px left.
+  const row = named("row", { display: "flex", "flex-direction": "row" }, [
+    named("black", { flex: "1 1 0", "min-width": "180px", height: "10px" }),
+    named("white", { flex: "2 2 0", height: "10px" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "black")).toEqual({ left: 0, top: 0, width: 180, height: 10 });
+  expect(rectOf(painted, "white")).toEqual({ left: 180, top: 0, width: 220, height: 10 });
+});
+
+test("an auto dimension is derived from the aspect ratio before its minimum applies", () => {
+  const grid = named("grid", { display: "grid", width: "400px", height: "400px" }, [
+    named("square", {
+      width: "100%",
+      "min-height": "100px",
+      "aspect-ratio": "1",
+      "align-self": "center",
+    }),
+  ]);
+  // The root fills the screen, so the 400px-square grid sits inside it.
+  const root = named("root", { display: "flex", "flex-direction": "column" }, [grid]);
+  expect(rectOf(topEdgePaintOrder(root, SCREEN), "square")).toEqual({
+    left: 0,
+    top: 0,
+    width: 400,
+    height: 400,
+  });
+});

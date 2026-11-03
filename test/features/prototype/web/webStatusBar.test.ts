@@ -42,7 +42,7 @@ test("a light top colour takes dark content and a dark one light content", () =>
   expect(statusBarContentFor(undefined, "light")).toBe("light");
 });
 
-test("the top colour is the first opaque full-width background, else the fallback", () => {
+test("the top colour is the innermost opaque full-width leading background, else the fallback", () => {
   const bar = el("div", { style: { "align-self": "stretch", "background-color": "#112233" } });
   const chip = el("div", { style: { "background-color": "#ffffff" } });
   const translucent = el("div", {
@@ -54,6 +54,9 @@ test("the top colour is the first opaque full-width background, else the fallbac
   expect(appTopColor(el("div", { style: { "background-color": "#abcdef" } }), "#000")).toBe(
     "#abcdef",
   );
+  // A dark header paints over its white root, so the header's colour wins.
+  const root = el("div", { style: { width: "100%", "background-color": "#ffffff" } }, [bar]);
+  expect(appTopColor(el("div", {}, [root]), "#000")).toBe("#112233");
 });
 
 test("the marks reflect the simulated device state", () => {
@@ -131,4 +134,32 @@ test("window.statusBar light or dark wins over the top colour; auto follows it",
   expect(statusBarOf(forced.element)?.attrs["data-status-content"]).toBe("light");
   const auto = renderPrototypeStill(spec({ statusBar: "auto" }, { mode: "dark" }));
   expect(statusBarOf(auto.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a dark header on a light root takes light content in a still", () => {
+  const still = renderPrototypeStill({
+    id: "header",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#ffffff" },
+      children: [{ type: "topAppBar", title: "Inbox", style: { background: "#1d1b20" } }],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a sheet leaves the status area on the screen background", () => {
+  const still = renderPrototypeStill({
+    id: "sheet",
+    window: { placement: { type: "sheet", edge: "bottom", height: 200 } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", background: "#1d1b20" },
+      children: [{ type: "text", text: "Sheet" }],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });

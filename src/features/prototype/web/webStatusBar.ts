@@ -88,19 +88,19 @@ function opaqueBackground(element: WebElement): string | undefined {
 }
 
 /**
- * The app's top colour: the first opaque background along the content's leading children that
- * spans the screen (a top app bar, a full-width header), else `fallback` (the screen background).
+ * The app's top colour: the innermost opaque background along the content's leading children that
+ * spans the screen, since it paints over its ancestors (a top app bar over a root column), else
+ * `fallback` (the screen background).
  */
 export function appTopColor(content: WebChild, fallback: string): string {
+  let top = fallback;
   let current: WebChild | undefined = content;
   for (let depth = 0; depth < 32 && current !== undefined && typeof current !== "string"; depth++) {
     const background = depth === 0 || stretches(current) ? opaqueBackground(current) : undefined;
-    if (background) {
-      return background;
-    }
+    top = background ?? top;
     current = current.children.find((child) => typeof child !== "string");
   }
-  return fallback;
+  return top;
 }
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;

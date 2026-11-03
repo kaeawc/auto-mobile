@@ -213,7 +213,7 @@ function screenBackground(style: WebStyleContext): string {
 
 /**
  * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
- * colour, as both platforms' edge-to-edge defaults do.
+ * colour (a fullscreen window's), as both platforms' edge-to-edge defaults do.
  */
 function stillStatusBarContent(
   spec: unknown,
@@ -225,7 +225,11 @@ function stillStatusBarContent(
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  return statusBarContentFor(appTopColor(content, background), dark ? "light" : "dark");
+  // A sheet or floating window leaves the status area on the screen background.
+  const placement = record(record(record(spec)?.window)?.placement)?.type;
+  const fullscreen = placement === undefined || placement === "fullscreen";
+  const top = fullscreen ? appTopColor(content, background) : background;
+  return statusBarContentFor(top, dark ? "light" : "dark");
 }
 
 export function renderPrototypeStill(

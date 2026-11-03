@@ -23,6 +23,11 @@ const DEFAULT_MAP_HEIGHT = 200;
 const SINGLE_POINT_ZOOM = 15;
 /** A fitted framing leaves this share of the box around its points. */
 const FIT_FILL = 0.8;
+/**
+ * Extents narrower than this share of the world are a point: wrapping a lone longitude into the
+ * gap search shifts it by whole worlds, which leaves rounding noise instead of a zero width.
+ */
+const POINT_EXTENT = 1e-9;
 
 export function mercator(lat: number, lng: number): MapPoint {
   const clamped = Math.max(-MAX_LATITUDE, Math.min(MAX_LATITUDE, lat));
@@ -157,13 +162,39 @@ function horizontalBounds(spans: readonly Span[]): Span {
   if (widest) {
     return { start: widest.start, end: widest.end };
   }
-  // No gap: the spans wrap the whole world. Fit the widest one where it is drawn, at least a world wide.
+  return wrappedBounds(spans);
+}
+
+/** `span` moved whole to the copy of the world that puts its middle nearest `center`, as drawn. */
+function placeSpan(span: Span, center: number): Span {
+  const middle = (span.start + span.end) / 2;
+  const shift = center + wrapOffset(middle - center) - middle;
+  return { start: span.start + shift, end: span.end + shift };
+}
+
+function union(spans: readonly Span[]): Span {
+  return {
+    start: Math.min(...spans.map((span) => span.start)),
+    end: Math.max(...spans.map((span) => span.end)),
+  };
+}
+
+/**
+ * Bounds for spans that together leave no gap round the world. Each span is placed as
+ * `mapPercent`/`routePercents` draw it: whole, on the copy whose middle is nearest the framing
+ * centre. Seeded on the widest span, the centre moves to the middle of the placed spans' union;
+ * the bounds are then symmetric round that centre and cover every span as placed from it (at least
+ * one world wide), so fitting and drawing agree and no span is clipped, even past one world.
+ */
+function wrappedBounds(spans: readonly Span[]): Span {
   const longest = spans.reduce((best, span) =>
     span.end - span.start > best.end - best.start ? span : best,
   );
-  const middle = (longest.start + longest.end) / 2;
-  const half = Math.max(1, longest.end - longest.start) / 2;
-  return { start: middle - half, end: middle + half };
+  const seeded = union(spans.map((span) => placeSpan(span, (longest.start + longest.end) / 2)));
+  const center = (seeded.start + seeded.end) / 2;
+  const placed = union(spans.map((span) => placeSpan(span, center)));
+  const half = Math.max(0.5, center - placed.start, placed.end - center);
+  return { start: center - half, end: center + half };
 }
 
 /**
@@ -192,8 +223,8 @@ export function fitFraming(
   const middle = (left + right) / 2;
   const center = { x: middle - Math.floor(middle), y: (top + bottom) / 2 };
   const fits = [
-    right > left ? (size.width * FIT_FILL) / (right - left) : Infinity,
-    bottom > top ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
+    right - left > POINT_EXTENT ? (size.width * FIT_FILL) / (right - left) : Infinity,
+    bottom - top > POINT_EXTENT ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
   ];
   const fitted = Math.min(...fits);
   const worldSize = Math.min(

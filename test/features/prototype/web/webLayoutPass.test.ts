@@ -282,3 +282,37 @@ test("a shrinking item keeps at least its padding and border", () => {
   expect(rectOf(painted, "black")?.width).toBe(210);
   expect(rectOf(painted, "white")?.left).toBe(210);
 });
+
+test("a ratio-derived flex basis is not clamped by the item's main-axis maximum", () => {
+  // CSS: bases 400 and 300 overflow 400 by 300, shared 4:3; both stay under their 240px maximum.
+  const item = (name: string, ratio: string) =>
+    named(name, {
+      flex: "1 1 auto",
+      height: "100%",
+      "aspect-ratio": ratio,
+      "min-width": "0",
+      "max-width": "240px",
+    });
+  const root = named("root", { display: "flex", "flex-direction": "column" }, [
+    named("row", { display: "flex", "flex-direction": "row", width: "400px", height: "800px" }, [
+      item("black", "0.5"),
+      item("white", "0.375"),
+    ]),
+  ]);
+  const painted = topEdgePaintOrder(root, SCREEN);
+  expect(rectOf(painted, "black")?.width).toBeCloseTo(228.57, 2);
+  expect(rectOf(painted, "white")?.left).toBeCloseTo(228.57, 2);
+  expect(rectOf(painted, "white")?.width).toBeCloseTo(171.43, 2);
+});
+
+test("shrink is weighted by the inner flex base size, excluding padding and border", () => {
+  // CSS: inner bases 120 and 320 share the 200px overflow 120:320.
+  const row = named("row", { display: "flex", "flex-direction": "row", width: "400px" }, [
+    named("black", { width: "280px", height: "10px", "min-width": "0", "padding-left": "160px" }),
+    named("white", { width: "320px", height: "10px", "min-width": "0" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "black")?.width).toBeCloseTo(225.45, 2);
+  expect(rectOf(painted, "white")?.left).toBeCloseTo(225.45, 2);
+  expect(rectOf(painted, "white")?.width).toBeCloseTo(174.55, 2);
+});

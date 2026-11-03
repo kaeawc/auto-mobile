@@ -2,6 +2,7 @@ import { cssLength, type CssVars } from "./webCssLength";
 import {
   add,
   alignOffset,
+  aspectRatioOf,
   clampKnown,
   clampSize,
   contentInsets,
@@ -232,7 +233,8 @@ function flexOf(child: WebElement): { grow: number; shrink: number; basis: strin
  * A line item. `basis` is its flex base size and `base` its hypothetical main size (the basis
  * clamped by its min and max). Its minimum and maximum are resolved in the freeze rounds, as CSS
  * does. `min` is the declared `min-*`, else the automatic minimum when the pass can know it;
- * `minUnknown` marks an automatic minimum that depends on unmeasured content.
+ * `minUnknown` marks an automatic minimum that depends on unmeasured content. `edges` is its
+ * main-axis padding and border, which the inner flex base size excludes.
  */
 interface LineItem {
   readonly element?: WebElement;
@@ -243,6 +245,7 @@ interface LineItem {
   readonly min: Len;
   readonly max: Len;
   readonly minUnknown: boolean;
+  readonly edges: number;
 }
 
 /** A line item's self-alignment on the cross axis: `align-self`, else the line's `align-items`. */
@@ -252,10 +255,21 @@ function crossAlign(child: WebElement, box: Container): string | undefined {
 }
 
 /**
- * An `auto` main size taken from the item's cross size through its `aspect-ratio`, clamped on the
- * main axis; unknown when the item has no ratio or its cross size is unknown.
+ * An `auto` main size transferred from the item's cross size through its `aspect-ratio`, before
+ * any main-axis `min-*` or `max-*`; unknown when the item has no ratio or its cross size is unknown.
+ * A flex basis is determined without those constraints (CSS 9.2 step 3B).
  */
 function ratioMainSize(child: WebElement, main: Axis, box: Container): Len {
+  const ratio = aspectRatioOf(child);
+  const crossSize = alignedSize(child, crossOf(main), crossAlign(child, box), box);
+  if (ratio === undefined || crossSize === undefined) {
+    return undefined;
+  }
+  return main === "width" ? crossSize * ratio : crossSize / ratio;
+}
+
+/** The ratio-derived main size clamped by the item's main-axis `min-*` and `max-*`. */
+function clampedRatioMainSize(child: WebElement, main: Axis, box: Container): Len {
   const crossSize = alignedSize(child, crossOf(main), crossAlign(child, box), box);
   const rect = oriented(main, [0, 0], [undefined, crossSize]);
   return withAspectRatio(child, rect, box.content, box.vars)[main];
@@ -279,13 +293,20 @@ function automaticMinimum(child: WebElement, main: Axis, box: Container): Len {
     child.children.every(
       (grandchild) => typeof grandchild === "string" && grandchild.trim() === "",
     );
-  const content = ratioMainSize(child, main, box) ?? (empty ? 0 : undefined);
+  const content = clampedRatioMainSize(child, main, box) ?? (empty ? 0 : undefined);
   const declared = declaredSize(child, main, box.content[main], box.vars);
   const specified = declared === "auto" ? undefined : declared;
   if (specified === undefined || content === undefined) {
     return content;
   }
   return Math.min(specified, content);
+}
+
+/** A line item's main-axis padding plus border; an unresolved side counts as zero. */
+function mainEdges(child: WebElement, main: Axis, box: Container): number {
+  const insets = contentInsets(child, box.content[main], box.vars);
+  const edges = main === "width" ? add(insets.left, insets.right) : add(insets.top, insets.bottom);
+  return edges ?? 0;
 }
 
 /**
@@ -297,13 +318,10 @@ function mainMinimum(
   main: Axis,
   box: Container,
 ): { min: Len; minUnknown: boolean } {
-  const room = box.content[main];
-  const explicitMin = cssLength(child.style[`min-${main}`], box.vars, room);
+  const explicitMin = cssLength(child.style[`min-${main}`], box.vars, box.content[main]);
   const automatic = explicitMin === undefined ? automaticMinimum(child, main, box) : undefined;
   // A border box is never narrower than its padding and border, whatever its minimum says.
-  const insets = contentInsets(child, room, box.vars);
-  const edges = main === "width" ? add(insets.left, insets.right) : add(insets.top, insets.bottom);
-  const floor = edges ?? 0;
+  const floor = mainEdges(child, main, box);
   const declaredMin = explicitMin ?? automatic;
   const min =
     declaredMin === undefined && floor === 0 ? undefined : Math.max(declaredMin ?? 0, floor);
@@ -313,7 +331,8 @@ function mainMinimum(
 function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   if (typeof child === "string") {
     const none = undefined;
-    return { basis: none, base: none, grow: 0, shrink: 0, min: none, max: none, minUnknown: true };
+    const text = { basis: none, base: none, grow: 0, shrink: 0, min: none, max: none };
+    return { ...text, minUnknown: true, edges: 0 };
   }
   const room = box.content[main];
   const { grow, shrink, basis: basisValue } = flexOf(child);
@@ -332,7 +351,8 @@ function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
     basis === undefined
       ? clampSize(undefined, child, main, { base: room, vars: box.vars })
       : Math.max(min ?? 0, Math.min(max ?? Infinity, basis));
-  return { element: child, basis, base, grow, shrink, min, max, minUnknown };
+  const edges = mainEdges(child, main, box);
+  return { element: child, basis, base, grow, shrink, min, max, minUnknown, edges };
 }
 
 /** The items to freeze this round: those at the clamp the total violation's sign names. */
@@ -379,15 +399,18 @@ function targetOf(item: LineItem, active: readonly LineItem[], share: number, mo
     const total = active.reduce((sum, other) => sum + other.grow, 0);
     return basis + (share * item.grow) / total;
   }
-  // Negative free space is shared by flex-shrink scaled by the flex basis (9.7 step 4c).
-  const scaled = active.reduce((sum, other) => sum + other.shrink * (other.basis ?? 0), 0);
-  return scaled === 0 ? basis : basis + (share * item.shrink * basis) / scaled;
+  // Negative free space is shared by flex-shrink scaled by the inner flex base size, the basis
+  // less padding and border (9.7 step 4c).
+  const scaledOf = (other: LineItem): number =>
+    other.shrink * Math.max(0, (other.basis ?? 0) - other.edges);
+  const scaled = active.reduce((sum, other) => sum + scaledOf(other), 0);
+  return scaled === 0 ? basis : basis + (share * scaledOf(item)) / scaled;
 }
 
 /**
  * Free space shared among flexible items, each held between its minimum and maximum (CSS flex
  * resolution, 9.7). Positive space grows items by grow factor; negative space shrinks them by
- * shrink factor times basis. Each round shares what the frozen items left of the initial free
+ * shrink factor times inner basis. Each round shares what the frozen items left of the initial free
  * space; when the unfrozen factors sum below 1, they take at most that fraction of it.
  */
 function distribute(

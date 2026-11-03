@@ -34,6 +34,7 @@ import {
   cssColor,
   lineCss,
   nodeCss,
+  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
@@ -334,9 +335,9 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
-    const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     const rowed = rowMeasured(node, path, prepareIn(inner));
+    const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
@@ -379,10 +380,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, {
-    inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
-  });
+  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope.style, horizontal) });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };

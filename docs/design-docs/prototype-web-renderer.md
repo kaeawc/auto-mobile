@@ -205,7 +205,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider` and `bottomSheet`. Where the devices differ,
+  `carousel`, `flow`, `list`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `badge`, `progress`, `fab`,
+  `chart`, `adaptive` and `bottomSheet`, and a `row` or `listItem`'s `swipeActions`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -218,7 +219,25 @@ the host, so the page's script only switches between views it was given and neve
   adaptive grid fits `floor((width + spacing) / (minWidth + spacing))` columns to the screen width,
   so its tracks and clamped spans agree. A carousel draws its items in a clipped row at `itemWidth`,
   `itemSpacing` apart, each masked with a 28 px corner, and keeps an empty slot for a hidden child; it does not resize items as multi-browse or
-  hero keylines do. A bottom nav is an 80 px `surfaceContainer` bar whose items draw their icon in a
+  hero keylines do. A flow places its children eagerly in lines, `spacing` apart, starting a new
+  line `runSpacing` below when `used + spacing + width` would exceed its width, hugs its widest line
+  and clamps to `maxLines` lines. A `list` draws its header, every repeated row up to `maxItems` and
+  its footer, `spacing` apart inside `contentPadding`, in a column (filling, scrolling vertically) or
+  a row (scrolling horizontally), at its opening scroll position. A badge is a 6 px `error` dot, or a 16 px `error` pill around its
+  text. A progress indicator is a 240x4 px bar or a 40 px ring on a `secondaryContainer` track, its
+  `primary` indicator at its numeric state over `max` (default 1) clamped to 0..1; unbound it is
+  indeterminate and a still rests it at 30 %. A FAB is 40, 56 or 96 px (`small`, regular, `large`)
+  on `primaryContainer`, or extended with its label; disabled it is a 12 % `onSurface` container. A
+  chart is inline SVG with Android's geometry: a 160 px plot filling the width (lines, filled areas
+  at 0.25 opacity, or grouped bars rising from zero) over its `yRange` or the auto range, a dashed
+  `outline` goal line, x labels below, or a 120 px ring of the latest value over the goal; series
+  without a `color` take `primary`, `tertiary`, `secondary`, `error` in turn, and the device summary
+  is its label unless one is authored. An `adaptive` scaffold lays out by the screen's width class
+  (compact below 600 px, expanded from 840 px): list-detail and supporting panes sit side by side
+  (a 360 px pane, a 24 px spacer) only when expanded, else the detail (after a selection, with Back)
+  or the open supporting pane (with Close) replaces the other; a navigation suite is a bottom bar,
+  a rail or a drawer by width class, each item drawing its label's first letter as its icon. Swipe
+  actions are drawn as hidden `start` and `end` panels, since a still shows the item closed. A bottom nav is an 80 px `surfaceContainer` bar whose items draw their icon in a
   64x32 pill (`secondaryContainer` when selected) over a 12 px label, and it pads its bottom edge by
   the safe area, as both devices' navigation bars do, unless an ancestor already applied it. A tab bar
   is a 48 px `surface` row (72 px when a tab has an icon) with an `outlineVariant` bottom divider; the

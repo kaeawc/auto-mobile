@@ -21,7 +21,10 @@ import {
   type WebAxis,
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { webAdaptiveRenderers } from "./webAdaptive";
+import { webChartRenderers } from "./webChart";
 import { webControlRenderers } from "./webControls";
+import { webIndicatorRenderers, withSwipeActions } from "./webIndicators";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
@@ -954,6 +957,9 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
   ...webStackRenderers(KIT),
+  ...webIndicatorRenderers(KIT),
+  ...webChartRenderers(KIT),
+  ...webAdaptiveRenderers(KIT),
 };
 
 const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
@@ -1052,5 +1058,7 @@ export function renderWebNode(
     return undefined;
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  return renderer
+    ? withSwipeActions(renderer(styled, own, path), styled, own, KIT)
+    : placeholder(styled, own, path);
 }

@@ -21,7 +21,9 @@ object PrototypeCastEvents {
       "remoteVolume",
     )
 
-  /** Why a session failed. `media_not_castable`: the player source is not an absolute http(s) URL. */
+  /**
+   * Why a session failed. `media_not_castable`: the player source is not an absolute http(s) URL.
+   */
   val failureReasons: List<String> =
     listOf("media_not_castable", "play_services_unavailable", "network", "receiver")
 
@@ -52,7 +54,10 @@ object PrototypeCastEvents {
   private val session =
     mapOf("player" to player, "protocol" to oneOf(protocols), "deviceName" to string(0, 256))
 
-  private class Shape(val required: Map<String, Field>, val optional: Map<String, Field> = emptyMap())
+  private class Shape(
+    val required: Map<String, Field>,
+    val optional: Map<String, Field> = emptyMap(),
+  )
 
   private val shapes: Map<String, Shape> =
     mapOf(

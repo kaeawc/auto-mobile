@@ -17,7 +17,8 @@ class PrototypeCastEventsTest {
   private val fixture: JsonObject =
     Json.parseToJsonElement(File(fixtureDirectory(), "cast/events.json").readText()).jsonObject
 
-  private fun strings(key: String) = fixture.getValue(key).jsonArray.map { it.jsonPrimitive.content }
+  private fun strings(key: String) =
+    fixture.getValue(key).jsonArray.map { it.jsonPrimitive.content }
 
   @Test
   fun `the event and reason lists match the shared fixture`() {

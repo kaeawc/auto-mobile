@@ -40,7 +40,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
-import { rowFillAxes, rowMeasured } from "./webRowAspect";
+import { rowFillAxes, rowMeasured, widthBoundContext, withIncomingHeight } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -317,7 +317,7 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
   ) {
     return [];
   }
-  const own = rowFillAxes(raw, path, prepareIn(scope));
+  const own = rowFillAxes(raw, path, prepareIn(scope), widthBoundContext(scope.style, raw.style));
   const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
@@ -336,7 +336,7 @@ const line =
     const node = filling(raw, lineFillAxes(raw, scope, path));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    const rowed = rowMeasured(node, path, prepareIn(inner));
+    const rowed = rowMeasured(node, path, prepareIn(inner), scope.style);
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
@@ -381,10 +381,15 @@ const scroll: NodeRenderer = (node, scope, path) => {
   });
   const inner = child(scope, {
     inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
+    style: {
+      ...scope.style,
+      parentAxis: horizontal ? "row" : "column",
+      unboundedWidth: horizontal || scope.style.unboundedWidth === true,
+    },
   });
   const scrollAttrs = { ...attrs, ...fade.attrs };
-  return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
+  const content = horizontal ? withIncomingHeight(node.child, node.style) : node.child;
+  return el("div", { attrs: scrollAttrs, style }, renderOrSkip(content, inner, `${path}.child`));
 };
 
 const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node), scope));
@@ -1033,7 +1038,11 @@ export function renderWebNode(
     return undefined;
   }
   const { styled, scope: local } = prepared;
-  const own: WebRenderScope = { ...local, ownInsets: safeAreaEdges(styled) };
+  const own: WebRenderScope = {
+    ...local,
+    style: widthBoundContext(local.style, styled.style),
+    ownInsets: safeAreaEdges(styled),
+  };
   const layer = WEB_LAYER_RENDERERS[String(styled.type)];
   if (layer) {
     layer(styled, own, path);

@@ -580,6 +580,72 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")["max-width"]).toBe("0px");
   });
 
+  test("under a horizontal scroll a row's unsized aspect ratio sizes from the height (#16718)", () => {
+    const render = (scrollStyle: Record<string, unknown>, rowStyle?: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "scroll",
+            axis: "horizontal",
+            style: scrollStyle,
+            child: {
+              type: "row",
+              testTag: "line",
+              ...(rowStyle ? { style: rowStyle } : {}),
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+              ],
+            },
+          },
+        }),
+        "line",
+      )[0]!;
+    const style = (root: WebElement, tag: string) => byTag({ element: root }, tag)[0]!.style;
+    const sized = render({ height: { dp: 100 } });
+    // No width to reach, so the row hugs its content instead of growing to the scroll.
+    expect(sized.style).not.toHaveProperty("width");
+    expect(style(sized, "ratio")).toMatchObject({ width: "100px", height: "100px" });
+    expect(style(sized, "ratio")).not.toHaveProperty("flex");
+    expect(style(sized, "after")).toMatchObject({ width: "40px" });
+    expect(style(sized, "after")).not.toHaveProperty("max-width");
+    // The row's own padding comes off the height the scroll hands it.
+    const padded = render({ height: { dp: 100 } }, { padding: { top: 10, bottom: 10 } });
+    expect(style(padded, "ratio")).toMatchObject({ width: "80px", height: "80px" });
+    // With no definite height the ratio stays as authored, and its sibling keeps its width.
+    const unsized = render({});
+    expect(style(unsized, "ratio")).not.toHaveProperty("width");
+    expect(style(unsized, "ratio")).not.toHaveProperty("flex");
+    expect(style(unsized, "after")).not.toHaveProperty("max-width");
+  });
+
+  test("a dp-width row under a horizontal scroll measures its aspect ratio against its width", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "scroll",
+          axis: "horizontal",
+          style: { height: { dp: 100 } },
+          child: {
+            type: "row",
+            testTag: "line",
+            style: { width: { dp: 200 } },
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+              { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+            ],
+          },
+        },
+      }),
+      "line",
+    )[0]!;
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({ flex: "1 1 0" });
+    expect(style("after")["max-width"]).toBe("0px");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

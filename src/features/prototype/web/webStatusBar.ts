@@ -1,5 +1,9 @@
-import type { DeviceFrame } from "./deviceFrames";
+import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import type { CssVars } from "./webCssLength";
+import { paintsTopEdgeAt, topEdgePaintOrder, type WebScreenSize } from "./webLayoutPass";
 import { el, type WebChild, type WebElement } from "./webNodes";
+
+export type { WebScreenSize } from "./webLayoutPass";
 
 /**
  * The generic status bar a still draws per skin (#16546): never a picture of a real OS, only a
@@ -78,30 +82,56 @@ export function statusBarContentFor(
   return luminance(color) > 0.179 ? "dark" : "light";
 }
 
-function stretches(element: WebElement): boolean {
-  return element.style["align-self"] === "stretch" || element.style.width === "100%";
+/** A background that paints fully opaque once the element's composite opacity applies. */
+function opaqueBackground(element: WebElement, opacity: number): string | undefined {
+  const background = element.style["background-color"];
+  const alpha = parseCssColor(background)?.a;
+  return alpha !== undefined && alpha * opacity === 1 ? background : undefined;
 }
 
-function opaqueBackground(element: WebElement): string | undefined {
-  const background = element.style["background-color"];
-  return parseCssColor(background)?.a === 1 ? background : undefined;
-}
+/** Points sampled along the screen's top edge, evenly across its width. */
+const TOP_EDGE_SAMPLES = 64;
+
+/** The default Android frame's portrait screen, for a caller that names none. */
+const DEFAULT_SCREEN: WebScreenSize = (() => {
+  const { widthDp, heightDp } = deviceFrameOrThrow(defaultDeviceFrameId("android")).screen;
+  return { width: widthDp, height: heightDp };
+})();
 
 /**
- * The app's top colour: the innermost opaque background along the content's leading children that
- * spans the screen, since it paints over its ancestors (a top app bar over a root column), else
- * `fallback` (the screen background). The walk stops at an element padded by the top safe area,
- * whose children start below the status bar.
+ * The app's top colour, from paint (#16667): a layout pass places the content on the `screen`,
+ * and at points evenly across the screen's top edge the last opaque background painted there is
+ * the colour behind the status bar (else `fallback`, the screen background). The colour at the
+ * most points wins; a tie goes to the one met first from the left. A background counts only when
+ * its alpha times the element's composite opacity is 1. `vars` are the custom properties the
+ * screen defines, such as the safe-area insets top padding reads.
  */
-export function appTopColor(content: WebChild, fallback: string): string {
+export function appTopColor(
+  content: WebChild,
+  fallback: string,
+  screen: WebScreenSize = DEFAULT_SCREEN,
+  vars: CssVars = {},
+): string {
+  if (typeof content === "string") {
+    return fallback;
+  }
+  const opaque = topEdgePaintOrder(content, screen, vars).flatMap((box) => {
+    const color = opaqueBackground(box.element, box.opacity);
+    return color === undefined ? [] : [{ box, color }];
+  });
+  const votes = new Map<string, number>();
+  for (let index = 0; index < TOP_EDGE_SAMPLES; index++) {
+    const x = ((index + 0.5) * screen.width) / TOP_EDGE_SAMPLES;
+    const shown = opaque.filter(({ box }) => paintsTopEdgeAt(box, x)).at(-1)?.color ?? fallback;
+    votes.set(shown, (votes.get(shown) ?? 0) + 1);
+  }
   let top = fallback;
-  let current: WebChild | undefined = content;
-  for (let depth = 0; depth < 32 && current !== undefined && typeof current !== "string"; depth++) {
-    const background = depth === 0 || stretches(current) ? opaqueBackground(current) : undefined;
-    top = background ?? top;
-    // Top safe-area padding moves the children below the status area, so this background shows.
-    const clears: boolean = current.style["padding-top"]?.includes("--safe-top") ?? false;
-    current = clears ? undefined : current.children.find((child) => typeof child !== "string");
+  let most = 0;
+  for (const [color, count] of votes) {
+    if (count > most) {
+      top = color;
+      most = count;
+    }
   }
   return top;
 }

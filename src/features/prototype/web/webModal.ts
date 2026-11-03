@@ -3,6 +3,7 @@ import { el, type WebElement } from "./webNodes";
 import type { WebRenderKit, WebRenderScope } from "./webRender";
 import { hoistedScope, LAYER_CSS, openLayer, roleColor, type WebLayerRenderer } from "./webSheet";
 import { rgbaCss, textCss } from "./webStyle";
+import { withOverContentLayers } from "./webStylePolish";
 
 type Css = Record<string, string>;
 
@@ -151,13 +152,18 @@ function dialogLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
       ...textButton(node.confirm, { part: "confirm", colorRole: "primary" }, ctx),
     ],
   );
-  const surface = el("div", { attrs: { ...attrs, "data-part": "dialog" }, style }, [
-    ...dialogIcon(node, scope, kit),
-    ...line(node.title, { part: "headlineSmall", colorRole: "onSurface" }, ctx),
-    ...line(node.text, { part: "bodyMedium", colorRole: "onSurfaceVariant" }, ctx),
-    ...body,
-    buttons,
-  ]);
+  // A gradient border and inner shadows paint over the surface's content, as on any other node.
+  const surface = withOverContentLayers(
+    el("div", { attrs: { ...attrs, "data-part": "dialog" }, style }, [
+      ...dialogIcon(node, scope, kit),
+      ...line(node.title, { part: "headlineSmall", colorRole: "onSurface" }, ctx),
+      ...line(node.text, { part: "bodyMedium", colorRole: "onSurfaceVariant" }, ctx),
+      ...body,
+      buttons,
+    ]),
+    node.style,
+    scope.style,
+  );
   const scrim = el("div", {
     attrs: { "data-part": "scrim" },
     style: {
@@ -209,10 +215,11 @@ function snackbarLayer(node: Raw, scope: WebRenderScope, _path: string, kit: Web
     },
     [kit.bound(node.text, scope)],
   );
-  const snackbar = el("div", { attrs: { ...attrs, "data-part": "snackbar" }, style }, [
-    text,
-    ...action,
-  ]);
+  const snackbar = withOverContentLayers(
+    el("div", { attrs: { ...attrs, "data-part": "snackbar" }, style }, [text, ...action]),
+    node.style,
+    scope.style,
+  );
   return el(
     "div",
     {

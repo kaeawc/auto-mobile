@@ -222,4 +222,21 @@ describe("web still snackbar (#16536)", () => {
     expect(reasons(true)).toEqual(["shaderFallback"]);
     expect(reasons(false)).toEqual([]);
   });
+
+  test("an open dialog and snackbar carry a gradient border and inner shadow over their content", () => {
+    const style = {
+      border: {
+        width: 2,
+        gradient: { type: "linear", angle: 0, stops: [{ color: "#000" }, { color: "#fff" }] },
+      },
+      shadows: [{ color: "#000000", radius: 6, inner: true }],
+    };
+    const still = renderPrototypeStill(specWith([dialog({ style }), snackbar({ style })]));
+    for (const part of ["dialog", "snackbar"]) {
+      const [surface] = byPart(still.element, part);
+      const layers = (surface!.children as WebElement[]).slice(-2);
+      expect(layers.map((layer) => layer.attrs["data-layer"])).toEqual(["border", "innerShadow"]);
+      expect(surface!.style.position).toBe("relative");
+    }
+  });
 });

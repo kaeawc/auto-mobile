@@ -29,6 +29,8 @@ export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
   "flow-basic": "prototype-spec/valid/flow-basic.json",
   "flow-max-lines-repeat": "prototype-spec/valid/flow-max-lines-repeat.json",
   "chart-variants": "prototype-spec/valid/chart-variants.json",
+  "status-bar-light-content": "prototype-web/status-bar-light-content.json",
+  "status-bar-dark-content": "prototype-web/status-bar-dark-content.json",
 };
 
 /** The browser viewport, in CSS px at device scale factor 1, so a golden is exactly this size. */

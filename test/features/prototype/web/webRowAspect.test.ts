@@ -5,6 +5,7 @@ import {
   CAPPED_SHRINK,
   isUnsizedAspectRatio,
   LATER_SHRINK,
+  rowContentHeight,
   rowMeasured,
   rowSequentialChildren,
 } from "../../../../src/features/prototype/web/webRowAspect";
@@ -187,7 +188,7 @@ test("a row without an unsized aspect ratio keeps its children as authored", () 
   expect(rowSequentialChildren(entries, shown)).toBe(entries);
 });
 
-test("a row around a capped aspect ratio is bounded to its parent; an authored maxWidth wins", () => {
+test("a row around a capped aspect ratio is bounded to its parent and its own maxWidth", () => {
   const prepare = (entry: unknown) => record(entry);
   const capped = { type: "box", style: { aspectRatio: 2, maxWidth: 100 } };
   const row = { type: "row", style: { padding: 4 }, children: [capped] };
@@ -205,7 +206,9 @@ test("a row around a capped aspect ratio is bounded to its parent; an authored m
 
   const context = { mode: "light" as const, palette: new Map(), parentAxis: "column" as const };
   expect(nodeCss(measured.style, context)["max-width"]).toBe("100%");
-  expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, context)["max-width"]).toBe("50px");
+  expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, context)["max-width"]).toBe(
+    "min(100%, 50px)",
+  );
 });
 
 test("a conditional maxWidth or weight cannot undo the row measure (styleWhen merges again)", () => {
@@ -215,4 +218,31 @@ test("a conditional maxWidth or weight cannot undo the row measure (styleWhen me
   expect(nodeCss(zeroed, context)["max-width"]).toBe("0px");
   const taker = { aspectRatio: 2, [ROW_MEASURE_KEY]: { take: true }, weight: 3 };
   expect(nodeCss(taker, context)).toMatchObject({ flex: "1 1 0", "min-width": "0" });
+});
+
+test("a row's definite content height is its dp height or maxHeight less vertical padding", () => {
+  expect(rowContentHeight({ height: { dp: 20 } })).toBe(20);
+  expect(
+    rowContentHeight({ height: { dp: 40 }, maxHeight: 30, padding: { top: 4, bottom: 6 } }),
+  ).toBe(20);
+  expect(rowContentHeight({ height: { dp: 4 }, padding: { top: 4, bottom: 6 } })).toBe(0);
+  expect(rowContentHeight({ height: "fill" })).toBe(Infinity);
+  expect(rowContentHeight(undefined)).toBe(Infinity);
+});
+
+test("a row's definite height caps its aspect ratios, as the incoming max height does natively", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const row = {
+    type: "row",
+    style: { width: "fill", height: { dp: 20 } },
+    children: [
+      { type: "box", style: { aspectRatio: 1, maxWidth: 100 } },
+      { type: "box", style: { aspectRatio: 2 } },
+    ],
+  };
+  const children = rowMeasured(row, "root", prepare).children as unknown[];
+  expect(styleOf(children[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 20 });
+  // An otherwise unsized ratio is capped by the row's height too, so it no longer takes the rest.
+  expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, basis: 40 });
+  expect(isUnsizedAspectRatio({ type: "box", style: { aspectRatio: 2 } }, 20)).toBe(false);
 });

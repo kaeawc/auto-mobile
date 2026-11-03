@@ -13,21 +13,21 @@ function freeAspectRatio(node: Raw | undefined): number | undefined {
 }
 
 /**
- * An `aspectRatio` node with no authored width, height, weight, or max bound. Compose's
- * `aspectRatio` sizes it from the incoming max width, so in a row it takes all the width its
- * earlier siblings left.
+ * An `aspectRatio` node with no authored width, height, weight, or max bound, in a row with no
+ * definite height (`rowHeight`). Compose's `aspectRatio` sizes it from the incoming max width, so
+ * in a row it takes all the width its earlier siblings left.
  */
-export function isUnsizedAspectRatio(node: Raw | undefined): boolean {
-  return freeAspectRatio(node) !== undefined && aspectRatioCap(node) === undefined;
+export function isUnsizedAspectRatio(node: Raw | undefined, rowHeight = Infinity): boolean {
+  return freeAspectRatio(node) !== undefined && aspectRatioCap(node, rowHeight) === undefined;
 }
 
 /**
- * The widest a capped aspect ratio grows in a row: the tighter of its `maxWidth` and
- * `maxHeight × ratio`, or undefined when the node is not a capped, otherwise unsized aspect
+ * The widest a capped aspect ratio grows in a row: the tightest of its `maxWidth`, its
+ * `maxHeight × ratio` and the row's content height (`rowHeight`) × ratio, or undefined when the node is not a capped, otherwise unsized aspect
  * ratio. Android applies `sizeIn` before `aspectRatio`, so the node takes
  * `min(remaining width, cap)` and may leave width for its later siblings.
  */
-export function aspectRatioCap(node: Raw | undefined): number | undefined {
+export function aspectRatioCap(node: Raw | undefined, rowHeight = Infinity): number | undefined {
   const ratio = freeAspectRatio(node);
   const style = record(node?.style);
   if (ratio === undefined || !style) {
@@ -36,6 +36,7 @@ export function aspectRatioCap(node: Raw | undefined): number | undefined {
   const caps = [
     typeof style.maxWidth === "number" ? style.maxWidth : Infinity,
     typeof style.maxHeight === "number" ? style.maxHeight * ratio : Infinity,
+    rowHeight * ratio,
   ];
   const cap = Math.min(...caps);
   return cap === Infinity ? undefined : cap;
@@ -46,6 +47,24 @@ export type PrepareChild = (entry: unknown, path: string) => Raw | undefined;
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
+const side = (padding: Raw | undefined, name: string) =>
+  typeof padding?.[name] === "number" ? padding[name] : 0;
+
+/**
+ * The tallest a row lets its children be, when the row authors a definite one: its dp `height`
+ * or `maxHeight`, less its vertical padding. Compose's `sizeIn` then `aspectRatio` on a child
+ * respects that incoming max height. Infinity when the row's height comes from elsewhere.
+ */
+export function rowContentHeight(style: Raw | undefined): number {
+  const dp = record(style?.height)?.dp;
+  const bounds = [
+    typeof dp === "number" ? dp : Infinity,
+    typeof style?.maxHeight === "number" ? style.maxHeight : Infinity,
+  ];
+  const padding = record(style?.padding);
+  return Math.max(0, Math.min(...bounds) - side(padding, "top") - side(padding, "bottom"));
+}
+
 /**
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the
  * remaining width, since a wrap-sized Compose Row then reaches its max width.
@@ -55,7 +74,10 @@ export function rowFillAxes(node: Raw, path: string, prepare: PrepareChild): "wi
     node.type === "row" &&
     Array.isArray(node.children) &&
     node.children.some((entry, index) =>
-      isUnsizedAspectRatio(prepare(entry, childPath(path, index))),
+      isUnsizedAspectRatio(
+        prepare(entry, childPath(path, index)),
+        rowContentHeight(record(node.style)),
+      ),
     );
   return fills ? ["width"] : [];
 }
@@ -71,11 +93,12 @@ export function rowMeasured(node: Raw, path: string, prepare: PrepareChild): Raw
     return node;
   }
   const styled = node.children.map((entry, index) => prepare(entry, childPath(path, index)));
-  const children = rowSequentialChildren(node.children, (_entry, index) => styled[index]);
+  const height = rowContentHeight(record(node.style));
+  const children = rowSequentialChildren(node.children, (_entry, index) => styled[index], height);
   if (children === node.children) {
     return node;
   }
-  const bounded = styled.some((child) => aspectRatioCap(child) !== undefined);
+  const bounded = styled.some((child) => aspectRatioCap(child, height) !== undefined);
   const style = bounded ? { ...record(node.style), [ROW_BOUND_KEY]: true } : node.style;
   return { ...node, children, ...(style === undefined ? {} : { style }) };
 }
@@ -118,16 +141,20 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * Every hint goes through ROW_MEASURE_KEY, which no `styleWhen` can author, so a conditional
  * `maxWidth` or `weight` that rendering merges again cannot undo it.
  *
+ * `rowHeight` is the row's definite content height (see rowContentHeight), which caps every
+ * aspect ratio in it as a `maxHeight` would.
+ *
  * `prepared` resolves an entry as rendering will (bound, visible, `styleWhen` merged), or
  * undefined when it is hidden. A repeat's children are one template, so they are left as authored.
  */
 export function rowSequentialChildren(
   entries: readonly unknown[],
   prepared: (entry: unknown, index: number) => Raw | undefined,
+  rowHeight = Infinity,
 ): readonly unknown[] {
   const styled = entries.map(prepared);
-  const taker = styled.findIndex(isUnsizedAspectRatio);
-  const capped = styled.findIndex((node) => aspectRatioCap(node) !== undefined);
+  const taker = styled.findIndex((node) => isUnsizedAspectRatio(node, rowHeight));
+  const capped = styled.findIndex((node) => aspectRatioCap(node, rowHeight) !== undefined);
   if (taker < 0 && capped < 0) {
     return entries;
   }
@@ -145,13 +172,12 @@ export function rowSequentialChildren(
     }
     return capped < 0 || index < capped || weighted
       ? entry
-      : cappedSibling(entry, node, index === capped);
+      : cappedSibling(entry, aspectRatioCap(node, rowHeight), index === capped);
   });
 }
 
 /** The capped aspect ratio itself, or a later unweighted sibling, with its shrink tier. */
-function cappedSibling(entry: unknown, node: Raw, first: boolean): unknown {
-  const basis = aspectRatioCap(node);
+function cappedSibling(entry: unknown, basis: number | undefined, first: boolean): unknown {
   const shrink = first ? CAPPED_SHRINK : LATER_SHRINK;
   return measured(entry, basis === undefined ? { shrink } : { shrink, basis });
 }

@@ -46,7 +46,7 @@ export const ROW_MEASURE_KEY = "webRowMeasure";
 
 /**
  * A style key the web renderer adds to a row around a capped aspect ratio, never authored: the row
- * is bounded to its parent's width, as a Compose Row's max is. An authored `maxWidth` wins.
+ * is bounded to its parent's width, as a Compose Row's max is, and to any authored `maxWidth`.
  */
 export const ROW_BOUND_KEY = "webRowBound";
 
@@ -219,8 +219,10 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     }
   }
   rowMeasureStyle(css, style, context);
-  if (style[ROW_BOUND_KEY] === true && typeof style.maxWidth !== "number") {
-    css["max-width"] = "100%";
+  if (style[ROW_BOUND_KEY] === true) {
+    // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
+    const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
+    css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
   }
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);

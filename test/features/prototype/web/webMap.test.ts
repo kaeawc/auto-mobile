@@ -362,6 +362,16 @@ describe("prototype web map across the 180° line (#16593)", () => {
     expect(end!.left).toBeCloseTo(55.825, 2);
   });
 
+  test("a turned camera projects the nearest copy across 180° too", () => {
+    const view = { center: mercator(0, 179), worldSize: 256 * 2 ** 1 };
+    const turned = { bearing: 90, tilt: 30 };
+    const east = projectPercent(mercator(0, -179), view, size, turned)!;
+    expect(Math.abs(east.top - 50)).toBeLessThan(5);
+    const [run, ...rest] = projectLine([mercator(0, 178), mercator(0, -178)], view, size, turned);
+    expect(rest).toEqual([]);
+    expect(Math.abs(run![1]!.top - run![0]!.top)).toBeLessThan(10);
+  });
+
   test("the rendered still pins and routes across 180°", () => {
     const pacific = [
       { id: "w", lat: 0, lng: 179, name: "West" },

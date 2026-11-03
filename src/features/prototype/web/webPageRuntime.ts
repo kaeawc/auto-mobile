@@ -321,8 +321,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     state.variant = variantSelect.value;
     const option = variantSelect.selectedOptions[0];
     state.revision = option?.dataset.latest ?? state.revision;
-    state.fit = true;
-    apply();
+    fitView();
   });
   postureSelect?.addEventListener("change", () => {
     state.posture = postureSelect.value;

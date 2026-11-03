@@ -3031,7 +3031,8 @@ A prototype can talk to a declarative backend with no server code (decisions in
 `<backendId>.mock.automobile.invalid` is answered in process by the daemon's backend of that id,
 before the egress policy: no DNS lookup, socket or `adb reverse`. A host under that suffix that
 names no defined backend fails as `network`. Backends live for the daemon session and are bounded
-(16 backends, 16 collections, 64 routes, 1 MiB of collections and routes).
+(16 backends, 16 collections, 64 routes, 64 rooms, 1 MiB of collections, routes, rooms and
+broadcasts).
 
 - **Collections** are json-server style: `GET /<name>` filters by `?field=value`, `q` matches a
   case-insensitive substring of any string or number member, `_sort=price|-price` sorts stably
@@ -3049,7 +3050,20 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
   timer, so a run replays identically: `latencyMs {min, max}` delays every answer, and each fault
   `{path, method?, status, every | rate}` fires on every nth matching request or with probability
   `rate`, answering `{error: "mock fault"}`.
-- Every answered request is logged (latest 200, with a sequence number) for assertions.
+- **Rooms** serve `via: "host"` channels to the same origin (`wss://` for WebSocket, `https://` for
+  SSE), with no socket. A connection joins the first room `{path, onConnect?, echo?, relay?,
+  timeline?}` whose path pattern matches its URL path; no match is `handshake_failed` with status 404,
+  and a room path with 64 connections refuses the next with 503. `onConnect` frames are delivered
+  right after `opened`; each `timeline` entry fires `afterMs` after its own connection opened, on the
+  injected timer. `echo` returns a client send to its sender and `relay` passes it to the other
+  connections of the same room path. Scripted frames bind `{params.x}` and `{query.x}` from the
+  channel URL; a string frame goes on the wire as written and other JSON as JSON text. SSE
+  connections only receive. Latency and faults apply to requests, not to channels.
+- **Broadcasts** `{collection: {room, frame, on?}}` send a 2xx collection write (`POST` unless `on`
+  lists `PUT` or `PATCH`) to the room path the binding produces; `{item}` and `{item:/pointer}` bind
+  the stored item, so a message one device posts reaches every device in its room.
+- Every answered request, client send, `publish` and broadcast is logged (latest 200, with one
+  sequence number) for assertions; a frame entry is `{seq, room, from, data}`.
 - **Actors** (at most 16, each with 1–64 steps) write to collections on the backend's injected
   timer. One fires after a successful (status below 400) request matching `on.route` (`"POST
   /path/:id"`), or runs `maxRuns` times every `every` ms (100 ms or more; run k starts at
@@ -3064,8 +3078,10 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
 
 The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
 {backendId, backend}` validates the definition and replaces the backend of that id (a failed
-definition leaves the old one), `clearBackend {backendId}` removes it, and `backendLog {backendId,
-since?}` returns the log. Their results report the origin a spec should call. `show` takes `mock`
+definition leaves the old one), `clearBackend {backendId}` removes it, `publish {backendId, room,
+frame}` delivers a frame to every connection in a room path and reports `delivered`, and
+`backendLog {backendId, since?}` returns the log. Replacing or clearing a backend, and session end,
+close its open channels with code 1001. Their results report the origin a spec should call. `show` takes `mock`
 (`{backendId: definition}`) or `mockPath` (an absolute file of the same, read like `specPath`, up to
 2 MiB): after the spec passes validation, every entry is validated and defined or none is, replacing
 backends of the same id. A saved prototype does not carry its mock backends. A request that

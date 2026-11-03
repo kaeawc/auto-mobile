@@ -23,13 +23,12 @@
         var errorCode: String?
     }
 
-    @MainActor
     protocol AccessibilityFocusElement: AnyObject {
-        var focusIdentifier: String? { get }
-        var focusLabel: String? { get }
-        var focusValue: String? { get }
-        var focusEligible: Bool { get }
-        var focusChildren: [any AccessibilityFocusElement] { get }
+        @MainActor var focusIdentifier: String? { get }
+        @MainActor var focusLabel: String? { get }
+        @MainActor var focusValue: String? { get }
+        @MainActor var focusEligible: Bool { get }
+        @MainActor var focusChildren: [any AccessibilityFocusElement] { get }
     }
 
     enum SdkAccessibilityFocus {

@@ -580,6 +580,72 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")["max-width"]).toBe("0px");
   });
 
+  test("a row's capped aspect ratio takes its cap and the row stays within its parent (#16673)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2, maxHeight: 30 } },
+                { type: "text", text: "b", testTag: "after" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // The row wraps its children but never outgrows its parent, as a Compose Row's max does.
+    expect(row.style["max-width"]).toBe("100%");
+    expect(row.style).not.toHaveProperty("width");
+    const style = (tag: string) => byTag({ element: row }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({
+      "aspect-ratio": "2",
+      "flex-basis": "60px",
+      "flex-grow": "0",
+      "min-width": "0",
+      width: "60px",
+    });
+    // The later sibling keeps its width while the cap leaves room, and gives it up first.
+    expect(style("after")).toMatchObject({ "flex-shrink": "1000000000", "min-width": "0" });
+    expect(style("after")).not.toHaveProperty("max-width");
+  });
+
+  test("a row whose height comes from fill or a weight caps its aspect ratio by it (#16686)", () => {
+    const ratioIn = (row: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            style: { height: { dp: 100 } },
+            children: [
+              { type: "box", style: { height: { dp: 60 } } },
+              {
+                ...row,
+                type: "row",
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                  { type: "text", text: "b" },
+                ],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // 100 dp less the 60 dp sibling leaves 40 dp, so the ratio is at most 80 dp wide.
+    expect(ratioIn({ style: { height: "fill" } })).toMatchObject({ "flex-basis": "80px" });
+    expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
+    // A wrap row is bounded by what is left too.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(
@@ -1389,5 +1455,43 @@ describe("prototype web still platform state (#16448)", () => {
     expect(label({ frame: "medium-tablet" })).toBe("android medium||{platform:/device/idiom}");
     expect(label({ frame: "iphone-16" })).toBe("ios compact||{platform:/device/idiom}");
     expect(label({ frame: "ipad-10" })).toBe("ios regular||{platform:/device/idiom}");
+  });
+});
+
+describe("a weighted child's main-axis bounds (#16698)", () => {
+  const bounded = (testTag: string) => ({
+    type: "box",
+    testTag,
+    style: { weight: 1, height: { dp: 100 }, maxHeight: 20 },
+  });
+  const still = renderPrototypeStill({
+    id: "weights",
+    window: { placement: { type: "fullscreen" } },
+    root: {
+      type: "column",
+      style: { height: { dp: 300 } },
+      children: [
+        bounded("in-column"),
+        { type: "card", children: [bounded("in-card")] },
+        { type: "scroll", style: { weight: 1 }, child: bounded("in-scroll") },
+        {
+          type: "row",
+          style: { weight: 1 },
+          children: [{ type: "scroll", child: bounded("in-nested-scroll") }],
+        },
+      ],
+    },
+  });
+  const maxHeight = (tag: string) => byTag(still, tag)[0]?.style["max-height"];
+
+  test("a column or card pins it to the share, dropping the bound", () => {
+    expect(byTag(still, "in-column")[0]?.style.flex).toBe("1 1 0");
+    expect(maxHeight("in-column")).toBeUndefined();
+    expect(maxHeight("in-card")).toBeUndefined();
+  });
+
+  test("scroll content keeps it, even inside a weighting row", () => {
+    expect(maxHeight("in-scroll")).toBe("20px");
+    expect(maxHeight("in-nested-scroll")).toBe("20px");
   });
 });

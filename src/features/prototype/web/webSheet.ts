@@ -85,7 +85,7 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
     ...scope,
     inBox: false,
     consumedInsets: [],
-    style: { ...scope.style, parentAxis: "column" },
+    style: { ...scope.style, parentAxis: "column", weightsChildren: false },
   };
   const { attrs, style: base } = kit.base(node, hoisted, {
     display: "flex",
@@ -102,7 +102,9 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
   const style = base["background-color"]
     ? base
     : { ...base, "background-color": rgbaCss(roleColor("surface", scope.style)) };
-  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: "column" } });
+  const inner = kit.child(hoisted, {
+    style: { ...hoisted.style, parentAxis: "column", weightsChildren: false },
+  });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const scrim = el("div", {
     attrs: { "data-part": "scrim" },

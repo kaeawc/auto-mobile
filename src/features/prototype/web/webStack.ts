@@ -34,7 +34,7 @@ export function webStackRenderers(kit: WebRenderKit): Readonly<Record<string, No
     const { attrs, style } = kit.base(node, scope, { display: "flex", "flex-direction": "column" });
     const inner = kit.child(scope, {
       inBox: false,
-      style: { ...scope.style, parentAxis: "column" },
+      style: { ...scope.style, parentAxis: "column", weightsChildren: false },
     });
     const screen = shown === undefined ? undefined : screens[shown];
     const content = kit.renderNode(screen, inner, `${path}.screens[${JSON.stringify(shown)}]`);

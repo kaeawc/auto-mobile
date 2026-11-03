@@ -338,6 +338,44 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(renderPrototypeStill(ime), "padded")[0]!.style["padding-bottom"]).toBe("8px");
   });
 
+  describe("landscape left inset on an iPhone frame (#16588)", () => {
+    const screens = (reference.root as { screens: Record<string, Record<string, unknown>> })
+      .screens;
+    const landscape = (cart: Record<string, unknown>) =>
+      renderPrototypeStill(
+        { ...reference, root: { ...(reference.root as object), screens: { ...screens, cart } } },
+        { frame: "iphone-16", orientation: "landscape" },
+      ).element;
+    const screenOf = (element: WebElement) =>
+      find(element, (node) => node.attrs["data-chrome"] === "screen")[0]!;
+    const insetUsers = (element: WebElement) =>
+      find(element, (node) => node.attrs["data-chrome"] === undefined).filter((node) =>
+        Object.values(node.style).some((value) => /--safe-(start|left)/.test(value)),
+      );
+
+    test("the screen resolves the start inset to the frame's 59 px landscape left inset", () => {
+      const screen = screenOf(landscape(screens.cart!)).style;
+      expect(screen["--safe-left"]).toBe("59px");
+      expect(screen["--safe-start"]).toBe("var(--safe-left)");
+    });
+
+    test("without safeAreaPadding no content takes the left inset, as both devices draw edge to edge", () => {
+      expect(insetUsers(landscape(screens.cart!))).toEqual([]);
+    });
+
+    test("safeAreaPadding on the screen column insets every row once", () => {
+      const users = insetUsers(
+        landscape({
+          ...screens.cart,
+          testTag: "cart",
+          safeAreaPadding: { edges: ["start", "end"], types: ["systemBars", "cutout"] },
+        }),
+      );
+      expect(users.map((node) => node.attrs["data-testid"])).toEqual(["cart"]);
+      expect(users[0]!.style["padding-inline-start"]).toBe("calc(0px + var(--safe-start))");
+    });
+  });
+
   test("draws a button disabled only when its enabledWhen is decidably false", () => {
     const buttonOf = (enabledWhen?: unknown) =>
       byTag(

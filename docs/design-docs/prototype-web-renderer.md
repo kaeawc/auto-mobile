@@ -321,7 +321,8 @@ the host, so the page's script only switches between views it was given and neve
   since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. Both devices draw a
   window's content edge to edge and a top app bar takes no inset of its own, so it clears the
-  status bar only through `safeAreaPadding`.
+  status bar only through `safeAreaPadding`; likewise content clears the landscape cutout side
+  (an iPhone's 59 pt left inset) only through `safeAreaPadding` on the `start` edge.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

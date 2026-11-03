@@ -60,7 +60,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_connectivity_v1",
       // Contract only; the biometric prompt runtime is owed (#14328).
       "prototype_platform_biometric_v1",
-      // Contract only; the settings launcher runtime is owed (#14320).
+      // CtrlProxy registers the settings launcher (#14320); the embedded renderer does not.
       "prototype_platform_settings_v1",
       // CtrlProxy registers the URL opener (#14238); the embedded renderer leaves it to the app.
       "prototype_platform_links_v1",

@@ -141,6 +141,7 @@ export const systemTrayResultSchema = z
             texts: z.array(z.string()),
             inGroup: z.boolean(),
             ownership: z.enum(["header", "dumpsys"]),
+            tag: z.string().optional(),
           })
           .passthrough(),
       )

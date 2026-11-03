@@ -1,0 +1,282 @@
+{
+  "id": "media-video-nodes",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["media"]
+  },
+  "media": {
+    "players": {
+      "main": {
+        "kind": "video",
+        "source": {
+          "sample": "countdown"
+        }
+      }
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      },
+      {
+        "type": "videoPlayer",
+        "player": "main"
+      }
+    ]
+  }
+}

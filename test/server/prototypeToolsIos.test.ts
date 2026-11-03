@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { toolIsError, toolStructured } from "../helpers/toolResponse";
 import { registerPrototypeTools, prototypeOutputSchema } from "../../src/server/prototypeTools";
@@ -22,6 +24,16 @@ const spec = {
   window: { placement: { type: "fullscreen" as const } },
   root: { type: "image" as const, asset: "logo" },
 };
+
+const settingsWifi = JSON.parse(
+  readFileSync(
+    join(
+      import.meta.dir,
+      "../fixtures/prototype-spec/platform-window-controls/settings-open-wifi.json",
+    ),
+    "utf8",
+  ),
+) as Record<string, unknown>;
 
 /** Stands in for the launchApp {prototype: true} registry (#10567). */
 class FakePrototypeAgentConnections implements PrototypeAgentConnections {
@@ -293,6 +305,15 @@ describe("prototype tool on an iOS simulator", () => {
     const { response, payload } = await call({ action: "show", spec: persistent });
     expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain('window.persistence "device" is Android only');
+    expect(agent.requests).toEqual([]);
+  });
+
+  test("an Android-only settings.open page is refused on iOS with its path (#16520)", async () => {
+    const { response, payload } = await call({ action: "show", spec: settingsWifi });
+    expect(toolIsError(response)).toBe(true);
+    expect(payload.error).toBe(
+      'Invalid prototype at spec.root.children[1].onTap[0]: settings.open page "wifi" is Android only; on iOS use "app" or "notifications". Nothing was shown.',
+    );
     expect(agent.requests).toEqual([]);
   });
 

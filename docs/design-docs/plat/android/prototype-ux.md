@@ -2137,8 +2137,10 @@ the capability yet.
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
-Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. CtrlProxy registers the module on Android and opens each page for its own package with
+Android only. The spec validators are platform-neutral, so the host's iOS show preflight refuses a literal
+Android-only `page` with the action's path; a bound page is left to the runtime. The Kotlin validator needs no
+such check because it runs only on Android, and the Swift agent validator has none yet because the iOS agent
+does not advertise the module, which the host's capability gate refuses. CtrlProxy registers the module on Android and opens each page for its own package with
 `FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
 the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
 handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do

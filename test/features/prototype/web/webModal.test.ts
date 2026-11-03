@@ -214,4 +214,12 @@ describe("web still snackbar (#16536)", () => {
     }
     expect(textOf(byPart(still.element, "headlineSmall")[0]!)).toBe("One\nTwo");
   });
+
+  test("an open dialog with a shader lists it as a shader fallback; a closed one does not", () => {
+    const node = dialog({ style: { shader: { type: "noise" } } });
+    const reasons = (open: boolean) =>
+      renderPrototypeStill(specWith([node], { open })).unsupportedNodes.map((n) => n.reason);
+    expect(reasons(true)).toEqual(["shaderFallback"]);
+    expect(reasons(false)).toEqual([]);
+  });
 });

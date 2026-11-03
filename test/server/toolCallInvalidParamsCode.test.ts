@@ -9,6 +9,7 @@ import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { prototypeSchema } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { formatToolParamError } from "../../src/utils/toolParamError";
+import { MAX_TOOL_PARAM_ARRAY_LENGTH } from "../../src/utils/toolParamArrayLimit";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -17,6 +18,8 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 
 const INTERNAL_TOOL = "__invalid_params_internal_failure__";
 const UNKNOWN_TOOL = "__invalid_params_unknown__";
+const ARRAY_TOOL = "__invalid_params_array_limit__";
+let arrayElementChecks = 0;
 const validationCases = [
   { label: "missing required parameter", name: "sendKeys", args: {}, fragment: "commands" },
   {
@@ -62,6 +65,19 @@ describe("invalid tool params use the SDK invalid-params code", () => {
     ToolRegistry.register(INTERNAL_TOOL, "Internal failure probe", z.object({}), async () => {
       throw new Error("genuine internal failure");
     });
+    ToolRegistry.register(
+      ARRAY_TOOL,
+      "Array limit probe",
+      z.object({
+        items: z.array(
+          z.string().refine(() => {
+            arrayElementChecks++;
+            return true;
+          }),
+        ),
+      }),
+      async () => ({ content: [] }),
+    );
     for (const fixture of fixtures) {
       await fixture.setup();
       // Warm dispatch outside the per-test timing budget.
@@ -129,6 +145,20 @@ describe("invalid tool params use the SDK invalid-params code", () => {
         .catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(ProtocolError);
       expect(error).toMatchObject({ code: -32602, message });
+    });
+
+    test(`${mode}: an oversized array is refused before any element is validated`, async () => {
+      arrayElementChecks = 0;
+      const items = Array.from({ length: MAX_TOOL_PARAM_ARRAY_LENGTH + 1 }, () => "x");
+      const error = await fixtures[index].client
+        .callTool({ name: ARRAY_TOOL, arguments: { items } })
+        .catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(ProtocolError);
+      expect(error).toMatchObject({ code: ErrorCode.InvalidParams });
+      expect((error as Error).message).toContain(
+        `Invalid parameters for tool ${ARRAY_TOOL}: items Too big: expected array to have <=${MAX_TOOL_PARAM_ARRAY_LENGTH} items`,
+      );
+      expect(arrayElementChecks).toBe(0);
     });
 
     test(`${mode}: genuine handler failure keeps its isError shape`, async () => {

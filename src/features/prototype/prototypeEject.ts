@@ -104,7 +104,7 @@ function composeStateLines(g: Generated): string[] {
     "fun top(stack: String): String = path(stack).last()",
     "fun push(stack: String, screen: String) { stacks[stack] = path(stack) + screen }",
     "fun pop(stack: String) { val p = path(stack); if (p.size > 1) stacks[stack] = p.dropLast(1) }",
-    "fun popToRoot(stack: String) { stacks[stack] = listOf(path(stack).first()) }",
+    'fun popToRoot(stack: String) { stacks[stack] = listOf(starts[stack] ?: "") }',
     "fun replace(stack: String, screen: String) { stacks[stack] = path(stack).dropLast(1) + screen }",
     'fun text(key: String): String = texts[key] ?: ""',
     "fun setText(key: String, value: String) { texts[key] = value }",
@@ -165,7 +165,7 @@ function swiftStateLines(g: Generated): string[] {
     'func top(_ stack: String) -> String { path(stack).last ?? "" }',
     "func push(_ stack: String, _ screen: String) { stacks[stack] = path(stack) + [screen] }",
     "func pop(_ stack: String) { let p = path(stack); if p.count > 1 { stacks[stack] = Array(p.dropLast()) } }",
-    "func popToRoot(_ stack: String) { stacks[stack] = Array(path(stack).prefix(1)) }",
+    'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?: ""] }',
     "func replace(_ stack: String, _ screen: String) { stacks[stack] = Array(path(stack).dropLast()) + [screen] }",
     ...block("func text(_ key: String) -> Binding<String> {", [
       'Binding(get: { self.texts[key] ?? "" }, set: { self.texts[key] = $0 })',

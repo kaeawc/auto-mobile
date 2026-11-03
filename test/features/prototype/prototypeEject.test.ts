@@ -262,6 +262,17 @@ describe("automobile:prototype/eject result", () => {
     );
   });
 
+  test("popToRoot resets a stack to its declared start, even after a replace", async () => {
+    const kt = (await eject("android")).files[0].content;
+    const swift = (await eject("ios")).files[0].content;
+    expect(kt).toContain(
+      'fun popToRoot(stack: String) { stacks[stack] = listOf(starts[stack] ?: "") }',
+    );
+    expect(swift).toContain(
+      'func popToRoot(_ stack: String) { stacks[stack] = [starts[stack] ?: ""] }',
+    );
+  });
+
   test("expands reusable components before translating them", async () => {
     const spec = {
       id: "reuse",

@@ -19,6 +19,7 @@
 #   PLAY_CLOSED_TRACK         closed-testing track name (default: alpha)
 #   PROTOVIEWER_METADATA_DIR  fastlane Android metadata root (default: fastlane/metadata/android)
 #   FASTLANE_BIN              fastlane executable (default: `bundle exec fastlane`)
+#   PLAY_RETRY_DELAYS         seconds between supply retries, space-separated (default: "30 90")
 #
 # Exit codes: 0 success, 1 fastlane or check failure, 2 usage or input error.
 set -euo pipefail
@@ -107,7 +108,26 @@ run_supply() {
   else
     fastlane=(bundle exec fastlane)
   fi
-  ${fastlane[@]+"${fastlane[@]}"} supply --package_name "$PACKAGE_NAME" "$@"
+  # Runs for different versions are not serialized against each other (an app-wide concurrency
+  # group would make a halt wait behind another version's pending approval), so two Play edits can
+  # overlap and one commit can invalidate the other's edit. supply commits last, so a failed attempt
+  # left nothing committed and is retried. A retried upload whose first commit did land fails on the
+  # already-used versionCode, loudly.
+  local delays=() delay attempt=1
+  read -r -a delays <<<"${PLAY_RETRY_DELAYS:-30 90}"
+  while true; do
+    if ${fastlane[@]+"${fastlane[@]}"} supply --package_name "$PACKAGE_NAME" "$@"; then
+      return 0
+    fi
+    if ((attempt > ${#delays[@]})); then
+      echo "protoviewer-play: supply failed after $attempt attempts" >&2
+      return 1
+    fi
+    delay="${delays[attempt - 1]}"
+    echo "protoviewer-play: supply attempt $attempt failed; retrying in ${delay}s" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
 }
 
 upload_internal() {

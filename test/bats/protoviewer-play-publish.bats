@@ -25,6 +25,7 @@ setup() {
   AAB="$BATS_TEST_TMPDIR/app.aab"
   : >"$AAB"
   unset PLAY_CLOSED_TRACK
+  export PLAY_RETRY_DELAYS="0 0"
 }
 
 # Workflow YAML as JSON, with either yq flavour (mikefarah on runners, python-yq locally).
@@ -232,4 +233,20 @@ workflow_json() {
   json="$(workflow_json "$WORKFLOW")"
   [ "$(jq -r '.concurrency.group' <<<"$json")" = "protoviewer-play-\${{ github.event_name == 'push' && github.ref_name || format('protoviewer/{0}', inputs.version) }}" ]
   [ "$(jq -r '.concurrency["cancel-in-progress"]' <<<"$json")" = "false" ]
+}
+
+@test "a failed supply call is retried, and gives up after the configured attempts" {
+  # Fails twice (an overlapping Play edit invalidated ours), then succeeds.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$SUPPLY_CALLS"\n[ "$(wc -l < "$SUPPLY_CALLS")" -ge 3 ]\n' >"$FASTLANE_BIN"
+  run bash "$SCRIPT" operate halt --version-code 1002003 --fraction 0.2
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$SUPPLY_CALLS")" -eq 3 ]
+  [ "$(sort -u "$SUPPLY_CALLS" | wc -l)" -eq 1 ]
+
+  rm "$SUPPLY_CALLS"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$SUPPLY_CALLS"\nexit 1\n' >"$FASTLANE_BIN"
+  run bash "$SCRIPT" operate halt --version-code 1002003 --fraction 0.2
+  [ "$status" -eq 1 ]
+  [ "$(wc -l <"$SUPPLY_CALLS")" -eq 3 ]
+  [[ "$output" == *"supply failed after 3 attempts"* ]]
 }

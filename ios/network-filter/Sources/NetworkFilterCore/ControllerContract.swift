@@ -4,16 +4,18 @@ import Foundation
 ///
 /// The daemon runs the installed controller as a subprocess and parses the one
 /// line of JSON it prints. Bump `version` whenever a field changes meaning or a
-/// required field is added or removed; the daemon rejects any other version.
+/// required field is added or removed; both peers validate the negotiated version.
 /// The nested `snapshot` carries the provider's own version. Version 2 shipped
 /// per-simulator attribution (#10589), where `status` and `snapshot` take
 /// repeatable `--managed <device-set> <udid>` pairs. Version 3 adds the leased
 /// per-app `apply`, `reset` and `renew` commands, the `rule` result field, and
 /// the snapshot's `rules` (#10264). Version 4 carries shaping configuration;
-/// invocations without negotiation still use version 3 for installed hosts.
+/// Version 5 adds launch-time watch rules and `existingFlows` on offline apply
+/// read-back. The daemon negotiates 5 for these semantics; versions 3 and 4
+/// retain their wire fields. Invocations without negotiation still use version 3.
 public enum ControllerContract {
-    public static let version = 4
-    public static let supportedVersions = [3, 4]
+    public static let version = 5
+    public static let supportedVersions = [3, 4, 5]
     public static let defaultVersion = 3
     public static let commands = ["activate", "status", "snapshot"] + NetworkRuleCommandKind.allCases.map(\.rawValue)
 }
@@ -51,7 +53,14 @@ public struct ControllerResult: Codable {
         self.state = state
         self.detail = detail
         self.snapshot = snapshot
-        self.rule = rule
+        self.rule = rule.map {
+            NetworkRuleResult(
+                outcome: $0.outcome, installedRevision: $0.installedRevision,
+                leaseRemainingMilliseconds: $0.leaseRemainingMilliseconds,
+                shaping: $0.shaping, rejection: $0.rejection,
+                existingFlows: version >= 5 ? $0.existingFlows : nil
+            )
+        }
     }
 
     /// One line of JSON, without the trailing newline the controller writes.
@@ -78,6 +87,7 @@ public struct ControllerInvocation: Equatable {
             switch remaining[1] {
             case "3": version = 3
             case "4": version = 4
+            case "5": version = 5
             default: throw ControllerInvocationError.invalidVersion
             }
             remaining.removeFirst(2)
@@ -85,8 +95,8 @@ public struct ControllerInvocation: Equatable {
         guard ControllerContract.commands.contains(command)
         else { throw ControllerInvocationError.invalidCommand(version: version) }
         // Legacy activate ignores arguments; version 4 makes its argument errors explicit.
-        if command == "activate", version == 4, let argument = remaining.first {
-            throw ControllerInvocationError.unexpectedActivateArgument(argument)
+        if command == "activate", version >= 4, let argument = remaining.first {
+            throw ControllerInvocationError.unexpectedActivateArgument(argument, version: version)
         }
         return ControllerInvocation(command: command, version: version, arguments: remaining)
     }
@@ -94,15 +104,15 @@ public struct ControllerInvocation: Equatable {
 
 public enum ControllerInvocationError: Error, Equatable, CustomStringConvertible {
     case invalidVersion
-    case unexpectedActivateArgument(String)
+    case unexpectedActivateArgument(String, version: Int = 4)
     case invalidCommand(version: Int = ControllerContract.defaultVersion)
 
     public var description: String {
         switch self {
-        case let .unexpectedActivateArgument(argument):
-            "Unexpected argument '\(argument)'; use activate [--contract-version <3|4>]"
+        case let .unexpectedActivateArgument(argument, version):
+            "Unexpected argument '\(argument)'; use activate [--contract-version <\(version >= 5 ? "3|4|5" : "3|4")>]"
         case .invalidVersion:
-            "Invalid or repeated --contract-version. Supported contract versions: 3, 4."
+            "Invalid or repeated --contract-version. Supported contract versions: 3, 4, 5."
         case let .invalidCommand(version):
             "Usage: network-filter-controller \(ControllerContract.commands.joined(separator: "|"))"
                 + " [--managed <device-set-path> <udid>]... (status|snapshot)"
@@ -113,7 +123,8 @@ public enum ControllerInvocationError: Error, Equatable, CustomStringConvertible
     public var result: ControllerResult {
         let version: Int
         switch self {
-        case .invalidVersion, .unexpectedActivateArgument: version = ControllerContract.version
+        case .invalidVersion: version = ControllerContract.version
+        case let .unexpectedActivateArgument(_, requested): version = requested
         case let .invalidCommand(requested): version = requested
         }
         return ControllerResult(state: .unavailable, detail: description, version: version)

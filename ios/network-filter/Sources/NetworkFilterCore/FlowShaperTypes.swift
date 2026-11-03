@@ -18,6 +18,13 @@ public struct ShapingRule: Equatable {
 /// back into the shaper. Nil means reset, expiry, or a non-shaping replacement.
 public protocol ShapingRuleSource {
     func shapingRule(for target: NetworkRuleTarget) -> ShapingRule?
+    func watches(_ target: NetworkRuleTarget) -> Bool
+    func commitOfflineDrop(for target: NetworkRuleTarget, existingFlow: Bool) -> Bool
+}
+
+extension ShapingRuleSource {
+    public func watches(_: NetworkRuleTarget) -> Bool { false }
+    public func commitOfflineDrop(for _: NetworkRuleTarget, existingFlow _: Bool) -> Bool { false }
 }
 
 /// A timer token, not buffered payload. IDs never repeat during a shaper's life.
@@ -53,6 +60,7 @@ public enum ResumeDecision: Equatable {
     case allow
     case filter(inbound: Bool, outbound: Bool, peekBytes: Int)
     case pass(bytes: Int, peekBytes: Int)
+    case drop
 }
 
 /// An early same-ticket timer retains its pause and must be scheduled again.

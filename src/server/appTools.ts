@@ -421,6 +421,8 @@ const createLaunchAppHandler =
       signal?.throwIfAborted();
       const prepared = prepareLaunchArguments(device, args, dependencies.idGenerator);
       mutationToken = prepared.mutationToken;
+      await dependencies.prearmNetwork(device, args);
+      signal?.throwIfAborted();
       const launchApp = dependencies.createLaunchApp(device);
       mutationMayHaveHappened = true;
       const result = await executeLaunch(launchApp, args, prepared.launchArguments, {

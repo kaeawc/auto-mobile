@@ -4,14 +4,12 @@ import { ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
 function freeAspectRatio(node: Raw | undefined): number | undefined {
   const style = record(node?.style);
-  const ratio = style?.aspectRatio;
-  return typeof ratio === "number" &&
-    ratio > 0 &&
-    style?.width === undefined &&
-    style.height === undefined &&
-    typeof style.weight !== "number"
-    ? ratio
-    : undefined;
+  if (!style || typeof style.aspectRatio !== "number" || style.aspectRatio <= 0) {
+    return undefined;
+  }
+  const sized =
+    style.width !== undefined || style.height !== undefined || typeof style.weight === "number";
+  return sized ? undefined : style.aspectRatio;
 }
 
 /**

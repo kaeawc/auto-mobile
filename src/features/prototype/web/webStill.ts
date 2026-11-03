@@ -8,6 +8,7 @@ import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
@@ -178,6 +179,8 @@ function stillScope(
       palette: prototypeRolePalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
+      platform: frame.platform,
+      ...(record(spec.window)?.layoutDirection === "rtl" ? { rtl: true } : {}),
     },
     condition: {
       state: record(spec.state) ?? {},
@@ -210,6 +213,27 @@ function screenBackground(style: WebStyleContext): string {
   );
 }
 
+/**
+ * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
+ * colour (a fullscreen window's), as both platforms' edge-to-edge defaults do.
+ */
+function stillStatusBarContent(
+  spec: unknown,
+  content: WebElement,
+  background: string,
+  dark: boolean,
+): WebStatusBarContent {
+  const authored = record(record(spec)?.window)?.statusBar;
+  if (authored === "light" || authored === "dark") {
+    return authored;
+  }
+  // A sheet or floating window leaves the status area on the screen background.
+  const placement = record(record(record(spec)?.window)?.placement)?.type;
+  const fullscreen = placement === undefined || placement === "fullscreen";
+  const top = fullscreen ? appTopColor(content, background) : background;
+  return statusBarContentFor(top, dark ? "light" : "dark");
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
@@ -223,11 +247,18 @@ export function renderPrototypeStill(
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
+  const background = screenBackground(scope.style);
+  const content = placed(expanded, root, scope.layers);
   const element = renderDeviceFrame(
     frame,
     options.orientation ?? "portrait",
-    { dark, textColor, background: screenBackground(scope.style) },
-    placed(expanded, root, scope.layers),
+    {
+      dark,
+      textColor,
+      background,
+      statusBarContent: stillStatusBarContent(expanded, content, background, dark),
+    },
+    content,
   );
   const stack = scope.stacks?.[0];
   return {

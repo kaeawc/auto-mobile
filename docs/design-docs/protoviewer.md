@@ -245,6 +245,14 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   internal scheme `automobile-proto://` remains for legacy callers (section 7): it imports a
   host-staged inbox bundle or opens an existing library entry. Simulator hosts use the file inbox
   instead. The scheme never fetches or carries spec bytes.
+- Link sharing (#14128) uses a team-supplied static https host; there is no AutoMobile relay and no
+  LAN serving from the daemon. MCP `prototype share` writes the canonical bundle under the data
+  directory and, given the https `url` it will be served from, returns
+  `automobile-proto://import?url=<percent-encoded>&sha256=<bundle hex>` and its QR (byte mode, level
+  M, link at most 1024 bytes). The hash pins the exact bytes: the importer must show host and hash,
+  fetch with the egress check, and refuse a mismatch before the strict import path, with
+  `source: "share"`. Links do not expire. Android only; iOS distribution beyond dev-signed builds is
+  out of scope.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 
@@ -631,6 +639,30 @@ Play Console. It is kept there and not in this repository, because it is persona
 grants production access, `promote-production` fails at Play, and the release stays on the closed
 track.
 
+### 8.4 Staged-rollout release gates (#16516)
+
+There is no crash SDK (section 12), so store vitals are the release signal. A version's rollout
+stops widening when its rate crosses a gate:
+
+| Platform | Signal (for the new version only)      | Gate    | Action                                  |
+| -------- | -------------------------------------- | ------- | --------------------------------------- |
+| Android  | Play Console user-perceived crash rate | > 1.09% | `halt` the staged rollout (section 8.3) |
+| Android  | Play Console user-perceived ANR rate   | > 0.47% | `halt` the staged rollout (section 8.3) |
+| iOS      | Xcode Organizer crash rate             | > 1.09% | Pause the phased release                |
+
+The Android gates are Play's bad-behavior thresholds; crossing them also lowers store ranking. iOS
+uses the same fixed crash-rate threshold (owner, 2026-11-03). The iOS gate applies once phased App
+Store releases exist (#14150).
+
+**Release checklist: check vitals before widening rollout.** The `google-play-release` approver checks the gates, using the new version's vitals,
+before approving every step that widens exposure:
+
+1. Before approving `promote-production`: the closed-track version is under every gate.
+2. Before every `rollout` dispatch: the production version is under every gate at its current
+   fraction.
+3. If a gate is crossed at any point: dispatch `halt` (iOS: pause the phased release) and ship the fix
+   under a higher version.
+
 ## 9. Phased plan
 
 **First release.** Library list; open/switch; relaunch/reset; delete; share a clean bundle; import by
@@ -692,6 +724,7 @@ harnesses and a nightly CI job remain future work.
 | Store accounts             | Personal enrollment on both stores; Play needs a 14-day closed test with 12 testers first (owner, 2026-10-31, #14144).          |
 | Store support and privacy  | Hosted on the docs site: `protoviewer/support.md` and `protoviewer/privacy.md` (owner, 2026-10-31, #14144).                     |
 | Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                                           |
+| Rollout gates              | Halt above 1.09% crash or 0.47% ANR (Android), 1.09% crash (iOS) (owner, 2026-11-03, #16516).                                   |
 
 ## Issues
 

@@ -427,11 +427,11 @@ The shared request-policy and storage work is tracked in #13622.
   report, or a report still for another version leaves the decision to the app's import gate
   (section 5 step 5); unusable storage keeps the platform save path, as for an import. The iOS
   simulator path has no report yet and always defers to the app.
-- Trust model for store-installed builds (owner, 2026-10-31). The host cannot pin a store binary's
+- Trust model for store-installed builds. The host cannot pin a store binary's
   checksum the way it pins CtrlProxy, and the Play-signed binary differs from the GitHub one
   (#14145). It accepts any ProtoViewer signed with the expected certificate (Android) or team
   (iOS); the host does not verify the signer yet.
-- Support window (owner, 2026-10-31): the MCP server supports the three most recent ProtoViewer
+- Support window: the MCP server supports the three most recent ProtoViewer
   releases. Older builds still get the handshake or the app's own gate, without a guarantee.
 - `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is installed, build a
   canonical bundle (#13616) and route it as above; otherwise the CtrlProxy or template path is
@@ -635,7 +635,7 @@ harnesses and a nightly CI job remain future work.
 | Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                |
 | Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
-| Version skew               | Host capability handshake before `save`, signer trust, store link, last 3 releases (2026-10-31).        |
+| Version skew               | Host capability handshake before `save`, signer trust, store link, last 3 releases.                     |
 
 ## Issues
 

@@ -289,8 +289,9 @@ the host, so the page's script only switches between views it was given and neve
   by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
   point. Points are placed in dp from the box centre (`calc(50% + …px)`, the SVG's origin at the
   centre), so CSS resolves them against the box as rendered. A width or height the parent sizes
-  (`fill`, a stretched width, the fullscreen root) cannot be known when rendering, so the framing and
-  perspective use the screen's size on that axis, the most the box can take. A camera framing turns
+  (`fill`, a `weight` on the parent's main axis, a stretched width, the fullscreen root) cannot be
+  known when rendering, so the framing and perspective use the screen's size on that axis, the most
+  the box can take. A camera framing turns
   by its `bearing` and `tilt` (a fit frames north up): the canvas moves to a ground square under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, sized from the
   box corners traced back onto the plane so it covers any aspect ratio, and lines and pins are
   projected the same way in code: pins stay upright, and lines are clipped at a near plane (0.1 of the

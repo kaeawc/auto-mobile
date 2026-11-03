@@ -151,6 +151,15 @@ describe("prototype web map (#16539)", () => {
     expect(mapSize({ height: "fill" }, screen)).toEqual({ width: 390, height: 844 });
     // `wrap` sets no CSS height, so the box stays at its 200 dp default.
     expect(mapSize({ height: "wrap" }, screen)).toEqual({ width: 390, height: 200 });
+    // A weight takes the parent's main axis, whatever size it names there.
+    expect(mapSize({ weight: 1, height: { dp: 150 } }, screen, "column")).toEqual({
+      width: 390,
+      height: 844,
+    });
+    expect(mapSize({ weight: 1, width: { dp: 300 } }, screen, "row")).toEqual({
+      width: 390,
+      height: 200,
+    });
   });
 
   test("an empty map draws the neutral canvas", () => {
@@ -318,6 +327,28 @@ describe("prototype web map (#16539)", () => {
     // The ground's reach covers the whole screen-sized box at that eye.
     const side = Number(/^max\((\d+)px/.exec(String(map.part("ground")[0]!.style.width))![1]!);
     expect(side / 2).toBeGreaterThanOrEqual(groundReach(SCREEN, 60));
+  });
+
+  test("a weighted map in a column is bounded by the screen too (#16656)", () => {
+    const rendered = renderPrototypeStill({
+      ...reference,
+      data: { places },
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "map",
+            markers,
+            style: { weight: 1 },
+            camera: { lat: 37.77, lng: -122.42, zoom: 12, tilt: 60 },
+          },
+        ],
+      },
+    });
+    const ground = find(rendered.element, (element) => element.attrs["data-part"] === "ground");
+    expect(ground[0]!.style.transform).toBe(
+      `perspective(${eyeDistance(SCREEN.height)}px) rotateX(60deg) rotate(0deg)`,
+    );
   });
 
   test("a fill map places pins at their zoom, whatever size the box renders at (#16656)", () => {

@@ -375,19 +375,25 @@ function dpSize(value: unknown): number | undefined {
 
 /**
  * The size the map frames and projects against: its `{dp}` size; any other height but `fill`
- * (unsized, `wrap`) leaves the box at its 200 dp. An axis its parent sizes (`fill`, or stretching across a column) cannot be known
- * here, so it takes the screen's, the most it can render at: the eye then sits far enough out that
- * no horizon shows in the box, and the ground's reach covers it. Points are placed from the centre
- * in dp, so they land true whatever size the box renders at.
+ * (unsized, `wrap`) leaves the box at its 200 dp. An axis its parent sizes (`fill`, a `weight` on
+ * the parent's main axis, or stretching across a column) cannot be known here, so it takes the
+ * screen's, the most it can render at: the eye then sits far enough out that no horizon shows in
+ * the box, and the ground's reach covers it. Points are placed from the centre in dp, so they land
+ * true whatever size the box renders at.
  */
 export function mapSize(
   style: Raw | undefined,
   screen: { readonly width: number; readonly height: number },
+  parentAxis?: "row" | "column",
 ): Size {
+  // A weight sets `flex: w w 0` on the parent's main axis, which overrides any size there.
+  const weighted = typeof style?.weight === "number" ? parentAxis : undefined;
   return {
-    width: dpSize(style?.width) ?? screen.width,
+    width: (weighted === "row" ? undefined : dpSize(style?.width)) ?? screen.width,
     height:
-      dpSize(style?.height) ?? (style?.height === "fill" ? screen.height : DEFAULT_MAP_HEIGHT),
+      weighted === "column" || style?.height === "fill"
+        ? screen.height
+        : (dpSize(style?.height) ?? DEFAULT_MAP_HEIGHT),
   };
 }
 
@@ -485,7 +491,11 @@ const mapRenderer =
   (kit: WebRenderKit): NodeRenderer =>
   (node, scope) => {
     const style = record(node.style);
-    const size = mapSize(style, { width: scope.screenWidth, height: scope.screenHeight });
+    const size = mapSize(
+      style,
+      { width: scope.screenWidth, height: scope.screenHeight },
+      scope.style.parentAxis,
+    );
     const eye = eyeDistance(size.height);
     const markers = mapMarkers(node, scope);
     const lines = mapLines(node, scope);

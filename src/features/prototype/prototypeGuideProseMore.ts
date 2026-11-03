@@ -48,8 +48,32 @@ sent, replacing backends of the same id, and a saved prototype does not carry th
 - **Latency and faults** replay identically for the same \`seed\`: \`latencyMs {min,max}\` delays every
   answer, and a fault \`{path, method?, status, every | rate}\` fails every nth matching request or
   that fraction of them with \`{error:"mock fault"}\`.
+- **Actors** play the other side (at most 16, each up to 64 steps). An actor fires on a matching
+  successful request (\`on: {route: "POST /messages/:id"}\`) or every N ms (\`every\` with \`maxRuns\`),
+  after an optional \`afterMs\` lead, and runs \`do\` in order: \`{append: collection, value}\`,
+  \`{update: collection, id, value}\` (merge), \`{remove: collection, id}\`, each with an optional
+  \`afterMs\` after the previous step. \`value\` and \`id\` bind \`{params.x}\`, \`{query.x}\` and
+  \`{body:/pointer}\` from the triggering request. A failed step is skipped and the run goes on;
+  redefining or clearing the backend cancels pending steps. Poll the collection to see the result.
+  \`publish\`, \`advance\` and \`notify\` steps are not supported yet.
 - A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
   with \`too_large\`.
+- **Rooms** serve realtime channels with \`via: "host"\`: a WebSocket to
+  \`wss://<backendId>.mock.automobile.invalid/rooms/general\` or an SSE stream to the \`https://\` form
+  joins the first room whose \`path\` (\`/rooms/:roomId\`) matches; no match is \`handshake_failed\`
+  with status 404. A room \`{path, onConnect?, echo?, relay?, timeline?}\` sends its \`onConnect\` frames
+  to each new connection, \`timeline [{afterMs, frame}]\` frames that long after each connection
+  opened, returns a send to its sender with \`echo\`, and passes it to the room's other connections
+  with \`relay\`. Frames bind \`{params.x}\` and \`{query.x}\` from the channel URL; a string frame is sent
+  as written, other JSON as JSON text.
+- **Broadcasts** \`{collection: {room, frame, on?}}\` send a successful collection write (\`POST\` by
+  default; \`on\` takes \`POST\`, \`PUT\`, \`PATCH\`) to a room. \`{item}\` and \`{item:/pointer}\` bind the
+  stored item, so \`{"messages":{"room":"/rooms/{item:/roomId}","frame":{"message":"{item}"}}}\` makes a
+  message one device posts appear on every device in that room.
+- \`publish {backendId, room, frame}\` speaks as the other side to every connection in \`room\` and
+  returns \`delivered\`. \`backendLog\` lists room frames (\`{room, from, data}\`, \`from\` is \`client\`,
+  \`publish\` or \`broadcast\`) beside requests. Redefining or clearing a backend closes its channels
+  with code 1001.
 
 ## Value formatters (#14227)
 
@@ -295,25 +319,40 @@ A spec reaches a platform feature through a module. Declare every module it uses
 Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists every module, call, event and key a spec may name; a device can run only the modules whose capabilities it advertises:
 `;
 
-export const GUIDE_PLATFORM_EXAMPLE = `Example: copy a link on tap and re-show a hint when the window changes size.
+export const GUIDE_PLATFORM_EXAMPLE = `Example: a podcast posts a "new episode" notification, and tapping it deep-links to the episode through a handler \`push\`.
 
 \`\`\`json
 {
-  "id": "share-link",
+  "id": "podcast",
   "window": {"placement": {"type": "fullscreen"}},
-  "state": {"copyStatus": "idle", "resized": false},
-  "requires": {"platform": ["clipboard", "device"]},
-  "platform": {"on": {"device.changed": [{"type": "setState", "key": "resized", "value": true}]}},
+  "state": {"postStatus": "idle"},
+  "data": {"opened": {"title": ""}},
+  "requires": {
+    "platform": ["notifications"],
+    "permissions": [{"name": "notifications", "purpose": "Tell you when a new episode is out"}]
+  },
+  "notifications": {"channels": [{"id": "episodes", "name": "New episodes", "importance": "default"}]},
+  "platform": {"on": {"notifications.opened": [
+    {"type": "setData", "path": "/data/opened/title", "value": {"event": "/data/title"}},
+    {"type": "push", "stack": "nav", "screen": "episode"}
+  ]}},
   "root": {
-    "type": "column",
-    "children": [
-      {"type": "text", "text": "Window {platform:/device/windowWidth} wide"},
-      {"type": "text", "text": "Layout changed", "visibleWhen": {"key": "resized", "equals": true}},
-      {"type": "button", "label": "Copy link", "onTap": [{"type": "platform", "call": "clipboard.copy", "args": {"text": {"value": "https://example.com/episode/1"}}, "statusKey": "copyStatus"}]}
-    ]
+    "type": "stack", "id": "nav", "start": "home",
+    "screens": {
+      "home": {"type": "button", "label": "Simulate release", "onTap": [{"type": "platform", "call": "notifications.post", "statusKey": "postStatus", "args": {
+        "id": {"value": "ep-42"}, "channel": {"value": "episodes"},
+        "title": {"value": "New episode"}, "body": {"value": "42: Shipping on Fridays"},
+        "data": {"value": {"title": "42: Shipping on Fridays"}}
+      }}]},
+      "episode": {"type": "text", "text": "Now playing {data:/opened/title}"}
+    }
   }
 }
-\`\`\``;
+\`\`\`
+
+Drive it for real with \`systemTray\` (find and tap the notification), then \`awaitEvent\` for \`prototype_platform_event\` and \`observe\` the episode screen.
+
+`;
 
 export const GUIDE_NOTIFICATIONS = `### Notifications
 
@@ -338,3 +377,43 @@ passive, default and high to active; optional \`description\` and \`showBadge\`)
   \`"/actionId"\`, \`"/reply"\` and \`"/data"\` there.
 - \`/platform/notifications/channels/<id>/blocked\` is true when the user turned a declared channel
   off; a post to it fails with \`unavailable\`. A read of an undeclared channel fails validation.`;
+
+export const GUIDE_MEDIA_ACTIONS = `### Media actions
+
+\`mediaLibrary.pick\` opens the system photo picker and \`camera.capture\` opens the system camera.
+Neither needs \`requires.permissions\`. Declare the module in \`requires.platform\`. A pick needs
+\`prototype_platform_mediaLibrary_v1\`. A capture needs \`prototype_platform_camera_v1\` and
+\`prototype_platform_camera_capture_v1\`. An iOS Simulator has the picker but no system camera, so
+it advertises \`mediaLibrary\` without the capture capability.
+
+- \`pick\` takes \`media\` (\`images\`, \`videos\` or \`imagesAndVideos\`) and optional \`maxItems\` (1 to 64,
+  default 1). With \`maxItems\` 1, \`into\` receives one media item. With more, it receives an array.
+  Android clamps \`maxItems\` to the system picker's limit.
+- \`capture\` takes \`media\` (\`image\` or \`video\`) and optional \`maxDurationMs\` (1 to 600000, video only).
+- A media item is \`{asset: "media:…", kind, mimeType, width?, height?, durationMs?, bytes, source,
+  createdAt, thumbnail?}\`; \`source\` is \`library\` for a pick and \`camera\` for a capture. Bind it to an image with \`{data: "/pointer"}\`; that needs
+  \`prototype_platform_media_items_v1\`.
+- Cancelling leaves \`into\` untouched and runs \`onError\` with \`cancelled\`. A device without a camera
+  fails with \`unavailable\` (detail \`missing_usage_description\` when the iOS plist key is missing), and
+  storage failures are \`platform_error\` (detail \`media_limit\` or \`io\`). Only one system-UI call can run
+  per prototype at a time; a second fails with \`too_many_in_flight\`.
+- Current runtimes advertise neither module, so the host refuses such a spec before show.
+  \`platformMode\` and simulated outcomes through \`prototype simulate\` are not accepted yet.
+
+\`\`\`json
+{
+  "id": "photo-draft",
+  "window": {"placement": {"type": "fullscreen"}},
+  "state": {"pickStatus": "idle", "camStatus": "idle"},
+  "data": {"draft": {}},
+  "requires": {"platform": ["mediaLibrary", "camera"]},
+  "root": {
+    "type": "column",
+    "children": [
+      {"type": "text", "text": "Picker: {pickStatus}, camera: {camStatus}"},
+      {"type": "button", "label": "Choose photos", "onTap": [{"type": "platform", "call": "mediaLibrary.pick", "args": {"media": {"value": "imagesAndVideos"}, "maxItems": {"value": 4}}, "into": "/data/draft/picked", "statusKey": "pickStatus"}]},
+      {"type": "button", "label": "Take photo", "onTap": [{"type": "platform", "call": "camera.capture", "args": {"media": {"value": "image"}}, "into": "/data/draft/photo", "statusKey": "camStatus"}]}
+    ]
+  }
+}
+\`\`\``;

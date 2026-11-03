@@ -22,6 +22,9 @@ import {
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
+import { webMapRenderers } from "./webMap";
+import { webMediaRenderers } from "./webMedia";
+import { bindStillPlatformText } from "./webPlatformState";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -34,13 +37,19 @@ import {
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
+import { textRuns } from "./webText";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
   readonly type: string;
   readonly id?: string;
   readonly path: string;
-  readonly reason: "unsupportedType" | "assetNotInlined";
+  /**
+   * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
+   * shader does.
+   */
+  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback";
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -94,7 +103,6 @@ export interface WebRenderKit {
 /** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
 const MAX_WEB_REPEAT_ITEMS = 200;
 
-/** Bare `{key}` placeholders read spec state, then top-level derived values; others stay literal. */
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
 function bindBare(text: string, scope: WebRenderScope): string {
   return text.replace(/\{([^{}]+)\}/g, (whole, inner: string) => {
@@ -126,15 +134,16 @@ export function bound(text: unknown, scope: WebRenderScope): string {
   if (typeof text !== "string") {
     return "";
   }
-  // Data placeholders bind first, then repeat items, then state, as the devices bind text. Every
-  // inserted value is shielded until the end, so it is never read again as a placeholder.
-  // Authored text is escaped too, so lookups read each placeholder's key unescaped.
-  const data = bindPrototypeDataText(escaped(text), (pointer) => {
+  // Data and platform placeholders bind first, then repeat items, then state, as the devices bind
+  // text. Every inserted value is shielded until the end, so it is never read again as a
+  // placeholder. Authored text is escaped too, so lookups read each placeholder's key unescaped.
+  const fromData = bindPrototypeDataText(escaped(text), (pointer) => {
     const value = resolvePrototypeDataPointer(scope.data, unshield(pointer));
     return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
       ? shield(renderScalar(value))
       : "";
   });
+  const data = bindStillPlatformText(fromData, scope.condition.platformState, unshield, shield);
   const items = [...scope.instances]
     .reverse()
     .reduce((value, instance) => bindText(value, shieldedInstance(instance)), data);
@@ -348,23 +357,6 @@ const box: NodeRenderer = (raw, scope, path) => {
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
-/** A text node's content: its `text`, or each span with its own text style. */
-function textContent(node: Raw, scope: WebRenderScope): WebChild[] {
-  if (!Array.isArray(node.spans)) {
-    return [bound(node.text, scope)];
-  }
-  return node.spans.map((span) => {
-    const entry = record(span) ?? {};
-    const style = record(entry.style);
-    const background = cssColor(style?.background, scope.style);
-    const css = {
-      ...textCss(style, scope.style),
-      ...(background ? { "background-color": background } : {}),
-    };
-    return el("span", { style: css }, [bound(entry.text, scope)]);
-  });
-}
-
 const text: NodeRenderer = (node, scope) => {
   const maxLines = record(node.style)?.maxLines;
   const clamp: Record<string, string> =
@@ -377,7 +369,11 @@ const text: NodeRenderer = (node, scope) => {
         }
       : {};
   const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
-  return el("span", { attrs, style }, textContent(node, scope));
+  return el(
+    "span",
+    { attrs, style },
+    textRuns(node, (value) => bound(value, scope), scope.style),
+  );
 };
 
 const scroll: NodeRenderer = (node, scope, path) => {
@@ -389,6 +385,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
+    ...fadeEdgesCss(node, scope.style),
   });
   const inner = child(scope, {
     inBox: false,
@@ -719,19 +716,16 @@ const textField: NodeRenderer = (node, scope, path) => {
   const caption = fieldCaption(node, error, scope);
   // With a caption, the wrapper is what the parent lays out, so it takes the field's sizing.
   const [outer, inner] = caption.length === 0 ? [{}, style] : splitParentFacing(style);
-  const field = el(
-    "div",
-    { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner },
-    [
-      ...namedIcon(node.leadingIcon, scope),
-      el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
-        ...floatingLabel(node, empty, scope),
-        el("span", { style: lineBounds(node) }, [shown]),
-      ]),
-      // The trailing slot is an {icon, label} action, like an app-bar action.
-      ...appBarIcons([node.trailingIcon], scope, path),
-    ],
-  );
+  const box = el("div", { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner }, [
+    ...namedIcon(node.leadingIcon, scope),
+    el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
+      ...floatingLabel(node, empty, scope),
+      el("span", { style: lineBounds(node) }, [shown]),
+    ]),
+    // The trailing slot is an {icon, label} action, like an app-bar action.
+    ...appBarIcons([node.trailingIcon], scope, path),
+  ]);
+  const field = caption.length === 0 ? box : withOverContentLayers(box, node.style, scope.style);
   return caption.length === 0
     ? field
     : el("div", { style: { ...outer, display: "flex", "flex-direction": "column", gap: "4px" } }, [
@@ -952,6 +946,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   listItem,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
+  ...webMediaRenderers(KIT),
+  ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
 };
 
@@ -1051,5 +1047,13 @@ export function renderWebNode(
     return undefined;
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const shaded = shaderFallback(styled, path);
+  if (shaded) {
+    own.unsupported.push(shaded);
+  }
+  // The layers belong to the node's own box; a wrapper (a captioned field) layers its box itself.
+  return element.attrs["data-node"] === undefined
+    ? element
+    : withOverContentLayers(element, styled.style, own.style);
 }

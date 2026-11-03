@@ -29,6 +29,7 @@ import {
 } from "./androidMutationBaseline";
 import { settingsBackedRawMutations } from "./androidSettingsBackedRevert";
 import { appLocaleJournalAppId, appLocalePrior } from "./appLocaleJournalKey";
+import { postedNotificationAppId } from "./mutations/postedNotification";
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationEntry, DeviceMutationInput } from "./mutations/types";
@@ -50,6 +51,7 @@ interface AndroidRevertCommand {
   wakeSleptScreen?: boolean;
 }
 
+const NOTIFICATIONS_CANCELLED_MARKER = "posted-notifications-cancelled";
 /** A key-press volume revert sets and reads every stream, with a legacy setter fallback. */
 const VOLUME_REVERT_TIMEOUT_MS = 10_000;
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
@@ -85,6 +87,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       this.appDataCommands(mutation) ?? this.systemPropertyCommands(mutation),
     "shared-file": (mutation) => this.fileCommands(mutation),
     "status-bar": (mutation) => this.statusBarCommands(mutation),
+    notification: (mutation) => this.postedNotificationCommands(mutation),
   };
 
   constructor(
@@ -654,6 +657,29 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
             ? "shell settings delete global sysui_demo_allowed"
             : `shell settings put global sysui_demo_allowed ${shellQuote(prior as string)}`,
       },
+    ];
+  }
+
+  /**
+   * Cancels what a journaled `postNotification` posted: force-stopping the app (every user) makes
+   * the system cancel all of its notifications, including any it showed before the session. The
+   * read-back lists every live notification key (`user|package|id|tag|uid`) and prints the marker
+   * only when none names the app; output that is not a key list fails the revert closed.
+   */
+  private postedNotificationCommands({ key }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const appId = postedNotificationAppId(key);
+    if (appId === undefined) {
+      return null;
+    }
+    const script = [
+      "out=$(cmd notification list) || exit 1",
+      `if printf '%s\\n' "$out" | grep -Ev -e '^$' -e '^-?[0-9]+[|]' | grep -q .; then exit 1; fi`,
+      `if printf '%s\\n' "$out" | grep -qF ${shellQuote(`|${appId}|`)}; then exit 1; fi`,
+      `echo ${NOTIFICATIONS_CANCELLED_MARKER}`,
+    ].join("; ");
+    return [
+      { command: `shell am force-stop ${shellQuote(appId)}` },
+      { command: `shell sh -c ${shellQuote(script)}`, success: NOTIFICATIONS_CANCELLED_MARKER },
     ];
   }
 

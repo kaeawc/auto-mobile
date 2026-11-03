@@ -4,8 +4,8 @@ Status: accepted for #14271.
 
 ## Decision
 
-1. **Where it runs.** The daemon only. A mock backend answers `via: "host"` requests (and, in a
-   later slice, channels) before the egress check, in process, with no socket and no DNS lookup. An
+1. **Where it runs.** The daemon only. A mock backend answers `via: "host"` requests and channels
+   before the egress check, in process, with no socket and no DNS lookup. An
    on-device twin of the same pure interpreter (TypeScript, Kotlin, Swift) is a later slice, so
    saved prototypes, ProtoViewer and disposable apps can run with no daemon.
 2. **Addressing.** A reserved origin, `https://<backendId>.mock.automobile.invalid/...` (RFC 2606;
@@ -24,6 +24,13 @@ Status: accepted for #14271.
 - An unknown backend id fails the request with `network` and a message naming the id, as a host that
   does not answer would.
 - The mock never proxies to the network and is not subject to the ProtoViewer egress switch.
+- A channel joins a room by its URL path. Membership is per room path (`/rooms/a` and `/rooms/b` of
+  one `/rooms/:roomId` definition are separate rooms), and a `timeline` runs per connection from its
+  open, so every viewer of a scripted feed sees it from the start.
+- A collection broadcast binds the stored item (`{item}`), not the request body, so generated ids
+  reach the other devices.
+- Redefining or clearing a backend closes its channels (1001) instead of moving them to the new
+  definition; the device's own reconnect then joins the new backend or fails as unknown.
 
 ## Alternatives checked
 

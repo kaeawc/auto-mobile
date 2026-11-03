@@ -111,6 +111,7 @@ not_in_nav: |
   /release/ios-simulator-continuity.md
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
+  /decisions/fastlane-supply-play-publishing.md
   /decisions/ios-user-files-provider.md
   /decisions/mcp-sdk-v2-split-packages.md
   /decisions/playwright-core-web-screenshots.md
@@ -142,6 +143,7 @@ nav:
       - "Android Automotive OS": using/android-automotive.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
+      - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
@@ -161,6 +163,7 @@ nav:
       - "Session broker experiment": design-docs/session-broker-experiment.md
       - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
       - "Session broker device reuse": design-docs/session-broker-device-reuse.md
+      - "Session broker remote devices": design-docs/session-broker-remote-devices.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
@@ -183,6 +186,7 @@ nav:
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
       - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
+      - "iOS CarPlay prototypes": design-docs/plat/ios/carplay-prototypes.md
       - "ProtoViewer": design-docs/protoviewer.md
       - "ProtoViewer localization": design-docs/protoviewer-localization.md
       - "ProtoViewer agent": design-docs/protoviewer-agent.md
@@ -196,6 +200,7 @@ nav:
       - "Prototype web renderer": design-docs/prototype-web-renderer.md
       - "Prototype web frames for every form factor": design-docs/prototype-web-frames-v2.md
       - "Prototype web library": design-docs/prototype-web-library.md
+      - "Prototype web 3D device view": design-docs/prototype-web-3d.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md

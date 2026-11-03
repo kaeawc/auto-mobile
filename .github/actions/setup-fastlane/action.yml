@@ -1,0 +1,32 @@
+name: "setup-fastlane"
+description: >-
+  Install Ruby and the frozen fastlane bundle from fastlane/Gemfile.lock for store publishing
+  jobs. No gem cache: publishing jobs hold store credentials and must not restore unsigned cache
+  entries.
+
+runs:
+  using: "composite"
+  steps:
+    # SHA-pinned: this runs in jobs that hold the Play service-account key.
+    - uses: ruby/setup-ruby@824c0e29fdfc7d689c191c27acc969d2d04b7dd8 # v1.331.0
+      with:
+        ruby-version: "3.3"
+        bundler: "Gemfile.lock"
+        bundler-cache: false
+        working-directory: fastlane
+
+    - name: "Install fastlane bundle (frozen)"
+      shell: bash
+      env:
+        BUNDLE_GEMFILE: ${{ github.workspace }}/fastlane/Gemfile
+        BUNDLE_FROZEN: "true"
+        BUNDLE_PATH: ${{ runner.temp }}/fastlane-bundle
+      run: |
+        set -euo pipefail
+        bundle install --jobs 4
+        {
+          echo "BUNDLE_GEMFILE=$BUNDLE_GEMFILE"
+          echo "BUNDLE_FROZEN=true"
+          echo "BUNDLE_PATH=$BUNDLE_PATH"
+        } >> "$GITHUB_ENV"
+        bundle exec fastlane --version

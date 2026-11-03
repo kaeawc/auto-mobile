@@ -5,6 +5,8 @@ import {
 } from "../../../src/features/prototype/prototypeGuide";
 import { PROTOTYPE_PLATFORM_MODULES } from "../../../src/features/prototype/prototypePlatform";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
+import { prototypeGateCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
+import { GUIDE_MEDIA_ACTIONS } from "../../../src/features/prototype/prototypeGuideProseMore";
 
 const guide = renderPrototypeGuide();
 const productionModules = Object.entries(PROTOTYPE_PLATFORM_MODULES).filter(
@@ -76,5 +78,43 @@ describe("platform guide section", () => {
     expect(block).not.toBeNull();
     const result = validatePrototypeSpec(block![1]);
     expect(result.success).toBe(true);
+  });
+
+  test("the worked example deep-links a notification tap through a handler push", () => {
+    const block = /```json\n([\s\S]*?)\n```/.exec(
+      guide.slice(guide.indexOf("## Platform features")),
+    );
+    const spec = JSON.parse(block![1]);
+    const opened = spec.platform.on["notifications.opened"];
+    expect(opened).toContainEqual({ type: "push", stack: "nav", screen: "episode" });
+    expect(JSON.stringify(spec.root)).toContain("notifications.post");
+  });
+});
+
+describe("media actions guide section", () => {
+  const example = /```json\n([\s\S]*?)\n```/.exec(GUIDE_MEDIA_ACTIONS)?.[1] ?? "";
+
+  test("is part of the rendered guide", () => {
+    expect(guide).toContain("### Media actions");
+  });
+
+  test("names the capabilities the contract gates pick and capture on", () => {
+    const camera = PROTOTYPE_PLATFORM_MODULES.camera;
+    expect(GUIDE_MEDIA_ACTIONS).toContain(
+      `\`${PROTOTYPE_PLATFORM_MODULES.mediaLibrary.capability}\``,
+    );
+    expect(GUIDE_MEDIA_ACTIONS).toContain(`\`${camera.capability}\``);
+    expect(GUIDE_MEDIA_ACTIONS).toContain(`\`${camera.calls.capture.capability}\``);
+  });
+
+  test("the example is a valid spec gated on both modules", () => {
+    expect(validatePrototypeSpec(example).success).toBe(true);
+    expect(prototypeGateCapabilities(JSON.parse(example))).toEqual(
+      expect.arrayContaining([
+        "prototype_platform_camera_capture_v1",
+        "prototype_platform_camera_v1",
+        "prototype_platform_mediaLibrary_v1",
+      ]),
+    );
   });
 });

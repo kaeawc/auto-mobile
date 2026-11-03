@@ -10,6 +10,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The spec's root-level `storage` block (#12522, `prototype_storage_v1`): the state keys
@@ -21,7 +23,7 @@ import kotlinx.serialization.json.doubleOrNull
 data class PrototypeStorageBlock(
   val version: Int,
   val keys: List<String>,
-  /** `state:` keys for the Keystore, never plaintext storage (#14321); validated, not yet used. */
+  /** `state:` keys for the Keystore, never plaintext storage (#14321). */
   val secure: List<String>? = null,
   /** Secure keys that unlock only after `biometric.authenticate` (#14321). */
   val secureAuth: Map<String, String>? = null,
@@ -55,25 +57,39 @@ sealed interface PrototypeStorageKey {
   }
 }
 
-/** The values stored for one id, with the `storage.version` they were stored under. */
-data class PrototypeStoredValues(val version: Int, val values: Map<String, JsonElement>)
+/**
+ * The values stored for one id, with the `storage.version` they were stored under. [secure] holds
+ * the secure store's values by `state:<key>` (#14321); a biometric-bound entry only marks that the
+ * key holds a value, its content is not read. [invalidated] lists secure keys whose hardware key
+ * was revoked.
+ */
+data class PrototypeStoredValues(
+  val version: Int,
+  val values: Map<String, JsonElement>,
+  val secure: Map<String, JsonElement> = emptyMap(),
+  val invalidated: List<String> = emptyList(),
+)
 
 enum class PrototypeStorageDropReason {
   VERSION,
   UNLISTED,
   MISMATCH,
+  /** A secure key whose hardware key was revoked: its value is gone and the spec's value stands. */
+  INVALIDATED,
 }
 
 data class PrototypeStorageDrop(val key: String, val reason: PrototypeStorageDropReason)
 
 /**
  * [spec] is the shown spec with the stored values applied; [applied] are the storage keys whose
- * stored value replaced the spec's, [dropped] the stored entries to delete.
+ * stored value replaced the spec's, [dropped] the stored entries to delete, [locked] the
+ * biometric-bound secure keys holding a value that waits for `biometric.authenticate`.
  */
 data class PrototypeStorageRestore(
   val spec: PrototypeSpec,
   val applied: List<String>,
   val dropped: List<PrototypeStorageDrop>,
+  val locked: List<String> = emptyList(),
 )
 
 /** The device's per-prototype report: bytes per stored key and the keys it declined to store. */
@@ -95,16 +111,28 @@ data class PrototypeStorageReport(
  * dropped (a spec without `storage` drops all); a value that no longer fits (a state type mismatch,
  * an undeclared state key, a data JSON-kind mismatch, a write the data writer refuses) is dropped
  * and the spec's value stands. Restoring is pure: it bumps no revision and emits nothing.
+ *
+ * Secure keys (#14321) follow the same version and listing rules, read from
+ * [PrototypeStoredValues.secure]: a value restores only into a key `storage.secure` lists, as a
+ * string of at most `MAX_PROTOTYPE_SECURE_VALUE_BYTES` UTF-8 bytes into a declared string state
+ * key, else it is a mismatch; a plaintext copy of a secure key is unlisted; a biometric-bound key
+ * holding a value is not read, its state holds `""` and it is listed in `locked`; an invalidated
+ * key is dropped with reason `INVALIDATED` and the spec's value stands.
  */
 object PrototypeStorageRestorer {
+  /** The largest secure value, in UTF-8 bytes (contract `limits`). */
+  val maxSecureValueBytes: Int =
+    PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_SECURE_VALUE_BYTES").jsonPrimitive.int
+
   fun restore(spec: PrototypeSpec, stored: PrototypeStoredValues?): PrototypeStorageRestore {
     if (stored == null) return PrototypeStorageRestore(spec, emptyList(), emptyList())
     val block = spec.storage
     val listed = block?.keys.orEmpty().toSet()
     val versionChanged = block != null && block.version != stored.version
-    var restored = spec
-    val applied = mutableListOf<String>()
-    val dropped = mutableListOf<PrototypeStorageDrop>()
+    val secure = restoreSecure(spec, stored, versionChanged)
+    var restored = secure.spec
+    val applied = secure.applied.toMutableList()
+    val dropped = secure.dropped.toMutableList()
     for ((key, value) in stored.values) {
       val next =
         when {
@@ -124,8 +152,70 @@ object PrototypeStorageRestorer {
         applied += key
       }
     }
-    return PrototypeStorageRestore(restored, applied, dropped)
+    return PrototypeStorageRestore(restored, applied, dropped, secure.locked)
   }
+
+  /** Applies the secure store's values: dropped, locked behind biometrics, or put in state. */
+  private fun restoreSecure(
+    spec: PrototypeSpec,
+    stored: PrototypeStoredValues,
+    versionChanged: Boolean,
+  ): PrototypeStorageRestore {
+    val invalidated = stored.invalidated.toSet()
+    val dropped =
+      invalidated
+        .map { PrototypeStorageDrop(it, PrototypeStorageDropReason.INVALIDATED) }
+        .toMutableList()
+    val applied = mutableListOf<String>()
+    val locked = mutableListOf<String>()
+    var state = spec.state.orEmpty()
+    for ((key, value) in stored.secure) {
+      if (key in invalidated) continue
+      val stateKey = (PrototypeStorageKey.parse(key) as? PrototypeStorageKey.State)?.key
+      val reason = secureDropReason(spec, key, value, versionChanged)
+      when {
+        reason != null || stateKey == null ->
+          dropped += PrototypeStorageDrop(key, reason ?: PrototypeStorageDropReason.MISMATCH)
+        isBiometric(spec, key) -> {
+          state = state + (stateKey to PrototypeScalar.Text(""))
+          locked += key
+        }
+        else -> {
+          state = state + (stateKey to PrototypeScalar.Text((value as JsonPrimitive).content))
+          applied += key
+        }
+      }
+    }
+    val restored = if (applied.isEmpty() && locked.isEmpty()) spec else spec.copy(state = state)
+    return PrototypeStorageRestore(restored, applied, dropped, locked)
+  }
+
+  private fun isBiometric(spec: PrototypeSpec, key: String): Boolean =
+    spec.storage?.secureAuth?.get(key) == "biometric"
+
+  /** Why a secure value cannot restore, or null when it fits (or waits for an unlock). */
+  private fun secureDropReason(
+    spec: PrototypeSpec,
+    key: String,
+    value: JsonElement,
+    versionChanged: Boolean,
+  ): PrototypeStorageDropReason? {
+    val stateKey = (PrototypeStorageKey.parse(key) as? PrototypeStorageKey.State)?.key
+    return when {
+      key !in spec.storage?.secure.orEmpty() -> PrototypeStorageDropReason.UNLISTED
+      versionChanged -> PrototypeStorageDropReason.VERSION
+      stateKey == null || spec.state?.get(stateKey) !is PrototypeScalar.Text ->
+        PrototypeStorageDropReason.MISMATCH
+      // A biometric-bound value is sealed until authentication; only its presence is known here.
+      isBiometric(spec, key) || fitsSecure(value) -> null
+      else -> PrototypeStorageDropReason.MISMATCH
+    }
+  }
+
+  private fun fitsSecure(value: JsonElement): Boolean =
+    value is JsonPrimitive &&
+      value.isString &&
+      value.content.toByteArray(Charsets.UTF_8).size <= maxSecureValueBytes
 
   /**
    * The values [spec] currently holds for its listed keys, by storage key; absent ones are left

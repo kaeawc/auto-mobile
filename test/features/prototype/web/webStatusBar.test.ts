@@ -458,6 +458,51 @@ test("a sole filling child of a row spans it, and a capped maximum width does no
   expect(statusBarOf(capped.element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("a maximum width at least the screen width does not narrow a child", () => {
+  const still = renderPrototypeStill({
+    id: "wide-cap",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#000000" },
+      children: [
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", maxWidth: 1000, background: "#ffffff" },
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a growing child held short by a maximum height does not reach the top of an end-arranged column", () => {
+  const still = renderPrototypeStill({
+    id: "capped-growth",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", arrangement: "end" },
+          children: [
+            {
+              type: "column",
+              style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

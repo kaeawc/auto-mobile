@@ -127,10 +127,15 @@ const MAIN_START = new Set([
 /**
  * Whether a child spans its container's width. The horizontal axis is `justify-self` in a box,
  * `align-self` in a column and the main axis in a row, where a full width or a sole growing child
- * counts. A maximum width below full caps it.
+ * counts. A maximum width below the screen width caps it.
  */
-function spansWidth(child: WebElement, layout: Layout, siblings: number): boolean {
-  const capped = belowFull(child.style["max-width"]);
+function spansWidth(
+  child: WebElement,
+  layout: Layout,
+  siblings: number,
+  screen: WebScreenSize | undefined,
+): boolean {
+  const capped = caps(child.style["max-width"], screen?.width);
   return !capped && (child.style.width === "100%" || stretchesAcross(child, layout, siblings));
 }
 
@@ -150,7 +155,24 @@ function stretchesAcross(child: WebElement, layout: Layout, siblings: number): b
   }
 }
 
-const belowFull = (value: string | undefined): boolean => value !== undefined && value !== "100%";
+/** The screen the content fills, so a size cap can be compared with the room it has. */
+export interface WebScreenSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Whether a size or size cap (`width`, `max-width`, `max-height`) binds below full: anything but
+ * `100%`, unless it is a px value at least `available`, which leaves the full size. With no
+ * `available` known, any cap binds.
+ */
+function caps(value: string | undefined, available: number | undefined): boolean {
+  if (value === undefined || value === "100%") {
+    return false;
+  }
+  const px = /^(\d+(?:\.\d+)?)px$/.exec(value.trim());
+  return available === undefined || px === null || Number(px[1]) < available;
+}
 
 /** Whether a flex child grows along the main axis: its `flex` shorthand's grow factor is above 0. */
 function grows(child: WebElement): boolean {
@@ -162,8 +184,10 @@ function grows(child: WebElement): boolean {
  * An explicit width or maximum width other than full: the element and everything inside it is
  * narrower than its container.
  */
-function narrowed(element: WebElement): boolean {
-  return belowFull(element.style.width) || belowFull(element.style["max-width"]);
+function narrowed(element: WebElement, screen: WebScreenSize | undefined): boolean {
+  return (
+    caps(element.style.width, screen?.width) || caps(element.style["max-width"], screen?.width)
+  );
 }
 
 /**
@@ -171,7 +195,12 @@ function narrowed(element: WebElement): boolean {
  * at the top (cross-axis alignment in a box or row; main-axis arrangement, or growing, as a
  * column's first child).
  */
-function reachesTop(child: WebElement, parent: WebElement, layout: Layout): boolean {
+function reachesTop(
+  child: WebElement,
+  parent: WebElement,
+  layout: Layout,
+  screen: WebScreenSize | undefined,
+): boolean {
   if (child.style.height === "100%") {
     return true;
   }
@@ -180,7 +209,11 @@ function reachesTop(child: WebElement, parent: WebElement, layout: Layout): bool
     case "row":
       return startAligned(child.style["align-self"] ?? parent.style["align-items"]);
     case "column":
-      return grows(child) || MAIN_START.has(parent.style["justify-content"]);
+      // A growing child fills the column unless a maximum height holds it short.
+      return (
+        (grows(child) && !caps(child.style["max-height"], screen?.height)) ||
+        MAIN_START.has(parent.style["justify-content"])
+      );
     case "flow":
       return true;
   }
@@ -196,21 +229,23 @@ interface Candidate {
  * its width and reach its top, last painted first, since a later child paints over the earlier
  * ones in the one cell; else the leading child, when it reaches the top.
  */
-function topCandidates(element: WebElement): Candidate[] {
+function topCandidates(element: WebElement, screen: WebScreenSize | undefined): Candidate[] {
   const layout = layoutOf(element);
   const children = elementChildren(element);
   if (layout === "box") {
     return children
       .filter(
-        (child) => spansWidth(child, layout, children.length) && reachesTop(child, element, layout),
+        (child) =>
+          spansWidth(child, layout, children.length, screen) &&
+          reachesTop(child, element, layout, screen),
       )
       .reverse()
       .map((child) => ({ child, spans: true }));
   }
   // A narrowed child's descendants span at most its width, so nothing inside it covers the top.
   const leading = children[0];
-  return leading && !narrowed(leading) && reachesTop(leading, element, layout)
-    ? [{ child: leading, spans: spansWidth(leading, layout, children.length) }]
+  return leading && !narrowed(leading, screen) && reachesTop(leading, element, layout, screen)
+    ? [{ child: leading, spans: spansWidth(leading, layout, children.length, screen) }]
     : [];
 }
 
@@ -222,14 +257,21 @@ function paddedAtTop(element: WebElement): boolean {
   return top !== undefined && !/^0(?:px)?$/.test(top.trim());
 }
 
+/** Where the walk is: the opacity above, the depth, and whether this element spans its container. */
+interface WalkStep {
+  readonly inherited: number;
+  readonly depth: number;
+  readonly spans: boolean;
+}
+
 /** The innermost opaque full-width background at the top of this subtree, if any paints there. */
 function subtreeTopColor(
   element: WebElement,
-  inherited: number,
-  depth: number,
-  spans: boolean,
+  step: WalkStep,
+  screen: WebScreenSize | undefined,
 ): string | undefined {
-  const composite = inherited * opacity(element);
+  const { depth, spans } = step;
+  const composite = step.inherited * opacity(element);
   if (composite <= 0) {
     // Nothing in a fully transparent subtree paints.
     return undefined;
@@ -240,8 +282,9 @@ function subtreeTopColor(
     return own;
   }
   // A candidate that paints nothing opaque at the top lets the one beneath it show.
-  for (const candidate of topCandidates(element)) {
-    const inner = subtreeTopColor(candidate.child, composite, depth + 1, candidate.spans);
+  for (const candidate of topCandidates(element, screen)) {
+    const next = { inherited: composite, depth: depth + 1, spans: candidate.spans };
+    const inner = subtreeTopColor(candidate.child, next, screen);
     if (inner !== undefined) {
       return inner;
     }
@@ -259,12 +302,14 @@ function subtreeTopColor(
  * wins. Element
  * opacity multiplies down the walk: a background is opaque only when its alpha times that
  * composite is 1, and a fully transparent subtree paints nothing. The walk stops at an element
- * with top padding (authored or the top safe area), whose children start below its top edge.
+ * with top padding (authored or the top safe area), whose children start below its top edge. A
+ * size cap binds only below the `screen` size, when given.
  */
-export function appTopColor(content: WebChild, fallback: string): string {
-  return typeof content === "string"
-    ? fallback
-    : (subtreeTopColor(content, 1, 0, true) ?? fallback);
+export function appTopColor(content: WebChild, fallback: string, screen?: WebScreenSize): string {
+  if (typeof content === "string") {
+    return fallback;
+  }
+  return subtreeTopColor(content, { inherited: 1, depth: 0, spans: true }, screen) ?? fallback;
 }
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;

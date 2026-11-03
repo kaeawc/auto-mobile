@@ -8,7 +8,12 @@ import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
-import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
+import {
+  appTopColor,
+  statusBarContentFor,
+  type WebScreenSize,
+  type WebStatusBarContent,
+} from "./webStatusBar";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
 
 /** The still renders in one fixed locale, so the same spec renders the same bytes. */
@@ -230,17 +235,20 @@ function coversStatusArea(spec: unknown): boolean {
  * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
  * colour (a fullscreen window's or top sheet's), as both platforms' edge-to-edge defaults do.
  */
-function stillStatusBarContent(
-  spec: unknown,
-  content: WebElement,
-  background: string,
-  dark: boolean,
-): WebStatusBarContent {
+interface StatusBarSample {
+  readonly content: WebElement;
+  readonly background: string;
+  readonly dark: boolean;
+  readonly screen: WebScreenSize;
+}
+
+function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
+  const { content, background, dark, screen } = sample;
   const authored = record(record(spec)?.window)?.statusBar;
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  const top = coversStatusArea(spec) ? appTopColor(content, background) : background;
+  const top = coversStatusArea(spec) ? appTopColor(content, background, screen) : background;
   return statusBarContentFor(top, dark ? "light" : "dark");
 }
 
@@ -266,7 +274,12 @@ export function renderPrototypeStill(
       dark,
       textColor,
       background,
-      statusBarContent: stillStatusBarContent(expanded, content, background, dark),
+      statusBarContent: stillStatusBarContent(expanded, {
+        content,
+        background,
+        dark,
+        screen: screenSize(frame, options.orientation ?? "portrait"),
+      }),
     },
     content,
   );

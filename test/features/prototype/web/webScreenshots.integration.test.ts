@@ -10,6 +10,7 @@ import {
   WEB_SCREENSHOT_VIEWPORT,
   webScreenshotCases,
   webScreenshotPage,
+  webSpecPage,
 } from "./webScreenshotCases";
 
 /**
@@ -385,4 +386,49 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
     },
     CASE_TIMEOUT_MS,
   );
+});
+
+const FADE_FIXTURE = join(
+  import.meta.dir,
+  "../../../fixtures/prototype-web/fade-edges-overflow.json",
+);
+
+describeBrowser("scroll fade edges follow overflow in headless Chromium (#16606)", () => {
+  let browser: Browser;
+
+  beforeAll(async () => {
+    browser = await chromium.launch();
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  for (const direction of ["ltr", "rtl"] as const) {
+    test(
+      `only an overflowing scroll fades its trailing edge (${direction})`,
+      async () => {
+        const base = JSON.parse(readFileSync(FADE_FIXTURE, "utf8")) as Record<string, unknown>;
+        const window = { ...(base.window as Record<string, unknown>), layoutDirection: direction };
+        const { page } = await openPage(browser, webSpecPage({ ...base, window }, "fade-edges"));
+        try {
+          const masks = await page.evaluate(() =>
+            Object.fromEntries(
+              Array.from(
+                document.querySelectorAll<HTMLElement>("[data-view]:not([hidden]) [data-fade]"),
+              ).map((scroll) => [scroll.dataset.testid, getComputedStyle(scroll).maskImage]),
+            ),
+          );
+          const trailing = direction === "rtl" ? "to right" : "to left";
+          expect(masks["vertical-fits"]).toBe("none");
+          expect(masks["horizontal-fits"]).toBe("none");
+          expect(masks["vertical-overflows"]).toStartWith("linear-gradient(to top,");
+          expect(masks["horizontal-overflows"]).toStartWith(`linear-gradient(${trailing},`);
+        } finally {
+          await page.close();
+        }
+      },
+      CASE_TIMEOUT_MS,
+    );
+  }
 });

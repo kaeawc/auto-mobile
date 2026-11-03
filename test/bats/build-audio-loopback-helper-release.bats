@@ -21,6 +21,7 @@ printf 'arm64 x86_64\n'
 SCRIPT
   cat > "${MOCK_BIN}/codesign" <<'SCRIPT'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "${BATS_TEST_TMPDIR}/codesign.log"
 exit 0
 SCRIPT
   cat > "${MOCK_BIN}/ditto" <<'SCRIPT'
@@ -67,4 +68,15 @@ SCRIPT
   [[ "${output}" == *"Notarization verdict: Invalid (submission sub-123)"* ]]
   # The rejected archive must not be promoted to the final output path.
   [ ! -f "${CALLER_DIR}/artifacts/audio-loopback-helper.zip" ]
+}
+
+@test "signs the helper with the audio-input entitlement" {
+  run bash -c 'cd "$1" && "$2" "$3"' _ \
+    "${CALLER_DIR}" "${SCRIPT}" "artifacts/audio-loopback-helper.zip"
+
+  [ "${status}" -eq 0 ]
+  grep -Fq -- "--entitlements ${REPO_ROOT}/ios/audio-loopback/audio-loopback-helper.entitlements" \
+    "${BATS_TEST_TMPDIR}/codesign.log"
+  grep -A1 -F "<key>com.apple.security.device.audio-input</key>" \
+    "${REPO_ROOT}/ios/audio-loopback/audio-loopback-helper.entitlements" | grep -Fq "<true/>"
 }

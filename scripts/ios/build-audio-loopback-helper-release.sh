@@ -54,9 +54,13 @@ for architecture in arm64 x86_64; do
   fi
 done
 
+# LoopbackRecorder starts a CoreAudio input queue, which Hardened Runtime refuses
+# without the audio-input entitlement.
+entitlements_path="${package_dir}/audio-loopback-helper.entitlements"
 codesign_args=(
   --force
   --options runtime
+  --entitlements "${entitlements_path}"
   --timestamp
   --sign "${MACOS_DEVELOPER_ID_SIGNING_IDENTITY}"
 )

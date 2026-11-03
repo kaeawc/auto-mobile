@@ -21,8 +21,6 @@ import {
   type WebAxis,
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
-import { webAdaptiveRenderers } from "./webAdaptive";
-import { webChartRenderers } from "./webChart";
 import { webControlRenderers } from "./webControls";
 import { webIndicatorRenderers, withSwipeActions } from "./webIndicators";
 import { webMapRenderers } from "./webMap";
@@ -953,8 +951,6 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
   ...webIndicatorRenderers(KIT),
-  ...webChartRenderers(KIT),
-  ...webAdaptiveRenderers(KIT),
 };
 
 const WEB_LAYER_RENDERERS = webSheetLayers(KIT);

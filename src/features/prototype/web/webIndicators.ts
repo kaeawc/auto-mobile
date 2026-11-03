@@ -1,4 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
+import { webAdaptiveRenderers } from "./webAdaptive";
+import { webChartRenderers } from "./webChart";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 import { cssColor, lineCss, textCss } from "./webStyle";
@@ -373,6 +375,7 @@ export function withSwipeActions(
   return { ...element, attrs, children: [...element.children, ...panels] };
 }
 
+/** The indicator, flow and list renderers, with the chart and adaptive ones registered alongside. */
 export function webIndicatorRenderers(kit: WebRenderKit): Record<string, NodeRenderer> {
   return {
     badge: badgeRenderer(kit),
@@ -380,5 +383,7 @@ export function webIndicatorRenderers(kit: WebRenderKit): Record<string, NodeRen
     fab: fabRenderer(kit),
     flow: flowRenderer(kit),
     list: listRenderer(kit),
+    ...webChartRenderers(kit),
+    ...webAdaptiveRenderers(kit),
   };
 }

@@ -199,11 +199,18 @@ function stillScope(
     inBox: false,
     unsupported: [],
     screenWidth: size.width,
-    ...(options.screen === undefined ? {} : { screen: options.screen }),
+    ...optionalScope(options),
     stacks: [],
     layers: [],
-    ...(options.imageSlots === undefined ? {} : { imageSlots: options.imageSlots }),
     imageDraws: [],
+  };
+}
+
+/** The scope fields only some callers set: the screen to draw and the inlinable images' slots. */
+function optionalScope(options: PrototypeStillOptions): Partial<WebRenderScope> {
+  return {
+    ...(options.screen === undefined ? {} : { screen: options.screen }),
+    ...(options.imageSlots === undefined ? {} : { imageSlots: options.imageSlots }),
   };
 }
 

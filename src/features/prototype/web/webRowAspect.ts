@@ -1,8 +1,10 @@
 import { record, type Raw } from "../prototypeTemplate";
 
 /**
- * An `aspectRatio` node with no authored width, height or weight. Compose's `aspectRatio` sizes it
- * from the incoming max width, so in a row it takes all the width its earlier siblings left.
+ * An `aspectRatio` node with no authored width, height, weight, or max bound. Compose's
+ * `aspectRatio` sizes it from the incoming max width, so in a row it takes all the width its
+ * earlier siblings left. A `maxWidth` or `maxHeight` is applied before the ratio (`sizeIn`), so a
+ * capped node may leave width for later siblings; it keeps plain `aspect-ratio` instead.
  */
 export function isUnsizedAspectRatio(node: Raw | undefined): boolean {
   const style = record(node?.style);
@@ -11,7 +13,9 @@ export function isUnsizedAspectRatio(node: Raw | undefined): boolean {
     style.aspectRatio > 0 &&
     style.width === undefined &&
     style.height === undefined &&
-    typeof style.weight !== "number"
+    typeof style.weight !== "number" &&
+    typeof style.maxWidth !== "number" &&
+    typeof style.maxHeight !== "number"
   );
 }
 

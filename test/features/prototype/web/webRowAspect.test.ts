@@ -18,6 +18,13 @@ test("only an aspect ratio with no authored width, height or weight is unsized",
   );
   expect(isUnsizedAspectRatio({ type: "box", style: { aspectRatio: 2, weight: 1 } })).toBe(false);
   expect(isUnsizedAspectRatio({ type: "box", style: { aspectRatio: 0 } })).toBe(false);
+  // A max bound applies before the ratio natively, so a capped node may not take all the width.
+  expect(isUnsizedAspectRatio({ type: "box", style: { aspectRatio: 2, maxWidth: 100 } })).toBe(
+    false,
+  );
+  expect(isUnsizedAspectRatio({ type: "box", style: { aspectRatio: 2, maxHeight: 50 } })).toBe(
+    false,
+  );
   expect(isUnsizedAspectRatio(undefined)).toBe(false);
 });
 
@@ -59,6 +66,14 @@ test("hidden children neither take the width nor lose theirs", () => {
   expect(measured[0]).toBe(entries[0]);
   expect(measured[1]).toBe(entries[1]);
   expect(styleOf(measured[2])).toEqual({ aspectRatio: 3, weight: 1 });
+});
+
+test("a capped aspect ratio leaves its later siblings their width", () => {
+  const entries = [
+    { type: "box", style: { aspectRatio: 2, maxWidth: 100 } },
+    { type: "box", style: { width: { dp: 40 } } },
+  ];
+  expect(rowSequentialChildren(entries, shown)).toBe(entries);
 });
 
 test("a row without an unsized aspect ratio keeps its children as authored", () => {

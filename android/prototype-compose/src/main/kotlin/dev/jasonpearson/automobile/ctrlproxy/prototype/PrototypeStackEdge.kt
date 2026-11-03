@@ -58,7 +58,12 @@ internal fun PrototypeRuntimeSnapshot.nextStackEdges(
     stackEdges[id]?.getOrNull(index)?.takeIf { it.screen == screen }
       ?: PrototypeStackEdge(screen, null, null)
   }
-  return if (direction == "pop") edges.take(path.size) else edges.take(path.size - 1) + edge
+  if (direction == "pop") return edges.take(path.size)
+  // Edges survive only while their screen is still at that depth: a `setStack` can change screens
+  // below the top, and those entries start with no transition or source.
+  val kept = edges.zip(path.dropLast(1)).takeWhile { (old, screen) -> old.screen == screen }
+  val added = path.subList(kept.size, path.size - 1).map { PrototypeStackEdge(it, null, null) }
+  return kept.map { it.first } + added + edge
 }
 
 /** A same-id show/patch keeps only metadata whose complete entry prefix survived. */

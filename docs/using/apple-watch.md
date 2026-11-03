@@ -39,8 +39,11 @@ Create a watch with `provisionDevice`, passing exact identifiers from that catal
 }
 ```
 
-A watch with the same name, UDID, device type and runtime is reused; otherwise a fresh one is
-created. `resources`, `enableTools` and `readiness: "automation"` are refused.
+A watch with that name (and `deviceId`, if given) and the same runtime and device type is reused.
+A new watch is created only when no watch has that name, no `deviceId` is given and device
+creation is enabled. Two watches with the same name need `deviceId`. A watch with
+that name but a different runtime or device type is an error: use another name, or delete that
+watch first. `resources`, `enableTools` and `readiness: "automation"` are refused.
 
 Boot an existing watch and start a session with `startDevice`, naming it by exact UDID or exact
 name. Every other option is refused.
@@ -91,8 +94,10 @@ Every other tool refuses a watch before doing anything, with:
 
 - `observe` returns a screenshot. With the automation runner connected and your app in the
   foreground it also returns the view hierarchy; otherwise the result carries
-  `hierarchyUnavailable` and no hierarchy fields. Bounds and `screenSize` are in points;
-  `screenshotImageSize` is in pixels. `waitFor`, `settled`, `raw`, `includeExtras`, `scope`,
+  `hierarchyUnavailable` and no hierarchy fields. With a hierarchy, bounds and `screenSize` are in
+  points and `screenshotImageSize` is in pixels; a screenshot-only result reports `screenSize` in
+  pixels. Check `screenSize.units` (`points` or `physical-pixels`) before using it for `tapAt`,
+  which takes points. `waitFor`, `settled`, `raw`, `includeExtras`, `scope`,
   `layer`, `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"` are refused.
 - `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. Only
   elements wholly on screen match. Only `action: "tap"` is supported.

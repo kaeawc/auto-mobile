@@ -37,8 +37,7 @@ internal object PrototypeStrictPolicy {
     return hostRequestError(context)
       ?: hostChannelError(spec)
       ?: secureLibraryError(spec, context)
-      ?: PrototypeSensitiveSinkRules.error(spec, context)
-      ?: PrototypeLibraryModuleRule.error(spec, context)
+      ?: PrototypeLibraryModuleRule.sensitiveError(spec, context)
   }
 
   private fun hostRequestError(context: PrototypeStateChecks.Context): PrototypeSpecError? {

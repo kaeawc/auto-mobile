@@ -1,7 +1,7 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
-import { cssColor, textCss } from "./webStyle";
+import { cssColor, lineCss, textCss } from "./webStyle";
 
 type Css = Record<string, string>;
 
@@ -279,7 +279,8 @@ const listRenderer =
     const { attrs, style } = kit.base(node, scope, {
       display: "flex",
       "flex-direction": horizontal ? "row" : "column",
-      "align-items": "flex-start",
+      // The style's alignment places rows on the cross axis, as the lazy list's alignment does.
+      "align-items": lineCss(horizontal ? "row" : "column", node.style)["align-items"]!,
       gap: px(dp(node.spacing)),
       padding: px(dp(node.contentPadding)),
       [horizontal ? "overflow-x" : "overflow-y"]: "auto",

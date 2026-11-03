@@ -343,6 +343,17 @@ describe("list", () => {
     });
   });
 
+  test("the style's alignment places rows on the cross axis", () => {
+    const spec = fixture("list-header-footer");
+    const aligned = (alignment: string, axis = "vertical") =>
+      nodes({ ...spec, root: { ...(spec.root as Spec), axis, style: { alignment } } }, "list")
+        .found[0]!.style["align-items"];
+    expect(aligned("topStart")).toBe("flex-start");
+    expect(aligned("topEnd")).toBe("flex-end");
+    expect(aligned("bottomStart", "horizontal")).toBe("flex-end");
+    expect(aligned("center", "horizontal")).toBe("center");
+  });
+
   test("maxItems caps the rows and an empty source draws none", () => {
     const spec = fixture("list-header-footer");
     const root = { ...(spec.root as Spec), maxItems: 1 };

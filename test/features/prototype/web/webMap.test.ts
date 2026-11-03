@@ -198,6 +198,16 @@ describe("prototype web map across the 180° line (#16593)", () => {
     expect(lefts.every((left) => left >= 0 && left <= 100)).toBe(true);
   });
 
+  test("a single fitted marker keeps the single-point zoom wherever it sits", () => {
+    // Wrapping a lone longitude through whole-world shifts must not leave a sliver of width.
+    for (const lng of [-122.42, -74, 0, 179.9]) {
+      expect(fitFraming([mercator(0, lng)], size)!.worldSize).toBe(256 * 2 ** 15);
+    }
+    const view = fitFraming([mercator(0, -122.42)], size)!;
+    const [, end] = routePercents([mercator(0, -122.42), mercator(0, -122.419)], view, size);
+    expect(end!.left).toBeCloseTo(55.825, 2);
+  });
+
   test("the rendered still pins and routes across 180°", () => {
     const pacific = [
       { id: "w", lat: 0, lng: 179, name: "West" },

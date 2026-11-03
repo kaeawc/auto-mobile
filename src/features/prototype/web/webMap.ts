@@ -23,6 +23,11 @@ const DEFAULT_MAP_HEIGHT = 200;
 const SINGLE_POINT_ZOOM = 15;
 /** A fitted framing leaves this share of the box around its points. */
 const FIT_FILL = 0.8;
+/**
+ * Extents narrower than this share of the world are a point: wrapping a lone longitude into the
+ * gap search shifts it by whole worlds, which leaves rounding noise instead of a zero width.
+ */
+const POINT_EXTENT = 1e-9;
 
 export function mercator(lat: number, lng: number): MapPoint {
   const clamped = Math.max(-MAX_LATITUDE, Math.min(MAX_LATITUDE, lat));
@@ -218,8 +223,8 @@ export function fitFraming(
   const middle = (left + right) / 2;
   const center = { x: middle - Math.floor(middle), y: (top + bottom) / 2 };
   const fits = [
-    right > left ? (size.width * FIT_FILL) / (right - left) : Infinity,
-    bottom > top ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
+    right - left > POINT_EXTENT ? (size.width * FIT_FILL) / (right - left) : Infinity,
+    bottom - top > POINT_EXTENT ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
   ];
   const fitted = Math.min(...fits);
   const worldSize = Math.min(

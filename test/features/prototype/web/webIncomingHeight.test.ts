@@ -123,7 +123,10 @@ test("a card hands its children heights as a column does, with no spacing (#1669
     {
       type: "card",
       style: { height: { dp: 100 }, padding: { top: 10, bottom: 10 }, spacing: 8 },
-      children: [{ type: "box", style: { height: { dp: 20 } } }, { type: "row", style: { weight: 1 } }],
+      children: [
+        { type: "box", style: { height: { dp: 20 } } },
+        { type: "row", style: { weight: 1 } },
+      ],
     },
     "root",
     prepare,

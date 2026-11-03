@@ -10,6 +10,7 @@ import {
   androidParityHtml,
   androidParitySpec,
   contentOnly,
+  parityAllowance,
   readAndroidParityBudgets,
 } from "./webAndroidParityCases";
 import { pngSize } from "./webScreenshotCases";
@@ -90,6 +91,12 @@ describe("prototype web parity with the Android goldens (#16534)", () => {
     expect(window.placement).toEqual({ type: "fullscreen" });
     expect(androidParityHtml(entry)).toContain('data-window="fullscreen"');
     expect(androidParityHtml(entry)).not.toContain('data-window="sheet"');
+  });
+
+  test("the runner allowance is 256 pixels or 1% of the budget, whichever is larger", () => {
+    expect(parityAllowance(0)).toBe(256);
+    expect(parityAllowance(1675)).toBe(1675 + 256);
+    expect(parityAllowance(69_282)).toBe(69_282 + 693);
   });
 
   test("the page is the chromeless still alone, transparent and inset-free", () => {

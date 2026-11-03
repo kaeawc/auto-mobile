@@ -175,7 +175,8 @@ fullscreen, because the goldens draw the root and theme without the window's pla
   screen's top-left region of its size.
 - **Budgets.** `test/fixtures/prototype-web/android-parity-budgets.json` maps each compared golden
   to the most pixels that may differ by more than pixelmatch's 0.1 colour distance. A case fails
-  when it differs in more. Budgets only shrink: `--update` lowers each to what was measured and
+  when it differs in more than its budget plus 256 pixels or 1 %, whichever is larger: hosted
+  runners do not all rasterize alike, so the same commit's counts move slightly between CI runs. Budgets only shrink: `--update` lowers each to what was measured and
   records a missing one, and raises one only with `--allow-grow`. The counts are measured by the
   CI Chromium build; every run logs them on one `android parity diff pixels:` line. A unit test
   keeps the case table, the skip list and the budget keys in step with the golden directory.

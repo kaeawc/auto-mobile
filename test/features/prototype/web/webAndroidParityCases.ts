@@ -30,6 +30,15 @@ export const ANDROID_PARITY_BUDGETS = join(
 export const ANDROID_PARITY_FRAME = "small-phone";
 export const ANDROID_PARITY_VIEWPORT = { width: 360, height: 640 } as const;
 
+/**
+ * Hosted runners do not all rasterize alike: one spec has moved by up to ~180 pixels between CI
+ * runs of the same commit, while one machine repeats its counts exactly. A case fails only beyond
+ * this allowance over its budget, so the budget tracks the renderer gap, not the runner.
+ */
+export function parityAllowance(budget: number): number {
+  return budget + Math.max(256, Math.ceil(budget * 0.01));
+}
+
 type Json = Record<string, unknown>;
 
 export interface AndroidParityCase {

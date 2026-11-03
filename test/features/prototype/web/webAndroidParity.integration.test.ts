@@ -9,6 +9,7 @@ import {
   ANDROID_PARITY_CASES,
   ANDROID_PARITY_VIEWPORT,
   androidParityHtml,
+  parityAllowance,
   readAndroidParityBudgets,
 } from "./webAndroidParityCases";
 import { pngSize, WEB_SCREENSHOT_FONT_CSS } from "./webScreenshotCases";
@@ -133,7 +134,7 @@ describeBrowser("prototype web still against the Android goldens (#16534)", () =
             if (budget === undefined) {
               throw new Error(`${entry.golden}: no budget; record one with --update`);
             }
-            expect(result.diffPixels).toBeLessThanOrEqual(budget);
+            expect(result.diffPixels).toBeLessThanOrEqual(parityAllowance(budget));
           }
         } finally {
           await page.close();

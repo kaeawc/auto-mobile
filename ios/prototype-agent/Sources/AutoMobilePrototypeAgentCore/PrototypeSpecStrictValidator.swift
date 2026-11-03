@@ -54,6 +54,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeMediaQueue.validate(fields)
             try PrototypeMedia.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeMap.validateNodes(fields, nodes: context.locatedNodes)
+            try PrototypeWebView.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeMediaCaptions.validate(fields, nodes: context.locatedNodes)
             try PrototypeMedia.validateCastButtons(fields, nodes: context.locatedNodes)
             try PrototypeCameraPreview.validateNodes(fields, nodes: context.locatedNodes)

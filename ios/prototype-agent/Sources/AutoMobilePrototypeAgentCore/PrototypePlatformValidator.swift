@@ -178,6 +178,7 @@ enum PrototypePlatformValidator {
         /// The root `sensors` block: the sensors the device listens to (#14327).
         var sensors: JSONValue?
         var previews: Set<String> = []
+        var webViews: Set<String> = []
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
@@ -208,6 +209,7 @@ enum PrototypePlatformValidator {
         declared.sensors = sensors
         declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         declared.previews = PrototypeCameraPreview.ids(root)
+        declared.webViews = PrototypeWebView.ids(root)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
@@ -527,6 +529,7 @@ enum PrototypePlatformValidator {
         )
         try PrototypeMedia.call(action, path: path, players: declared.players)
         try PrototypeCameraPreview.call(action, path: path, previews: declared.previews)
+        try PrototypeWebView.call(action, path: path, webViews: declared.webViews)
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)
         }

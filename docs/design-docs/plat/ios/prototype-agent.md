@@ -67,6 +67,7 @@ use native controls. No rendering changes accompany this default.
 | timePicker      | native   | material | —     |
 | topAppBar       | material | material | —     |
 | videoPlayer     | material | material | —     |
+| webView         | neutral  | neutral  | —     |
 
 Before a node becomes `native`, simulator verification must establish the testability contract:
 its `testTag` and every `<testTag>.<part>` remain reachable by `observe` and `tapOn`, observed bounds

@@ -323,6 +323,7 @@ const fixtures: Record<string, Node> = {
   },
   prototype_platform_sensors_v1: statusRead("sensors", "proximityNear", true),
   prototype_platform_map_v1: { type: "map" },
+  prototype_platform_webview_v1: { type: "webView" },
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,

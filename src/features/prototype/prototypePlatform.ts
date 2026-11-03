@@ -21,6 +21,11 @@ import {
   prototypeVideoPlayerError,
 } from "./prototypeMedia";
 import { prototypeMapError } from "./prototypeMap";
+import {
+  prototypeWebViewCallError,
+  prototypeWebViewError,
+  prototypeWebViewIds,
+} from "./prototypeWebView";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
 import { prototypeCommerceBlockError, prototypeCommerceCallError } from "./prototypeCommerce";
@@ -425,11 +430,12 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     );
   }
   placeholderUses(root, uses);
-  // A map node draws through the map module (#14309), so its gate names the node. Only node
-  // positions count: a map-shaped value in a request field or payload is data.
+  // A map or webView node draws through its module (#14309, #14312), so its gate names the node.
+  // Only node positions count: a map-shaped value in a request field or payload is data.
   walkPrototypeNodes(root, (node, path) => {
-    if (node.type === "map") {
-      uses.push({ kind: "node", path, module: "map" });
+    const module = node.type === "map" ? "map" : node.type === "webView" ? "webview" : undefined;
+    if (module) {
+      uses.push({ kind: "node", path, module });
     }
   });
   return uses;
@@ -507,6 +513,7 @@ interface PlatformContext {
   players: ReadonlySet<string>;
   root: Raw;
   previews: ReadonlySet<string>;
+  webViews: ReadonlySet<string>;
 }
 
 function callError(
@@ -745,6 +752,7 @@ function platformContext(root: Raw): PlatformContext {
     players: prototypeMediaPlayers(root),
     root,
     previews: prototypeCameraPreviewIds(root),
+    webViews: prototypeWebViewIds(root),
     declared: strings(requires.platform),
     permissions: new Set(
       (Array.isArray(requires.permissions) ? requires.permissions : []).map(
@@ -808,6 +816,7 @@ const ROOT_BLOCK_CHECKS: readonly ((
   prototypeMediaQueueError,
   prototypeVideoPlayerError,
   prototypeMapError,
+  prototypeWebViewError,
   prototypeMediaCaptionsError,
   prototypeCastButtonError,
   prototypeCameraPreviewError,
@@ -1043,6 +1052,7 @@ function channelUseError(
         prototypeCommerceCallError(use.action, use.path, root) ??
         prototypeNotificationsCallError(use.action, use.path, root) ??
         prototypeMediaCallError(use.action, use.path, context.players) ??
-        prototypeCameraCallError(use.action, use.path, context.previews))
+        prototypeCameraCallError(use.action, use.path, context.previews) ??
+        prototypeWebViewCallError(use.action, use.path, context.webViews))
     : undefined;
 }

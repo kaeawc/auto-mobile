@@ -1925,6 +1925,41 @@ data class PrototypeMapNode(
   val onCameraIdle: PrototypeNodeMapOnCameraIdle? = null,
 ) : PrototypeNode()
 
+@SerialName("webView")
+@Serializable
+data class PrototypeWebViewNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val url: String,
+  val allowedOrigins: List<String>,
+  val javaScript: Boolean? = null,
+  val navigationStateKey: String? = null,
+  val titleKey: String? = null,
+  val canGoBackKey: String? = null,
+  val onNavigate: List<PrototypeAction>? = null,
+  val onBlockedNavigation: List<PrototypeAction>? = null,
+) : PrototypeNode()
+
 @SerialName("castButton")
 @Serializable
 data class PrototypeCastButtonNode(

@@ -83,7 +83,16 @@ object PrototypeQueue {
     data class SetRate(val rate: Double) : Op
 
     /** `ms` 0 cancels; [endOfItem] pauses at the end of the current item. */
-    data class SetSleepTimer(val ms: Long = 0, val endOfItem: Boolean = false) : Op
+    data class SetSleepTimer(val ms: Long = 0, val endOfItem: Boolean = false) : Op {
+      /** The timer this call sets, or `null` to cancel. */
+      val sleep: Sleep?
+        get() =
+          when {
+            endOfItem -> Sleep.EndOfItem
+            ms > 0 -> Sleep.Timer(ms)
+            else -> null
+          }
+    }
 
     /** The engine reports that the current item played to its end. */
     data object Ended : Op
@@ -126,16 +135,9 @@ object PrototypeQueue {
       is Op.SetShuffle -> shuffled(state, op.shuffle, random)
       is Op.SetRepeat -> state.copy(repeat = op.repeat)
       is Op.SetRate -> state.copy(rate = op.rate)
-      is Op.SetSleepTimer -> state.copy(sleep = sleepFor(op))
+      is Op.SetSleepTimer -> state.copy(sleep = op.sleep)
       is Op.Advance -> advanced(state, op.ms)
       else -> state
-    }
-
-  private fun sleepFor(op: Op.SetSleepTimer): Sleep? =
-    when {
-      op.endOfItem -> Sleep.EndOfItem
-      op.ms > 0 -> Sleep.Timer(op.ms)
-      else -> null
     }
 
   private fun moveTo(state: State, itemId: String?, playing: Boolean = state.playing): Result =

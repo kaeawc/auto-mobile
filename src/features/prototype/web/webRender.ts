@@ -813,8 +813,10 @@ const toggle =
   };
 
 const card: NodeRenderer = (raw, scope, path) => {
-  // A card hugs its content, but grows like a line around a child that fills.
-  const node = filling(raw, lineFillAxes(raw, scope, path));
+  // A card hugs its content, but grows like a line around a child that fills; each child carries
+  // the height the card's column hands it.
+  const sized = heightsIn(raw, scope, path);
+  const node = filling(sized, lineFillAxes(sized, scope, path));
   const { attrs, style } = base(node, scope, {
     display: "flex",
     "flex-direction": "column",

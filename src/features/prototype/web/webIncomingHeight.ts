@@ -91,19 +91,29 @@ function withHeight(entry: unknown, height: number | undefined): unknown {
   return { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height } };
 }
 
+/** The containers that hand their children a height, and whether they lay them out as a column. */
+const HEIGHT_PARENTS: ReadonlyMap<unknown, { readonly column: boolean }> = new Map([
+  ["row", { column: false }],
+  ["box", { column: false }],
+  ["column", { column: true }],
+  // A card lays out its content in a column, as Material's Card does, with no spacing.
+  ["card", { column: true }],
+]);
+
 /**
- * A row, column or box with each child carrying the incoming max height it hands that child
+ * A row, column, box or card with each child carrying the incoming max height it hands that child
  * (INCOMING_HEIGHT_KEY), where the node's own content height is statically known; other nodes
- * unchanged. A row or box hands every child its content height. A column measures its children
- * in order (see columnChildHeights), except a repeat, whose children are one template, so each
- * gets the whole content height as a bound. A height that depends on layout (a sibling's wrap
+ * unchanged. A row or box hands every child its content height. A column or card measures its
+ * children in order (see columnChildHeights), except a repeat, whose children are one template, so
+ * each gets the whole content height as a bound. A height that depends on layout (a sibling's wrap
  * height, the screen) is left out, so the bound stays an upper one or is absent.
  *
  * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
  */
 export function withChildHeights(node: Raw, path: string, prepare: PrepareChild): Raw {
-  const { type, children } = node;
-  if ((type !== "row" && type !== "column" && type !== "box") || !Array.isArray(children)) {
+  const { children } = node;
+  const parent = HEIGHT_PARENTS.get(node.type);
+  if (!parent || !Array.isArray(children)) {
     return node;
   }
   const style = record(node.style);
@@ -112,11 +122,11 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
     return node;
   }
   const heights =
-    type === "column" && node.repeat === undefined
+    parent.column && node.repeat === undefined
       ? columnChildHeights(
           children.map((entry, index) => prepare(entry, childPath(path, index))),
           content,
-          typeof style?.spacing === "number" ? style.spacing : 0,
+          node.type === "column" && typeof style?.spacing === "number" ? style.spacing : 0,
         )
       : children.map(() => content);
   return { ...node, children: children.map((entry, index) => withHeight(entry, heights[index])) };

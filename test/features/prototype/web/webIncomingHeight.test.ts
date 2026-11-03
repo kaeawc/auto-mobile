@@ -117,3 +117,26 @@ test("a fill-height row in a 40 dp column caps its aspect ratio at 40 dp × rati
     basis: 80,
   });
 });
+
+test("a card hands its children heights as a column does, with no spacing (#16690)", () => {
+  const card = withChildHeights(
+    {
+      type: "card",
+      style: { height: { dp: 100 }, padding: { top: 10, bottom: 10 }, spacing: 8 },
+      children: [{ type: "box", style: { height: { dp: 20 } } }, { type: "row", style: { weight: 1 } }],
+    },
+    "root",
+    prepare,
+  );
+  // 80 dp of content: the box gets all of it, the weighted row what the box left; a card's
+  // children are not spaced, so `spacing` takes nothing.
+  expect(childrenOf(card).map(heightOf)).toEqual([80, 60]);
+  // An unbounded card hands nothing down.
+  const loose = withChildHeights({ type: "card", children: [{ type: "row" }] }, "root", prepare);
+  expect(childrenOf(loose).map(heightOf)).toEqual([undefined]);
+});
+
+test("only a row, column, box or card hands its children a height (#16690)", () => {
+  const node = { type: "toString", style: { height: { dp: 50 } }, children: [{ type: "row" }] };
+  expect(withChildHeights(node, "root", prepare)).toBe(node);
+});

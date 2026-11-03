@@ -178,6 +178,8 @@ function stillScope(
       palette: prototypeRolePalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
+      platform: frame.platform,
+      ...(record(spec.window)?.layoutDirection === "rtl" ? { rtl: true } : {}),
     },
     condition: {
       state: record(spec.state) ?? {},

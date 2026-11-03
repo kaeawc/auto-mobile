@@ -131,8 +131,12 @@ function fixture(clientCount = 2, timeoutCode = "timeout") {
       }
       let result: SessionBrokerResult;
       const hardware = batchClientDevice(c.config).hardware;
-      if (hardware.kind === "archetype" && hardware.archetype === "duo") {
-        result = fail(c, "capability_disabled");
+      if (
+        hardware.kind === "exact-model" &&
+        hardware.model.value ===
+          "com.apple.CoreSimulator.SimDeviceType.AutoMobile-Missing-iPhone-Duo"
+      ) {
+        result = fail(c, "unsupported_hardware");
       } else if (c.config.preparationTimeoutMs === 1) {
         result = fail(c, timeoutCode, true);
       } else if (resources.filter((r) => r.state === "active").length >= 2) {

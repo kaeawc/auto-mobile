@@ -1,4 +1,5 @@
 import { bindPrototypeDataText, resolvePrototypeDataPointer } from "../prototypeData";
+import { prototypeLinkifyMatches, type PrototypeLinkifyKind } from "../prototypeLinkify";
 import {
   projectPrototypeDerivedItem,
   resolvePrototypeDerived,
@@ -35,13 +36,18 @@ import {
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { fadeEdgesCss, withOverContentLayers } from "./webStylePolish";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
   readonly type: string;
   readonly id?: string;
   readonly path: string;
-  readonly reason: "unsupportedType" | "assetNotInlined";
+  /**
+   * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
+   * shader does.
+   */
+  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback";
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -349,20 +355,49 @@ const box: NodeRenderer = (raw, scope, path) => {
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
-/** A text node's content: its `text`, or each span with its own text style. */
+/** A span with its own text style and background; a link is marked, since a still never taps. */
+function styledSpan(text: string, style: Raw | undefined, link: boolean, scope: WebRenderScope) {
+  const background = cssColor(style?.background, scope.style);
+  const css = {
+    ...textCss(style, scope.style),
+    ...(background ? { "background-color": background } : {}),
+  };
+  return el("span", { attrs: link ? { "data-link": "true" } : {}, style: css }, [text]);
+}
+
+/**
+ * `linkify`: the resolved text split into plain runs and one link per match, in its `style`, as
+ * Android draws it; plain text when nothing matches.
+ */
+function linkified(text: string, linkify: Raw, scope: WebRenderScope): WebChild[] {
+  const kinds = Array.isArray(linkify.kinds) ? (linkify.kinds as PrototypeLinkifyKind[]) : [];
+  const matches = prototypeLinkifyMatches(text, kinds);
+  if (matches.length === 0) {
+    return [text];
+  }
+  const runs: WebChild[] = [];
+  let cursor = 0;
+  for (const match of matches) {
+    if (match.start > cursor) {
+      runs.push(text.slice(cursor, match.start));
+    }
+    runs.push(styledSpan(match.text, record(linkify.style), true, scope));
+    cursor = match.end;
+  }
+  return cursor < text.length ? [...runs, text.slice(cursor)] : runs;
+}
+
+/** A text node's content: its `text` (linkified when asked), or each span in its own style. */
 function textContent(node: Raw, scope: WebRenderScope): WebChild[] {
   if (!Array.isArray(node.spans)) {
-    return [bound(node.text, scope)];
+    const linkify = record(node.linkify);
+    const text = bound(node.text, scope);
+    return linkify ? linkified(text, linkify, scope) : [text];
   }
   return node.spans.map((span) => {
     const entry = record(span) ?? {};
-    const style = record(entry.style);
-    const background = cssColor(style?.background, scope.style);
-    const css = {
-      ...textCss(style, scope.style),
-      ...(background ? { "background-color": background } : {}),
-    };
-    return el("span", { style: css }, [bound(entry.text, scope)]);
+    const link = Array.isArray(entry.onTap) && entry.onTap.length > 0;
+    return styledSpan(bound(entry.text, scope), record(entry.style), link, scope);
   });
 }
 
@@ -390,6 +425,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
+    ...fadeEdgesCss(node, scope.style),
   });
   const inner = child(scope, {
     inBox: false,
@@ -1052,5 +1088,16 @@ export function renderWebNode(
     return undefined;
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  if (record(styled.style)?.shader !== undefined) {
+    // Devices that cannot run the shader draw the node without it; so does the still.
+    const id = typeof styled.id === "string" ? styled.id : undefined;
+    own.unsupported.push({
+      type: String(styled.type),
+      ...(id ? { id } : {}),
+      path,
+      reason: "shaderFallback",
+    });
+  }
+  return withOverContentLayers(element, styled.style, own.style);
 }

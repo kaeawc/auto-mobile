@@ -18,6 +18,7 @@ import {
   ANDROID_TYPE_FOCUSED_INPUT_ERROR,
 } from "./AndroidTypingConstants";
 import { ImeSpanService, isImeRestorationFailure } from "./ImeSpan";
+import type { PendingImeRestoreRegistry } from "./PendingImeRestore";
 import { readImeEditorState } from "./ImeEditorState";
 import type { AndroidModeTyper } from "./AndroidModeTyper";
 import { A11yTyper } from "./A11yTyper";
@@ -86,6 +87,7 @@ export interface SendKeysPlatformDependencies {
   /** Routes iOS text entry and clear on an SDK bridge field (#5159). */
   iosSdkTextRouter?: IosSdkBridgeTextRouter;
   iosSdkWebTextRouter?: IosSdkWebTextRouter;
+  pendingImeRestores?: PendingImeRestoreRegistry;
   imeSpanService?: Pick<
     ImeSpanService,
     "imeSpan" | "withImeSpan" | "acquireImeSpan" | "restoreImeSpan"
@@ -188,14 +190,22 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.keyEventSupport = this.createKeyEventSupport();
     this.imeSpanService =
       dependencies.imeSpanService ??
-      new ImeSpanService({
-        deviceId: device.deviceId,
-        verifySafeImeRecovery: (snapshot, signal) => this.verifySafeImeRecovery(snapshot, signal),
-        restoreIme: (prior, wasEnabled, subtype) => this.restoreIme(prior, wasEnabled, subtype),
-        clearPinnedUser: () => {
-          this.session.imeUserId = undefined;
+      new ImeSpanService(
+        {
+          deviceId: device.deviceId,
+          verifySafeImeRecovery: (snapshot, signal) => this.verifySafeImeRecovery(snapshot, signal),
+          restoreIme: (prior, wasEnabled, subtype) => this.restoreIme(prior, wasEnabled, subtype),
+          getPinnedUser: () => this.session.imeUserId,
+          setPinnedUser: (userId) => {
+            this.session.imeUserId = userId;
+          },
+          clearPinnedUser: () => {
+            this.session.imeUserId = undefined;
+          },
         },
-      });
+        this.timer,
+        dependencies.pendingImeRestores,
+      );
     this.imeRestore = new ImeRestore({
       adb: this.adb,
       device: this.device,
@@ -859,7 +869,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async prepareTypingMode(mode: AndroidSendKeysTypingMode, signal?: AbortSignal) {
     // A non-IME typing mode ends the span BEFORE delivery. A later IME type may
     // reactivate; interleaved key/clear commands deliberately retain the active IME.
-    if (mode !== "ime" && mode !== "imeKeyEvents") {
+    if (!this.imeSpanService.imeSpan || (mode !== "ime" && mode !== "imeKeyEvents")) {
       await this.imeSpanService.restoreImeSpan();
       this.checkAbort(signal);
     }

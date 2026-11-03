@@ -1,3 +1,4 @@
+import { isRecord } from "./pipeline/isRecord";
 import { isDeviceBindingTool } from "../daemon/deviceSessionResult";
 import type { z, ZodType } from "zod/v4";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
@@ -61,6 +62,7 @@ import {
   clearSessionlessAutolockAttribution,
   runWithDeviceCallRequestDeadline,
   invokeResolvedDeviceHandler,
+  flushPendingImeRestoreBeforeTool,
   refuseInternalControlOnForeignOwnedSession,
   sessionDisplayPinnedHandler,
 } from "./pipeline/deviceCallDispatch";
@@ -299,6 +301,21 @@ export class ToolRegistryClass {
       schema,
       handler: async (args, progress, signal) => {
         await assertSessionBrokerToolCall(name, false, args);
+        const sessionUuid =
+          nonBlankSessionUuid(args.sessionUuid) ?? getToolSelectionContext()?.routingSessionUuid;
+        const nestedDeviceId =
+          isRecord(args.device) && typeof args.device.deviceId === "string"
+            ? args.device.deviceId
+            : undefined;
+        const deviceId =
+          typeof args.deviceId === "string"
+            ? args.deviceId
+            : (nestedDeviceId ??
+              (sessionUuid
+                ? (defaultDaemonContext.sessionManager()?.getDeviceForSession(sessionUuid) ??
+                  undefined)
+                : undefined));
+        await flushPendingImeRestoreBeforeTool(name, deviceId);
         const response = await handler(args, progress, signal);
         if (isDeviceBindingTool(name)) {
           // Ingress binds and heartbeats the session these results name after the handler

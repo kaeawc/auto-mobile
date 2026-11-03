@@ -328,11 +328,11 @@ export class ImeCommitTyper implements AndroidModeTyper {
 
   private async captureEditorState({ signal, display, delivery }: ImeCommitRouting): Promise<void> {
     const span = this.imeSpanService.imeSpan;
-    if (!span || span.editorState || span.snapshot || delivery === "clearField") {
+    if (!span || span.editorState || delivery === "clearField") {
       return;
     }
     // Explicit IME mode has no password-routing pre-read. Sample once per call,
-    // not per command/character, and reuse the terminal post-restoration read.
+    // not per command/character, and reuse the terminal observation for warnings.
     span.editorState = {};
     try {
       span.editorState = readImeEditorState(
@@ -412,6 +412,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       try {
         await this.host.restoreIme(prior, wasEnabled, priorSubtype);
       } catch (error) {
+        logger.warn("[SendKeys] IME activation cleanup failed", error);
         restoreFailure = errorMessage(error);
       } finally {
         await this.restoration.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);

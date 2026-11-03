@@ -83,7 +83,7 @@ let serial = 0;
 function harness(after: ObserveResult, baselineUnavailable = false) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  let restored = false;
+  let committed = false;
   const reads: Parameters<SendKeysObserver["execute"]>[0][] = [];
   const observer: SendKeysObserver = {
     execute: async (options) => {
@@ -91,17 +91,15 @@ function harness(after: ObserveResult, baselineUnavailable = false) {
       if (baselineUnavailable && reads.length === 1) {
         throw new Error("diagnostic hierarchy unavailable");
       }
-      return restored ? after : frame();
+      return committed && !options?.hierarchyOnly ? after : frame();
     },
   };
   const device = { ...android, deviceId: `ime-editor-16428-${++serial}` };
   const h = createSendKeysHarness(device, observer, timer);
-  const execute = h.adb.executeCommand.bind(h.adb);
-  h.adb.executeCommand = async (...args) => {
-    const result = await execute(...args);
-    if (args[0] === "shell ime set com.example.keyboard/.Ime") {
-      restored = true;
-    }
+  const commit = h.client.commitViaIme;
+  h.client.commitViaIme = async (...args) => {
+    const result = await commit(...args);
+    committed = true;
     return result;
   };
   const action = new SendKeys(device, h.adbFactory, {
@@ -113,7 +111,7 @@ function harness(after: ObserveResult, baselineUnavailable = false) {
   return { ...h, action, timer, reads };
 }
 
-test("sendKeys warns after IME restoration loses focus without changing delivery", async () => {
+test("sendKeys warns when IME typing loses focus without changing delivery", async () => {
   const h = harness(frame(false));
   const result = await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
   expect(result).toMatchObject({ success: true, completedCommands: 1 });
@@ -124,7 +122,7 @@ test("sendKeys warns after IME restoration loses focus without changing delivery
   expect(h.timer.getSleepHistory()).toEqual([]);
   expect(
     h.adb.getExecutedCommands().filter((command) => command.startsWith("shell ime set ")),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
 });
 
 test("sendKeys omits warnings when the editor keeps focus and keyboard visibility", async () => {
@@ -144,7 +142,7 @@ test("auto IME typing reuses the password-routing observation for its baseline",
   const h = harness(frame(false));
   const result = await h.action.execute([{ action: "type", text: "日本語😀" }]);
   expect(result.warnings).toEqual([expect.stringContaining("focused editor lost focus")]);
-  // Existing password pre-check, commit verification, and terminal post-restore read only.
+  // Existing password pre-check, commit verification, and terminal read only.
   expect(h.reads).toHaveLength(3);
 });
 
@@ -159,7 +157,7 @@ test("explicit IME commands share one baseline and retain the single activation 
   expect(h.timer.getSleepHistory()).toEqual([]);
   expect(
     h.adb.getExecutedCommands().filter((command) => command.startsWith("shell ime set ")),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
 });
 
 test("an explicit key that can dismiss or move focus does not blame IME typing", async () => {

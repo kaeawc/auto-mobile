@@ -1,3 +1,7 @@
+import {
+  pendingImeRestores,
+  type PendingImeRestoreRegistry,
+} from "../features/action/sendkeys/PendingImeRestore";
 import { ActionableError } from "../models/ActionableError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { logger } from "../utils/logger";
@@ -53,6 +57,7 @@ export class SessionReleaseTeardown {
   constructor(
     private readonly host: SessionReleaseTeardownHost,
     private readonly restores: SessionReleaseRestorers,
+    private readonly pendingIme: PendingImeRestoreRegistry = pendingImeRestores,
   ) {}
 
   /**
@@ -76,6 +81,18 @@ export class SessionReleaseTeardown {
     operation?: SessionReleaseOperation,
     options: SessionReleaseOptions = {},
   ): Promise<readonly Promise<void>[]> {
+    const deviceId = session.assignedDevice;
+    if (options.deviceIdentityReplaced || releaseWasForced(operation)) {
+      // Never apply an old snapshot after identity or ownership was forcibly replaced.
+      this.pendingIme.discard(deviceId);
+    } else {
+      try {
+        await this.pendingIme.flush(deviceId);
+      } catch (error) {
+        // ImeRestore quarantines unsafe state; release still completes with a visible diagnostic.
+        logger.warn(`[SendKeys] Session-end IME restoration failed on ${deviceId}`, error);
+      }
+    }
     if (!options.deviceIdentityReplaced && !this.releaseNeedsTeardown(session)) {
       return [];
     }

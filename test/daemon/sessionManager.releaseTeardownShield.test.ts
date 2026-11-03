@@ -358,3 +358,30 @@ describe("session release teardown is shielded from the caller's signal (#10198)
     expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
   });
 });
+
+test("session release restores a pending typing IME exactly once before handing off the device", async () => {
+  const h = await harness();
+  await ownDevice(h, []);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const restored: string[] = [];
+  pendingImeRestores.store(
+    device.deviceId,
+    {
+      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+      userId: 10,
+      restore: async () => {
+        expect(h.manager.getSessionForDevice(device.deviceId)).toBe("old");
+        restored.push("restore");
+      },
+    },
+    h.timer,
+  );
+  try {
+    await h.manager.releaseSession("old", "plan-auto-release");
+    await h.manager.releaseSession("old", "plan-auto-release");
+    expect(restored).toEqual(["restore"]);
+  } finally {
+    pendingImeRestores.discard(device.deviceId);
+  }
+});

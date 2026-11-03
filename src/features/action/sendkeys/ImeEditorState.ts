@@ -64,7 +64,7 @@ export function imeEditorWarnings(before: ImeEditorState, observation: ObserveRe
   }
   return changes.length
     ? [
-        `After IME typing and keyboard restoration, ${changes.join(" and ")}. Inspect the field before retrying to avoid duplicate text; refocus and use visible key taps if needed.`,
+        `After IME typing, ${changes.join(" and ")}. Inspect the field before retrying to avoid duplicate text; refocus and use visible key taps if needed.`,
       ]
     : [];
 }

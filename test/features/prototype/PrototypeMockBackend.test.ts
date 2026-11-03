@@ -302,6 +302,37 @@ describe("PrototypeMockBackend rooms and broadcasts", () => {
     ).toBe("{item}");
   });
 
+  test("a canned route or fault on a broadcasting collection broadcasts nothing", async () => {
+    const { engine } = backend({
+      ...chat,
+      routes: [{ method: "POST", path: "/messages", status: 201, body: { roomId: "general" } }],
+    });
+    const general = member(engine, "/rooms/general");
+    await engine.answer({
+      method: "POST",
+      path: "/messages",
+      query: {},
+      body: { roomId: "general" },
+    });
+    expect([general, engine.snapshot().messages]).toEqual([[], []]);
+  });
+
+  test("a room binding to an odd path neither fails nor changes the committed write", async () => {
+    const { engine } = backend({
+      ...chat,
+      broadcasts: { messages: { room: "/{item:/roomId}", frame: "{item}" } },
+    });
+    const response = await engine.answer({
+      method: "POST",
+      path: "/messages",
+      query: {},
+      body: { roomId: "/x" },
+    });
+    expect(response.status).toBe(201);
+    expect(engine.requestLog().at(-1)).toMatchObject({ room: "//x", from: "broadcast" });
+    expect(engine.snapshot().messages).toHaveLength(1);
+  });
+
   test("publish speaks to a room and dispose closes its connections", () => {
     const { engine } = backend(chat);
     const closes: number[] = [];

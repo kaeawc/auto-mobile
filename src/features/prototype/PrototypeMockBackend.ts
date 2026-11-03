@@ -135,15 +135,16 @@ export class PrototypeMockBackend {
     const method = request.method.toUpperCase();
     await this.waitLatency();
     signal?.throwIfAborted();
-    const response = this.faultFor(method, request.path) ??
-      (await this.cannedRoute(method, request, signal)) ??
-      this.collectionResponse(method, request) ?? {
-        status: 404,
-        headers: {},
-        body: { error: "No such route" },
-      };
+    const early =
+      this.faultFor(method, request.path) ?? (await this.cannedRoute(method, request, signal));
+    const written = early === undefined ? this.collectionResponse(method, request) : undefined;
+    const response = early ??
+      written ?? { status: 404, headers: {}, body: { error: "No such route" } };
     this.record(method, request, response);
-    this.broadcastWrite(method, request, response);
+    // Only a collection's own answer is a stored write; a fault or canned route stored nothing.
+    if (written !== undefined) {
+      this.broadcastWrite(method, request, written);
+    }
     return response;
   }
 
@@ -160,21 +161,18 @@ export class PrototypeMockBackend {
       body: request.body,
       item: response.body ?? null,
     };
-    let room: PrototypeRequestJson;
-    let frame: PrototypeRequestJson;
     try {
-      room = bindMockValue(broadcast.room, context);
-      frame = bindMockValue(broadcast.frame, context, MAX_PROTOTYPE_CHANNEL_FRAME_BYTES);
+      const room = bindMockValue(broadcast.room, context);
+      if (typeof room !== "string" || !room.startsWith("/")) {
+        logger.warn(`[PrototypeMock] broadcast for ${name} dropped: room is not a path`);
+        return;
+      }
+      const frame = bindMockValue(broadcast.frame, context, MAX_PROTOTYPE_CHANNEL_FRAME_BYTES);
+      this.rooms.publish(room, frame, "broadcast");
     } catch (error) {
-      // The write already happened and answered; only its broadcast is lost, and the log says so.
+      // The write is stored and answered either way; a failed broadcast must not change its result.
       logger.warn(`[PrototypeMock] broadcast for ${name} dropped: ${errorMessage(error)}`);
-      return;
     }
-    if (typeof room !== "string" || !room.startsWith("/")) {
-      logger.warn(`[PrototypeMock] broadcast for ${name} dropped: room is not a path`);
-      return;
-    }
-    this.rooms.publish(room, frame, "broadcast");
   }
 
   /** The broadcast a 2xx write of `method` to collection `name` triggers, if any. */

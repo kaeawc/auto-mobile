@@ -54,7 +54,8 @@ export function mockFrameData(frame: PrototypeRequestJson): string {
 
 /** The path as a URL would carry it, so `/rooms/a b` and `/rooms/a%20b` name the same room. */
 export function normalizeMockRoomPath(path: string): string {
-  return new URL(path, "https://room.invalid").pathname;
+  // Appended, not resolved: a `//x` path must stay a path, never become a protocol-relative host.
+  return new URL(`https://room.invalid${path.startsWith("/") ? "" : "/"}${path}`).pathname;
 }
 
 const fits = (data: string): boolean =>

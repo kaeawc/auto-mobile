@@ -2814,6 +2814,20 @@ describe("systemTray list prototype tags", () => {
     expect((await list()).notifications[0]).not.toHaveProperty("tag");
   });
 
+  test("leaves the tag off both rows when an untagged twin renders the same text", async () => {
+    const { adb } = setup([page(row("Twin"), row("Twin"))]);
+    respond(
+      adb,
+      record("proto:twin", "Twin", "Body of Twin", { id: 1 }),
+      record("null", "Twin", "Body of Twin", { id: 2 }),
+    );
+    const result = await list();
+    expect(result.notifications.map((notification) => notification.tag)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   test("ignores another package's prototype record with the same text", async () => {
     const { adb } = setup([page(row("Shared"))]);
     respond(adb, record("proto:other", "Shared", "Body of Shared", { pkg: "com.example.other" }));

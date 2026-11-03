@@ -69,12 +69,14 @@ notifications".
 Prototype apps post every notification with a `proto:` tag, which the dump
 prints as the fourth field of the record key (`<user>|<pkg>|<id>|<tag>|<uid>`).
 After a row is attributed by either evidence class, it carries `tag` when
-exactly one of the requested package's `proto:`-tagged records matches the
-row's text by the same extras rule used for ownership. Group summary records
-are ignored, so a grouped pair maps each child to its own tag. Two prototype
-records rendering the same text, an untagged record, an unreadable dump, or a
-record already cancelled while its row lingers all leave `tag` absent; it never
-changes attribution.
+exactly one of the requested package's non-summary records could have rendered
+the row (shares its text, or has no readable extras) and that record is
+`proto:`-tagged and matches by the same extras rule used for ownership. Every
+record of the package competes, tagged or not, so a same-text twin or a
+record whose body a collapsed row hides leaves `tag` absent. Group summary
+records are ignored, so a grouped pair maps each child to its own tag. An
+unreadable dump, or a record already cancelled while its row lingers, also
+leaves `tag` absent; it never changes attribution.
 
 ## Tap observation result
 

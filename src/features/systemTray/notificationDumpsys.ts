@@ -23,6 +23,8 @@ export interface DumpsysNotificationRecord {
    * only for a non-summary record; a group summary is never a rendered row.
    */
   prototypeTag?: string;
+  /** Set on a group summary record, which renders a group header, not a row. */
+  groupSummary?: true;
 }
 
 /** The tag prefix the prototype notification runtime posts with. */
@@ -219,6 +221,9 @@ const readRecordMetadata = (current: ParsedDumpsysNotificationRecord, line: stri
 // sharing its children's tag never correlates as a row.
 const finalizeRecordTags = (records: readonly ParsedDumpsysNotificationRecord[]): void => {
   for (const record of records) {
+    if (record.isGroupSummary) {
+      record.correlation.groupSummary = true;
+    }
     const tag = readKeyTag(record.key);
     if (tag?.startsWith(PROTOTYPE_NOTIFICATION_TAG_PREFIX) && !record.isGroupSummary) {
       record.correlation.prototypeTag = tag;
@@ -424,23 +429,25 @@ export const attributeRowByDumpsys = (
 };
 
 /**
- * The prototype tag of the single tagged record that rendered this row, or
- * `undefined` when no prototype record matches the row's text or more than one
- * distinct tag could. Only the requested package's records are considered.
+ * The prototype tag of the record that rendered this row, or `undefined` when
+ * the rendered text cannot single that record out. Every non-summary record of
+ * the requested package that could have rendered the row — tagged or not, and
+ * including one whose extras the row only partly shows — competes, so a tag is
+ * named only when exactly one plausible record remains and it fully matches.
  */
 export const prototypeTagForRow = (
   records: readonly DumpsysNotificationRecord[],
   appId: string,
   rowTexts: ReadonlySet<string>,
 ): string | undefined => {
-  const tags = new Set(
-    records.flatMap((record) =>
+  const plausible = records.filter(
+    (record) =>
       record.pkg === appId &&
-      record.prototypeTag !== undefined &&
-      recordMatchesRow(record, rowTexts)
-        ? [record.prototypeTag]
-        : [],
-    ),
+      !record.groupSummary &&
+      (recordIsOpaque(record) ||
+        record.hasCustomLayout ||
+        recordSharesRowEvidence(record, rowTexts)),
   );
-  return tags.size === 1 ? [...tags][0] : undefined;
+  const [only] = plausible;
+  return plausible.length === 1 && recordMatchesRow(only, rowTexts) ? only.prototypeTag : undefined;
 };

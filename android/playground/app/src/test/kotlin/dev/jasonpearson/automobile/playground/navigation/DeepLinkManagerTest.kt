@@ -15,57 +15,69 @@ class DeepLinkManagerTest {
   @Test
   fun testGenerateOnboardingUrl() {
     val url = DeepLinkManager.generateOnboardingUrl()
-    assertEquals("automobile:playground/onboarding", url)
+    assertEquals("automobile://playground/onboarding", url)
   }
 
   @Test
   fun testGenerateLoginUrl() {
     val url = DeepLinkManager.generateLoginUrl()
-    assertEquals("automobile:playground/login", url)
+    assertEquals("automobile://playground/login", url)
   }
 
   @Test
   fun testGenerateHomeUrl() {
     val url = DeepLinkManager.generateHomeUrl()
-    assertEquals("automobile:playground/home", url)
+    assertEquals("automobile://playground/home", url)
   }
 
   @Test
   fun testGenerateVideoPlayerUrl() {
     val url = DeepLinkManager.generateVideoPlayerUrl("test123")
-    assertEquals("automobile:playground/video_player/test123", url)
+    assertEquals("automobile://playground/video_player/test123", url)
   }
 
   @Test
   fun testParseValidOnboardingDeepLink() {
-    val uri = Uri.parse("automobile:playground/onboarding")
+    val uri = Uri.parse("automobile://playground/onboarding")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(OnboardingDestination, destination)
   }
 
   @Test
   fun testParseValidLoginDeepLink() {
-    val uri = Uri.parse("automobile:playground/login")
+    val uri = Uri.parse("automobile://playground/login")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(LoginDestination, destination)
   }
 
   @Test
   fun testParseValidHomeDeepLink() {
-    val uri = Uri.parse("automobile:playground/home")
+    val uri = Uri.parse("automobile://playground/home")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(HomeDestination(), destination)
   }
 
   @Test
+  fun testParseOpaqueAndHierarchicalHomeDeepLinksToSameDestination() {
+    val opaqueUri = Uri.parse("automobile:playground/home")
+    val hierarchicalUri = Uri.parse("automobile://playground/home")
+
+    assertTrue(DeepLinkManager.isValidDeepLink(opaqueUri))
+    assertTrue(DeepLinkManager.isValidDeepLink(hierarchicalUri))
+    val opaqueDestination = DeepLinkManager.parseDeepLink(opaqueUri)
+    assertEquals(HomeDestination(), opaqueDestination)
+    assertEquals(opaqueDestination, DeepLinkManager.parseDeepLink(hierarchicalUri))
+  }
+
+  @Test
   fun testParseChatDeepLinkSelectsChatTab() {
-    val destination = DeepLinkManager.parseDeepLink(Uri.parse("automobile:playground/chat"))
+    val destination = DeepLinkManager.parseDeepLink(Uri.parse("automobile://playground/chat"))
     assertEquals(HomeDestination(selectedTab = 0, selectedSubTab = 5), destination)
   }
 
   @Test
   fun testParseValidVideoPlayerDeepLink() {
-    val uri = Uri.parse("automobile:playground/video_player/sample123")
+    val uri = Uri.parse("automobile://playground/video_player/sample123")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(VideoPlayerDestination("sample123"), destination)
   }
@@ -79,42 +91,42 @@ class DeepLinkManagerTest {
 
   @Test
   fun testParseDeepLinkVideoPlayer() {
-    val uri = Uri.parse("automobile:playground/video_player/sample123")
+    val uri = Uri.parse("automobile://playground/video_player/sample123")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(VideoPlayerDestination("sample123"), destination)
   }
 
   @Test
   fun testParseDeepLinkSettings() {
-    val uri = Uri.parse("automobile:playground/settings")
+    val uri = Uri.parse("automobile://playground/settings")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(SettingsDestination, destination)
   }
 
   @Test
   fun testParseValidSlidesDeepLink() {
-    val uri = Uri.parse("automobile:playground/slides/5")
+    val uri = Uri.parse("automobile://playground/slides/5")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(SlidesDestination(5), destination)
   }
 
   @Test
   fun testParseDemoIndexDeepLink() {
-    val uri = Uri.parse("automobile:playground/demos")
+    val uri = Uri.parse("automobile://playground/demos")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(DemoIndexDestination, destination)
   }
 
   @Test
   fun testParseDemoPerformanceDetailDeepLink() {
-    val uri = Uri.parse("automobile:playground/demos/perf/detail/7")
+    val uri = Uri.parse("automobile://playground/demos/perf/detail/7")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(DemoPerformanceDetailDestination(7), destination)
   }
 
   @Test
   fun testParseDemoPointerProbeDeepLink() {
-    val uri = Uri.parse("automobile:playground/demos/input/pointer_probe")
+    val uri = Uri.parse("automobile://playground/demos/input/pointer_probe")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertEquals(DemoPointerProbeDestination, destination)
   }
@@ -135,21 +147,21 @@ class DeepLinkManagerTest {
 
   @Test
   fun testParseInvalidPath() {
-    val uri = Uri.parse("automobile:playground/unknown")
+    val uri = Uri.parse("automobile://playground/unknown")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertNull(destination)
   }
 
   @Test
   fun testParseVideoPlayerWithoutId() {
-    val uri = Uri.parse("automobile:playground/video_player/")
+    val uri = Uri.parse("automobile://playground/video_player/")
     val destination = DeepLinkManager.parseDeepLink(uri)
     assertNull(destination)
   }
 
   @Test
   fun testIsValidDeepLink() {
-    val validUri = Uri.parse("automobile:playground/home")
+    val validUri = Uri.parse("automobile://playground/home")
     assertTrue(DeepLinkManager.isValidDeepLink(validUri))
 
     val invalidUri = Uri.parse("https://google.com")
@@ -158,28 +170,31 @@ class DeepLinkManagerTest {
 
   @Test
   fun testGetDestinationName() {
-    val onboardingUri = Uri.parse("automobile:playground/onboarding")
+    val onboardingUri = Uri.parse("automobile://playground/onboarding")
     assertEquals("Onboarding", DeepLinkManager.getDestinationName(onboardingUri))
 
-    val loginUri = Uri.parse("automobile:playground/login")
+    val loginUri = Uri.parse("automobile://playground/login")
     assertEquals("Login", DeepLinkManager.getDestinationName(loginUri))
 
-    val homeUri = Uri.parse("automobile:playground/home")
+    val homeUri = Uri.parse("automobile://playground/home")
     assertEquals("Home", DeepLinkManager.getDestinationName(homeUri))
 
-    val videoPlayerUri = Uri.parse("automobile:playground/video_player/sample123")
+    val opaqueHomeUri = Uri.parse("automobile:playground/home")
+    assertEquals("Home", DeepLinkManager.getDestinationName(opaqueHomeUri))
+
+    val videoPlayerUri = Uri.parse("automobile://playground/video_player/sample123")
     assertEquals("Video Player", DeepLinkManager.getDestinationName(videoPlayerUri))
 
-    val settingsUri = Uri.parse("automobile:playground/settings")
+    val settingsUri = Uri.parse("automobile://playground/settings")
     assertEquals("Settings", DeepLinkManager.getDestinationName(settingsUri))
 
-    val demoIndexUri = Uri.parse("automobile:playground/demos")
+    val demoIndexUri = Uri.parse("automobile://playground/demos")
     assertEquals("Demo Index", DeepLinkManager.getDestinationName(demoIndexUri))
 
-    val demoPerfUri = Uri.parse("automobile:playground/demos/perf/detail/2")
+    val demoPerfUri = Uri.parse("automobile://playground/demos/perf/detail/2")
     assertEquals("Demo Performance Detail", DeepLinkManager.getDestinationName(demoPerfUri))
 
-    val pointerProbeUri = Uri.parse("automobile:playground/demos/input/pointer_probe")
+    val pointerProbeUri = Uri.parse("automobile://playground/demos/input/pointer_probe")
     assertEquals("Demo Pointer Probe", DeepLinkManager.getDestinationName(pointerProbeUri))
 
     val invalidUri = Uri.parse("https://invalid.com")
@@ -192,19 +207,20 @@ class DeepLinkManagerTest {
     assertEquals(25, allLinks.size)
 
     val linkUrls = allLinks.map { it.second }
-    assertTrue(linkUrls.contains("automobile:playground/onboarding"))
-    assertTrue(linkUrls.contains("automobile:playground/login"))
-    assertTrue(linkUrls.contains("automobile:playground/home"))
-    assertTrue(linkUrls.contains("automobile:playground/long_press"))
-    assertTrue(linkUrls.contains("automobile:playground/video_player/sample123"))
-    assertTrue(linkUrls.contains("automobile:playground/slides/0"))
-    assertTrue(linkUrls.contains("automobile:playground/slides/3"))
-    assertTrue(linkUrls.contains("automobile:playground/demos"))
-    assertTrue(linkUrls.contains("automobile:playground/demos/ux/start"))
-    assertTrue(linkUrls.contains("automobile:playground/demos/perf/list"))
-    assertTrue(linkUrls.contains("automobile:playground/demos/perf/detail/4"))
-    assertTrue(linkUrls.contains("automobile:playground/demos/a11y/contrast"))
-    assertTrue(linkUrls.contains("automobile:playground/demos/bugs/repro"))
-    assertTrue(linkUrls.contains("automobile:playground/demos/input/pointer_probe"))
+    assertTrue(linkUrls.all { it.startsWith("automobile://playground/") })
+    assertTrue(linkUrls.contains("automobile://playground/onboarding"))
+    assertTrue(linkUrls.contains("automobile://playground/login"))
+    assertTrue(linkUrls.contains("automobile://playground/home"))
+    assertTrue(linkUrls.contains("automobile://playground/long_press"))
+    assertTrue(linkUrls.contains("automobile://playground/video_player/sample123"))
+    assertTrue(linkUrls.contains("automobile://playground/slides/0"))
+    assertTrue(linkUrls.contains("automobile://playground/slides/3"))
+    assertTrue(linkUrls.contains("automobile://playground/demos"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/ux/start"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/perf/list"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/perf/detail/4"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/a11y/contrast"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/bugs/repro"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/input/pointer_probe"))
   }
 }

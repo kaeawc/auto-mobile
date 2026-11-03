@@ -1190,5 +1190,80 @@
         }
       }
     ]
+  },
+  {
+    "name": "canonically equivalent ids stay distinct items",
+    "items": ["\u00e9", "e\u0301", "x"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "skipTo", "itemId": "e\u0301" },
+        "expect": {
+          "currentItemId": "e\u0301",
+          "currentIndex": 1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["\u00e9", "e\u0301", "x"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["e\u0301", "x"] },
+        "expect": {
+          "currentItemId": "e\u0301",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["e\u0301", "x"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "skipTo", "itemId": "\u00e9" },
+        "expect": {
+          "currentItemId": "e\u0301",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["e\u0301", "x"],
+          "itemChanged": false,
+          "error": "item_not_found"
+        }
+      },
+      {
+        "op": { "op": "previous" },
+        "expect": {
+          "currentItemId": "e\u0301",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["e\u0301", "x"],
+          "itemChanged": false,
+          "error": null
+        }
+      }
+    ]
   }
 ]

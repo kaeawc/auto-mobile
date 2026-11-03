@@ -46,7 +46,7 @@ enum PrototypeQueue {
 
         /// The current item's index in queue order, or -1 with no current item.
         var currentIndex: Int {
-            currentItemId.flatMap { items.firstIndex(of: $0) } ?? -1
+            PrototypeQueue.index(of: currentItemId, in: items) ?? -1
         }
 
         var sleepRemainingMs: Int64? {
@@ -96,7 +96,7 @@ enum PrototypeQueue {
         case .next: return advanceToNext(state)
         case .previous: return previous(state)
         case let .skipTo(itemId):
-            return state.items.contains(itemId)
+            return index(of: itemId, in: state.items) != nil
                 ? move(state, to: itemId)
                 : Result(state: state, error: itemNotFound)
         case let .setShuffle(shuffle): next = shuffled(state, shuffle, random)
@@ -111,9 +111,24 @@ enum PrototypeQueue {
         return Result(state: next)
     }
 
+    // Ids compare by exact UTF-16 code units, as the host, Kotlin and `PrototypeMediaQueue` do: Swift
+    // String equality would merge canonically equivalent ids such as "\u{e9}" and "e\u{301}".
+    private static func same(_ lhs: String?, _ rhs: String?) -> Bool {
+        switch (lhs, rhs) {
+        case let (lhs?, rhs?): lhs.utf16.elementsEqual(rhs.utf16)
+        case (nil, nil): true
+        default: false
+        }
+    }
+
+    fileprivate static func index(of itemId: String?, in ids: [String]) -> Int? {
+        guard let itemId else { return nil }
+        return ids.firstIndex { same($0, itemId) }
+    }
+
     private static func distinct(_ items: [String]) -> [String] {
-        var seen = Set<String>()
-        return items.filter { seen.insert($0).inserted }
+        var seen = Set<[UInt16]>()
+        return items.filter { seen.insert(Array($0.utf16)).inserted }
     }
 
     private static func move(_ state: State, to itemId: String?, playing: Bool? = nil) -> Result {
@@ -121,12 +136,12 @@ enum PrototypeQueue {
         next.currentItemId = itemId
         next.positionMs = 0
         next.playing = (playing ?? state.playing) && itemId != nil
-        return Result(state: next, itemChanged: itemId != state.currentItemId)
+        return Result(state: next, itemChanged: !same(itemId, state.currentItemId))
     }
 
     /// The item after the current one in play order, wrapping under repeat `all`.
     private static func following(_ state: State) -> String? {
-        let position = state.currentItemId.flatMap { state.order.firstIndex(of: $0) } ?? -1
+        let position = index(of: state.currentItemId, in: state.order) ?? -1
         if position + 1 < state.order.count {
             return state.order[position + 1]
         }
@@ -147,7 +162,7 @@ enum PrototypeQueue {
 
     private static func previous(_ state: State) -> Result {
         guard let current = state.currentItemId,
-              let position = state.order.firstIndex(of: current) else { return Result(state: state) }
+              let position = index(of: current, in: state.order) else { return Result(state: state) }
         if state.positionMs > previousRestartMs {
             var next = state
             next.positionMs = 0
@@ -196,7 +211,7 @@ enum PrototypeQueue {
             next.order = state.items
             return next
         }
-        var rest = state.items.filter { $0 != state.currentItemId }
+        var rest = state.items.filter { !same($0, state.currentItemId) }
         if rest.count > 1 {
             for index in stride(from: rest.count - 1, through: 1, by: -1) {
                 rest.swapAt(index, random.nextInt(index + 1))
@@ -207,19 +222,18 @@ enum PrototypeQueue {
     }
 
     private static func sync(_ state: State, _ items: [String]) -> Result {
-        let kept = Set(items)
+        let keptKeys = Set(items.map { Array($0.utf16) })
+        let kept = { (id: String) in keptKeys.contains(Array(id.utf16)) }
+        let added = { (id: String) in index(of: id, in: state.order) == nil }
         var synced = state
         synced.items = items
-        synced.order = state.shuffle
-            ? state.order.filter(kept.contains) + items.filter { !state.order.contains($0) }
-            : items
+        synced.order = state.shuffle ? state.order.filter(kept) + items.filter(added) : items
         guard let current = state.currentItemId else { return move(synced, to: items.first) }
-        if kept.contains(current) {
+        if kept(current) {
             return Result(state: synced)
         }
-        let position = state.order.firstIndex(of: current) ?? -1
-        let target = state.order.dropFirst(position + 1).first(where: kept.contains)
-            ?? items.first { !state.order.contains($0) }
+        let position = index(of: current, in: state.order) ?? -1
+        let target = state.order.dropFirst(position + 1).first(where: kept) ?? items.first(where: added)
         if let target {
             return move(synced, to: target)
         }

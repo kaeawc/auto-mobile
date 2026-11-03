@@ -224,7 +224,7 @@ describe("normalization and hardware defaults", () => {
   });
 });
 
-describe("Duo capability policy", () => {
+describe("Duo normalization", () => {
   test.each([
     {
       kind: "archetype" as const,
@@ -238,7 +238,7 @@ describe("Duo capability policy", () => {
       kind: "exact-model" as const,
       model: { namespace: "alias" as const, value: "duo-preview" },
     },
-  ])("refuses recognized Duo selector %# before resolution", (hardware) => {
+  ])("normalizes installed Duo selector %# without an opt-in", (hardware) => {
     const result = normalizeSessionDeviceRequirement(
       {
         schemaVersion: 1,
@@ -250,10 +250,10 @@ describe("Duo capability policy", () => {
       iosCatalog(),
     );
 
-    expect(unwrapError(result).code).toBe("capability_disabled");
+    expect(result.ok).toBe(true);
   });
 
-  test("an omitted default resolving to Duo needs no installed Duo profile", () => {
+  test("normalizing an omitted Duo default needs no installed profile", () => {
     const result = normalizeSessionDeviceRequirement(
       {
         schemaVersion: 1,
@@ -267,10 +267,19 @@ describe("Duo capability policy", () => {
       iosCatalog({ models: [], releases: [] }),
     );
 
-    expect(unwrapError(result).code).toBe("capability_disabled");
+    const normalized = unwrap(result);
+    expect(
+      unwrapError(
+        resolveSessionDeviceProfile(
+          normalized,
+          iosDefaults({ hardware: { omitted: "duo", archetypes: [], modelTypes: [] } }),
+          iosCatalog({ models: [], releases: [] }),
+        ),
+      ).code,
+    ).toBe("invalid_config");
   });
 
-  test("a known Duo farther down a phone default path cannot bypass refusal", () => {
+  test("a known Duo farther down a phone default path fails normal resolution", () => {
     const defaults = iosDefaults({
       hardware: {
         ...iosDefaults().hardware,
@@ -295,34 +304,38 @@ describe("Duo capability policy", () => {
       iosCatalog(),
     );
 
-    expect(unwrapError(result).code).toBe("capability_disabled");
-  });
-
-  test("Duo remains distinct from phone even when its name starts with iPhone", () => {
-    const normalized = normalizeIos({
-      schemaVersion: 1,
-      platform: "ios",
-      hardware: { kind: "archetype", archetype: "phone" },
-      os: { kind: "major", major: 27 },
-    });
-
     expect(
-      matchSessionDevice(normalized, {
-        platform: "ios",
-        metadataState: "current",
-        simulatorDeviceTypeIdentifier: IOS_DUO.simulatorDeviceTypeIdentifier,
-        modelIdentifier: IOS_DUO.modelIdentifier,
-        archetype: "duo",
-        modelType: IOS_DUO.modelType,
-        runtimeId: "duo-runtime",
-        osVersion: "27",
-      }),
-    ).toEqual({ kind: "mismatch", reason: "hardware" });
+      unwrapError(resolveSessionDeviceProfile(unwrap(result), defaults, iosCatalog())).code,
+    ).toBe("invalid_config");
   });
+
+  test.each(["phone", "tablet"] as const)(
+    "Duo remains distinct from %s even when its name starts with iPhone",
+    (archetype) => {
+      const normalized = normalizeIos({
+        schemaVersion: 1,
+        platform: "ios",
+        hardware: { kind: "archetype", archetype },
+        os: { kind: "major", major: 27 },
+      });
+
+      expect(
+        matchSessionDevice(normalized, {
+          platform: "ios",
+          metadataState: "current",
+          simulatorDeviceTypeIdentifier: IOS_DUO.simulatorDeviceTypeIdentifier,
+          modelIdentifier: IOS_DUO.modelIdentifier,
+          archetype: "duo",
+          modelType: IOS_DUO.modelType,
+          runtimeId: "duo-runtime",
+          osVersion: "27",
+        }),
+      ).toEqual({ kind: "mismatch", reason: "hardware" });
+    },
+  );
 });
 
-describe("Duo capability enabled", () => {
-  const enabled = { iosDuo: true };
+describe("installed Duo resolution", () => {
   const duoDefaults = () =>
     iosDefaults({
       hardware: {
@@ -365,10 +378,9 @@ describe("Duo capability enabled", () => {
         { schemaVersion: 1, platform: "ios", hardware, os: { kind: "exact", version: "28" } },
         defaults,
         catalog,
-        enabled,
       ),
     );
-    const resolved = resolveIos(normalized, defaults, catalog, enabled);
+    const resolved = resolveIos(normalized, defaults, catalog);
 
     expect(resolved.profile).toMatchObject({
       simulatorDeviceTypeIdentifier: IOS_DUO.simulatorDeviceTypeIdentifier,
@@ -378,58 +390,81 @@ describe("Duo capability enabled", () => {
     });
   });
 
-  test("resolution still refuses Duo when its capability is not passed", () => {
-    const defaults = duoDefaults();
-    const catalog = iosCatalog();
-    const normalized = unwrap(
-      normalizeSessionDeviceRequirement(
-        {
-          schemaVersion: 1,
-          platform: "ios",
-          hardware: { kind: "archetype", archetype: "duo" },
-          os: { kind: "exact", version: "28" },
+  test("a missing exact Duo model uses the normal hardware failure", () => {
+    const catalog = iosCatalog({ models: [] });
+    const result = normalizeSessionDeviceRequirement(
+      {
+        schemaVersion: 1,
+        platform: "ios",
+        hardware: {
+          kind: "exact-model",
+          model: {
+            namespace: "simulator-device-type",
+            value: IOS_DUO.simulatorDeviceTypeIdentifier,
+          },
         },
-        defaults,
-        catalog,
-        enabled,
-      ),
-    );
-
-    expect(unwrapError(resolveSessionDeviceProfile(normalized, defaults, catalog)).code).toBe(
-      "capability_disabled",
-    );
-  });
-
-  test("a phone default that points at a Duo is invalid config, never a Duo session", () => {
-    const defaults = iosDefaults({
-      hardware: {
-        ...iosDefaults().hardware,
-        modelTypes: iosDefaults().hardware.modelTypes.map((entry) =>
-          entry.modelType.family === "iphone" && entry.modelType.variant === "pro-max"
-            ? { ...entry, model: { namespace: "alias" as const, value: "duo-preview" } }
-            : entry,
-        ),
+        os: { kind: "exact", version: "28" },
       },
-    });
-    const catalog = iosCatalog();
-    const normalized = unwrap(
-      normalizeSessionDeviceRequirement(
-        {
-          schemaVersion: 1,
-          platform: "ios",
-          hardware: { kind: "archetype", archetype: "phone" },
-          os: { kind: "exact", version: "28" },
-        },
-        defaults,
-        catalog,
-        enabled,
-      ),
+      duoDefaults(),
+      catalog,
     );
-
-    expect(
-      unwrapError(resolveSessionDeviceProfile(normalized, defaults, catalog, enabled)).code,
-    ).toBe("invalid_config");
+    expect(unwrapError(result).code).toBe("unsupported_hardware");
   });
+
+  test("an installed Duo without an installed runtime uses the normal runtime failure", () => {
+    const defaults = duoDefaults();
+    const catalog = iosCatalog({ releases: [] });
+    const normalized = normalizeIos(
+      {
+        schemaVersion: 1,
+        platform: "ios",
+        hardware: { kind: "archetype", archetype: "duo" },
+        os: { kind: "exact", version: "28" },
+      },
+      defaults,
+      catalog,
+    );
+    expect(unwrapError(resolveSessionDeviceProfile(normalized, defaults, catalog)).code).toBe(
+      "missing_installed_runtime",
+    );
+  });
+
+  test.each(["phone", "tablet"] as const)(
+    "a %s default that points at a Duo is invalid config",
+    (archetype) => {
+      const defaults = iosDefaults({
+        hardware: {
+          ...iosDefaults().hardware,
+          modelTypes: iosDefaults().hardware.modelTypes.map((entry) =>
+            (
+              archetype === "phone"
+                ? entry.modelType.family === "iphone"
+                : entry.modelType.family === "ipad"
+            )
+              ? { ...entry, model: { namespace: "alias" as const, value: "duo-preview" } }
+              : entry,
+          ),
+        },
+      });
+      const catalog = iosCatalog();
+      const normalized = unwrap(
+        normalizeSessionDeviceRequirement(
+          {
+            schemaVersion: 1,
+            platform: "ios",
+            hardware: { kind: "archetype", archetype },
+            os: { kind: "exact", version: "28" },
+          },
+          defaults,
+          catalog,
+        ),
+      );
+
+      expect(unwrapError(resolveSessionDeviceProfile(normalized, defaults, catalog)).code).toBe(
+        "invalid_config",
+      );
+    },
+  );
 });
 
 describe("iOS catalog and OS resolution", () => {

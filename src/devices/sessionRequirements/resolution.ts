@@ -28,7 +28,6 @@ import type {
   ResolvedSessionDeviceProfile,
   ResolutionProvenance,
   SessionDeviceCatalog,
-  SessionRequirementCapabilities,
   SessionRequirementDefaults,
 } from "./types";
 import {
@@ -588,17 +587,10 @@ function resolveIos(
   requirement: NormalizedIosSessionDeviceRequirement,
   defaults: IosSessionRequirementDefaults,
   catalog: Extract<SessionDeviceCatalog, { platform: "ios" }>,
-  capabilities: SessionRequirementCapabilities,
 ): RequirementResult<ResolvedSessionDeviceProfile> {
   const hardware = resolveIosHardware(requirement, defaults, catalog);
   if (!hardware.ok) {
     return hardware;
-  }
-  if (hardware.value.model.archetype === "duo" && capabilities.iosDuo !== true) {
-    return failure(
-      "capability_disabled",
-      `Model '${hardware.value.model.name}' resolves to Duo, which is disabled by provider policy.`,
-    );
   }
   const os = chooseIosRelease(
     requirement.effective.os,
@@ -689,10 +681,9 @@ export function resolveSessionDeviceProfile(
   requirement: NormalizedSessionDeviceRequirement,
   defaults: SessionRequirementDefaults,
   catalog: SessionDeviceCatalog,
-  capabilities: SessionRequirementCapabilities = {},
 ): RequirementResult<ResolvedSessionDeviceProfile> {
   if (requirement.platform === "ios" && defaults.platform === "ios" && catalog.platform === "ios") {
-    return resolveIos(requirement, defaults, catalog, capabilities);
+    return resolveIos(requirement, defaults, catalog);
   }
   if (
     requirement.platform === "android" &&

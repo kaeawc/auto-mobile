@@ -344,14 +344,14 @@ function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   const { min, minUnknown } = mainMinimum(child, main, box);
   // A content-sized item with an aspect ratio and a known cross size takes its main size from both.
   const size = declared === "auto" ? ratioMainSize(child, main, box) : declared;
-  // A growing item's unmeasured content basis is taken as zero, so it shares the room as
-  // `flex: 1` would; its growth, not its content, decides its size.
-  const basis = grow > 0 ? (size ?? 0) : size;
+  const edges = mainEdges(child, main, box);
+  // A growing item's unmeasured content is taken as zero, so its border-box basis is its padding
+  // and border; it shares the room as `flex: 1` would, and its growth decides its size.
+  const basis = grow > 0 ? (size ?? edges) : size;
   const base =
     basis === undefined
       ? clampSize(undefined, child, main, { base: room, vars: box.vars })
       : Math.max(min ?? 0, Math.min(max ?? Infinity, basis));
-  const edges = mainEdges(child, main, box);
   return { element: child, basis, base, grow, shrink, min, max, minUnknown, edges };
 }
 

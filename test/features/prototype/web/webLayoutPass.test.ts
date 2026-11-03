@@ -316,3 +316,14 @@ test("shrink is weighted by the inner flex base size, excluding padding and bord
   expect(rectOf(painted, "white")?.left).toBeCloseTo(225.45, 2);
   expect(rectOf(painted, "white")?.width).toBeCloseTo(174.55, 2);
 });
+
+test("a growing item's content-sized basis keeps its padding", () => {
+  // CSS: empty items' auto bases are 0 and 100 (padding), so the 300px left splits 150/150.
+  const row = named("row", { display: "flex", "flex-direction": "row", width: "400px" }, [
+    named("black", { flex: "1 1 auto", height: "10px" }),
+    named("white", { flex: "1 1 auto", height: "10px", "padding-left": "100px" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "black")?.width).toBe(150);
+  expect(rectOf(painted, "white")).toEqual({ left: 150, top: 0, width: 250, height: 10 });
+});

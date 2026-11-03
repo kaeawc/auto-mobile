@@ -314,3 +314,30 @@ test("weights summing below 1 take only that fraction of the free space, as CSS 
     90, 10,
   ]);
 });
+
+test("a weighted child's padding and border are its flex base, which its share grows from (#16763)", () => {
+  const weighted = (weight: number, bounds: Raw = {}) => ({
+    type: "row",
+    style: { weight, ...bounds },
+  });
+  const padded = (top: number, bounds: Raw = {}) =>
+    weighted(1, { padding: { top, bottom: top }, ...bounds });
+  // border-box keeps the 50 dp of padding above a maxHeight of 20, so the sibling gets 50.
+  expect(columnChildHeights([padded(25, { maxHeight: 20 }), weighted(1)], 100, 0)).toEqual([
+    50, 50,
+  ]);
+  // The share grows on top of the padding: 70 dp of padding leaves 30 to split 1:3.
+  expect(columnChildHeights([padded(35), weighted(3)], 100, 0)).toEqual([77.5, 22.5]);
+  expect(columnChildHeights([padded(30, { minHeight: 10 }), weighted(1)], 100, 0)).toEqual([
+    80, 20,
+  ]);
+  expect(columnChildHeights([padded(10, { maxHeight: 40 }), weighted(1)], 100, 0)).toEqual([
+    40, 60,
+  ]);
+  // A solid border counts on both edges; a gradient border is drawn as an overlay and does not.
+  const bordered = (border: Raw) => weighted(1, { border });
+  expect(columnChildHeights([bordered({ width: 10 }), weighted(1)], 100, 0)).toEqual([60, 40]);
+  expect(
+    columnChildHeights([bordered({ width: 10, gradient: { colors: [] } }), weighted(1)], 100, 0),
+  ).toEqual([50, 50]);
+});

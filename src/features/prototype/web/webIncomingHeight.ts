@@ -71,25 +71,42 @@ const fixedHeight = (node: Raw): number => {
 };
 
 /**
- * Each weighted node's share of `free`, as CSS's flexible-length algorithm resolves `flex: w w 0`
- * items: split what is left over the unfrozen weights (only `free × weights` of it when those
- * weights sum below 1), clamp each share by its node's `maxHeight`
- * then `minHeight` (see clamped), freeze the min violators when the clamps add height, the max
- * violators when they take it away, or every share when they cancel, and repeat until every
- * share is frozen. A share clamped by its own bound so hands what it gives up to its siblings.
+ * The vertical padding and solid border of a node's box, which `box-sizing: border-box` never lets
+ * it shrink below: a `flex: w w 0` item's base size, the height its weight share is added to.
+ */
+function frame(style: Raw | undefined): number {
+  const padding = record(style?.padding);
+  const border = record(style?.border);
+  const width =
+    typeof border?.width === "number" && border.gradient === undefined ? border.width : 0;
+  return side(padding, "top") + side(padding, "bottom") + 2 * width;
+}
+
+/**
+ * Each weighted node's height out of `free`, as CSS's flexible-length algorithm resolves
+ * `flex: w w 0` items: each starts at its frame (see frame), and what the frames leave is split
+ * over the unfrozen weights (only that fraction of the initial free space when the weights sum
+ * below 1). Each target is clamped by its node's `maxHeight` then `minHeight` (see clamped) and
+ * never below its frame; the min violators freeze when the clamps add height, the max violators
+ * when they take it away, every target when they cancel, and the loop repeats until every target
+ * is frozen. A target clamped by its own bound so hands what it gives up to its siblings.
  */
 function weightShares(nodes: readonly Raw[], free: number): Map<Raw, number> {
   const frozen = new Map<Raw, number>();
   let open = nodes.filter((node) => weightOf(node) !== undefined);
+  const base = (node: Raw) => frame(record(node.style));
+  const initial = free - open.reduce((sum, node) => sum + base(node), 0);
   while (open.length > 0) {
     const weights = open.reduce((sum, node) => sum + (weightOf(node) ?? 0), 0);
-    const left = free - [...frozen.values()].reduce((sum, height) => sum + height, 0);
+    const taken = [...frozen.values()].reduce((sum, height) => sum + height, 0);
+    const left = free - taken - open.reduce((sum, node) => sum + base(node), 0);
     // Weights summing below 1 take only that fraction of the initial free space, when less.
-    const fraction = free * weights;
+    const fraction = initial * weights;
     const space = weights < 1 && Math.abs(fraction) < Math.abs(left) ? fraction : left;
     const targets = open.map((node) => {
-      const share = (space * (weightOf(node) ?? 0)) / weights;
-      return { node, share, height: clamped(record(node.style), share) };
+      const share = base(node) + (space * (weightOf(node) ?? 0)) / weights;
+      const height = Math.max(base(node), clamped(record(node.style), share));
+      return { node, share, height };
     });
     const violation = targets.reduce((sum, target) => sum + target.height - target.share, 0);
     const freezes = targets.filter(

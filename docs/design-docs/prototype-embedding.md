@@ -49,6 +49,25 @@ units and escapes `$`; Swift uses `\u{X}` scalars.
 - A `storage` block opts the host in to file-backed storage. Requests use the embedded routing
   decision in `docs/decisions/prototype-embedded-request-routing.md`.
 
+## Eject scaffold
+
+`automobile:prototype/eject` is the other path out of a prototype: a deterministic, one-shot
+Compose or SwiftUI scaffold with no renderer dependency, for teams that want to own their screens.
+It resolves the prototype like the native resource, expands `components`, and writes one file.
+
+- `prototypeEjectMapping.ts` classifies every contract node type as scaffolded or `"stub"`. It is
+  typed over every node type, and a test compares it with the contract, so a new node type fails
+  until someone classifies it. Each dialect's emitter table is typed over the scaffolded set.
+- The subset is fixed (layout, text, buttons, fields, lists, `stack`). Its maintenance cost grows
+  with every node type added to it, which is why the rest stay as stubs rather than gaining
+  emitters. A stub keeps its `testTag` and children so the screen map and recorded flows still
+  find them.
+- It is not round-trip. Nothing reads the ejected code back, and re-reading the resource
+  overwrites nothing; the app copies the file once.
+- Only `push`, `replace`, `pop` and `popToRoot` are translated, onto a back stack per `stack` id in
+  the generated state class. Other actions, styles, conditions and placeholders are reported in
+  `remaining`.
+
 ## Samples and checks
 
 - `test/fixtures/prototype-embedding/sample.json` is rendered through the resource by

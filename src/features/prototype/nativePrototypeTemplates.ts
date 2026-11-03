@@ -36,7 +36,7 @@ export interface InlineHostSource {
  * through (with the quote, backslash and Kotlin's `$` escaped), everything else is a Unicode
  * escape in the target language's own form. Lone surrogates have no scalar and become U+FFFD.
  */
-function stringLiteral(value: string, language: "kotlin" | "swift"): string {
+export function stringLiteral(value: string, language: "kotlin" | "swift"): string {
   return `"${escapedChars(value, language).join("")}"`;
 }
 

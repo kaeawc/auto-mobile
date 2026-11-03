@@ -57,8 +57,9 @@ work unchanged. On the verified emulator:
 | `prototype` `show`, `dismiss`, `save`   | Pass (see below)                                                    |
 
 The screen is small, and on a round display content near the corners is cut off. `swipeOn` with
-`lookFor` taps the centre of the found element, and on a round watch list that centre lies inside
-the visible circle, edge rows included.
+`lookFor` scrolls until the element is visible and returns it; call `tapOn` to open it. On a round
+watch list the centre of each row lies inside the visible circle, edge rows included, so the tap
+lands.
 
 - `observe` reports `isScreenRound` on a watch: `true` on a round display, `false` on a square one,
   absent when it cannot be read.

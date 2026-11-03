@@ -49983,6 +49983,12 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "pinnedDisplay": {
           "$ref": "#/$defs/__schema0"
         },

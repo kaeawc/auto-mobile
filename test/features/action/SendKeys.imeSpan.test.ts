@@ -107,9 +107,10 @@ test("three IME commands perform one light verification read each", async () => 
     success: true,
     completedCommands: 3,
   });
+  // One pre-activation baseline, then the existing per-command verification reads.
   // SendKeys also takes a terminal observation after the command span.
-  expect(reads.filter((read) => read?.hierarchyOnly)).toHaveLength(3);
-  expect(verifiedCommands).toEqual([1, 2, 3]);
+  expect(reads.filter((read) => read?.hierarchyOnly)).toHaveLength(4);
+  expect(verifiedCommands).toEqual([0, 1, 2, 3]);
 });
 
 // #10411 keeps one IME input session across consecutive type commands; the device must append

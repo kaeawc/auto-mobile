@@ -18,6 +18,7 @@ import {
   ANDROID_TYPE_FOCUSED_INPUT_ERROR,
 } from "./AndroidTypingConstants";
 import { ImeSpanService, isImeRestorationFailure } from "./ImeSpan";
+import { readImeEditorState } from "./ImeEditorState";
 import type { AndroidModeTyper } from "./AndroidModeTyper";
 import { A11yTyper } from "./A11yTyper";
 import { EventOnlyTyper } from "./EventOnlyTyper";
@@ -155,6 +156,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       execute: async (options) => {
         const observation = await observer.execute(options);
         this.iosSdkText.observed(observation);
+        const span = this.imeSpanService.imeSpan;
+        if (this.device.platform === "android" && span && !span.snapshot && !span.editorState) {
+          // Reuse the auto/password pre-check, before the first IME activation.
+          span.editorState = readImeEditorState(observation);
+        }
         if (this.targetLayer !== "prototype") {
           return observation;
         }

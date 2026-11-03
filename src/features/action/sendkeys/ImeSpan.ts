@@ -6,6 +6,7 @@ import { redactPasswordImeFailure, withImeFailure } from "../imeFailureDiagnosti
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { ImeRestorationError } from "./ImeRestorationError";
+import type { ImeEditorState } from "./ImeEditorState";
 
 type SendKeysCommandExecution = Awaited<
   ReturnType<NonNullable<SendKeysCommandExecutor["withImeSpan"]>>
@@ -27,6 +28,7 @@ export interface ImeSpanSnapshot {
 
 export interface AndroidImeSpan {
   snapshot?: ImeSpanSnapshot;
+  editorState?: ImeEditorState;
   lastType?: { text: string; focusedFieldClass?: string | null; passwordField?: boolean };
   safeToRestore: boolean;
   restorationFailed?: boolean;
@@ -115,6 +117,7 @@ export class ImeSpanService {
       throw failure;
     }
     execution!.restorationFailed = execution!.restorationFailed || this.imeSpan?.restorationFailed;
+    execution!.imeEditorState = this.imeSpan?.editorState;
     return execution!;
   }
 

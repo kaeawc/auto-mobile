@@ -45,9 +45,20 @@ export function mediaTime(ms: number): string {
 
 const fills: Css = { position: "absolute", inset: "0" };
 
+/** The node's inline source, else the source of the declared `media.players` entry it names. */
+function videoSource(node: Raw, scope: WebRenderScope): unknown {
+  if (node.source !== undefined) {
+    return node.source;
+  }
+  const players = record(record(scope.spec.media)?.players);
+  return typeof node.player === "string" && players && Object.hasOwn(players, node.player)
+    ? record(players[node.player])?.source
+    : undefined;
+}
+
 /** The frame a video shows before playback: a built-in sample's synthetic frame, else black. */
-function videoFrame(node: Raw): WebElement {
-  const sample = record(node.source)?.sample;
+function videoFrame(node: Raw, scope: WebRenderScope): WebElement {
+  const sample = record(videoSource(node, scope))?.sample;
   if (sample === "colorBars") {
     return el("div", {
       attrs: { "data-part": "frame" },
@@ -201,7 +212,7 @@ const videoPlayerRenderer =
     const chrome =
       node.controls === "none" ? [] : [...(ios ? [] : [centredPlay()]), controlRow(node, ios)];
     return el("div", { attrs: { "aria-label": "Video player", ...attrs, role: "region" }, style }, [
-      videoFrame(node),
+      videoFrame(node, scope),
       ...chrome,
     ]);
   };

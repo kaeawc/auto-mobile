@@ -94,6 +94,18 @@ describe("prototype web map (#16539)", () => {
     expect(pins[1]!.style).toMatchObject({ left: "50%", top: "50%" });
   });
 
+  test("projects against the map's own dp size", () => {
+    const map = still({
+      markers,
+      fit: "markers",
+      style: { width: { dp: 200 }, height: { dp: 400 } },
+    });
+    // The taller box fits the points by width, so they no longer reach the vertical margins.
+    const pins = map.part("marker");
+    expect(pins.map((pin) => pin.style.left)).toEqual(["10%", "90%"]);
+    expect(map.html).toContain("height:400px");
+  });
+
   test("an empty map draws the neutral canvas", () => {
     const map = still({ mapStyle: "plain" });
     expect(map.unsupportedNodes).toEqual([]);

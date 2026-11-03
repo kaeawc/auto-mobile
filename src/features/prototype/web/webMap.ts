@@ -179,8 +179,10 @@ export function mapPercent(
   };
 }
 
-function numericSize(value: unknown, fallback: number): number {
-  return typeof value === "number" && value > 0 ? value : fallback;
+/** A `{dp}` dimension, as the style maps it to CSS; anything else (unsized, `fill`) falls back. */
+function dpSize(value: unknown, fallback: number): number {
+  const dp = record(value)?.dp;
+  return typeof dp === "number" && dp > 0 ? dp : fallback;
 }
 
 function routeLayer(lines: MapLine[], place: (point: MapPoint) => { left: number; top: number }) {
@@ -254,8 +256,8 @@ const mapRenderer =
   (node, scope) => {
     const style = record(node.style);
     const size = {
-      width: numericSize(style?.width, scope.screenWidth),
-      height: numericSize(style?.height, DEFAULT_MAP_HEIGHT),
+      width: dpSize(style?.width, scope.screenWidth),
+      height: dpSize(style?.height, DEFAULT_MAP_HEIGHT),
     };
     const markers = mapMarkers(node, scope);
     const lines = mapLines(node, scope);

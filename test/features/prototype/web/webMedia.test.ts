@@ -71,6 +71,19 @@ describe("prototype web media nodes (#16539)", () => {
     expect(bare.part("play")).toHaveLength(0);
   });
 
+  test("a declared player's sample source draws its frame", () => {
+    const rendered = renderPrototypeStill(
+      {
+        ...reference,
+        media: { players: { main: { kind: "video", source: { sample: "colorBars" } } } },
+        root: { type: "videoPlayer", player: "main" },
+      },
+      { frame: "pixel-9" },
+    );
+    const frame = find(rendered.element, (element) => element.attrs["data-part"] === "frame");
+    expect(frame[0]!.style.background).toContain("linear-gradient");
+  });
+
   test("a poster asset is listed as not inlined", () => {
     expect(
       still({ type: "videoPlayer", id: "clip", player: "main", poster: "p" }).unsupportedNodes,

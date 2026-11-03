@@ -4,9 +4,11 @@ import { join } from "node:path";
 import {
   cameraOrientation,
   fitFraming,
+  groundReach,
   groundTransform,
   mapPercent,
   mercator,
+  projectLine,
   projectPercent,
 } from "../../../../src/features/prototype/web/webMap";
 import {
@@ -181,7 +183,8 @@ describe("prototype web map (#16539)", () => {
     const ground = map.part("ground");
     expect(ground).toHaveLength(1);
     expect(ground[0]!.style.transform).toBe("perspective(300px) rotateX(45deg) rotate(-90deg)");
-    expect(ground[0]!.style.inset).toBe("-300%");
+    // A 412 × 200 box at 45°: its top corners trace back to (±309, −212), about 375 dp out.
+    expect(ground[0]!.style).toMatchObject({ width: "752px", margin: "-376px 0 0 -376px" });
     const pins = map.part("marker");
     expect(pins[0]!.style).toMatchObject({ left: "50%", top: "50%" });
     // The pier lies north-east; facing east it is ahead and to the left.
@@ -205,5 +208,49 @@ describe("prototype web map (#16539)", () => {
     });
     expect(fitted.part("ground")).toEqual([]);
     expect(fitted.part("marker").map((pin) => pin.style.left)).toEqual(["39.744%", "60.256%"]);
+  });
+
+  test("the ground reaches every corner of a short, wide box", () => {
+    // At 60° the 390 × 100 box's top corners trace back to about (±461, −237) on the ground,
+    // past a fixed three-box overscan's 350 dp.
+    expect(groundReach({ width: 390, height: 100 }, 60)).toBeCloseTo(518.6, 0);
+    expect(groundReach({ width: 200, height: 200 }, 0)).toBeCloseTo(Math.hypot(100, 100), 6);
+    const map = still({
+      markers,
+      style: { width: { dp: 390 }, height: { dp: 100 } },
+      camera: { lat: 37.77, lng: -122.42, zoom: 12, bearing: 90, tilt: 60 },
+    });
+    expect(map.part("ground")[0]!.style).toMatchObject({ width: "1040px", height: "1040px" });
+  });
+
+  test("a route clips at the near plane instead of dropping its far vertex", () => {
+    const size = { width: 200, height: 200 };
+    const center = mercator(0, 0);
+    const view = { center, worldSize: 256 * 2 ** 3 };
+    const orientation = { bearing: 0, tilt: 60 };
+    const south = mercator(-60, 0);
+    const [run, ...rest] = projectLine([center, south], view, size, orientation);
+    expect(rest).toEqual([]);
+    expect(run).toHaveLength(2);
+    expect(run![0]).toEqual({ left: 50, top: 50 });
+    // Latitude −10 lies on the visible part, so the clipped end is past it.
+    const tenSouth = projectPercent(mercator(-10, 0), view, size, orientation)!;
+    expect(tenSouth.top).toBeCloseTo(67.121, 3);
+    expect(run![1]!.top).toBeGreaterThan(tenSouth.top);
+    expect(run![1]!.left).toBe(50);
+    // Passing behind the eye and back breaks the line rather than joining its visible ends.
+    const runs = projectLine([center, south, mercator(0, 10)], view, size, orientation);
+    expect(runs).toHaveLength(2);
+    expect(runs.map((points) => points.length)).toEqual([2, 2]);
+  });
+
+  test("a flat line is one run of the flat placement", () => {
+    const size = { width: 400, height: 200 };
+    const view = { center: mercator(0, 0), worldSize: 4096 };
+    const points = [mercator(0, -1), mercator(1, 1)];
+    expect(projectLine(points, view, size, { bearing: 0, tilt: 0 })).toEqual([
+      points.map((point) => mapPercent(point, view, size)),
+    ]);
+    expect(projectLine([], view, size, { bearing: 0, tilt: 0 })).toEqual([]);
   });
 });

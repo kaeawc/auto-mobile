@@ -288,8 +288,10 @@ the host, so the page's script only switches between views it was given and neve
   grid), 200 px tall unless sized, with its polylines in an inline SVG and its markers as pins, placed
   by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
   point. A camera framing turns by its `bearing` and `tilt` (a fit frames north up): the canvas moves
-  to an oversized ground layer under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, and
-  lines and pins are projected the same way in code, pins staying upright and dropped behind the eye.
+  to a ground square under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, sized from the
+  box corners traced back onto the plane so it covers any aspect ratio, and lines and pins are
+  projected the same way in code: pins stay upright, and lines are clipped at a near plane (0.1 of the
+  eye distance) and break into separate runs there, while pins past it are dropped.
   A camera preview is a portrait viewfinder at its
   `aspectRatio` (default 4:3) showing colour bars and a label naming its mode. A cast button is the
   skin's idle route icon (Cast on Android, AirPlay on iOS) in a 48 px target; it is a `details`

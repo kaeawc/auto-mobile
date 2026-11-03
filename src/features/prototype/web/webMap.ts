@@ -213,38 +213,131 @@ export function mapPercent(
   };
 }
 
+/** A point on the turned ground plane, in dp from the box centre, before the tilt. */
+interface GroundPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+type Size = { width: number; height: number };
+type Percent = { left: number; top: number };
+
+/** A point nearer than this share of the eye distance is clipped, so nothing divides by ~0. */
+const NEAR_PLANE = 0.1;
+
+function radians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+/** The world point turned by `-bearing` about the box centre, in dp. */
+function turnGround(point: MapPoint, view: MapFraming, bearing: number): GroundPoint {
+  const dx = (point.x - view.center.x) * view.worldSize;
+  const dy = (point.y - view.center.y) * view.worldSize;
+  const turn = radians(-bearing);
+  return {
+    x: dx * Math.cos(turn) - dy * Math.sin(turn),
+    y: dx * Math.sin(turn) + dy * Math.cos(turn),
+  };
+}
+
+/** The furthest a ground point may lie toward the viewer (down the box) and still be drawn. */
+function nearLimit(tilt: number, height: number): number {
+  const sin = Math.sin(radians(tilt));
+  return sin > 0 ? (EYE_DISTANCE * height * (1 - NEAR_PLANE)) / sin : Infinity;
+}
+
+/** A ground point tilted away under the perspective eye, as a percentage of each side. */
+function projectGround(point: GroundPoint, size: Size, tilt: number): Percent {
+  const eye = EYE_DISTANCE * size.height;
+  const scale = eye / (eye - point.y * Math.sin(radians(tilt)));
+  const round = (value: number) => Number(value.toFixed(3));
+  return {
+    left: round(50 + (point.x * scale * 100) / size.width),
+    top: round(50 + (point.y * Math.cos(radians(tilt)) * scale * 100) / size.height),
+  };
+}
+
 /**
  * Where a world point falls under a turned camera, as a percentage of each side: the map turns by
  * `-bearing` about the box centre, then the ground plane tilts away under a perspective eye
  * `EYE_DISTANCE` heights out, exactly as `groundTransform` turns the canvas. Undefined for a point
- * at or behind the eye. North up and straight down, this is `mapPercent`.
+ * at or behind the near plane. North up and straight down, this is `mapPercent`.
  */
 export function projectPercent(
   point: MapPoint,
   view: MapFraming,
-  size: { width: number; height: number },
+  size: Size,
   orientation: MapOrientation,
-): { left: number; top: number } | undefined {
+): Percent | undefined {
   if (orientation.bearing === 0 && orientation.tilt === 0) {
     return mapPercent(point, view, size);
   }
-  const dx = (point.x - view.center.x) * view.worldSize;
-  const dy = (point.y - view.center.y) * view.worldSize;
-  const turn = (-orientation.bearing * Math.PI) / 180;
-  const x = dx * Math.cos(turn) - dy * Math.sin(turn);
-  const y = dx * Math.sin(turn) + dy * Math.cos(turn);
-  const tilt = (orientation.tilt * Math.PI) / 180;
-  const eye = EYE_DISTANCE * size.height;
-  const depth = eye - y * Math.sin(tilt);
-  if (depth <= 0) {
-    return undefined;
+  const ground = turnGround(point, view, orientation.bearing);
+  return ground.y > nearLimit(orientation.tilt, size.height)
+    ? undefined
+    : projectGround(ground, size, orientation.tilt);
+}
+
+/**
+ * A line's visible runs: each segment is clipped to the near plane on the ground (where clipping is
+ * linear, before the perspective division), and a run breaks where the line passes behind it.
+ */
+export function projectLine(
+  points: readonly MapPoint[],
+  view: MapFraming,
+  size: Size,
+  orientation: MapOrientation,
+): Percent[][] {
+  if (orientation.bearing === 0 && orientation.tilt === 0) {
+    return points.length > 0 ? [points.map((point) => mapPercent(point, view, size))] : [];
   }
-  const scale = eye / depth;
-  const round = (value: number) => Number(value.toFixed(3));
-  return {
-    left: round(50 + (x * scale * 100) / size.width),
-    top: round(50 + (y * Math.cos(tilt) * scale * 100) / size.height),
+  const limit = nearLimit(orientation.tilt, size.height);
+  const ground = points.map((point) => turnGround(point, view, orientation.bearing));
+  const runs: GroundPoint[][] = [];
+  let run: GroundPoint[] = [];
+  const at = (from: GroundPoint, to: GroundPoint): GroundPoint => {
+    const share = (limit - from.y) / (to.y - from.y);
+    return { x: from.x + (to.x - from.x) * share, y: limit };
   };
+  for (const [index, point] of ground.entries()) {
+    const previous = ground[index - 1];
+    const inside = point.y <= limit;
+    if (previous && previous.y <= limit !== inside) {
+      run.push(at(previous, point));
+      if (!inside) {
+        runs.push(run);
+        run = [];
+      }
+    }
+    if (inside) {
+      run.push(point);
+    }
+  }
+  runs.push(run);
+  return runs
+    .filter((points) => points.length > 0)
+    .map((points) => points.map((point) => projectGround(point, size, orientation.tilt)));
+}
+
+/**
+ * How far from the box centre the turned ground must reach to cover the whole box: each box
+ * corner traced back through the perspective onto the ground plane. The bearing turns the plane
+ * about the centre, so the farthest corner's distance covers every bearing.
+ */
+export function groundReach(size: Size, tilt: number): number {
+  const eye = EYE_DISTANCE * size.height;
+  const [sin, cos] = [Math.sin(radians(tilt)), Math.cos(radians(tilt))];
+  const corners = [-1, 1].flatMap((sx) =>
+    [-1, 1].map((sy) => ({ X: (sx * size.width) / 2, Y: (sy * size.height) / 2 })),
+  );
+  return Math.max(
+    ...corners.map(({ X, Y }) => {
+      // Screen Y = y·cos·eye/(eye − y·sin), solved for y; the box stays below the horizon at 60°.
+      const y = (Y * eye) / (eye * cos + Y * sin);
+      const x = (X * (eye - y * sin)) / eye;
+      return Math.hypot(x, y);
+    }),
+  );
 }
 
 /** The CSS transform that turns the ground canvas the way `projectPercent` turns points. */
@@ -259,9 +352,7 @@ function dpSize(value: unknown, fallback: number): number {
   return typeof dp === "number" && dp > 0 ? dp : fallback;
 }
 
-type Place = (point: MapPoint) => { left: number; top: number } | undefined;
-
-function routeLayer(lines: MapLine[], place: Place) {
+function routeLayer(lines: MapLine[], project: (points: MapPoint[]) => Percent[][]) {
   return el(
     "svg",
     {
@@ -274,24 +365,20 @@ function routeLayer(lines: MapLine[], place: Place) {
         overflow: "visible",
       },
     },
-    lines.map((line) =>
-      el("polyline", {
-        attrs: {
-          points: line.points
-            .flatMap((point) => {
-              const at = place(point);
-              return at ? [at] : [];
-            })
-            .map(({ left, top }) => `${left},${top}`)
-            .join(" "),
-          fill: "none",
-          stroke: line.color,
-          "stroke-width": String(line.width),
-          "stroke-linecap": "round",
-          "stroke-linejoin": "round",
-          "vector-effect": "non-scaling-stroke",
-        },
-      }),
+    lines.flatMap((line) =>
+      project(line.points).map((run) =>
+        el("polyline", {
+          attrs: {
+            points: run.map(({ left, top }) => `${left},${top}`).join(" "),
+            fill: "none",
+            stroke: line.color,
+            "stroke-width": String(line.width),
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "vector-effect": "non-scaling-stroke",
+          },
+        }),
+      ),
     ),
   );
 }
@@ -320,18 +407,23 @@ function markerPin(
 }
 
 /**
- * The canvas on its own layer, turned like the camera. At the maximum 60° tilt the far edge of a
- * plane must reach about 2.4 heights out to cover the box's top, so the layer extends 3 box sizes
- * past each side; the box clips it.
+ * The canvas on its own layer, turned like the camera: a square centred on the box that reaches
+ * `groundReach` (plus a pixel) out, so the tilted, turned plane covers the box at any aspect ratio;
+ * the box clips it.
  */
-function groundLayer(background: string, orientation: MapOrientation, height: number): WebElement {
+function groundLayer(background: string, orientation: MapOrientation, size: Size): WebElement {
+  const reach = Math.ceil(groundReach(size, orientation.tilt)) + 1;
   return el("div", {
     attrs: { "aria-hidden": "true", "data-part": "ground" },
     style: {
       position: "absolute",
-      inset: "-300%",
+      left: "50%",
+      top: "50%",
+      width: `${reach * 2}px`,
+      height: `${reach * 2}px`,
+      margin: `-${reach}px 0 0 -${reach}px`,
       background,
-      transform: groundTransform(orientation, height),
+      transform: groundTransform(orientation, size.height),
     },
   });
 }
@@ -369,7 +461,6 @@ const mapRenderer =
       size,
     );
     const turned = orientation.bearing !== 0 || orientation.tilt !== 0;
-    const place = (point: MapPoint) => projectPercent(point, view, size, orientation);
     const background = MAP_BACKGROUNDS[String(node.mapStyle)] ?? MAP_BACKGROUNDS.streets!;
     const { attrs, style: css } = kit.base(node, scope, {
       position: "relative",
@@ -380,10 +471,12 @@ const mapRenderer =
     });
     const pin = cssColor("error", scope.style) ?? "#b3261e";
     return el("div", { attrs: { "aria-label": "Map", ...attrs, role: "img" }, style: css }, [
-      ...(turned ? [groundLayer(background, orientation, size.height)] : []),
-      ...(lines.length > 0 ? [routeLayer(lines, place)] : []),
+      ...(turned ? [groundLayer(background, orientation, size)] : []),
+      ...(lines.length > 0
+        ? [routeLayer(lines, (points) => projectLine(points, view, size, orientation))]
+        : []),
       ...markers.flatMap((marker) => {
-        const at = place(marker.point);
+        const at = projectPercent(marker.point, view, size, orientation);
         return at ? [markerPin(marker, at, pin)] : [];
       }),
     ]);

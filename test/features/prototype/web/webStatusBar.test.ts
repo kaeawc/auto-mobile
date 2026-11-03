@@ -288,6 +288,46 @@ test("a narrow full-height child in a fullscreen box leaves the full-fill colour
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("top padding ends the walk, so a padded child's background does not reach the status bar", () => {
+  const white = el("div", { style: { width: "100%", "background-color": "#ffffff" } });
+  const padded = (style: Record<string, string>) =>
+    el("div", { style: { "justify-self": "stretch", width: "100%", ...style } }, [white]);
+  const black = el("div", {
+    style: { "justify-self": "stretch", width: "100%", "background-color": "#000000" },
+  });
+  const box = (top: WebElement) =>
+    el("div", { style: { display: "grid", "grid-template-areas": '"cell"', width: "100%" } }, [
+      black,
+      top,
+    ]);
+  expect(appTopColor(box(padded({ "padding-top": "80px" })), "#777777")).toBe("#000000");
+  expect(appTopColor(box(padded({ padding: "80px 16px" })), "#777777")).toBe("#000000");
+  // Zero top padding still lets the child show.
+  expect(appTopColor(box(padded({ padding: "0 16px" })), "#777777")).toBe("#ffffff");
+  expect(appTopColor(box(padded({ "padding-top": "0px" })), "#777777")).toBe("#ffffff");
+});
+
+test("a padded transparent overlay in a fullscreen box leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "padded-overlay",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", padding: { top: 80 } },
+          children: [{ type: "column", style: { width: "fill", background: "#ffffff" } }],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

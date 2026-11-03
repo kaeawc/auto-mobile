@@ -141,6 +141,12 @@ function topCandidates(element: WebElement): WebElement[] {
 
 const MAX_DEPTH = 32;
 
+/** Whether the element has top padding: its `padding-top`, else the first `padding` value. */
+function paddedAtTop(element: WebElement): boolean {
+  const top = element.style["padding-top"] ?? element.style.padding?.trim().split(/\s+/)[0];
+  return top !== undefined && !/^0(?:px)?$/.test(top.trim());
+}
+
 /** The innermost opaque full-width background at the top of this subtree, if any paints there. */
 function subtreeTopColor(
   element: WebElement,
@@ -153,9 +159,8 @@ function subtreeTopColor(
     return undefined;
   }
   const own = depth === 0 || stretches(element) ? opaqueBackground(element, composite) : undefined;
-  // Top safe-area padding moves the children below the status area, so this background shows.
-  const clears: boolean = element.style["padding-top"]?.includes("--safe-top") ?? false;
-  if (clears || depth >= MAX_DEPTH) {
+  // Top padding (authored or the safe area) moves the children down, so this background shows.
+  if (paddedAtTop(element) || depth >= MAX_DEPTH) {
     return own;
   }
   // A candidate that paints nothing opaque at the top lets the one beneath it show.
@@ -175,7 +180,7 @@ function subtreeTopColor(
  * from the last painted to the first, and the first that paints an opaque top colour wins. Element
  * opacity multiplies down the walk: a background is opaque only when its alpha times that
  * composite is 1, and a fully transparent subtree paints nothing. The walk stops at an element
- * padded by the top safe area, whose children start below the status bar.
+ * with top padding (authored or the top safe area), whose children start below its top edge.
  */
 export function appTopColor(content: WebChild, fallback: string): string {
   return typeof content === "string" ? fallback : (subtreeTopColor(content, 1, 0) ?? fallback);

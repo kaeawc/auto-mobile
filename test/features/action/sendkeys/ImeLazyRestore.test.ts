@@ -48,7 +48,9 @@ function harness() {
 
 test("three calls retain the original snapshot and release the device lock while idle", async () => {
   const h = harness();
+  expect(h.registry.hasPending(h.deviceId)).toBe(false);
   await h.commit();
+  expect(h.registry.hasPending(h.deviceId)).toBe(true);
   await withAndroidImeLock(h.deviceId, async () => {
     expect(h.restored).toEqual([]);
   });
@@ -57,6 +59,7 @@ test("three calls retain the original snapshot and release the device lock while
   expect(h.restored).toEqual([]);
   expect(h.captures()).toBe(1);
   await h.registry.flush(h.deviceId);
+  expect(h.registry.hasPending(h.deviceId)).toBe(false);
   await h.registry.flush(h.deviceId);
   expect(h.restored).toEqual([["keyboard/.Ime", false, { id: 7 }, 10]]);
 });

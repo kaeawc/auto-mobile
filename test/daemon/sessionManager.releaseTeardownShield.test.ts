@@ -359,6 +359,21 @@ describe("session release teardown is shielded from the caller's signal (#10198)
   });
 });
 
+test("session release skips IME flush when no restore is pending", async () => {
+  const h = await harness();
+  await ownDevice(h, ["network"]);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const flushIme = spyOn(pendingImeRestores, "flush");
+  try {
+    await h.manager.releaseSession("old", "plan-auto-release");
+    expect(flushIme).not.toHaveBeenCalled();
+    expect(h.fake.reached).toEqual(["network"]);
+  } finally {
+    flushIme.mockRestore();
+  }
+});
+
 test("session release restores a pending typing IME exactly once before handing off the device", async () => {
   const h = await harness();
   await ownDevice(h, []);

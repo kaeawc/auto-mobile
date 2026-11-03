@@ -8,6 +8,9 @@ export class FakePendingImeRestoreRegistry implements PendingImeRestoreRegistry 
   readonly entries = new Map<string, PendingImeRestore>();
   readonly flushes: string[] = [];
   error?: Error;
+  hasPending(deviceId: string): boolean {
+    return this.entries.has(deviceId);
+  }
   take(deviceId: string): PendingImeRestore | undefined {
     const pending = this.entries.get(deviceId);
     this.entries.delete(deviceId);

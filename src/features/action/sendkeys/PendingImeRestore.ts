@@ -15,6 +15,7 @@ export interface PendingImeRestore {
 
 /** take/store run under the device IME lock; flush acquires it itself. */
 export interface PendingImeRestoreRegistry {
+  hasPending(deviceId: string): boolean;
   take(deviceId: string): PendingImeRestore | undefined;
   store(deviceId: string, pending: PendingImeRestore, timer: Timer): void;
   flush(deviceId: string): Promise<void>;
@@ -31,6 +32,10 @@ export class DevicePendingImeRestores implements PendingImeRestoreRegistry {
   private readonly entries = new Map<string, Entry>();
 
   constructor(private readonly log: Pick<Logger, "warn"> = logger) {}
+
+  hasPending(deviceId: string): boolean {
+    return this.entries.has(deviceId);
+  }
 
   take(deviceId: string): PendingImeRestore | undefined {
     const entry = this.entries.get(deviceId);

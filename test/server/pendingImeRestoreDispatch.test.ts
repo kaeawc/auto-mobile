@@ -9,7 +9,7 @@ import { FakePendingImeRestoreRegistry } from "../fakes/FakePendingImeRestoreReg
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const device = { deviceId: "lazy-dispatch", platform: "android" as const, name: "Phone" };
-function harness(name = "tapAt") {
+function harness(name = "tapAt", keepsImeRestorePending?: boolean) {
   const pendingImeRestores = new FakePendingImeRestoreRegistry();
   const events: string[] = [];
   pendingImeRestores.store(
@@ -25,6 +25,7 @@ function harness(name = "tapAt") {
   );
   const handler = sessionDisplayPinnedHandler({
     name,
+    traits: { keepsImeRestorePending },
     schema: z.object({}),
     pendingImeRestores,
     handler: async () => {
@@ -42,10 +43,29 @@ test("a tap restores the device once before dispatch; the next tap does nothing"
   expect(h.events).toEqual(["restore", "tapAt", "tapAt"]);
 });
 
-test.each(["sendKeys", "observe"])("%s preserves pending restoration", async (name) => {
-  const h = harness(name);
-  await h.handler(device, {});
-  expect(h.events).toEqual([name]);
+test.each(["sendKeys", "observe", "customTypingTool"])(
+  "%s preserves pending restoration by trait",
+  async (name) => {
+    const h = harness(name, true);
+    await h.handler(device, {});
+    expect(h.events).toEqual([name]);
+    expect(h.pendingImeRestores.flushes).toEqual([]);
+  },
+);
+
+test.each(["sendKeys", "observe"])(
+  "%s without the trait restores before dispatch",
+  async (name) => {
+    const h = harness(name, false);
+    await h.handler(device, {});
+    expect(h.events).toEqual(["restore", name]);
+  },
+);
+
+test("iOS dispatch leaves Android keyboard restoration pending", async () => {
+  const h = harness();
+  await h.handler({ ...device, platform: "ios" }, {});
+  expect(h.events).toEqual(["tapAt"]);
   expect(h.pendingImeRestores.flushes).toEqual([]);
 });
 
@@ -65,9 +85,15 @@ test("another device does not restore this device's snapshot", async () => {
   expect(h.pendingImeRestores.entries.has(device.deviceId)).toBe(true);
 });
 
-test.each(["targetDevice", "resolvedDevice", "plainDevice", "nestedDevice"] as const)(
-  "%s registry dispatch restores through the shared hook and surfaces failures",
-  async (path) => {
+test.each(
+  (["targetDevice", "resolvedDevice", "plainDevice", "nestedDevice"] as const).flatMap((path) =>
+    [true, false, undefined].map(
+      (keepsImeRestorePending) => [path, keepsImeRestorePending] as const,
+    ),
+  ),
+)(
+  "%s registry dispatch respects keepsImeRestorePending=%s and surfaces restore failures",
+  async (path, keepsImeRestorePending) => {
     const timer = new FakeTimer();
     const events: string[] = [];
     const registry = new ToolRegistryClass(timer, new FakeLogger(), null, {
@@ -101,10 +127,13 @@ test.each(["targetDevice", "resolvedDevice", "plainDevice", "nestedDevice"] as c
           deviceId: z.string().optional(),
           device: z.object({ deviceId: z.string() }).optional(),
         }),
-        handler,
+        { handler, keepsImeRestorePending },
       );
     } else {
-      registry.registerDeviceAware("tapAt", "test", z.object({}), handler);
+      registry.registerDeviceAware("tapAt", "test", z.object({}), {
+        handler,
+        keepsImeRestorePending,
+      });
     }
     const invoke = () =>
       path === "plainDevice" || path === "nestedDevice"
@@ -138,10 +167,17 @@ test.each(["targetDevice", "resolvedDevice", "plainDevice", "nestedDevice"] as c
       store(false);
       await invoke();
       await invoke();
-      expect(events).toEqual(["restore", "dispatch", "dispatch"]);
+      expect(events).toEqual(
+        keepsImeRestorePending ? ["dispatch", "dispatch"] : ["restore", "dispatch", "dispatch"],
+      );
       store(true);
-      await expect(invoke()).rejects.toBeInstanceOf(ActionableError);
-      expect(events).toEqual(["restore", "dispatch", "dispatch", "restore"]);
+      if (keepsImeRestorePending) {
+        await invoke();
+        expect(events).toEqual(["dispatch", "dispatch", "dispatch"]);
+      } else {
+        await expect(invoke()).rejects.toBeInstanceOf(ActionableError);
+        expect(events).toEqual(["restore", "dispatch", "dispatch", "restore"]);
+      }
     } finally {
       pendingImeRestores.discard(device.deviceId);
     }

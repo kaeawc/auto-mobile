@@ -315,7 +315,7 @@ export class ToolRegistryClass {
                 ? (defaultDaemonContext.sessionManager()?.getDeviceForSession(sessionUuid) ??
                   undefined)
                 : undefined));
-        await flushPendingImeRestoreBeforeTool(name, deviceId);
+        await flushPendingImeRestoreBeforeTool(options.keepsImeRestorePending, deviceId);
         const response = await handler(args, progress, signal);
         if (isDeviceBindingTool(name)) {
           // Ingress binds and heartbeats the session these results name after the handler
@@ -345,6 +345,7 @@ export class ToolRegistryClass {
       appUiResourceUri: options.appUiResourceUri,
       selectsActiveDevice: options.selectsActiveDevice,
       hostInventory: options.hostInventory,
+      keepsImeRestorePending: options.keepsImeRestorePending,
     });
   }
 
@@ -396,8 +397,8 @@ export class ToolRegistryClass {
     // A UI interaction answers the device's system-alert policy first (#14106).
     const erased = eraseDeviceAware(inSchema, inHandler, inOptions);
     const { schema, handler, options } = gateUiInteraction(erased);
-    const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler });
     const traits = pickToolTraits(options);
+    const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler, traits });
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
     // delivery requires an explicit per-tool opt-in.
     const transportRecovery = this.prepareDeviceAwareRegistration(name, options);

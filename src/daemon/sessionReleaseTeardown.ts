@@ -85,7 +85,7 @@ export class SessionReleaseTeardown {
     if (options.deviceIdentityReplaced || releaseWasForced(operation)) {
       // Never apply an old snapshot after identity or ownership was forcibly replaced.
       this.pendingIme.discard(deviceId);
-    } else {
+    } else if (this.pendingIme.hasPending(deviceId)) {
       try {
         await this.pendingIme.flush(deviceId);
       } catch (error) {

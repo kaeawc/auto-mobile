@@ -585,17 +585,20 @@ function schemaAcceptsSessionDisplay(schema: unknown): boolean {
 
 /** One restore hook for resolved device calls and plain tools naming a device/session. */
 export async function flushPendingImeRestoreBeforeTool(
-  name: string,
+  keepsImeRestorePending: boolean | undefined,
   deviceId: string | undefined,
   registry: PendingImeRestoreRegistry = pendingImeRestores,
 ): Promise<void> {
-  if (!deviceId || name === "sendKeys" || name === "observe") {
+  if (!deviceId || keepsImeRestorePending) {
     return;
   }
   try {
     await registry.flush(deviceId);
   } catch (error) {
-    throw toActionableError(error, `Failed to restore the keyboard before ${name} on ${deviceId}`);
+    throw toActionableError(
+      error,
+      `Failed to restore the keyboard before tool dispatch on ${deviceId}`,
+    );
   }
 }
 
@@ -603,6 +606,7 @@ export function sessionDisplayPinnedHandler(input: {
   name: string;
   schema: unknown;
   handler: DeviceAwareToolHandler;
+  traits?: ToolTraits;
   pendingImeRestores?: PendingImeRestoreRegistry;
 }): DeviceAwareToolHandler {
   const acceptsDisplay = schemaAcceptsSessionDisplay(input.schema);
@@ -619,7 +623,7 @@ export function sessionDisplayPinnedHandler(input: {
         // Both registry dispatch and callInternal(targetDevice) pass this resolved-device seam.
         if (device.platform === "android") {
           await flushPendingImeRestoreBeforeTool(
-            input.name,
+            input.traits?.keepsImeRestorePending,
             device.deviceId,
             input.pendingImeRestores,
           );

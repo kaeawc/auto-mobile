@@ -24,7 +24,11 @@ function envelope(payload: Payload, isError = false): unknown {
   };
 }
 
-const LANDSCAPE = { viewHierarchy: {}, screenSize: { width: 1024, height: 768 } };
+/** The default `skeleton` projection: no viewHierarchy or elements on the wire. */
+const LANDSCAPE = {
+  skeleton: [{ elementId: "e1", label: "Settings", bounds: {}, affordances: ["tap"] }],
+  screenSize: { width: 1024, height: 768 },
+};
 
 function motion(status: string): Payload {
   return {
@@ -150,8 +154,12 @@ describe("assertions", () => {
   test("landscape observation", () => {
     expect(assertLandscapeObservation(LANDSCAPE)).toBeUndefined();
     expect(assertLandscapeObservation({ screenSize: { width: 1, height: 2 } })).toContain(
-      "no view hierarchy",
+      "no skeleton or view hierarchy",
     );
+    expect(assertLandscapeObservation({ ...LANDSCAPE, skeleton: [] })).toContain("empty skeleton");
+    expect(
+      assertLandscapeObservation({ viewHierarchy: {}, screenSize: { width: 1024, height: 768 } }),
+    ).toBeUndefined();
     expect(
       assertLandscapeObservation({ viewHierarchy: {}, screenSize: { width: 768, height: 1024 } }),
     ).toContain("landscape");

@@ -87,10 +87,18 @@ function expectNotForeground(appId: string) {
     activeAppId(payload) === appId ? `${appId} is still in the foreground` : undefined;
 }
 
-/** An observe payload must carry a hierarchy and a landscape screen, as a car head unit has. */
+/**
+ * An observe payload must carry a hierarchy and a landscape screen, as a car head unit has.
+ * The default `skeleton` projection replaces `viewHierarchy`/`elements` with a `skeleton` list.
+ */
 export function assertLandscapeObservation(payload: Payload): string | undefined {
-  if (payload.viewHierarchy === undefined && payload.elements === undefined) {
-    return "observe returned no view hierarchy";
+  const skeleton = payload.skeleton;
+  if (Array.isArray(skeleton)) {
+    if (skeleton.length === 0) {
+      return "observe returned an empty skeleton";
+    }
+  } else if (payload.viewHierarchy === undefined && payload.elements === undefined) {
+    return "observe returned no skeleton or view hierarchy";
   }
   const size = readObject(payload.screenSize);
   const width = size?.width;

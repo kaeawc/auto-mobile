@@ -128,6 +128,20 @@ describe("MockRooms", () => {
     expect(a.member.frames).toEqual(["x"]);
   });
 
+  test("? and # in a published room path stay path data and never reach a shorter room", () => {
+    const { join, engine } = setup([{ path: "/rooms/:roomId" }]);
+    const short = join("/rooms/a");
+    const query = join("/rooms/a%3Fb");
+    const hash = join("/rooms/a%23b");
+    expect(engine.publish("/rooms/a?b", "q", "broadcast")).toBe(1);
+    expect(engine.publish("/rooms/a#b", "h", "broadcast")).toBe(1);
+    expect([short.member.frames, query.member.frames, hash.member.frames]).toEqual([
+      [],
+      ["q"],
+      ["h"],
+    ]);
+  });
+
   test("oversized sends and publishes are refused", () => {
     const { join, engine } = setup([{ path: "/r", relay: true }]);
     const a = join("/r");

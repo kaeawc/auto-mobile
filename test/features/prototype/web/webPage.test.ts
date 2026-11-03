@@ -11,6 +11,8 @@ import {
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
 import {
+  prototypeWebClockDelay,
+  prototypeWebClockText,
   prototypeWebFitScale,
   prototypeWebRotation,
   prototypeWebScreenView,
@@ -100,6 +102,25 @@ describe("prototype web page (#16346)", () => {
     ]) {
       expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
     }
+  });
+
+  test("the clock reads local time in the stills' fixed 9:41 form (#16585)", () => {
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 9, 41))).toBe("9:41");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 0, 5))).toBe("12:05");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 12, 0))).toBe("12:00");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 21, 9))).toBe("9:09");
+  });
+
+  test("the clock re-arms at the next minute boundary (#16585)", () => {
+    expect(prototypeWebClockDelay(0)).toBe(60_000);
+    expect(prototypeWebClockDelay(59_999)).toBe(1);
+    expect(prototypeWebClockDelay(125_000)).toBe(55_000);
+  });
+
+  test("the inlined runtime carries the clock rules and updates the status bar clock", () => {
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("function prototypeWebClockText(");
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("function prototypeWebClockDelay(");
+    expect(PROTOTYPE_WEB_RUNTIME).toContain('[data-status="clock"]');
   });
 
   test("keeps the runtime within its budget", () => {

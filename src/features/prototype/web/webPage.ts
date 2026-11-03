@@ -6,6 +6,8 @@ import type { WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
 import {
   prototypeWebAnimateTurn,
+  prototypeWebClockDelay,
+  prototypeWebClockText,
   prototypeWebFitScale,
   prototypeWebPageRuntime,
   prototypeWebRotation,
@@ -58,7 +60,7 @@ export interface PrototypeWebPage {
 }
 
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
-export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()} });`;
+export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()} });`;
 export const MAX_PROTOTYPE_WEB_RUNTIME_BYTES = 150 * 1024;
 export const MAX_PROTOTYPE_WEB_PAGE_BYTES = 2 * 1024 * 1024;
 

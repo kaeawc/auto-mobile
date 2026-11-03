@@ -86,6 +86,20 @@ export function prototypeWebRotation(
   };
 }
 
+/**
+ * The status bar clock's text for a moment (#16585): local hours and minutes in the stills' fixed
+ * `9:41` form, so a page whose browser clock is frozen at 9:41 draws the same bytes as the still.
+ */
+export function prototypeWebClockText(now: Date): string {
+  const hours = now.getHours() % 12 || 12;
+  return `${hours}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Milliseconds from `nowMs` to the next minute boundary, when the clock's text next changes. */
+export function prototypeWebClockDelay(nowMs: number): number {
+  return 60_000 - (((nowMs % 60_000) + 60_000) % 60_000);
+}
+
 /** The elements one turn moves. */
 export interface PrototypeWebTurnTargets {
   readonly from: HTMLElement | undefined;
@@ -132,10 +146,13 @@ export interface PrototypeWebRuntimeRules {
   readonly screenView: typeof prototypeWebScreenView;
   readonly rotation: typeof prototypeWebRotation;
   readonly animateTurn: typeof prototypeWebAnimateTurn;
+  readonly clockText: typeof prototypeWebClockText;
+  readonly clockDelay: typeof prototypeWebClockDelay;
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const { zoomScale, fitScale: fitted, wheelFactor, screenView, rotation, animateTurn } = rules;
+  const { clockText, clockDelay } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -285,5 +302,18 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   });
   viewport.addEventListener("dblclick", fitView);
   globalThis.addEventListener("resize", apply);
+  // Every view's status bar clock follows the browser clock, re-armed at each minute boundary.
+  const clocks = Array.from(doc.querySelectorAll<HTMLElement>('[data-status="clock"]'));
+  const tick = () => {
+    const now = Date.now();
+    const text = clockText(new Date(now));
+    clocks.forEach((clock) => {
+      clock.textContent = text;
+    });
+    setTimeout(tick, clockDelay(now));
+  };
+  if (clocks.length > 0) {
+    tick();
+  }
   apply();
 }

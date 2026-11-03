@@ -116,22 +116,32 @@ function skipReason(
 
 /**
  * Runs the plan after install and before launch, so the first frame shows the final state, and
- * reports each declared permission as `{name, state, verified}`. Backend failures propagate: a
- * deterministic run must not launch on a half-applied plan.
+ * reports each declared permission as `{name, state, verified}`. Every write runs before any read,
+ * since two names can share an Android manifest permission (`microphone` and `speech` both use
+ * RECORD_AUDIO). Backend failures propagate: a deterministic run must not launch on a half-applied
+ * plan.
  */
 export async function applyPrototypePermissions(
   declared: readonly PrototypePermissionName[],
   mode: PrototypePermissionMode,
   backend: PrototypePermissionBackend,
 ): Promise<PrototypePermissionResult[]> {
-  const results: PrototypePermissionResult[] = [];
-  for (const { name, step } of planPrototypePermissions(declared, mode)) {
-    const mapping = PROTOTYPE_PERMISSION_MAP[name];
-    const reason = skipReason(name, step, backend.target);
+  const plan = planPrototypePermissions(declared, mode).map((entry) => ({
+    ...entry,
+    mapping: PROTOTYPE_PERMISSION_MAP[entry.name],
+    reason: skipReason(entry.name, entry.step, backend.target),
+  }));
+  if (backend.target === "android") {
+    rejectSharedManifestConflicts(plan);
+  }
+  for (const { name, step, mapping, reason } of plan) {
     const noRuntimeGrant = backend.target === "android" && mapping.android.grant === "none";
     if (reason === undefined && step !== "leave" && !noRuntimeGrant) {
       await backend[step](name, mapping);
     }
+  }
+  const results: PrototypePermissionResult[] = [];
+  for (const { name, step, mapping, reason } of plan) {
     const state = await backend.read(name, mapping);
     results.push({
       name,
@@ -141,4 +151,25 @@ export async function applyPrototypePermissions(
     });
   }
   return results;
+}
+
+/** Granting one name and denying another that shares an Android manifest permission cannot both hold. */
+function rejectSharedManifestConflicts(
+  plan: readonly { name: PrototypePermissionName; step: PrototypePermissionStep }[],
+): void {
+  const owners = new Map<
+    string,
+    { name: PrototypePermissionName; step: PrototypePermissionStep }
+  >();
+  for (const entry of plan.filter((candidate) => candidate.step !== "leave")) {
+    for (const permission of PROTOTYPE_PERMISSION_MAP[entry.name].android.manifest) {
+      const other = owners.get(permission);
+      if (other !== undefined && other.step !== entry.step) {
+        throw new ActionableError(
+          `Permissions ${other.name} and ${entry.name} share ${permission} on Android, so one cannot be granted while the other is denied; put both in the same list`,
+        );
+      }
+      owners.set(permission, entry);
+    }
+  }
 }

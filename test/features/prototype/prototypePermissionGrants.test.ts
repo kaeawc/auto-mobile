@@ -110,6 +110,36 @@ describe("prototype permission grants on Android", () => {
     expect(backend.calls).toEqual([]);
   });
 
+  test("names sharing a manifest permission cannot be split between grant and deny", async () => {
+    const backend = new FakePermissionBackend("android");
+    await expect(
+      applyPrototypePermissions(
+        ["microphone", "speech"],
+        { grant: ["microphone"], deny: ["speech"] },
+        backend,
+      ),
+    ).rejects.toThrow(
+      "Permissions microphone and speech share android.permission.RECORD_AUDIO on Android",
+    );
+    expect(backend.calls).toEqual([]);
+  });
+
+  test("states are read after every write, so a later step cannot leave a stale verification", async () => {
+    const backend = new FakePermissionBackend("android");
+    const reads: string[] = [];
+    const read = backend.read.bind(backend);
+    backend.read = async (name) => {
+      reads.push(`read ${name} after ${backend.calls.length} writes`);
+      return read(name);
+    };
+    await applyPrototypePermissions(declared, "grantDeclared", backend);
+    expect(reads).toEqual([
+      "read camera after 3 writes",
+      "read location after 3 writes",
+      "read notifications after 3 writes",
+    ]);
+  });
+
   test("a backend failure stops the run instead of launching half-applied", async () => {
     const backend = new FakePermissionBackend("android", "grant location");
     await expect(applyPrototypePermissions(declared, "grantDeclared", backend)).rejects.toThrow(

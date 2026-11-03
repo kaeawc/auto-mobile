@@ -39,7 +39,11 @@ export function filling(node: Raw, axes: readonly WebAxis[]): Raw {
 }
 
 /** The page a pager opens on: its numeric state value clamped to its pages and truncated, else 0. */
-export function pagerPage(node: Raw, scope: WebRenderScope, kit: WebRenderKit): number {
+export function pagerPage(
+  node: Raw,
+  scope: WebRenderScope,
+  kit: Pick<WebRenderKit, "bound">,
+): number {
   const count = Array.isArray(node.children) ? node.children.length : 0;
   const key = typeof node.stateKey === "string" ? kit.bound(node.stateKey, scope) : undefined;
   const value = key === undefined ? undefined : scope.condition.state[key];

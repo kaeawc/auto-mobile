@@ -1010,7 +1010,7 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
  * (through the devices' own contract), a pager's locals set before its own conditions run, its
  * `visibleWhen` (undefined when hidden) and its `styleWhen` merged. One path, so the two agree.
  */
-function preparedNode(
+export function preparedNode(
   node: unknown,
   scope: WebRenderScope,
   path: string,

@@ -7,6 +7,7 @@ import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import { resolveWebStillAppearance, webAuthoredBackground } from "./webStillAppearance";
 import type { WebStackScreens } from "./webStack";
 import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
@@ -19,6 +20,7 @@ export interface PrototypeStillOptions {
   readonly frame?: string;
   readonly platform?: "android" | "ios";
   readonly orientation?: WebOrientation;
+  /** The system setting: decides only when the spec's theme and authored background do not. */
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
@@ -168,15 +170,13 @@ function stillScope(
   frame: DeviceFrame,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
-  // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
-  const authored = record(spec.theme)?.mode;
   const size = screenSize(frame, options.orientation ?? "portrait");
   const screenDp = { widthDp: size.width, heightDp: size.height };
-  const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
-  return {
+  // Conditions and pager pages do not depend on the mode, so the walk reads a light scope.
+  const scope: WebRenderScope = {
     style: {
-      mode,
-      palette: prototypeRolePalette(expanded, mode),
+      mode: "light",
+      palette: prototypeRolePalette(expanded, "light"),
       parentAxis: "column",
       typography: themeTypography(expanded),
       platform: frame.platform,
@@ -198,6 +198,16 @@ function stillScope(
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
     layers: [],
+  };
+  // The caller's mode is only the system setting; the spec decides first, as on the devices.
+  const { mode, surface } = resolveWebStillAppearance(
+    expanded,
+    webAuthoredBackground(spec.root, scope, "root"),
+    options.mode ?? "light",
+  );
+  return {
+    ...scope,
+    style: { ...scope.style, mode, palette: prototypeRolePalette(expanded, mode, surface) },
   };
 }
 

@@ -39,6 +39,11 @@ const DEFAULT_MAP_HEIGHT = 200;
 const SINGLE_POINT_ZOOM = 15;
 /** A fitted framing leaves this share of the box around its points. */
 const FIT_FILL = 0.8;
+/**
+ * Extents narrower than this share of the world are a point: wrapping a lone longitude into the
+ * gap search shifts it by whole worlds, which leaves rounding noise instead of a zero width.
+ */
+const POINT_EXTENT = 1e-9;
 
 export function mercator(lat: number, lng: number): MapPoint {
   const clamped = Math.max(-MAX_LATITUDE, Math.min(MAX_LATITUDE, lat));
@@ -113,28 +118,131 @@ function mapLines(node: Raw, scope: WebRenderScope): MapLine[] {
   });
 }
 
-/** The framing that fits `points` in `size` with a margin; undefined when there are none. */
+/** `dx` moved to the nearest copy of the world, in `[-0.5, 0.5)`. */
+export function wrapOffset(dx: number): number {
+  return dx - Math.floor(dx + 0.5);
+}
+
+/** A line's x coordinates as it is drawn: each one the short way round from the one before. */
+function unwrappedXs(points: readonly MapPoint[]): number[] {
+  return points.reduce<number[]>(
+    (xs, point, index) => [
+      ...xs,
+      index === 0 ? point.x : xs[index - 1]! + wrapOffset(point.x - points[index - 1]!.x),
+    ],
+    [],
+  );
+}
+
+interface Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+function mergeSpans(spans: readonly Span[]): Span[] {
+  return spans
+    .toSorted((a, b) => a.start - b.start)
+    .reduce<Span[]>((merged, span) => {
+      const last = merged.at(-1);
+      return last && span.start <= last.end
+        ? [...merged.slice(0, -1), { start: last.start, end: Math.max(last.end, span.end) }]
+        : [...merged, span];
+    }, []);
+}
+
+/**
+ * The left and right x of the smallest arc covering every span, unwrapped so `right` may pass 1:
+ * the arc starts just after the widest stretch of the world no span covers. Copies of the spans one
+ * and two worlds over make every gap that opens in `[1, 2)` a real one, each listed once.
+ */
+function horizontalBounds(spans: readonly Span[]): Span {
+  const base = spans.map(({ start, end }) => {
+    const from = start - Math.floor(start);
+    return { start: from, end: from + end - start };
+  });
+  const merged = mergeSpans(
+    [0, 1, 2].flatMap((shift) =>
+      base.map(({ start, end }) => ({ start: start + shift, end: end + shift })),
+    ),
+  );
+  const gaps = merged.slice(1).flatMap((next, index) => {
+    const before = merged[index]!.end;
+    return before >= 1 && before < 2
+      ? [{ width: next.start - before, start: next.start - 1, end: before }]
+      : [];
+  });
+  const widest = gaps.reduce<(typeof gaps)[number] | undefined>(
+    (best, gap) => (best && best.width >= gap.width ? best : gap),
+    undefined,
+  );
+  if (widest) {
+    return { start: widest.start, end: widest.end };
+  }
+  return wrappedBounds(spans);
+}
+
+/** `span` moved whole to the copy of the world that puts its middle nearest `center`, as drawn. */
+function placeSpan(span: Span, center: number): Span {
+  const middle = (span.start + span.end) / 2;
+  const shift = center + wrapOffset(middle - center) - middle;
+  return { start: span.start + shift, end: span.end + shift };
+}
+
+function union(spans: readonly Span[]): Span {
+  return {
+    start: Math.min(...spans.map((span) => span.start)),
+    end: Math.max(...spans.map((span) => span.end)),
+  };
+}
+
+/**
+ * Bounds for spans that together leave no gap round the world. Each span is placed as
+ * `mapOffset`/`projectLine` draw it: whole, on the copy whose middle is nearest the framing
+ * centre. Seeded on the widest span, the centre moves to the middle of the placed spans' union;
+ * the bounds are then symmetric round that centre and cover every span as placed from it (at least
+ * one world wide), so fitting and drawing agree and no span is clipped, even past one world.
+ */
+function wrappedBounds(spans: readonly Span[]): Span {
+  const longest = spans.reduce((best, span) =>
+    span.end - span.start > best.end - best.start ? span : best,
+  );
+  const seeded = union(spans.map((span) => placeSpan(span, (longest.start + longest.end) / 2)));
+  const center = (seeded.start + seeded.end) / 2;
+  const placed = union(spans.map((span) => placeSpan(span, center)));
+  const half = Math.max(0.5, center - placed.start, placed.end - center);
+  return { start: center - half, end: center + half };
+}
+
+/**
+ * The framing that fits `points` and the drawn `lines` in `size` with a margin; undefined when there
+ * is nothing to fit. A line is fitted over the span it is drawn across, not just its vertices.
+ */
 export function fitFraming(
   points: readonly MapPoint[],
   size: { width: number; height: number },
+  lines: readonly (readonly MapPoint[])[] = [],
 ): MapFraming | undefined {
-  if (points.length === 0) {
+  const drawn = lines.filter((line) => line.length > 0);
+  const ys = [...points, ...drawn.flat()].map((point) => point.y);
+  if (ys.length === 0) {
     return undefined;
   }
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const [left, right, top, bottom] = [
-    Math.min(...xs),
-    Math.max(...xs),
-    Math.min(...ys),
-    Math.max(...ys),
-  ];
-  const center = { x: (left + right) / 2, y: (top + bottom) / 2 };
   const spans = [
-    right > left ? (size.width * FIT_FILL) / (right - left) : Infinity,
-    bottom > top ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
+    ...points.map((point) => ({ start: point.x, end: point.x })),
+    ...drawn.map((line) => {
+      const xs = unwrappedXs(line);
+      return { start: Math.min(...xs), end: Math.max(...xs) };
+    }),
   ];
-  const fitted = Math.min(...spans);
+  const { start: left, end: right } = horizontalBounds(spans);
+  const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
+  const middle = (left + right) / 2;
+  const center = { x: middle - Math.floor(middle), y: (top + bottom) / 2 };
+  const fits = [
+    right - left > POINT_EXTENT ? (size.width * FIT_FILL) / (right - left) : Infinity,
+    bottom - top > POINT_EXTENT ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
+  ];
+  const fitted = Math.min(...fits);
   const worldSize = Math.min(
     Number.isFinite(fitted) ? fitted : TILE_SIZE * 2 ** SINGLE_POINT_ZOOM,
     TILE_SIZE * 2 ** 22,
@@ -180,14 +288,14 @@ function cameraFraming(node: Raw, scope: WebRenderScope): MapFraming | undefined
 function framing(
   node: Raw,
   scope: WebRenderScope,
-  points: { markers: MapPoint[]; route: MapPoint[] },
+  points: { markers: MapPoint[]; lines: MapPoint[][] },
   size: { width: number; height: number },
 ): { view: MapFraming; orientation: MapOrientation } {
   const fitted =
     node.fit === "markers"
       ? fitFraming(points.markers, size)
       : node.fit === "route"
-        ? fitFraming(points.route, size)
+        ? fitFraming([], size, points.lines)
         : undefined;
   if (fitted) {
     return { view: fitted, orientation: NORTH_UP };
@@ -196,7 +304,7 @@ function framing(
   if (camera) {
     return { view: camera, orientation: cameraOrientation(cameraRecord(node, scope)) };
   }
-  const view = fitFraming([...points.markers, ...points.route], size) ?? {
+  const view = fitFraming(points.markers, size, points.lines) ?? {
     center: { x: 0.5, y: 0.5 },
     worldSize: TILE_SIZE,
   };
@@ -218,12 +326,37 @@ function rounded(value: number): number {
   return Number(value.toFixed(3)) + 0;
 }
 
-/** Where a world point falls, flat and north up, in dp from the box centre. */
-export function mapOffset(point: MapPoint, view: MapFraming): MapOffset {
+/** `point` on the copy of the world nearest the framing centre, so the 180° line does not split the view. */
+function nearestCopy(point: MapPoint, view: MapFraming): MapPoint {
+  return { x: view.center.x + wrapOffset(point.x - view.center.x), y: point.y };
+}
+
+/**
+ * A line's points as drawn: each one the short way round from the one before, so a segment crossing
+ * the 180° line does not span the world, and the whole line on the copy whose middle is nearest the
+ * framing centre (as fitting frames it), so a line wider than half the world keeps that copy.
+ */
+function drawnLine(points: readonly MapPoint[], view: MapFraming): MapPoint[] {
+  if (points.length === 0) {
+    return [];
+  }
+  const xs = unwrappedXs(points);
+  const middle = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const shift = view.center.x + wrapOffset(middle - view.center.x) - middle;
+  return points.map((point, index) => ({ x: xs[index]! + shift, y: point.y }));
+}
+
+/** Where an already-placed world point falls, flat and north up, in dp from the box centre. */
+function flatOffset(point: MapPoint, view: MapFraming): MapOffset {
   return {
     x: rounded((point.x - view.center.x) * view.worldSize),
     y: rounded((point.y - view.center.y) * view.worldSize),
   };
+}
+
+/** Where a world point falls, flat and north up, in dp from the box centre (nearest world copy). */
+export function mapOffset(point: MapPoint, view: MapFraming): MapOffset {
+  return flatOffset(nearestCopy(point, view), view);
 }
 
 /** A point on the turned ground plane, in dp from the box centre, before the tilt. */
@@ -287,7 +420,7 @@ export function projectOffset(
   if (orientation.bearing === 0 && orientation.tilt === 0) {
     return mapOffset(point, view);
   }
-  const ground = turnGround(point, view, orientation.bearing);
+  const ground = turnGround(nearestCopy(point, view), view, orientation.bearing);
   return ground.y > nearLimit(orientation.tilt, eye)
     ? undefined
     : projectGround(ground, eye, orientation.tilt);
@@ -303,11 +436,12 @@ export function projectLine(
   eye: number,
   orientation: MapOrientation,
 ): MapOffset[][] {
+  const drawn = drawnLine(points, view);
   if (orientation.bearing === 0 && orientation.tilt === 0) {
-    return points.length > 0 ? [points.map((point) => mapOffset(point, view))] : [];
+    return drawn.length > 0 ? [drawn.map((point) => flatOffset(point, view))] : [];
   }
   const limit = nearLimit(orientation.tilt, eye);
-  const ground = points.map((point) => turnGround(point, view, orientation.bearing));
+  const ground = drawn.map((point) => turnGround(point, view, orientation.bearing));
   const runs: GroundPoint[][] = [];
   let run: GroundPoint[] = [];
   const at = (from: GroundPoint, to: GroundPoint): GroundPoint => {
@@ -504,7 +638,7 @@ const mapRenderer =
       scope,
       {
         markers: markers.map((marker) => marker.point),
-        route: lines.flatMap((line) => line.points),
+        lines: lines.map((line) => line.points),
       },
       size,
     );

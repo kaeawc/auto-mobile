@@ -10,9 +10,12 @@ import {
   groundTransform,
   mapOffset,
   mapSize,
+  type MapFraming,
+  type MapPoint,
   mercator,
   projectLine,
   projectOffset,
+  wrapOffset,
 } from "../../../../src/features/prototype/web/webMap";
 import {
   toHtml,
@@ -360,5 +363,147 @@ describe("prototype web map (#16539)", () => {
       left: fromCentre(pier.x),
       top: fromCentre(pier.y),
     });
+  });
+});
+
+describe("prototype web map across the 180° line (#16593)", () => {
+  const size = { width: 400, height: 200 };
+  const percent = (dp: number, side: number) => Number((50 + (dp * 100) / side).toFixed(3));
+  /** Where `mapOffset` places a point, as a percentage of each side of `size`. */
+  const mapPercent = (point: MapPoint, view: MapFraming, box: typeof size) => {
+    const at = mapOffset(point, view);
+    return { left: percent(at.x, box.width), top: percent(at.y, box.height) };
+  };
+  /** A flat line's single run, as a percentage of each side of `size`. */
+  const routePercents = (points: MapPoint[], view: MapFraming, box: typeof size) =>
+    projectLine(points, view, 300, { bearing: 0, tilt: 0 })[0]!.map((at) => ({
+      left: percent(at.x, box.width),
+      top: percent(at.y, box.height),
+    }));
+
+  test("wraps a horizontal offset to the nearest copy of the world", () => {
+    expect(wrapOffset(0.25)).toBe(0.25);
+    expect(wrapOffset(0.75)).toBe(-0.25);
+    expect(wrapOffset(-0.75)).toBe(0.25);
+    expect(wrapOffset(0.5)).toBe(-0.5);
+  });
+
+  test("a camera near 180° places a marker just over the line beside it", () => {
+    const view = { center: mercator(0, 179), worldSize: 256 * 2 ** 1 };
+    // 2° east over the line is 2/360 of a 512 dp world right of the centre, not 358° left.
+    expect(mapOffset(mercator(0, -179), view)).toEqual({ x: 2.844, y: 0 });
+    expect(mapOffset(mercator(0, 178), view).x).toBe(-1.422);
+  });
+
+  test("a turned camera near 180° projects points and routes on the copy beside it", () => {
+    const view = { center: mercator(0, 179), worldSize: 256 * 2 ** 1 };
+    const facingEast = { bearing: 90, tilt: 0 };
+    // Facing east, 2° east over the line is straight ahead: up the screen, not a world away.
+    expect(projectOffset(mercator(0, -179), view, 300, facingEast)).toEqual({ x: 0, y: -2.844 });
+    const [run, ...rest] = projectLine(
+      [mercator(0, 178), mercator(0, -179)],
+      view,
+      300,
+      facingEast,
+    );
+    expect(rest).toEqual([]);
+    expect(run).toEqual([
+      { x: 0, y: 1.422 },
+      { x: 0, y: -2.844 },
+    ]);
+  });
+
+  test("fitting markers on both sides of 180° frames them around it", () => {
+    const points = [mercator(0, 179), mercator(0, -179)];
+    const view = fitFraming(points, size)!;
+    expect(view.center.x).toBeCloseTo(0, 9);
+    expect(mapPercent(points[0]!, view, size).left).toBeCloseTo(10, 3);
+    expect(mapPercent(points[1]!, view, size).left).toBeCloseTo(90, 3);
+    // Three points spread round the world still take the smallest arc covering them.
+    const spread = fitFraming([mercator(0, 170), mercator(0, -170), mercator(0, 10)], size)!;
+    expect(spread.center.x).toBeCloseTo(mercator(0, 100).x, 9);
+  });
+
+  test("a route crossing 180° is drawn the short way round", () => {
+    const route = [mercator(0, 178), mercator(0, -178), mercator(0, -176)];
+    const view = fitFraming(route, size)!;
+    const lefts = routePercents(route, view, size).map((point) => point.left);
+    expect(lefts[0]).toBeCloseTo(10, 3);
+    expect(lefts[1]).toBeCloseTo(63.333, 3);
+    expect(lefts[2]).toBeCloseTo(90, 3);
+    // Framed elsewhere, the crossing segment still spans 4°, not the whole world.
+    const away = { center: mercator(0, 0), worldSize: 256 };
+    const [from, to] = routePercents(route.slice(0, 2), away, size);
+    expect(to!.left - from!.left).toBeCloseTo(((4 / 360) * 256 * 100) / 400, 2);
+  });
+
+  test("fitting a route frames the span it is drawn across, not just its vertices", () => {
+    // Each hop is under half the world, so the line is drawn 340° wide through Greenwich.
+    const route = [mercator(0, -170), mercator(0, 0), mercator(0, 170)];
+    const view = fitFraming([], size, [route])!;
+    const lefts = routePercents(route, view, size).map((point) => point.left);
+    expect(lefts[0]).toBeCloseTo(10, 2);
+    expect(lefts[1]).toBeCloseTo(50, 2);
+    expect(lefts[2]).toBeCloseTo(90, 2);
+    // A line wrapping the whole world is fitted one world wide.
+    const round = [0, 120, -120, 0].map((lng) => mercator(0, lng));
+    const roundView = fitFraming([], size, [round])!;
+    expect(roundView.worldSize).toBeCloseTo(400 * 0.8, 9);
+    const roundLefts = routePercents(round, roundView, size).map((point) => point.left);
+    expect(roundLefts[0]).toBeCloseTo(10, 2);
+    expect(roundLefts[3]).toBeCloseTo(90, 2);
+    expect(fitFraming([], size, [[]])).toBeUndefined();
+  });
+
+  test("fitting routes that only together wrap the world keeps every vertex in view (#16658)", () => {
+    const lines = [
+      [-170, 0, 170].map((lng) => mercator(0, lng)),
+      [0, 170, -20].map((lng) => mercator(0, lng)),
+    ];
+    const view = fitFraming([], size, lines)!;
+    const placed = lines.map((line) => routePercents(line, view, size).map((point) => point.left));
+    // Drawn 340° wide each and offset by 170°, the lines span 510°: framed edge to edge.
+    expect(placed[0]![0]).toBeCloseTo(10, 2);
+    expect(placed[1]![2]).toBeCloseTo(90, 2);
+    expect(placed.flat().every((left) => left >= 0 && left <= 100)).toBe(true);
+    expect(view.worldSize).toBeCloseTo((400 * 0.8) / (510 / 360), 6);
+    // Markers framed with them sit on the copy the fit placed them on.
+    const marked = fitFraming([mercator(0, 90)], size, lines)!;
+    const lefts = [
+      mapPercent(mercator(0, 90), marked, size).left,
+      ...lines.flatMap((line) => routePercents(line, marked, size).map((point) => point.left)),
+    ];
+    expect(lefts.every((left) => left >= 0 && left <= 100)).toBe(true);
+  });
+
+  test("a single fitted marker keeps the single-point zoom wherever it sits", () => {
+    // Wrapping a lone longitude through whole-world shifts must not leave a sliver of width.
+    for (const lng of [-122.42, -74, 0, 179.9]) {
+      expect(fitFraming([mercator(0, lng)], size)!.worldSize).toBe(256 * 2 ** 15);
+    }
+    const view = fitFraming([mercator(0, -122.42)], size)!;
+    const [, end] = routePercents([mercator(0, -122.42), mercator(0, -122.419)], view, size);
+    expect(end!.left).toBeCloseTo(55.825, 2);
+  });
+
+  test("the rendered still pins and routes across 180°", () => {
+    const pacific = [
+      { id: "w", lat: 0, lng: 179, name: "West" },
+      { id: "e", lat: 0, lng: -179, name: "East" },
+    ];
+    const rendered = renderPrototypeStill({
+      ...reference,
+      data: { places: pacific, route: pacific.map(({ lat, lng }) => ({ lat, lng })) },
+      root: {
+        type: "map",
+        markers,
+        polylines: [{ path: "/route" }],
+        fit: "markers",
+        style: { width: { dp: 400 }, height: { dp: 200 } },
+      },
+    });
+    const pins = find(rendered.element, (element) => element.attrs["data-part"] === "marker");
+    expect(pins.map((pin) => pin.style.left)).toEqual(["calc(50% - 160px)", "calc(50% + 160px)"]);
+    expect(toHtml(rendered.element)).toContain('points="-160,0 160,0"');
   });
 });

@@ -1,7 +1,6 @@
 import type { ToolHandlerResult } from "../../toolRegistryTypes";
 import {
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-  INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
 } from "../../../daemon/wire/constants";
 import { getSessionToolSelectionService } from "../../../features/toolSelection/SessionToolSelectionService";
@@ -60,9 +59,6 @@ export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown
     ...parsedParams,
     ...(plan.tool.selectsActiveDevice === true && plan.routingSessionUuid
       ? { sessionUuid: plan.routingSessionUuid }
-      : {}),
-    ...(plan.implicitAutolockMcpSessionId
-      ? { [INTERNAL_MCP_SESSION_PARAM]: plan.implicitAutolockMcpSessionId }
       : {}),
     ...(context.requestOneShotCli ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true } : {}),
     ...(context.requestAcceptanceDiscoveryOrder !== undefined

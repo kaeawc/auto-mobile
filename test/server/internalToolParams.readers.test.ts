@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
-  internalMcpSessionId,
   internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
@@ -25,24 +24,6 @@ describe("call execution identity (#15663)", () => {
 
   test("is absent outside a tool call, whatever the args carry", () => {
     expect(currentExecution()).toBeUndefined();
-  });
-});
-
-describe("internal call identity readers", () => {
-  test("read the in-band keys a handler's args carry", () => {
-    expect(internalMcpSessionId({ __mcpSessionId: "mcp-1" })).toBe("mcp-1");
-  });
-
-  test("an absent key reads as absent", () => {
-    expect(internalMcpSessionId({})).toBeUndefined();
-  });
-
-  test("a value of the wrong type reads as absent", () => {
-    expect(internalMcpSessionId({ __mcpSessionId: null })).toBeUndefined();
-  });
-
-  test("a blank connection identity is still a string, as the stages read it today", () => {
-    expect(internalMcpSessionId({ __mcpSessionId: "" })).toBe("");
   });
 });
 

@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { isRecord } from "../../src/server/pipeline/isRecord";
@@ -242,27 +243,22 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         ["getAndroid", devices[0]],
         ["getApple", devices[1]],
       ] as const) {
-        ToolRegistry.register(
-          toolName,
-          toolName,
-          z.object({ __mcpSessionId: z.string().optional() }).passthrough(),
-          async (toolArgs) => {
-            acquisitionOwners.push(toolArgs.__mcpSessionId);
-            const sessionUuid = await pool.autolockDevice(
-              device.deviceId,
-              device.platform,
-              toolArgs.__mcpSessionId,
-            );
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({ runtime: { session: { sessionUuid } } }),
-                },
-              ],
-            };
-          },
-        );
+        ToolRegistry.register(toolName, toolName, z.object({}).passthrough(), async (toolArgs) => {
+          acquisitionOwners.push(currentAutolockMcpSessionId());
+          const sessionUuid = await pool.autolockDevice(
+            device.deviceId,
+            device.platform,
+            currentAutolockMcpSessionId(),
+          );
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ runtime: { session: { sessionUuid } } }),
+              },
+            ],
+          };
+        });
       }
       ToolRegistry.registerDeviceAware(
         "routingProbe",

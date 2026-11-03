@@ -90,6 +90,7 @@ import {
   screenForObserve,
   type ObserveResponse,
   withDeviceDiagnostics,
+  withCarAppTemplates,
   type ObserveToolDependencies,
 } from "./observeResponse";
 
@@ -444,11 +445,15 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
-      const served = await withDeviceDiagnostics(
+      const diagnosed = await withDeviceDiagnostics(
         layerScopedObserveResult(result, args.layer, platform, !waitOutcome),
         device,
         dependencies.audioInputDiagnostic,
       );
+      // A non-owner read of a held device makes no app provider calls.
+      const served = deviceRead
+        ? diagnosed
+        : await withCarAppTemplates(diagnosed, device, dependencies.carAppTemplates);
 
       if (waitOutcome) {
         return await createObserveWaitResponse(served, waitOutcome, args.includeScreenshotImage, {

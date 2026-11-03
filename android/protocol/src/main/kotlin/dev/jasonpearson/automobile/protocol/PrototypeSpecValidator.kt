@@ -175,8 +175,10 @@ object PrototypeSpecValidator {
     }
     val value = checkNotNull(context.root).jsonObject
     val checked = checkNotNull(context.stateBindings)
-    // A state write can break a videoPlayer's number-typed positionKey or a cameraPreview's keys.
+    // A state write can break a videoPlayer's number-typed positionKey, a webView's navigation keys
+    // or a cameraPreview's keys.
     val videoPlayers = context.nodes.filter { it.value.text("type") == "videoPlayer" }
+    val webViews = context.nodes.filter { it.value.text("type") == "webView" }
     val cameraPreviews = context.nodes.filter { it.value.text("type") == "cameraPreview" }
     // Only bindings can change their verdict. Static-only nodes/actions passed full validation.
     checked.nodes.removeAll {
@@ -212,6 +214,7 @@ object PrototypeSpecValidator {
               ?: mediaNodeError(
                 JsonObject(value + ("state" to stored)),
                 videoPlayers,
+                webViews,
                 cameraPreviews,
               )
               ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
@@ -222,13 +225,18 @@ object PrototypeSpecValidator {
     }
   }
 
-  /** The state-dependent media node rules: a videoPlayer positionKey and cameraPreview keys. */
+  /**
+   * The state-dependent node rules, in full validation's order: a videoPlayer positionKey, webView
+   * navigation keys and cameraPreview keys.
+   */
   private fun mediaNodeError(
     root: JsonObject,
     videoPlayers: List<PrototypeStateChecks.Located>,
+    webViews: List<PrototypeStateChecks.Located>,
     cameraPreviews: List<PrototypeStateChecks.Located>,
   ): PrototypeSpecError? =
     PrototypeMedia.videoPlayerError(root, videoPlayers)
+      ?: PrototypeWebView.error(root, webViews)
       ?: PrototypeCameraPreview.error(root, cameraPreviews)
 
   /** The verdict for a decoded state write against the spec it replaces the state of. */

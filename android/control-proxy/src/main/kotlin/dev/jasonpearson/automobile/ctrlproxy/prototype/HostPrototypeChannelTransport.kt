@@ -33,7 +33,13 @@ class HostPrototypeChannelTransport(
   private val link: PrototypeChannelHostLink,
   private val warn: (String) -> Unit = { Log.w(TAG, it) },
 ) : PrototypeChannelTransport {
-  private class Entry(val listener: PrototypeChannelListener, val target: Any)
+  private class Entry(val listener: PrototypeChannelListener) {
+    /** The connection the open went to; null while it is still being handed to the link. */
+    @Volatile var target: Any? = null
+
+    /** Connections that closed while the open was still being handed to the link. */
+    val lostWhileSending = HashSet<Any>()
+  }
 
   private val connections = ConcurrentHashMap<String, Entry>()
 
@@ -43,21 +49,28 @@ class HostPrototypeChannelTransport(
   ): PrototypeChannelConnection {
     val id = request.connectionId
     val frame = openFrame(request)
-    // Registered under a placeholder first, so an answer racing the send still finds it.
-    val pending = Any()
-    connections[id] = Entry(listener, pending)
+    // Registered before the send, so an answer racing the send still finds it.
+    val opening = Entry(listener)
+    connections[id] = opening
     val target = link.send(frame)
-    if (target == null) {
-      connections.remove(id)
-      listener.onClosed(null, null, error(NO_HOST_MESSAGE))
-    } else {
-      connections.computeIfPresent(id) { _, entry -> Entry(entry.listener, target) }
+    val lostMeanwhile =
+      target != null &&
+        synchronized(opening) {
+          opening.target = target
+          target in opening.lostWhileSending
+        }
+    when {
+      target == null ->
+        if (connections.remove(id, opening)) listener.onClosed(null, null, error(NO_HOST_MESSAGE))
+      // Its host closed before the send returned, so no onHostLost will name this connection.
+      lostMeanwhile ->
+        if (connections.remove(id, opening)) listener.onClosed(null, null, error(HOST_LOST_MESSAGE))
     }
     return object : PrototypeChannelConnection {
       override fun send(data: String): Boolean {
         val entry = connections[id] ?: return false
         return link.sendTo(
-          entry.target,
+          entry.target ?: return false,
           message(SEND_TYPE, id) { put("data", data) },
         )
       }
@@ -65,7 +78,7 @@ class HostPrototypeChannelTransport(
       override fun close(code: Int, reason: String) {
         val entry = connections.remove(id) ?: return
         link.sendTo(
-          entry.target,
+          entry.target ?: return,
           message(CLOSE_TYPE, id) {
             put("code", code)
             if (reason.isNotEmpty()) put("reason", reason)
@@ -109,10 +122,18 @@ class HostPrototypeChannelTransport(
   /** The host went away: its connections fail; with no [connection], every connection does. */
   fun onHostLost(connection: Any? = null) {
     for ((id, entry) in connections) {
-      if (connection == null || entry.target === connection) {
-        if (connections.remove(id, entry)) {
-          entry.listener.onClosed(null, null, error(HOST_LOST_MESSAGE))
+      val affected =
+        synchronized(entry) {
+          val target = entry.target
+          when {
+            connection == null || target === connection -> true
+            // Still being handed to the link: remember the close so the open can settle it.
+            target == null -> false.also { entry.lostWhileSending += connection }
+            else -> false
+          }
         }
+      if (affected && connections.remove(id, entry)) {
+        entry.listener.onClosed(null, null, error(HOST_LOST_MESSAGE))
       }
     }
   }

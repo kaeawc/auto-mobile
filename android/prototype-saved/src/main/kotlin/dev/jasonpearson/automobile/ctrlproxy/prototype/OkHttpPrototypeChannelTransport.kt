@@ -33,6 +33,8 @@ class OkHttpPrototypeChannelTransport(
   private val maxFrameBytes: Int = PrototypeChannelLimits.maxFrameBytes,
   /** Unexpected failures; a seam so JVM tests need no `android.util.Log`. */
   private val warn: (String, Throwable) -> Unit = { message, error -> Log.w(TAG, message, error) },
+  /** The most a connection may take to open; the request default. */
+  handshakeTimeoutMs: Long = HANDSHAKE_TIMEOUT_MS,
 ) : PrototypeChannelTransport {
   private val base: OkHttpClient =
     client
@@ -45,11 +47,13 @@ class OkHttpPrototypeChannelTransport(
       .connectionPool(ConnectionPool())
       .addNetworkInterceptor(PrototypeEgressInterceptor(policy))
       .pingInterval(PING_INTERVAL_MS, TimeUnit.MILLISECONDS)
-      .connectTimeout(HANDSHAKE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-      .writeTimeout(HANDSHAKE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-      // A stream is open-ended; the ping (WebSocket) or the server (SSE) ends a dead one.
+      .connectTimeout(handshakeTimeoutMs, TimeUnit.MILLISECONDS)
+      .writeTimeout(handshakeTimeoutMs, TimeUnit.MILLISECONDS)
+      // A stream is open-ended; the ping (WebSocket) or the server (SSE) ends a dead one. The call
+      // timeout bounds only the handshake: OkHttp exits it once the WebSocket upgrades or the SSE
+      // response opens.
       .readTimeout(0, TimeUnit.MILLISECONDS)
-      .callTimeout(0, TimeUnit.MILLISECONDS)
+      .callTimeout(handshakeTimeoutMs, TimeUnit.MILLISECONDS)
       .build()
 
   override fun open(
@@ -263,7 +267,6 @@ class OkHttpPrototypeChannelTransport(
     private const val TAG = "PrototypeChannel"
     const val PING_INTERVAL_MS = 25_000L
     private const val MESSAGE_TOO_BIG = 1009
-    private val HANDSHAKE_TIMEOUT_MS =
-      PrototypeSpecValidator.DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS.toLong()
+    val HANDSHAKE_TIMEOUT_MS = PrototypeSpecValidator.DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS.toLong()
   }
 }

@@ -97,7 +97,7 @@ class PrototypeChannelController(
     }
   }
 
-  private class Routed(val channel: String, val actions: JsonArray, val event: JsonElement)
+  private class Routed(val slot: Slot, val actions: JsonArray, val event: JsonElement)
 
   private val lock = Mutex()
   private val inbox = Channel<suspend () -> Unit>(Channel.UNLIMITED)
@@ -129,7 +129,9 @@ class PrototypeChannelController(
       previous?.let(::abandon)
       val slot = Slot(id, declaration).also { slots[id] = it }
       publish(slot)
-      if (live || (started && declaration.connectOnShow)) connect(slot)
+      // A changed channel keeps its state: only live ones reconnect, and only a newly declared
+      // channel connects on show.
+      if (live || (previous == null && started && declaration.connectOnShow)) connect(slot)
     }
   }
 
@@ -303,7 +305,7 @@ class PrototypeChannelController(
     )
     PrototypeChannelRoutes.match(slot.declaration.routes, decoded, event)?.let {
       // A fresh array per frame: coalescing keeps frames by identity.
-      window += Routed(slot.id, JsonArray(it), decoded)
+      window += Routed(slot, JsonArray(it), decoded)
     }
     scheduleFlush()
   }
@@ -332,7 +334,9 @@ class PrototypeChannelController(
       val index = (from until frames.size).first { frames[it].actions === actions }
       from = index + 1
       val routed = frames[index]
-      if (slots.containsKey(routed.channel)) sink.run(routed.channel, routed.actions, routed.event)
+      // A patch or removal since the frame arrived replaced its declaration: drop its actions.
+      val slot = routed.slot
+      if (slots[slot.id] === slot) sink.run(slot.id, routed.actions, routed.event)
     }
     val changed = dirty.toList()
     dirty.clear()

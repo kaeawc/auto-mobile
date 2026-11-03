@@ -130,4 +130,43 @@ class HostPrototypeChannelTransportTest {
     transport.onFrame("[1]")
     assertEquals(2, warnings.size)
   }
+
+  @Test
+  fun `a host lost while the open is being sent fails the connection`() {
+    lateinit var transport: HostPrototypeChannelTransport
+    val link =
+      object : PrototypeChannelHostLink {
+        override fun send(frame: String): Any {
+          // The host disconnects after taking the frame but before send returns.
+          transport.onHostLost("host-a")
+          return "host-a"
+        }
+
+        override fun sendTo(target: Any, frame: String) = true
+      }
+    transport = HostPrototypeChannelTransport(link) {}
+    val recorder = Recorder()
+    val connection = transport.open(request, recorder)
+    assertEquals(HostPrototypeChannelTransport.HOST_LOST_MESSAGE, recorder.error?.message)
+    assertFalse(connection.send("x"))
+  }
+
+  @Test
+  fun `a different host lost while the open is being sent leaves the connection alone`() {
+    lateinit var transport: HostPrototypeChannelTransport
+    val link =
+      object : PrototypeChannelHostLink {
+        override fun send(frame: String): Any {
+          transport.onHostLost("host-b")
+          return "host-a"
+        }
+
+        override fun sendTo(target: Any, frame: String) = true
+      }
+    transport = HostPrototypeChannelTransport(link) {}
+    val recorder = Recorder()
+    val connection = transport.open(request, recorder)
+    assertTrue(recorder.seen.isEmpty())
+    assertTrue(connection.send("x"))
+  }
 }

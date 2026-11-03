@@ -71,7 +71,15 @@ class OkHttpPrototypeChannelTransportTest {
     policy: PrototypeDestinationPolicy = permissivePolicy,
     maxFrameBytes: Int = 65_536,
     client: OkHttpClient = OkHttpClient(),
-  ) = OkHttpPrototypeChannelTransport(client, policy, maxFrameBytes) { _, _ -> }
+    handshakeTimeoutMs: Long = OkHttpPrototypeChannelTransport.HANDSHAKE_TIMEOUT_MS,
+  ) =
+    OkHttpPrototypeChannelTransport(
+      client,
+      policy,
+      maxFrameBytes,
+      warn = { _, _ -> },
+      handshakeTimeoutMs = handshakeTimeoutMs,
+    )
 
   private fun request(
     kind: PrototypeChannelKind,
@@ -247,5 +255,64 @@ class OkHttpPrototypeChannelTransportTest {
       PrototypeChannelError.INVALID_REQUEST,
       (recorder.next() as Seen.Closed).error?.code,
     )
+  }
+
+  @Test
+  fun `a handshake that never answers times out`() {
+    server.enqueue(MockResponse.Builder().headersDelay(2, TimeUnit.SECONDS).build())
+    val recorder = Recorder()
+    transport(handshakeTimeoutMs = 200)
+      .open(request(PrototypeChannelKind.SSE, server.url("/feed").toString()), recorder)
+    assertEquals("timeout", (recorder.next() as Seen.Closed).error?.code)
+  }
+
+  @Test
+  fun `an open websocket outlives the handshake timeout`() {
+    server.enqueue(
+      MockResponse.Builder()
+        .webSocketUpgrade(
+          object : ServerSocket() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+              Thread {
+                Thread.sleep(STREAM_DELAY_MS)
+                webSocket.send("late")
+              }
+                .start()
+            }
+          },
+        )
+        .build(),
+    )
+    val recorder = Recorder()
+    val connection =
+      transport(handshakeTimeoutMs = OUTLIVED_HANDSHAKE_MS)
+        .open(request(PrototypeChannelKind.WEBSOCKET, wsUrl()), recorder)
+    assertTrue(recorder.next() is Seen.Open)
+    assertEquals(Seen.Frame("late", null, null), recorder.next())
+    connection.close(1000, "")
+  }
+
+  @Test
+  fun `an open sse stream outlives the handshake timeout`() {
+    server.enqueue(
+      MockResponse.Builder()
+        .setHeader("Content-Type", "text/event-stream")
+        .bodyDelay(STREAM_DELAY_MS, TimeUnit.MILLISECONDS)
+        .body("data: late\n\n")
+        .build(),
+    )
+    val recorder = Recorder()
+    transport(handshakeTimeoutMs = OUTLIVED_HANDSHAKE_MS)
+      .open(request(PrototypeChannelKind.SSE, server.url("/feed").toString()), recorder)
+    assertEquals(Seen.Open(null), recorder.next())
+    assertEquals(Seen.Frame("late", null, null), recorder.next())
+  }
+
+  private companion object {
+    /**
+     * Generous enough that a loaded runner still upgrades in time; the stream then waits longer.
+     */
+    const val OUTLIVED_HANDSHAKE_MS = 1_000L
+    const val STREAM_DELAY_MS = 1_500L
   }
 }

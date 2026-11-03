@@ -458,6 +458,47 @@ class PrototypeChannelControllerTest {
     assertNull(h.controller.state("chat"))
   }
 
+  @Test
+  fun `a patch keeps a disconnected or exhausted channel closed`() = runTest {
+    val h = Harness(this)
+    val failing = websocket.copy(maxAttempts = 0)
+    h.controller.update(mapOf("chat" to websocket, "once" to failing))
+    h.controller.show()
+    h.controller.disconnect("chat")
+    h.host.opened.last { it.request.channel == "once" }.listener.onClosed(1006, "", null)
+    runCurrent()
+    assertEquals("closed", h.sink.status("once"))
+    val opens = h.host.opened.size
+    h.controller.update(
+      mapOf(
+        "chat" to websocket.copy(url = "wss://example.com/other"),
+        "once" to failing.copy(url = "wss://example.com/other"),
+      ),
+    )
+    assertEquals(opens, h.host.opened.size)
+    // A channel the patch adds still connects on show.
+    h.controller.update(mapOf("added" to websocket))
+    assertEquals("added", h.host.last.request.channel)
+  }
+
+  @Test
+  fun `a patch drops routed frames still waiting for the flush`() = runTest {
+    val h = Harness(this)
+    val routed =
+      channel(
+        """{"kind":"websocket","url":"wss://e.com","routes":[
+          {"actions":[{"type":"increment","key":"n"}]}]}""",
+      )
+    h.controller.update(mapOf("chat" to routed))
+    h.controller.show()
+    h.host.last.listener.onOpen(null)
+    h.host.last.listener.onFrame("{}", null, null)
+    runCurrent()
+    h.controller.update(mapOf("chat" to routed.copy(url = "wss://e.com/v2")))
+    settle()
+    assertTrue(h.sink.runs.isEmpty())
+  }
+
   private fun vectors(name: String): JsonObject {
     val file =
       generateSequence(File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }

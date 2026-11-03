@@ -319,25 +319,40 @@ A spec reaches a platform feature through a module. Declare every module it uses
 Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists every module, call, event and key a spec may name; a device can run only the modules whose capabilities it advertises:
 `;
 
-export const GUIDE_PLATFORM_EXAMPLE = `Example: copy a link on tap and re-show a hint when the window changes size.
+export const GUIDE_PLATFORM_EXAMPLE = `Example: a podcast posts a "new episode" notification, and tapping it deep-links to the episode through a handler \`push\`.
 
 \`\`\`json
 {
-  "id": "share-link",
+  "id": "podcast",
   "window": {"placement": {"type": "fullscreen"}},
-  "state": {"copyStatus": "idle", "resized": false},
-  "requires": {"platform": ["clipboard", "device"]},
-  "platform": {"on": {"device.changed": [{"type": "setState", "key": "resized", "value": true}]}},
+  "state": {"postStatus": "idle"},
+  "data": {"opened": {"title": ""}},
+  "requires": {
+    "platform": ["notifications"],
+    "permissions": [{"name": "notifications", "purpose": "Tell you when a new episode is out"}]
+  },
+  "notifications": {"channels": [{"id": "episodes", "name": "New episodes", "importance": "default"}]},
+  "platform": {"on": {"notifications.opened": [
+    {"type": "setData", "path": "/data/opened/title", "value": {"event": "/data/title"}},
+    {"type": "push", "stack": "nav", "screen": "episode"}
+  ]}},
   "root": {
-    "type": "column",
-    "children": [
-      {"type": "text", "text": "Window {platform:/device/windowWidth} wide"},
-      {"type": "text", "text": "Layout changed", "visibleWhen": {"key": "resized", "equals": true}},
-      {"type": "button", "label": "Copy link", "onTap": [{"type": "platform", "call": "clipboard.copy", "args": {"text": {"value": "https://example.com/episode/1"}}, "statusKey": "copyStatus"}]}
-    ]
+    "type": "stack", "id": "nav", "start": "home",
+    "screens": {
+      "home": {"type": "button", "label": "Simulate release", "onTap": [{"type": "platform", "call": "notifications.post", "statusKey": "postStatus", "args": {
+        "id": {"value": "ep-42"}, "channel": {"value": "episodes"},
+        "title": {"value": "New episode"}, "body": {"value": "42: Shipping on Fridays"},
+        "data": {"value": {"title": "42: Shipping on Fridays"}}
+      }}]},
+      "episode": {"type": "text", "text": "Now playing {data:/opened/title}"}
+    }
   }
 }
-\`\`\``;
+\`\`\`
+
+Drive it for real with \`systemTray\` (find and tap the notification), then \`awaitEvent\` for \`prototype_platform_event\` and \`observe\` the episode screen.
+
+`;
 
 export const GUIDE_NOTIFICATIONS = `### Notifications
 

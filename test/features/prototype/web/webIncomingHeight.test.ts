@@ -55,6 +55,11 @@ test("a column hands each child what its earlier siblings left, and weights shar
   // A sibling with no dp height counts as 0, so the bound is an upper one.
   expect(columnChildHeights([{ type: "text" }, weighted(1)], 40, 0)).toEqual([40, 40]);
   expect(columnChildHeights([dp(50), weighted(1)], 40, 0)).toEqual([40, 0]);
+  // A maxHeight alone is a ceiling, not a height the sibling takes.
+  const ceiling = { type: "box", style: { maxHeight: 100 } };
+  expect(columnChildHeights([ceiling, weighted(1)], 100, 0)).toEqual([100, 100]);
+  const floor = { type: "box", style: { maxHeight: 100, minHeight: 10 } };
+  expect(columnChildHeights([floor, weighted(1)], 100, 0)).toEqual([100, 90]);
 });
 
 test("a row or box with a known content height hands it to every child", () => {

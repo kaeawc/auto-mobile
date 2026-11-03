@@ -725,10 +725,12 @@ class PrototypeRuntime(
             ->
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
+        is PrototypeSetStackAction -> setStack(action)
         PrototypeDismissAction -> dismiss()
         is PrototypeSetDataAction,
         is PrototypeAppendDataAction,
         is PrototypePrependDataAction,
+        is PrototypeUpsertDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
         is PrototypePlatformAction -> startPlatformCall(action, touched)
@@ -912,6 +914,24 @@ class PrototypeRuntime(
       stacks = current.stacks + (id to PrototypeStackSnapshot(stack.path.dropLast(1))),
       stackChange = current.stackPopChange(id),
     )
+  }
+
+  /**
+   * `setStack` replaces the whole path of [action]'s stack with its screens (#16620). A path that
+   * names an unknown screen or exceeds the depth limit leaves the stack as it was. It reports the
+   * same `screen_changed` event as the other stack actions and animates as a replace.
+   */
+  private suspend fun setStack(action: PrototypeSetStackAction) {
+    val screens = action.path.map { it.screen }
+    changeStack(action.stack, "replace") { node, path ->
+      if (
+        screens.isEmpty() ||
+          screens.size > PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
+          screens.any { !node.screens.containsKey(it) }
+      )
+        path
+      else screens
+    }
   }
 
   private suspend fun changeStack(
@@ -1156,6 +1176,16 @@ class PrototypeRuntime(
             prototypeListMaxItemsFor(current.spec, action.path),
           )
         }
+      is PrototypeUpsertDataAction ->
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Upsert(
+            action.path,
+            action.key,
+            it,
+            listOfNotNull(action.maxItems, prototypeListMaxItemsFor(current.spec, action.path))
+              .minOrNull(),
+          )
+        }
       is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
       else -> null
     }
@@ -1168,12 +1198,14 @@ class PrototypeRuntime(
   private fun dataWritePayload(write: PrototypeDataWrite, revision: Long): JsonObject {
     fun payload(value: JsonElement?) = buildJsonObject {
       put("op", write.op)
+      if (write is PrototypeDataWrite.Upsert) put("key", write.key)
       if (value != null) put("value", value)
       val maximum =
         when (write) {
           is PrototypeDataWrite.Append -> write.maxItems
           is PrototypeDataWrite.Prepend -> write.maxItems
           is PrototypeDataWrite.Extend -> write.maxItems
+          is PrototypeDataWrite.Upsert -> write.maxItems
           else -> null
         }
       maximum?.let { put("maxItems", it.toLong()) }
@@ -1191,7 +1223,7 @@ class PrototypeRuntime(
 
   private fun dataWriteValue(write: PrototypeDataWrite): JsonElement? =
     when (write) {
-      is PrototypeDataWrite.Upsert -> error("Realtime data writes require a supporting runtime")
+      is PrototypeDataWrite.Upsert -> write.value
       is PrototypeDataWrite.Set -> write.value
       is PrototypeDataWrite.Append -> write.value
       is PrototypeDataWrite.Prepend -> write.value

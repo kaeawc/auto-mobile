@@ -82,6 +82,18 @@ describe("data write change events", () => {
       revision: 2,
     });
   });
+  test("an upsert decodes with its key pointer", () => {
+    const payload = { op: "upsert", key: "/sku", value: { sku: "a", n: 2 }, revision: 6 };
+    const wire = dataWrite(1, CART, payload);
+    expect(prototypeDataWriteOf(decodePrototypeEvent(wire, "test")!)).toEqual({
+      path: CART,
+      ...payload,
+    });
+  });
+  test("an upsert without a key pointer is dropped", () => {
+    const wire = dataWrite(1, CART, { op: "upsert", value: { sku: "a" }, revision: 6 });
+    expect(decodePrototypeEvent(wire, "test")).toBeUndefined();
+  });
   test("a validity change is not a data write", () => {
     const wire = { ...event(1, "shop", "change", "email"), validity: { email: true } };
     expect(prototypeDataWriteOf(decodePrototypeEvent(wire, "test")!)).toBeUndefined();
@@ -101,6 +113,20 @@ describe("the host mirror follows device data writes", () => {
     expect(dataOf(shown)).toEqual({ cart: [{ sku: "a" }, { sku: "b" }], note: "hi" });
     shown.recordDeviceDataWrite("d", "shop", { path: "/data/cart/0", op: "remove", revision: 4 });
     expect(dataOf(shown)).toEqual({ cart: [{ sku: "b" }], note: "hi" });
+  });
+  test("an upsert replaces the keyed row and appends a new one", () => {
+    const shown = tracked();
+    const upsert = (value: Record<string, unknown>, revision: number) =>
+      shown.recordDeviceDataWrite("d", "shop", {
+        path: CART,
+        op: "upsert",
+        key: "/sku",
+        value,
+        revision,
+      });
+    expect(upsert({ sku: "b", n: 1 }, 3)).toMatchObject({ kind: "mirrored" });
+    expect(upsert({ sku: "a", n: 2 }, 4)).toMatchObject({ kind: "mirrored" });
+    expect(dataOf(shown)).toEqual({ cart: [{ sku: "a", n: 2 }, { sku: "b", n: 1 }], note: "hi" });
   });
   test("a write the mirror cannot apply makes the host stop tracking the spec", () => {
     for (const write of [

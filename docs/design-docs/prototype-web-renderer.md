@@ -304,8 +304,16 @@ the host, so the page's script only switches between views it was given and neve
   8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
-  generic status bar, the cutout and the navigation handle (or three generic button marks, which move to
-  the right edge in landscape when the frame reserves that inset). Landscape swaps the screen size, uses
+  generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
+  navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to
+  the right edge in landscape when the frame reserves that inset, and iOS's home indicator
+  (`data-nav="homeIndicator"`). The status bar is never a picture of a real OS: a clock and generic
+  cellular, Wi-Fi and battery marks (`data-status` with a `data-level`) drawn from a fixed state (9:41,
+  four bars, Wi-Fi on, full battery). An iPhone with an island centres the clock and the marks in the
+  ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
+  `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
+  app's top colour, which is the first opaque background spanning the screen along the content's leading
+  children (a top app bar), else the screen background. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own

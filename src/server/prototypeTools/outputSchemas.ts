@@ -184,6 +184,11 @@ const prototypeEventOutputSchema = z.object({
   keys: z.array(z.string()).min(1).max(8).optional(),
   timestamp: z.number(),
 });
+const prototypeDeviceStatusReadingSchema = z.object({
+  values: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  receivedAt: z.number(),
+  simulated: z.literal(true).optional(),
+});
 export const prototypeOutputSchema = z.object({
   screenMap: z
     .object({
@@ -382,6 +387,16 @@ export const prototypeOutputSchema = z.object({
     )
     .optional(),
   lastResult: lastResultSchema.optional(),
+  platformStatus: z
+    .object({
+      battery: prototypeDeviceStatusReadingSchema.optional(),
+      power: prototypeDeviceStatusReadingSchema.optional(),
+      audio: prototypeDeviceStatusReadingSchema.optional(),
+    })
+    .optional()
+    .describe(
+      "status and inspect: the last battery, power and audio values the device delivered through <module>.changed; a module is absent until its first change",
+    ),
   screenRound: z
     .boolean()
     .optional()

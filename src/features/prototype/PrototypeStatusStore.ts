@@ -24,6 +24,10 @@ import {
   type ShownPrototypeAppearance,
 } from "./prototypeAppearance";
 import type { PrototypeWindowChrome } from "./prototypeWindowChrome";
+import {
+  prototypeDeviceStatusOf,
+  type PrototypeDeviceStatusMirror,
+} from "./prototypeDeviceStatusMirror";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
@@ -113,6 +117,8 @@ export interface AdoptedPrototype {
 export interface PrototypeStatus {
   prototypes: (PrototypeLastResult & Partial<PrototypeEventState>)[];
   lastResult?: PrototypeLastResult;
+  /** The last `battery|power|audio.changed` values the device delivered in this scope (#14316). */
+  platformStatus?: PrototypeDeviceStatusMirror;
 }
 export interface PrototypeScope {
   sessionUuid?: string;
@@ -178,6 +184,7 @@ interface StoredPrototypeStatus extends PrototypeScope {
   lastResult?: PrototypeLastResult;
   snapshots?: Map<string, PrototypeEventState>;
   pendingSnapshots?: Map<string, PrototypeEventState>;
+  platformStatus?: PrototypeDeviceStatusMirror;
 }
 
 /** Sets or, for undefined, removes the entry's reported data. */
@@ -280,6 +287,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
         presenceWithSnapshot(entry, entry.id ? stored?.snapshots?.get(entry.id) : undefined),
       ),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
+      ...(stored?.platformStatus ? { platformStatus: structuredClone(stored.platformStatus) } : {}),
     };
   }
 
@@ -370,6 +378,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...scope,
       shown: new Map<string, PrototypeLastResult>(),
     };
+    this.recordDeviceStatus(stored, event);
     stored.pendingSnapshots ??= new Map();
     const snapshot = eventSnapshot(event);
     stored.pendingSnapshots.set(event.id, snapshot);
@@ -382,6 +391,21 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       }
     }
     this.remember(key, stored);
+  }
+
+  /** A delivered status change replaces that module's mirrored values whatever prototype received it. */
+  private recordDeviceStatus(stored: StoredPrototypeStatus, event: PrototypeEvent): void {
+    const reading = prototypeDeviceStatusOf(event);
+    if (reading) {
+      stored.platformStatus = {
+        ...stored.platformStatus,
+        [reading.module]: {
+          values: reading.values,
+          receivedAt: this.clock.now(),
+          ...(reading.simulated ? { simulated: true as const } : {}),
+        },
+      };
+    }
   }
 
   /**

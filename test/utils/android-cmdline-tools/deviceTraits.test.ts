@@ -348,8 +348,9 @@ describe("parseTraitFormFactor", () => {
 });
 
 describe("vehicle capabilities (#16742)", () => {
-  function carAdb(buildType: string, debuggable: string): FakeAdbExecutor {
+  function carAdb(buildType: string, debuggable: string, qemu = "1"): FakeAdbExecutor {
     const adb = samsungAdb();
+    adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult(`${qemu}\n`, ""));
     adb.setCommandResponse(
       "getprop ro.build.characteristics",
       createExecResult("emulator,automotive\n", ""),
@@ -367,10 +368,25 @@ describe("vehicle capabilities (#16742)", () => {
     ["", "0", "unsupported"],
     ["", "", "unknown"],
   ] as const)("build type %j, debuggable %j -> motion %s", (buildType, debuggable, expected) => {
-    expect(deriveVehicleCapabilities(buildType || null, debuggable || null)).toEqual({
+    expect(deriveVehicleCapabilities(true, buildType || null, debuggable || null)).toEqual({
       motion: expected,
       nightMode: "supported",
     });
+  });
+
+  it.each([false, null])("a non-emulator (isEmulator %p) supports neither control", (flag) => {
+    expect(deriveVehicleCapabilities(flag, "userdebug", "1")).toEqual({
+      motion: "unsupported",
+      nightMode: "unsupported",
+    });
+  });
+
+  test("a physical userdebug head unit reports both controls unsupported", async () => {
+    const traits = await new AndroidDeviceTraitsReader(new FakeTimer()).read(
+      carAdb("userdebug", "1", "0"),
+      "R5CW123",
+    );
+    expect(traits.vehicle).toEqual({ motion: "unsupported", nightMode: "unsupported" });
   });
 
   test("a Play Store car image (user build) cannot simulate motion", async () => {

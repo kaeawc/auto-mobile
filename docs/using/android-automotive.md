@@ -45,7 +45,8 @@ built from an `android-automotive` image and creates one from such an image inst
 image. If none is installed in the range, the error names the `sdkmanager` package to install. It is
 refused for a non-automotive request. A booted car emulator's `traits.vehicle` in the booted-devices
 resource reports `motion` (`supported`, `unsupported`, or `unknown` when the build props could not be
-read) and `nightMode` (`supported`); other devices have no `vehicle` field.
+read) and `nightMode` (`supported`). A physical head unit reports both `unsupported`, because vehicle
+state is injected on emulators only. Other devices have no `vehicle` field.
 
 To choose the exact image and profile yourself, call `provisionDevice` with an `android-automotive`
 system image as `runtime` and an automotive profile as `deviceType`:

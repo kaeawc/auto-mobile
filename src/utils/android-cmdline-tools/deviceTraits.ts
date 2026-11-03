@@ -64,8 +64,8 @@ export type VehicleCapabilityState = "supported" | "unsupported" | "unknown";
 export interface VehicleCapabilities {
   /** Driving state (`inject-vhal-event`, `emulate-driving-state`): refused on `user` builds. */
   motion: VehicleCapabilityState;
-  /** Day/night mode works on every automotive build, including Play Store `user` images. */
-  nightMode: "supported";
+  /** Day/night mode works on every automotive emulator, including Play Store `user` images. */
+  nightMode: VehicleCapabilityState;
 }
 
 export const BUILD_TYPE_PROP = "ro.build.type";
@@ -74,12 +74,17 @@ export const DEBUGGABLE_PROP = "ro.debuggable";
 /**
  * Derive {@link VehicleCapabilities} from `ro.build.type` (preferred) or `ro.debuggable`.
  * Play Store car images are `user` builds whose car service refuses driving-state injection;
- * non-Play `android-automotive` images are `userdebug` and accept it.
+ * non-Play `android-automotive` images are `userdebug` and accept it. Vehicle state is injected
+ * on emulators only, so a device not positively identified as one supports neither control.
  */
 export function deriveVehicleCapabilities(
+  isEmulator: boolean | null,
   buildType: string | null,
   debuggable: string | null,
 ): VehicleCapabilities {
+  if (isEmulator !== true) {
+    return { motion: "unsupported", nightMode: "unsupported" };
+  }
   return { motion: motionFromBuild(buildType, debuggable), nightMode: "supported" };
 }
 
@@ -284,6 +289,7 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
     const vehicle =
       formFactor === "automotive"
         ? deriveVehicleCapabilities(
+            isEmulator,
             ...(await Promise.all([optional(BUILD_TYPE_PROP), optional(DEBUGGABLE_PROP)])),
           )
         : undefined;

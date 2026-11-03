@@ -425,6 +425,39 @@ test("a full-width child inside a narrow ancestor does not cover the status bar"
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("a sole filling child of a row spans it, and a capped maximum width does not", () => {
+  const row = renderPrototypeStill({
+    id: "row-fill",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "row",
+      style: { width: "fill", height: "fill", background: "#000000" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#ffffff" } },
+      ],
+    },
+  });
+  expect(statusBarOf(row.element)?.attrs["data-status-content"]).toBe("dark");
+  const capped = renderPrototypeStill({
+    id: "max-width",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", maxWidth: 20, background: "#ffffff" },
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(capped.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

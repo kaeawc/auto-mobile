@@ -126,22 +126,31 @@ const MAIN_START = new Set([
 
 /**
  * Whether a child spans its container's width. The horizontal axis is `justify-self` in a box,
- * `align-self` in a column and the main axis in a row, where only a full width counts.
+ * `align-self` in a column and the main axis in a row, where a full width or a sole growing child
+ * counts. A maximum width below full caps it.
  */
-function spansWidth(child: WebElement, layout: Layout): boolean {
+function spansWidth(child: WebElement, layout: Layout, siblings: number): boolean {
+  const capped = belowFull(child.style["max-width"]);
+  return !capped && (child.style.width === "100%" || stretchesAcross(child, layout, siblings));
+}
+
+/** Whether a child without a full width stretches across its container's horizontal axis. */
+function stretchesAcross(child: WebElement, layout: Layout, siblings: number): boolean {
   const { style } = child;
-  const full = style.width === "100%";
   switch (layout) {
     case "box":
-      return full || style["justify-self"] === "stretch";
+      return style["justify-self"] === "stretch";
     case "column":
-      return full || style["align-self"] === "stretch";
+      return style["align-self"] === "stretch";
     case "row":
-      return full;
+      // A sole growing child fills the row's main axis.
+      return siblings === 1 && grows(child);
     case "flow":
-      return full || style["align-self"] === "stretch" || style["justify-self"] === "stretch";
+      return style["align-self"] === "stretch" || style["justify-self"] === "stretch";
   }
 }
+
+const belowFull = (value: string | undefined): boolean => value !== undefined && value !== "100%";
 
 /** Whether a flex child grows along the main axis: its `flex` shorthand's grow factor is above 0. */
 function grows(child: WebElement): boolean {
@@ -149,9 +158,12 @@ function grows(child: WebElement): boolean {
   return Number.isFinite(factor) && factor > 0;
 }
 
-/** An explicit width other than full: the element and everything inside it is narrower. */
+/**
+ * An explicit width or maximum width other than full: the element and everything inside it is
+ * narrower than its container.
+ */
 function narrowed(element: WebElement): boolean {
-  return element.style.width !== undefined && element.style.width !== "100%";
+  return belowFull(element.style.width) || belowFull(element.style["max-width"]);
 }
 
 /**
@@ -189,14 +201,16 @@ function topCandidates(element: WebElement): Candidate[] {
   const children = elementChildren(element);
   if (layout === "box") {
     return children
-      .filter((child) => spansWidth(child, layout) && reachesTop(child, element, layout))
+      .filter(
+        (child) => spansWidth(child, layout, children.length) && reachesTop(child, element, layout),
+      )
       .reverse()
       .map((child) => ({ child, spans: true }));
   }
   // A narrowed child's descendants span at most its width, so nothing inside it covers the top.
   const leading = children[0];
   return leading && !narrowed(leading) && reachesTop(leading, element, layout)
-    ? [{ child: leading, spans: spansWidth(leading, layout) }]
+    ? [{ child: leading, spans: spansWidth(leading, layout, children.length) }]
     : [];
 }
 

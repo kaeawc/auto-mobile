@@ -1,7 +1,9 @@
 import { describe, expect } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { pendingImeRestores } from "../../src/features/action/sendkeys/PendingImeRestore";
+import { FakePendingImeRestoreRegistry } from "../fakes/FakePendingImeRestoreRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { setDeviceToolsDependencies } from "../../src/server/deviceTools";
 import { BASE, restartStopHarness } from "../helpers/restartStopHarness";
 
 // killDevice's ownership check runs inside its handler, so the registry must not restore the
@@ -47,5 +49,17 @@ describe("killDevice flushes the target's pending IME restore only after admissi
     expect(events).toEqual(["restore:0"]);
     expect(pendingImeRestores.hasPending(f.device.deviceId)).toBe(false);
     expect(f.manager.killed).toEqual([f.device.deviceId]);
+  });
+
+  test("an injected registry receives the admitted caller's flush", async () => {
+    const f = await fixture("android", false, false, "owner-conn", false);
+    const injected = new FakePendingImeRestoreRegistry();
+    setDeviceToolsDependencies({ pendingImeRestores: injected });
+    await expect(f.call("killDevice", undefined, false, "rival-conn")).rejects.toBeInstanceOf(
+      InputDeviceOwnedError,
+    );
+    expect(injected.flushes).toEqual([]);
+    await f.call("killDevice", BASE, false, "owner-conn");
+    expect(injected.flushes).toEqual([f.device.deviceId]);
   });
 });

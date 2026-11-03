@@ -19,7 +19,11 @@ import type {
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { exponentialBackoff } from "../../../../src/utils/Backoff";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import { drainMicrotasks, drainUntil } from "../../../helpers/fakeTimerStepping";
+import {
+  drainMicrotasks,
+  drainUntil,
+  settleByFakeEvents,
+} from "../../../helpers/fakeTimerStepping";
 import { useScratchRoot } from "../../../helpers/scratchRoot";
 
 const OWNER = { daemonId: "draining-daemon", pid: 4201, processGenerationToken: "test:owner" };
@@ -39,7 +43,8 @@ type FaultStep =
   | "claimExecution"
   | "openBindingJournal"
   | "getAssignment"
-  | "updateBindingState";
+  | "updateBindingState"
+  | "releaseExecution";
 
 /** Fault injection applies only through the draining daemon's connection. */
 function makeFaults(registry: BindingRegistry) {
@@ -191,15 +196,32 @@ describe("managed execution release peer view", () => {
     });
   }
 
-  async function tearDown(): Promise<void> {
+  /**
+   * Close both coordinators and wait for their background work. A retry already parked on a
+   * fake-time wait when close() lands sees the close only once that wait fires, and nothing
+   * advances this FakeTimer afterwards, so fire its pending events until both are idle rather
+   * than awaiting a wait that never ends. A busy owner clear during teardown (an SQLITE_BUSY on
+   * windows-latest, #16665) parks exactly such a retry.
+   */
+  async function closeAndSettle(): Promise<void> {
     active = false;
     timer.advanceTime(1_000);
     await drainMicrotasks(100);
     reowner?.close();
     drain.close();
-    await reowner?.whenIdle();
-    await drain.whenIdle();
-    await Promise.all([ownerRegistry.close(), peerRegistry.close()]);
+    await settleByFakeEvents(timer, Promise.all([reowner?.whenIdle(), drain.whenIdle()]), {
+      maxEvents: 100,
+      description: "the release coordinators going idle after close",
+    });
+  }
+
+  async function tearDown(): Promise<void> {
+    try {
+      await closeAndSettle();
+    } finally {
+      // Release both file handles even when settling fails, so the scratch root can be removed.
+      await Promise.all([ownerRegistry.close(), peerRegistry.close()]);
+    }
   }
 
   function testWithFreshBinding(
@@ -470,5 +492,22 @@ describe("managed execution release peer view", () => {
       expect(reowner.automationRefusal(SESSION)).toBeInstanceOf(BindingOwnershipUnconfirmedError);
     },
     PREVIOUS,
+  );
+
+  testWithFreshBinding(
+    "closing settles an owner-clear retry parked on fake time by a busy registry",
+    async () => {
+      // The settling mark stays owed, so the owner clear runs only once work settles at close.
+      faults.busy.openBindingJournal = 1_000;
+      const result = await drain.releaseExecution(SESSION);
+      expect(result).toMatchObject({ outcome: "cleanup_pending", settlement: "settling" });
+      faults.busy.openBindingJournal = 0;
+      // A busy owner clear (SQLITE_BUSY on windows-latest, #16665) parks its retry on a fake-time
+      // poll that the close lands during; awaiting whenIdle() alone then never returns.
+      faults.busy.releaseExecution = Infinity;
+      await closeAndSettle();
+      expect(faults.calls.releaseExecution).toBeGreaterThan(0);
+      expect(timer.getPendingSleepCount()).toBe(0);
+    },
   );
 });

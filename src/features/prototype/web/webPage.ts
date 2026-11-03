@@ -6,13 +6,20 @@ import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import type { WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
 import {
+  prototypeWebAnimateTurn,
+  prototypeWebBrowserClock,
+  prototypeWebClockDelay,
+  prototypeWebClockText,
   prototypeWebFitScale,
   prototypeWebPageRuntime,
+  prototypeWebRotation,
   prototypeWebScreenView,
+  prototypeWebStartClock,
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "./webPageRuntime";
 import { renderPrototypeStill } from "./webStill";
+import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
 import type { UnsupportedWebNode } from "./webRender";
 import type { WebStackScreens } from "./webStack";
 
@@ -57,7 +64,7 @@ export interface PrototypeWebPage {
 }
 
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
-export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()} });`;
+export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
 export const MAX_PROTOTYPE_WEB_RUNTIME_BYTES = 150 * 1024;
 export const MAX_PROTOTYPE_WEB_PAGE_BYTES = 2 * 1024 * 1024;
 
@@ -80,6 +87,7 @@ const PAGE_CSS = [
   // A narrow window keeps the width for the stage and moves the history below it.
   "@media (max-width:720px){[data-main]{flex-direction:column}[data-control=revisions]{width:auto;max-height:30vh;border-left:0;border-top:1px solid #ccc}}",
   "[hidden]{display:none!important}",
+  FADE_EDGES_PAGE_CSS,
 ].join("");
 
 function cspFor(script: string): string {
@@ -204,10 +212,23 @@ function screenPicker(screens: ScreenPicker): WebElement[] {
   ];
 }
 
+/** Watches and TVs never rotate (prototype-web-frames-v2.md); every other form factor does. */
+export function prototypeWebFrameRotates(formFactor: string): boolean {
+  return formFactor !== "watch" && formFactor !== "tv";
+}
+
+/** The frame facts the page shell needs: the platform's rotation and whether the device rotates. */
+interface PageFrame {
+  readonly platform: string;
+  /** A device that never rotates gets no rotate control. */
+  readonly rotates: boolean;
+}
+
 function toolbar(
   input: PrototypeWebPageInput,
   chosen: PrototypeWebVariant,
   screens: ScreenPicker,
+  frame: PageFrame,
 ): WebElement {
   const button = (control: string, label: string, text: string) =>
     el("button", { attrs: { type: "button", "data-control": control, "aria-label": label } }, [
@@ -241,7 +262,7 @@ function toolbar(
     "div",
     { attrs: { "data-toolbar": "", role: "toolbar", "aria-label": "Prototype view" } },
     [
-      button("rotate", "Rotate device", "Rotate"),
+      ...(frame.rotates ? [button("rotate", "Rotate device", "Rotate")] : []),
       button("zoom-out", "Zoom out", "−"),
       el("span", { attrs: { "data-control": "zoom-level", "aria-live": "polite" } }, ["100%"]),
       button("zoom-in", "Zoom in", "+"),
@@ -408,6 +429,7 @@ function chooseVariant(input: PrototypeWebPageInput): PrototypeWebVariant {
 }
 
 interface PageParts {
+  readonly frame: PageFrame;
   readonly views: string;
   readonly history: WebElement | undefined;
   readonly screens: ScreenPicker;
@@ -416,24 +438,29 @@ interface PageParts {
 function pageHtml(
   input: PrototypeWebPageInput,
   first: { variant: PrototypeWebVariant; revision: number },
-  { views, history, screens }: PageParts,
+  { frame, views, history, screens }: PageParts,
 ): string {
-  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}">${toHtml(toolbar(input, first.variant, screens))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
+  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}">${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
   const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
 
 /**
- * One self-contained HTML page (#16346): the prototype in a device frame with rotate, zoom and
- * pan, a variant switcher and revision history. Every view is pre-rendered; the inlined script
+ * One self-contained HTML page (#16346): the prototype in a device frame with animated rotate
+ * (#16545), zoom and pan, a variant switcher and revision history. Every view is pre-rendered; the inlined script
  * only switches between them. No network: the CSP allows only that script, inline styles and
  * `data:` images and fonts. The same input yields the same bytes.
  */
 export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWebPage {
   const chosen = chooseVariant(input);
-  const frame = deviceFrameOrThrow(
+  const device = deviceFrameOrThrow(
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),
-  ).id;
+  );
+  const frame = device.id;
+  const pageFrame: PageFrame = {
+    platform: device.platform,
+    rotates: prototypeWebFrameRotates(device.formFactor),
+  };
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
   // The shell lists only the pinned revisions (each latest and the one shown first), which are
   // always kept; older entries are charged to their own revision in the budget.
@@ -447,6 +474,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
   // option longer than the `hidden` attribute it may add, so the page never outgrows the budget.
   const shellBytes = Buffer.byteLength(
     pageHtml(input, shown, {
+      frame: pageFrame,
       views: "",
       history: revisionHistory(input, pinned, true),
       screens: pickerFor(rendered, shown),
@@ -475,6 +503,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     revisions.map((revision) => `${revision.variant}\u0000${revision.revision}`),
   );
   const html = pageHtml(input, shown, {
+    frame: pageFrame,
     views: viewsHtml,
     history: revisionHistory(input, (variant, revision) => kept.has(`${variant}\u0000${revision}`)),
     screens: pickerFor(revisions, shown),

@@ -47,7 +47,7 @@ const panelFields = {
   safeArea: z.object({ portrait: insets(), landscape: insets() }).strict(),
 };
 
-/** Physical panel roles from DisplayPanel; `overlay` and `unknown` never describe a frame. */
+/** Physical panel roles from DisplayPanel; `overlay`, `virtual` and `unknown` never describe a frame. */
 const PANEL_ROLES = ["inner", "cover", "rear", "external"] as const satisfies readonly PanelRole[];
 const panelRole = z.enum(PANEL_ROLES);
 const extraPanelSchema = z.object({ role: panelRole.exclude(["inner"]), ...panelFields }).strict();

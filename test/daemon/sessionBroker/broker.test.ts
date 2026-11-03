@@ -885,32 +885,35 @@ describe("session-only broker lifecycle", () => {
     });
   });
 
-  test("Duo refusal happens before capacity and never evicts a device", async () => {
+  test("a missing Duo model is refused before capacity and never evicts a device", async () => {
     await ready("first");
     const request = config("duo");
-    request.device.hardware = { kind: "archetype", archetype: "duo" };
+    request.device.hardware = {
+      kind: "exact-model",
+      model: {
+        namespace: "simulator-device-type",
+        value: "com.apple.CoreSimulator.SimDeviceType.AutoMobile-Missing-iPhone-Duo",
+      },
+    };
     expect(await broker.prepare(request, "owner-token")).toMatchObject({
       outcome: "failed",
-      failure: { code: "capability_disabled" },
+      failure: { code: "unsupported_hardware" },
     });
     expect(devices.prepared).toHaveLength(1);
     expect(devices.destroyed).toHaveLength(0);
     expect(await options.store.getRequest("duo")).toMatchObject({
       state: "failed",
-      errorCode: "capability_disabled",
+      errorCode: "unsupported_hardware",
       resourceId: null,
     });
   });
 
-  test("an enabled Duo capability admits an exact Duo request and advertises support", async () => {
-    expect(broker.supportsIosDuo()).toBe(false);
+  test("an installed Duo admits an exact request without an opt-in", async () => {
     await broker.close();
     broker = new SessionBroker({
       ...options,
       limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 0 },
-      capabilities: { iosDuo: true },
     });
-    expect(broker.supportsIosDuo()).toBe(true);
     const request = config("duo-enabled");
     request.device.hardware = {
       kind: "exact-model",

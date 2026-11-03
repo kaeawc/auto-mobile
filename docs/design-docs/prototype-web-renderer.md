@@ -1,8 +1,8 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the per-prototype resources (the page and the single-file Compose and SwiftUI
-sources), spec revisions, the page, its browser check, the still renderer and the device frame
+document covers the per-prototype resources (the page, the embed envelope and the single-file
+Compose and SwiftUI sources), spec revisions, the page, its browser check, the still renderer and the device frame
 registry.
 
 ## Resource
@@ -23,6 +23,14 @@ registry.
   `ActionableError`s.
 - **Read result.** `_meta` is `{revision, deviceRevision?, revisions, variants, frame, sha256,
   rendererVersion}`; `rendererVersion` is the server release version.
+- **Embed envelope.** `automobile:prototype/{id}/embed{?revision,variant}` (`application/json`) is
+  read by `readPrototypeEmbedResource` in `src/features/prototype/web/prototypeEmbedResource.ts`.
+  Its text is `{format: "automobile-prototype-embed", version: 1, requires, spec}`, where `spec` is
+  the stored spec of the variant and revision the web page would show first and `requires` is
+  `requiredPrototypeCapabilities(spec)` computed by this host, so the web library can refuse a spec
+  it cannot draw whole ([Prototype web library](prototype-web-library.md)). Variant, revision and
+  errors are the web resource's; there is no `frame`. `_meta` is the web resource's without
+  `frame`, its `sha256` hashing the envelope text.
 - **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision}` (`text/x-kotlin`)
   and `automobile:prototype/{id}/swiftui{?frame,revision}` (`text/x-swift`) are read by
   `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render
@@ -37,15 +45,16 @@ registry.
   (`pixel-9`, `iphone-16`), since the format fixes the platform. The shader and Swift-equivalent
   asset id refusals are the native resource's. `_meta` is `{revision, deviceRevision?, revisions,
   frame, sha256, rendererVersion}`.
-- **Listing.** Each known id gets concrete resources `automobile:prototype/{id}/{web,compose,swiftui}`
-  named `prototype-{id}-{format}`, titled `{id} (web)`, `{id} (Compose)` and `{id} (SwiftUI)`,
+- **Listing.** Each known id gets concrete resources
+  `automobile:prototype/{id}/{web,embed,compose,swiftui}` named `prototype-{id}-{format}`, titled
+  `{id} (web)`, `{id} (embed)`, `{id} (Compose)` and `{id} (SwiftUI)`,
   registered when its first revision appears and unregistered when the id is evicted; each change
   sends `list_changed`. List entries carry no
   `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
   `_meta`.
 - **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
-  `resources/updated` for the parameter-free URI of every format of the id, and for the web URI of
-  each id in its variant group and of each id in the group it left (or was evicted from), in
+  `resources/updated` for the parameter-free URI of every format of the id, and for the web and embed
+  URIs of each id in its variant group and of each id in the group it left (or was evicted from), in
   revision order. The concrete resource matches subscriptions
   exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
 
@@ -79,7 +88,8 @@ it inlined per variant.
   then the others in key order; such views carry `data-screen`). The first view is the chosen
   variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
   `hidden`.
-- **Controls.** Only five: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
+- **Controls.** Only five: rotate (portrait/landscape; absent for watch and TV frames, which
+  never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
   double-click to fit), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
@@ -90,8 +100,16 @@ it inlined per variant.
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
   self-contained. It only shows and hides views, lists the shown revision's screens in the
-  screen select and moves the stage; UI state stays in memory, with no storage, cookies or URL
+  screen select, moves the stage and animates rotation; UI state stays in memory, with no storage, cookies or URL
   changes. It must stay at or below 150 KB.
+- **Rotation.** Rotate turns the frame 90° (counterclockwise into landscape, clockwise back)
+  with the Web Animations API: the outgoing view turns away from upright while the incoming view,
+  pre-rendered in the new orientation, turns in from a quarter turn, so both track one frame, and
+  the stage's fitted scale animates with them. Android (`data-platform` on `body`) cross-fades
+  the content over a 500 ms turn; iOS hands over to the new layout in the first quarter of a
+  400 ms turn, as its window re-lays out while the bounds animate. The end state is the plain
+  landscape view. A second rotate finishes the running turn first. `prefers-reduced-motion:
+  reduce` skips the animation.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
 - **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
@@ -114,11 +132,14 @@ nothing at runtime drives a browser.
 - **Assertions.** The page is served from one fixed URL and every other request is aborted and
   fails the case, on top of the page's own CSP. No console error, page error or
   `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
-  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; rotate
-  shows the landscape view, wider than tall; a page with a screen select shows exactly the picked
-  screen's view.
-- **Goldens.** One PNG per case in `test/fixtures/prototype-web/screenshots/`
-  (`<spec>--<frame>.png`, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
+  through rotate both views are shown and turned, and the finished turn shows only the landscape
+  view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
+  screen's view. The browser clock is fixed at 9:41 UTC, so the live status bar clock matches the
+  stills; a separate case installs a running clock and checks the clock advances each minute.
+- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
+  (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
+  turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
@@ -153,7 +174,10 @@ the host, so the page's script only switches between views it was given and neve
   top-level `derive` entry. Repeat placeholders
   bind each object item (a literal `items` array or a data pointer; scalar items are skipped
   before indices are assigned, as on devices), including the repeat's own `derive`
-  fields. Text binds once, in that order: every inserted data or repeat value is shielded until binding
+  fields. A repeat draws at most 200 items, except a `list`, which draws up to the list contract
+  limit (2,000) capped by its `maxItems`, as devices do. A 2,000-row list of plain list items is
+  about 0.7 MB of markup, inside the page budget; a page whose kept start screens exceed it fails
+  the build as described under **Budget**. Text binds once, in that order: every inserted data or repeat value is shielded until binding
   ends, so it is never read again as a placeholder. Nested conditions with typed operands and state keys bind through the devices' own
   field walk (`mapBindableFields`). A spans-only text node renders each span
   with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a
@@ -184,19 +208,43 @@ the host, so the page's script only switches between views it was given and neve
   `style.alignment` says otherwise, as both devices do; a box is a one-cell grid aligned by
   `style.alignment`, and stack screens fill the stack. `fill` (inside a box grid, only on its own axis), `{dp}`, `weight`, padding (logical
   start and end), corner radius (per-corner radii are logical, so RTL mirrors them), border, elevation and alpha map to CSS. 1 dp is 1 CSS px.
+- **Style polish.** A `gradient` paints over the background across the whole node: a linear
+  angle is clockwise from left-to-right (CSS's angle plus 90) and a radial one is centred and
+  reaches the corners; stop positions apply only when every stop has one, made non-decreasing.
+  `shadows` map to `box-shadow` with the authored blur as the CSS blur (sigma b/2), and `elevation`
+  takes its `shadowColor` tint. A gradient border and inner shadows are absolutely placed layers
+  after the node's children, so they paint over the content, inside its bounds, as Compose draws
+  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: an iOS frame blurs and
+  saturates the backdrop under a translucent tint (else white) with a light rim, and an Android
+  frame draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
+  keeps its colour. `ios.glassGroup` draws nothing of its own. `scroll.fadeEdges` is a mask on the
+  trailing edge only (the leading one in a `reverse` scroll), since a still opens at the scroll's
+  start; horizontal start and end mirror in RTL. The still cannot measure overflow, so it hands the
+  mask to the page as `--fade-mask`, and a scroll-driven animation on a `scroll(self)` timeline
+  applies it: that timeline is inactive while the content fits, so only an overflowing scroll
+  fades, as Android draws a fade only while it can scroll forward. It depends on layout, not time,
+  so screenshots stay deterministic; a browser without scroll-driven animations always fades. `linkify` splits the
+  resolved text into plain runs and one `data-link` span per match in its `style`, and a span with
+  `onTap` is marked the same way; links get no style of their own, as on Android. A
+  `zoomable` image draws at 1x. A node with `style.shader` draws without it, as a device without
+  shader support does, and is listed with reason `shaderFallback`.
 - **Typography.** `theme.typography` scales every type-scale role and sets its family, as the
   native theme does.
-- **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
-  accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
-  roles unpainted. Both devices paint nothing behind a window, so the app below shows through;
-  the still has no app below, so the screen paints the theme's `background` role (else `surface`),
-  or the Material 3 baseline background for the mode when the scheme leaves both unresolved. An explicit `theme.mode` of
+- **Colour.** Theme roles resolve from the Material 3 baseline, then the roles a `theme.colors.seed`
+  derives, then the explicit overrides. The seed roles are the HSL approximation both devices
+  share (`prototypeSeedScheme.ts`, Android's `prototypeSeedColorScheme`, the iOS agent's
+  `seedScheme`), rounded to 8-bit channels as Compose stores them. A `device` source has no
+  device scheme to read, so it falls through to the seed or the baseline, as iOS and Android
+  below API 31 do. The accessibility lint still treats a seed or device scheme as unknown. Both
+  devices paint nothing behind a window, so the app below shows through; the still has no app
+  below, so the screen paints the theme's `background` role (else `surface`). An explicit `theme.mode` of
   `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider` and `bottomSheet`. Where the devices differ,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `videoPlayer`,
+  `map`, `cameraPreview` and `castButton`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -243,20 +291,41 @@ the host, so the page's script only switches between views it was given and neve
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
   titled with the name, because the glyph set is not inlined. A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
-  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. A
+  as both devices do. A video player is a black 16:9 frame (a `colorBars` sample draws bars, a
+  `countdown` sample a 3; other sources are not inlined) under the skin's chrome at `startMs`
+  (Android: a centred 56 px play button over a bottom bar; iOS: play inside a rounded bottom bar),
+  with a CC button when it has captions and none when `controls` is `none`; a poster is listed
+  `assetNotInlined`. A map fetches no tiles: it draws a neutral canvas (`plain`, or a faint street
+  grid), 200 px tall unless sized, with its polylines in an inline SVG and its markers as pins, placed
+  by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
+  point; bearing and tilt are not drawn. A camera preview is a portrait viewfinder at its
+  `aspectRatio` (default 4:3) showing colour bars and a label naming its mode. A cast button is the
+  skin's idle route icon (Cast on Android, AirPlay on iOS) in a 48 px target; it is a `details`
+  disclosure, so a tap opens a device picker listing no devices without any script. Glyphs are inline
+  SVG; the serializer allows only `viewBox` and `preserveAspectRatio` as mixed-case attributes.
+  A card hugs its content unless its width is `fill`, as both devices do. A
   `bottomSheet` is open when its `openWhen` key holds exactly `equals` (a missing key keeps it shut)
   and draws nothing in place: like the devices' modal layer, an open one is drawn over its window
   (the screen, a sheet window's region or a floating window's box) after the tree, in tree order, a
   sheet before those inside it, and takes no ancestor's grid cell or consumed insets. It is a scrim
   filling the window (the `scrim` role at 0.4 opacity by default or when named, else the authored
   colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
-  or `dp` capped at the window), painted `surface` unless an authored background resolves (the still draws no gradients),
+  or `dp` capped at the window), painted `surface` unless an authored background resolves,
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
   8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
-  generic status bar, the cutout and the navigation handle (or three generic button marks, which move to
-  the right edge in landscape when the frame reserves that inset). Landscape swaps the screen size, uses
+  generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
+  navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to
+  the right edge in landscape when the frame reserves that inset, and iOS's home indicator
+  (`data-nav="homeIndicator"`). The status bar is never a picture of a real OS: a clock and generic
+  cellular, Wi-Fi and battery marks (`data-status` with a `data-level`) drawn from a fixed state (9:41,
+  four bars, Wi-Fi on, full battery). In the interactive page the runtime rewrites every clock from
+  the browser's local time in the same `h:mm` 12-hour form, re-armed at each minute boundary. An iPhone with an island centres the clock and the marks in the
+  ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
+  `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
+  app's top colour, which is the first opaque background spanning the screen along the content's leading
+  children (a top app bar), else the screen background. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own
@@ -264,7 +333,8 @@ the host, so the page's script only switches between views it was given and neve
   since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. Both devices draw a
   window's content edge to edge and a top app bar takes no inset of its own, so it clears the
-  status bar only through `safeAreaPadding`.
+  status bar only through `safeAreaPadding`; likewise content clears the landscape cutout side
+  (an iPhone's 59 pt left inset) only through `safeAreaPadding` on the `start` edge.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

@@ -1,0 +1,17 @@
+{
+  "id": "status-bar-dark-content",
+  "window": { "placement": { "type": "fullscreen" } },
+  "theme": { "mode": "light" },
+  "root": {
+    "type": "column",
+    "style": { "width": "fill", "height": "fill" },
+    "children": [
+      {
+        "type": "topAppBar",
+        "title": "Inbox",
+        "safeAreaPadding": { "edges": ["top"], "types": ["systemBars", "cutout"] }
+      },
+      { "type": "text", "text": "A light top app bar takes dark status bar content." }
+    ]
+  }
+}

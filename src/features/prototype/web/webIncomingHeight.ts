@@ -22,8 +22,8 @@ function ownHeight(style: Raw | undefined): number {
  * The tallest a node lets its children be: its own height (see ownHeight) within the height its
  * parent hands it (INCOMING_HEIGHT_KEY), less its vertical padding. A `fill` or wrap-sized node is
  * bounded by the incoming height alone, as Compose's incoming max height bounds it. A column's
- * weighted child (WEIGHTED_HEIGHT_KEY) takes its whole share whatever its dp height and height
- * bounds, as Compose's fixed weight constraints and SwiftUI's weighted axis pin it. Infinity when
+ * weighted child marked with an exact share (WEIGHTED_HEIGHT_KEY) takes it whole, whatever its dp
+ * height and height bounds, as Compose's fixed weight constraints and SwiftUI's weighted axis pin it. Infinity when
  * no bound is statically known.
  */
 export function contentHeight(style: Raw | undefined): number {
@@ -86,6 +86,20 @@ export function columnChildHeights(
   return heights;
 }
 
+/**
+ * Whether a column's weight shares are exact: every visible unweighted child has a dp height. A
+ * wrap-sized sibling counts as its minHeight (see fixedHeight), so with one present each share is
+ * only an upper bound, and a weighted child keeps its own height as a bound too.
+ */
+export function exactWeightShares(children: readonly (Raw | undefined)[]): boolean {
+  return children.every(
+    (node) =>
+      node === undefined ||
+      weightOf(node) !== undefined ||
+      typeof record(record(node.style)?.height)?.dp === "number",
+  );
+}
+
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
 function withHeight(entry: unknown, height: number | undefined, weighted: boolean): unknown {
@@ -101,8 +115,8 @@ function withHeight(entry: unknown, height: number | undefined, weighted: boolea
  * A row, column or box with each child carrying the incoming max height it hands that child
  * (INCOMING_HEIGHT_KEY), where the node's own content height is statically known; other nodes
  * unchanged. A row or box hands every child its content height. A column measures its children
- * in order (see columnChildHeights) and marks each weighted child (WEIGHTED_HEIGHT_KEY), except a
- * repeat, whose children are one template, so each
+ * in order (see columnChildHeights) and, when its shares are exact (see exactWeightShares), marks
+ * each weighted child (WEIGHTED_HEIGHT_KEY), except a repeat, whose children are one template, so each
  * gets the whole content height as a bound. A height that depends on layout (a sibling's wrap
  * height, the screen) is left out, so the bound stays an upper one or is absent.
  *
@@ -124,8 +138,9 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
   const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
   const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
   const heights = columnChildHeights(prepared, content, spacing);
+  const exact = exactWeightShares(prepared);
   const marked = children.map((entry, index) =>
-    withHeight(entry, heights[index], weightOf(prepared[index]) !== undefined),
+    withHeight(entry, heights[index], exact && weightOf(prepared[index]) !== undefined),
   );
   return { ...node, children: marked };
 }

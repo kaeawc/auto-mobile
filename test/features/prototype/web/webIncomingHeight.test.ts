@@ -3,6 +3,7 @@ import { record, type Raw } from "../../../../src/features/prototype/prototypeTe
 import {
   columnChildHeights,
   contentHeight,
+  exactWeightShares,
   withChildHeights,
 } from "../../../../src/features/prototype/web/webIncomingHeight";
 import { CAPPED_SHRINK, rowMeasured } from "../../../../src/features/prototype/web/webRowAspect";
@@ -209,4 +210,29 @@ test("a weight drops the authored bounds on its main axis, as both devices pin i
     "min-height": "30px",
     "max-height": "40px",
   });
+});
+
+test("a weight share is exact only when every unweighted sibling has a dp height", () => {
+  const dp = { type: "box", style: { height: { dp: 10 } } };
+  const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
+  expect(exactWeightShares([dp, undefined, weighted])).toBe(true);
+  expect(exactWeightShares([{ type: "column" }, weighted])).toBe(false);
+  expect(exactWeightShares([{ type: "text", style: { minHeight: 30 } }, weighted])).toBe(false);
+  // A wrap sibling of unknown height leaves the share an upper bound: the row keeps its dp height,
+  // so its aspect ratio errs small rather than overflowing a share it may not get.
+  const column = withChildHeights(
+    {
+      type: "column",
+      style: { height: { dp: 100 } },
+      children: [
+        { type: "column", children: [{ type: "box", style: { height: { dp: 80 } } }] },
+        { ...weighted, children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }] },
+      ],
+    },
+    "root",
+    prepare,
+  );
+  const row = record(childrenOf(column)[1])!;
+  expect(weightedOf(row)).toBeUndefined();
+  expect(contentHeight(record(row.style))).toBe(10);
 });

@@ -28946,7 +28946,7 @@
           "pattern": "^[a-z0-9][a-z0-9-]{0,30}$"
         },
         "backend": {
-          "description": "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?}. Replaces the backend of that id",
+          "description": "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?, actors?:[{on:{route:'POST /path/:id'}|every+maxRuns, afterMs?, do:[{afterMs?, append|update|remove: collection, id?, value?}]}]}. Actors write to collections after a matching successful request or every N ms (at most 16 actors, 64 steps each; publish, advance and notify are not supported yet). Replaces the backend of that id",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -39020,6 +39020,11 @@
               "maximum": 9007199254740991
             },
             "faults": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "actors": {
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991

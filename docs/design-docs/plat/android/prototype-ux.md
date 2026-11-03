@@ -3027,6 +3027,17 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
   `{path, method?, status, every | rate}` fires on every nth matching request or with probability
   `rate`, answering `{error: "mock fault"}`.
 - Every answered request is logged (latest 200, with a sequence number) for assertions.
+- **Actors** (at most 16, each with 1–64 steps) write to collections on the backend's injected
+  timer. One fires after a successful (status below 400) request matching `on.route` (`"POST
+  /path/:id"`), or runs `maxRuns` times every `every` ms (100 ms or more; run k starts at
+  `afterMs + k * every`). Its steps run in order: `append`, `update` and `remove` go through the
+  same collection code as `POST`, `PATCH` and `DELETE` (ids, 409, 413 and the size budget apply), and
+  each step's `afterMs` is relative to the previous step. `value` and `id` bind the triggering
+  request's placeholders. A failing step is logged and skipped. A backend holds at most 256
+  scheduled steps; a trigger past that is dropped and logged. Redefining, clearing or ending the
+  session cancels every pending step. `publish`, `advance` and `notify` are refused at definition
+  until mock channels, polylines and simulated push exist, and actors follow the daemon's timer,
+  not the device clock that `prototype simulate` advances.
 
 The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
 {backendId, backend}` validates the definition and replaces the backend of that id (a failed

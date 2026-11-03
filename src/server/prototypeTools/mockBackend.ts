@@ -46,6 +46,7 @@ export function mockBackendOutput(
         collections,
         routes: definition.routeCount,
         faults: definition.faultCount,
+        actors: definition.actorCount,
       },
     };
   } catch (error) {

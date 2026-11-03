@@ -135,7 +135,8 @@ nothing at runtime drives a browser.
   non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
-  screen's view.
+  screen's view. The browser clock is fixed at 9:41 UTC, so the live status bar clock matches the
+  stills; a separate case installs a running clock and checks the clock advances each minute.
 - **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
   (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
   turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
@@ -309,7 +310,8 @@ the host, so the page's script only switches between views it was given and neve
   the right edge in landscape when the frame reserves that inset, and iOS's home indicator
   (`data-nav="homeIndicator"`). The status bar is never a picture of a real OS: a clock and generic
   cellular, Wi-Fi and battery marks (`data-status` with a `data-level`) drawn from a fixed state (9:41,
-  four bars, Wi-Fi on, full battery). An iPhone with an island centres the clock and the marks in the
+  four bars, Wi-Fi on, full battery). In the interactive page the runtime rewrites every clock from
+  the browser's local time in the same `h:mm` 12-hour form, re-armed at each minute boundary. An iPhone with an island centres the clock and the marks in the
   ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
   app's top colour, which is the first opaque background spanning the screen along the content's leading

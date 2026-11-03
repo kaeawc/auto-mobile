@@ -201,7 +201,15 @@ interface PaintStep {
   readonly opacity: number;
   readonly vars: CssVars;
   readonly clips: readonly RoundedRect[];
+  /** Whether the element's inherited direction is right to left. */
+  readonly rtl: boolean;
   readonly depth: number;
+}
+
+/** An element's direction: its own `dir` or `direction`, else its parent's. */
+function isRtl(element: WebElement, inherited: boolean): boolean {
+  const own = element.attrs.dir ?? element.style.direction;
+  return own === "rtl" ? true : own === "ltr" ? false : inherited;
 }
 
 function paintElement(element: WebElement, step: PaintStep, painted: PaintedBox[]): void {
@@ -212,7 +220,8 @@ function paintElement(element: WebElement, step: PaintStep, painted: PaintedBox[
   }
   const vars = scopedVars(element, step.vars);
   const rect = moved(element, step.rect, vars);
-  const radii = borderRadii(element, rect, vars);
+  const rtl = isRtl(element, step.rtl);
+  const radii = borderRadii(element, rect, vars, rtl);
   painted.push({ element, rect, radii, opacity, clips: step.clips });
   // A clipped subtree below the top edge, or one at an unknown place, cannot cover it.
   if (step.depth >= MAX_DEPTH || !mayReachTop(element, rect)) {
@@ -220,7 +229,7 @@ function paintElement(element: WebElement, step: PaintStep, painted: PaintedBox[
   }
   const clips = clipsOverflow(element) ? [...step.clips, { rect, radii }] : step.clips;
   for (const child of childrenInPaintOrder(element, rect, vars)) {
-    const next = { rect: child.rect, opacity, vars, clips, depth: step.depth + 1 };
+    const next = { rect: child.rect, opacity, vars, clips, rtl, depth: step.depth + 1 };
     paintElement(child.element, next, painted);
   }
 }
@@ -238,7 +247,7 @@ export function topEdgePaintOrder(
 ): PaintedBox[] {
   const painted: PaintedBox[] = [];
   const rect = { left: 0, top: 0, width: screen.width, height: screen.height };
-  paintElement(root, { rect, opacity: 1, vars, clips: [], depth: 0 }, painted);
+  paintElement(root, { rect, opacity: 1, vars, clips: [], rtl: false, depth: 0 }, painted);
   return painted;
 }
 

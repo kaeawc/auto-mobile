@@ -348,3 +348,26 @@ test("a rounded clip hides a top-edge point in its cut-away corner", () => {
   expect(paintsTopEdgeAt(box, 390)).toBe(false);
   expect(paintsTopEdgeAt(box, 200)).toBe(true);
 });
+
+test("logical corners follow the inherited direction: right to left rounds the top-right corner", () => {
+  const box = named("box", { width: "100px", height: "50px", "border-start-start-radius": "10px" });
+  const radiiIn = (dir: string) =>
+    topEdgePaintOrder(el("div", { attrs: { dir } }, [named("wrap", {}, [box])]), SCREEN).find(
+      (entry) => entry.element === box,
+    )?.radii;
+  expect(radiiIn("ltr")?.topLeft).toEqual({ x: 10, y: 10 });
+  expect(radiiIn("ltr")?.topRight).toEqual({ x: 0, y: 0 });
+  expect(radiiIn("rtl")?.topRight).toEqual({ x: 10, y: 10 });
+  expect(radiiIn("rtl")?.topLeft).toEqual({ x: 0, y: 0 });
+});
+
+test("a box of unmeasured height keeps square corners, since its height could shrink the radii", () => {
+  // A pill whose height comes from its unmeasured content: the browser fits 9999px radii to it.
+  const pill = named("pill", { width: "400px", "border-radius": "9999px" });
+  const painted = topEdgePaintOrder(named("root", {}, [pill]), SCREEN);
+  const box = painted.find((entry) => entry.element === pill)!;
+  expect(box.rect.height).toBeUndefined();
+  expect(box.radii).toBeUndefined();
+  expect(paintsTopEdgeAt(box, 200)).toBe(true);
+  expect(paintsTopEdgeAt(box, 5)).toBe(true);
+});

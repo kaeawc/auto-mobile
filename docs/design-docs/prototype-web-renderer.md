@@ -326,7 +326,9 @@ the host, so the page's script only switches between views it was given and neve
   the safe-area insets, absolute insets, relative offsets and translations, overflow clips, corner radii, and CSS paint
   order with z-index), then samples evenly spaced points along the screen's top edge. A point in a rounded
   corner's cut-away region is outside the box: neither its background nor its overflow clip's descendants
-  paint there, so a circle meets the top edge at one point. At each point the
+  paint there, so a circle meets the top edge at one point. Logical corners follow the element's
+  direction, so right to left rounds the opposite side. A box of unmeasured height keeps square
+  corners, because its real height could scale the radii down. At each point the
   last opaque background painted there is the colour, else the screen background; the colour at the most
   points wins. Element opacity multiplies down the tree, so a background counts only when it is opaque
   after that opacity, and a fully transparent subtree paints nothing. The window placement is part of the

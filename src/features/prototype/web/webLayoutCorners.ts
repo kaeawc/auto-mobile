@@ -30,15 +30,27 @@ export interface RoundedRect {
 
 type Corner = keyof CornerRadii;
 
-/**
- * The longhands for each corner, physical then logical. The pass lays content out left to right,
- * so a logical corner maps as it does in a left-to-right window.
- */
-const LONGHANDS: Record<Corner, readonly string[]> = {
-  topLeft: ["border-top-left-radius", "border-start-start-radius"],
-  topRight: ["border-top-right-radius", "border-start-end-radius"],
-  bottomRight: ["border-bottom-right-radius", "border-end-end-radius"],
-  bottomLeft: ["border-bottom-left-radius", "border-end-start-radius"],
+/** Each corner's physical longhand. */
+const PHYSICAL: Record<Corner, string> = {
+  topLeft: "border-top-left-radius",
+  topRight: "border-top-right-radius",
+  bottomRight: "border-bottom-right-radius",
+  bottomLeft: "border-bottom-left-radius",
+};
+
+/** Each corner's logical longhand in a left-to-right element; right to left mirrors start and end. */
+const LOGICAL_LTR: Record<Corner, string> = {
+  topLeft: "border-start-start-radius",
+  topRight: "border-start-end-radius",
+  bottomRight: "border-end-end-radius",
+  bottomLeft: "border-end-start-radius",
+};
+
+const MIRRORED: Record<Corner, Corner> = {
+  topLeft: "topRight",
+  topRight: "topLeft",
+  bottomRight: "bottomLeft",
+  bottomLeft: "bottomRight",
 };
 
 const CORNERS: readonly Corner[] = ["topLeft", "topRight", "bottomRight", "bottomLeft"];
@@ -66,7 +78,7 @@ function cornerRadius(values: RadiusValues, rect: WebRect, vars: CssVars): Corne
 
 /**
  * Scales every radius down by one factor when adjacent radii would overlap on a side
- * (CSS Backgrounds 3, 5.5). A side of unknown length does not constrain them.
+ * (CSS Backgrounds 3, 5.5).
  */
 function fitted(radii: CornerRadii, rect: WebRect): CornerRadii {
   const { topLeft, topRight, bottomRight, bottomLeft } = radii;
@@ -92,16 +104,24 @@ function fitted(radii: CornerRadii, rect: WebRect): CornerRadii {
   };
 }
 
-/** An element's corner radii on its border box, or undefined when every corner is square. */
+/**
+ * An element's corner radii on its border box, or undefined when every corner is square or the
+ * box's height is unknown. `rtl` is the element's direction, which places its logical corners.
+ */
 export function borderRadii(
   element: WebElement,
   rect: WebRect,
   vars: CssVars,
+  rtl = false,
 ): CornerRadii | undefined {
+  if (rect.height === undefined) {
+    // An unmeasured height can scale the radii down to nothing, and a smaller radius cuts less,
+    // so only square corners are certain.
+    return undefined;
+  }
   const radius = (corner: Corner): CornerRadius => {
-    const longhand = LONGHANDS[corner]
-      .map((name) => element.style[name])
-      .find((value) => value !== undefined);
+    const logical = LOGICAL_LTR[rtl ? MIRRORED[corner] : corner];
+    const longhand = element.style[PHYSICAL[corner]] ?? element.style[logical];
     const [x, y] = shorthandValues(longhand);
     const values: RadiusValues =
       longhand === undefined

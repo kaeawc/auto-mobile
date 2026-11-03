@@ -14,15 +14,15 @@ describe("broker reset readiness lifecycle", () => {
   // Warm the whole per-test path (harness, broker, seed acquisition and reset) once, so the first
   // test does not pay first-use costs inside its 100 ms budget.
   beforeAll(async () => {
-    await setUp();
+    await openBroker();
     const { released } = await startRelease();
-    await tearDown();
+    await closeBroker();
     await released;
   });
-  beforeEach(setUp);
-  afterEach(tearDown);
+  beforeEach(openBroker);
+  afterEach(closeBroker);
 
-  async function setUp() {
+  async function openBroker() {
     harness = await openExportHarness();
     harness.options.timer = harness.timer;
     harness.options.reuseCleanDevices = true;
@@ -52,7 +52,7 @@ describe("broker reset readiness lifecycle", () => {
     };
   }
 
-  async function tearDown() {
+  async function closeBroker() {
     finishReset.resolve("clean");
     await broker.close();
     await harness.broker.close();

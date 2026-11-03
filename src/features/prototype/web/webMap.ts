@@ -36,6 +36,11 @@ const DEFAULT_MAP_HEIGHT = 200;
 const SINGLE_POINT_ZOOM = 15;
 /** A fitted framing leaves this share of the box around its points. */
 const FIT_FILL = 0.8;
+/**
+ * Extents narrower than this share of the world are a point: wrapping a lone longitude into the
+ * gap search shifts it by whole worlds, which leaves rounding noise instead of a zero width.
+ */
+const POINT_EXTENT = 1e-9;
 
 export function mercator(lat: number, lng: number): MapPoint {
   const clamped = Math.max(-MAX_LATITUDE, Math.min(MAX_LATITUDE, lat));
@@ -110,28 +115,131 @@ function mapLines(node: Raw, scope: WebRenderScope): MapLine[] {
   });
 }
 
-/** The framing that fits `points` in `size` with a margin; undefined when there are none. */
+/** `dx` moved to the nearest copy of the world, in `[-0.5, 0.5)`. */
+export function wrapOffset(dx: number): number {
+  return dx - Math.floor(dx + 0.5);
+}
+
+/** A line's x coordinates as it is drawn: each one the short way round from the one before. */
+function unwrappedXs(points: readonly MapPoint[]): number[] {
+  return points.reduce<number[]>(
+    (xs, point, index) => [
+      ...xs,
+      index === 0 ? point.x : xs[index - 1]! + wrapOffset(point.x - points[index - 1]!.x),
+    ],
+    [],
+  );
+}
+
+interface Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+function mergeSpans(spans: readonly Span[]): Span[] {
+  return spans
+    .toSorted((a, b) => a.start - b.start)
+    .reduce<Span[]>((merged, span) => {
+      const last = merged.at(-1);
+      return last && span.start <= last.end
+        ? [...merged.slice(0, -1), { start: last.start, end: Math.max(last.end, span.end) }]
+        : [...merged, span];
+    }, []);
+}
+
+/**
+ * The left and right x of the smallest arc covering every span, unwrapped so `right` may pass 1:
+ * the arc starts just after the widest stretch of the world no span covers. Copies of the spans one
+ * and two worlds over make every gap that opens in `[1, 2)` a real one, each listed once.
+ */
+function horizontalBounds(spans: readonly Span[]): Span {
+  const base = spans.map(({ start, end }) => {
+    const from = start - Math.floor(start);
+    return { start: from, end: from + end - start };
+  });
+  const merged = mergeSpans(
+    [0, 1, 2].flatMap((shift) =>
+      base.map(({ start, end }) => ({ start: start + shift, end: end + shift })),
+    ),
+  );
+  const gaps = merged.slice(1).flatMap((next, index) => {
+    const before = merged[index]!.end;
+    return before >= 1 && before < 2
+      ? [{ width: next.start - before, start: next.start - 1, end: before }]
+      : [];
+  });
+  const widest = gaps.reduce<(typeof gaps)[number] | undefined>(
+    (best, gap) => (best && best.width >= gap.width ? best : gap),
+    undefined,
+  );
+  if (widest) {
+    return { start: widest.start, end: widest.end };
+  }
+  return wrappedBounds(spans);
+}
+
+/** `span` moved whole to the copy of the world that puts its middle nearest `center`, as drawn. */
+function placeSpan(span: Span, center: number): Span {
+  const middle = (span.start + span.end) / 2;
+  const shift = center + wrapOffset(middle - center) - middle;
+  return { start: span.start + shift, end: span.end + shift };
+}
+
+function union(spans: readonly Span[]): Span {
+  return {
+    start: Math.min(...spans.map((span) => span.start)),
+    end: Math.max(...spans.map((span) => span.end)),
+  };
+}
+
+/**
+ * Bounds for spans that together leave no gap round the world. Each span is placed as
+ * `mapPercent`/`routePercents` draw it: whole, on the copy whose middle is nearest the framing
+ * centre. Seeded on the widest span, the centre moves to the middle of the placed spans' union;
+ * the bounds are then symmetric round that centre and cover every span as placed from it (at least
+ * one world wide), so fitting and drawing agree and no span is clipped, even past one world.
+ */
+function wrappedBounds(spans: readonly Span[]): Span {
+  const longest = spans.reduce((best, span) =>
+    span.end - span.start > best.end - best.start ? span : best,
+  );
+  const seeded = union(spans.map((span) => placeSpan(span, (longest.start + longest.end) / 2)));
+  const center = (seeded.start + seeded.end) / 2;
+  const placed = union(spans.map((span) => placeSpan(span, center)));
+  const half = Math.max(0.5, center - placed.start, placed.end - center);
+  return { start: center - half, end: center + half };
+}
+
+/**
+ * The framing that fits `points` and the drawn `lines` in `size` with a margin; undefined when there
+ * is nothing to fit. A line is fitted over the span it is drawn across, not just its vertices.
+ */
 export function fitFraming(
   points: readonly MapPoint[],
   size: { width: number; height: number },
+  lines: readonly (readonly MapPoint[])[] = [],
 ): MapFraming | undefined {
-  if (points.length === 0) {
+  const drawn = lines.filter((line) => line.length > 0);
+  const ys = [...points, ...drawn.flat()].map((point) => point.y);
+  if (ys.length === 0) {
     return undefined;
   }
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const [left, right, top, bottom] = [
-    Math.min(...xs),
-    Math.max(...xs),
-    Math.min(...ys),
-    Math.max(...ys),
-  ];
-  const center = { x: (left + right) / 2, y: (top + bottom) / 2 };
   const spans = [
-    right > left ? (size.width * FIT_FILL) / (right - left) : Infinity,
-    bottom > top ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
+    ...points.map((point) => ({ start: point.x, end: point.x })),
+    ...drawn.map((line) => {
+      const xs = unwrappedXs(line);
+      return { start: Math.min(...xs), end: Math.max(...xs) };
+    }),
   ];
-  const fitted = Math.min(...spans);
+  const { start: left, end: right } = horizontalBounds(spans);
+  const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
+  const middle = (left + right) / 2;
+  const center = { x: middle - Math.floor(middle), y: (top + bottom) / 2 };
+  const fits = [
+    right - left > POINT_EXTENT ? (size.width * FIT_FILL) / (right - left) : Infinity,
+    bottom - top > POINT_EXTENT ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
+  ];
+  const fitted = Math.min(...fits);
   const worldSize = Math.min(
     Number.isFinite(fitted) ? fitted : TILE_SIZE * 2 ** SINGLE_POINT_ZOOM,
     TILE_SIZE * 2 ** 22,
@@ -177,14 +285,14 @@ function cameraFraming(node: Raw, scope: WebRenderScope): MapFraming | undefined
 function framing(
   node: Raw,
   scope: WebRenderScope,
-  points: { markers: MapPoint[]; route: MapPoint[] },
+  points: { markers: MapPoint[]; lines: MapPoint[][] },
   size: { width: number; height: number },
 ): { view: MapFraming; orientation: MapOrientation } {
   const fitted =
     node.fit === "markers"
       ? fitFraming(points.markers, size)
       : node.fit === "route"
-        ? fitFraming(points.route, size)
+        ? fitFraming([], size, points.lines)
         : undefined;
   if (fitted) {
     return { view: fitted, orientation: NORTH_UP };
@@ -193,24 +301,64 @@ function framing(
   if (camera) {
     return { view: camera, orientation: cameraOrientation(cameraRecord(node, scope)) };
   }
-  const view = fitFraming([...points.markers, ...points.route], size) ?? {
+  const view = fitFraming(points.markers, size, points.lines) ?? {
     center: { x: 0.5, y: 0.5 },
     worldSize: TILE_SIZE,
   };
   return { view, orientation: NORTH_UP };
 }
 
-/** Where a world point falls in the box, as a percentage of each side (outside is 0–100 too). */
-export function mapPercent(
-  point: MapPoint,
+/** Where a world offset from the centre falls in the box, as a percentage of each side. */
+function offsetPercent(
+  dx: number,
+  dy: number,
   view: MapFraming,
   size: { width: number; height: number },
 ): { left: number; top: number } {
   const round = (value: number) => Number(value.toFixed(3));
   return {
-    left: round(50 + ((point.x - view.center.x) * view.worldSize * 100) / size.width),
-    top: round(50 + ((point.y - view.center.y) * view.worldSize * 100) / size.height),
+    left: round(50 + (dx * view.worldSize * 100) / size.width),
+    top: round(50 + (dy * view.worldSize * 100) / size.height),
   };
+}
+
+/**
+ * Where a world point falls in the box, as a percentage of each side (outside is 0–100 too), taking
+ * the copy of the world nearest the centre so the 180° line does not split the view.
+ */
+export function mapPercent(
+  point: MapPoint,
+  view: MapFraming,
+  size: { width: number; height: number },
+): { left: number; top: number } {
+  return offsetPercent(wrapOffset(point.x - view.center.x), point.y - view.center.y, view, size);
+}
+
+/**
+ * A line's horizontal world offsets from the centre: each point the short way round from the one
+ * before, the line anchored by its middle, as fitting frames it, so a line wider than half the
+ * world keeps the copy it was fitted on.
+ */
+function routeOffsets(points: readonly MapPoint[], view: MapFraming): number[] {
+  const xs = unwrappedXs(points);
+  const middle = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const shift = wrapOffset(middle - view.center.x) - middle;
+  return xs.map((x) => x + shift);
+}
+
+/**
+ * A line's points in the box: the first as `mapPercent` places it, each next one the short way
+ * round from the one before, so a segment crossing the 180° line does not span the world.
+ */
+export function routePercents(
+  points: readonly MapPoint[],
+  view: MapFraming,
+  size: { width: number; height: number },
+): { left: number; top: number }[] {
+  const offsets = routeOffsets(points, view);
+  return points.map((point, index) =>
+    offsetPercent(offsets[index]!, point.y - view.center.y, view, size),
+  );
 }
 
 /** A point on the turned ground plane, in dp from the box centre, before the tilt. */
@@ -229,10 +377,10 @@ function radians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }
 
-/** The world point turned by `-bearing` about the box centre, in dp. */
-function turnGround(point: MapPoint, view: MapFraming, bearing: number): GroundPoint {
-  const dx = (point.x - view.center.x) * view.worldSize;
-  const dy = (point.y - view.center.y) * view.worldSize;
+/** A world offset from the centre turned by `-bearing` about the box centre, in dp. */
+function turnGround(offset: GroundPoint, view: MapFraming, bearing: number): GroundPoint {
+  const dx = offset.x * view.worldSize;
+  const dy = offset.y * view.worldSize;
   const turn = radians(-bearing);
   return {
     x: dx * Math.cos(turn) - dy * Math.sin(turn),
@@ -261,7 +409,8 @@ function projectGround(point: GroundPoint, size: Size, tilt: number): Percent {
  * Where a world point falls under a turned camera, as a percentage of each side: the map turns by
  * `-bearing` about the box centre, then the ground plane tilts away under a perspective eye
  * `EYE_DISTANCE` heights out, exactly as `groundTransform` turns the canvas. Undefined for a point
- * at or behind the near plane. North up and straight down, this is `mapPercent`.
+ * at or behind the near plane. North up and straight down, this is `mapPercent`; like it, a
+ * point takes the copy of the world nearest the centre.
  */
 export function projectPercent(
   point: MapPoint,
@@ -272,7 +421,8 @@ export function projectPercent(
   if (orientation.bearing === 0 && orientation.tilt === 0) {
     return mapPercent(point, view, size);
   }
-  const ground = turnGround(point, view, orientation.bearing);
+  const offset = { x: wrapOffset(point.x - view.center.x), y: point.y - view.center.y };
+  const ground = turnGround(offset, view, orientation.bearing);
   return ground.y > nearLimit(orientation.tilt, size.height)
     ? undefined
     : projectGround(ground, size, orientation.tilt);
@@ -289,10 +439,16 @@ export function projectLine(
   orientation: MapOrientation,
 ): Percent[][] {
   if (orientation.bearing === 0 && orientation.tilt === 0) {
-    return points.length > 0 ? [points.map((point) => mapPercent(point, view, size))] : [];
+    return points.length > 0 ? [routePercents(points, view, size)] : [];
+  }
+  if (points.length === 0) {
+    return [];
   }
   const limit = nearLimit(orientation.tilt, size.height);
-  const ground = points.map((point) => turnGround(point, view, orientation.bearing));
+  const offsets = routeOffsets(points, view);
+  const ground = points.map((point, index) =>
+    turnGround({ x: offsets[index]!, y: point.y - view.center.y }, view, orientation.bearing),
+  );
   const runs: GroundPoint[][] = [];
   let run: GroundPoint[] = [];
   const at = (from: GroundPoint, to: GroundPoint): GroundPoint => {
@@ -459,7 +615,7 @@ const mapRenderer =
       scope,
       {
         markers: markers.map((marker) => marker.point),
-        route: lines.flatMap((line) => line.points),
+        lines: lines.map((line) => line.points),
       },
       size,
     );

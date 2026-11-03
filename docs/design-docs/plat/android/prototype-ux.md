@@ -2274,6 +2274,20 @@ whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, ga
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 `commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
+The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin `PrototypePurchaseOutcome`
+copies it, and both replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
+`gracePeriod` or `billingRetry`, and a consumable never holds one. `lastTransaction` is
+`{transactionId, productId, status}`, or null. Buying a product that is `active` or in `gracePeriod` fails
+with `alreadyOwned`, whatever outcome was queued; a product in `billingRetry` can be bought again. A product
+the catalog does not list is `platform_error` with reason `unavailable`. A failed purchase leaves the state
+untouched. A code other than `cancelled`, `alreadyOwned` or `platform_error` becomes `platform_error`, and only
+`platform_error` keeps a reason: `network`, `declined` or `unavailable`. Every result is recorded as
+`lastTransaction`, but only `purchased` grants the entitlement. A `deferred` or `pending` transaction is
+resolved later: `approved` grants the entitlement and `declined` records `declined`. Simulated
+`entitlementsChanged` events work on a subscription the user holds. `renew` sets it `active`, and
+`gracePeriod` and `billingRetry` set those states. `expire` and `refund` remove an entitlement and also apply to
+a non-consumable. `commerce.entitlementsChanged` is raised only when the entitlements actually change.
+
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
 and it may not also appear in `storage.keys`. The list needs the `secureStorage` module

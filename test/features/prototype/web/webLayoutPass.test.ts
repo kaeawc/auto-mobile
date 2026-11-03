@@ -4,10 +4,11 @@ import {
   topEdgePaintOrder,
   type PaintedBox,
 } from "../../../../src/features/prototype/web/webLayoutPass";
-import { el, type WebElement } from "../../../../src/features/prototype/web/webNodes";
+import { el, type WebChild } from "../../../../src/features/prototype/web/webNodes";
+import { appTopColor } from "../../../../src/features/prototype/web/webStatusBar";
 
 const SCREEN = { width: 400, height: 800 };
-const named = (name: string, style: Record<string, string>, children: WebElement[] = []) =>
+const named = (name: string, style: Record<string, string>, children: WebChild[] = []) =>
   el("div", { attrs: { "data-name": name }, style }, children);
 const rectOf = (painted: PaintedBox[], name: string) =>
   painted.find((box) => box.element.attrs["data-name"] === name)?.rect;
@@ -220,4 +221,82 @@ test("an auto dimension is derived from the aspect ratio before its minimum appl
     width: 400,
     height: 400,
   });
+});
+
+test("a reverse scroll places its child from the main-end, so a white screen keeps a white top", () => {
+  // webRender emits a vertical `reverse` scroll as `column-reverse`, opening at its end.
+  const scroll = named(
+    "scroll",
+    {
+      display: "flex",
+      "flex-direction": "column-reverse",
+      "align-items": "flex-start",
+      "overflow-y": "auto",
+      width: "400px",
+      height: "800px",
+      "background-color": "#ffffff",
+    },
+    [named("black", { width: "400px", height: "100px", "background-color": "#000000" })],
+  );
+  const painted = topEdgePaintOrder(scroll, SCREEN);
+  expect(rectOf(painted, "black")).toEqual({ left: 0, top: 700, width: 400, height: 100 });
+  expect(appTopColor(scroll, "#888888", SCREEN)).toBe("#ffffff");
+});
+
+test("a row-reverse line places items from its right edge in source order", () => {
+  const row = named("row", { display: "flex", "flex-direction": "row-reverse", gap: "10px" }, [
+    named("first", { width: "100px", height: "10px" }),
+    named("second", { width: "50px", height: "10px" }),
+    named("grow", { flex: "1", "max-width": "60px", height: "10px" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "first")).toEqual({ left: 300, top: 0, width: 100, height: 10 });
+  expect(rectOf(painted, "second")).toEqual({ left: 240, top: 0, width: 50, height: 10 });
+  expect(rectOf(painted, "grow")).toEqual({ left: 170, top: 0, width: 60, height: 10 });
+});
+
+test("a reversed line mirrors flex-start, flex-end and space-*, and keeps start and end", () => {
+  const tops = (justify: string) =>
+    topEdgePaintOrder(
+      named(
+        "column",
+        { display: "flex", "flex-direction": "column-reverse", "justify-content": justify },
+        [named("a", { height: "100px" }), named("b", { height: "100px" })],
+      ),
+      SCREEN,
+    ).flatMap((box) => (box.element.attrs["data-name"] === "column" ? [] : [box.rect.top]));
+  expect(tops("normal")).toEqual([700, 600]);
+  expect(tops("flex-start")).toEqual([700, 600]);
+  expect(tops("flex-end")).toEqual([100, 0]);
+  expect(tops("start")).toEqual([100, 0]);
+  expect(tops("end")).toEqual([700, 600]);
+  expect(tops("center")).toEqual([400, 300]);
+  expect(tops("space-between")).toEqual([700, 0]);
+  expect(tops("space-around")).toEqual([550, 150]);
+  // On a column, left and right mean start.
+  expect(tops("left")).toEqual([100, 0]);
+});
+
+test("a content-sized reversed line ends where its items do", () => {
+  const root = named("root", { display: "flex", "flex-direction": "column" }, [
+    named("line", { display: "flex", "flex-direction": "column-reverse" }, [
+      named("a", { height: "30px" }),
+      named("b", { height: "20px" }),
+    ]),
+  ]);
+  const painted = topEdgePaintOrder(root, SCREEN);
+  expect(rectOf(painted, "a")?.top).toBe(20);
+  expect(rectOf(painted, "b")?.top).toBe(0);
+});
+
+test("a content-sized reversed line keeps its last item at its start when another size is unknown", () => {
+  const root = named("root", { display: "flex", "flex-direction": "column" }, [
+    named("line", { display: "flex", "flex-direction": "column-reverse" }, [
+      named("before", {}, ["text"]),
+      named("last", { width: "400px" }, ["text"]),
+    ]),
+  ]);
+  const painted = topEdgePaintOrder(root, SCREEN);
+  expect(rectOf(painted, "last")?.top).toBe(0);
+  expect(rectOf(painted, "before")?.top).toBeUndefined();
 });

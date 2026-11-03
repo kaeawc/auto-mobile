@@ -287,7 +287,10 @@ the host, so the page's script only switches between views it was given and neve
   `assetNotInlined`. A map fetches no tiles: it draws a neutral canvas (`plain`, or a faint street
   grid), 200 px tall unless sized, with its polylines in an inline SVG and its markers as pins, placed
   by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
-  point; bearing and tilt are not drawn. A camera preview is a portrait viewfinder at its
+  point. A camera framing turns by its `bearing` and `tilt` (a fit frames north up): the canvas moves
+  to an oversized ground layer under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, and
+  lines and pins are projected the same way in code, pins staying upright and dropped behind the eye.
+  A camera preview is a portrait viewfinder at its
   `aspectRatio` (default 4:3) showing colour bars and a label naming its mode. A cast button is the
   skin's idle route icon (Cast on Android, AirPlay on iOS) in a 48 px target; it is a `details`
   disclosure, so a tap opens a device picker listing no devices without any script. Glyphs are inline

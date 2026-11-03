@@ -16,6 +16,19 @@ export interface MapFraming {
   readonly worldSize: number;
 }
 
+/**
+ * How the camera is turned: `bearing` degrees clockwise from north (the map turns the other way)
+ * and `tilt` degrees from straight down (the top of the map recedes).
+ */
+export interface MapOrientation {
+  readonly bearing: number;
+  readonly tilt: number;
+}
+
+const NORTH_UP: MapOrientation = { bearing: 0, tilt: 0 };
+/** The eye sits this many map heights from the ground plane, as Mapbox GL places its camera. */
+const EYE_DISTANCE = 1.5;
+
 const TILE_SIZE = 256;
 const MAX_LATITUDE = 85.051_128_78;
 /** The height an unsized map takes, and the zoom a single fitted point is framed at. */
@@ -126,13 +139,29 @@ export function fitFraming(
   return { center, worldSize };
 }
 
+/** The camera object: a literal camera, or one read from `/data`. */
+function cameraRecord(node: Raw, scope: WebRenderScope): Raw | undefined {
+  const authored = record(node.camera);
+  return typeof authored?.data === "string"
+    ? record(resolvePrototypeDataPointer(scope.data, authored.data))
+    : authored;
+}
+
+/** One orientation angle, clamped to the schema's range; anything non-numeric is 0. */
+function angle(value: unknown, max: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(max, value)) % 360
+    : 0;
+}
+
+/** The camera's bearing and tilt, north up and straight down when it names none. */
+export function cameraOrientation(camera: Raw | undefined): MapOrientation {
+  return { bearing: angle(camera?.bearing, 360), tilt: angle(camera?.tilt, 60) };
+}
+
 /** The camera framing: a literal camera, or one read from `/data`; undefined when it has none. */
 function cameraFraming(node: Raw, scope: WebRenderScope): MapFraming | undefined {
-  const authored = record(node.camera);
-  const camera =
-    typeof authored?.data === "string"
-      ? record(resolvePrototypeDataPointer(scope.data, authored.data))
-      : authored;
+  const camera = cameraRecord(node, scope);
   const center = latLng(camera);
   const zoom = Number(camera?.zoom);
   return center && Number.isFinite(zoom)
@@ -142,28 +171,33 @@ function cameraFraming(node: Raw, scope: WebRenderScope): MapFraming | undefined
 
 /**
  * `fit: markers` or `route` frames those points; otherwise the camera, else every point, else the
- * whole world.
+ * whole world. Only a camera framing turns by the camera's bearing and tilt: a fit, like both
+ * platforms' bounds fit, frames north up.
  */
 function framing(
   node: Raw,
   scope: WebRenderScope,
   points: { markers: MapPoint[]; route: MapPoint[] },
   size: { width: number; height: number },
-): MapFraming {
+): { view: MapFraming; orientation: MapOrientation } {
   const fitted =
     node.fit === "markers"
       ? fitFraming(points.markers, size)
       : node.fit === "route"
         ? fitFraming(points.route, size)
         : undefined;
-  return (
-    fitted ??
-    cameraFraming(node, scope) ??
-    fitFraming([...points.markers, ...points.route], size) ?? {
-      center: { x: 0.5, y: 0.5 },
-      worldSize: TILE_SIZE,
-    }
-  );
+  if (fitted) {
+    return { view: fitted, orientation: NORTH_UP };
+  }
+  const camera = cameraFraming(node, scope);
+  if (camera) {
+    return { view: camera, orientation: cameraOrientation(cameraRecord(node, scope)) };
+  }
+  const view = fitFraming([...points.markers, ...points.route], size) ?? {
+    center: { x: 0.5, y: 0.5 },
+    worldSize: TILE_SIZE,
+  };
+  return { view, orientation: NORTH_UP };
 }
 
 /** Where a world point falls in the box, as a percentage of each side (outside is 0–100 too). */
@@ -179,13 +213,55 @@ export function mapPercent(
   };
 }
 
+/**
+ * Where a world point falls under a turned camera, as a percentage of each side: the map turns by
+ * `-bearing` about the box centre, then the ground plane tilts away under a perspective eye
+ * `EYE_DISTANCE` heights out, exactly as `groundTransform` turns the canvas. Undefined for a point
+ * at or behind the eye. North up and straight down, this is `mapPercent`.
+ */
+export function projectPercent(
+  point: MapPoint,
+  view: MapFraming,
+  size: { width: number; height: number },
+  orientation: MapOrientation,
+): { left: number; top: number } | undefined {
+  if (orientation.bearing === 0 && orientation.tilt === 0) {
+    return mapPercent(point, view, size);
+  }
+  const dx = (point.x - view.center.x) * view.worldSize;
+  const dy = (point.y - view.center.y) * view.worldSize;
+  const turn = (-orientation.bearing * Math.PI) / 180;
+  const x = dx * Math.cos(turn) - dy * Math.sin(turn);
+  const y = dx * Math.sin(turn) + dy * Math.cos(turn);
+  const tilt = (orientation.tilt * Math.PI) / 180;
+  const eye = EYE_DISTANCE * size.height;
+  const depth = eye - y * Math.sin(tilt);
+  if (depth <= 0) {
+    return undefined;
+  }
+  const scale = eye / depth;
+  const round = (value: number) => Number(value.toFixed(3));
+  return {
+    left: round(50 + (x * scale * 100) / size.width),
+    top: round(50 + (y * Math.cos(tilt) * scale * 100) / size.height),
+  };
+}
+
+/** The CSS transform that turns the ground canvas the way `projectPercent` turns points. */
+export function groundTransform(orientation: MapOrientation, height: number): string {
+  const eye = Number((EYE_DISTANCE * height).toFixed(3));
+  return `perspective(${eye}px) rotateX(${orientation.tilt}deg) rotate(${-orientation.bearing}deg)`;
+}
+
 /** A `{dp}` dimension, as the style maps it to CSS; anything else (unsized, `fill`) falls back. */
 function dpSize(value: unknown, fallback: number): number {
   const dp = record(value)?.dp;
   return typeof dp === "number" && dp > 0 ? dp : fallback;
 }
 
-function routeLayer(lines: MapLine[], place: (point: MapPoint) => { left: number; top: number }) {
+type Place = (point: MapPoint) => { left: number; top: number } | undefined;
+
+function routeLayer(lines: MapLine[], place: Place) {
   return el(
     "svg",
     {
@@ -202,7 +278,10 @@ function routeLayer(lines: MapLine[], place: (point: MapPoint) => { left: number
       el("polyline", {
         attrs: {
           points: line.points
-            .map(place)
+            .flatMap((point) => {
+              const at = place(point);
+              return at ? [at] : [];
+            })
             .map(({ left, top }) => `${left},${top}`)
             .join(" "),
           fill: "none",
@@ -240,6 +319,23 @@ function markerPin(
   });
 }
 
+/**
+ * The canvas on its own layer, turned like the camera. At the maximum 60° tilt the far edge of a
+ * plane must reach about 2.4 heights out to cover the box's top, so the layer extends 3 box sizes
+ * past each side; the box clips it.
+ */
+function groundLayer(background: string, orientation: MapOrientation, height: number): WebElement {
+  return el("div", {
+    attrs: { "aria-hidden": "true", "data-part": "ground" },
+    style: {
+      position: "absolute",
+      inset: "-300%",
+      background,
+      transform: groundTransform(orientation, height),
+    },
+  });
+}
+
 const MAP_BACKGROUNDS: Readonly<Record<string, string>> = {
   plain: "#e8eaed",
   // Streets: a faint road grid over land, since tiles are not fetched.
@@ -249,7 +345,9 @@ const MAP_BACKGROUNDS: Readonly<Record<string, string>> = {
 
 /**
  * A map with no tiles (the page fetches nothing): a neutral canvas with the route lines and marker
- * pins placed by Web Mercator under the framing. Bearing and tilt are not drawn.
+ * pins placed by Web Mercator under the framing. A camera `bearing` or `tilt` turns the canvas on
+ * its own ground layer (oversized so a tilted plane still fills the box) and projects the lines and
+ * pins to match; the pins stay upright, as both platforms draw them.
  */
 const mapRenderer =
   (kit: WebRenderKit): NodeRenderer =>
@@ -261,7 +359,7 @@ const mapRenderer =
     };
     const markers = mapMarkers(node, scope);
     const lines = mapLines(node, scope);
-    const view = framing(
+    const { view, orientation } = framing(
       node,
       scope,
       {
@@ -270,18 +368,24 @@ const mapRenderer =
       },
       size,
     );
-    const place = (point: MapPoint) => mapPercent(point, view, size);
+    const turned = orientation.bearing !== 0 || orientation.tilt !== 0;
+    const place = (point: MapPoint) => projectPercent(point, view, size, orientation);
+    const background = MAP_BACKGROUNDS[String(node.mapStyle)] ?? MAP_BACKGROUNDS.streets!;
     const { attrs, style: css } = kit.base(node, scope, {
       position: "relative",
       overflow: "hidden",
-      background: MAP_BACKGROUNDS[String(node.mapStyle)] ?? MAP_BACKGROUNDS.streets!,
+      background: turned ? MAP_BACKGROUNDS.plain! : background,
       "align-self": "stretch",
       height: `${DEFAULT_MAP_HEIGHT}px`,
     });
     const pin = cssColor("error", scope.style) ?? "#b3261e";
     return el("div", { attrs: { "aria-label": "Map", ...attrs, role: "img" }, style: css }, [
+      ...(turned ? [groundLayer(background, orientation, size.height)] : []),
       ...(lines.length > 0 ? [routeLayer(lines, place)] : []),
-      ...markers.map((marker) => markerPin(marker, place(marker.point), pin)),
+      ...markers.flatMap((marker) => {
+        const at = place(marker.point);
+        return at ? [markerPin(marker, at, pin)] : [];
+      }),
     ]);
   };
 

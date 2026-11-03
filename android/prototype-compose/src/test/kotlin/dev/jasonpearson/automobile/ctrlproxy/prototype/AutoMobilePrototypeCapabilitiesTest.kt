@@ -92,6 +92,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audioRecorder_v1",
       // Contract only; the local notification runtime is owed (#14281).
       "prototype_platform_notifications_v1",
+      // Contract only; the disposable-app permission runtime is owed (#14298).
+      "prototype_platform_permissions_v1",
       // Contract only; the scheduled notification runtimes are owed (#14283).
       "prototype_platform_notifications_scheduled_v1",
       // Contract only; the media players and video renderers are owed (#14255, #14256).

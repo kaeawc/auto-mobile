@@ -540,7 +540,9 @@ function callError(
   if (args) {
     return args;
   }
-  const crossArgs = crossArgumentsError(action, path);
+  const crossArgs =
+    crossArgumentsError(action, path) ??
+    undeclaredRequestedPermissionError(action, path, context.permissions);
   if (crossArgs) {
     return crossArgs;
   }
@@ -563,6 +565,32 @@ function crossArgumentsError(action: Raw, path: string): PrototypePlatformError 
       ? crossArgumentRules[action.call]
       : undefined;
   return rule?.(record(action.args) ?? {}, `${path}.args`);
+}
+
+/**
+ * `permissions.request` may only ask for permissions the spec declares in `requires.permissions`,
+ * since the declaration carries the usage string and the manifest entry (#14297). Bound lists are
+ * only known at run time, so only a literal list is checked here.
+ */
+function undeclaredRequestedPermissionError(
+  action: Raw,
+  path: string,
+  declared: ReadonlySet<string>,
+): PrototypePlatformError | undefined {
+  if (action.call !== "permissions.request") {
+    return undefined;
+  }
+  const names = record(record(action.args)?.names)?.value;
+  if (!Array.isArray(names)) {
+    return undefined;
+  }
+  const index = names.findIndex((name) => typeof name === "string" && !declared.has(name));
+  return index < 0
+    ? undefined
+    : {
+        path: `${path}.args.names.value[${index}]`,
+        message: `Permission ${String(names[index])} is not declared in requires.permissions`,
+      };
 }
 
 function intoError(into: string): string | undefined {

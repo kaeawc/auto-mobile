@@ -278,6 +278,26 @@ describe("automobile:prototype/eject result", () => {
     expect((await eject("android")).files[0].content).not.toContain("??");
   });
 
+  test("inline tap handlers never put a semicolon after a TODO comment", async () => {
+    const spec = {
+      id: "taps",
+      root: {
+        type: "text",
+        text: "Go",
+        onTap: [
+          { type: "emit", name: "go" },
+          { type: "pop", stack: "main" },
+        ],
+      },
+    };
+    expect((await eject("ios", spec)).files[0].content).toContain(
+      '.onTapGesture { ui.pop("main") /* TODO(eject): emit action */ }',
+    );
+    expect((await eject("android", spec)).files[0].content).toContain(
+      '.clickable { ui.pop("main") /* TODO(eject): emit action */ }',
+    );
+  });
+
   test("expands reusable components before translating them", async () => {
     const spec = {
       id: "reuse",

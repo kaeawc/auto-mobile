@@ -1,5 +1,10 @@
 import type { EjectScope } from "./prototypeEjectScope";
-import { block, type EjectDialect, type NodeEmitter } from "./prototypeEjectWriter";
+import {
+  block,
+  inlineStatements,
+  type EjectDialect,
+  type NodeEmitter,
+} from "./prototypeEjectWriter";
 import type { Raw } from "./prototypeTemplate";
 
 /** Jetpack Compose (Material 3) half of `automobile:prototype/eject` (#14129). */
@@ -13,7 +18,7 @@ function modifier(scope: EjectScope, extra = "", clickable = true): string {
   }
   const actions = clickable ? scope.actions("onTap") : [];
   if (actions.length > 0) {
-    parts.push(`.clickable { ${actions.join("; ")} }`);
+    parts.push(`.clickable { ${inlineStatements(actions)} }`);
   }
   return parts.join("");
 }

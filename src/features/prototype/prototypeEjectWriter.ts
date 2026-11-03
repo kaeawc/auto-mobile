@@ -43,6 +43,17 @@ export function indent(lines: readonly string[]): string[] {
   return lines.map((line) => (line.length > 0 ? `${INDENT}${line}` : line));
 }
 
+/**
+ * Action statements on one line for an inline closure. Swift rejects a `;` after a comment-only
+ * entry, so real calls are joined with `; ` and the TODO comments follow them.
+ */
+export function inlineStatements(actions: readonly string[]): string {
+  const comment = (line: string): boolean => line.startsWith("/*");
+  return [actions.filter((line) => !comment(line)).join("; "), ...actions.filter(comment)]
+    .filter((part) => part.length > 0)
+    .join(" ");
+}
+
 /** `open`, the body one level in, then `close`. */
 export function block(open: string, body: readonly string[], close = "}"): string[] {
   return [open, ...indent(body), close];

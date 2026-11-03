@@ -1,5 +1,10 @@
 import type { EjectScope } from "./prototypeEjectScope";
-import { block, type EjectDialect, type NodeEmitter } from "./prototypeEjectWriter";
+import {
+  block,
+  inlineStatements,
+  type EjectDialect,
+  type NodeEmitter,
+} from "./prototypeEjectWriter";
 import type { Raw } from "./prototypeTemplate";
 
 /** SwiftUI half of `automobile:prototype/eject` (#14129). */
@@ -13,7 +18,7 @@ function modifiers(scope: EjectScope, clickable = true): string[] {
   }
   const actions = clickable ? scope.actions("onTap") : [];
   if (actions.length > 0) {
-    lines.push(`.onTapGesture { ${actions.join("; ")} }`);
+    lines.push(`.onTapGesture { ${inlineStatements(actions)} }`);
   }
   return lines;
 }

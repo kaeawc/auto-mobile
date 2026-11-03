@@ -121,8 +121,9 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    // The seventh block is the platform section's example, validated in prototypeGuidePlatform.test.ts.
-    expect(blocks).toHaveLength(7);
+    // The seventh and eighth blocks are the platform and media actions examples, validated in
+    // prototypeGuidePlatform.test.ts.
+    expect(blocks).toHaveLength(8);
     const [minimal, list, data, components, appearanceCall, mockCall] = blocks;
     expect(validatePrototypeSpec(data)).toMatchObject({ success: true });
     expect(validatePrototypeSpec(minimal).success).toBe(true);

@@ -11,12 +11,14 @@ const MINUTE_MS = 60_000;
 
 /**
  * Remote device provider that allocates immediately. Sessions are `fake-session-<n>`, active from
- * `nowMs` for the requested minutes. Set `reserveError` to make the next reservations fail.
+ * `nowMs` for the requested minutes. Set `reserveError` or `releaseError` to make the next
+ * reservations or releases fail; a failed release is still recorded in `released`.
  */
 export class FakeRemoteDeviceProvider implements RemoteDeviceProvider {
   readonly reserved: RemoteDeviceRequest[] = [];
   readonly released: string[] = [];
   reserveError?: Error;
+  releaseError?: Error;
   private readonly sessions = new Map<string, RemoteDeviceSession>();
 
   constructor(public nowMs = 0) {}
@@ -56,6 +58,9 @@ export class FakeRemoteDeviceProvider implements RemoteDeviceProvider {
 
   async release(sessionId: string): Promise<void> {
     this.released.push(sessionId);
+    if (this.releaseError) {
+      throw this.releaseError;
+    }
     const session = this.sessions.get(sessionId);
     if (session) {
       this.sessions.set(sessionId, { ...session, state: "finished" });

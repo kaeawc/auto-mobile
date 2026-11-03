@@ -40,6 +40,7 @@ Credentials would need a Google auth library or a hand-written OAuth refresh, an
 - A remote serial is a loopback port that a later session can reuse for a
   different device. Each connect drops the serial's cached CtrlProxy state and
   reads traits with an uncached reader.
-- A held session leaves the held set only after the provider confirms release,
-  so `releaseAll` (session end, daemon shutdown) retries earlier failures and
-  returns the ids it still could not release.
+- A session is held from reservation until the provider confirms release.
+  `releaseAll` (session end, daemon shutdown) first cancels and drains
+  acquisitions still in progress, so none can return a live session afterwards,
+  then retries every held session and returns the ids it still could not release.

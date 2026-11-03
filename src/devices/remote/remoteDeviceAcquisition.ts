@@ -73,32 +73,58 @@ export interface RemoteDeviceAcquisitionOptions {
 const UNKNOWN_IDENTITY: RemoteDeviceIdentity = { manufacturer: null, brand: null, model: null };
 const MINUTE_MS = 60_000;
 
-interface HeldLease {
-  lease: RemoteDeviceLease;
-  connection: RemoteAdbConnection;
+/** A session this acquisition must release; no connection when adb never connected. */
+interface HeldSession {
+  connection?: RemoteAdbConnection;
+}
+
+interface InFlightAcquisition {
+  controller: AbortController;
+  settled: Promise<unknown>;
 }
 
 export class RemoteDeviceAcquisition {
-  private readonly held = new Map<string, HeldLease>();
+  private readonly held = new Map<string, HeldSession>();
+  private readonly inFlight = new Set<InFlightAcquisition>();
 
   constructor(private readonly options: RemoteDeviceAcquisitionOptions) {}
 
+  /** Rejects, with the session released, when `signal` or {@link releaseAll} cancels it midway. */
   async acquire(request: RemoteDeviceRequest, signal?: AbortSignal): Promise<RemoteDeviceLease> {
+    const controller = new AbortController();
+    const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const run = this.acquireWith(request, combined);
+    const entry = { controller, settled: Promise.allSettled([run]) };
+    this.inFlight.add(entry);
+    try {
+      return await run;
+    } finally {
+      this.inFlight.delete(entry);
+    }
+  }
+
+  private async acquireWith(
+    request: RemoteDeviceRequest,
+    signal: AbortSignal,
+  ): Promise<RemoteDeviceLease> {
     const { session, cost } = await this.options.provider.reserve(request, signal);
     let connection: RemoteAdbConnection | undefined;
     try {
+      throwIfCancelled(signal, session.id);
       connection = await this.options.transport.connect(session, signal);
+      throwIfCancelled(signal, session.id);
       await this.options.setup.installCtrlProxy(connection.serial, signal);
+      throwIfCancelled(signal, session.id);
       const identity = await this.readIdentity(connection.serial);
-      const lease: RemoteDeviceLease = {
+      throwIfCancelled(signal, session.id);
+      this.held.set(session.id, { connection });
+      return {
         sessionId: session.id,
         serial: connection.serial,
         identity,
         cost,
         expireTimeMs: session.expireTimeMs,
       };
-      this.held.set(session.id, { lease, connection });
-      return lease;
     } catch (error) {
       throw await this.abandon(session.id, connection, error);
     }
@@ -106,9 +132,9 @@ export class RemoteDeviceAcquisition {
 
   /** Disconnects adb and ends the session. Releasing an unknown or released session only ends it. */
   async release(sessionId: string): Promise<void> {
-    const held = this.held.get(sessionId);
-    if (held) {
-      await this.closeQuietly(held.connection);
+    const connection = this.held.get(sessionId)?.connection;
+    if (connection) {
+      await this.closeQuietly(connection);
     }
     await this.options.provider.release(sessionId);
     // Kept until the provider confirms, so a failed release is retried by releaseAll.
@@ -116,10 +142,15 @@ export class RemoteDeviceAcquisition {
   }
 
   /**
-   * Releases every held session, for session end and daemon shutdown. One failure does not stop
-   * the rest; the ids that could not be released are returned after each is logged.
+   * Releases every held session, for session end and daemon shutdown. Acquisitions still in
+   * progress are cancelled and drained first, so none can hand back a live session afterwards.
+   * One failure does not stop the rest; the ids that could not be released are returned after
+   * each is logged.
    */
   async releaseAll(): Promise<string[]> {
+    const pending = [...this.inFlight];
+    pending.forEach((acquisition) => acquisition.controller.abort());
+    await Promise.all(pending.map((acquisition) => acquisition.settled));
     const ids = [...this.held.keys()];
     const results = await Promise.allSettled(ids.map((id) => this.release(id)));
     return ids.filter((id, index) => {
@@ -178,6 +209,8 @@ export class RemoteDeviceAcquisition {
         `Failed to release remote session ${sessionId} after a failed connect`,
         releaseError,
       );
+      // Held without a connection so releaseAll retries it.
+      this.held.set(sessionId, {});
       return new ActionableError(
         `${errorMessage(error)}. Releasing remote session ${sessionId} also failed ` +
           `(${errorMessage(releaseError)}); cancel it in the Google Cloud console so it stops billing.`,
@@ -193,5 +226,13 @@ export class RemoteDeviceAcquisition {
       // The session is released next, which drops the device whatever adb's state.
       logger.warn(`Failed to close adb connection ${connection.serial}`, error);
     }
+  }
+}
+
+function throwIfCancelled(signal: AbortSignal, sessionId: string): void {
+  if (signal.aborted) {
+    throw new ActionableError(
+      `Remote device acquisition was cancelled; session ${sessionId} is being released.`,
+    );
   }
 }

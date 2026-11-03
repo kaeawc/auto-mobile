@@ -18,11 +18,14 @@ class FakeTransport implements RemoteAdbTransport {
   readonly closed: string[] = [];
   connectError?: Error;
   closeError?: Error;
+  /** When set, connect waits for this before answering. */
+  gate?: Promise<void>;
 
   async connect(session: RemoteDeviceSession): Promise<RemoteAdbConnection> {
     if (this.connectError) {
       throw this.connectError;
     }
+    await this.gate;
     this.connected.push(session.id);
     const serial = `127.0.0.1:${5000 + this.connected.length}`;
     return {
@@ -169,6 +172,61 @@ describe("RemoteDeviceAcquisition.release", () => {
     provider.releaseError = undefined;
     expect(await acquisition.releaseAll()).toEqual([]);
     expect(acquisition.heldSessionIds()).toEqual([]);
+  });
+});
+
+describe("RemoteDeviceAcquisition.releaseAll during an acquisition", () => {
+  test("cancels an acquisition still connecting and releases its session", async () => {
+    const { provider, transport, connectSetup, acquisition } = setup();
+    const gate = Promise.withResolvers<void>();
+    transport.gate = gate.promise;
+    const pending = acquisition.acquire(request);
+    const outcome = pending.then(
+      () => "acquired",
+      (error: unknown) => String(error),
+    );
+    await Promise.resolve();
+
+    const releasing = acquisition.releaseAll();
+    gate.resolve();
+
+    expect(await releasing).toEqual([]);
+    expect(await outcome).toContain("acquisition was cancelled; session fake-session-1");
+    expect(transport.closed).toEqual(["127.0.0.1:5001"]);
+    expect(connectSetup.installs).toEqual([]);
+    expect(provider.released).toEqual(["fake-session-1"]);
+    expect(acquisition.heldSessionIds()).toEqual([]);
+  });
+
+  test("a cancelled acquisition whose release fails is reported and retried", async () => {
+    const { provider, transport, acquisition } = setup();
+    const gate = Promise.withResolvers<void>();
+    transport.gate = gate.promise;
+    const outcome = acquisition.acquire(request).catch((error: unknown) => String(error));
+    await Promise.resolve();
+    provider.releaseError = new Error("HTTP 503");
+
+    const releasing = acquisition.releaseAll();
+    gate.resolve();
+
+    expect(await releasing).toEqual(["fake-session-1"]);
+    expect(await outcome).toContain("cancel it in the Google Cloud console");
+
+    provider.releaseError = undefined;
+    expect(await acquisition.releaseAll()).toEqual([]);
+    expect(acquisition.heldSessionIds()).toEqual([]);
+  });
+
+  test("a failed release after a failed connect stays held for releaseAll", async () => {
+    const { provider, transport, acquisition } = setup();
+    transport.connectError = new Error("AdbConnect stream refused");
+    provider.releaseError = new Error("HTTP 503");
+
+    await expect(acquisition.acquire(request)).rejects.toThrow("also failed");
+    expect(acquisition.heldSessionIds()).toEqual(["fake-session-1"]);
+
+    provider.releaseError = undefined;
+    expect(await acquisition.releaseAll()).toEqual([]);
   });
 });
 

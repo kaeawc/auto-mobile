@@ -1,8 +1,8 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the per-prototype resources (the page and the single-file Compose and SwiftUI
-sources), spec revisions, the page, its browser check, the still renderer and the device frame
+document covers the per-prototype resources (the page, the embed envelope and the single-file
+Compose and SwiftUI sources), spec revisions, the page, its browser check, the still renderer and the device frame
 registry.
 
 ## Resource
@@ -23,6 +23,14 @@ registry.
   `ActionableError`s.
 - **Read result.** `_meta` is `{revision, deviceRevision?, revisions, variants, frame, sha256,
   rendererVersion}`; `rendererVersion` is the server release version.
+- **Embed envelope.** `automobile:prototype/{id}/embed{?revision,variant}` (`application/json`) is
+  read by `readPrototypeEmbedResource` in `src/features/prototype/web/prototypeEmbedResource.ts`.
+  Its text is `{format: "automobile-prototype-embed", version: 1, requires, spec}`, where `spec` is
+  the stored spec of the variant and revision the web page would show first and `requires` is
+  `requiredPrototypeCapabilities(spec)` computed by this host, so the web library can refuse a spec
+  it cannot draw whole ([Prototype web library](prototype-web-library.md)). Variant, revision and
+  errors are the web resource's; there is no `frame`. `_meta` is the web resource's without
+  `frame`, its `sha256` hashing the envelope text.
 - **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision}` (`text/x-kotlin`)
   and `automobile:prototype/{id}/swiftui{?frame,revision}` (`text/x-swift`) are read by
   `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render
@@ -37,15 +45,16 @@ registry.
   (`pixel-9`, `iphone-16`), since the format fixes the platform. The shader and Swift-equivalent
   asset id refusals are the native resource's. `_meta` is `{revision, deviceRevision?, revisions,
   frame, sha256, rendererVersion}`.
-- **Listing.** Each known id gets concrete resources `automobile:prototype/{id}/{web,compose,swiftui}`
-  named `prototype-{id}-{format}`, titled `{id} (web)`, `{id} (Compose)` and `{id} (SwiftUI)`,
+- **Listing.** Each known id gets concrete resources
+  `automobile:prototype/{id}/{web,embed,compose,swiftui}` named `prototype-{id}-{format}`, titled
+  `{id} (web)`, `{id} (embed)`, `{id} (Compose)` and `{id} (SwiftUI)`,
   registered when its first revision appears and unregistered when the id is evicted; each change
   sends `list_changed`. List entries carry no
   `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
   `_meta`.
 - **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
-  `resources/updated` for the parameter-free URI of every format of the id, and for the web URI of
-  each id in its variant group and of each id in the group it left (or was evicted from), in
+  `resources/updated` for the parameter-free URI of every format of the id, and for the web and embed
+  URIs of each id in its variant group and of each id in the group it left (or was evicted from), in
   revision order. The concrete resource matches subscriptions
   exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
 

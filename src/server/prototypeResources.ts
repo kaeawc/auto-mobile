@@ -31,9 +31,11 @@ import type {
 } from "../features/prototype/prototypeSpecRevisions";
 import {
   PROTOTYPE_COMPOSE_TEMPLATE,
+  PROTOTYPE_EMBED_TEMPLATE,
   PROTOTYPE_SWIFTUI_TEMPLATE,
   PROTOTYPE_WEB_TEMPLATE,
   prototypeResourceName,
+  prototypeEmbedUri,
   prototypeResourceUri,
   prototypeWebUri,
   type PrototypeResourceFormat,
@@ -49,6 +51,10 @@ import {
   readPrototypeWebResource,
   type PrototypeWebResourceQuery,
 } from "../features/prototype/web/prototypeWebResource";
+import {
+  readPrototypeEmbedResource,
+  type PrototypeEmbedResourceQuery,
+} from "../features/prototype/web/prototypeEmbedResource";
 import { logger } from "../utils/logger";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import type { ResourceContent } from "./resourceRegistry";
@@ -104,6 +110,20 @@ function readWeb(sources: PrototypeWebSources, query: PrototypeWebResourceQuery)
   };
 }
 
+function readEmbed(
+  sources: PrototypeWebSources,
+  query: PrototypeEmbedResourceQuery,
+): ResourceContent {
+  const embed = readPrototypeEmbedResource(sources.revisions, query, sources.rendererVersion());
+  const { revision, variant } = query;
+  return {
+    uri: readUri(query.id, "embed", { revision, variant }),
+    mimeType: "application/json",
+    text: embed.text,
+    _meta: { ...embed.meta },
+  };
+}
+
 function readSource(
   sources: PrototypeWebSources,
   format: PrototypeSourceFormat,
@@ -150,6 +170,14 @@ const PER_ID_FORMATS: readonly PerIdFormat[] = [
       `Prototype ${id} as a self-contained HTML page in a device frame (latest revision)`,
     mimeType: "text/html",
     read: (sources, id) => readWeb(sources, { id }),
+  },
+  {
+    format: "embed",
+    title: "embed",
+    description: (id) =>
+      `Prototype ${id} as an embed envelope for the web library: its spec and required capabilities (latest revision)`,
+    mimeType: "application/json",
+    read: (sources, id) => readEmbed(sources, { id }),
   },
   sourceFormat("compose", "Compose"),
   sourceFormat("swiftui", "SwiftUI"),
@@ -199,8 +227,8 @@ function syncWebResources(sources: PrototypeWebSources): boolean {
 }
 
 /**
- * A new revision changes every format of its id, and the web page of every variant sharing its
- * group (only the web page shows variants).
+ * A new revision changes every format of its id, and the web page and embed envelope of every
+ * variant sharing its group (only those two report variants).
  */
 async function onWebRevision(
   sources: PrototypeWebSources,
@@ -220,7 +248,7 @@ async function onWebRevision(
   const current = known.has(event.id) ? prototypeVariantIds(sources.revisions, event.id) : [];
   const ids = new Set([...(known.has(event.id) ? [event.id] : []), ...current, ...former]);
   const uris = new Set([
-    ...[...ids].map(prototypeWebUri),
+    ...[...ids].flatMap((id) => [prototypeWebUri(id), prototypeEmbedUri(id)]),
     ...(known.has(event.id) ? perIdUris(event.id) : []),
   ]);
   if (uris.size > 0) {
@@ -284,6 +312,17 @@ function registerPrototypeWebResources(sources: PrototypeWebSources): void {
         variant: params.variant,
       }),
   });
+  ResourceRegistry.registerTemplate(PROTOTYPE_EMBED_TEMPLATE, "Prototype as an embed envelope", {
+    description:
+      'A shown prototype as {format: "automobile-prototype-embed", version: 1, requires, spec} for the web renderer library, requires being the capabilities the spec needs (revision: a kept spec revision, default the latest; variant: the prototype id of its variant group to serve)',
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) =>
+      readEmbed(sources, {
+        id: decodeSegmentOrThrow(params.id ?? ""),
+        revision: params.revision,
+        variant: params.variant,
+      }),
+  });
   registerSourceTemplate(sources, PROTOTYPE_COMPOSE_TEMPLATE, "compose", "Jetpack Compose");
   registerSourceTemplate(sources, PROTOTYPE_SWIFTUI_TEMPLATE, "swiftui", "SwiftUI");
   syncWebResources(sources);
@@ -310,7 +349,8 @@ export function prototypeWebNotificationsSettled(): Promise<void> {
 
 /**
  * Registers the `prototype` authoring guide, its icon lookup (#11052), the native-code
- * resources (#13729) and the per-prototype web page and Compose/SwiftUI files (#16345).
+ * resources (#13729), the per-prototype web page and Compose/SwiftUI files (#16345) and the
+ * per-prototype embed envelope (#16452).
  */
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),

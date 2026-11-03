@@ -50,7 +50,15 @@ export const listSystemTrayNotificationsForClear = (
   { awaitTimeoutMs, signal }: { awaitTimeoutMs: number; signal?: AbortSignal },
 ) =>
   listNotifications(
-    { device, appId, appLabel, awaitTimeoutMs, signal, skipTerminalObservation: true },
+    {
+      device,
+      appId,
+      appLabel,
+      awaitTimeoutMs,
+      signal,
+      skipTerminalObservation: true,
+      readPrototypeTags: false,
+    },
     trayListingContext,
   );
 

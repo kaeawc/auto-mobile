@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { diffPngs } from "../../../../src/features/visual/VisualDiff";
+import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/webPage";
 import {
   WEB_SCREENSHOT_FONT_CSS,
   WEB_SCREENSHOT_GOLDEN_DIR,
@@ -302,4 +303,63 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
     },
     CASE_TIMEOUT_MS,
   );
+
+  test(
+    "a padded text after an unsized aspect ratio in a row takes no width (#16710)",
+    async () => {
+      const spec = {
+        id: "ratio-padded",
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                {
+                  type: "text",
+                  testTag: "padded",
+                  text: "Hi",
+                  style: { padding: { start: 20, end: 20 } },
+                },
+              ],
+            },
+          ],
+        },
+      };
+      const { page } = await openPage(browser, singleSpecPage(spec));
+      try {
+        const sizes = await page.evaluate(() => {
+          // Layout px: undo the stage's fit-to-viewport scale.
+          const stage = document.querySelector<HTMLElement>("[data-stage]");
+          const scale = Number(/scale\(([\d.]+)\)/.exec(stage?.style.transform ?? "")?.[1] ?? 1);
+          const view = Array.from(document.querySelectorAll<HTMLElement>("[data-view]")).find(
+            (shown) => !shown.hidden,
+          );
+          const size = (tag: string) => {
+            const box = view?.querySelector(`[data-testid="${tag}"]`)?.getBoundingClientRect();
+            return [(box?.width ?? -1) / scale, (box?.height ?? -1) / scale];
+          };
+          return { ratio: size("ratio"), padded: size("padded") };
+        });
+        expect(sizes.ratio[0]).toBeCloseTo(411, 1);
+        expect(sizes.ratio[1]).toBeCloseTo(205.5, 1);
+        expect(sizes.padded[0]).toBeCloseTo(0, 1);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 });
+
+/** A page showing one inline spec on the Pixel 9 frame (411 dp wide). */
+function singleSpecPage(spec: unknown): string {
+  return buildPrototypeWebPage({
+    title: "geometry",
+    frame: "pixel-9",
+    variants: [
+      { id: "geometry", label: "geometry", revisions: [{ revision: 1, operation: "show", spec }] },
+    ],
+  }).html;
+}

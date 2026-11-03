@@ -270,3 +270,22 @@ test("a nested bounded row that its parent row zeroes keeps no width", () => {
   const nested = { [ROW_BOUND_KEY]: true, [ROW_MEASURE_KEY]: { zero: true } };
   expect(nodeCss(nested, context)["max-width"]).toBe("0px");
 });
+
+test("a nested row that rowMeasured both zeroes and bounds keeps max-width 0 (#16780)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const inner = {
+    type: "row",
+    children: [
+      { type: "box", style: { aspectRatio: 2, maxWidth: 50 } },
+      { type: "text", text: "b" },
+    ],
+  };
+  const outer = { type: "row", children: [{ type: "box", style: { aspectRatio: 1 } }, inner] };
+  const zeroed = (rowMeasured(outer, "root", prepare).children as unknown[])[1];
+  expect(styleOf(zeroed)?.[ROW_MEASURE_KEY]).toEqual({ zero: true });
+  // The nested row's own measure adds the bound around its capped child, keeping the zero hint.
+  const nested = rowMeasured(record(zeroed)!, "root.children[1]", prepare);
+  expect(nested.style).toEqual({ [ROW_MEASURE_KEY]: { zero: true }, [ROW_BOUND_KEY]: true });
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  expect(nodeCss(nested.style, context)["max-width"]).toBe("0px");
+});

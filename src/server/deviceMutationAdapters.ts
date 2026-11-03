@@ -275,8 +275,12 @@ function namedToolMutations(
   args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] | undefined {
+  // An image upload overwrites shared storage cleaning does not restore, so it keeps the tool row.
   const posted =
-    name === "postNotification" && platform === "android" && typeof args.appId === "string"
+    name === "postNotification" &&
+    platform === "android" &&
+    typeof args.appId === "string" &&
+    args.imagePath === undefined
       ? postedNotificationKey(args.appId)
       : undefined;
   if (posted !== undefined) {

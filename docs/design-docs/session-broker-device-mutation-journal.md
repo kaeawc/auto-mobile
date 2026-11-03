@@ -143,7 +143,9 @@ reading `cmd notification list` back: the revert succeeds only when every line i
 notification key and none names the package. Posting also persists a notification
 channel, which only uninstalling the app removes, so the call also journals the
 `postNotification` app fallback; it is dropped only when the session installed an app
-the baseline did not hold. A call without an `appId` keeps an escalating row.
+the baseline did not hold. A call without an `appId`, or with an `imagePath` (the image
+upload can overwrite a baseline file under `/sdcard/Download/automobile`, which file
+cleaning does not restore), keeps an escalating row.
 
 On iOS, sanitize covers session-installed apps and app groups through inventory
 cleaning, absolute keychain/permission/location/status-bar/clipboard resets,

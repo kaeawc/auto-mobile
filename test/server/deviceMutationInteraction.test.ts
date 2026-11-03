@@ -421,6 +421,11 @@ describe("postNotification journal row (#14364)", () => {
     [{ appId: "not a package", title: "Hi" }, "android"],
     [{ appId: "com.example.app", title: "Hi" }, "ios"],
     [{ appId: "com.example.app", title: "Hi" }, undefined],
+    [
+      { appId: "com.example.app", title: "Hi", imageType: "bigPicture", imagePath: "/a.png" },
+      "android",
+    ],
+    [{ appId: "com.example.app", title: "Hi", imagePath: "/a.png" }, "android"],
   ] as const)("%p on %p keeps the escalating tool row", (args, platform) => {
     expect(deviceToolMutations("postNotification", { ...args }, platform)).toEqual([
       { kind: "notification", key: "tool:postNotification" },

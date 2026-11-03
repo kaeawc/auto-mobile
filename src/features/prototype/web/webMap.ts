@@ -565,7 +565,7 @@ function routeLayer(
   project: (points: MapPoint[]) => MapOffset[][],
   fitted: Size | undefined,
 ) {
-  const frame = fitted
+  const frame: { attrs: Record<string, string>; style: Record<string, string> } = fitted
     ? {
         attrs: {
           width: "100%",

@@ -1,6 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
 import type { PrepareChild } from "./webRowAspect";
-import { INCOMING_HEIGHT_KEY } from "./webStyle";
+import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
 
 const finite = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : Infinity;
@@ -19,13 +19,28 @@ function ownHeight(style: Raw | undefined): number {
 }
 
 /**
- * The tallest a node lets its children be: its own height (see ownHeight) within the height its
- * parent hands it (INCOMING_HEIGHT_KEY), less its vertical padding. A `fill`, weighted or
- * wrap-sized node is bounded by the incoming height alone, as Compose's incoming max height
- * bounds it. Infinity when no bound is statically known.
+ * The height a node is laid out within: the height its parent hands it (INCOMING_HEIGHT_KEY)
+ * capped by its own height (see ownHeight). A column's weight allocation
+ * (INCOMING_ALLOCATED_KEY) instead sizes the node outright, as CSS's `flex: w w 0` replaces its
+ * `height` and Compose's weight fixes its constraints, so its dp and min height are ignored. Its
+ * `maxHeight` still caps it, as CSS applies `max-height` to a flex item.
+ */
+function boundHeight(style: Raw | undefined): number {
+  const incoming = finite(style?.[INCOMING_HEIGHT_KEY]);
+  if (style?.[INCOMING_ALLOCATED_KEY] === true && incoming !== Infinity) {
+    return Math.min(incoming, finite(style?.maxHeight));
+  }
+  return Math.min(incoming, ownHeight(style));
+}
+
+/**
+ * The tallest a node lets its children be: the height it is laid out within (see boundHeight),
+ * less its vertical padding. A `fill`, weighted or wrap-sized node is bounded by the incoming
+ * height alone, as Compose's incoming max height bounds it. Infinity when no bound is statically
+ * known.
  */
 export function contentHeight(style: Raw | undefined): number {
-  const bound = Math.min(finite(style?.[INCOMING_HEIGHT_KEY]), ownHeight(style));
+  const bound = boundHeight(style);
   const padding = record(style?.padding);
   return Math.max(0, bound - side(padding, "top") - side(padding, "bottom"));
 }
@@ -86,12 +101,17 @@ export function columnChildHeights(
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
-function withHeight(entry: unknown, height: number | undefined): unknown {
+/**
+ * `entry` with `height` as its incoming height, marked as an allocation (INCOMING_ALLOCATED_KEY)
+ * when `allocated`, so its own dp height does not cap it.
+ */
+function withHeight(entry: unknown, height: number | undefined, allocated: boolean): unknown {
   const node = record(entry);
   if (!node || height === undefined || height === Infinity) {
     return entry;
   }
-  return { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height } };
+  const style = { ...record(node.style), [INCOMING_HEIGHT_KEY]: height };
+  return { ...node, style: allocated ? { ...style, [INCOMING_ALLOCATED_KEY]: true } : style };
 }
 
 /** The containers that hand their children a height, and whether they lay them out as a column. */
@@ -107,8 +127,9 @@ const HEIGHT_PARENTS: ReadonlyMap<unknown, { readonly column: boolean }> = new M
  * A row, column, box or card with each child carrying the incoming max height it hands that child
  * (INCOMING_HEIGHT_KEY), where the node's own content height is statically known; other nodes
  * unchanged. A row or box hands every child its content height. A column or card measures its
- * children in order (see columnChildHeights), except a repeat, whose children are one template, so
- * each gets the whole content height as a bound. A height that depends on layout (a sibling's wrap
+ * children in order (see columnChildHeights) and marks a weighted child's share as an allocation
+ * (INCOMING_ALLOCATED_KEY), except a repeat, whose children are one template, so each gets the
+ * whole content height as a bound. A height that depends on layout (a sibling's wrap
  * height, the screen) is left out, so the bound stays an upper one or is absent.
  *
  * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
@@ -124,13 +145,19 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
   if (content === Infinity) {
     return node;
   }
-  const heights =
-    parent.column && node.repeat === undefined
-      ? columnChildHeights(
-          children.map((entry, index) => prepare(entry, childPath(path, index))),
-          content,
-          node.type === "column" && typeof style?.spacing === "number" ? style.spacing : 0,
-        )
-      : children.map(() => content);
-  return { ...node, children: children.map((entry, index) => withHeight(entry, heights[index])) };
+  if (!parent.column || node.repeat !== undefined) {
+    return { ...node, children: children.map((entry) => withHeight(entry, content, false)) };
+  }
+  const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
+  const heights = columnChildHeights(
+    prepared,
+    content,
+    node.type === "column" && typeof style?.spacing === "number" ? style.spacing : 0,
+  );
+  return {
+    ...node,
+    children: children.map((entry, index) =>
+      withHeight(entry, heights[index], weightOf(prepared[index]) !== undefined),
+    ),
+  };
 }

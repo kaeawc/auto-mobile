@@ -7,6 +7,7 @@ import {
 } from "../../../../src/features/prototype/web/webIncomingHeight";
 import { CAPPED_SHRINK, rowMeasured } from "../../../../src/features/prototype/web/webRowAspect";
 import {
+  INCOMING_ALLOCATED_KEY,
   INCOMING_HEIGHT_KEY,
   nodeCss,
   ROW_MEASURE_KEY,
@@ -147,4 +148,64 @@ test("a card hands its children heights as a column does, with no spacing (#1669
 test("only a row, column, box or card hands its children a height (#16690)", () => {
   const node = { type: "toString", style: { height: { dp: 50 } }, children: [{ type: "row" }] };
   expect(withChildHeights(node, "root", prepare)).toBe(node);
+});
+
+test("a column's weight allocation sizes a child past its own dp and min height (#16701)", () => {
+  const allocated = { [INCOMING_HEIGHT_KEY]: 80, [INCOMING_ALLOCATED_KEY]: true };
+  expect(contentHeight({ ...allocated, weight: 1, height: { dp: 20 } })).toBe(80);
+  expect(contentHeight({ ...allocated, weight: 1, minHeight: 100 })).toBe(80);
+  // CSS still applies max-height to a flex item, so maxHeight caps the allocation.
+  expect(contentHeight({ ...allocated, weight: 1, maxHeight: 50, padding: { top: 5 } })).toBe(45);
+  // Without the mark, the incoming height is a ceiling the child's own height can undercut.
+  expect(contentHeight({ [INCOMING_HEIGHT_KEY]: 80, weight: 1, height: { dp: 20 } })).toBe(20);
+  // A mark with no incoming height bounds nothing.
+  expect(contentHeight({ [INCOMING_ALLOCATED_KEY]: true, height: { dp: 20 } })).toBe(20);
+});
+
+test("a weighted row with a dp height in a 100 dp column caps its aspect ratio by its share (#16701)", () => {
+  const column = withChildHeights(
+    {
+      type: "column",
+      style: { height: { dp: 100 } },
+      children: [
+        { type: "box", style: { height: { dp: 20 } } },
+        {
+          type: "row",
+          style: { weight: 1, height: { dp: 20 } },
+          children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }],
+        },
+      ],
+    },
+    "root",
+    prepare,
+  );
+  const [box, row] = childrenOf(column).map((entry) => record(record(entry)?.style));
+  expect(box?.[INCOMING_ALLOCATED_KEY]).toBeUndefined();
+  expect(row?.[INCOMING_ALLOCATED_KEY]).toBe(true);
+  const ratio = childrenOf(
+    rowMeasured(record(childrenOf(column)[1])!, "root.children[1]", prepare),
+  );
+  expect(record(record(ratio[0])?.style)?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: CAPPED_SHRINK,
+    basis: 160,
+  });
+});
+
+test("only a column's or card's weighted child is marked as allocated (#16701)", () => {
+  const children = [{ type: "row", style: { weight: 1, height: { dp: 20 } } }];
+  const allocatedOf = (node: Raw) =>
+    childrenOf(withChildHeights(node, "root", prepare)).map(
+      (entry) => record(record(entry)?.style)?.[INCOMING_ALLOCATED_KEY],
+    );
+  const style = { height: { dp: 100 } };
+  expect(allocatedOf({ type: "card", style, children })).toEqual([true]);
+  // A weight in a row is horizontal, and a repeat's template children are only bounded.
+  expect(allocatedOf({ type: "row", style, children })).toEqual([undefined]);
+  expect(allocatedOf({ type: "box", style, children })).toEqual([undefined]);
+  expect(allocatedOf({ type: "column", style, children, repeat: { items: [] } })).toEqual([
+    undefined,
+  ]);
+  // The key is internal: it never reaches the CSS.
+  const css = nodeCss({ [INCOMING_ALLOCATED_KEY]: true }, { mode: "light", palette: new Map() });
+  expect(css).toEqual({ "box-sizing": "border-box" });
 });

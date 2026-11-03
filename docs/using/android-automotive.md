@@ -26,8 +26,8 @@ Pass that to `startDevice`. AutoMobile picks only from installed `android-automo
 `maxOsVersion` range, an ABI your machine can run) and creates the AVD with the
 `automotive_1024p_landscape` profile. A phone, tablet or foldable request never gets a car image. If no
 car image is installed in the range, the error names the `sdkmanager` command to run. Asking again
-reuses the car emulator instead of creating another. Creating and booting a car emulator this way is
-unverified on a device.
+reuses the car emulator instead of creating another. Creating and booting a car emulator this way works
+with an `android-automotive` image; with a Play Store car image it is unverified.
 
 To choose the exact image and profile yourself, call `provisionDevice` with an `android-automotive`
 system image as `runtime` and an automotive profile as `deviceType`:
@@ -70,11 +70,12 @@ device `requires` clause.
 
 ## What to expect
 
-An AAOS image is a normal Android build, so the tools that need only adb and the accessibility tree
-(`observe`, `tapOn`, `swipeOn`, `sendKeys`, `launchApp`) are expected to work unchanged. Layout is wide and
-landscape, and the cluster or passenger displays may appear as extra displays. The pass/fail matrix from
-the baseline run will live in `docs/design-docs/plat/android/form-factors.md`; until it exists, treat all
-of this as unverified.
+An AAOS image is a normal Android build, so the tools that need only adb and the accessibility tree work
+unchanged: on an API 34 `android-automotive` emulator `observe`, screenshots, `tapOn`, `tapAt`, `swipeOn`,
+`launchApp`, `listApps`, `pressButton` `home` and `performanceTrace` all pass. Layout is wide and landscape.
+Behaviour on the cluster and passenger displays is unchecked. The full pass/fail matrix,
+including which car-service commands each image accepts, is in
+[Android form factors](../design-docs/plat/android/form-factors.md#automotive-baseline-on-an-emulator).
 
 ## Headless system user
 
@@ -122,7 +123,9 @@ physical head units and iOS return `unsupported`.
 `pressButton` accepts `rotary_rotate_cw` and `rotary_rotate_ccw` (with `steps`, 1 to 50),
 `rotary_nudge_up`, `rotary_nudge_down`, `rotary_nudge_left`, `rotary_nudge_right` and `rotary_select`.
 Nudges and select send the rotary navigation key events; rotation uses the car service's rotary
-injection. Other devices refuse these buttons. Unverified on an emulator.
+injection. Rotation and nudges move focus on an emulator; `rotary_select` succeeds but its effect depends
+on the focused item. Other devices refuse these buttons. The Wear-only `rotaryScroll` warns on a car and
+falls back to a swipe.
 
 ## Prototypes
 

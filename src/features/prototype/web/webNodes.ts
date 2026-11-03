@@ -21,6 +21,8 @@ export function el(
 
 const VOID_ELEMENTS = new Set(["img", "br", "hr", "input", "meta", "link"]);
 const NAME = /^[a-z][a-z0-9-]*$/;
+/** The camelCase SVG attributes inline glyphs and map overlays need; no other mixed case passes. */
+const SVG_ATTRIBUTES = new Set(["viewBox", "preserveAspectRatio"]);
 
 function escapeText(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -41,11 +43,11 @@ function attributeText(element: WebElement): string {
   const attrs = { ...element.attrs, ...(style ? { style } : {}) };
   return sortedEntries(attrs)
     .map(([name, value]) => {
-      if (!NAME.test(name)) {
+      if (!NAME.test(name) && !SVG_ATTRIBUTES.has(name)) {
         throw new Error(`Invalid attribute name: ${name}`);
       }
       // The page runs no authored script; handlers would bypass the CSP's script hashes.
-      if (name.startsWith("on")) {
+      if (name.toLowerCase().startsWith("on")) {
         throw new Error(`Event handler attributes are not allowed: ${name}`);
       }
       return ` ${name}="${escapeAttribute(value)}"`;

@@ -1468,9 +1468,15 @@ describe("bounded excess text request floors", () => {
   test.each([
     [300, 77_000],
     [1000, 147_000],
-    [5000, 165_000],
+    [5000, 555_000],
   ])("single sendKeys length %s has floor %s", (length, expected) => {
     expect(resolve("sendKeys", ["a".repeat(length)])).toBe(expected);
+  });
+
+  test("3500 code points budget all four sendKeys appends without changing setUIState", () => {
+    const text = "😀".repeat(3500);
+    expect(resolve("sendKeys", [text])).toBe(403_000);
+    expect(resolve("setUIState", [text])).toBe(195_000);
   });
 
   test("twenty short fields preserve the existing floor and caller precedence", () => {

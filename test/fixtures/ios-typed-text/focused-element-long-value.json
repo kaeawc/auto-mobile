@@ -1,0 +1,20 @@
+{
+  "value": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijab",
+  "resource-id": "status.textField",
+  "class": "UITextField",
+  "clickable": "true",
+  "focused": true,
+  "role": "textfield",
+  "hint-text": "What's your status?",
+  "view-id": "status.textField",
+  "actions": [
+    "set_text",
+    "clear_text"
+  ],
+  "bounds": [
+    32,
+    182,
+    370,
+    205
+  ]
+}

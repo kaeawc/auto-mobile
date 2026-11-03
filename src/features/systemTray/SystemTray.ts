@@ -626,7 +626,10 @@ export class SystemTray {
           }),
         signal,
       );
-      const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
+      const initiallyOpen = clearDetector.isTrayOpen(
+        initialObservation.viewHierarchy,
+        initialObservation.deviceLock,
+      );
       // Use statusbar commands directly: an unreadable hierarchy must not
       // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
       this.restoreFailedClearAll = async () => {

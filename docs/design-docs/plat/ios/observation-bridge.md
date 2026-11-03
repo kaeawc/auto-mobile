@@ -204,7 +204,9 @@ bridge's `insertText` and its clear (the `clear` command and the clear before a 
 `clearText`, under the same fallback and fail-closed rules as `tapOn`. Each command result reports
 `backend` and, for an XCTest stand-in, `fallbackReason`; a command that used both reports the
 fallback. The focus tap itself stays on XCTest, so an XCTest stand-in finds the field focused as
-usual, and the typed text is verified by read-back as for XCTest typing. IME actions have no
+usual, and the typed text is verified by read-back as for XCTest typing. Focused values filling
+XCUI's 512-character read window cannot prove a change beyond it; typing succeeds with a short
+unverified warning, and timeout read-back leaves what was committed unknown. IME actions have no
 native bridge form: on a native bridge field they run through XCTest and report
 `fallbackReason: unsupported`. `sendKeys` without a selector has no resolved field, so it stays on
 XCTest.

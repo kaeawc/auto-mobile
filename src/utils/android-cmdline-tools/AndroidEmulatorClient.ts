@@ -499,6 +499,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           signal,
         ),
       isAvdStarting: (avdName) => this.isAvdStarting(avdName),
+      advertisedSerials: (avdName) => this.advertisedAvdSerials(avdName),
     });
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = getFallbackEmulatorPath();
@@ -738,6 +739,20 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * @param avdName - The AVD name to check
    * @returns Promise with boolean indicating if the AVD is currently starting
    */
+  /** The serials the running emulators of `avdName` advertise; empty when unreadable (#16339). */
+  private async advertisedAvdSerials(avdName: string): Promise<string[]> {
+    try {
+      return await this.runningAvdAdvertisementReader.advertisedSerials(avdName);
+    } catch (error) {
+      // Same secondary signal as isAvdStarting: degrade to "none known", but say so.
+      logger.warn(
+        `Failed to read running-AVD advertisements for '${avdName}': ${errorMessage(error)}`,
+        error,
+      );
+      return [];
+    }
+  }
+
   async isAvdStarting(avdName: string): Promise<boolean> {
     try {
       return await this.runningAvdAdvertisementReader.isAvdAdvertisedRunning(avdName);

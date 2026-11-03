@@ -97,17 +97,17 @@ describe("PrototypeShownSpecs", () => {
     const store = new PrototypeShownSpecs();
     const read = shown(store);
     const patched = { data: { count: 2 } };
-    expect(store.commitPatch("d", "panel", read.version, patched)).toBe(true);
+    expect(store.commitPatch("d", "panel", read.version, { spec: patched })).toBe(true);
     patched.data.count = 99;
     expect(store.read("d", "panel")).toMatchObject({ spec: { data: { count: 2 } } });
-    expect(store.commitPatch("d", "panel", read.version, spec)).toBe(false);
+    expect(store.commitPatch("d", "panel", read.version, { spec })).toBe(false);
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
   });
   test("an overlapping show is poisoned; a later dispatched show restores tracking", () => {
     const store = new PrototypeShownSpecs();
     const read = shown(store);
     const overlap = store.beginShow("d");
-    expect(store.commitPatch("d", "panel", read.version, spec)).toBe(false);
+    expect(store.commitPatch("d", "panel", read.version, { spec })).toBe(false);
     store.endShow("d", overlap, { id: "panel", spec });
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
     shown(store);
@@ -122,7 +122,7 @@ describe("PrototypeShownSpecs", () => {
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
     const restored = shown(store);
     expect(restored.version).toBeGreaterThan(read.version);
-    expect(store.commitPatch("d", "panel", restored.version, spec)).toBe(true);
+    expect(store.commitPatch("d", "panel", restored.version, { spec })).toBe(true);
   });
   test("abandon forgets an entry and invalidates its patch version", () => {
     const store = new PrototypeShownSpecs();
@@ -131,7 +131,7 @@ describe("PrototypeShownSpecs", () => {
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
     const restored = shown(store);
     expect(restored.version).toBeGreaterThan(read.version);
-    expect(store.commitPatch("d", "panel", read.version, spec)).toBe(false);
+    expect(store.commitPatch("d", "panel", read.version, { spec })).toBe(false);
   });
   test("abandon on an unknown device is a no-op", () => {
     const store = new PrototypeShownSpecs();
@@ -154,7 +154,9 @@ describe("PrototypeShownSpecs", () => {
       store.forget("d", "panel");
     }
     expect(
-      store.commitPatch("d", intervention === "wrongId" ? "wrong" : "panel", read.version, spec),
+      store.commitPatch("d", intervention === "wrongId" ? "wrong" : "panel", read.version, {
+        spec,
+      }),
     ).toBe(false);
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
   });
@@ -188,7 +190,9 @@ describe("PrototypeShownSpecs", () => {
     const before = shown(store);
     store.clearDevice("d");
     const after = shown(store);
-    expect(store.commitPatch("d", "panel", before.version, { data: { count: 99 } })).toBe(false);
+    expect(store.commitPatch("d", "panel", before.version, { spec: { data: { count: 99 } } })).toBe(
+      false,
+    );
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
     expect(after.version).not.toBe(before.version);
   });
@@ -198,7 +202,7 @@ describe("PrototypeShownSpecs", () => {
     store.clearDevice("d");
     store.endShow("d", ticket, { id: "panel", spec });
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
-    expect(store.commitPatch("d", "panel", 0, spec)).toBe(false);
+    expect(store.commitPatch("d", "panel", 0, { spec })).toBe(false);
   });
 });
 

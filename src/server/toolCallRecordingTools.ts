@@ -10,7 +10,7 @@ import {
   getToolCallRecordingStatus,
 } from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
+import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
 
 // ============================================================================
 // Tool Call Recording — "recordToolCalls" tool
@@ -51,9 +51,8 @@ const recordToolCallsResultSchema = z.object({
 const recordToolCallsTool = async (params: {
   action: "begin" | "end" | "status";
   planName?: string;
-  [INTERNAL_MCP_SESSION_PARAM]?: string;
 }): Promise<any> => {
-  const connectionId = params[INTERNAL_MCP_SESSION_PARAM];
+  const connectionId = currentAutolockMcpSessionId();
   // Status is always allowed — lets agents probe recording state even when the flag is off.
   if (params.action === "status") {
     const status = getToolCallRecordingStatus({ connectionId });

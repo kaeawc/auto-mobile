@@ -1,0 +1,194 @@
+add device 1: /dev/input/event11
+  name:     "virtio_input_multi_touch_11"
+add device 2: /dev/input/event10
+  name:     "virtio_input_multi_touch_10"
+add device 3: /dev/input/event9
+  name:     "virtio_input_multi_touch_9"
+add device 4: /dev/input/event8
+  name:     "virtio_input_multi_touch_8"
+add device 5: /dev/input/event7
+  name:     "virtio_input_multi_touch_7"
+add device 6: /dev/input/event6
+  name:     "virtio_input_multi_touch_6"
+add device 7: /dev/input/event5
+  name:     "virtio_input_multi_touch_5"
+add device 8: /dev/input/event4
+  name:     "virtio_input_multi_touch_4"
+add device 9: /dev/input/event3
+  name:     "virtio_input_multi_touch_3"
+add device 10: /dev/input/event2
+  name:     "virtio_input_multi_touch_2"
+add device 11: /dev/input/event1
+  name:     "virtio_input_multi_touch_1"
+add device 12: /dev/input/event0
+  name:     "gpio-keys"
+add device 13: /dev/input/event12
+  name:     "automobile-pen"
+[     116.939193] /dev/input/event12: EV_KEY       BTN_DIGI             DOWN                
+[     116.939193] /dev/input/event12: EV_KEY       BTN_TOUCH            DOWN                
+[     116.939193] /dev/input/event12: EV_ABS       ABS_X                0000012c            
+[     116.939193] /dev/input/event12: EV_ABS       ABS_Y                00000384            
+[     116.939193] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000333            
+[     116.939193] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     116.956345] /dev/input/event12: EV_ABS       ABS_X                00000135            
+[     116.956345] /dev/input/event12: EV_ABS       ABS_Y                0000038a            
+[     116.956345] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000372            
+[     116.956345] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     116.971668] /dev/input/event12: EV_ABS       ABS_X                0000013e            
+[     116.971668] /dev/input/event12: EV_ABS       ABS_Y                00000390            
+[     116.971668] /dev/input/event12: EV_ABS       ABS_PRESSURE         000003b1            
+[     116.971668] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     116.989205] /dev/input/event12: EV_ABS       ABS_X                00000148            
+[     116.989205] /dev/input/event12: EV_ABS       ABS_Y                00000396            
+[     116.989205] /dev/input/event12: EV_ABS       ABS_PRESSURE         000003f0            
+[     116.989205] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.003494] /dev/input/event12: EV_ABS       ABS_X                00000151            
+[     117.003494] /dev/input/event12: EV_ABS       ABS_Y                0000039d            
+[     117.003494] /dev/input/event12: EV_ABS       ABS_PRESSURE         0000042f            
+[     117.003494] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.018323] /dev/input/event12: EV_ABS       ABS_X                0000015a            
+[     117.018323] /dev/input/event12: EV_ABS       ABS_Y                000003a3            
+[     117.018323] /dev/input/event12: EV_ABS       ABS_PRESSURE         0000046e            
+[     117.018323] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.033035] /dev/input/event12: EV_ABS       ABS_X                00000163            
+[     117.033035] /dev/input/event12: EV_ABS       ABS_Y                000003a9            
+[     117.033035] /dev/input/event12: EV_ABS       ABS_PRESSURE         000004ad            
+[     117.033035] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.047238] /dev/input/event12: EV_ABS       ABS_X                0000016d            
+[     117.047238] /dev/input/event12: EV_ABS       ABS_Y                000003af            
+[     117.047238] /dev/input/event12: EV_ABS       ABS_PRESSURE         000004ec            
+[     117.047238] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.063514] /dev/input/event12: EV_ABS       ABS_X                00000176            
+[     117.063514] /dev/input/event12: EV_ABS       ABS_Y                000003b5            
+[     117.063514] /dev/input/event12: EV_ABS       ABS_PRESSURE         0000052b            
+[     117.063514] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.078764] /dev/input/event12: EV_ABS       ABS_X                0000017f            
+[     117.078764] /dev/input/event12: EV_ABS       ABS_Y                000003bb            
+[     117.078764] /dev/input/event12: EV_ABS       ABS_PRESSURE         0000056a            
+[     117.078764] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.093224] /dev/input/event12: EV_ABS       ABS_X                00000188            
+[     117.093224] /dev/input/event12: EV_ABS       ABS_Y                000003c2            
+[     117.093224] /dev/input/event12: EV_ABS       ABS_PRESSURE         000005a9            
+[     117.093224] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.109464] /dev/input/event12: EV_ABS       ABS_X                00000192            
+[     117.109464] /dev/input/event12: EV_ABS       ABS_Y                000003c8            
+[     117.109464] /dev/input/event12: EV_ABS       ABS_PRESSURE         000005e8            
+[     117.109464] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.124760] /dev/input/event12: EV_ABS       ABS_X                0000019b            
+[     117.124760] /dev/input/event12: EV_ABS       ABS_Y                000003ce            
+[     117.124760] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000627            
+[     117.124760] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.141998] /dev/input/event12: EV_ABS       ABS_X                000001a4            
+[     117.141998] /dev/input/event12: EV_ABS       ABS_Y                000003d4            
+[     117.141998] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000666            
+[     117.141998] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.156238] /dev/input/event12: EV_ABS       ABS_X                000001ad            
+[     117.156238] /dev/input/event12: EV_ABS       ABS_Y                000003da            
+[     117.156238] /dev/input/event12: EV_ABS       ABS_PRESSURE         000006c5            
+[     117.156238] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.171587] /dev/input/event12: EV_ABS       ABS_X                000001b6            
+[     117.171587] /dev/input/event12: EV_ABS       ABS_Y                000003e0            
+[     117.171587] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000723            
+[     117.171587] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.188108] /dev/input/event12: EV_ABS       ABS_X                000001c0            
+[     117.188108] /dev/input/event12: EV_ABS       ABS_Y                000003e6            
+[     117.188108] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000782            
+[     117.188108] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.201624] /dev/input/event12: EV_ABS       ABS_X                000001c9            
+[     117.201624] /dev/input/event12: EV_ABS       ABS_Y                000003ed            
+[     117.201624] /dev/input/event12: EV_ABS       ABS_PRESSURE         000007e0            
+[     117.201624] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.217029] /dev/input/event12: EV_ABS       ABS_X                000001d2            
+[     117.217029] /dev/input/event12: EV_ABS       ABS_Y                000003f3            
+[     117.217029] /dev/input/event12: EV_ABS       ABS_PRESSURE         0000083f            
+[     117.217029] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.232438] /dev/input/event12: EV_ABS       ABS_X                000001db            
+[     117.232438] /dev/input/event12: EV_ABS       ABS_Y                000003f9            
+[     117.232438] /dev/input/event12: EV_ABS       ABS_PRESSURE         0000089d            
+[     117.232438] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.247607] /dev/input/event12: EV_ABS       ABS_X                000001e5            
+[     117.247607] /dev/input/event12: EV_ABS       ABS_Y                000003ff            
+[     117.247607] /dev/input/event12: EV_ABS       ABS_PRESSURE         000008fc            
+[     117.247607] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.263820] /dev/input/event12: EV_ABS       ABS_X                000001ee            
+[     117.263820] /dev/input/event12: EV_ABS       ABS_Y                00000405            
+[     117.263820] /dev/input/event12: EV_ABS       ABS_PRESSURE         0000095a            
+[     117.263820] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.284616] /dev/input/event12: EV_ABS       ABS_X                000001f7            
+[     117.284616] /dev/input/event12: EV_ABS       ABS_Y                0000040b            
+[     117.284616] /dev/input/event12: EV_ABS       ABS_PRESSURE         000009b9            
+[     117.284616] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.296706] /dev/input/event12: EV_ABS       ABS_X                00000200            
+[     117.296706] /dev/input/event12: EV_ABS       ABS_Y                00000412            
+[     117.296706] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000a17            
+[     117.296706] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.309835] /dev/input/event12: EV_ABS       ABS_X                0000020a            
+[     117.309835] /dev/input/event12: EV_ABS       ABS_Y                00000418            
+[     117.309835] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000a75            
+[     117.309835] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.325669] /dev/input/event12: EV_ABS       ABS_X                00000213            
+[     117.325669] /dev/input/event12: EV_ABS       ABS_Y                0000041e            
+[     117.325669] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000ad4            
+[     117.325669] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.341758] /dev/input/event12: EV_ABS       ABS_X                0000021c            
+[     117.341758] /dev/input/event12: EV_ABS       ABS_Y                00000424            
+[     117.341758] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000b33            
+[     117.341758] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.356241] /dev/input/event12: EV_ABS       ABS_X                00000228            
+[     117.356241] /dev/input/event12: EV_ABS       ABS_Y                0000042f            
+[     117.356241] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000b81            
+[     117.356241] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.370416] /dev/input/event12: EV_ABS       ABS_X                00000235            
+[     117.370416] /dev/input/event12: EV_ABS       ABS_Y                0000043a            
+[     117.370416] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000bd0            
+[     117.370416] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.388283] /dev/input/event12: EV_ABS       ABS_X                00000241            
+[     117.388283] /dev/input/event12: EV_ABS       ABS_Y                00000444            
+[     117.388283] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000c1f            
+[     117.388283] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.401669] /dev/input/event12: EV_ABS       ABS_X                0000024d            
+[     117.401669] /dev/input/event12: EV_ABS       ABS_Y                0000044f            
+[     117.401669] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000c6d            
+[     117.401669] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.418644] /dev/input/event12: EV_ABS       ABS_X                0000025a            
+[     117.418644] /dev/input/event12: EV_ABS       ABS_Y                0000045a            
+[     117.418644] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000cbc            
+[     117.418644] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.433307] /dev/input/event12: EV_ABS       ABS_X                00000266            
+[     117.433307] /dev/input/event12: EV_ABS       ABS_Y                00000465            
+[     117.433307] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000d0b            
+[     117.433307] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.448445] /dev/input/event12: EV_ABS       ABS_X                00000272            
+[     117.448445] /dev/input/event12: EV_ABS       ABS_Y                0000046f            
+[     117.448445] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000d5a            
+[     117.448445] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.464133] /dev/input/event12: EV_ABS       ABS_X                0000027e            
+[     117.464133] /dev/input/event12: EV_ABS       ABS_Y                0000047a            
+[     117.464133] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000da9            
+[     117.464133] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.479900] /dev/input/event12: EV_ABS       ABS_X                0000028b            
+[     117.479900] /dev/input/event12: EV_ABS       ABS_Y                00000485            
+[     117.479900] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000df7            
+[     117.479900] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.493639] /dev/input/event12: EV_ABS       ABS_X                00000297            
+[     117.493639] /dev/input/event12: EV_ABS       ABS_Y                00000490            
+[     117.493639] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000e46            
+[     117.493639] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.509873] /dev/input/event12: EV_ABS       ABS_X                000002a3            
+[     117.509873] /dev/input/event12: EV_ABS       ABS_Y                0000049a            
+[     117.509873] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000e95            
+[     117.509873] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.525952] /dev/input/event12: EV_ABS       ABS_X                000002b0            
+[     117.525952] /dev/input/event12: EV_ABS       ABS_Y                000004a5            
+[     117.525952] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000ee4            
+[     117.525952] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.542177] /dev/input/event12: EV_ABS       ABS_X                000002bc            
+[     117.542177] /dev/input/event12: EV_ABS       ABS_Y                000004b0            
+[     117.542177] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000f32            
+[     117.542177] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.542332] /dev/input/event12: EV_KEY       BTN_TOUCH            UP                  
+[     117.542332] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000000            
+[     117.542332] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     117.542332] /dev/input/event12: EV_KEY       BTN_DIGI             UP                  
+[     117.542332] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+remove device 13: /dev/input/event12

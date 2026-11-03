@@ -34,6 +34,8 @@ import type {
   VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { toolJson } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 isolateToolRegistry();
 
@@ -127,7 +129,8 @@ describe("platform device preparation tools", () => {
     if (!tool) {
       throw new Error(`${name} is not registered`);
     }
-    const result = await tool.handler(args);
+    // Run as MCP ingress does: under the connection the in-band key names (#15663).
+    const result = await withWireConnection(args, (wireArgs) => tool.handler(wireArgs));
     return typeof result === "string" ? JSON.parse(result) : toolJson(result);
   }
 
@@ -1640,7 +1643,9 @@ describe("platform device preparation tools", () => {
     });
 
     try {
-      await Promise.resolve();
+      await drainUntil(() => timer.getPendingTimeouts().includes(10), {
+        description: "Android reset recovery boot deadline",
+      });
       timer.advanceTime(10);
       await expect(preparation).rejects.toThrow(/Timed out waiting for Android AVD reset recovery/);
     } finally {

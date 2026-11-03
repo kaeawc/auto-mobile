@@ -61,7 +61,7 @@ import {
   summarizeOrphanedAvdSnapshots,
   type OrphanedAvdSnapshotSummary,
 } from "./orphanedAvdSnapshots";
-export type { OrphanedAvdSnapshot, OrphanedAvdSnapshotSummary } from "./orphanedAvdSnapshots";
+export type { OrphanedAvdSnapshotSummary } from "./orphanedAvdSnapshots";
 import {
   deviceSnapshotIncarnationInvalidator,
   type DeviceIncarnationInvalidator,

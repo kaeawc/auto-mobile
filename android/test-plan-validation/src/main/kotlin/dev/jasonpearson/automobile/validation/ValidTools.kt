@@ -66,6 +66,7 @@ object ValidTools {
         "pressButton",
         "provisionDevice",
         "recentApps",
+        "ambient",
         "rotaryScroll",
         "rotateCrown",
         "recordDeviceGestures",

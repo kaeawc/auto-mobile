@@ -54,12 +54,26 @@ export function parseAndroidDisplayInfos(output: string): AndroidDisplayInfo[] {
   return records;
 }
 
-/** Map a physical panel key back to Android's current logical display id. */
+/**
+ * The inventory key for a display-service uniqueId. Physical panels drop the `local:`/`external:`
+ * prefix (their key is the bare physical id); overlay displays keep the whole `overlay:<n>` id so
+ * the key can never collide with a physical id or be mistaken for a logical display id.
+ */
+export function panelKeyForUniqueId(uniqueId: string): string {
+  if (uniqueId.startsWith("overlay:") || !uniqueId.includes(":")) {
+    return uniqueId;
+  }
+  return uniqueId.slice(uniqueId.indexOf(":") + 1);
+}
+
+/** Map an inventory panel key back to Android's current logical display id. */
 export function logicalDisplayIdForPanel(
   infos: readonly AndroidDisplayInfo[],
   panelKey: string,
 ): number | undefined {
-  const info = infos.find((entry) => entry.uniqueId?.split(":").slice(1).join(":") === panelKey);
+  const info = infos.find(
+    (entry) => entry.uniqueId !== undefined && panelKeyForUniqueId(entry.uniqueId) === panelKey,
+  );
   return info ? Number(info.logicalId) : undefined;
 }
 

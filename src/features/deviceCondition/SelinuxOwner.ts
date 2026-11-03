@@ -20,6 +20,20 @@ export class SelinuxOwner {
     });
   }
 
+  /** Recover an abandoned root fixture, preserving any baseline already held by a live fixture. */
+  recover(token: object): Promise<void> {
+    return this.serialize(async () => {
+      if (this.requests.has(token)) {
+        return;
+      }
+      if (this.requests.size === 0) {
+        this.baseline = false;
+      }
+      // The abandoned fixture already changed SELinux; release must restore it.
+      this.requests.set(token, true);
+    });
+  }
+
   has(token: object): boolean {
     return this.requests.has(token);
   }

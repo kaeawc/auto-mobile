@@ -12,7 +12,7 @@ import { logger } from "../../utils/logger";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Timer } from "../../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
-import { INTERNAL_MCP_SESSION_PARAM, INTERNAL_NO_DIFF_PARAM } from "../../daemon/wire/constants";
+import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/wire/constants";
 import { getToolCallRecorder } from "../../daemon/toolCallRecordingManager";
 import { formatToolResultLog } from "../toolResultLog";
 import { formatStructuredToolError } from "../../utils/formatStructuredToolError";
@@ -30,7 +30,10 @@ import {
   type ToolOutputArtifactRetention,
 } from "../toolOutputArtifactWriter";
 import { getDefaultToolOutputsDir } from "../../utils/toolOutputArtifacts";
-import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  getToolSelectionContext,
+} from "../../features/toolSelection/toolSelectionContext";
 import { isClientCancelled } from "../../utils/AbortContext";
 import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import type { ToolTraits } from "../toolRegistry";
@@ -414,7 +417,7 @@ function recordCompletedToolCall(
   });
 
   if (toolSuccess) {
-    getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(
+    getToolCallRecorder({ connectionId: currentAutolockMcpSessionId() })?.record(
       name,
       args,
       traits,

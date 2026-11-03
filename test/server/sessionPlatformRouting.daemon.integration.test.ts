@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { isRecord } from "../../src/server/pipeline/isRecord";
@@ -51,6 +52,7 @@ import {
 } from "../../src/server/deviceTools";
 import type { BootedDevice } from "../../src/models";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -149,8 +151,14 @@ test("daemon routes both platforms and explicit session wins over platform", asy
     deviceReadiness: "booted",
   });
   const tool = ToolRegistry.getTool("platformProbe")!;
-  await tool.handler({ platform: "android", __mcpSessionId: "client", keepScreenAwake: false });
-  await tool.handler({ platform: "ios", __mcpSessionId: "client", keepScreenAwake: false });
+  await withWireConnection(
+    { platform: "android", __mcpSessionId: "client", keepScreenAwake: false },
+    (args) => tool.handler(args),
+  );
+  await withWireConnection(
+    { platform: "ios", __mcpSessionId: "client", keepScreenAwake: false },
+    (args) => tool.handler(args),
+  );
   await tool.handler({ platform: "ios", sessionUuid: androidSession, keepScreenAwake: false });
   expect(received).toEqual([devices[0].deviceId, devices[1].deviceId, devices[0].deviceId]);
 }, 30000);
@@ -172,11 +180,14 @@ test("ambiguous platform names candidates and deviceId selects the matching owne
 test("setActiveDevice selects an acquired session without an explicit UUID", async () => {
   await acquireBoth();
   registerUtilityTools();
-  const result = await ToolRegistry.getTool("setActiveDevice")!.handler({
-    deviceId: devices[0].deviceId,
-    platform: "android",
-    __mcpSessionId: "client",
-  });
+  const result = await withWireConnection(
+    {
+      deviceId: devices[0].deviceId,
+      platform: "android",
+      __mcpSessionId: "client",
+    },
+    (args) => ToolRegistry.getTool("setActiveDevice")!.handler(args),
+  );
   expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(androidSession);
 }, 30000);
@@ -232,27 +243,22 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         ["getAndroid", devices[0]],
         ["getApple", devices[1]],
       ] as const) {
-        ToolRegistry.register(
-          toolName,
-          toolName,
-          z.object({ __mcpSessionId: z.string().optional() }).passthrough(),
-          async (toolArgs) => {
-            acquisitionOwners.push(toolArgs.__mcpSessionId);
-            const sessionUuid = await pool.autolockDevice(
-              device.deviceId,
-              device.platform,
-              toolArgs.__mcpSessionId,
-            );
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({ runtime: { session: { sessionUuid } } }),
-                },
-              ],
-            };
-          },
-        );
+        ToolRegistry.register(toolName, toolName, z.object({}).passthrough(), async (toolArgs) => {
+          acquisitionOwners.push(currentAutolockMcpSessionId());
+          const sessionUuid = await pool.autolockDevice(
+            device.deviceId,
+            device.platform,
+            currentAutolockMcpSessionId(),
+          );
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ runtime: { session: { sessionUuid } } }),
+              },
+            ],
+          };
+        });
       }
       ToolRegistry.registerDeviceAware(
         "routingProbe",
@@ -588,11 +594,14 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
 test("setActiveDevice rebinds the session of the device's platform, never the other platform's default (#11167)", async () => {
   await acquireBoth();
   registerUtilityTools();
-  const result = await ToolRegistry.getTool("setActiveDevice")!.handler({
-    deviceId: devices[2].deviceId,
-    platform: "android",
-    __mcpSessionId: "client",
-  });
+  const result = await withWireConnection(
+    {
+      deviceId: devices[2].deviceId,
+      platform: "android",
+      __mcpSessionId: "client",
+    },
+    (args) => ToolRegistry.getTool("setActiveDevice")!.handler(args),
+  );
   expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(manager.getSession(androidSession!)?.assignedDevice).toBe(devices[2].deviceId);
   expect(manager.getSession(iosSession!)?.platform).toBe("ios");

@@ -50,7 +50,8 @@ resolve_apksigner() {
 
 certificate_digest() {
   "$apksigner_bin" verify --print-certs "$1" |
-    awk -F ': ' '/Signer #1 certificate SHA-256 digest:/ { print $2; exit }'
+    # Matches both "Signer #1 certificate ..." (build-tools < 37) and "V2 Signer: certificate ...".
+    awk '/^(Signer #1|V[0-9.]+ Signer( #1)?:) certificate SHA-256 digest:/ { print $NF; exit }'
 }
 
 cleanup_packages() {

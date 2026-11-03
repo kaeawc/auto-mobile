@@ -89,6 +89,7 @@
     "MAX_PROTOTYPE_UPLOAD_PARTS": 16,
     "MAX_PROTOTYPE_KEYFRAME_NODES": 16,
     "MAX_PROTOTYPE_MEDIA_PLAYERS": 4,
+    "MAX_PROTOTYPE_VIDEO_NODES": 64,
     "MAX_PROTOTYPE_ACTIVE_DECODERS": 3,
     "MAX_PROTOTYPE_LOOPS": 8
   },
@@ -12503,6 +12504,13 @@
               "rule": {
                 "kind": "enum",
                 "values": ["none", "dots"]
+              },
+              "optional": true
+            },
+            "indicatorPlacement": {
+              "rule": {
+                "kind": "enum",
+                "values": ["over", "below"]
               },
               "optional": true
             },

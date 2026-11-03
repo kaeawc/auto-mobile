@@ -30,6 +30,7 @@ import {
   TEXT_MCP_REQUEST_HEADROOM_MS,
   DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
 } from "../features/action/textTransportTimeout";
+import { splitIosTextChunks } from "../features/action/sendkeys/IosTextChunks";
 import * as yaml from "js-yaml";
 import { decodePlanYamlContent } from "../utils/plan/planYaml";
 import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
@@ -690,7 +691,15 @@ function resolveTextToolBudgetMs(
           ? record.text
           : undefined
         : record?.value;
-    return typeof text === "string" ? resolveTextCtrlProxyTimeoutMs(text) : 0;
+    if (typeof text !== "string") {
+      return 0;
+    }
+    return request.params?.name === "sendKeys"
+      ? splitIosTextChunks(text).reduce(
+          (budget, chunk) => budget + resolveTextCtrlProxyTimeoutMs(chunk),
+          0,
+        )
+      : resolveTextCtrlProxyTimeoutMs(text);
   });
   const excessMs = timeouts.reduce(
     (budget, timeout) => budget + Math.max(0, timeout - DEFAULT_TEXT_REQUEST_TIMEOUT_MS),

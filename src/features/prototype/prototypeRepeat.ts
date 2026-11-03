@@ -486,6 +486,7 @@ interface Budget {
   effects: number;
   animatedEffects: number;
   keyframeNodes: number;
+  videoNodes: number;
 }
 
 /**
@@ -509,9 +510,17 @@ export function imageSlotUses(value: unknown): number {
     : 1;
 }
 
-function imageUses(node: Raw): number {
+/** The node's own image slots: an `image` costs at least 1, a `videoPlayer` its `poster`. */
+export function nodeImageUses(node: Raw): number {
   if (node.type === "image") {
     return Math.max(1, imageSlotUses(node.asset));
+  }
+  return node.type === "videoPlayer" ? imageSlotUses(node.poster) : 0;
+}
+
+function imageUses(node: Raw): number {
+  if (node.type === "image" || node.type === "videoPlayer") {
+    return nodeImageUses(node);
   }
   const items = Array.isArray(node.items) ? (node.items as unknown[]) : [];
   return items.reduce<number>((sum, item) => sum + imageSlotUses(record(item)?.image), 0);
@@ -590,7 +599,7 @@ export function repeatErrors(
     expandedErrors(
       root,
       "root",
-      { nodes: 0, images: 0, effects: 0, animatedEffects: 0, keyframeNodes: 0 },
+      { nodes: 0, images: 0, effects: 0, animatedEffects: 0, keyframeNodes: 0, videoNodes: 0 },
       { data },
     )
   );

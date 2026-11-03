@@ -8,6 +8,8 @@ import {
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { asMcpConnection } from "../helpers/mcpConnection";
+import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
 
 let deviceUtils: FakeDeviceUtils;
 let matcher: FakeDeviceMatcher;
@@ -53,8 +55,10 @@ for (const platform of ["android", "ios"] as const) {
           deviceId: platform === "android" ? "emulator-5554" : "UDID",
           preferRunning: true,
           createIfMissing: false,
-          __mcpSessionId: "session",
         });
+        // The internal session reaches preparation ambiently, not as a forwarded arg (#15663).
+        expect(args).not.toHaveProperty("__mcpSessionId");
+        expect(currentAutolockMcpSessionId()).toBe("session");
         expect(budgets).toMatchObject({
           bootTimeoutMs: 1234,
           automationReadyTimeoutMs: 5678,
@@ -78,7 +82,10 @@ for (const platform of ["android", "ios"] as const) {
       __mcpSessionId: "session",
     };
     const handler = platform === "android" ? handlers.getAndroidHandler : handlers.getAppleHandler;
-    await expect(handler(raw, undefined, controller.signal)).rejects.toBe(failure);
+    // Ingress writes the key in-band and runs the call under that connection (#15663).
+    await expect(
+      asMcpConnection("session", () => handler(raw, undefined, controller.signal)),
+    ).rejects.toBe(failure);
     expect(events).toEqual(["reserve:stable", "prepare", "release"]);
     expect(raw.__mcpSessionId).toBe("session");
     expect(handlers.stripInternalAcquisitionParams(raw)).not.toHaveProperty("__mcpSessionId");

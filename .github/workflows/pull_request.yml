@@ -329,6 +329,9 @@ jobs:
             android:
               - 'android/**'
               - 'scripts/android/**'
+              # The deviceCondition memory-pressure payload build (#16402).
+              - 'scripts/ci/verify-lmk-pressure-binaries.sh'
+              - '.github/workflows/build-lmk-pressure.yml'
               # Shared with the daemon's TS test and read by the Kotlin
               # CoordinationParamsParityTest, so a fixture-only edit must run it.
               - 'test/fixtures/plan-coordination-params/**'
@@ -2411,6 +2414,17 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
+  # Keeps the deviceCondition memory-pressure payload (android/lmk-pressure/)
+  # building for both ABIs, with the ELF and reproducibility checks Prepare
+  # Release relies on (#16402). Advisory: not in the green-main ruleset.
+  build-lmk-pressure:
+    name: "Build lmk-pressure binaries"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.android_should_run == 'true'
+    uses: ./.github/workflows/build-lmk-pressure.yml
+    with:
+      upload-artifact: false
+
   # =============================================================================
   # Kotlin Code Coverage
   # =============================================================================
@@ -2439,6 +2453,9 @@ jobs:
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
+          # Restore the android-all jars merge.yml's coverage job saves, so
+          # Robolectric does not download them at test time (#16396).
+          robolectric-jar-cache: "restore"
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Generate Kotlin Coverage Badge"

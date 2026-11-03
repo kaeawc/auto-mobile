@@ -137,6 +137,7 @@ export interface DeviceConditionInput {
    */
   faults?: {
     battery?: "unplug" | "low" | "full" | typeof DEVICE_CONDITION_UNSET;
+    memoryPressure?: "on" | typeof DEVICE_CONDITION_UNSET;
     lowPower?: "on" | typeof DEVICE_CONDITION_UNSET;
     doze?: "on" | typeof DEVICE_CONDITION_UNSET;
     thermal?: "throttling" | "critical" | typeof DEVICE_CONDITION_UNSET;
@@ -254,6 +255,12 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .enum(["unplug", "low", "full", DEVICE_CONDITION_UNSET])
           .optional()
           .describe("Battery fault via `dumpsys battery` (unplug / low 15% / full), or unset."),
+        memoryPressure: z
+          .enum(["on", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Hold anonymous memory until Android lmkd kills background apps. Unsupported if no kill follows. Uses a local build or AUTOMOBILE_LMK_PRESSURE_DIR, else downloads the checksum-verified release binary; reset stops the payload and removes its files. Or unset.",
+          ),
         lowPower: z
           .enum(["on", DEVICE_CONDITION_UNSET])
           .optional()
@@ -320,7 +327,7 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .union([z.literal(DEVICE_CONDITION_UNSET), trimTargetSchema()])
           .optional()
           .describe(
-            "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running. Nothing to reset; 'unset' is a no-op.",
+            "Send a running app an onTrimMemory level once ({ package, level }) with `am send-trim-memory`. The app must be running; a foreground app must get a RUNNING_* level (RUNNING_MODERATE, RUNNING_LOW, RUNNING_CRITICAL) because Android refuses HIDDEN, BACKGROUND, MODERATE and COMPLETE for a foreground app. Nothing to reset; 'unset' is a no-op.",
           ),
         clearPackageData: z
           .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])

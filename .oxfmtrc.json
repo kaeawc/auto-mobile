@@ -24,6 +24,8 @@
     "test/fixtures/ios-sdk-network/*.json",
     "test/fixtures/ios-lock-state/**",
     "test/fixtures/ios-notification-center/*.json",
+    "test/fixtures/ios-typed-text/*.json",
+    "test/fixtures/systemTray/**",
     "test/fixtures/ios-tcc-photos/**/*.json",
     "test/fixtures/ios-devicectl/list-devices-*.json",
     "test/fixtures/ios-devicectl/info-*.json",

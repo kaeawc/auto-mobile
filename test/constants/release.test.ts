@@ -3,6 +3,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   APK_SHA256_CHECKSUM,
+  AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME,
+  AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM,
+  resolveAudioLoopbackHelperChecksum,
+  resolveAudioLoopbackHelperUrl,
   APK_URL,
   AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV,
   DAEMON_PACKAGE_NAME,
@@ -35,6 +39,9 @@ import {
   resolvePrototypeViewerUrl,
   resolveNetworkFilterChecksum,
   resolveNetworkFilterUrl,
+  LMK_PRESSURE_ASSET_FILENAMES,
+  resolveLmkPressureChecksum,
+  resolveLmkPressureUrl,
   resolveScreenCaptureHelperChecksum,
   resolveScreenCaptureHelperUrl,
   resolveVideoJarChecksum,
@@ -813,6 +820,99 @@ describe("prototype-viewer release delivery (#12255)", function () {
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const checksum = entry.prototypeViewerSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
+  });
+});
+
+describe("audio-loopback-helper release delivery", () => {
+  const checksum = "a".repeat(64);
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "1.0.0",
+      apkSha256: "apk",
+      ipaSha256: "ipa",
+      runnerSha256: "runner",
+      audioLoopbackHelperSha256: checksum,
+    },
+    { version: "0.9.0", apkSha256: "apk", ipaSha256: "ipa", runnerSha256: "runner" },
+  ];
+
+  test("uses the audio archive with the selected version and asset mirror", () => {
+    expect(AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME).toBe(
+      "audio-loopback-helper-macos-universal.zip",
+    );
+    expect(resolveAudioLoopbackHelperUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/1.0.0/${AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME}`,
+    );
+    expect(
+      resolveAudioLoopbackHelperUrl(
+        {
+          AUTOMOBILE_VERSION: "0.9.0",
+          AUTOMOBILE_ASSET_BASE_URL: "https://mirror.example/releases",
+        },
+        registry,
+      ),
+    ).toBe(`https://mirror.example/releases/0.9.0/${AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME}`);
+  });
+
+  test("selects the checksum for the pinned version and fails closed for unknown releases", () => {
+    expect(resolveAudioLoopbackHelperChecksum({}, registry)).toBe(checksum);
+    expect(resolveAudioLoopbackHelperChecksum({ AUTOMOBILE_VERSION: "0.9.0" }, registry)).toBe("");
+    expect(resolveAudioLoopbackHelperChecksum({ AUTOMOBILE_VERSION: "9.0.0" }, registry)).toBe("");
+    expect(resolveAudioLoopbackHelperChecksum({}, [])).toBe("");
+  });
+
+  test("committed pins are empty or SHA-256 values and the scalar follows the registry", () => {
+    expect(AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM).toBe(resolveAudioLoopbackHelperChecksum({}));
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const checksum = entry.audioLoopbackHelperSha256 ?? "";
+      expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
+  });
+});
+
+describe("lmk-pressure release delivery (#16402)", function () {
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "0.0.90",
+      apkSha256: "apk90",
+      ipaSha256: "ipa90",
+      runnerSha256: "runner90",
+      lmkPressureArm64Sha256: "arm90",
+      lmkPressureX8664Sha256: "x8690",
+    },
+    { version: "0.0.89", apkSha256: "apk89", ipaSha256: "ipa89", runnerSha256: "runner89" },
+  ];
+
+  test("uses one fixed release asset name per ABI", function () {
+    expect(LMK_PRESSURE_ASSET_FILENAMES).toEqual({
+      "arm64-v8a": "automobile-lmk-pressure-arm64-v8a",
+      x86_64: "automobile-lmk-pressure-x86_64",
+    });
+  });
+
+  test("builds a version-pinned release URL for each ABI", function () {
+    expect(resolveLmkPressureUrl("arm64-v8a", {}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.90/automobile-lmk-pressure-arm64-v8a`,
+    );
+    expect(resolveLmkPressureUrl("x86_64", {}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.90/automobile-lmk-pressure-x86_64`,
+    );
+  });
+
+  test("resolves each ABI's own checksum and leaves pre-delivery releases unverifiable", function () {
+    expect(resolveLmkPressureChecksum("arm64-v8a", {}, registry)).toBe("arm90");
+    expect(resolveLmkPressureChecksum("x86_64", {}, registry)).toBe("x8690");
+    expect(resolveLmkPressureChecksum("x86_64", { AUTOMOBILE_VERSION: "0.0.89" }, registry)).toBe(
+      "",
+    );
+  });
+
+  test("registry lmk-pressure checksums are empty or SHA-256 values", function () {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      for (const checksum of [entry.lmkPressureArm64Sha256, entry.lmkPressureX8664Sha256]) {
+        expect((checksum ?? "") === "" || /^[a-f0-9]{64}$/.test(checksum ?? "")).toBe(true);
+      }
     }
   });
 });

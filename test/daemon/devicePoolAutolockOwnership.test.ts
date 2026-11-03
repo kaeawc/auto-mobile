@@ -33,6 +33,7 @@ import {
 import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -76,6 +77,13 @@ async function harness(deviceUtils?: FakeDeviceUtils) {
       await db.destroy();
     },
   };
+}
+
+/** Call the registered getAndroid as MCP ingress does: under the connection the args name (#15663). */
+function getAndroid(args: { deviceId: string; __mcpSessionId: string }): Promise<unknown> {
+  return withWireConnection(args, (wireArgs) =>
+    ToolRegistry.getTool("getAndroid")!.handler(wireArgs),
+  );
 }
 
 async function withAutolock(work: () => Promise<void>): Promise<void> {
@@ -301,7 +309,7 @@ test("registered getAndroid preserves its caller's UUID and rejects a different 
     });
     registerDeviceTools();
     try {
-      const handler = ToolRegistry.getTool("getAndroid")!.handler;
+      const handler = getAndroid;
       const args = { deviceId: "emulator-5554", __mcpSessionId: "agent-A" };
       const first = getDeviceSessionIdFromResult(await handler(args));
       expect(first).toBeDefined();
@@ -363,7 +371,7 @@ test.each(["agent-B", "agent-A"])(
       registerDeviceTools();
       try {
         const owner = await h.pool.autolockDevice(device.deviceId, "android", "agent-A", image);
-        const acquiring = ToolRegistry.getTool("getAndroid")!.handler({
+        const acquiring = getAndroid({
           deviceId: device.deviceId,
           __mcpSessionId: client,
         });
@@ -435,7 +443,7 @@ test("System UI recovery rejects a remapped client while its first target is idl
     registerDeviceTools();
     try {
       await expect(
-        ToolRegistry.getTool("getAndroid")!.handler({
+        getAndroid({
           deviceId: device.deviceId,
           __mcpSessionId: "agent-A",
         }),
@@ -505,7 +513,7 @@ test.each([false, true])(
       });
       registerDeviceTools();
       try {
-        const acquiring = ToolRegistry.getTool("getAndroid")!.handler({
+        const acquiring = getAndroid({
           deviceId: device.deviceId,
           __mcpSessionId: "agent-A",
         });

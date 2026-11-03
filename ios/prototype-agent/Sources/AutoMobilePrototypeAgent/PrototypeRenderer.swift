@@ -1577,15 +1577,17 @@
             }
         }
 
-        /// Page dots are laid out after the pages (a row below a horizontal pager, a column beside a
-        /// vertical one), so they never cover a page. They stay out of the accessibility tree.
+        /// Dots default to after the pages; an explicit overlay preserves the full page size.
+        /// Both placements stay out of accessibility and hit testing.
         var body: some View {
             if PrototypeCarousel.showsIndicator(node) {
-                switch PrototypeCarousel.indicatorSide(vertical: layout.vertical) {
+                switch PrototypeCarousel.indicatorSide(vertical: layout.vertical, placement: node.indicatorPlacement) {
                 case .below:
                     VStack(spacing: 0) { content; indicator }
                 case .beside:
                     HStack(spacing: 0) { content; indicator }
+                case .over:
+                    content.overlay(alignment: layout.vertical ? .trailing : .bottom) { indicator }
                 }
             } else {
                 content

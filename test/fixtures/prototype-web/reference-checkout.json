@@ -1,0 +1,69 @@
+{
+  "id": "checkout",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "name": "Ada", "agree": true, "showPromo": false },
+  "derive": {
+    "totalText": {
+      "of": { "value": 42.5 },
+      "format": { "currency": { "code": "USD" } },
+      "locale": "en-US"
+    }
+  },
+  "data": {
+    "items": [
+      { "id": "a", "title": "Tea", "price": 3 },
+      { "id": "b", "title": "Cake", "price": 4.25 }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "cart",
+    "style": { "width": "fill", "height": "fill", "background": "surface" },
+    "screens": {
+      "cart": {
+        "type": "column",
+        "children": [
+          { "type": "topAppBar", "title": "Hi {name}" },
+          {
+            "type": "column",
+            "testTag": "lines",
+            "style": { "padding": { "start": 16, "end": 16 }, "spacing": 8 },
+            "repeat": {
+              "items": { "path": "/items" },
+              "as": "line",
+              "key": "id",
+              "derive": {
+                "priceText": {
+                  "of": { "item": "price" },
+                  "format": { "currency": { "code": "USD" } },
+                  "locale": "en-US"
+                }
+              }
+            },
+            "children": [{ "type": "text", "text": "{line.title}: {line.priceText}" }]
+          },
+          {
+            "type": "text",
+            "testTag": "promo",
+            "text": "Promo",
+            "visibleWhen": { "key": "showPromo", "equals": true }
+          },
+          { "type": "checkbox", "stateKey": "agree", "label": "I agree" },
+          {
+            "type": "text",
+            "text": "Total {derived:totalText}",
+            "style": { "textSize": 20, "fontWeight": 600, "color": "primary" }
+          },
+          { "type": "progress", "id": "spend" },
+          {
+            "type": "button",
+            "label": "Pay",
+            "onTap": [{ "type": "setState", "key": "agree", "value": false }]
+          }
+        ]
+      },
+      "done": { "type": "text", "text": "Thanks" }
+    }
+  }
+}

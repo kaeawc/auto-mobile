@@ -1,3 +1,4 @@
+import { DevicePendingImeRestores } from "../../../src/features/action/sendkeys/PendingImeRestore";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { createExecResult } from "../../../src/utils/execResult";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
@@ -242,7 +243,9 @@ export function createSendKeysHarness(
     },
   };
   const adbFactory = createAdbFactory(adb, deliveries);
+  const pendingImeRestores = new DevicePendingImeRestores();
   return {
+    pendingImeRestores,
     adb,
     adbFactory,
     client,
@@ -252,6 +255,7 @@ export function createSendKeysHarness(
     clientCalls,
     deliveries,
     executor: new DefaultSendKeysCommandExecutor(device, adbFactory, observe, {
+      pendingImeRestores,
       timer,
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },

@@ -14,10 +14,14 @@ export interface NotificationUIDetector {
 
   /**
    * Returns `true` when the view hierarchy snapshot shows the
-   * notification shade (Android) or NotificationCenter (iOS) open.
+   * notification shade (Android) or NotificationCenter (iOS) open. iOS can
+   * also use the same observation's lock state for a tray over an app.
    * `undefined` snapshots return `false`.
    */
-  isTrayOpen(viewHierarchy?: ViewHierarchyResult): boolean;
+  isTrayOpen(
+    viewHierarchy?: ViewHierarchyResult,
+    deviceLock?: ObserveResult["deviceLock"],
+  ): boolean;
 
   /**
    * Open the notification shade / NotificationCenter. The observation
@@ -28,6 +32,9 @@ export interface NotificationUIDetector {
 
   /** Close the notification shade / NotificationCenter. See {@link expandTray} on `observation`. */
   collapseTray(observation?: ObserveResult): Promise<void>;
+
+  /** Refresh iOS lock evidence before polling an app-owned cover sheet. */
+  invalidateLockState?(): void;
 
   /**
    * Resolve a `minTimestamp` for the next observation request so

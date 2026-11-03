@@ -17,7 +17,7 @@ import {
 } from "../../../src/features/prototype/prototypeTextTarget";
 import { prototypeSpecSchema } from "../../../src/features/prototype/prototypeSpec";
 import { android, ios, createSendKeysHarness } from "./SendKeysTestHarness";
-import { typedObservation } from "./IosTypedTextTestHarness";
+import { typedObservation, unfocusedObservation } from "./IosTypedTextTestHarness";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import type { ViewHierarchyNode, ObserveResult } from "../../../src/models";
@@ -289,8 +289,11 @@ test("Android refused and reverted text fails with stored value and final observ
 
 test("iOS accepted state has one before-read and one verification request with no warning", async () => {
   const r = iosReader();
-  const result = await harness("ios", { reader: r.reader }).run();
+  const h = harness("ios", { reader: r.reader });
+  h.observer.execute = async () => unfocusedObservation();
+  const result = await h.run();
   expect(result.success).toBe(true);
+  expect(h.inserted).toEqual(["Rb one"]);
   expect(result.commands[0]?.warning).toBeUndefined();
   expect(r.agent.requests.map((request) => request.type)).toEqual([
     "get_prototype_status",

@@ -99,53 +99,54 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## 📱 Devices & system
 
-| Tool                                        | What it does                                                                         |
-| ------------------------------------------- | ------------------------------------------------------------------------------------ |
-| 📃 <code>listDevices</code>                 | List booted devices                                                                  |
-| 💿 <code>listDeviceImages</code>            | List device images                                                                   |
-| 🤖 <code>getAndroid</code>                  | Find or recover an Android AVD and prepare it for automation                         |
-| 🍎 <code>getApple</code>                    | Find or recover an iOS Simulator and prepare it for automation                       |
-| 🏗️ <code>provisionDevice</code>             | Provision exact virtual device                                                       |
-| 🧰 <code>setDeviceResources</code>          | Set selected device resources and verify native state                                |
-| ⚖️ <code>reconcileDeviceResources</code>    | Compare a simulator to a requested resource map                                      |
-| ✅ <code>setActiveDevice</code>             | Pick the active device for this connection                                           |
-| 🔌 <code>killDevice</code>                  | Kill device                                                                          |
-| 🗑️ <code>deleteDevice</code>                | Stop and permanently delete a device, with verified platform-inventory absence       |
-| 💾 <code>deviceSnapshot</code>              | Capture or restore device snapshot                                                   |
-| 🔃 <code>rotate</code>                      | Rotate device orientation                                                            |
-| 📐 <code>setPosture</code>                  | Set foldable / Duo posture                                                           |
-| 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                       |
-| 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                     |
-| 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                  |
-| ⌚ <code>rotateCrown</code>                 | watchOS: rotate the Digital Crown by a signed delta with optional velocity           |
-| 🌍 <code>openLink</code>                    | Open URL in browser                                                                  |
-| 🏠 <code>homeScreen</code>                  | Go to home screen                                                                    |
-| 🕘 <code>recentApps</code>                  | Open recent apps                                                                     |
-| 🔔 <code>systemTray</code>                  | System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)    |
-| 🔓 <code>wakeAndUnlock</code>               | Wake a device and unlock its keyguard                                                |
-| 🌍 <code>changeLocalization</code>          | Change locale, time zone, text direction, time format, and calendar system           |
-| 🩺 <code>getDeviceState</code>              | Read clock, DND, connectivity, and other device state                                |
-| 🔧 <code>setDeviceState</code>              | Set DND, airplane mode, and other device state                                       |
-| 🖥️ <code>displayConfig</code>               | Read or set font scale, density, and display size                                    |
-| 🎨 <code>displayProfile</code>              | Apply an OEM-style display profile (Android)                                         |
-| 🍏 <code>getIosSimulatorCapabilities</code> | Discover biometric capabilities for a selected iOS Simulator device type and runtime |
-| 🪪 <code>biometricAuth</code>               | Simulate biometric success or failure                                                |
-| 📳 <code>shake</code>                       | Shake the device (simulator/emulator)                                                |
-| 🧲 <code>setSensor</code>                   | Set an emulator sensor (accelerometer, gyro, …)                                      |
-| 🎙️ <code>injectAudioInput</code>            | Emulator or simulator: play a WAV file or tone into the microphone. Off by default   |
-| ⏹️ <code>stopAudioInput</code>              | Stop an audio injection. Off by default                                              |
-| 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default      |
-| 📞 <code>phoneCall</code>                   | Simulate an incoming phone call                                                      |
-| 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                             |
-| 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                               |
-| 📣 <code>postNotification</code>            | Post notification via Android SDK hooks or iOS Simulator simctl push                 |
-| 🔕 <code>getNotificationPolicy</code>       | Read app notification/DND policy state                                               |
-| 🔕 <code>setNotificationPolicy</code>       | Set app notification/DND policy state                                                |
-| 🛂 <code>getAppPermissions</code>           | Read app permission state                                                            |
-| 🛂 <code>setAppPermissions</code>           | userId grant/revoke; device-wide reset ['all']; Android notification state           |
-| ☠️ <code>killProfile</code>                 | Simulate an OEM background-kill policy (Android)                                     |
-| 🏭 <code>manufacturerProfile</code>         | Approximate an OEM device (Android)                                                  |
-| ⚠️ <code>systemAlerts</code>                | Auto-answer OS permission and system alerts                                          |
+| Tool                                        | What it does                                                                            |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 📃 <code>listDevices</code>                 | List booted devices                                                                     |
+| 💿 <code>listDeviceImages</code>            | List device images                                                                      |
+| 🤖 <code>getAndroid</code>                  | Find or recover an Android AVD and prepare it for automation                            |
+| 🍎 <code>getApple</code>                    | Find or recover an iOS Simulator and prepare it for automation                          |
+| 🏗️ <code>provisionDevice</code>             | Provision exact virtual device                                                          |
+| 🧰 <code>setDeviceResources</code>          | Set selected device resources and verify native state                                   |
+| ⚖️ <code>reconcileDeviceResources</code>    | Compare a simulator to a requested resource map                                         |
+| ✅ <code>setActiveDevice</code>             | Pick the active device for this connection                                              |
+| 🔌 <code>killDevice</code>                  | Kill device                                                                             |
+| 🗑️ <code>deleteDevice</code>                | Stop and permanently delete a device, with verified platform-inventory absence          |
+| 💾 <code>deviceSnapshot</code>              | Capture or restore device snapshot                                                      |
+| 🔃 <code>rotate</code>                      | Rotate device orientation                                                               |
+| 📐 <code>setPosture</code>                  | Set foldable / Duo posture                                                              |
+| 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                          |
+| 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                        |
+| 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                     |
+| 🌙 <code>ambient</code>                     | Wear OS sleep/wake power-state change; wakefulness readback does not prove ambient mode |
+| ⌚ <code>rotateCrown</code>                 | watchOS: rotate the Digital Crown by a signed delta with optional velocity              |
+| 🌍 <code>openLink</code>                    | Open URL in browser                                                                     |
+| 🏠 <code>homeScreen</code>                  | Go to home screen                                                                       |
+| 🕘 <code>recentApps</code>                  | Open recent apps                                                                        |
+| 🔔 <code>systemTray</code>                  | System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)       |
+| 🔓 <code>wakeAndUnlock</code>               | Wake a device and unlock its keyguard                                                   |
+| 🌍 <code>changeLocalization</code>          | Change locale, time zone, text direction, time format, and calendar system              |
+| 🩺 <code>getDeviceState</code>              | Read clock, DND, connectivity, and other device state                                   |
+| 🔧 <code>setDeviceState</code>              | Set DND, airplane mode, and other device state                                          |
+| 🖥️ <code>displayConfig</code>               | Read or set font scale, density, and display size                                       |
+| 🎨 <code>displayProfile</code>              | Apply an OEM-style display profile (Android)                                            |
+| 🍏 <code>getIosSimulatorCapabilities</code> | Discover biometric capabilities for a selected iOS Simulator device type and runtime    |
+| 🪪 <code>biometricAuth</code>               | Simulate biometric success or failure                                                   |
+| 📳 <code>shake</code>                       | Shake the device (simulator/emulator)                                                   |
+| 🧲 <code>setSensor</code>                   | Set an emulator sensor (accelerometer, gyro, …)                                         |
+| 🎙️ <code>injectAudioInput</code>            | Emulator or simulator: play a WAV file or tone into the microphone. Off by default      |
+| ⏹️ <code>stopAudioInput</code>              | Stop an audio injection. Off by default                                                 |
+| 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default         |
+| 📞 <code>phoneCall</code>                   | Simulate an incoming phone call                                                         |
+| 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                                |
+| 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                                  |
+| 📣 <code>postNotification</code>            | Post notification via Android SDK hooks or iOS Simulator simctl push                    |
+| 🔕 <code>getNotificationPolicy</code>       | Read app notification/DND policy state                                                  |
+| 🔕 <code>setNotificationPolicy</code>       | Set app notification/DND policy state                                                   |
+| 🛂 <code>getAppPermissions</code>           | Read app permission state                                                               |
+| 🛂 <code>setAppPermissions</code>           | userId grant/revoke; device-wide reset ['all']; Android notification state              |
+| ☠️ <code>killProfile</code>                 | Simulate an OEM background-kill policy (Android)                                        |
+| 🏭 <code>manufacturerProfile</code>         | Approximate an OEM device (Android)                                                     |
+| ⚠️ <code>systemAlerts</code>                | Auto-answer OS permission and system alerts                                             |
 
 ## 🌐 Network, plans & recording
 
@@ -317,4 +318,5 @@ of rows, a full-screen metric (one large number with a label and unit), a two-bu
 
 The mockup is a phone overlay sized like a watch. It does not simulate the Digital Crown, Always-On
 or wrist-down dimming, real watchOS or Wear OS fonts and controls, or the round Wear OS screen, and
-nothing runs on a watch. Check the final design on a real watch.
+nothing runs on a watch. Check the final design on a real watch. To drive a watch app itself, see
+[Apple Watch simulators](using/apple-watch.md).

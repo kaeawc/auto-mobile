@@ -2,9 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
-  internalLiveDeadlineKey,
-  internalMcpSessionId,
-  internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
 } from "../../src/server/internalToolParams";
@@ -29,31 +26,7 @@ describe("call execution identity (#15663)", () => {
   });
 });
 
-describe("internal call identity readers", () => {
-  test("read the in-band keys a handler's args carry", () => {
-    expect(internalMcpSessionId({ __mcpSessionId: "mcp-1" })).toBe("mcp-1");
-  });
-
-  test("an absent key reads as absent", () => {
-    expect(internalMcpSessionId({})).toBeUndefined();
-  });
-
-  test("a value of the wrong type reads as absent", () => {
-    expect(internalMcpSessionId({ __mcpSessionId: null })).toBeUndefined();
-  });
-
-  test("a blank connection identity is still a string, as the stages read it today", () => {
-    expect(internalMcpSessionId({ __mcpSessionId: "" })).toBe("");
-  });
-});
-
 describe("start-device handoff readers", () => {
-  test("one-shot CLI is only an exact true", () => {
-    expect(internalOneShotCli({ __oneShotCli: true })).toBe(true);
-    expect(internalOneShotCli({ __oneShotCli: "true" })).toBe(false);
-    expect(internalOneShotCli({})).toBe(false);
-  });
-
   test("restart-resume fields read through with their declared types", () => {
     const targets = [{ sessionId: "s1" }] as const;
     const args = { __restartResumeTargets: targets, __restartResumeSessionUuid: "s1" };
@@ -74,12 +47,6 @@ describe("start-device handoff readers", () => {
 });
 
 describe("provisioning handoff readers", () => {
-  test("the live deadline key reads only a string", () => {
-    expect(internalLiveDeadlineKey({ __mcpLiveDeadlineKey: "k1" })).toBe("k1");
-    expect(internalLiveDeadlineKey({ __mcpLiveDeadlineKey: 1 })).toBeUndefined();
-    expect(internalLiveDeadlineKey({})).toBeUndefined();
-  });
-
   test("adopting a resume session never replaces one the args already name", () => {
     const named: { __restartResumeSessionUuid?: string } = { __restartResumeSessionUuid: "mine" };
     adoptRestartResumeSessionUuid(named, "other");

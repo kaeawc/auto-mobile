@@ -83,7 +83,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper prototype-agent prototype-viewer network-filter; do
+  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar lmk-pressure screen-capture-helper audio-loopback-helper prototype-agent prototype-viewer network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -309,16 +309,20 @@
     .github/workflows/build-control-proxy-apk.yml \
     .github/workflows/build-protoviewer-apk.yml \
     .github/workflows/build-video-server-jar.yml \
+    .github/workflows/build-lmk-pressure.yml \
     .github/workflows/build-screen-capture-helper.yml \
+    .github/workflows/build-audio-loopback-helper.yml \
     .github/workflows/build-prototype-agent.yml \
     .github/workflows/build-prototype-viewer.yml; do
     run yq -r '.on.workflow_call.inputs."artifact-retention-days".default' "$workflow"
     [ "$status" -eq 0 ]
     [ "$output" = "7" ]
 
+    # Every upload in the builder (the ProtoViewer AAB and mapping too) honours the retention input.
     run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .with."retention-days"' "$workflow"
     [ "$status" -eq 0 ]
-    [ "$output" = '${{ inputs.artifact-retention-days }}' ]
+    [ -n "$output" ]
+    [ "$(sort -u <<<"$output")" = '${{ inputs.artifact-retention-days }}' ]
   done
 
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with."retention-days"' .github/workflows/prepare-release.yml
@@ -414,6 +418,32 @@
   grep -Fq '"network-filter"' "$release"
   grep -Fq "/tmp/automobile-network-filter-macos-universal.zip" "$release"
   grep -Fq "entry.networkFilterSha256" "$release"
+}
+
+@test "prepare-release records, verifies, and ships both lmk-pressure binaries (#16402)" {
+  local prepare=".github/workflows/prepare-release.yml"
+  local release=".github/workflows/release.yml"
+  grep -Fq "uses: ./.github/workflows/build-lmk-pressure.yml" "$prepare"
+  grep -Fq "LMK_PRESSURE_ARM64_SHA256: \${{ needs.build-candidate-lmk-pressure.outputs.arm64_sha256 }}" "$prepare"
+  grep -Fq "LMK_PRESSURE_X86_64_SHA256: \${{ needs.build-candidate-lmk-pressure.outputs.x86_64_sha256 }}" "$prepare"
+  grep -Fq "verify-artifact-sha256.sh /tmp/automobile-lmk-pressure-arm64-v8a lmkpressurearm64" "$prepare"
+  grep -Fq "verify-artifact-sha256.sh /tmp/automobile-lmk-pressure-x86_64 lmkpressurex8664" "$prepare"
+  grep -Fq '"lmk-pressure"' "$prepare"
+  grep -Fq '"lmk-pressure"' "$release"
+  grep -Fq "entry.lmkPressureArm64Sha256" "$release"
+  grep -Fq "entry.lmkPressureX8664Sha256" "$release"
+  grep -Fq "/tmp/automobile-lmk-pressure-arm64-v8a" "$release"
+  grep -Fq "/tmp/automobile-lmk-pressure-x86_64" "$release"
+}
+
+@test "lmk-pressure builder checks ELF targets and reproducibility, and uploads both binaries (#16402)" {
+  local workflow=".github/workflows/build-lmk-pressure.yml"
+  grep -Fq "bash scripts/ci/verify-lmk-pressure-binaries.sh build/lmk-pressure" "$workflow"
+  grep -Fq "name: Verify reproducible build" "$workflow" || grep -Fq 'name: "Verify reproducible build"' "$workflow"
+  grep -Fq "name: lmk-pressure" "$workflow"
+  grep -Fq "/tmp/automobile-lmk-pressure-arm64-v8a" "$workflow"
+  grep -Fq "/tmp/automobile-lmk-pressure-x86_64" "$workflow"
+  grep -Fq "uses: ./.github/workflows/build-lmk-pressure.yml" .github/workflows/pull_request.yml
 }
 
 @test "network-filter builder packs with ditto, exposes the archive sha256, and uploads it" {
@@ -908,7 +938,10 @@ wiring_requires_yq() {
 
   run yq -r '.jobs.build.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
   [ "$status" -eq 0 ]
-  [ "$output" = ":protoviewer:assembleRelease" ]
+  # The Play pipeline (#14147) adds bundleRelease through build-aab; releases build the APK only.
+  [ "$output" = "\${{ inputs.build-aab && ':protoviewer:assembleRelease :protoviewer:bundleRelease' || ':protoviewer:assembleRelease' }}" ]
+  run yq -r '.jobs."build-candidate-protoviewer-apk".with."build-aab"' .github/workflows/prepare-release.yml
+  [ "$output" = "null" ]
 
   run yq -r '.jobs.build.env.PROTOVIEWER_REQUIRE_RELEASE_SIGNING' "$workflow"
   [ "$status" -eq 0 ]
@@ -1003,6 +1036,10 @@ wiring_requires_yq() {
   [ "$(grep -c 'check-protoviewer-artifact-policy.ts' "$gate")" -eq 2 ]
   ! grep -Fq -- "--allow-snapshot" "$gate"
   grep -Fq "check-protoviewer-artifact-policy.ts android" ".github/workflows/pull_request.yml"
+  # The candidate gate builds with the release versionName, or the -SNAPSHOT check fails it.
+  [ "$(yq -r '.jobs."build-candidate-protoviewer-artifact-policy".with."release-version"' "$prepare")" = \
+    '${{ needs.prepare-version.outputs.protoviewer_version }}' ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_RELEASE_VERSION' "$gate")" = '${{ inputs.release-version }}' ]
 }
 
 @test "ProtoViewer APK build feeds the PROTOVIEWER_* signing and version inputs the convention reads (#15301)" {
@@ -1066,4 +1103,23 @@ wiring_requires_yq() {
   run yq -r '.jobs."prepare-version".steps[] | select(.id == "protoviewer-version") | .env.RELEASE_VERSION' "$workflow"
   [ "$status" -eq 0 ]
   [ "$output" = '${{ inputs.version }}' ]
+}
+
+
+@test "audio-loopback helper is built, pinned, verified and published from prepared artifacts" {
+  local prepare=".github/workflows/prepare-release.yml"
+  local release=".github/workflows/release.yml"
+  local builder=".github/workflows/build-audio-loopback-helper.yml"
+  grep -Fq "uses: ./.github/workflows/build-audio-loopback-helper.yml" "$prepare"
+  grep -Fq 'AUDIO_LOOPBACK_HELPER_SHA256: ${{ needs.build-candidate-audio-loopback-helper.outputs.sha256 }}' "$prepare"
+  for workflow in "$prepare" "$release"; do
+    grep -Fq '"audio-loopback-helper"' "$workflow"
+  done
+  grep -Fq "verify-artifact-sha256.sh /tmp/audio-loopback-helper-macos-universal.zip audioloopbackhelper" "$prepare"
+  ! grep -Fq "uses: ./.github/workflows/build-audio-loopback-helper.yml" "$release"
+  grep -Fq "entry.audioLoopbackHelperSha256" "$release"
+  grep -Fq "setup-macos-signing-keychain.sh" "$builder"
+  grep -Fq "build-audio-loopback-helper-release.sh" "$builder"
+  grep -Fq "name: audio-loopback-helper" "$builder"
+  grep -Fq "path: /tmp/audio-loopback-helper-macos-universal.zip" "$builder"
 }

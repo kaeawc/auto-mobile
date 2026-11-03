@@ -1,5 +1,7 @@
-import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/wire/constants";
-import { getToolSelectionContext } from "../toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  getToolSelectionContext,
+} from "../toolSelection/toolSelectionContext";
 
 // Leaf module: shared by deviceLifecycleCore and lifecycleDeviceOwnership so neither
 // imports the other (#11827).
@@ -13,10 +15,9 @@ export interface LifecycleRequester {
 /**
  * The requester of a plain (`ToolRegistry.register`) tool call. Such tools never pass through
  * device-aware target resolution, so the routing session (an explicit, admitted `sessionUuid` or
- * the connection's bound session) comes from the ambient tool-selection context.
+ * the connection's bound session) and the connection come from the ambient tool-selection context.
  */
 export function lifecycleRequester(args: object): LifecycleRequester {
-  const mcpSessionId: unknown = Reflect.get(args, INTERNAL_MCP_SESSION_PARAM);
   const explicitSessionUuid: unknown = Reflect.get(args, "sessionUuid");
   return {
     sessionUuid:
@@ -24,6 +25,7 @@ export function lifecycleRequester(args: object): LifecycleRequester {
       (typeof explicitSessionUuid === "string" && explicitSessionUuid.trim().length > 0
         ? explicitSessionUuid
         : undefined),
-    mcpSessionId: typeof mcpSessionId === "string" ? mcpSessionId : undefined,
+    // The call's own connection (#15663); a plan step or nested call has none.
+    mcpSessionId: currentAutolockMcpSessionId(),
   };
 }

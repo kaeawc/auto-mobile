@@ -1,0 +1,964 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"observationId\":\"9f753758-74b0-4b7e-a63e-0556f60acc20\",\"deviceId\":\"45D48E06-E6AC-4894-B738-4EA7B6835D46\",\"display\":{\"key\":\"0\",\"role\":\"unknown\",\"posture\":\"unknown\",\"generation\":0},\"updatedAt\":1793630200652,\"screenSize\":{\"width\":402,\"height\":874,\"units\":\"points\"},\"systemInsets\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0},\"insets\":{\"available\":false,\"displayCutoutInfo\":{\"classification\":\"unknown\"},\"source\":\"unavailable\",\"units\":\"unknown\"},\"viewHierarchy\":{\"hierarchy\":{\"node\":{\"$\":{\"text\":\"Settings\",\"class\":\"XCUIApplication\",\"bounds\":[0,0,402,874],\"view-id\":\"s2-43e58a01e9d168a2\"},\"node\":[{\"$\":{\"resource-id\":\"Settings\",\"class\":\"UINavigationBar\",\"bounds\":[0,62,402,168],\"view-id\":\"Settings\"},\"node\":{\"$\":{\"text\":\"Settings\",\"class\":\"UILabel\",\"bounds\":[16,119,149,160],\"role\":\"text\",\"view-id\":\"s2-64fdb66f68f91f95\"}}},{\"$\":{\"class\":\"UICollectionView\",\"bounds\":[0,0,402,874],\"scrollable\":\"true\",\"role\":\"list\",\"view-id\":\"s2-8f1a39a336322854\"},\"node\":[{\"$\":{\"resource-id\":\"AdditionalDimmingOverlay\",\"class\":\"UIImageView\",\"bounds\":[-120,738,522,1010],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"AdditionalDimmingOverlay\"}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,168,386,258],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-625bff35be0cd2da\"},\"node\":{\"$\":{\"text\":\"Apple Account, Sign in to access your iCloud data, the App Store, Apple services, and more.\",\"resource-id\":\"com.apple.settings.primaryAppleAccount\",\"class\":\"UIButton\",\"bounds\":[16,168,386,258],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.primaryAppleAccount\"},\"node\":[{\"$\":{\"text\":\"apple.id\",\"resource-id\":\"apple.id\",\"class\":\"UIImageView\",\"bounds\":[32,183,92,243],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"apple.id\"}},{\"$\":{\"text\":\"Apple Account\",\"class\":\"UILabel\",\"bounds\":[100,183,234,207],\"role\":\"text\",\"view-id\":\"s2-87535aecf5c08702\"}},{\"$\":{\"text\":\"Sign in to access your iCloud data, the App Store, Apple services, and more.\",\"class\":\"UILabel\",\"bounds\":[100,209,336,243],\"role\":\"text\",\"view-id\":\"s2-5750e91b6b168761\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,207,367,219],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,293,386,345],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-a7f2a4bcc9342c5b\"},\"node\":{\"$\":{\"text\":\"Ready for Apple Intelligence\",\"resource-id\":\"com.apple.settings.followUpItem.com.apple.icloud.gm\",\"class\":\"UIButton\",\"bounds\":[16,293,386,345],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.followUpItem.com.apple.icloud.gm\"},\"node\":{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,313,367,325],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,380,386,432],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-d0616b38b1abdd0c\"},\"node\":{\"$\":{\"text\":\"General\",\"resource-id\":\"com.apple.settings.general\",\"class\":\"UIButton\",\"bounds\":[16,380,386,432],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.general\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,392,58,421],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-1\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,400,367,412],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,432,386,484],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-a4698b05b6fda779\"},\"node\":{\"$\":{\"text\":\"Accessibility\",\"resource-id\":\"com.apple.settings.accessibility\",\"class\":\"UIButton\",\"bounds\":[16,432,386,484],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.accessibility\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,444,58,473],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-2\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,452,367,464],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,484,386,536],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-cba24b22b27fdd3a\"},\"node\":{\"$\":{\"text\":\"Action Button\",\"resource-id\":\"com.apple.settings.actionButton\",\"class\":\"UIButton\",\"bounds\":[16,484,386,536],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.actionButton\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,496,58,525],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-3\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,504,367,516],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,536,386,588],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-34b91af3e8cd2666\"},\"node\":{\"$\":{\"text\":\"Apple Intelligence & Siri\",\"resource-id\":\"com.apple.settings.siri\",\"class\":\"UIButton\",\"bounds\":[16,536,386,588],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.siri\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,547,58,576],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-4\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,556,367,568],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,588,386,640],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-659b01912afaae5d\"},\"node\":{\"$\":{\"text\":\"Camera\",\"resource-id\":\"com.apple.settings.camera\",\"class\":\"UIButton\",\"bounds\":[16,588,386,640],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.camera\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,599,58,628],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-5\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,608,367,620],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,640,386,692],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-b003ad3f263b0fec\"},\"node\":{\"$\":{\"text\":\"Home Screen & App Library\",\"resource-id\":\"com.apple.settings.homeScreen\",\"class\":\"UIButton\",\"bounds\":[16,640,386,692],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.homeScreen\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,651,58,680],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-6\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,660,367,672],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,692,386,744],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-4a682b0618905340\"},\"node\":{\"$\":{\"text\":\"Search\",\"resource-id\":\"com.apple.settings.search\",\"class\":\"UIButton\",\"bounds\":[16,692,386,744],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.search\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,704,58,733],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-7\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,712,367,724],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,744,386,796],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-02b8d77ebbd35c5b\"},\"node\":{\"$\":{\"text\":\"StandBy\",\"resource-id\":\"com.apple.settings.standBy\",\"class\":\"UIButton\",\"bounds\":[16,744,386,796],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.standBy\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,756,58,785],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-8\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,764,367,776],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"class\":\"UITableViewCell\",\"bounds\":[16,831,386,883],\"clickable\":\"true\",\"role\":\"listitem\",\"view-id\":\"s2-f2f0260a05c9cef4\"},\"node\":{\"$\":{\"text\":\"Screen Time\",\"resource-id\":\"com.apple.settings.screenTime\",\"class\":\"UIButton\",\"bounds\":[16,831,386,883],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"com.apple.settings.screenTime\"},\"node\":[{\"$\":{\"class\":\"UIImageView\",\"bounds\":[29,843,58,872],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"s2-7edfbf5215a4f07c-9\"}},{\"$\":{\"resource-id\":\"chevron.forward\",\"class\":\"UIImageView\",\"bounds\":[360,851,367,863],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"chevron.forward\"}}]}},{\"$\":{\"text\":\"Vertical scroll bar, 2 pages\",\"class\":\"UIView\",\"bounds\":[369,116,399,788],\"view-id\":\"s2-3b9b6552ae2ad908\"}}]},{\"$\":{\"text\":\"Toolbar\",\"resource-id\":\"Toolbar\",\"class\":\"UIToolbar\",\"bounds\":[0,788,402,874],\"view-id\":\"Toolbar\"},\"node\":{\"$\":{\"text\":\"Search\",\"class\":\"UISearchBar\",\"bounds\":[32,803,368,841],\"clickable\":\"true\",\"role\":\"textfield\",\"hint-text\":\"Search\",\"view-id\":\"s2-9772f1f7cf44968d\",\"actions\":[\"set_text\",\"clear_text\"]},\"node\":[{\"$\":{\"text\":\"Dictate\",\"resource-id\":\"Dictate\",\"class\":\"UIButton\",\"bounds\":[335,811,353,833],\"clickable\":\"true\",\"role\":\"button\",\"view-id\":\"Dictate\"}},{\"$\":{\"text\":\"Search\",\"resource-id\":\"magnifyingglass\",\"class\":\"UIImageView\",\"bounds\":[45,812,66,831],\"clickable\":\"true\",\"role\":\"image\",\"view-id\":\"magnifyingglass\"}}]}}]}},\"packageName\":\"com.apple.Preferences\",\"updatedAt\":1793630200652,\"windows\":[{\"bounds\":[0,0,402,874],\"id\":0,\"isActive\":true,\"isFocused\":true,\"type\":1}],\"screenScale\":3,\"screenWidth\":402,\"screenHeight\":874,\"nativeScale\":3,\"pixelWidth\":1206,\"pixelHeight\":2622,\"insets\":{\"available\":false,\"displayCutoutInfo\":{\"classification\":\"unknown\"},\"source\":\"unavailable\",\"units\":\"unknown\"},\"receivedAt\":1793630200655,\"fresh\":true,\"frameContext\":\"DAC1694F-BBA9-4D60-B53D-C20E5CF73C9C:1:9e65be240d867019\"},\"rotation\":0,\"activeWindow\":{\"appId\":\"com.apple.Preferences\",\"activityName\":\"\",\"layoutSeqSum\":0},\"screenIdentity\":{\"platform\":\"ios\",\"source\":\"heuristic\",\"confidence\":\"high\",\"key\":\"[[\\\"bundle\\\",\\\"com.apple.Preferences\\\"],[\\\"nav\\\",\\\"Settings\\\"]]\",\"components\":{\"bundleId\":\"com.apple.Preferences\",\"navigationTitle\":\"Settings\"}},\"layoutWarnings\":{\"scope\":\"full\",\"warnings\":[]},\"freshness\":{\"actualTimestamp\":1793630200652,\"ageMs\":2,\"verified\":true,\"isFresh\":true},\"deviceLock\":{\"locked\":true,\"keyguardShowing\":true},\"screenshotOrientation\":\"native\",\"screenshotPath\":\"/Users/jason/.claude/orchestrate/kaeawc__auto-mobile/verifyq/n5-16378/batch/daemon1/data/screenshots/screenshot_1793630200657_45D48E06-E6AC-4894-B738-4EA7B6835D46-50ee276ef967_ee1a2bbc-a40a-4d20-93c6-7e55a83a1bd3.png\",\"screenshotExpiresAt\":1793630800861,\"screenshotSource\":\"fresh\",\"screenshotCaptureSource\":\"device\",\"screenshotCapturedAt\":\"2026-11-02T14:36:40.860Z\",\"screenshotAgeMs\":0.354248046875,\"screenshotFormat\":\"png\",\"screenshotMimeType\":\"image/png\",\"screenshotImageSize\":{\"width\":1206,\"height\":2622},\"screenshotPixelsPerNativeUnit\":{\"x\":3,\"y\":3},\"screenshotScaleProvenance\":\"native-scale-confirmed\",\"screenshotSettled\":true,\"observationScreenshotResourceUri\":\"automobile:observation/45D48E06-E6AC-4894-B738-4EA7B6835D46/9f753758-74b0-4b7e-a63e-0556f60acc20/screenshot\"}"
+    }
+  ],
+  "structuredContent": {
+    "observationId": "9f753758-74b0-4b7e-a63e-0556f60acc20",
+    "deviceId": "45D48E06-E6AC-4894-B738-4EA7B6835D46",
+    "display": {
+      "key": "0",
+      "role": "unknown",
+      "posture": "unknown",
+      "generation": 0
+    },
+    "updatedAt": 1793630200652,
+    "screenSize": {
+      "width": 402,
+      "height": 874,
+      "units": "points"
+    },
+    "systemInsets": {
+      "top": 0,
+      "right": 0,
+      "bottom": 0,
+      "left": 0
+    },
+    "insets": {
+      "available": false,
+      "displayCutoutInfo": {
+        "classification": "unknown"
+      },
+      "source": "unavailable",
+      "units": "unknown"
+    },
+    "viewHierarchy": {
+      "hierarchy": {
+        "node": {
+          "$": {
+            "text": "Settings",
+            "class": "XCUIApplication",
+            "bounds": [
+              0,
+              0,
+              402,
+              874
+            ],
+            "view-id": "s2-43e58a01e9d168a2"
+          },
+          "node": [
+            {
+              "$": {
+                "resource-id": "Settings",
+                "class": "UINavigationBar",
+                "bounds": [
+                  0,
+                  62,
+                  402,
+                  168
+                ],
+                "view-id": "Settings"
+              },
+              "node": {
+                "$": {
+                  "text": "Settings",
+                  "class": "UILabel",
+                  "bounds": [
+                    16,
+                    119,
+                    149,
+                    160
+                  ],
+                  "role": "text",
+                  "view-id": "s2-64fdb66f68f91f95"
+                }
+              }
+            },
+            {
+              "$": {
+                "class": "UICollectionView",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ],
+                "scrollable": "true",
+                "role": "list",
+                "view-id": "s2-8f1a39a336322854"
+              },
+              "node": [
+                {
+                  "$": {
+                    "resource-id": "AdditionalDimmingOverlay",
+                    "class": "UIImageView",
+                    "bounds": [
+                      -120,
+                      738,
+                      522,
+                      1010
+                    ],
+                    "clickable": "true",
+                    "role": "image",
+                    "view-id": "AdditionalDimmingOverlay"
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      168,
+                      386,
+                      258
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-625bff35be0cd2da"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Apple Account, Sign in to access your iCloud data, the App Store, Apple services, and more.",
+                      "resource-id": "com.apple.settings.primaryAppleAccount",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        168,
+                        386,
+                        258
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.primaryAppleAccount"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "text": "apple.id",
+                          "resource-id": "apple.id",
+                          "class": "UIImageView",
+                          "bounds": [
+                            32,
+                            183,
+                            92,
+                            243
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "apple.id"
+                        }
+                      },
+                      {
+                        "$": {
+                          "text": "Apple Account",
+                          "class": "UILabel",
+                          "bounds": [
+                            100,
+                            183,
+                            234,
+                            207
+                          ],
+                          "role": "text",
+                          "view-id": "s2-87535aecf5c08702"
+                        }
+                      },
+                      {
+                        "$": {
+                          "text": "Sign in to access your iCloud data, the App Store, Apple services, and more.",
+                          "class": "UILabel",
+                          "bounds": [
+                            100,
+                            209,
+                            336,
+                            243
+                          ],
+                          "role": "text",
+                          "view-id": "s2-5750e91b6b168761"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            207,
+                            367,
+                            219
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      293,
+                      386,
+                      345
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-a7f2a4bcc9342c5b"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Ready for Apple Intelligence",
+                      "resource-id": "com.apple.settings.followUpItem.com.apple.icloud.gm",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        293,
+                        386,
+                        345
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.followUpItem.com.apple.icloud.gm"
+                    },
+                    "node": {
+                      "$": {
+                        "resource-id": "chevron.forward",
+                        "class": "UIImageView",
+                        "bounds": [
+                          360,
+                          313,
+                          367,
+                          325
+                        ],
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    }
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      380,
+                      386,
+                      432
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-d0616b38b1abdd0c"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "General",
+                      "resource-id": "com.apple.settings.general",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        380,
+                        386,
+                        432
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.general"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            392,
+                            58,
+                            421
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-1"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            400,
+                            367,
+                            412
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      432,
+                      386,
+                      484
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-a4698b05b6fda779"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Accessibility",
+                      "resource-id": "com.apple.settings.accessibility",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        432,
+                        386,
+                        484
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.accessibility"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            444,
+                            58,
+                            473
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-2"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            452,
+                            367,
+                            464
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      484,
+                      386,
+                      536
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-cba24b22b27fdd3a"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Action Button",
+                      "resource-id": "com.apple.settings.actionButton",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        484,
+                        386,
+                        536
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.actionButton"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            496,
+                            58,
+                            525
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-3"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            504,
+                            367,
+                            516
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      536,
+                      386,
+                      588
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-34b91af3e8cd2666"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Apple Intelligence & Siri",
+                      "resource-id": "com.apple.settings.siri",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        536,
+                        386,
+                        588
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.siri"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            547,
+                            58,
+                            576
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-4"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            556,
+                            367,
+                            568
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      588,
+                      386,
+                      640
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-659b01912afaae5d"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Camera",
+                      "resource-id": "com.apple.settings.camera",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        588,
+                        386,
+                        640
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.camera"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            599,
+                            58,
+                            628
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-5"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            608,
+                            367,
+                            620
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      640,
+                      386,
+                      692
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-b003ad3f263b0fec"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Home Screen & App Library",
+                      "resource-id": "com.apple.settings.homeScreen",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        640,
+                        386,
+                        692
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.homeScreen"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            651,
+                            58,
+                            680
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-6"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            660,
+                            367,
+                            672
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      692,
+                      386,
+                      744
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-4a682b0618905340"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Search",
+                      "resource-id": "com.apple.settings.search",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        692,
+                        386,
+                        744
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.search"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            704,
+                            58,
+                            733
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-7"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            712,
+                            367,
+                            724
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      744,
+                      386,
+                      796
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-02b8d77ebbd35c5b"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "StandBy",
+                      "resource-id": "com.apple.settings.standBy",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        744,
+                        386,
+                        796
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.standBy"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            756,
+                            58,
+                            785
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-8"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            764,
+                            367,
+                            776
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "class": "UITableViewCell",
+                    "bounds": [
+                      16,
+                      831,
+                      386,
+                      883
+                    ],
+                    "clickable": "true",
+                    "role": "listitem",
+                    "view-id": "s2-f2f0260a05c9cef4"
+                  },
+                  "node": {
+                    "$": {
+                      "text": "Screen Time",
+                      "resource-id": "com.apple.settings.screenTime",
+                      "class": "UIButton",
+                      "bounds": [
+                        16,
+                        831,
+                        386,
+                        883
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "com.apple.settings.screenTime"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIImageView",
+                          "bounds": [
+                            29,
+                            843,
+                            58,
+                            872
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "s2-7edfbf5215a4f07c-9"
+                        }
+                      },
+                      {
+                        "$": {
+                          "resource-id": "chevron.forward",
+                          "class": "UIImageView",
+                          "bounds": [
+                            360,
+                            851,
+                            367,
+                            863
+                          ],
+                          "clickable": "true",
+                          "role": "image",
+                          "view-id": "chevron.forward"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 2 pages",
+                    "class": "UIView",
+                    "bounds": [
+                      369,
+                      116,
+                      399,
+                      788
+                    ],
+                    "view-id": "s2-3b9b6552ae2ad908"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "Toolbar",
+                "resource-id": "Toolbar",
+                "class": "UIToolbar",
+                "bounds": [
+                  0,
+                  788,
+                  402,
+                  874
+                ],
+                "view-id": "Toolbar"
+              },
+              "node": {
+                "$": {
+                  "text": "Search",
+                  "class": "UISearchBar",
+                  "bounds": [
+                    32,
+                    803,
+                    368,
+                    841
+                  ],
+                  "clickable": "true",
+                  "role": "textfield",
+                  "hint-text": "Search",
+                  "view-id": "s2-9772f1f7cf44968d",
+                  "actions": [
+                    "set_text",
+                    "clear_text"
+                  ]
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Dictate",
+                      "resource-id": "Dictate",
+                      "class": "UIButton",
+                      "bounds": [
+                        335,
+                        811,
+                        353,
+                        833
+                      ],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "Dictate"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Search",
+                      "resource-id": "magnifyingglass",
+                      "class": "UIImageView",
+                      "bounds": [
+                        45,
+                        812,
+                        66,
+                        831
+                      ],
+                      "clickable": "true",
+                      "role": "image",
+                      "view-id": "magnifyingglass"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "packageName": "com.apple.Preferences",
+      "updatedAt": 1793630200652,
+      "windows": [
+        {
+          "bounds": [
+            0,
+            0,
+            402,
+            874
+          ],
+          "id": 0,
+          "isActive": true,
+          "isFocused": true,
+          "type": 1
+        }
+      ],
+      "screenScale": 3,
+      "screenWidth": 402,
+      "screenHeight": 874,
+      "nativeScale": 3,
+      "pixelWidth": 1206,
+      "pixelHeight": 2622,
+      "insets": {
+        "available": false,
+        "displayCutoutInfo": {
+          "classification": "unknown"
+        },
+        "source": "unavailable",
+        "units": "unknown"
+      },
+      "receivedAt": 1793630200655,
+      "fresh": true,
+      "frameContext": "DAC1694F-BBA9-4D60-B53D-C20E5CF73C9C:1:9e65be240d867019"
+    },
+    "rotation": 0,
+    "activeWindow": {
+      "appId": "com.apple.Preferences",
+      "activityName": "",
+      "layoutSeqSum": 0
+    },
+    "screenIdentity": {
+      "platform": "ios",
+      "source": "heuristic",
+      "confidence": "high",
+      "key": "[[\"bundle\",\"com.apple.Preferences\"],[\"nav\",\"Settings\"]]",
+      "components": {
+        "bundleId": "com.apple.Preferences",
+        "navigationTitle": "Settings"
+      }
+    },
+    "layoutWarnings": {
+      "scope": "full",
+      "warnings": []
+    },
+    "freshness": {
+      "actualTimestamp": 1793630200652,
+      "ageMs": 2,
+      "verified": true,
+      "isFresh": true
+    },
+    "deviceLock": {
+      "locked": true,
+      "keyguardShowing": true
+    },
+    "screenshotOrientation": "native",
+    "screenshotPath": "/Users/jason/.claude/orchestrate/kaeawc__auto-mobile/verifyq/n5-16378/batch/daemon1/data/screenshots/screenshot_1793630200657_45D48E06-E6AC-4894-B738-4EA7B6835D46-50ee276ef967_ee1a2bbc-a40a-4d20-93c6-7e55a83a1bd3.png",
+    "screenshotExpiresAt": 1793630800861,
+    "screenshotSource": "fresh",
+    "screenshotCaptureSource": "device",
+    "screenshotCapturedAt": "2026-11-02T14:36:40.860Z",
+    "screenshotAgeMs": 0.354248046875,
+    "screenshotFormat": "png",
+    "screenshotMimeType": "image/png",
+    "screenshotImageSize": {
+      "width": 1206,
+      "height": 2622
+    },
+    "screenshotPixelsPerNativeUnit": {
+      "x": 3,
+      "y": 3
+    },
+    "screenshotScaleProvenance": "native-scale-confirmed",
+    "screenshotSettled": true,
+    "observationScreenshotResourceUri": "automobile:observation/45D48E06-E6AC-4894-B738-4EA7B6835D46/9f753758-74b0-4b7e-a63e-0556f60acc20/screenshot"
+  }
+}

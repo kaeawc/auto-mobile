@@ -44,6 +44,8 @@ write_fixtures() {
 
   local viewer="${8-$HELPER_SHA}"
   local protoviewer_apk="${9-$HELPER_SHA}"
+  local lmk_arm64="${10-$HELPER_SHA}"
+  local lmk_x86_64="${11-$HELPER_SHA}"
 
   cat > "${TEST_ROOT}/package.json" <<EOF
 { "name": "@kaeawc/auto-mobile", "version": "${ver}" }
@@ -79,6 +81,8 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     prototypeViewerSha256: "${viewer}",
     protoViewerApkSha256: "${protoviewer_apk}",
     networkFilterSha256: "${filter}",
+    lmkPressureArm64Sha256: "${lmk_arm64}",
+    lmkPressureX8664Sha256: "${lmk_x86_64}",
   },
 ];
 export const IOS_CTRL_PROXY_APP_HASH: string = "";
@@ -274,6 +278,20 @@ PY
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
   [[ "$output" == *"registry[0].networkFilterSha256"* ]]
+}
+
+@test "fails when the lmk-pressure arm64-v8a sha256 is empty (#16402)" {
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" "$HELPER_SHA" "$HELPER_SHA" "$FILTER_SHA" "$HELPER_SHA" "$HELPER_SHA" ""
+  run_gate "$VERSION"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"registry[0].lmkPressureArm64Sha256"* ]]
+}
+
+@test "fails when the lmk-pressure x86_64 sha256 is malformed (#16402)" {
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" "$HELPER_SHA" "$HELPER_SHA" "$FILTER_SHA" "$HELPER_SHA" "$HELPER_SHA" "$HELPER_SHA" "not-a-valid-sha"
+  run_gate "$VERSION"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"registry[0].lmkPressureX8664Sha256"* ]]
 }
 
 @test "fails when runner sha256 target is not the CtrlProxy xctest executable" {

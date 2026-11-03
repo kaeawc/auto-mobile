@@ -1,6 +1,5 @@
 import type {
   SessionDeviceCatalog,
-  SessionRequirementCapabilities,
   SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
 import type { Timer } from "../../utils/SystemTimer";
@@ -22,8 +21,6 @@ export interface SessionBrokerOptions {
   ) => Promise<SessionDeviceCatalog>;
   /** Watch requests are exact and have no defaults, so only iOS and Android are asked. */
   defaults: (platform: "ios" | "android") => SessionRequirementDefaults;
-  /** Operator-enabled hardware capabilities; omitted capabilities refuse their requests. */
-  capabilities?: SessionRequirementCapabilities;
   /** Admission-only lookup; must not start lazy release from inside recovery. */
   sessionDisposition?: (sessionUuid: string) => SessionLiveness | Promise<SessionLiveness>;
   /** Opt in to iOS reuse only after the native reset baseline passes contamination tests. */

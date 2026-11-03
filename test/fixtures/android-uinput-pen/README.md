@@ -6,7 +6,7 @@ Android 17, API 37, `google_apis` arm64, `ro.build.type=userdebug`.
 Strokes ran through the private-daemon uinput route, using the `automobile-pen`
 virtual device and `/system/bin/uinput`.
 
-Each `-getevent-lt` file is `adb shell timeout 12 getevent -lt` taken while the
+Each `-getevent-lt-emulator-5610` file is `adb shell timeout 12 getevent -lt` taken while the
 stroke ran. Each `-lp-during` file is `adb shell timeout 2 getevent -lp` taken
 2 s into the stroke.
 
@@ -16,6 +16,8 @@ Stroke inputs:
 - Eraser tap at (540,1170), pressure 0.5.
 - Stylus swipe from (300,1400) to (300,900) over 800 ms, pressure 0.6.
 - Stylus hover over (300,900), (350,850), (400,800).
+- Stylus `dragPath` from (300,900) to (700,1200), four points with pressures
+  0.2, 0.4, 0.7 and 0.95 (`stroke-varying-pressure`).
 
 Additional stylus captures use the same device on 2026-11-01, with display geometry
 1080x2340, rotation 0. The tap point is (540,1170), pressure 0.5:
@@ -39,3 +41,15 @@ contain the stroke. The other four new capability snapshots include the pen.
 `stylus-tilt-swipe-dumpsys-input-device-emulator-5610.txt` is the verbatim
 `dumpsys input` block for `automobile-pen` during the tilted swipe. Android derives
 its tilt and orientation motion ranges from the degree-valued `ABS_TILT_X/Y` axes.
+
+The `stroke-*-getevent-lt-api37.txt` files are verbatim all-node `getevent -lt`
+captures from the product's uinput generator on API 37 (`automobile-pen`,
+`/dev/input/event12`). Each input has six waypoints; the generator interpolates
+kernel frames about every 16 ms. Contact spans from `BTN_TOUCH DOWN` to `UP`:
+
+| Capture                              | Input segment durations         | Contact span            |
+| ------------------------------------ | ------------------------------- | ----------------------- |
+| `stroke-5s-getevent-lt-api37.txt`    | 5 x 1000 ms                     | 206.402369-211.404516 s |
+| `stroke-21s-getevent-lt-api37.txt`   | 5000, 5000, 5000, 5000, 1000 ms | 247.362649-268.365706 s |
+| `stroke-22s-getevent-lt-api37.txt`   | 5 x 4400 ms                     | 108.120257-130.122804 s |
+| `stroke-22-5s-getevent-lt-api37.txt` | 5 x 4500 ms                     | 279.474959-301.976883 s |

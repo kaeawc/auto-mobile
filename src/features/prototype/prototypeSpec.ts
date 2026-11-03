@@ -636,6 +636,7 @@ const pagerBaseSchema = z
       ])
       .optional(),
     indicator: z.enum(["none", "dots"]).optional(),
+    indicatorPlacement: z.enum(["over", "below"]).optional(),
   })
   .strict();
 const carouselBaseSchema = z

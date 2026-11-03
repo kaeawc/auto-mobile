@@ -18,6 +18,7 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -44,8 +45,11 @@ describe("ToolRegistry two-session device pinning (#11810)", () => {
   let sessionManager: SessionManager;
   let fakeReadiness: FakeDeviceReadiness;
 
+  /** One top-level rotate; an `__mcpSessionId` in `args` is its ambient connection (#15663). */
   const rotate = (args: Record<string, unknown>) =>
-    ToolRegistry.getTool("rotate")!.handler({ orientation: "landscape", ...args });
+    withWireConnection(args, (rest) =>
+      ToolRegistry.getTool("rotate")!.handler({ orientation: "landscape", ...rest }),
+    );
 
   async function arrangeHarness(connected: BootedDevice[]): Promise<void> {
     ran = [];

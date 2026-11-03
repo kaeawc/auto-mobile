@@ -22,6 +22,7 @@ internal object PrototypeRepeatTree {
     var animatedEffects: Int = 0,
     var loopNodes: Int = 0,
     var keyframeNodes: Int = 0,
+    var videoNodes: Int = 0,
   )
 
   fun childrenOf(node: JsonObject, path: String): List<Child> = buildList {
@@ -149,7 +150,8 @@ internal object PrototypeRepeatTree {
   }
 
   fun imageUses(node: JsonObject): Int =
-    if (node.text("type") == "image") maxOf(1, prototypeImageSlotUses(node["asset"]))
+    if (node.text("type") == "image" || node.text("type") == "videoPlayer")
+      prototypeNodeImageUses(node)
     else
       (node["items"] as? JsonArray).orEmpty().sumOf {
         prototypeImageSlotUses((it as? JsonObject)?.get("image"))
@@ -176,6 +178,8 @@ internal object PrototypeRepeatTree {
       return fail("$path.keyframes", "Keyframe node limit exceeded")
     if ("attentionLoop" in node && ++budget.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
       return fail("$path.attentionLoop", "Loop node limit exceeded")
+    if (prototypeVideoNodeOverLimit(node) { ++budget.videoNodes })
+      return fail(path, "Video node limit exceeded")
     PrototypeEffectRules.chargeExpanded(node, at, budget)?.let {
       return it
     }

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   logicalDisplayIdForPanel,
+  panelKeyForUniqueId,
   parseAndroidDisplayInfos,
   parseSurfaceFlingerDisplayIds,
   parseTopFocusedDisplayId,
@@ -397,5 +398,27 @@ describe("parseTopFocusedDisplayId", () => {
   });
   test("is undefined when absent", () => {
     expect(parseTopFocusedDisplayId("")).toBeUndefined();
+  });
+});
+
+describe("overlay display keys (#13138)", () => {
+  const output = [
+    "Displays:",
+    '  Display id 0: DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2400, type INTERNAL, uniqueId "local:4619827259835644672", app 1080 x 2400}',
+    '  Display id 2: DisplayInfo{"Overlay #1", displayId 2, real 1080 x 1920, type OVERLAY, uniqueId "overlay:1", app 1080 x 1920}',
+  ].join("\n");
+
+  test("keeps the overlay prefix and strips physical prefixes", () => {
+    expect(panelKeyForUniqueId("overlay:1")).toBe("overlay:1");
+    expect(panelKeyForUniqueId("local:4619827259835644672")).toBe("4619827259835644672");
+    expect(panelKeyForUniqueId("virtual:com.example:a")).toBe("com.example:a");
+    expect(panelKeyForUniqueId("bare")).toBe("bare");
+  });
+
+  test("maps an overlay key to its logical display id", () => {
+    const infos = parseAndroidDisplayInfos(output);
+    expect(logicalDisplayIdForPanel(infos, "overlay:1")).toBe(2);
+    expect(logicalDisplayIdForPanel(infos, "1")).toBeUndefined();
+    expect(logicalDisplayIdForPanel(infos, "4619827259835644672")).toBe(0);
   });
 });

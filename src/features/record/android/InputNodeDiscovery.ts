@@ -25,6 +25,14 @@ export interface InputNodes {
   pen: TouchInputNode[];
 }
 
+/** Notifications emitted by all-node getevent, also used as capability-block headers. */
+export function parseInputNodeChange(
+  line: string,
+): { action: "add" | "remove"; path: string } | null {
+  const match = /^(add|remove) device \d+:\s+(\/dev\/input\/event\d+)\s*$/.exec(line);
+  return match ? { action: match[1] === "add" ? "add" : "remove", path: match[2] } : null;
+}
+
 /** Run `shell getevent -p` and classify the nodes into touch and pen digitizers. */
 export async function discoverInputNodes(adb: AdbExecutor): Promise<InputNodes> {
   const { stdout } = await adb.executeCommand("shell getevent -p");
@@ -82,6 +90,7 @@ function toNode(
   y: AbsoluteAxisInfo,
   { pressure, kind }: { pressure?: AbsoluteAxisInfo; kind: "touch" | "pen" },
 ): TouchInputNode {
+  const distance = device.abs.get(kind === "pen" ? 0x19 : 0x3b);
   const tiltX = device.abs.get(ABS_TILT_X);
   const tiltY = device.abs.get(ABS_TILT_Y);
   return {
@@ -92,6 +101,7 @@ function toNode(
     axisYMin: y.min,
     axisYMax: y.max,
     kind,
+    ...(distance && distance.max > distance.min ? { distanceRange: distance } : {}),
     ...(tiltX && tiltY ? { tiltAxes: { x: tiltX, y: tiltY } } : {}),
     ...(pressure && pressure.max > pressure.min
       ? { pressureMin: pressure.min, pressureMax: pressure.max }
@@ -105,6 +115,8 @@ const NAME_TO_CODE: Record<string, number> = {
   ABS_X: ABS_X,
   ABS_Y: ABS_Y,
   ABS_PRESSURE: ABS_PRESSURE,
+  ABS_DISTANCE: 0x19,
+  ABS_MT_DISTANCE: 0x3b,
   ABS_TILT_X: ABS_TILT_X,
   ABS_TILT_Y: ABS_TILT_Y,
   ABS_MT_POSITION_X: ABS_MT_POSITION_X,
@@ -132,9 +144,9 @@ function splitDevices(output: string): DeviceInfo[] {
   let current: DeviceInfo | null = null;
   const state = { inKeyBlock: false };
   for (const line of output.split("\n")) {
-    const deviceMatch = line.match(/^add device \d+:\s+(.+)/);
-    if (deviceMatch) {
-      const path = deviceMatch[1].trim();
+    const change = parseInputNodeChange(line);
+    if (change?.action === "add") {
+      const { path } = change;
       current = { path, name: path, abs: new Map(), hasPenTool: false };
       devices.push(current);
       state.inKeyBlock = false;

@@ -3,6 +3,7 @@ import {
   type ProvisionDeviceCleanup,
 } from "../../src/features/deviceLifecycle/provisioning/provisioning";
 import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
+import { withWireDeadline } from "../helpers/requestDeadline";
 import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
 import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
 import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
@@ -80,6 +81,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { withWireConnection } from "../helpers/mcpConnection";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
@@ -186,7 +188,8 @@ async function provisionResponseText(args: Record<string, unknown>): Promise<str
     throw new Error("provisionDevice not registered");
   }
 
-  const response: unknown = await tool.handler(args);
+  // Run as MCP ingress does: under the connection the in-band key names (#15663).
+  const response: unknown = await withWireConnection(args, (wireArgs) => tool.handler(wireArgs));
   if (typeof response !== "object" || response === null || !("content" in response)) {
     throw new Error("provisionDevice returned an invalid response");
   }
@@ -1826,12 +1829,15 @@ describe("provisionDevice handler", () => {
 
     const first = JSON.parse(
       asToolResponse(
-        await tool.handler({
-          ...args,
-          __mcpSessionId: "mcp-session-5434",
-          __executionId: "execution-5434",
-          __executionStartTime: 0,
-        }),
+        await withWireConnection(
+          {
+            ...args,
+            __mcpSessionId: "mcp-session-5434",
+            __executionId: "execution-5434",
+            __executionStartTime: 0,
+          },
+          (wireArgs) => tool.handler(wireArgs),
+        ),
       ).content[0].text,
     );
     const second = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
@@ -4339,7 +4345,7 @@ describe("provisionDevice handler", () => {
     const awaited = provisionCancellationOutcomes
       .await("forwarded-call-key", 60_000, new FakeTimer())
       .then((outcome) => published.push(outcome));
-    const call = tool.handler(args, undefined, caller.signal);
+    const call = withWireDeadline(args, (rest) => tool.handler(rest, undefined, caller.signal));
     await Promise.resolve();
     caller.abort(new Error("client went away"));
     const response = await call;
@@ -5659,11 +5665,19 @@ describe("provisionDevice handler", () => {
       const args = { ...provisionTestArgs("android"), timeoutMs: 60_000 };
 
       const first = JSON.parse(
-        asToolResponse(await tool.handler({ ...args, __mcpSessionId: "client-a" })).content[0].text,
+        asToolResponse(
+          await withWireConnection({ ...args, __mcpSessionId: "client-a" }, (wireArgs) =>
+            tool.handler(wireArgs),
+          ),
+        ).content[0].text,
       );
       const firstSessionId: string = first.sessionId;
       const second = JSON.parse(
-        asToolResponse(await tool.handler({ ...args, __mcpSessionId: "client-b" })).content[0].text,
+        asToolResponse(
+          await withWireConnection({ ...args, __mcpSessionId: "client-b" }, (wireArgs) =>
+            tool.handler(wireArgs),
+          ),
+        ).content[0].text,
       );
 
       expect(first.lifecycleState).toBe("ready");
@@ -5729,12 +5743,15 @@ describe("provisionDevice handler", () => {
         },
       });
 
-      const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs("android"),
-        timeoutMs: 60_000,
-        resources: { wallpaperRendering: "disabled" as const },
-        __mcpSessionId: "my-mcp-client",
-      });
+      const response = await withWireConnection(
+        {
+          ...provisionTestArgs("android"),
+          timeoutMs: 60_000,
+          resources: { wallpaperRendering: "disabled" as const },
+          __mcpSessionId: "my-mcp-client",
+        },
+        (wireArgs) => ToolRegistry.getTool("provisionDevice")!.handler(wireArgs),
+      );
 
       expect({ readinessCalls, resourceRequests: resources.requests.length }).toEqual({
         readinessCalls: 0,
@@ -5824,11 +5841,14 @@ describe("provisionDevice handler", () => {
     autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
 
     try {
-      const request = ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs("android"),
-        timeoutMs: 60_000,
-        __mcpSessionId: "provision-mcp-client",
-      });
+      const request = withWireConnection(
+        {
+          ...provisionTestArgs("android"),
+          timeoutMs: 60_000,
+          __mcpSessionId: "provision-mcp-client",
+        },
+        (wireArgs) => ToolRegistry.getTool("provisionDevice")!.handler(wireArgs),
+      );
       await metadataStarted.promise;
 
       await timer.advanceTimeAsync(500);
@@ -5930,11 +5950,14 @@ describe("provisionDevice handler", () => {
     autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
 
     try {
-      const request = ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs("android"),
-        timeoutMs: 60_000,
-        __mcpSessionId: "provision-mcp-client",
-      });
+      const request = withWireConnection(
+        {
+          ...provisionTestArgs("android"),
+          timeoutMs: 60_000,
+          __mcpSessionId: "provision-mcp-client",
+        },
+        (wireArgs) => ToolRegistry.getTool("provisionDevice")!.handler(wireArgs),
+      );
       await activeSessionWriteStarted.promise;
 
       await timer.advanceTimeAsync(500);
@@ -6041,16 +6064,18 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
 
-    await tool.handler({
-      ...provisionTestArgs("android"),
-      boot: false,
-      readiness: "none",
-      timeoutMs: 100_000,
-      // The outer request originally had 165s (100s provisioning + 60s
-      // rollback + 5s response headroom); 20s elapsed in the socket queue.
-      __mcpRequestTimeoutMs: 145_000,
-      __mcpRequestDeadlineMs: 145_000,
-    });
+    await withWireDeadline(
+      {
+        ...provisionTestArgs("android"),
+        boot: false,
+        readiness: "none" as const,
+        timeoutMs: 100_000,
+        // The outer request originally had 165s (100s provisioning + 60s
+        // rollback + 5s response headroom); 20s elapsed in the socket queue.
+        __mcpRequestDeadlineMs: 145_000,
+      },
+      (args) => tool.handler(args),
+    );
 
     expect(provisionDeadlineMs).toBe(80_000);
   });

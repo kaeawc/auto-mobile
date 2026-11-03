@@ -1,4 +1,6 @@
 import {
+  androidRequirementArchetype,
+  resolveAndroidExactProfile,
   describeIosModelType,
   iosModelTypeArchetype,
   iosModelTypesEqual,
@@ -6,7 +8,9 @@ import {
 } from "./catalog";
 import { failure, success } from "./result";
 import type {
+  AndroidArchetype,
   AndroidCatalogProfile,
+  AndroidExactCatalogProfile,
   AndroidProfileDefault,
   AndroidCatalogRelease,
   AndroidSessionRequirementDefaults,
@@ -24,7 +28,6 @@ import type {
   ResolvedSessionDeviceProfile,
   ResolutionProvenance,
   SessionDeviceCatalog,
-  SessionRequirementCapabilities,
   SessionRequirementDefaults,
 } from "./types";
 import {
@@ -43,7 +46,8 @@ interface ResolvedIosHardware {
 
 interface ResolvedAndroidHardware {
   memoryMb?: number;
-  profile: AndroidCatalogProfile;
+  profile: AndroidCatalogProfile & { archetype: AndroidArchetype };
+  by: ResolutionProvenance["resolvedHardwareBy"];
   path: readonly string[];
 }
 
@@ -163,7 +167,10 @@ export function androidProfileDefault(
   requirement: NormalizedAndroidSessionDeviceRequirement,
   defaults: AndroidSessionRequirementDefaults,
 ): RequirementResult<AndroidProfileDefault> {
-  const archetype = requirement.effective.hardware.archetype;
+  const archetype = androidRequirementArchetype(requirement);
+  if (archetype === undefined) {
+    return failure("unsupported_hardware", "The Android request has no classified archetype.");
+  }
   if (
     archetype === "foldable" &&
     !defaults.hardware.profiles.some((entry) => entry.archetype === archetype)
@@ -180,16 +187,76 @@ export function androidProfileDefault(
   );
 }
 
+/**
+ * The host sizing an exact-profile request gets (#16427): the mapping naming that profile, else
+ * its archetype's mapping, so an exact profile never gets avdmanager's tiny defaults where the
+ * archetype path would not. No mapping for the archetype leaves the AVD's own RAM, as the
+ * archetype path does without `memoryMb`.
+ */
+function androidExactProfileDefault(
+  profile: AndroidExactCatalogProfile,
+  defaults: AndroidSessionRequirementDefaults,
+): RequirementResult<AndroidProfileDefault | undefined> {
+  const named = defaults.hardware.profiles.filter((entry) => entry.profileId === profile.profileId);
+  const candidates =
+    named.length > 0
+      ? named
+      : defaults.hardware.profiles.filter((entry) => entry.archetype === profile.archetype);
+  if (candidates.length > 1) {
+    return invalidConfig(
+      `Conflicting Android ${profile.archetype} profile default entries.`,
+      "defaults.hardware.profiles",
+    );
+  }
+  return success(candidates[0]);
+}
+
+/** The `memoryMb` a request's creation and pool reuse are bound to, whichever selector it used. */
+export function androidRequirementMemoryMb(
+  requirement: NormalizedAndroidSessionDeviceRequirement,
+  defaults: AndroidSessionRequirementDefaults,
+): RequirementResult<number | undefined> {
+  const mapping = requirement.exactProfile
+    ? androidExactProfileDefault(requirement.exactProfile, defaults)
+    : androidProfileDefault(requirement, defaults);
+  return mapping.ok ? success(mapping.value?.memoryMb) : mapping;
+}
+
+function resolveAndroidExactHardware(
+  exact: AndroidExactCatalogProfile,
+  defaults: AndroidSessionRequirementDefaults,
+  catalog: Extract<SessionDeviceCatalog, { platform: "android" }>,
+): RequirementResult<ResolvedAndroidHardware> {
+  // Re-read the catalog the creation is resolved against, never the normalized snapshot alone.
+  const current = resolveAndroidExactProfile(exact.profileId, catalog);
+  if (!current.ok) {
+    return current;
+  }
+  const memoryMb = androidExactProfileDefault(current.value, defaults);
+  if (!memoryMb.ok) {
+    return memoryMb;
+  }
+  return success({
+    profile: current.value,
+    by: "explicit-model",
+    path: ["exact-profile", current.value.profileId],
+    ...(memoryMb.value?.memoryMb === undefined ? {} : { memoryMb: memoryMb.value.memoryMb }),
+  });
+}
+
 function resolveAndroidHardware(
   requirement: NormalizedAndroidSessionDeviceRequirement,
   defaults: AndroidSessionRequirementDefaults,
   catalog: Extract<SessionDeviceCatalog, { platform: "android" }>,
 ): RequirementResult<ResolvedAndroidHardware> {
-  const archetype = requirement.effective.hardware.archetype;
+  if (requirement.exactProfile) {
+    return resolveAndroidExactHardware(requirement.exactProfile, defaults, catalog);
+  }
   const configured = androidProfileDefault(requirement, defaults);
   if (!configured.ok) {
     return configured;
   }
+  const archetype = configured.value.archetype;
   const profiles = catalog.profiles.filter(
     (profile) => profile.profileId === configured.value.profileId,
   );
@@ -220,7 +287,8 @@ function resolveAndroidHardware(
     );
   }
   return success({
-    profile,
+    profile: { ...profile, archetype },
+    by: "archetype-default",
     path: [archetype, profile.profileId],
     ...(configured.value.memoryMb === undefined ? {} : { memoryMb: configured.value.memoryMb }),
   });
@@ -268,13 +336,26 @@ function chooseIosRelease(
   selector: EffectiveOsSelector,
   preferredVersion: string,
   releases: readonly IosCatalogRelease[],
+  model: IosCatalogModel,
 ): RequirementResult<ResolvedIosOs> {
   const valid = validIosReleases(releases);
-  const satisfying = valid.filter((release) =>
-    osSelectorMatchesVersion(selector, release.osVersion),
-  );
+  let satisfying = valid.filter((release) => osSelectorMatchesVersion(selector, release.osVersion));
   if (satisfying.length === 0) {
     return noRuntimeResult(selector, releases, "ios");
+  }
+  if (selector.kind !== "exact") {
+    const minimum = compatibilityBound(model.minOsVersion, model, "minimum");
+    const maximum = compatibilityBound(model.maxOsVersion, model, "maximum");
+    // Invalid bounds and empty compatible sets retain the existing compatibility error path.
+    if (minimum.ok && maximum.ok) {
+      const compatible = satisfying.filter(
+        (release) =>
+          !outsideIosCompatibilityBounds(release.osVersion, minimum.value, maximum.value),
+      );
+      if (compatible.length > 0) {
+        satisfying = compatible;
+      }
+    }
   }
   const ordered = stableReleaseSort(
     satisfying,
@@ -519,22 +600,16 @@ function resolveIos(
   requirement: NormalizedIosSessionDeviceRequirement,
   defaults: IosSessionRequirementDefaults,
   catalog: Extract<SessionDeviceCatalog, { platform: "ios" }>,
-  capabilities: SessionRequirementCapabilities,
 ): RequirementResult<ResolvedSessionDeviceProfile> {
   const hardware = resolveIosHardware(requirement, defaults, catalog);
   if (!hardware.ok) {
     return hardware;
   }
-  if (hardware.value.model.archetype === "duo" && capabilities.iosDuo !== true) {
-    return failure(
-      "capability_disabled",
-      `Model '${hardware.value.model.name}' resolves to Duo, which is disabled by provider policy.`,
-    );
-  }
   const os = chooseIosRelease(
     requirement.effective.os,
     defaults.os.preferredVersion,
     catalog.releases,
+    hardware.value.model,
   );
   if (!os.ok) {
     return os;
@@ -595,7 +670,7 @@ function resolveAndroid(
     metadataState: "current",
     profileId: hardware.value.profile.profileId,
     ...(hardware.value.memoryMb === undefined ? {} : { memoryMb: hardware.value.memoryMb }),
-    archetype: hardware.value.profile.archetype ?? requirement.effective.hardware.archetype,
+    archetype: hardware.value.profile.archetype,
     systemImagePackage: release.systemImagePackage,
     osVersion: release.osVersion,
     versionPrecision: release.versionPrecision,
@@ -609,7 +684,7 @@ function resolveAndroid(
     profile,
     provenance: resolutionProvenance(
       requirement,
-      "archetype-default",
+      hardware.value.by,
       hardware.value.path,
       os.value.by,
     ),
@@ -620,10 +695,9 @@ export function resolveSessionDeviceProfile(
   requirement: NormalizedSessionDeviceRequirement,
   defaults: SessionRequirementDefaults,
   catalog: SessionDeviceCatalog,
-  capabilities: SessionRequirementCapabilities = {},
 ): RequirementResult<ResolvedSessionDeviceProfile> {
   if (requirement.platform === "ios" && defaults.platform === "ios" && catalog.platform === "ios") {
-    return resolveIos(requirement, defaults, catalog, capabilities);
+    return resolveIos(requirement, defaults, catalog);
   }
   if (
     requirement.platform === "android" &&

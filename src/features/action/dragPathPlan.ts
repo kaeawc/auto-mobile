@@ -123,6 +123,7 @@ export function dragPathTimeline(
 export function assertDragPathFitsRequestBudget(
   totalMs: number,
   remainingRequestBudgetMs: number | undefined,
+  dispatchOverheadMs = 0,
 ): void {
   if (totalMs > DRAG_PATH_MAX_TOTAL_MS) {
     throw new ActionableError(
@@ -132,7 +133,7 @@ export function assertDragPathFitsRequestBudget(
   if (remainingRequestBudgetMs === undefined) {
     return;
   }
-  const neededMs = totalMs + LONG_PRESS_TIMEOUT_HEADROOM_MS;
+  const neededMs = totalMs + dispatchOverheadMs + LONG_PRESS_TIMEOUT_HEADROOM_MS;
   if (neededMs > remainingRequestBudgetMs) {
     throw new ActionableError(
       `dragPath duration ${totalMs} ms does not fit the remaining request budget (${remainingRequestBudgetMs} ms; needs ${neededMs} ms including dispatch headroom); no input was sent. Increase the request timeout or shorten the path.`,

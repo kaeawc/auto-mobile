@@ -841,6 +841,7 @@ final class PrototypeNode: Decodable {
     let pageSize: PrototypePagerPageSize?
     /// Pager page dots (`none` or `dots`, #12071) and the `carousel` node's item sizing.
     let indicator: String?
+    let indicatorPlacement: String?
     let itemWidth: Double?
     let itemSpacing: Double?
     let items: [NavItem]?
@@ -957,7 +958,7 @@ final class PrototypeNode: Decodable {
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              routes,
              linkify, contentTransition,
-             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
+             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, indicatorPlacement, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, errorWhen, errorText, keyboardType, secure, multiline, minLines, maxLength,
              trailingIcon,
              imeAction, yRange, xLabels, goal
@@ -1102,6 +1103,7 @@ final class PrototypeNode: Decodable {
         peek = try container.decodeIfPresent(PrototypePagerPeek.self, forKey: .peek)
         pageSize = try container.decodeIfPresent(PrototypePagerPageSize.self, forKey: .pageSize)
         indicator = try container.decodeIfPresent(String.self, forKey: .indicator)
+        indicatorPlacement = try container.decodeIfPresent(String.self, forKey: .indicatorPlacement)
         itemWidth = try container.decodeIfPresent(Double.self, forKey: .itemWidth)
         itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing)
         dismissOnSwipe = try container.decodeIfPresent(Bool.self, forKey: .dismissOnSwipe)

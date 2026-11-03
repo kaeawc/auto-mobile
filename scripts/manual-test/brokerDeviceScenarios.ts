@@ -545,13 +545,19 @@ async function timeout(ctx: BrokerScenarioContext) {
     device: {
       schemaVersion: 1,
       platform: "ios",
-      hardware: { kind: "archetype", archetype: "duo" },
+      hardware: {
+        kind: "exact-model",
+        model: {
+          namespace: "simulator-device-type",
+          value: "com.apple.CoreSimulator.SimDeviceType.AutoMobile-Missing-iPhone-Duo",
+        },
+      },
       os: { kind: "omitted" },
     },
   };
   const refused = await acquire(ctx, control);
   assert.equal(refused.outcome, "failed");
-  assert.equal(refused.failure?.code, "capability_disabled");
+  assert.equal(refused.failure?.code, "unsupported_hardware");
   assert.equal(refused.failure?.retryable, false);
   assert.equal(refused.cleanupPending, false);
   assert.deepEqual(await status(ctx, control), refused);

@@ -82,9 +82,15 @@ function expectForeground(appId: string) {
   };
 }
 
-function expectNotForeground(appId: string) {
-  return (payload: Payload): string | undefined =>
-    activeAppId(payload) === appId ? `${appId} is still in the foreground` : undefined;
+/** Fails on a missing app id too: home is unproven when the payload names no foreground app. */
+export function expectNotForeground(appId: string) {
+  return (payload: Payload): string | undefined => {
+    const actual = activeAppId(payload);
+    if (actual === undefined) {
+      return `expected ${appId} to leave the foreground, observed no foreground app`;
+    }
+    return actual === appId ? `${appId} is still in the foreground` : undefined;
+  };
 }
 
 /**
@@ -240,6 +246,7 @@ export function buildAaosSmokePlan(options: AaosSmokePlanOptions = {}): AaosSmok
 export interface AaosSmokeDeps {
   client: DriveClient;
   outDir: string;
+  /** Write an artifact; may throw (a full disk, a permissions error). */
   writeFile(path: string, contents: string): void;
   /** Copy a host file into the artifact dir; returns false when it cannot. */
   copyFile(from: string, to: string): boolean;
@@ -260,7 +267,7 @@ async function callStep(
   try {
     return { envelope: await deps.client.callTool(call.tool, call.args) };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) };
+    return { error: errorText(error) };
   }
 }
 
@@ -275,6 +282,28 @@ function judgeEnvelope(step: AaosSmokeStep, envelope: unknown): string | undefin
   }
   const failure = step.assert(payload ?? {});
   return failure ? `assertion failed: ${failure}` : undefined;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Write the step payload; returns why it could not be written, so the step can report it. */
+function saveStepPayload(
+  index: number,
+  step: AaosSmokeStep,
+  envelope: unknown,
+  deps: AaosSmokeDeps,
+): string | undefined {
+  const path = join(deps.outDir, "steps", stepFileName(index, step, ".json"));
+  try {
+    deps.writeFile(path, JSON.stringify(envelope, null, 2));
+    return undefined;
+  } catch (error) {
+    // A lost artifact must not abort the plan: the always-run reset and the summary still run.
+    deps.log(`### ${step.id}: could not write ${path}: ${errorText(error)}`);
+    return `could not write step JSON: ${errorText(error)}`;
+  }
 }
 
 function saveScreenshot(
@@ -308,18 +337,23 @@ export async function runAaosSmoke(
       }
       const started = deps.now();
       const { envelope, error } = await callStep(step, session, deps);
+      let writeError: string | undefined;
       if (envelope !== undefined) {
-        deps.writeFile(
-          join(deps.outDir, "steps", stepFileName(index, step, ".json")),
-          JSON.stringify(envelope, null, 2),
-        );
+        writeError = saveStepPayload(index, step, envelope, deps);
         saveScreenshot(index, step, envelope, deps);
         session ??= getDeviceSessionIdFromResult(envelope);
       }
-      const detail = error !== undefined ? `call threw: ${error}` : judgeEnvelope(step, envelope);
-      const status: AaosSmokeStepStatus = detail === undefined ? "passed" : "failed";
+      const verdict = error !== undefined ? `call threw: ${error}` : judgeEnvelope(step, envelope);
+      const status: AaosSmokeStepStatus = verdict === undefined ? "passed" : "failed";
       failed ||= status === "failed";
-      steps.push({ ...describeStep(step), status, detail, durationMs: deps.now() - started });
+      // The artifact error is a detail, not a verdict: the tool call itself met its expectation.
+      const detail = [verdict, writeError].filter((part) => part !== undefined).join("; ");
+      steps.push({
+        ...describeStep(step),
+        status,
+        detail: detail.length > 0 ? detail : undefined,
+        durationMs: deps.now() - started,
+      });
       deps.log(`### ${step.id} (${step.tool}): ${status}${detail ? ` — ${detail}` : ""}`);
     }
   } finally {
@@ -365,6 +399,50 @@ export function renderAaosSmokeSummary(result: AaosSmokeResult): string {
   return lines.join("\n");
 }
 
+/** Where the run's verdict goes once the plan has finished; faked in tests. */
+export interface AaosSmokeOutputDeps {
+  outDir: string;
+  /** `$GITHUB_STEP_SUMMARY`, when set. */
+  stepSummaryPath?: string;
+  writeFile(path: string, contents: string): void;
+  appendFile(path: string, contents: string): void;
+  log(message: string): void;
+}
+
+/**
+ * Write `summary.md`, `result.json` and the job step summary. Each write is attempted on its
+ * own, so one failure cannot drop the others; returns the failures, already logged.
+ */
+export function writeAaosSmokeOutputs(
+  result: AaosSmokeResult,
+  summary: string,
+  deps: AaosSmokeOutputDeps,
+): string[] {
+  const writes: Array<[string, () => void]> = [
+    ["summary.md", () => deps.writeFile(join(deps.outDir, "summary.md"), summary)],
+    [
+      "result.json",
+      () => deps.writeFile(join(deps.outDir, "result.json"), JSON.stringify(result, null, 2)),
+    ],
+  ];
+  const stepSummaryPath = deps.stepSummaryPath;
+  if (stepSummaryPath) {
+    writes.push(["GITHUB_STEP_SUMMARY", () => deps.appendFile(stepSummaryPath, summary)]);
+  }
+  const failures: string[] = [];
+  for (const [name, write] of writes) {
+    try {
+      write();
+    } catch (error) {
+      // The summary is still printed to the log, and the exit status still carries the verdict.
+      const failure = `could not write ${name}: ${errorText(error)}`;
+      deps.log(failure);
+      failures.push(failure);
+    }
+  }
+  return failures;
+}
+
 async function main(): Promise<void> {
   const { copyFileSync, mkdirSync, writeFileSync, appendFileSync } = await import("node:fs");
   const { dirname } = await import("node:path");
@@ -378,22 +456,21 @@ async function main(): Promise<void> {
     defaultServerPath(),
     resolveTimeoutMs(undefined, process.env),
   );
+  const writeFile = (path: string, contents: string): void => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, contents);
+  };
   const result = await runAaosSmoke(plan, {
     client,
     outDir,
-    writeFile: (path, contents) => {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, contents);
-    },
+    writeFile,
     copyFile: (from, to) => {
       try {
         mkdirSync(dirname(to), { recursive: true });
         copyFileSync(from, to);
         return true;
       } catch (error) {
-        console.warn(
-          `copy ${from} failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        console.warn(`copy ${from} failed: ${errorText(error)}`);
         return false;
       }
     },
@@ -401,12 +478,13 @@ async function main(): Promise<void> {
     log: (message) => console.log(message),
   });
   const summary = renderAaosSmokeSummary(result);
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, "summary.md"), summary);
-  writeFileSync(join(outDir, "result.json"), JSON.stringify(result, null, 2));
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
-  }
+  writeAaosSmokeOutputs(result, summary, {
+    outDir,
+    stepSummaryPath: process.env.GITHUB_STEP_SUMMARY,
+    writeFile,
+    appendFile: (path, contents) => appendFileSync(path, contents),
+    log: (message) => console.warn(message),
+  });
   console.log(summary);
   process.exit(result.ok ? 0 : 1);
 }

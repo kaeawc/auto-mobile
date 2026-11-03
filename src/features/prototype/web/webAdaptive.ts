@@ -92,7 +92,7 @@ function twoPanes(first: WebElement, second: WebElement): WebChild[] {
  */
 function listDetail(ctx: AdaptiveContext): WebChild[] {
   const selected = stateValue(ctx.node.selectionKey, ctx);
-  const hasSelection = typeof selected === "string" ? selected !== "" : selected != null;
+  const hasSelection = selected !== undefined && selected !== null && selected !== "";
   const list = pane("list", {}, slot("list", ctx));
   if (webWidthClass(ctx.scope.screenWidth) === "expanded") {
     return twoPanes(list, pane("detail", {}, slot("detail", ctx)));

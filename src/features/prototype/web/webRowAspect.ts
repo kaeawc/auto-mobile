@@ -75,7 +75,10 @@ export function rowFillAxes(
   return fills ? ["width"] : [];
 }
 
-/** A row with its children measured in order (see rowSequentialChildren); other nodes unchanged. */
+/**
+ * A row with its children measured in order (see rowSequentialChildren), or by the height under
+ * an unbounded width (see rowHeightSizedChildren, withChildHeights); other nodes unchanged.
+ */
 export function rowMeasured(
   node: Raw,
   path: string,
@@ -90,7 +93,7 @@ export function rowMeasured(
     measure.unboundedWidth === true
       ? rowHeightSizedChildren(node.children, prepared, rowContentHeight(record(node.style)))
       : rowSequentialChildren(node.children, prepared);
-  return children === node.children ? node : { ...node, children };
+  return withChildHeights(children === node.children ? node : { ...node, children }, measure);
 }
 
 function withStyle(entry: unknown, patch: Raw): unknown {
@@ -159,16 +162,40 @@ export function rowHeightSizedChildren(
 }
 
 /**
- * A horizontal scroll's child with the scroll's definite content height handed to it
- * (INCOMING_HEIGHT_KEY), as Compose's incoming max height; unchanged when that height depends on
- * layout. A vertical scroll hands its child an unbounded height, so it never calls this.
+ * A child with its parent's definite content height handed to it (INCOMING_HEIGHT_KEY), as
+ * Compose's incoming max height; unchanged when that height depends on layout. A horizontal
+ * scroll hands it to its child; a vertical scroll hands its child an unbounded height instead.
  */
-export function withIncomingHeight(entry: unknown, scrollStyle: unknown): unknown {
+function withIncomingHeight(entry: unknown, parentStyle: unknown): unknown {
   const node = record(entry);
-  const height = rowContentHeight(record(scrollStyle));
+  const height = rowContentHeight(record(parentStyle));
   return node && Number.isFinite(height)
     ? { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height } }
     : entry;
+}
+
+/**
+ * A container under an unbounded width with each child handed its own content height (see
+ * rowContentHeight) as INCOMING_HEIGHT_KEY, as Compose passes the max height on: a horizontal
+ * scroll to its child, and a row or box to every child, so a row nested in them still sizes its
+ * aspect ratios from the scroll's height. Other nodes, and nodes whose content height depends on
+ * layout, are unchanged. A column is left out: each child's bound there depends on its earlier
+ * siblings' heights.
+ */
+export function withChildHeights(node: Raw, measure: RowMeasure): Raw {
+  const style = record(node.style);
+  if (measure.unboundedWidth !== true || !Number.isFinite(rowContentHeight(style))) {
+    return node;
+  }
+  if (node.type === "scroll") {
+    return node.child === undefined
+      ? node
+      : { ...node, child: withIncomingHeight(node.child, style) };
+  }
+  const passes = node.type === "row" || node.type === "box";
+  return passes && Array.isArray(node.children)
+    ? { ...node, children: node.children.map((entry) => withIncomingHeight(entry, style)) }
+    : node;
 }
 
 /**

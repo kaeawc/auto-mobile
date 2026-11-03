@@ -44,9 +44,9 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 type Css = Record<string, string>;
 
 /**
- * A style key the web renderer adds to a horizontal scroll's child, never authored (the style
- * schema is strict, so a `styleWhen` cannot overwrite it): the scroll's definite content height
- * (dp), the incoming max height Compose hands that child.
+ * A style key the web renderer adds to a horizontal scroll's child, and to the children of a row
+ * or box beneath it, never authored (the style schema is strict, so a `styleWhen` cannot overwrite
+ * it): the parent's definite content height (dp), the incoming max height Compose hands that child.
  */
 export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 

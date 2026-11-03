@@ -620,6 +620,30 @@ describe("prototype web still (#16346)", () => {
     expect(style(unsized, "after")).not.toHaveProperty("max-width");
   });
 
+  test("a row nested in a box or row under a horizontal scroll still sizes from the height", () => {
+    const row = {
+      type: "row",
+      children: [
+        { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+        { type: "box", style: { width: { dp: 40 } } },
+      ],
+    };
+    const ratioIn = (child: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "scroll", axis: "horizontal", style: { height: { dp: 100 } }, child },
+        }),
+        "ratio",
+      )[0]!.style;
+    const inBox = { type: "box", style: { padding: { top: 5, bottom: 5 } }, children: [row] };
+    expect(ratioIn(inBox)).toMatchObject({ width: "90px", height: "90px" });
+    expect(ratioIn({ type: "row", children: [row] })).toMatchObject({
+      width: "100px",
+      height: "100px",
+    });
+  });
+
   test("a dp-width row under a horizontal scroll measures its aspect ratio against its width", () => {
     const root = byTag(
       renderPrototypeStill({

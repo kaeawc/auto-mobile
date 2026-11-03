@@ -8,7 +8,7 @@ import {
   rowMeasured,
   rowSequentialChildren,
   widthBoundContext,
-  withIncomingHeight,
+  withChildHeights,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
   INCOMING_HEIGHT_KEY,
@@ -146,8 +146,10 @@ test("a row under an unbounded width neither takes nor fills the width", () => {
     aspectRatio: 1,
     width: { dp: 80 },
     height: { dp: 80 },
+    [INCOMING_HEIGHT_KEY]: 80,
   });
-  expect(children[1]).toBe(row.children[1]);
+  // A later sibling keeps its width, and is handed the row's height for its own children.
+  expect(styleOf(children[1])).toEqual({ width: { dp: 40 }, [INCOMING_HEIGHT_KEY]: 80 });
   // Bounded, the same row keeps Compose's sequential measure.
   const bounded = rowMeasured(row, "root", prepare).children as unknown[];
   expect(styleOf(bounded[0])).toEqual({ aspectRatio: 1, weight: 1 });
@@ -155,10 +157,15 @@ test("a row under an unbounded width neither takes nor fills the width", () => {
 
 test("a horizontal scroll hands its child its definite content height only", () => {
   const child = { type: "row", style: { spacing: 4 } };
-  const handed = withIncomingHeight(child, { height: { dp: 100 }, padding: { top: 8 } });
-  expect(styleOf(handed)).toEqual({ spacing: 4, [INCOMING_HEIGHT_KEY]: 92 });
-  expect(withIncomingHeight(child, { height: "fill" })).toBe(child);
-  expect(withIncomingHeight(undefined, { height: { dp: 100 } })).toBeUndefined();
+  const scroll = (style: Raw) => ({ type: "scroll", style, child });
+  const unbounded = { unboundedWidth: true };
+  const handed = withChildHeights(scroll({ height: { dp: 100 }, padding: { top: 8 } }), unbounded);
+  expect(styleOf(handed.child)).toEqual({ spacing: 4, [INCOMING_HEIGHT_KEY]: 92 });
+  expect(withChildHeights(scroll({ height: "fill" }), unbounded).child).toBe(child);
+  // A vertical scroll's content is width-bounded, so it hands no height.
+  expect(withChildHeights(scroll({ height: { dp: 100 } }), {}).child).toBe(child);
+  const empty = { type: "scroll", style: { height: { dp: 100 } } };
+  expect(withChildHeights(empty, unbounded)).toBe(empty);
 });
 
 test("a node with a dp width or maxWidth bounds its content's width again", () => {
@@ -169,4 +176,20 @@ test("a node with a dp width or maxWidth bounds its content's width again", () =
   expect(widthBoundContext(context, { width: "fill" })).toBe(context);
   const bounded: WebStyleContext = { ...context, unboundedWidth: undefined };
   expect(widthBoundContext(bounded, { width: { dp: 200 } })).toBe(bounded);
+});
+
+test("under an unbounded width a row or box hands its children its content height", () => {
+  const children = [{ type: "row", children: [] }, "skipped"];
+  const box = { type: "box", style: { [INCOMING_HEIGHT_KEY]: 100, padding: { top: 5 } }, children };
+  const handed = withChildHeights(box, { unboundedWidth: true });
+  expect(styleOf((handed.children as unknown[])[0])).toEqual({ [INCOMING_HEIGHT_KEY]: 95 });
+  expect((handed.children as unknown[])[1]).toBe("skipped");
+  expect(withChildHeights({ ...box, type: "row" }, { unboundedWidth: true })).not.toBe(box);
+  // Bounded, a column, or no definite height: the children stay as authored.
+  expect(withChildHeights(box, {})).toBe(box);
+  expect(withChildHeights({ ...box, type: "column" }, { unboundedWidth: true }).children).toBe(
+    children,
+  );
+  const unsized = { type: "box", children };
+  expect(withChildHeights(unsized, { unboundedWidth: true })).toBe(unsized);
 });

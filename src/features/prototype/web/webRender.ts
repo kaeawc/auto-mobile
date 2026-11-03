@@ -40,7 +40,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
-import { rowFillAxes, rowMeasured, widthBoundContext, withIncomingHeight } from "./webRowAspect";
+import { rowFillAxes, rowMeasured, widthBoundContext, withChildHeights } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -345,7 +345,8 @@ const box: NodeRenderer = (raw, scope, path) => {
   const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
   const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
-  return el("div", { attrs, style }, children(node, inner, path));
+  const handed = withChildHeights(node, scope.style);
+  return el("div", { attrs, style }, children(handed, inner, path));
 };
 
 const text: NodeRenderer = (node, scope) => {
@@ -388,7 +389,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     },
   });
   const scrollAttrs = { ...attrs, ...fade.attrs };
-  const content = horizontal ? withIncomingHeight(node.child, node.style) : node.child;
+  const { child: content } = withChildHeights(node, { unboundedWidth: horizontal });
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(content, inner, `${path}.child`));
 };
 

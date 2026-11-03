@@ -83,11 +83,18 @@ describe("data write change events", () => {
     });
   });
   test("an upsert decodes with its key pointer", () => {
-    const payload = { op: "upsert", key: "/sku", value: { sku: "a", n: 2 }, revision: 6 };
-    const wire = dataWrite(1, CART, payload);
+    const wire = dataWrite(1, CART, {
+      op: "upsert",
+      key: "/sku",
+      value: { sku: "a", n: 2 },
+      revision: 6,
+    });
     expect(prototypeDataWriteOf(decodePrototypeEvent(wire, "test")!)).toEqual({
       path: CART,
-      ...payload,
+      op: "upsert",
+      key: "/sku",
+      value: { sku: "a", n: 2 },
+      revision: 6,
     });
   });
   test("an upsert without a key pointer is dropped", () => {
@@ -116,7 +123,7 @@ describe("the host mirror follows device data writes", () => {
   });
   test("an upsert replaces the keyed row and appends a new one", () => {
     const shown = tracked();
-    const upsert = (value: Record<string, unknown>, revision: number) =>
+    const upsert = (value: { sku: string; n: number }, revision: number) =>
       shown.recordDeviceDataWrite("d", "shop", {
         path: CART,
         op: "upsert",

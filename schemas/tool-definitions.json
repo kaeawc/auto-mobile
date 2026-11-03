@@ -39527,6 +39527,22 @@
           "required": ["lastAction", "success", "timestamp"],
           "additionalProperties": false
         },
+        "platformStatus": {
+          "description": "status and inspect: the last battery, power and audio values the device delivered through <module>.changed; a module is absent until its first change",
+          "type": "object",
+          "properties": {
+            "battery": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "power": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "audio": {
+              "$ref": "#/$defs/__schema32"
+            }
+          },
+          "additionalProperties": false
+        },
         "screenRound": {
           "description": "Wear OS show only: whether the watch display is round, so content in the corners is clipped; absent on other devices or when unreadable",
           "type": "boolean"
@@ -39712,7 +39728,7 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema32"
+              "$ref": "#/$defs/__schema33"
             },
             "context": {
               "$ref": "#/$defs/__schema29"
@@ -40427,6 +40443,39 @@
           "const": true
         },
         "__schema32": {
+          "type": "object",
+          "properties": {
+            "values": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              }
+            },
+            "receivedAt": {
+              "type": "number"
+            },
+            "simulated": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["values", "receivedAt"],
+          "additionalProperties": false
+        },
+        "__schema33": {
           "anyOf": [
             {
               "type": "string"
@@ -40443,7 +40492,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema32"
+                "$ref": "#/$defs/__schema33"
               }
             },
             {
@@ -40452,7 +40501,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema32"
+                "$ref": "#/$defs/__schema33"
               }
             }
           ]

@@ -13,7 +13,7 @@ import { ActionableError } from "../../../src/models/ActionableError";
 
 const shop = {
   id: "shop",
-  theme: { colors: { primary: "#6750A4", dark: { primary: "#D0BCFF80" } } },
+  theme: { colors: { primary: "#6750A4", dark: { primary: "#80D0BCFF" } } },
   state: { email: "a@b.test", price: "$5", count: 3 },
   data: { items: [{ name: "a" }, { name: "b" }, { name: "c" }] },
   root: {
@@ -206,6 +206,59 @@ describe("automobile:prototype/eject result", () => {
     const kt = (await eject("android")).files[0].content;
     expect(kt).toContain(
       'Column(modifier = Modifier) {\n            Text(text = "TODO: topAppBar")\n            Text(text = "kept", modifier = Modifier)',
+    );
+  });
+
+  test("a stub keeps descendants in child and adaptive pane slots", async () => {
+    const spec = {
+      id: "slots",
+      root: {
+        type: "column",
+        children: [
+          { type: "drawer", child: { type: "text", text: "menu", testTag: "drawer-text" } },
+          { type: "adaptive", list: { type: "text", text: "l", testTag: "pane-list" } },
+        ],
+      },
+    };
+    const result = await eject("ios", spec);
+    const swift = result.files[0].content;
+    expect(swift).toContain('.accessibilityIdentifier("drawer-text")');
+    expect(swift).toContain('.accessibilityIdentifier("pane-list")');
+    expect(result.remaining.map((item) => item.path)).toEqual([
+      "root.children[0]",
+      "root.children[1]",
+    ]);
+  });
+
+  test("reports actions outside onTap, such as onSubmit, instead of dropping them", async () => {
+    const spec = {
+      id: "search",
+      root: {
+        type: "textField",
+        stateKey: "q",
+        onSubmit: [
+          { type: "emit", name: "search" },
+          { type: "push", stack: "main", screen: "results" },
+        ],
+      },
+    };
+    const result = await eject("android", spec);
+    expect(result.remaining).toEqual([
+      { path: "root.onSubmit[0]", kind: "action", type: "emit" },
+      { path: "root.onSubmit[1]", kind: "action", type: "push" },
+    ]);
+    expect(result.files[0].content).toContain(
+      "// TODO(eject): onSubmit actions at root are not translated.",
+    );
+  });
+
+  test("reads eight-digit theme colors as alpha-first ARGB", async () => {
+    const spec = { id: "argb", theme: { colors: { primary: "#80FF0000" } }, root: shop.root };
+    expect((await eject("android", spec)).files[0].content).toContain(
+      "primary = Color(0x80FF0000),",
+    );
+    expect((await eject("ios", spec)).files[0].content).toContain(
+      "UIColor(red: 1.000, green: 0.000, blue: 0.000, alpha: 0.502)",
     );
   });
 

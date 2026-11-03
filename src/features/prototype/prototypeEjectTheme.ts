@@ -1,4 +1,5 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
+import { parsePrototypeHex, type Rgba } from "./prototypeContrast";
 import { record } from "./prototypeTemplate";
 
 /**
@@ -8,7 +9,6 @@ import { record } from "./prototypeTemplate";
  */
 
 const ROLES = Object.keys(contract.definitions.themeModeColors.fields);
-const HEX = /^#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/;
 
 export interface EjectThemeColors {
   readonly mode?: "light" | "dark";
@@ -24,7 +24,7 @@ function roleColors(...sources: unknown[]): Map<string, string> {
     const values = record(source) ?? {};
     for (const role of ROLES) {
       const value = values[role];
-      if (typeof value === "string" && HEX.test(value)) {
+      if (typeof value === "string" && parsePrototypeHex(value)) {
         colors.set(role, value);
       }
     }
@@ -45,14 +45,18 @@ export function ejectThemeColors(theme: unknown): EjectThemeColors {
   };
 }
 
-function channels(hex: string): { rgb: string; alpha: string } {
-  const match = HEX.exec(hex);
-  return { rgb: (match?.[1] ?? "000000").toUpperCase(), alpha: (match?.[2] ?? "FF").toUpperCase() };
+/** Contract colors are `#RRGGBB` or alpha-first `#AARRGGBB`, as the renderers read them. */
+function rgba(hex: string): Rgba {
+  return parsePrototypeHex(hex) ?? { r: 0, g: 0, b: 0, a: 1 };
+}
+
+function hexByte(value: number): string {
+  return Math.round(value).toString(16).padStart(2, "0").toUpperCase();
 }
 
 function composeColor(hex: string): string {
-  const { rgb, alpha } = channels(hex);
-  return `Color(0x${alpha}${rgb})`;
+  const { r, g, b, a } = rgba(hex);
+  return `Color(0x${hexByte(a * 255)}${hexByte(r)}${hexByte(g)}${hexByte(b)})`;
 }
 
 function schemeLines(name: string, factory: string, colors: ReadonlyMap<string, string>): string[] {
@@ -87,9 +91,9 @@ export function composeThemeLines(theme: EjectThemeColors, name: string): string
 }
 
 function uiColor(hex: string): string {
-  const { rgb, alpha } = channels(hex);
-  const unit = (value: string): string => (Number.parseInt(value, 16) / 255).toFixed(3);
-  return `UIColor(red: ${unit(rgb.slice(0, 2))}, green: ${unit(rgb.slice(2, 4))}, blue: ${unit(rgb.slice(4, 6))}, alpha: ${unit(alpha)})`;
+  const { r, g, b, a } = rgba(hex);
+  const unit = (value: number): string => (value / 255).toFixed(3);
+  return `UIColor(red: ${unit(r)}, green: ${unit(g)}, blue: ${unit(b)}, alpha: ${a.toFixed(3)})`;
 }
 
 /** Roles present in either mode; a role set for only one mode uses that value in both. */

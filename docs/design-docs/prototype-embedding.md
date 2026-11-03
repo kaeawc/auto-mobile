@@ -64,9 +64,12 @@ It resolves the prototype like the native resource, expands `components`, and wr
   find them.
 - It is not round-trip. Nothing reads the ejected code back, and re-reading the resource
   overwrites nothing; the app copies the file once.
-- Only `push`, `replace`, `pop` and `popToRoot` are translated, onto a back stack per `stack` id in
-  the generated state class. Other actions, styles, conditions and placeholders are reported in
-  `remaining`.
+- Only `onTap` actions are translated, and of those only `push`, `replace`, `pop` and `popToRoot`,
+  onto a back stack per `stack` id in the generated state class. Every action in any other
+  action-list field of the contract (`onSubmit`, `onLongPress`, ...) and every other `onTap` action
+  is reported in `remaining`, as are unsupported nodes and unbound placeholders.
+- Stubs keep descendants from every contract child slot (`prototypeNodeChildren`), not only
+  `children`. Eight-digit colors are alpha-first `#AARRGGBB`, as the renderers read them.
 
 ## Samples and checks
 

@@ -210,9 +210,9 @@ the host, so the page's script only switches between views it was given and neve
   `shadows` map to `box-shadow` with the authored blur as the CSS blur (sigma b/2), and `elevation`
   takes its `shadowColor` tint. A gradient border and inner shadows are absolutely placed layers
   after the node's children, so they paint over the content, inside its bounds, as Compose draws
-  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: an iOS frame blurs and
-  saturates the backdrop under a translucent tint (else white) with a light rim, and an Android
-  frame draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
+  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: the iOS skin blurs and
+  saturates the backdrop under a translucent tint (else white) with a light rim, and the Android
+  skin draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
   keeps its colour. `ios.glassGroup` draws nothing of its own. `scroll.fadeEdges` is a mask on the
   trailing edge only (the leading one in a `reverse` scroll), since a still opens at the scroll's
   start and cannot measure overflow; horizontal start and end mirror in RTL. `linkify` splits the

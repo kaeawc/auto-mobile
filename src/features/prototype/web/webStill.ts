@@ -165,24 +165,30 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+/** An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's. */
+function colorMode(spec: Raw, options: PrototypeStillOptions): PrototypeColorMode {
+  const authored = record(spec.theme)?.mode;
+  return authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
   frame: DeviceFrame,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
-  // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
-  const authored = record(spec.theme)?.mode;
   const size = screenSize(frame, options.orientation ?? "portrait");
   const screenDp = { widthDp: size.width, heightDp: size.height };
-  const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
+  const mode = colorMode(spec, options);
+  // The skin decides every look the devices draw differently, glass included.
+  const skin = options.skin ?? frame.platform;
   return {
     style: {
       mode,
       palette: prototypeRolePalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
-      platform: frame.platform,
+      platform: skin,
       ...(record(spec.window)?.layoutDirection === "rtl" ? { rtl: true } : {}),
     },
     condition: {
@@ -197,7 +203,7 @@ function stillScope(
     instances: [],
     inBox: false,
     unsupported: [],
-    skin: options.skin ?? frame.platform,
+    skin,
     screenWidth: size.width,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],

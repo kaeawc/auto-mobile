@@ -153,6 +153,13 @@ describe("platform skins (#16531)", () => {
     expect(part(ios, "inactive").style["background-color"]).toBe("rgba(120,120,128,0.36)");
   });
 
+  test("glass follows the skin, not the frame", () => {
+    const glass = { type: "box", testTag: "g", style: { surface: "glass" } };
+    const ios = rendered([glass], { frame: "iphone-16" }, "g");
+    expect(rendered([glass], { frame: "pixel-9", skin: "ios" }, "g")).toEqual(ios);
+    expect(rendered([glass], { frame: "pixel-9" }, "g")).not.toEqual(ios);
+  });
+
   test("components the iOS skin leaves out draw as Material on both skins", () => {
     const chip = { type: "chip", label: "Tag", testTag: "c" };
     expect(rendered([chip], { skin: "ios" }, "c")).toEqual(

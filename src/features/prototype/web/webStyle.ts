@@ -12,7 +12,7 @@ export interface WebStyleContext {
   readonly parentAxis?: "row" | "column";
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
-  /** The frame's platform, for looks the devices draw differently (glass). Android when unset. */
+  /** The skin's platform, for looks the devices draw differently (glass). Android when unset. */
   readonly platform?: "android" | "ios";
   /** The window's explicit `rtl` direction, for physical edges such as a fade's. */
   readonly rtl?: boolean;

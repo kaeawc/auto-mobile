@@ -306,3 +306,32 @@ test("a dp-height sibling takes at least its vertical padding, as its CSS border
   expect(childrenOf(column).map(heightOf)).toEqual([40, 10]);
   expect(contentHeight(record(record(childrenOf(column)[1])?.style))).toBe(10);
 });
+
+test("a weight share stays a max without a definite column height or a whole weight", () => {
+  const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
+  const shareOf = (style: Raw, child: Raw = weighted) => {
+    const column = withChildHeights({ type: "column", style, children: [child] }, "root", prepare);
+    const entry = record(childrenOf(column)[0]);
+    return [exactOf(entry), contentHeight(record(entry?.style))];
+  };
+  expect(shareOf({ height: { dp: 40 } })).toEqual([true, 40]);
+  // A maxHeight alone leaves the column's CSS height auto.
+  expect(shareOf({ maxHeight: 40 })).toEqual([undefined, 10]);
+  // So does a fill or weight that is only a bound; an exact share of its own is definite.
+  expect(shareOf({ [INCOMING_HEIGHT_KEY]: 40 })).toEqual([undefined, 10]);
+  expect(shareOf({ [INCOMING_HEIGHT_KEY]: 40, [INCOMING_HEIGHT_EXACT_KEY]: true })).toEqual([
+    true,
+    40,
+  ]);
+  // A lone grow factor below 1 takes only that fraction of the free space.
+  const half = { ...weighted, style: { ...weighted.style, weight: 0.5 } };
+  expect(shareOf({ height: { dp: 40 } }, half)).toEqual([undefined, 10]);
+});
+
+test("a solid border takes layout like padding; a gradient border does not", () => {
+  const border = { width: 15, color: "#000000" };
+  expect(contentHeight({ height: { dp: 40 }, border })).toBe(10);
+  expect(contentHeight({ height: { dp: 40 }, border: { ...border, gradient: {} } })).toBe(40);
+  const bordered = { type: "row", style: { height: { dp: 10 }, border } };
+  expect(columnChildHeights([bordered, { type: "box" }], 40, 0)).toEqual([40, 10]);
+});

@@ -37,15 +37,25 @@ function boxHeight(style: Raw | undefined): number {
 }
 
 /**
+ * A node's vertical padding plus its solid border on both edges: what CSS's border box spends
+ * before its content. A gradient border is drawn by overlay layers, so it takes no layout.
+ */
+function verticalInset(style: Raw | undefined): number {
+  const padding = record(style?.padding);
+  const border = record(style?.border);
+  const edge =
+    typeof border?.width === "number" && border.gradient === undefined ? border.width : 0;
+  return side(padding, "top") + side(padding, "bottom") + 2 * edge;
+}
+
+/**
  * The tallest a node lets its children be: its box height (see boxHeight) less its vertical
- * padding. A `fill`, weighted or wrap-sized node is bounded by the incoming height alone, as
+ * padding and border (see verticalInset). A `fill`, weighted or wrap-sized node is bounded by the incoming height alone, as
  * Compose's incoming max height bounds it; a column-weighted node takes its share even over an
  * authored dp height. Infinity when no bound is statically known.
  */
 export function contentHeight(style: Raw | undefined): number {
-  const bound = boxHeight(style);
-  const padding = record(style?.padding);
-  return Math.max(0, bound - side(padding, "top") - side(padding, "bottom"));
+  return Math.max(0, boxHeight(style) - verticalInset(style));
 }
 
 const weightOf = (node: Raw | undefined): number | undefined => {
@@ -55,7 +65,7 @@ const weightOf = (node: Raw | undefined): number | undefined => {
 
 /**
  * The height an unweighted child takes when `remaining` is left: its dp height clamped by its
- * bounds (see ownHeight), and at least its vertical padding. A `fill` child takes everything left,
+ * bounds (see ownHeight), and at least its vertical padding and border. A `fill` child takes everything left,
  * within its bounds, as Compose's `fillMaxHeight` does in a Column, so a later sibling, weighted or
  * not, gets nothing. With no dp height it wraps its content, which is only known at layout time, so it counts as its
  * `minHeight` (else 0), never its `maxHeight`, and the rest is an upper bound.
@@ -69,9 +79,8 @@ const takenHeight = (node: Raw, remaining: number): number => {
   if (typeof record(style?.height)?.dp !== "number") {
     return floor;
   }
-  // CSS sizes a node's border box, so its vertical padding is a floor under its dp height.
-  const padding = record(style?.padding);
-  return Math.max(ownHeight(style), side(padding, "top") + side(padding, "bottom"));
+  // CSS sizes a node's border box, so its padding and border are a floor under its dp height.
+  return Math.max(ownHeight(style), verticalInset(style));
 };
 
 /**
@@ -144,16 +153,26 @@ const fixedSibling = (node: Raw | undefined): boolean =>
   typeof record(record(node.style)?.height)?.dp === "number";
 
 /**
- * Which resolved column children get their incoming height as an exact allocation: the weighted
- * one, when it is the column's only visible weighted child and every unweighted sibling has a dp
- * height (see fixedSibling). Its own `minHeight`/`maxHeight` are applied by contentHeight. With
- * two or more weighted children, CSS flex items keep `min-height: auto`, so a sibling's padding,
- * content or bounds can move height between them; the shares are then only upper bounds and stay
- * a max.
+ * Whether CSS gives a column a definite height to share: a dp height, or an exact allocation of
+ * its own. A `maxHeight` alone, a `fill` or a wrap leaves its CSS height auto, so its weighted
+ * child is sized from content and the share is only a bound.
  */
-function exactShares(prepared: readonly (Raw | undefined)[]): boolean[] {
-  const weighted = prepared.filter((node) => weightOf(node) !== undefined).length;
-  const known = weighted === 1 && prepared.every(fixedSibling);
+const definite = (style: Raw | undefined): boolean =>
+  typeof record(style?.height)?.dp === "number" || style?.[INCOMING_HEIGHT_EXACT_KEY] === true;
+
+/**
+ * Which resolved column children get their incoming height as an exact allocation: the weighted
+ * one, when the column's height is definite (see definite), its weight is at least 1 (CSS grow
+ * factors summing below 1 take only that fraction of the free space), it is the column's only
+ * visible weighted child, and every unweighted sibling has a dp height (see fixedSibling). Its
+ * own `minHeight`/`maxHeight` are applied by contentHeight. With two or more weighted children,
+ * CSS flex items keep `min-height: auto`, so a sibling's padding, content or bounds can move
+ * height between them. Otherwise the shares are only upper bounds and stay a max.
+ */
+function exactShares(column: Raw | undefined, prepared: readonly (Raw | undefined)[]): boolean[] {
+  const weights = prepared.flatMap((node) => weightOf(node) ?? []);
+  const known =
+    definite(column) && weights.length === 1 && weights[0]! >= 1 && prepared.every(fixedSibling);
   return prepared.map((node) => known && weightOf(node) !== undefined);
 }
 
@@ -187,7 +206,7 @@ export function withChildHeights(node: Raw, path: string, prepare: PrepareChild)
   const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
   const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
   const heights = columnChildHeights(prepared, content, spacing);
-  const exact = exactShares(prepared);
+  const exact = exactShares(style, prepared);
   return {
     ...node,
     children: children.map((entry, index) => withHeight(entry, heights[index], exact[index])),
@@ -220,7 +239,7 @@ export function repeatInstanceChildren(
   );
   const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
   const heights = columnChildHeights(prepared, content, spacing);
-  const exact = exactShares(prepared);
+  const exact = exactShares(style, prepared);
   return prepares.map((_prepare, instance) =>
     template.map((entry, index) => {
       const at = instance * template.length + index;

@@ -1,4 +1,7 @@
-plugins { id("automobile.android-application") }
+plugins {
+  id("automobile.android-application")
+  id("automobile.robolectric-sdk-pin")
+}
 
 // Deterministic Android Automotive OS fixture: a media browse tree, Car App Library templates and
 // one driving-safe plus one parked-only activity. No network and no Google services, so it installs
@@ -18,4 +21,5 @@ dependencies {
   implementation(libs.androidx.car.app.automotive)
 
   testImplementation(libs.junit)
+  testImplementation(libs.robolectric)
 }

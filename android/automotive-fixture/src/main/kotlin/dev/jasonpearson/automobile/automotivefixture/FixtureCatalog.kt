@@ -10,6 +10,8 @@ data class FixturePoi(
   val address: String,
   val latitude: Double,
   val longitude: Double,
+  /** Fixed distance shown by the navigation template; never computed from a location. */
+  val distanceKm: Double,
 )
 
 /** Where a home-list row leads. */
@@ -69,9 +71,16 @@ object FixtureCatalog {
 
   val pois: List<FixturePoi> =
     listOf(
-      FixturePoi("poi_charging", "Fixture Charging Station", "1 Fixture Way", 37.4220, -122.0841),
-      FixturePoi("poi_cafe", "Fixture Cafe", "2 Fixture Way", 37.4225, -122.0850),
-      FixturePoi("poi_parking", "Fixture Parking", "3 Fixture Way", 37.4230, -122.0860),
-      FixturePoi("poi_park", "Fixture Park", "4 Fixture Way", 37.4235, -122.0870),
+      FixturePoi(
+        "poi_charging",
+        "Fixture Charging Station",
+        "1 Fixture Way",
+        37.4220,
+        -122.0841,
+        0.5,
+      ),
+      FixturePoi("poi_cafe", "Fixture Cafe", "2 Fixture Way", 37.4225, -122.0850, 1.2),
+      FixturePoi("poi_parking", "Fixture Parking", "3 Fixture Way", 37.4230, -122.0860, 2.4),
+      FixturePoi("poi_park", "Fixture Park", "4 Fixture Way", 37.4235, -122.0870, 3.8),
     )
 }

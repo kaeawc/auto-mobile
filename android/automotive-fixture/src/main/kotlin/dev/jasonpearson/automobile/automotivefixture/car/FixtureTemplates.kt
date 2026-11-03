@@ -1,10 +1,14 @@
 package dev.jasonpearson.automobile.automotivefixture.car
 
+import android.text.SpannableString
+import android.text.Spanned
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
 import androidx.car.app.model.CarIcon
 import androidx.car.app.model.CarLocation
+import androidx.car.app.model.Distance
+import androidx.car.app.model.DistanceSpan
 import androidx.car.app.model.GridItem
 import androidx.car.app.model.GridTemplate
 import androidx.car.app.model.Header
@@ -20,14 +24,12 @@ import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.PlaceListNavigationTemplate
 import androidx.core.graphics.drawable.IconCompat
 import dev.jasonpearson.automobile.automotivefixture.FixtureCatalog
+import dev.jasonpearson.automobile.automotivefixture.FixturePoi
 import dev.jasonpearson.automobile.automotivefixture.FixtureRow
 import dev.jasonpearson.automobile.automotivefixture.R
 
 private fun header(title: String, back: Boolean): Header =
-  Header.Builder()
-    .setTitle(title)
-    .apply { if (back) setStartHeaderAction(Action.BACK) }
-    .build()
+  Header.Builder().setTitle(title).apply { if (back) setStartHeaderAction(Action.BACK) }.build()
 
 private fun row(item: FixtureRow, onClick: (() -> Unit)? = null): Row =
   Row.Builder()
@@ -89,7 +91,7 @@ class GridScreen(carContext: CarContext) : Screen(carContext) {
           .setText(item.subtitle)
           .setImage(icon)
           .setOnClickListener { screenManager.push(RowDetailScreen(carContext, item)) }
-          .build()
+          .build(),
       )
     }
     return GridTemplate.Builder()
@@ -104,7 +106,9 @@ class PaneScreen(carContext: CarContext) : Screen(carContext) {
   override fun onGetTemplate(): Template {
     val pane = Pane.Builder()
     FixtureCatalog.paneRows.forEach { pane.addRow(row(it)) }
-    return PaneTemplate.Builder(pane.build()).setHeader(header("Pane template", back = true)).build()
+    return PaneTemplate.Builder(pane.build())
+      .setHeader(header("Pane template", back = true))
+      .build()
   }
 }
 
@@ -118,29 +122,47 @@ class RowDetailScreen(carContext: CarContext, private val item: FixtureRow) : Sc
 
 /** Navigation place list with four fixed points of interest; no map is drawn. */
 class PoiNavigationScreen(carContext: CarContext) : Screen(carContext) {
-  override fun onGetTemplate(): Template {
-    val list = ItemList.Builder()
-    FixtureCatalog.pois.forEach { poi ->
-      val place =
-        Place.Builder(CarLocation.create(poi.latitude, poi.longitude))
-          .setMarker(PlaceMarker.Builder().build())
-          .build()
-      list.addItem(
-        Row.Builder()
-          .setTitle(poi.name)
-          .addText(poi.address)
-          .setMetadata(Metadata.Builder().setPlace(place).build())
-          .setOnClickListener {
-            screenManager.push(
-              RowDetailScreen(carContext, FixtureRow(poi.id, poi.name, poi.address))
-            )
-          }
-          .build()
-      )
+  override fun onGetTemplate(): Template =
+    poiPlaceListTemplate(FixtureCatalog.pois) { poi ->
+      screenManager.push(RowDetailScreen(carContext, FixtureRow(poi.id, poi.name, poi.address)))
     }
-    return PlaceListNavigationTemplate.Builder()
-      .setHeader(header("Navigation template", back = true))
-      .setItemList(list.build())
-      .build()
-  }
 }
+
+/**
+ * The place list behind [PoiNavigationScreen]. Every non-browsable row in a place list must carry a
+ * [DistanceSpan] (or the builder throws), so each address line leads with the fixed distance.
+ */
+fun poiPlaceListTemplate(
+  pois: List<FixturePoi>,
+  onClick: (FixturePoi) -> Unit,
+): PlaceListNavigationTemplate {
+  val list = ItemList.Builder()
+  pois.forEach { poi ->
+    val place =
+      Place.Builder(CarLocation.create(poi.latitude, poi.longitude))
+        .setMarker(PlaceMarker.Builder().build())
+        .build()
+    val text = SpannableString("$DISTANCE_PLACEHOLDER · ${poi.address}")
+    text.setSpan(
+      DistanceSpan.create(Distance.create(poi.distanceKm, Distance.UNIT_KILOMETERS)),
+      0,
+      DISTANCE_PLACEHOLDER.length,
+      Spanned.SPAN_INCLUSIVE_INCLUSIVE,
+    )
+    list.addItem(
+      Row.Builder()
+        .setTitle(poi.name)
+        .addText(text)
+        .setMetadata(Metadata.Builder().setPlace(place).build())
+        .setOnClickListener { onClick(poi) }
+        .build(),
+    )
+  }
+  return PlaceListNavigationTemplate.Builder()
+    .setHeader(header("Navigation template", back = true))
+    .setItemList(list.build())
+    .build()
+}
+
+// The host replaces the spanned character with the formatted distance.
+private const val DISTANCE_PLACEHOLDER = " "

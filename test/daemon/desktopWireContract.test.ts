@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DAEMON_OWNED_SESSIONS_PARAM } from "../../src/daemon/wire/constants";
 import {
   DESKTOP_CLIENT_NAME,
@@ -50,6 +50,22 @@ const TEN_MINUTES_TICKS = 300;
 const MINUTE_TICKS = 30;
 
 let harness: DesktopWireHarness | undefined;
+
+// The file's first scenario paid the daemon's one-time module and construction cost, which put a
+// ten-minute watch at the 100 ms budget (#16420). Warm the harness once outside the timed tests.
+beforeAll(async () => {
+  const warm = new DesktopWireHarness([PIXEL, PIXEL_FOLD]);
+  await warm.start();
+  try {
+    await warm.send("desktop", "register", "daemon/registerSession", {
+      sessionId: DESKTOP_2,
+      clientName: DESKTOP_CLIENT_NAME,
+    });
+    await warm.heartbeats("heartbeat-watching", DESKTOP_2, 2);
+  } finally {
+    await warm.stop();
+  }
+});
 
 afterEach(async () => {
   await harness?.stop();

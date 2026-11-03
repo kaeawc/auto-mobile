@@ -133,6 +133,51 @@ async function finishAnimations(page: Page): Promise<void> {
   );
 }
 
+interface Device3dState {
+  readonly pressed: string | null;
+  readonly wrapped: boolean;
+  readonly transform: string;
+}
+
+function device3dState(page: Page): Promise<Device3dState> {
+  return page.evaluate(() => {
+    const shown = document.querySelector<HTMLElement>("[data-view]:not([hidden])");
+    return {
+      pressed: document.querySelector('[data-control="3d"]')?.getAttribute("aria-pressed") ?? null,
+      wrapped: document.body.hasAttribute("data-device3d"),
+      transform: shown?.style.transform ?? "",
+    };
+  });
+}
+
+function shownViewHtml(page: Page): Promise<string> {
+  return page.evaluate(
+    () => document.querySelector<HTMLElement>("[data-view]:not([hidden])")?.outerHTML ?? "",
+  );
+}
+
+/**
+ * 2D → 3D → 2D (#16458): the toggle transitions into the three-quarter pose, arrow keys orbit the
+ * focused viewport, and leaving 3D restores the shown view's DOM byte for byte.
+ */
+async function checkDevice3d(page: Page): Promise<void> {
+  const before = await shownViewHtml(page);
+  await page.click('[data-control="3d"]');
+  await page.waitForFunction(() =>
+    document
+      .querySelector<HTMLElement>("[data-view]:not([hidden])")
+      ?.style.transform.includes("rotateY(30deg)"),
+  );
+  expect(await device3dState(page)).toMatchObject({ pressed: "true", wrapped: true });
+  await page.focus("[data-viewport]");
+  await page.keyboard.press("ArrowRight");
+  expect((await device3dState(page)).transform).toContain("rotateY(35deg)");
+  await page.click('[data-control="3d"]');
+  await page.waitForFunction(() => !document.body.hasAttribute("data-device3d"));
+  expect(await device3dState(page)).toEqual({ pressed: "false", wrapped: false, transform: "" });
+  expect(await shownViewHtml(page)).toBe(before);
+}
+
 function writeOutput(name: string, png: Buffer): void {
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(join(OUT_DIR, name), png);
@@ -237,6 +282,8 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
             );
             expect(picked).toEqual([screens.at(-1)]);
           }
+
+          await checkDevice3d(page);
 
           const violations = await page.evaluate((): string[] =>
             Reflect.get(globalThis, "__cspViolations"),

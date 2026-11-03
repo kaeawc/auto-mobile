@@ -144,26 +144,31 @@ function checkedContentSize(contentSize: string): PrototypeContentSize {
   return known;
 }
 
-/**
- * The text scale a frame's platform applies, or undefined at the default size. Each option belongs
- * to one platform, so naming the other platform's option is refused rather than ignored.
- */
-export function stillTextScale(
-  platform: "android" | "ios",
-  size: StillTextSize | undefined,
-): TextScale | undefined {
-  if (platform === "android" && size?.contentSize !== undefined) {
+/** Each option belongs to one platform, so naming the other platform's option is refused. */
+function checkPlatform(platform: "android" | "ios", size: StillTextSize): void {
+  if (platform === "android" && size.contentSize !== undefined) {
     throw new ActionableError(
       "contentSize is iOS Dynamic Type; use fontScale for an Android frame.",
     );
   }
-  if (platform === "ios" && size?.fontScale !== undefined) {
+  if (platform === "ios" && size.fontScale !== undefined) {
     throw new ActionableError("fontScale is Android's; use contentSize for an iOS frame.");
   }
-  if (size?.fontScale !== undefined && checkedFontScale(size.fontScale) !== 1) {
+}
+
+/** The text scale a frame's platform applies, or undefined at the default size. */
+export function stillTextScale(
+  platform: "android" | "ios",
+  size: StillTextSize | undefined,
+): TextScale | undefined {
+  if (!size) {
+    return undefined;
+  }
+  checkPlatform(platform, size);
+  if (size.fontScale !== undefined && checkedFontScale(size.fontScale) !== 1) {
     return androidTextScale(size.fontScale);
   }
-  if (size?.contentSize !== undefined && checkedContentSize(size.contentSize) !== "large") {
+  if (size.contentSize !== undefined && checkedContentSize(size.contentSize) !== "large") {
     return iosTextScale(size.contentSize);
   }
   return undefined;

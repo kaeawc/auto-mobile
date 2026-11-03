@@ -16,7 +16,9 @@ describe("generated prototype render contract (#16451)", () => {
   });
 
   test("refuses a contract without a limit the renderer reads", () => {
-    const { MAX_PROTOTYPE_NODES: _removed, ...limits } = contract.limits;
+    const limits = Object.fromEntries(
+      Object.entries(contract.limits).filter(([name]) => name !== "MAX_PROTOTYPE_NODES"),
+    );
     expect(() => renderPrototypeRenderContract({ ...contract, limits })).toThrow(
       "Contract limit MAX_PROTOTYPE_NODES: not found",
     );

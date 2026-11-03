@@ -26,6 +26,15 @@ fun interface LibraryClock {
   fun nowMillis(): Long
 }
 
+/**
+ * Whether content may enter the library. [DirectoryLibraryRepository.add] asks under its lock, so a
+ * Hide that lands while an import is staging either rejects the import or is followed by a purge
+ * that sees the new entry (#16669).
+ */
+fun interface LibraryAdmission {
+  fun admits(source: LibrarySource, specSha256: String, sourceHost: String?): Boolean
+}
+
 @Serializable
 enum class LibrarySource {
   mcp,
@@ -90,6 +99,7 @@ class DirectoryLibraryRepository(
   private val storage: LibraryStorage,
   private val ids: IdGenerator = IdGenerator { UUID.randomUUID().toString() },
   private val clock: LibraryClock = LibraryClock(System::currentTimeMillis),
+  private val admission: LibraryAdmission = LibraryAdmission { _, _, _ -> true },
 ) : LibraryRepository {
   private val json = Json {
     ignoreUnknownKeys = false
@@ -186,6 +196,10 @@ class DirectoryLibraryRepository(
       !validLibrarySpec(request.specJson) || !AutoMobilePrototype.capabilities.containsAll(requires)
     )
       return LibraryResult.Failure(LibraryError.Invalid)
+    val specSha256 = sha256Hex(request.specJson.toByteArray())
+    // Repeat the importer's early check under this lock: purgeBlocked() lists through it.
+    if (!admission.admits(source, specSha256, null))
+      return LibraryResult.Failure(LibraryError.Hidden)
     val listed = list()
     if (listed is LibraryResult.Failure) return listed
     if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
@@ -220,7 +234,7 @@ class DirectoryLibraryRepository(
               clock.nowMillis(),
               0,
               source,
-              sha256Hex(request.specJson.toByteArray()),
+              specSha256,
               requires.distinct().sorted(),
               false,
             )

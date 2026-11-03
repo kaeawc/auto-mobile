@@ -268,7 +268,9 @@ Android implements them; the iOS viewer does not yet (#16437).
   start repeats the sweep, so an entry whose delete failed before its metadata was removed is
   retried. A later file or share import of hidden content, or of content from a blocked host, is
   rejected as `Hidden` ("hidden on this device") before anything is staged or stored, so hidden
-  content does not hold library quota. There is no unhide.
+  content does not hold library quota. The repository repeats that check under its lock when it
+  commits the entry, and the purge lists through the same lock after Hide records the hash, so an
+  import that races Hide is either rejected or deleted by that purge. There is no unhide.
 - Report opens the user's mail app addressed to the published contact
   (`automobile+coc@jasonpearson.dev`, the project's code-of-conduct enforcement address) with the
   label, spec SHA-256, source and host. The app sends nothing itself and attaches no bundle bytes.

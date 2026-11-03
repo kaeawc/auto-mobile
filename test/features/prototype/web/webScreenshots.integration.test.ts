@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/webPage";
 import { diffPngs } from "../../../../src/features/visual/VisualDiff";
 import {
   WEB_SCREENSHOT_FONT_CSS,
@@ -279,6 +280,88 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
       CASE_TIMEOUT_MS,
     );
   }
+
+  test(
+    "a repeat column's instances keep their aspect ratios inside their own share (#16694)",
+    async () => {
+      const [entry] = webScreenshotCases();
+      const spec = JSON.parse(readFileSync(entry!.fixture, "utf8")) as Record<string, unknown>;
+      const ratioRow = {
+        type: "row",
+        testTag: "instance",
+        style: { weight: 1 },
+        children: [
+          { type: "box", testTag: "ratio", style: { aspectRatio: 2, background: "#3366ff" } },
+          { type: "text", text: "b" },
+        ],
+      };
+      const root = {
+        type: "column",
+        children: [
+          {
+            type: "column",
+            style: { height: { dp: 40 } },
+            repeat: { items: [{ id: 1 }, { id: 2 }] },
+            children: [ratioRow],
+          },
+          {
+            type: "row",
+            testTag: "repeated",
+            repeat: { items: [{ id: 1 }] },
+            children: [{ type: "box", style: { aspectRatio: 2, maxWidth: 40 } }],
+          },
+        ],
+      };
+      const html = buildPrototypeWebPage({
+        title: "repeat-share",
+        frame: entry!.frame,
+        variants: [
+          {
+            id: "repeat-share",
+            label: "repeat-share",
+            revisions: [{ revision: 1, operation: "show", spec: { ...spec, root } }],
+          },
+        ],
+      }).html;
+      const { page } = await openPage(browser, html);
+      try {
+        const boxes = await page.evaluate(() => {
+          const view = Array.from(document.querySelectorAll<HTMLElement>("[data-view]")).find(
+            (shown) => !shown.hidden,
+          );
+          const rects = (tag: string) =>
+            Array.from(view?.querySelectorAll(`[data-testid="${tag}"]`) ?? []).map((node) => {
+              const box = node.getBoundingClientRect();
+              return { top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+            });
+          const repeated = view?.querySelector('[data-testid="repeated"]');
+          return {
+            instances: rects("instance"),
+            ratios: rects("ratio"),
+            repeatedWidth: repeated?.getBoundingClientRect().width ?? 0,
+            parentWidth: repeated?.parentElement?.getBoundingClientRect().width ?? 0,
+          };
+        });
+        expect(boxes.instances).toHaveLength(2);
+        expect(boxes.ratios).toHaveLength(2);
+        const [first, second] = boxes.instances;
+        // The two weighted instances split the column, and neither ratio spills into the next.
+        expect(Math.abs(first!.height - second!.height)).toBeLessThan(0.5);
+        boxes.ratios.forEach((ratio, index) => {
+          const instance = boxes.instances[index]!;
+          expect(ratio.height).toBeGreaterThan(0);
+          expect(ratio.top).toBeGreaterThanOrEqual(instance.top - 0.5);
+          expect(ratio.bottom).toBeLessThanOrEqual(instance.bottom + 0.5);
+          expect(ratio.width / ratio.height).toBeCloseTo(2, 1);
+        });
+        // A repeated row is not stretched to its parent's width.
+        expect(boxes.repeatedWidth).toBeLessThan(boxes.parentWidth);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 
   test(
     "the status bar clock follows the browser clock (#16585)",

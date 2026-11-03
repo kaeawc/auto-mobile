@@ -37,6 +37,75 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 
 type Css = Record<string, string>;
 
+/**
+ * A style key the web renderer adds to a row's children, never authored (the style schema is
+ * strict), so a `styleWhen` cannot overwrite it: how CSS flex approximates Compose's sequential
+ * Row measure around an aspect ratio (see webRowAspect.ts).
+ */
+export const ROW_MEASURE_KEY = "webRowMeasure";
+
+/**
+ * A style key the web renderer adds to a row around a capped aspect ratio, never authored: the row
+ * is bounded to its parent's width, as a Compose Row's max is, and to any authored `maxWidth`.
+ */
+export const ROW_BOUND_KEY = "webRowBound";
+
+/**
+ * A style key the web renderer adds to a row, column or box's children, never authored: the
+ * tallest that parent lets the child be (dp), as Compose's incoming max height. It is set only
+ * where that height is statically known (see webIncomingHeight.ts).
+ */
+export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
+
+/**
+ * A style key the web renderer adds beside INCOMING_HEIGHT_KEY, never authored: `true` when that
+ * height is the child's exact allocation rather than a max, as a column's weight share is. Compose's
+ * weight constraint coerces an inner `height`, and the web's flex share grows past it, so the
+ * allocation, not the authored dp height, sizes the child.
+ */
+export const INCOMING_HEIGHT_EXACT_KEY = "webIncomingHeightExact";
+
+/**
+ * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
+ * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one.
+ */
+export interface RowMeasure {
+  readonly take?: true;
+  readonly zero?: true;
+  readonly shrink?: number;
+  readonly basis?: number;
+}
+
+function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
+  if (typeof basis === "number") {
+    // The width also sets the item's max-content contribution, so a wrap row sizes around it.
+    css["flex-grow"] = "0";
+    css["flex-basis"] = px(basis);
+    css.width = px(basis);
+  }
+  css["flex-shrink"] = String(shrink);
+}
+
+/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
+  const measure = record(style[ROW_MEASURE_KEY]);
+  if (context.parentAxis !== "row" || !measure) {
+    return;
+  }
+  if (measure.take === true) {
+    css.flex = "1 1 0";
+  }
+  if (typeof measure.shrink === "number") {
+    rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
+    css["min-width"] = "0";
+  }
+  if (measure.zero === true) {
+    css["max-width"] = "0px";
+  }
+}
+
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
 /** Material 3 shape scale, the same corner sizes both native renderers use. */
@@ -163,6 +232,12 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     if (typeof style[field] === "number") {
       css[property] = px(style[field] as number);
     }
+  }
+  rowMeasureStyle(css, style, context);
+  if (style[ROW_BOUND_KEY] === true) {
+    // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
+    const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
+    css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
   }
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);

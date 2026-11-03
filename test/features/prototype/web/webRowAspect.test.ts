@@ -329,15 +329,25 @@ test("a nested bounded row that its parent row zeroes keeps no width", () => {
 
 test("a container that authors a dp width or maxWidth bounds its children's width again", () => {
   const unbounded = { style: { mode: "light" as const, palette: new Map(), unboundedWidth: true } };
-  const childOf = (style: Raw) => containerChildStyle(unbounded, { type: "column", style }, "column");
+  const childOf = (style: Raw) =>
+    containerChildStyle(unbounded, { type: "column", style }, "column");
   // Modifier.width or widthIn restores a finite max width, as on Android.
-  expect(childOf({ width: { dp: 100 } })).toMatchObject({ parentAxis: "column", unboundedWidth: false });
+  expect(childOf({ width: { dp: 100 } })).toMatchObject({
+    parentAxis: "column",
+    unboundedWidth: false,
+  });
   expect(childOf({ maxWidth: 100 }).unboundedWidth).toBe(false);
   expect(nodeCss({ [ROW_BOUND_KEY]: true }, childOf({ width: { dp: 100 } }))["max-width"]).toBe(
     "100%",
   );
   // A fill or wrap width under an infinite max stays unbounded, as do min and height bounds.
-  for (const style of [{}, { width: "fill" }, { width: "wrap" }, { minWidth: 40 }, { maxHeight: 9 }]) {
+  for (const style of [
+    {},
+    { width: "fill" },
+    { width: "wrap" },
+    { minWidth: 40 },
+    { maxHeight: 9 },
+  ]) {
     expect(childOf(style).unboundedWidth).toBe(true);
   }
   // A bounded container's box, scroll or row children carry the reset down.
@@ -348,7 +358,9 @@ test("a container that authors a dp width or maxWidth bounds its children's widt
   // A horizontal scroll inside the bounded container unbounds its own content again.
   const across = { type: "scroll", axis: "horizontal", style: { width: { dp: 80 } } };
   expect(scrollChildStyle({ style: bounded }, across).unboundedWidth).toBe(true);
-  expect(scrollChildStyle(unbounded, { type: "scroll", style: { width: { dp: 80 } } })).toMatchObject({
+  expect(
+    scrollChildStyle(unbounded, { type: "scroll", style: { width: { dp: 80 } } }),
+  ).toMatchObject({
     parentAxis: "column",
     unboundedWidth: false,
   });

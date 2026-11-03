@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import {
   AAOS_SETTINGS_APP_ID,
   assertAutomotiveDevice,
@@ -186,8 +187,9 @@ describe("runAaosSmoke", () => {
     expect(result.session).toBe("sess-1");
     expect(client.calls[1]!.args.sessionUuid).toBe("sess-1");
     expect(client.closed).toBe(true);
-    expect(files.has("/out/steps/01-start.json")).toBe(true);
-    expect(copies).toEqual(["/out/screenshots/04-observe-launched.png"]);
+    // Built with path.join so the expectation holds on Windows separators too.
+    expect(files.has(join("/out", "steps", "01-start.json"))).toBe(true);
+    expect(copies).toEqual([join("/out", "screenshots", "04-observe-launched.png")]);
   });
 
   test("a broken assertion fails its step, skips the rest and still resets", async () => {

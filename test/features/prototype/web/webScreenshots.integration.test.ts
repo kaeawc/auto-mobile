@@ -303,6 +303,54 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
     },
     CASE_TIMEOUT_MS,
   );
+
+  test(
+    "a padded text after an unsized aspect ratio in a row takes no width (#16710)",
+    async () => {
+      const spec = {
+        id: "ratio-padded",
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                {
+                  type: "text",
+                  testTag: "padded",
+                  text: "Hi",
+                  style: { padding: { start: 20, end: 20 } },
+                },
+              ],
+            },
+          ],
+        },
+      };
+      const { page } = await openPage(browser, webSpecPage(spec, "ratio-padded"));
+      try {
+        const sizes = await page.evaluate(() => {
+          // Layout px: undo the stage's fit-to-viewport scale.
+          const stage = document.querySelector<HTMLElement>("[data-stage]");
+          const scale = Number(/scale\(([\d.]+)\)/.exec(stage?.style.transform ?? "")?.[1] ?? 1);
+          const view = Array.from(document.querySelectorAll<HTMLElement>("[data-view]")).find(
+            (shown) => !shown.hidden,
+          );
+          const size = (tag: string) => {
+            const box = view?.querySelector(`[data-testid="${tag}"]`)?.getBoundingClientRect();
+            return [(box?.width ?? -1) / scale, (box?.height ?? -1) / scale];
+          };
+          return { ratio: size("ratio"), padded: size("padded") };
+        });
+        expect(sizes.ratio[0]).toBeCloseTo(411, 1);
+        expect(sizes.ratio[1]).toBeCloseTo(205.5, 1);
+        expect(sizes.padded[0]).toBeCloseTo(0, 1);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 });
 
 const FADE_FIXTURE = join(

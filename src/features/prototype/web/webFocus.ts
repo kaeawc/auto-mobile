@@ -14,11 +14,8 @@ const FOCUSABLE_ROLES: ReadonlySet<string> = new Set([
  * Drawn as an outline, so it neither moves nor resizes the node. Leanback and tvOS both mark the
  * focused item with a light border; one generic ring stands in for either.
  */
-const FOCUS_RING = {
-  outline: "3px solid #ffffff",
-  "outline-offset": "2px",
-  "box-shadow": "0 0 0 5px rgba(0, 0, 0, 0.6)",
-} as const;
+const FOCUS_OUTLINE = { outline: "3px solid #ffffff", "outline-offset": "2px" } as const;
+const FOCUS_SHADOW = "0 0 0 5px rgba(0, 0, 0, 0.6)";
 
 /**
  * A spec node with a focusable role, or an item of a spec node's tab list: `tabBar` and
@@ -41,7 +38,14 @@ function marked(element: WebElement): WebElement {
   return {
     ...element,
     attrs: { ...element.attrs, "data-focus": "ring" },
-    style: { ...element.style, ...FOCUS_RING },
+    style: {
+      ...element.style,
+      ...FOCUS_OUTLINE,
+      // Added to the node's own shadows (a selected tab's inset underline, an authored elevation).
+      "box-shadow": element.style["box-shadow"]
+        ? `${FOCUS_SHADOW}, ${element.style["box-shadow"]}`
+        : FOCUS_SHADOW,
+    },
   };
 }
 

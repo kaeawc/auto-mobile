@@ -53,6 +53,10 @@ describe("still on watch, TV and car frames (#16446)", () => {
       const rings = ringed(element);
       expect(rings.map((node) => node.attrs.role)).toEqual(["tab"]);
       expect(JSON.stringify(rings[0])).toContain("Movies");
+      if (type === "tabBar") {
+        // The selected tab keeps its inset underline under the ring.
+        expect(rings[0]!.style["box-shadow"]).toContain("inset 0 -3px 0 0");
+      }
     }
   });
 

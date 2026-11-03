@@ -51,6 +51,22 @@ describe("markInitialFocus (#16446)", () => {
     expect((marked.children[0] as WebElement).attrs["data-focus"]).toBeUndefined();
   });
 
+  test("the ring adds its shadow to the node's own instead of replacing it", () => {
+    const tab = el("div", {
+      attrs: { role: "tab" },
+      style: { "box-shadow": "inset 0 -3px 0 0 #6750a4" },
+    });
+    const tablist = el("div", { attrs: { "data-node": "tabBar", role: "tablist" } }, [tab]);
+    const [item] = markInitialFocus(tablist).children as WebElement[];
+    expect(item!.style["box-shadow"]).toBe(
+      "0 0 0 5px rgba(0, 0, 0, 0.6), inset 0 -3px 0 0 #6750a4",
+    );
+    const plain = markInitialFocus(el("div", {}, [node("button", "button")]));
+    expect((plain.children[0] as WebElement).style["box-shadow"]).toBe(
+      "0 0 0 5px rgba(0, 0, 0, 0.6)",
+    );
+  });
+
   test("each focusable role can take focus", () => {
     for (const role of ["button", "checkbox", "switch", "slider", "tab", "textbox"]) {
       expect(ringed(markInitialFocus(el("div", {}, [node(role, role)])))).toEqual([role]);

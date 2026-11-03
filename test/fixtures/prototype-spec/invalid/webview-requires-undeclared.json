@@ -21,41 +21,6 @@
       "type": "column",
       "children": [
         {
-          "type": "row",
-          "children": [
-            {
-              "type": "button",
-              "label": "Back",
-              "onTap": [
-                {
-                  "type": "platform",
-                  "call": "webview.back",
-                  "args": {
-                    "node": {
-                      "value": "article"
-                    }
-                  }
-                }
-              ]
-            },
-            {
-              "type": "button",
-              "label": "Reload",
-              "onTap": [
-                {
-                  "type": "platform",
-                  "call": "webview.reload",
-                  "args": {
-                    "node": {
-                      "value": "article"
-                    }
-                  }
-                }
-              ]
-            }
-          ]
-        },
-        {
           "type": "webView",
           "id": "article",
           "url": "https://example.com/post/{data:/selected/slug}",
@@ -83,6 +48,6 @@
       ]
     }
   },
-  "expectedPath": "root.children[1]",
+  "expectedPath": "root.children[0]",
   "expectedMessage": "webView requires webview in requires.platform"
 }

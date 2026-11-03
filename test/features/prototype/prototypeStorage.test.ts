@@ -12,7 +12,10 @@ import {
   prototypeClearStorageUnsupportedMessage,
   prototypeStorageUnsupportedMessage,
 } from "../../../src/features/prototype/prototypeStorage";
-import { restorePrototypeStorage } from "../../../src/features/prototype/prototypeStorageRestore";
+import {
+  MAX_PROTOTYPE_SECURE_VALUE_BYTES,
+  restorePrototypeStorage,
+} from "../../../src/features/prototype/prototypeStorageRestore";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 function spec(storage: unknown, extra: Record<string, unknown> = {}) {
@@ -223,7 +226,13 @@ describe("restore precedence (adopted decision)", () => {
 
   test("with nothing stored the spec's values stand", () => {
     const restored = restorePrototypeStorage(base, undefined);
-    expect(restored).toEqual({ state: base.state, data: base.data, applied: [], dropped: [] });
+    expect(restored).toEqual({
+      state: base.state,
+      data: base.data,
+      applied: [],
+      dropped: [],
+      locked: [],
+    });
   });
 
   test("stored values replace the spec's for listed keys, and only those", () => {
@@ -318,6 +327,129 @@ describe("restore precedence (adopted decision)", () => {
       { version: 1, values: { "data:/later": [1] } },
     );
     expect(restored.data).toEqual({ later: [1] });
+  });
+});
+
+describe("secure key restore (#14321)", () => {
+  const secureSpec = {
+    state: { token: "", pin: "", count: 0 },
+    storage: {
+      version: 1,
+      keys: [],
+      secure: ["state:token", "state:pin"],
+      secureAuth: { "state:pin": "biometric" },
+    },
+  };
+
+  test("a secure value restores into its string state key", () => {
+    const restored = restorePrototypeStorage(secureSpec, {
+      version: 1,
+      values: {},
+      secure: { "state:token": "abc" },
+    });
+    expect(restored.state.token).toBe("abc");
+    expect(restored.applied).toEqual(["state:token"]);
+    expect(restored.dropped).toEqual([]);
+    expect(restored.locked).toEqual([]);
+  });
+
+  test("a biometric-bound value stays locked and its state holds an empty string", () => {
+    const restored = restorePrototypeStorage(
+      { ...secureSpec, state: { ...secureSpec.state, pin: "authored" } },
+      { version: 1, values: {}, secure: { "state:pin": "1234" } },
+    );
+    expect(restored.state.pin).toBe("");
+    expect(restored.locked).toEqual(["state:pin"]);
+    expect(restored.applied).toEqual([]);
+  });
+
+  test("a sealed biometric value is locked without reading its content", () => {
+    const restored = restorePrototypeStorage(secureSpec, {
+      version: 1,
+      values: {},
+      secure: { "state:pin": null },
+    });
+    expect(restored.locked).toEqual(["state:pin"]);
+    expect(restored.dropped).toEqual([]);
+  });
+
+  test("a biometric key with no stored value is not locked", () => {
+    const restored = restorePrototypeStorage(secureSpec, { version: 1, values: {}, secure: {} });
+    expect(restored.locked).toEqual([]);
+    expect(restored.state.pin).toBe("");
+  });
+
+  test("an invalidated key drops its value and the spec's value stands", () => {
+    const restored = restorePrototypeStorage(
+      { ...secureSpec, state: { ...secureSpec.state, pin: "authored" } },
+      { version: 1, values: {}, secure: { "state:pin": null }, invalidated: ["state:pin"] },
+    );
+    expect(restored.state.pin).toBe("authored");
+    expect(restored.locked).toEqual([]);
+    expect(restored.dropped).toEqual([{ key: "state:pin", reason: "invalidated" }]);
+  });
+
+  test("a changed version, an unlisted key or no storage block drops secure values", () => {
+    const changed = restorePrototypeStorage(
+      { ...secureSpec, storage: { ...secureSpec.storage, version: 2 } },
+      { version: 1, values: {}, secure: { "state:token": "abc", "state:pin": null } },
+    );
+    expect(changed.state).toEqual(secureSpec.state);
+    expect(changed.locked).toEqual([]);
+    expect(changed.dropped).toEqual([
+      { key: "state:token", reason: "version" },
+      { key: "state:pin", reason: "version" },
+    ]);
+    const unlisted = restorePrototypeStorage(
+      { state: secureSpec.state, storage: { version: 1, keys: [] } },
+      { version: 1, values: {}, secure: { "state:token": "abc" } },
+    );
+    expect(unlisted.dropped).toEqual([{ key: "state:token", reason: "unlisted" }]);
+    const noBlock = restorePrototypeStorage(
+      { state: secureSpec.state },
+      { version: 1, values: {}, secure: { "state:token": "abc" } },
+    );
+    expect(noBlock.state.token).toBe("");
+    expect(noBlock.dropped).toEqual([{ key: "state:token", reason: "unlisted" }]);
+  });
+
+  test("a value that is not a string, is too large or fills a non-string key is a mismatch", () => {
+    const restored = restorePrototypeStorage(
+      { ...secureSpec, storage: { ...secureSpec.storage, secure: ["state:token", "state:count"] } },
+      {
+        version: 1,
+        values: {},
+        secure: { "state:token": 42, "state:count": "7" },
+      },
+    );
+    expect(restored.state).toEqual(secureSpec.state);
+    expect(restored.dropped).toEqual([
+      { key: "state:token", reason: "mismatch" },
+      { key: "state:count", reason: "mismatch" },
+    ]);
+    const atLimit = "é".repeat(MAX_PROTOTYPE_SECURE_VALUE_BYTES / 2);
+    const fits = restorePrototypeStorage(secureSpec, {
+      version: 1,
+      values: {},
+      secure: { "state:token": atLimit },
+    });
+    expect(fits.applied).toEqual(["state:token"]);
+    const over = restorePrototypeStorage(secureSpec, {
+      version: 1,
+      values: {},
+      secure: { "state:token": `${atLimit}a` },
+    });
+    expect(over.dropped).toEqual([{ key: "state:token", reason: "mismatch" }]);
+    expect(MAX_PROTOTYPE_SECURE_VALUE_BYTES).toBe(4096);
+  });
+
+  test("a plaintext stored copy of a secure key never restores into it", () => {
+    const restored = restorePrototypeStorage(secureSpec, {
+      version: 1,
+      values: { "state:token": "leaked" },
+    });
+    expect(restored.state.token).toBe("");
+    expect(restored.dropped).toEqual([{ key: "state:token", reason: "unlisted" }]);
   });
 });
 

@@ -2273,8 +2273,13 @@ and it may not also appear in `storage.keys`. The list needs the `secureStorage`
 in `requires.platform`. A secure key never leaves the device through an emit `context`: the validators refuse
 `{state: <secure key>}` there. A `request` may send one only with `allowSecureInRequest: true`; otherwise a
 `{state: <secure key>}` binding in a header, query value or body (whole, form entry or multipart value), or a
-`{<secure key>}` placeholder in the URL, a header or a query value, is refused. No production runtime advertises
-the module yet.
+`{<secure key>}` placeholder in the URL, a header or a query value, is refused. On a show, `restorePrototypeStorage`
+applies the secure store's values under the same version and listing rules: a value restores only into a listed
+secure key, as a string of at most `MAX_PROTOTYPE_SECURE_VALUE_BYTES` (4096) UTF-8 bytes into a string state key,
+and a plaintext stored copy never fills one. A biometric-bound key that holds a value is not read: its state holds
+`""` and it is reported in `locked` until `biometric.authenticate` unlocks it. A key the store reports invalidated
+(biometric re-enrolment revoked its hardware key) is dropped and the spec's value stands. No production runtime
+advertises the module yet.
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads

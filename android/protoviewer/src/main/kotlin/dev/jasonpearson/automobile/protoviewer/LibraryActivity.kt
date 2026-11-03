@@ -53,6 +53,7 @@ class LibraryActivity : ComponentActivity() {
   private val services
     get() = (application as ProtoViewerApplication).services
 
+  private val received by lazy { ReceivedContentHandler(this, services) }
   private var entries by mutableStateOf<LibraryResult<List<LibraryEntry>>?>(null)
   private var actionFailed by mutableStateOf(false)
   private var localNetworkDenied by mutableStateOf(false)
@@ -94,7 +95,11 @@ class LibraryActivity : ComponentActivity() {
           ::open,
           ::share,
           ::delete,
-          ReceivedContentActions(::report, ::hide, ::block),
+          ReceivedContentActions(
+            report = { actionFailed = !received.report(it) },
+            hide = { entry -> lifecycleScope.launch { entries = received.hide(entry, entries) } },
+            block = { entry -> lifecycleScope.launch { entries = received.block(entry, entries) } },
+          ),
           allowNetwork = allowNetwork,
           localNetworkDenied = localNetworkDenied,
           setAllowNetwork = { enabled ->
@@ -154,39 +159,6 @@ class LibraryActivity : ComponentActivity() {
         withContext(services.io) { services.repository.delete(entry.libraryId) } is
           LibraryResult.Failure
       entries = withContext(services.io) { services.repository.list() }
-    }
-  }
-
-  private fun report(entry: LibraryEntry) {
-    val body = getString(R.string.report_body, reportDetails(entry))
-    actionFailed = !launchReport(this, getString(R.string.report_subject), body)
-  }
-
-  private fun hide(entry: LibraryEntry) =
-    updateBlocklist({ it.specSha256 == entry.specSha256 }) { hide(entry.specSha256) }
-
-  private fun block(entry: LibraryEntry) {
-    val host = entry.sourceHost ?: return
-    updateBlocklist({ it.sourceHost == host }) { block(host) }
-  }
-
-  /** Like Delete, closes every open viewer of content the change hides, not just this row's. */
-  private fun updateBlocklist(
-    affected: (LibraryEntry) -> Boolean,
-    change: ContentBlocklist.() -> Unit,
-  ) {
-    lifecycleScope.launch {
-      (entries as? LibraryResult.Success)
-        ?.value
-        ?.filter { it.isReceived && affected(it) }
-        ?.forEach { ViewerLaunch.close(this@LibraryActivity, it.libraryId) }
-      entries =
-        withContext(services.io) {
-          services.blocklist.change()
-          // Hidden content must not keep holding library quota: delete it, keep only the hash/host.
-          services.repository.purgeBlocked()
-          services.repository.list()
-        }
     }
   }
 
@@ -349,6 +321,14 @@ internal fun LibraryScreen(
   }
 }
 
+/** The confirmation a row's menu asked for; at most one is open at a time. */
+private enum class RowDialog {
+  Reset,
+  Delete,
+  Hide,
+  Block,
+}
+
 @Composable
 private fun LibraryRow(
   entry: LibraryEntry,
@@ -357,10 +337,7 @@ private fun LibraryRow(
   delete: (LibraryEntry) -> Unit,
   received: ReceivedContentActions,
 ) {
-  var confirm by remember { mutableStateOf(false) }
-  var confirmDelete by remember { mutableStateOf(false) }
-  var confirmHide by remember { mutableStateOf(false) }
-  var confirmBlock by remember { mutableStateOf(false) }
+  var dialog by remember { mutableStateOf<RowDialog?>(null) }
   val openLabel = stringResource(R.string.open_prototype, entry.label)
   ListItem(
     headlineContent = { Text(entry.label) },
@@ -371,71 +348,59 @@ private fun LibraryRow(
       ) {
         open(entry, false, false)
       },
-    trailingContent = {
-      LibraryEntryMenu(
-        entry,
-        open,
-        share,
-        { confirm = true },
-        { confirmDelete = true },
-        ReceivedContentActions(received.report, { confirmHide = true }, { confirmBlock = true }),
-      )
-    },
+    trailingContent = { LibraryEntryMenu(entry, open, share, received.report) { dialog = it } },
   )
-
-  if (confirmDelete)
-    AlertDialog(
-      onDismissRequest = { confirmDelete = false },
-      title = { Text(stringResource(R.string.delete_title)) },
-      text = {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-          Text(stringResource(R.string.delete_body))
-        }
-      },
-      confirmButton = {
-        TextButton(
-          modifier = Modifier.testTag("confirm-delete"),
-          onClick = {
-            confirmDelete = false
-            delete(entry)
-          },
-        ) {
-          Text(stringResource(R.string.delete))
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
-      },
-    )
-  if (confirmHide)
-    BlocklistConfirmation(
-      "confirm-hide",
-      stringResource(R.string.hide_title),
-      stringResource(R.string.hide_body),
-      stringResource(R.string.hide),
-      { confirmHide = false },
-    ) {
-      confirmHide = false
-      received.hide(entry)
+  dialog?.let { shown ->
+    RowConfirmation(entry, shown, { dialog = null }) {
+      dialog = null
+      when (shown) {
+        RowDialog.Reset -> open(entry, true, true)
+        RowDialog.Delete -> delete(entry)
+        RowDialog.Hide -> received.hide(entry)
+        RowDialog.Block -> received.block(entry)
+      }
     }
-  entry.sourceHost?.let { host ->
-    if (confirmBlock)
-      BlocklistConfirmation(
+  }
+}
+
+@Composable
+private fun RowConfirmation(
+  entry: LibraryEntry,
+  dialog: RowDialog,
+  dismiss: () -> Unit,
+  confirm: () -> Unit,
+) {
+  val host = entry.sourceHost.orEmpty()
+  when (dialog) {
+    RowDialog.Reset -> ResetConfirmation(dismiss, confirm)
+    RowDialog.Delete ->
+      ConfirmationDialog(
+        "confirm-delete",
+        stringResource(R.string.delete_title),
+        stringResource(R.string.delete_body),
+        stringResource(R.string.delete),
+        dismiss,
+        confirm,
+      )
+    RowDialog.Hide ->
+      ConfirmationDialog(
+        "confirm-hide",
+        stringResource(R.string.hide_title),
+        stringResource(R.string.hide_body),
+        stringResource(R.string.hide),
+        dismiss,
+        confirm,
+      )
+    RowDialog.Block ->
+      ConfirmationDialog(
         "confirm-block",
         stringResource(R.string.block_title, host),
         stringResource(R.string.block_body),
         stringResource(R.string.block_host, host),
-        { confirmBlock = false },
-      ) {
-        confirmBlock = false
-        received.block(entry)
-      }
+        dismiss,
+        confirm,
+      )
   }
-  if (confirm)
-    ResetConfirmation({ confirm = false }) {
-      confirm = false
-      open(entry, true, true)
-    }
 }
 
 @Composable
@@ -443,9 +408,8 @@ private fun LibraryEntryMenu(
   entry: LibraryEntry,
   open: (LibraryEntry, Boolean, Boolean) -> Unit,
   share: (LibraryEntry) -> Unit,
-  reset: () -> Unit,
-  delete: () -> Unit,
-  received: ReceivedContentActions,
+  report: (LibraryEntry) -> Unit,
+  confirm: (RowDialog) -> Unit,
 ) {
   var expanded by remember { mutableStateOf(false) }
   Column {
@@ -457,64 +421,40 @@ private fun LibraryEntryMenu(
       Text("⋮", Modifier.clearAndSetSemantics {})
     }
     DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-      DropdownMenuItem(
-        text = { Text(stringResource(R.string.share)) },
-        onClick = {
-          expanded = false
-          share(entry)
-        },
-      )
+      val item: @Composable (Int, String?, () -> Unit) -> Unit = { label, tag, action ->
+        MenuItem(stringResource(label), tag, { expanded = false }, action)
+      }
+      item(R.string.share, null) { share(entry) }
       if (entry.isReceived) {
-        DropdownMenuItem(
-          text = { Text(stringResource(R.string.report)) },
-          modifier = Modifier.testTag("report-${entry.libraryId}"),
-          onClick = {
-            expanded = false
-            received.report(entry)
-          },
-        )
-        DropdownMenuItem(
-          text = { Text(stringResource(R.string.hide)) },
-          modifier = Modifier.testTag("hide-${entry.libraryId}"),
-          onClick = {
-            expanded = false
-            received.hide(entry)
-          },
-        )
+        item(R.string.report, "report-${entry.libraryId}") { report(entry) }
+        item(R.string.hide, "hide-${entry.libraryId}") { confirm(RowDialog.Hide) }
         entry.sourceHost?.let { host ->
-          DropdownMenuItem(
-            text = { Text(stringResource(R.string.block_host, host)) },
-            modifier = Modifier.testTag("block-${entry.libraryId}"),
-            onClick = {
-              expanded = false
-              received.block(entry)
-            },
-          )
+          MenuItem(
+            stringResource(R.string.block_host, host),
+            "block-${entry.libraryId}",
+            { expanded = false },
+          ) {
+            confirm(RowDialog.Block)
+          }
         }
       }
-      DropdownMenuItem(
-        text = { Text(stringResource(R.string.delete)) },
-        onClick = {
-          expanded = false
-          delete()
-        },
-      )
-      DropdownMenuItem(
-        text = { Text(stringResource(R.string.relaunch)) },
-        onClick = {
-          expanded = false
-          open(entry, false, true)
-        },
-      )
-      DropdownMenuItem(
-        text = { Text(stringResource(R.string.reset)) },
-        onClick = {
-          expanded = false
-          reset()
-        },
-      )
+      item(R.string.delete, null) { confirm(RowDialog.Delete) }
+      item(R.string.relaunch, null) { open(entry, false, true) }
+      item(R.string.reset, null) { confirm(RowDialog.Reset) }
     }
   }
+}
+
+@Composable
+private fun MenuItem(label: String, tag: String?, dismiss: () -> Unit, action: () -> Unit) {
+  DropdownMenuItem(
+    text = { Text(label) },
+    modifier = tag?.let { Modifier.testTag(it) } ?: Modifier,
+    onClick = {
+      dismiss()
+      action()
+    },
+  )
 }
 
 /** Report, Hide and Block for content another person sent (#16437). */
@@ -525,8 +465,8 @@ internal class ReceivedContentActions(
 )
 
 @Composable
-@Suppress("LongParameterList") // Dialog text, tag and both outcomes are independent.
-private fun BlocklistConfirmation(
+@Suppress("LongParameterList") // Dialog text, test tag and both outcomes are independent.
+private fun ConfirmationDialog(
   tag: String,
   title: String,
   body: String,

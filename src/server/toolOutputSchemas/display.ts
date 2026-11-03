@@ -8,7 +8,10 @@ export const displayInventoryUnavailableSchema = z.object({
 export const pinnedDisplaySchema = z.object({
   pin: z.string(),
   availablePanels: z.array(
-    z.object({ key: z.string(), role: z.enum(["inner", "cover", "rear", "external", "unknown"]) }),
+    z.object({
+      key: z.string(),
+      role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
+    }),
   ),
 });
 
@@ -199,7 +202,7 @@ export const observationDisplaySchema = z
       .literal(true)
       .optional()
       .describe("This call selected the panel using its session display pin."),
-    role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+    role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
     posture: z.enum([
       "closed",
       "half_opened",
@@ -224,7 +227,7 @@ export const otherDisplaysSchema = z
   .array(
     z.object({
       key: z.string(),
-      role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+      role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
       size: z.object({ width: z.number(), height: z.number() }),
     }),
   )

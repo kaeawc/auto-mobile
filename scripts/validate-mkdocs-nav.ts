@@ -42,6 +42,7 @@ const EXCLUDED_FILES = new Set([
   "decisions/prototype-embedded-request-routing.md",
   "decisions/prototype-mock-backend.md",
   "decisions/prototype-request-retrofit.md",
+  "decisions/qrcode-generator-share-qr.md",
   "decisions/types-bun-test-typecheck.md",
   "decisions/watchos-platform.md",
 ]);

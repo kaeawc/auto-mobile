@@ -43,12 +43,38 @@ enum PrototypePlatformValidator {
 
     /// The capability a `map` node's non-default `backend` needs on top of the module's (#14302),
     /// or nil for the default `auto` backend or any value the table does not list.
-    static func nodeBackendCapability(_ node: [String: JSONValue]) -> String? {
+    private static func nodeBackendCapability(_ node: [String: JSONValue]) -> String? {
         guard node["type"] == .string("map"), let backend = node["backend"]?.stringValue else {
             return nil
         }
         return PrototypeContractValidator.platformModules["map"]?.objectFields?["backends"]?
             .objectFields?[backend]?.objectFields?["capability"]?.stringValue
+    }
+
+    /// Backend capabilities of `map` nodes at node positions only, the twin of TypeScript's
+    /// `walkPrototypeNodes`: `root` and each component root, then `child`, `children`, `screens`,
+    /// adaptive slots and list `header`/`footer`. A map-shaped payload or `equals` literal is data.
+    static func backendCapabilities(_ spec: [String: JSONValue]) -> Set<String> {
+        var pending = [spec["root"]].compactMap { $0 }
+        for component in spec["components"]?.objectFields?.values ?? [:].values {
+            if let root = component.objectFields?["root"] { pending.append(root) }
+        }
+        var found = Set<String>()
+        while let next = pending.popLast() {
+            guard let node = next.objectFields else { continue }
+            if let capability = nodeBackendCapability(node) { found.insert(capability) }
+            let type = node["type"]?.stringValue
+            for (key, value) in node {
+                if key == "child" || (type == "adaptive" && PrototypeAdaptive.slots.contains(key)) ||
+                    (type == "list" && ["header", "footer"].contains(key))
+                {
+                    pending.append(value)
+                }
+                if key == "children", case let .array(children) = value { pending += children }
+                if key == "screens" { pending += Array(value.objectFields?.values ?? [:].values) }
+            }
+        }
+        return found
     }
 
     struct Module: Equatable {

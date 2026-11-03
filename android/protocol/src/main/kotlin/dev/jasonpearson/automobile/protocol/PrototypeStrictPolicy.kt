@@ -255,6 +255,7 @@ internal object PrototypeStrictPolicy {
     scanner.platform(spec)
     (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
     if ("hideKeyboard" in locatedActionTypes(spec)) scanner.result.add("prototype_hide_keyboard_v1")
+    scanner.result.addAll(PrototypePlatformModules.backendCapabilities(spec))
     return scanner.result
   }
 
@@ -445,7 +446,6 @@ internal object PrototypeStrictPolicy {
         if (keys.any { fields[it] != null }) need(feature)
       }
       listAndRequestFeatures(type, fields)
-      PrototypePlatformModules.nodeBackendCapability(fields)?.let(result::add)
     }
 
     private fun listAndRequestFeatures(type: String, fields: JsonObject) {

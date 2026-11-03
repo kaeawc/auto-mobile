@@ -143,6 +143,7 @@
     "loading-states.json",
     "location-block-minimal.json",
     "location-block.json",
+    "map-backend-channel-literal.json",
     "map-backends.json",
     "map-node-limits.json",
     "map-node.json",
@@ -3464,6 +3465,7 @@
       "prototype_platform_map_maplibre_v1",
       "prototype_platform_map_v1",
       "prototype_platform_v1"
-    ]
+    ],
+    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"]
   }
 }

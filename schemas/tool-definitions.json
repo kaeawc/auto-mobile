@@ -40464,6 +40464,10 @@
                 ]
               }
             },
+            "timestamp": {
+              "description": "Device time of the change event the values came from",
+              "type": "number"
+            },
             "receivedAt": {
               "type": "number"
             },
@@ -40472,7 +40476,7 @@
               "const": true
             }
           },
-          "required": ["values", "receivedAt"],
+          "required": ["values", "timestamp", "receivedAt"],
           "additionalProperties": false
         },
         "__schema33": {

@@ -88,14 +88,37 @@ describe("prototype status device status mirror", () => {
     store.recordEvent(scope, delivered(4, { event: "power.changed", data: { thermal: "hot" } }));
     const status = store.status(scope);
     expect(status.platformStatus).toEqual({
-      battery: { values: { level: 10, state: "unplugged" }, receivedAt: 2000 },
-      power: { values: { saver: true }, receivedAt: 2000, simulated: true },
+      battery: { values: { level: 10, state: "unplugged" }, timestamp: 2, receivedAt: 2000 },
+      power: { values: { saver: true }, timestamp: 3, receivedAt: 2000, simulated: true },
     });
     if (status.platformStatus?.battery) {
       status.platformStatus.battery.receivedAt = 0;
     }
     expect(store.status(scope).platformStatus?.battery?.receivedAt).toBe(2000);
     expect(store.status({ ...scope, sessionUuid: "two" })).not.toHaveProperty("platformStatus");
+  });
+
+  test("a replay grouped by prototype keeps the newest reading on the device clock", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const scope = { deviceId: "device" };
+    const battery = (sequence: number, id: string, level: number): PrototypeEvent => ({
+      ...delivered(sequence, { event: "battery.changed", data: { level } }),
+      id,
+    });
+    // Delivered A10, B10, A20, B20, A30; replayed grouped as A10, A20, A30, B10, B20.
+    for (const replayed of [
+      battery(1, "a", 10),
+      battery(3, "a", 20),
+      battery(5, "a", 30),
+      battery(2, "b", 10),
+      battery(4, "b", 20),
+    ]) {
+      store.recordEvent(scope, replayed);
+    }
+    expect(store.status(scope).platformStatus?.battery).toMatchObject({
+      values: { level: 30 },
+      timestamp: 5,
+    });
   });
 
   test("a cleared device forgets its mirrored status", () => {

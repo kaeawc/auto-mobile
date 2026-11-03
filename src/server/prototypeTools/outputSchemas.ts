@@ -186,6 +186,7 @@ const prototypeEventOutputSchema = z.object({
 });
 const prototypeDeviceStatusReadingSchema = z.object({
   values: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  timestamp: z.number().describe("Device time of the change event the values came from"),
   receivedAt: z.number(),
   simulated: z.literal(true).optional(),
 });

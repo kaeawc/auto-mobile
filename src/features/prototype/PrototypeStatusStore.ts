@@ -393,14 +393,20 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     this.remember(key, stored);
   }
 
-  /** A delivered status change replaces that module's mirrored values whatever prototype received it. */
+  /**
+   * A delivered status change replaces that module's mirrored values whatever prototype received it,
+   * unless it is older on the device clock: `inspect` replays buffered events grouped by prototype,
+   * not in delivery order.
+   */
   private recordDeviceStatus(stored: StoredPrototypeStatus, event: PrototypeEvent): void {
     const reading = prototypeDeviceStatusOf(event);
-    if (reading) {
+    const current = reading ? stored.platformStatus?.[reading.module] : undefined;
+    if (reading && !(current && current.timestamp > event.timestamp)) {
       stored.platformStatus = {
         ...stored.platformStatus,
         [reading.module]: {
           values: reading.values,
+          timestamp: event.timestamp,
           receivedAt: this.clock.now(),
           ...(reading.simulated ? { simulated: true as const } : {}),
         },

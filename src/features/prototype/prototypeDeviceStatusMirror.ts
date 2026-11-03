@@ -20,6 +20,8 @@ export const PROTOTYPE_STATUS_MODULES: readonly PrototypeStatusModule[] = [
 /** The last values a device delivered for one status module. */
 export interface PrototypeDeviceStatusReading {
   values: PrototypeStatusValues;
+  /** Device time of the delivering event; an older replayed event never replaces this reading. */
+  timestamp: number;
   /** Host clock time the delivering event was recorded. */
   receivedAt: number;
   /** The delivering event was injected by the host, not read from the device. */

@@ -46,6 +46,19 @@ function harness() {
   return { deviceId, timer, registry, service, commit, restored, host, captures: () => captures };
 }
 
+test("an empty flush completes while the device IME lock is held", async () => {
+  const h = harness();
+  await withAndroidImeLock(h.deviceId, async () => {
+    let flushed = false;
+    const flush = h.registry.flush(h.deviceId).then(() => {
+      flushed = true;
+    });
+    await drainUntil(() => flushed, { description: "empty IME flush", maxTurns: 20 });
+    await flush;
+  });
+  expect(h.restored).toEqual([]);
+});
+
 test("three calls retain the original snapshot and release the device lock while idle", async () => {
   const h = harness();
   expect(h.registry.hasPending(h.deviceId)).toBe(false);

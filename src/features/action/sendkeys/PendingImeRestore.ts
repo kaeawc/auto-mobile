@@ -68,6 +68,9 @@ export class DevicePendingImeRestores implements PendingImeRestoreRegistry {
   }
 
   private async flushEntry(deviceId: string, expected?: Entry): Promise<void> {
+    if (!expected && !this.entries.has(deviceId)) {
+      return;
+    }
     await withAndroidImeLock(
       deviceId,
       async () => {

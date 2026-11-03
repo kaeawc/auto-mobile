@@ -18,7 +18,15 @@ export interface DumpsysNotificationRecord {
   bodies: string[];
   /** Whether a custom `RemoteViews` layout can render unrelated text. */
   hasCustomLayout: boolean;
+  /**
+   * The prototype posting tag (`proto:...`) from the record's key, present
+   * only for a non-summary record; a group summary is never a rendered row.
+   */
+  prototypeTag?: string;
 }
+
+/** The tag prefix the prototype notification runtime posts with. */
+export const PROTOTYPE_NOTIFICATION_TAG_PREFIX = "proto:";
 
 const TITLE_EXTRAS = ["android.title", "android.title.big", "android.conversationTitle"];
 const BODY_EXTRAS = [
@@ -154,6 +162,17 @@ const readNotificationKey = (line: string): string | null => {
   return valueEnd > valueStart ? line.slice(valueStart, valueEnd) : null;
 };
 
+// A key is `<user>|<pkg>|<id>|<tag>|<uid>`; the tag is the app's own string
+// and may itself contain `|`, while `null` means the record was posted untagged.
+const readKeyTag = (key: string | null): string | undefined => {
+  const parts = key?.split("|") ?? [];
+  if (parts.length < 5) {
+    return undefined;
+  }
+  const tag = parts.slice(3, -1).join("|");
+  return tag === "null" ? undefined : tag;
+};
+
 const startParsedRecord = (
   line: string,
   inActiveSection: boolean,
@@ -194,6 +213,17 @@ const readRecordMetadata = (current: ParsedDumpsysNotificationRecord, line: stri
       (Number.isFinite(numericFlags) && (numericFlags & GROUP_SUMMARY_FLAG) !== 0);
   }
   return line.startsWith("extras={");
+};
+
+// Expose the tag only once the record's flags are known, so a group summary
+// sharing its children's tag never correlates as a row.
+const finalizeRecordTags = (records: readonly ParsedDumpsysNotificationRecord[]): void => {
+  for (const record of records) {
+    const tag = readKeyTag(record.key);
+    if (tag?.startsWith(PROTOTYPE_NOTIFICATION_TAG_PREFIX) && !record.isGroupSummary) {
+      record.correlation.prototypeTag = tag;
+    }
+  }
 };
 
 const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotificationSnapshot => {
@@ -255,6 +285,7 @@ const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotifica
     extrasLines.push(line);
   }
   flushExtras();
+  finalizeRecordTags(records);
   return {
     records,
     activeSectionRecognized,
@@ -390,4 +421,26 @@ export const attributeRowByDumpsys = (
   }
   const owners = packagesMatching(records, (record) => recordMatchesRow(record, rowTexts));
   return owners.size === 1 ? [...owners][0] : null;
+};
+
+/**
+ * The prototype tag of the single tagged record that rendered this row, or
+ * `undefined` when no prototype record matches the row's text or more than one
+ * distinct tag could. Only the requested package's records are considered.
+ */
+export const prototypeTagForRow = (
+  records: readonly DumpsysNotificationRecord[],
+  appId: string,
+  rowTexts: ReadonlySet<string>,
+): string | undefined => {
+  const tags = new Set(
+    records.flatMap((record) =>
+      record.pkg === appId &&
+      record.prototypeTag !== undefined &&
+      recordMatchesRow(record, rowTexts)
+        ? [record.prototypeTag]
+        : [],
+    ),
+  );
+  return tags.size === 1 ? [...tags][0] : undefined;
 };

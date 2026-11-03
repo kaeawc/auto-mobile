@@ -28,7 +28,7 @@ systemTray({
 On Android, use `systemTray({ action: "list", notification: { appId: "com.google.android.apps.messaging" } })`.
 The command collapses and reopens the shade to reset its scroll position, reads its initial contents, then swipes upward at most three times to collect more rows. It stops early when the rows no longer change and closes the shade before returning, so follow-up actions reopen at the top. Cancellation stops further package batches, swipes, and observations.
 
-The response contains `notifications`, `swipes`, `unattributedRows`, and `order: "encounter"`. Each notification includes `id` (when Android exposes a unique row ID), `appId`, `appLabel`, `title`, `body`, `actions`, `texts` (including custom-layout text), `inGroup`, and `ownership` (the evidence class that attributed the row: `"header"` or `"dumpsys"`). Missing title/body fields are `null`; only text exposed by the hierarchy is available. Child notifications can inherit their group's app header. Overlapping rows on consecutive pages are reconciled by their unique row IDs when available, otherwise by ordered row positions. Stable IDs or unchanged neighboring rows anchor the scroll displacement, so a row can update its title/body without becoming a duplicate. Without usable IDs or a continuity anchor, rows are retained separately. This positional fallback is best effort: replacement or reordered rows without native IDs cannot always be distinguished. Explicit end-of-scroll metadata stops the scan before unnecessary repeat observations.
+The response contains `notifications`, `swipes`, `unattributedRows`, and `order: "encounter"`. Each notification includes `id` (when Android exposes a unique row ID), `appId`, `appLabel`, `title`, `body`, `actions`, `texts` (including custom-layout text), `inGroup`, `ownership` (the evidence class that attributed the row: `"header"` or `"dumpsys"`), and `tag` when the row maps to a prototype notification (see below). Missing title/body fields are `null`; only text exposed by the hierarchy is available. Child notifications can inherit their group's app header. Overlapping rows on consecutive pages are reconciled by their unique row IDs when available, otherwise by ordered row positions. Stable IDs or unchanged neighboring rows anchor the scroll displacement, so a row can update its title/body without becoming a duplicate. Without usable IDs or a continuity anchor, rows are retained separately. This positional fallback is best effort: replacement or reordered rows without native IDs cannot always be distinguished. Explicit end-of-scroll metadata stops the scan before unnecessary repeat observations.
 
 App filtering uses the notification's app header, not mentions in message text. Before scanning, the command verifies that this label is unique across a fresh installed-package inventory. Duplicate labels, incomplete inventories, or unavailable label metadata return an error instead of attributing ambiguous notifications. Encounter order is the shade's order, not a guarantee of posting time. This bounded scan may omit notifications beyond three swipes. `list` requires `notification.appId`; existing `find`, `tap`, and `dismiss` criteria requirements are unchanged.
 
@@ -54,13 +54,27 @@ evidence. A record whose extras carry no readable text at all (a custom
 header-less row, so it keeps every such row ambiguous rather than letting a
 different package's matching extras claim it.
 
-The dump is only read when the shade actually contains a header-less row. A
+The dump is read when the shade contains a header-less row, or a header row for
+the requested app (to name prototype tags below); `clearAll` skips the latter
+read. A
 redacted dump (`--noredact` unsupported or refused) prints value lengths rather
 than values, so it yields no correlation evidence: such rows stay unattributed
 instead of being guessed at. Every row no evidence class can attribute is
 counted in `unattributedRows` and named in the response message, so
 `Listed 0 notifications` is distinguishable from "this app has no
 notifications".
+
+### Prototype notification tags
+
+Prototype apps post every notification with a `proto:` tag, which the dump
+prints as the fourth field of the record key (`<user>|<pkg>|<id>|<tag>|<uid>`).
+After a row is attributed by either evidence class, it carries `tag` when
+exactly one of the requested package's `proto:`-tagged records matches the
+row's text by the same extras rule used for ownership. Group summary records
+are ignored, so a grouped pair maps each child to its own tag. Two prototype
+records rendering the same text, an untagged record, an unreadable dump, or a
+record already cancelled while its row lingers all leave `tag` absent; it never
+changes attribution.
 
 ## Tap observation result
 

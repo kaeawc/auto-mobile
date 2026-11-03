@@ -60832,6 +60832,9 @@
               "ownership": {
                 "type": "string",
                 "enum": ["header", "dumpsys"]
+              },
+              "tag": {
+                "type": "string"
               }
             },
             "required": [

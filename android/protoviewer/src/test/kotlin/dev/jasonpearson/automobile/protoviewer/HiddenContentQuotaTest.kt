@@ -55,7 +55,10 @@ class HiddenContentQuotaTest {
 
     assertTrue(metadata.documents.isEmpty())
     assertTrue(commit.commit(bundle, LibrarySource.share, null) is LibraryResult.Success)
-    assertEquals(listOf(FIRST), (repository.list() as LibraryResult.Success).value.map { it.libraryId })
+    assertEquals(
+      listOf(FIRST),
+      (repository.list() as LibraryResult.Success).value.map { it.libraryId },
+    )
   }
 
   @Test
@@ -91,7 +94,8 @@ class HiddenContentQuotaTest {
 
   companion object {
     private val bundle: PrototypeBundle by lazy {
-      (PrototypeBundleReader.read(ImportBundleFixtures.minimal) as PrototypeBundleReadResult.Success)
+      (PrototypeBundleReader.read(ImportBundleFixtures.minimal)
+          as PrototypeBundleReadResult.Success)
         .bundle
     }
 

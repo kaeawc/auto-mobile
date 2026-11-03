@@ -3,8 +3,8 @@ package dev.jasonpearson.automobile.protoviewer
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import androidx.core.net.toUri
 import android.util.Log
+import androidx.core.net.toUri
 
 /**
  * Published contact for objectionable-content reports and abuse (#16437). The same address is the

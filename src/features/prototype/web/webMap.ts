@@ -97,6 +97,25 @@ function mapLines(node: Raw, scope: WebRenderScope): MapLine[] {
   });
 }
 
+/** `dx` moved to the nearest copy of the world, in `[-0.5, 0.5)`. */
+export function wrapOffset(dx: number): number {
+  return dx - Math.floor(dx + 0.5);
+}
+
+/**
+ * The left and right x of the smallest arc covering `xs`, unwrapped so `right` may pass 1: the arc
+ * starts just after the widest empty gap between neighbouring points around the world.
+ */
+function horizontalBounds(xs: readonly number[]): { left: number; right: number } {
+  const sorted = xs.map((x) => x - Math.floor(x)).toSorted((a, b) => a - b);
+  const gaps = sorted.map((x, index) =>
+    index + 1 < sorted.length ? sorted[index + 1]! - x : sorted[0]! + 1 - x,
+  );
+  const widest = gaps.indexOf(Math.max(...gaps));
+  const left = sorted[(widest + 1) % sorted.length]!;
+  return { left, right: left + 1 - gaps[widest]! };
+}
+
 /** The framing that fits `points` in `size` with a margin; undefined when there are none. */
 export function fitFraming(
   points: readonly MapPoint[],
@@ -105,15 +124,11 @@ export function fitFraming(
   if (points.length === 0) {
     return undefined;
   }
-  const xs = points.map((point) => point.x);
   const ys = points.map((point) => point.y);
-  const [left, right, top, bottom] = [
-    Math.min(...xs),
-    Math.max(...xs),
-    Math.min(...ys),
-    Math.max(...ys),
-  ];
-  const center = { x: (left + right) / 2, y: (top + bottom) / 2 };
+  const { left, right } = horizontalBounds(points.map((point) => point.x));
+  const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
+  const middle = (left + right) / 2;
+  const center = { x: middle - Math.floor(middle), y: (top + bottom) / 2 };
   const spans = [
     right > left ? (size.width * FIT_FILL) / (right - left) : Infinity,
     bottom > top ? (size.height * FIT_FILL) / (bottom - top) : Infinity,
@@ -166,17 +181,51 @@ function framing(
   );
 }
 
-/** Where a world point falls in the box, as a percentage of each side (outside is 0–100 too). */
-export function mapPercent(
-  point: MapPoint,
+/** Where a world offset from the centre falls in the box, as a percentage of each side. */
+function offsetPercent(
+  dx: number,
+  dy: number,
   view: MapFraming,
   size: { width: number; height: number },
 ): { left: number; top: number } {
   const round = (value: number) => Number(value.toFixed(3));
   return {
-    left: round(50 + ((point.x - view.center.x) * view.worldSize * 100) / size.width),
-    top: round(50 + ((point.y - view.center.y) * view.worldSize * 100) / size.height),
+    left: round(50 + (dx * view.worldSize * 100) / size.width),
+    top: round(50 + (dy * view.worldSize * 100) / size.height),
   };
+}
+
+/**
+ * Where a world point falls in the box, as a percentage of each side (outside is 0–100 too), taking
+ * the copy of the world nearest the centre so the 180° line does not split the view.
+ */
+export function mapPercent(
+  point: MapPoint,
+  view: MapFraming,
+  size: { width: number; height: number },
+): { left: number; top: number } {
+  return offsetPercent(wrapOffset(point.x - view.center.x), point.y - view.center.y, view, size);
+}
+
+/**
+ * A line's points in the box: the first as `mapPercent` places it, each next one the short way
+ * round from the one before, so a segment crossing the 180° line does not span the world.
+ */
+export function routePercents(
+  points: readonly MapPoint[],
+  view: MapFraming,
+  size: { width: number; height: number },
+): { left: number; top: number }[] {
+  const offsets = points.reduce<number[]>((dxs, point, index) => {
+    const previous = points[index - 1];
+    const dx = previous
+      ? dxs[index - 1]! + wrapOffset(point.x - previous.x)
+      : wrapOffset(point.x - view.center.x);
+    return [...dxs, dx];
+  }, []);
+  return points.map((point, index) =>
+    offsetPercent(offsets[index]!, point.y - view.center.y, view, size),
+  );
 }
 
 /** A `{dp}` dimension, as the style maps it to CSS; anything else (unsized, `fill`) falls back. */
@@ -185,7 +234,10 @@ function dpSize(value: unknown, fallback: number): number {
   return typeof dp === "number" && dp > 0 ? dp : fallback;
 }
 
-function routeLayer(lines: MapLine[], place: (point: MapPoint) => { left: number; top: number }) {
+function routeLayer(
+  lines: MapLine[],
+  place: (points: readonly MapPoint[]) => { left: number; top: number }[],
+) {
   return el(
     "svg",
     {
@@ -201,8 +253,7 @@ function routeLayer(lines: MapLine[], place: (point: MapPoint) => { left: number
     lines.map((line) =>
       el("polyline", {
         attrs: {
-          points: line.points
-            .map(place)
+          points: place(line.points)
             .map(({ left, top }) => `${left},${top}`)
             .join(" "),
           fill: "none",
@@ -280,7 +331,9 @@ const mapRenderer =
     });
     const pin = cssColor("error", scope.style) ?? "#b3261e";
     return el("div", { attrs: { "aria-label": "Map", ...attrs, role: "img" }, style: css }, [
-      ...(lines.length > 0 ? [routeLayer(lines, place)] : []),
+      ...(lines.length > 0
+        ? [routeLayer(lines, (points) => routePercents(points, view, size))]
+        : []),
       ...markers.map((marker) => markerPin(marker, place(marker.point), pin)),
     ]);
   };

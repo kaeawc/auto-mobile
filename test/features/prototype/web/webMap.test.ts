@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fitFraming, mapPercent, mercator } from "../../../../src/features/prototype/web/webMap";
+import {
+  fitFraming,
+  mapPercent,
+  mercator,
+  routePercents,
+  wrapOffset,
+} from "../../../../src/features/prototype/web/webMap";
 import {
   toHtml,
   type WebChild,
@@ -110,5 +116,67 @@ describe("prototype web map (#16539)", () => {
     const map = still({ mapStyle: "plain" });
     expect(map.unsupportedNodes).toEqual([]);
     expect(map.html).toContain("background:#e8eaed");
+  });
+});
+
+describe("prototype web map across the 180° line (#16593)", () => {
+  const size = { width: 400, height: 200 };
+
+  test("wraps a horizontal offset to the nearest copy of the world", () => {
+    expect(wrapOffset(0.25)).toBe(0.25);
+    expect(wrapOffset(0.75)).toBe(-0.25);
+    expect(wrapOffset(-0.75)).toBe(0.25);
+    expect(wrapOffset(0.5)).toBe(-0.5);
+  });
+
+  test("a camera near 180° places a marker just over the line beside it", () => {
+    const view = { center: mercator(0, 179), worldSize: 256 * 2 ** 1 };
+    expect(mapPercent(mercator(0, -179), view, size)).toEqual({ left: 50.711, top: 50 });
+    expect(mapPercent(mercator(0, 178), view, size).left).toBe(49.644);
+  });
+
+  test("fitting markers on both sides of 180° frames them around it", () => {
+    const points = [mercator(0, 179), mercator(0, -179)];
+    const view = fitFraming(points, size)!;
+    expect(view.center.x).toBeCloseTo(0, 9);
+    expect(mapPercent(points[0]!, view, size).left).toBeCloseTo(10, 3);
+    expect(mapPercent(points[1]!, view, size).left).toBeCloseTo(90, 3);
+    // Three points spread round the world still take the smallest arc covering them.
+    const spread = fitFraming([mercator(0, 170), mercator(0, -170), mercator(0, 10)], size)!;
+    expect(spread.center.x).toBeCloseTo(mercator(0, 100).x, 9);
+  });
+
+  test("a route crossing 180° is drawn the short way round", () => {
+    const route = [mercator(0, 178), mercator(0, -178), mercator(0, -176)];
+    const view = fitFraming(route, size)!;
+    const lefts = routePercents(route, view, size).map((point) => point.left);
+    expect(lefts[0]).toBeCloseTo(10, 3);
+    expect(lefts[1]).toBeCloseTo(63.333, 3);
+    expect(lefts[2]).toBeCloseTo(90, 3);
+    // Framed elsewhere, the crossing segment still spans 4°, not the whole world.
+    const away = { center: mercator(0, 0), worldSize: 256 };
+    const [from, to] = routePercents(route.slice(0, 2), away, size);
+    expect(to!.left - from!.left).toBeCloseTo(((4 / 360) * 256 * 100) / 400, 2);
+  });
+
+  test("the rendered still pins and routes across 180°", () => {
+    const pacific = [
+      { id: "w", lat: 0, lng: 179, name: "West" },
+      { id: "e", lat: 0, lng: -179, name: "East" },
+    ];
+    const rendered = renderPrototypeStill({
+      ...reference,
+      data: { places: pacific, route: pacific.map(({ lat, lng }) => ({ lat, lng })) },
+      root: {
+        type: "map",
+        markers,
+        polylines: [{ path: "/route" }],
+        fit: "markers",
+        style: { width: { dp: 400 }, height: { dp: 200 } },
+      },
+    });
+    const pins = find(rendered.element, (element) => element.attrs["data-part"] === "marker");
+    expect(pins.map((pin) => pin.style.left)).toEqual(["10%", "90%"]);
+    expect(toHtml(rendered.element)).toContain('points="10,50 90,50"');
   });
 });

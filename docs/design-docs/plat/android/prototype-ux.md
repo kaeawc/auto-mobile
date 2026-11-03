@@ -485,13 +485,18 @@ components and rotary input in prototypes are out of scope.
 
 ## Android Automotive
 
-The renderer is phone-oriented; on a car display it lays out wide and landscape. A successful `show`
-on an Android device whose booted form factor is `automotive` reports `formFactor: "automotive"`,
-taken from the device's form factor with no extra read; other devices omit it. `save` with `pin:true`
-uses the same launcher check as everywhere else, so a car launcher without pinned-shortcut support keeps
-the save and reports `pinned:"unsupported"`. Dismiss placement relative to the car system bars, and
-whether the overlay stays visible while driving restrictions are on, are unverified on an AAOS emulator
-(#14916). Car App Library templates and car-specific spec nodes are out of scope.
+The renderer is phone-oriented; on a car display it lays out wide and landscape. A successful `show` on
+an Android device whose booted form factor is `automotive` reports `formFactor: "automotive"`, taken
+from the device's form factor with no extra read; other devices omit it. `save` with `pin:true` uses the
+same launcher check as everywhere else, so a car launcher without pinned-shortcut support keeps the save
+and reports `pinned:"unsupported"` (the car launcher `com.android.car.carlauncher` has none). The car
+top bar can be taller than the `systemBars` top inset the overlay window receives, so for fullscreen and
+top-gravity floating windows the host uses the larger of that inset and the display's `systemBars` top
+inset: the dismiss bar, the escape pill and top-edge `safeAreaPadding` clear the whole bar. With `none`,
+authored content without top-edge `safeAreaPadding` still starts behind the car top bar. The floored
+position and whether the overlay stays visible while driving restrictions are on are unverified on a
+device; checking them needs a userdebug or eng AAOS image, since user builds refuse driving-state
+emulation. Car App Library templates and car-specific spec nodes are out of scope.
 
 ## Common node properties
 

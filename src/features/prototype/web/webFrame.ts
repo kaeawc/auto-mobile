@@ -176,38 +176,84 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
   ];
 }
 
+interface ScreenPaint {
+  readonly dark: boolean;
+  readonly textColor: string;
+  readonly background: string;
+}
+
+type Insets = DeviceFrame["safeArea"]["portrait"];
+
+const NO_INSETS: Insets = { top: 0, bottom: 0, left: 0, right: 0 };
+
+function screenStyle(
+  size: { width: number; height: number },
+  radius: number,
+  insets: Insets,
+  options: ScreenPaint,
+): Record<string, string> {
+  return {
+    position: "relative",
+    width: px(size.width),
+    height: px(size.height),
+    overflow: "hidden",
+    "border-radius": px(radius),
+    // Both devices paint nothing behind a window, so the app below shows through; a still has no
+    // app below, so the theme's background stands in for it.
+    "background-color": options.background,
+    color: options.textColor,
+    "font-family": "system-ui, -apple-system, Roboto, sans-serif",
+    "font-size": "14px",
+    "--safe-top": px(insets.top),
+    "--safe-bottom": px(insets.bottom),
+    "--safe-left": px(insets.left),
+    "--safe-right": px(insets.right),
+    "--safe-start": "var(--safe-left)",
+    "--safe-end": "var(--safe-right)",
+  };
+}
+
+/**
+ * The frame's screen alone: no bezel, corner radius, status bar, cutout or navigation marks, no
+ * safe-area insets and no window background, so the content draws as a renderer's content path
+ * does without a window (#16534).
+ */
+export function renderChromelessScreen(
+  frame: DeviceFrame,
+  orientation: WebOrientation,
+  options: ScreenPaint,
+  content: WebElement,
+): WebElement {
+  return el(
+    "div",
+    {
+      attrs: { "data-chrome": "screen", "data-frame": frame.id, "data-orientation": orientation },
+      style: screenStyle(screenSize(frame, orientation), 0, NO_INSETS, {
+        ...options,
+        background: "transparent",
+      }),
+    },
+    [content],
+  );
+}
+
 /** A device frame around the screen content, with status bar, cutout and navigation handle. */
 export function renderDeviceFrame(
   frame: DeviceFrame,
   orientation: WebOrientation,
-  options: { dark: boolean; textColor: string; background: string },
+  options: ScreenPaint,
   content: WebElement,
 ): WebElement {
-  const { width, height } = screenSize(frame, orientation);
-  const insets = frame.safeArea[orientation];
   const screen = el(
     "div",
     {
       attrs: { "data-chrome": "screen" },
-      style: {
-        position: "relative",
-        width: px(width),
-        height: px(height),
-        overflow: "hidden",
-        "border-radius": px(frame.cornerRadiusDp),
-        // Both devices paint nothing behind a window, so the app below shows through; a still has no
-        // app below, so the theme's background stands in for it.
-        "background-color": options.background,
-        color: options.textColor,
-        "font-family": "system-ui, -apple-system, Roboto, sans-serif",
-        "font-size": "14px",
-        "--safe-top": px(insets.top),
-        "--safe-bottom": px(insets.bottom),
-        "--safe-left": px(insets.left),
-        "--safe-right": px(insets.right),
-        "--safe-start": "var(--safe-left)",
-        "--safe-end": "var(--safe-right)",
-      },
+      style: screenStyle(
+        screenSize(frame, orientation),
+        frame.cornerRadiusDp,
+        frame.safeArea[orientation],
+        options,
+      ),
     },
     [
       content,

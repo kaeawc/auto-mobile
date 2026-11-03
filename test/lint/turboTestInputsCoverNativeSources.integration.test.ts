@@ -77,6 +77,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // PinchGeometryTest.kt / PinchGeometryTests.swift (issue #2997).
     "android/control-proxy/src/test/kotlin/**",
     "ios/control-proxy/Tests/**",
+    // webAndroidParityCases.test.ts keeps its case table in step with the Android
+    // renderer's prototype goldens and reads their sizes (#16534).
+    "android/control-proxy/src/test/resources/screenshots/prototype/**",
     // ownerTokenClientInventory.test.ts reads the desktop owner-token compatibility pins.
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",

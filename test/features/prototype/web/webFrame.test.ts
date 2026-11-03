@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { deviceFrameOrThrow } from "../../../../src/features/prototype/web/deviceFrames";
-import { renderDeviceFrame, screenSize } from "../../../../src/features/prototype/web/webFrame";
+import {
+  renderChromelessScreen,
+  renderDeviceFrame,
+  screenSize,
+} from "../../../../src/features/prototype/web/webFrame";
 import {
   el,
   type WebChild,
@@ -75,4 +79,25 @@ test("landscape button navigation sits on the right edge the frame reserves; ges
   expect(side.style).not.toHaveProperty("height");
   const bottom = chrome(frameOf("iphone-16", "landscape"), "navBar")!;
   expect(bottom.style).toMatchObject({ bottom: "0", left: "0" });
+});
+
+test("a chromeless screen is the screen alone: no bezel, bars, radius, insets or background", () => {
+  const screen = renderChromelessScreen(
+    deviceFrameOrThrow("pixel-9"),
+    "portrait",
+    { dark: false, textColor: "#000", background: "#fff" },
+    el("div"),
+  );
+  expect(screen.attrs["data-chrome"]).toBe("screen");
+  expect(screen.children).toHaveLength(1);
+  expect(chrome(screen, "statusBar")).toBeUndefined();
+  expect(chrome(screen, "navBar")).toBeUndefined();
+  expect(screen.style).toMatchObject({
+    width: "411px",
+    height: "923px",
+    "border-radius": "0px",
+    "background-color": "transparent",
+    "--safe-top": "0px",
+    "--safe-bottom": "0px",
+  });
 });

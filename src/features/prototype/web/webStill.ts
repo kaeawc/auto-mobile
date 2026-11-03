@@ -3,7 +3,12 @@ import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
-import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
+import {
+  renderChromelessScreen,
+  renderDeviceFrame,
+  screenSize,
+  type WebOrientation,
+} from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
@@ -23,6 +28,11 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * Draws the frame's screen alone, without the device or its insets: the content path a
+   * renderer's goldens capture (#16534).
+   */
+  readonly chromeless?: boolean;
 }
 
 export interface PrototypeStill {
@@ -223,7 +233,8 @@ export function renderPrototypeStill(
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
-  const element = renderDeviceFrame(
+  const draw = options.chromeless ? renderChromelessScreen : renderDeviceFrame;
+  const element = draw(
     frame,
     options.orientation ?? "portrait",
     { dark, textColor, background: screenBackground(scope.style) },

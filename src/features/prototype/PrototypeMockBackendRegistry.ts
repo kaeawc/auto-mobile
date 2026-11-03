@@ -63,7 +63,7 @@ export class PrototypeMockBackendRegistry {
     }
     const createRandom = this.deps.createRandom ?? defaultCreateRandom;
     for (const [backendId, definition] of parsed) {
-      this.backends.get(backendId)?.dispose();
+      this.backends.get(backendId)?.dispose(`Mock backend "${backendId}" was replaced.`);
       this.backends.set(
         backendId,
         new PrototypeMockBackend(definition, {
@@ -79,17 +79,17 @@ export class PrototypeMockBackendRegistry {
     return this.backends.get(backendId);
   }
 
+  /** Removes `backendId`, closing its open channels. */
   clear(backendId: string): boolean {
-    this.backends.get(backendId)?.dispose();
+    this.backends.get(backendId)?.dispose(`Mock backend "${backendId}" was cleared.`);
     return this.backends.delete(backendId);
   }
 
   /** Session end. */
   clearAll(): void {
-    for (const backend of this.backends.values()) {
-      backend.dispose();
+    for (const backendId of this.ids()) {
+      this.clear(backendId);
     }
-    this.backends.clear();
   }
 
   ids(): string[] {

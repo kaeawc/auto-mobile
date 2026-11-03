@@ -2,17 +2,28 @@
  * The mock backend engine (#14271): answers an HTTP request from a declarative definition with no
  * network. Canned routes win over collections, faults are decided before either, and latency and
  * `rate` faults draw from the injected seeded `Random` and wait on the injected `Timer`, so a run
- * replays identically.
+ * replays identically. Channels join its rooms, and a collection write can broadcast to a room.
  */
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { Random } from "../../utils/Random";
 import type { Timer } from "../../utils/SystemTimer";
+import { MAX_PROTOTYPE_CHANNEL_FRAME_BYTES } from "./prototypeChannelLimits";
 import { PrototypeMockActors, type MockActorWrite } from "./PrototypeMockActors";
 import { answerCollection, type MockResponse } from "./prototypeMockCollections";
 import { bindMockValue, decodeURIComponentSafe, matchMockPath } from "./prototypeMockBinding";
 import {
+  MockRooms,
+  type MockFrameSource,
+  type MockRoomJoin,
+  type MockRoomMember,
+} from "./prototypeMockRooms";
+import {
   MAX_MOCK_BACKEND_BYTES,
+  mockBackendBytes,
   type MockBackendDefinition,
+  type MockBroadcast,
   type MockFault,
   type MockItem,
   type MockRoute,
@@ -28,7 +39,7 @@ export interface MockRequest {
   body: PrototypeRequestJson | undefined;
 }
 
-export interface MockLogEntry {
+export interface MockRequestLogEntry {
   seq: number;
   method: string;
   path: string;
@@ -36,6 +47,16 @@ export interface MockLogEntry {
   status: number;
   body?: PrototypeRequestJson;
 }
+
+/** A frame put into a room: a client's send, an agent `publish` or a collection broadcast. */
+export interface MockFrameLogEntry {
+  seq: number;
+  room: string;
+  from: MockFrameSource;
+  data: string;
+}
+
+export type MockLogEntry = MockRequestLogEntry | MockFrameLogEntry;
 
 export interface MockBackendDeps {
   random: Random;
@@ -49,6 +70,7 @@ export class PrototypeMockBackend {
   private readonly collections = new Map<string, MockItem[]>();
   private readonly faultHits = new Map<MockFault, number>();
   private readonly log: MockLogEntry[] = [];
+  private readonly rooms: MockRooms;
   private seq = 0;
   private readonly actors: PrototypeMockActors;
 
@@ -60,6 +82,10 @@ export class PrototypeMockBackend {
     for (const [name, items] of Object.entries(definition.collections ?? {})) {
       this.collections.set(name, structuredClone(items));
     }
+    this.rooms = new MockRooms(definition.rooms ?? [], {
+      timer: deps.timer,
+      record: (room, from, data) => this.append({ seq: 0, room, from, data }),
+    });
     this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, (write) =>
       this.applyActorWrite(write),
     );
@@ -70,9 +96,27 @@ export class PrototypeMockBackend {
     return this.definition.actors?.length ?? 0;
   }
 
-  /** Cancels every scheduled actor step; the backend still answers requests. */
-  dispose(): void {
+  get roomCount(): number {
+    return this.definition.rooms?.length ?? 0;
+  }
+
+  /** Joins the room `path` names; see {@link MockRooms.join}. */
+  join(path: string, query: Record<string, string>, member: MockRoomMember): MockRoomJoin {
+    return this.rooms.join(path, query, member);
+  }
+
+  /** The agent speaks as the other side: `frame` to every member of `room`; how many it reached. */
+  publish(room: string, frame: PrototypeRequestJson): number {
+    return this.rooms.publish(room, frame, "publish");
+  }
+
+  /**
+   * Cancels every scheduled actor step and ends every open connection; the backend still answers
+   * requests. `reason` is the close reason its channels see.
+   */
+  dispose(reason = "Mock backend was disposed."): void {
     this.actors.dispose();
+    this.rooms.closeAll(reason);
   }
 
   get routeCount(): number {
@@ -83,7 +127,10 @@ export class PrototypeMockBackend {
     return this.definition.faults?.length ?? 0;
   }
 
-  /** Requests answered so far with `seq` above `since`, oldest first; bounded to the latest 200. */
+  /**
+   * Requests answered and room frames seen with `seq` above `since`, oldest first; bounded to the
+   * latest 200.
+   */
   requestLog(since = 0): MockLogEntry[] {
     return this.log.filter((entry) => entry.seq > since);
   }
@@ -103,14 +150,16 @@ export class PrototypeMockBackend {
     const method = request.method.toUpperCase();
     await this.waitLatency();
     signal?.throwIfAborted();
-    const response = this.faultFor(method, request.path) ??
-      (await this.cannedRoute(method, request, signal)) ??
-      this.collectionResponse(method, request) ?? {
-        status: 404,
-        headers: {},
-        body: { error: "No such route" },
-      };
+    const early =
+      this.faultFor(method, request.path) ?? (await this.cannedRoute(method, request, signal));
+    const written = early === undefined ? this.collectionResponse(method, request) : undefined;
+    const response = early ??
+      written ?? { status: 404, headers: {}, body: { error: "No such route" } };
     this.record(method, request, response);
+    // Only a collection's own answer is a stored write; a fault or canned route stored nothing.
+    if (written !== undefined) {
+      this.broadcastWrite(method, request, written);
+    }
     this.actors.onRequest(method, request.path, response.status, {
       query: request.query,
       body: request.body,
@@ -133,6 +182,48 @@ export class PrototypeMockBackend {
       },
       { ids: this.deps.ids, fits: (next) => this.fitsWith(items, next) },
     ).status;
+  }
+
+  /** A successful write to a collection with a broadcast sends its frame to the bound room. */
+  private broadcastWrite(method: string, request: MockRequest, response: MockResponse): void {
+    const name = decodeURIComponentSafe(request.path.split("/")[1] ?? "");
+    const broadcast = this.broadcastFor(name, method, response.status);
+    if (broadcast === undefined) {
+      return;
+    }
+    const context = {
+      params: {},
+      query: request.query,
+      body: request.body,
+      item: response.body ?? null,
+    };
+    try {
+      const room = bindMockValue(broadcast.room, context);
+      if (typeof room !== "string" || !room.startsWith("/")) {
+        logger.warn(`[PrototypeMock] broadcast for ${name} dropped: room is not a path`);
+        return;
+      }
+      const frame = bindMockValue(broadcast.frame, context, MAX_PROTOTYPE_CHANNEL_FRAME_BYTES);
+      this.rooms.publish(room, frame, "broadcast");
+    } catch (error) {
+      // The write is stored and answered either way; a failed broadcast must not change its result.
+      logger.warn(`[PrototypeMock] broadcast for ${name} dropped: ${errorMessage(error)}`);
+    }
+  }
+
+  /** The broadcast a 2xx write of `method` to collection `name` triggers, if any. */
+  private broadcastFor(name: string, method: string, status: number): MockBroadcast | undefined {
+    const broadcasts = this.definition.broadcasts ?? {};
+    if (
+      status < 200 ||
+      status > 299 ||
+      !this.collections.has(name) ||
+      !Object.hasOwn(broadcasts, name)
+    ) {
+      return undefined;
+    }
+    const broadcast = broadcasts[name]!;
+    return (broadcast.on ?? ["POST"]).some((on) => on === method) ? broadcast : undefined;
   }
 
   private async waitLatency(): Promise<void> {
@@ -221,21 +312,24 @@ export class PrototypeMockBackend {
     const collections = Object.fromEntries(
       [...this.collections].map(([name, current]) => [name, current === items ? next : current]),
     );
-    return (
-      Buffer.byteLength(JSON.stringify([collections, this.definition.routes])) <=
-      MAX_MOCK_BACKEND_BYTES
-    );
+    return mockBackendBytes(this.definition, collections) <= MAX_MOCK_BACKEND_BYTES;
   }
 
   private record(method: string, request: MockRequest, response: MockResponse): void {
-    this.log.push({
-      seq: ++this.seq,
+    this.append({
+      seq: 0,
       method,
       path: request.path,
       query: request.query,
       status: response.status,
       ...(request.body === undefined ? {} : { body: request.body }),
     });
+  }
+
+  /** Numbers `entry` and keeps the latest 200. */
+  private append(entry: MockLogEntry): void {
+    entry.seq = ++this.seq;
+    this.log.push(entry);
     if (this.log.length > MAX_LOG_ENTRIES) {
       this.log.shift();
     }

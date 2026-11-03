@@ -1,10 +1,14 @@
 import { failure, success } from "./result";
 import type {
+  AndroidArchetype,
+  AndroidExactCatalogProfile,
+  AndroidSessionDeviceCatalog,
   IosArchetype,
   IosCatalogModel,
   IosExactModelReference,
   IosModelType,
   IosSessionDeviceCatalog,
+  NormalizedAndroidSessionDeviceRequirement,
   RequirementResult,
   SessionDeviceCatalog,
   SessionRequirementDefaults,
@@ -115,6 +119,54 @@ export function resolveIosModelReference(
     );
   }
   return success(model);
+}
+
+/**
+ * An exact-profile selector's installed catalog profile (#16427). An uninstalled or unclassified
+ * profile is refused rather than guessed, so the session never falls back to an archetype default.
+ */
+export function resolveAndroidExactProfile(
+  profileId: string,
+  catalog: AndroidSessionDeviceCatalog,
+): RequirementResult<AndroidExactCatalogProfile> {
+  const profiles = catalog.profiles.filter((profile) => profile.profileId === profileId);
+  if (profiles.length === 0) {
+    const installed = catalog.profiles.map((profile) => profile.profileId).join(", ") || "none";
+    return failure(
+      "unsupported_hardware",
+      `Android profile '${profileId}' is not installed. Installed profiles: ${installed}.`,
+      { field: "hardware.profileId" },
+    );
+  }
+  if (profiles.length > 1) {
+    return failure(
+      "catalog_metadata_invalid",
+      `Android profile '${profileId}' is duplicated in the catalog.`,
+    );
+  }
+  const [profile] = profiles;
+  if (profile.metadataState !== "current") {
+    return failure(
+      "catalog_metadata_invalid",
+      `Android profile '${profileId}' lacks current catalog metadata.`,
+    );
+  }
+  if (profile.archetype === undefined) {
+    return failure(
+      "unsupported_hardware",
+      `Android profile '${profileId}' has no archetype classification. Classify it as phone, tablet or foldable in androidProfileArchetypes.`,
+      { field: "hardware.profileId" },
+    );
+  }
+  return success({ ...profile, archetype: profile.archetype, metadataState: "current" });
+}
+
+/** The archetype a normalized Android request resolves to: explicit, defaulted or the exact profile's. */
+export function androidRequirementArchetype(
+  requirement: Pick<NormalizedAndroidSessionDeviceRequirement, "effective" | "exactProfile">,
+): AndroidArchetype | undefined {
+  const hardware = requirement.effective.hardware;
+  return hardware.kind === "archetype" ? hardware.archetype : requirement.exactProfile?.archetype;
 }
 
 export function validateContext(

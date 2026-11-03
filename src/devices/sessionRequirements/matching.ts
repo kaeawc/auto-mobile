@@ -1,4 +1,4 @@
-import { iosModelTypeMatches } from "./catalog";
+import { androidRequirementArchetype, iosModelTypeMatches } from "./catalog";
 import type {
   AndroidSessionDeviceProfile,
   DevicePredicateMatch,
@@ -48,10 +48,18 @@ function matchAndroidHardware(
   requirement: NormalizedAndroidSessionDeviceRequirement,
   candidate: AndroidSessionDeviceProfile,
 ): DevicePredicateMatch {
+  const selector = requirement.effective.hardware;
+  if (selector.kind === "exact-profile") {
+    // Only a device created from exactly this profile satisfies the request (#16427).
+    if (!candidate.profileId) {
+      return mismatch("unknown-hardware-metadata");
+    }
+    return candidate.profileId === selector.profileId ? MATCH : mismatch("hardware");
+  }
   if (!candidate.archetype) {
     return mismatch("unknown-hardware-metadata");
   }
-  return candidate.archetype === requirement.effective.hardware.archetype
+  return candidate.archetype === androidRequirementArchetype(requirement)
     ? MATCH
     : mismatch("hardware");
 }

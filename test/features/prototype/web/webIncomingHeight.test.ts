@@ -24,6 +24,10 @@ test("a node's content height is the least of its incoming, dp and max height, l
   expect(contentHeight({ height: { dp: 4 }, padding: { top: 4, bottom: 6 } })).toBe(0);
   expect(contentHeight({ height: "fill" })).toBe(Infinity);
   expect(contentHeight(undefined)).toBe(Infinity);
+  // The dp height is held to maxHeight, then raised to minHeight, as CSS and sizeIn resolve it.
+  expect(contentHeight({ height: { dp: 20 }, minHeight: 100 })).toBe(100);
+  expect(contentHeight({ height: { dp: 20 }, minHeight: 100, maxHeight: 50 })).toBe(100);
+  expect(contentHeight({ minHeight: 30, [INCOMING_HEIGHT_KEY]: 40 })).toBe(40);
   // A fill, weighted or wrap node is bounded by what its parent hands it.
   expect(contentHeight({ height: "fill", [INCOMING_HEIGHT_KEY]: 40 })).toBe(40);
   expect(contentHeight({ weight: 1, [INCOMING_HEIGHT_KEY]: 30, padding: { top: 5 } })).toBe(25);
@@ -43,6 +47,11 @@ test("a column hands each child what its earlier siblings left, and weights shar
     undefined,
     82,
   ]);
+  // A sibling takes its dp height clamped by its own bounds.
+  const clamped = { type: "box", style: { height: { dp: 100 }, maxHeight: 20 } };
+  expect(columnChildHeights([clamped, weighted(1)], 100, 0)).toEqual([100, 80]);
+  const floored = { type: "text", style: { minHeight: 30 } };
+  expect(columnChildHeights([floored, weighted(1)], 100, 0)).toEqual([100, 70]);
   // A sibling with no dp height counts as 0, so the bound is an upper one.
   expect(columnChildHeights([{ type: "text" }, weighted(1)], 40, 0)).toEqual([40, 40]);
   expect(columnChildHeights([dp(50), weighted(1)], 40, 0)).toEqual([40, 0]);

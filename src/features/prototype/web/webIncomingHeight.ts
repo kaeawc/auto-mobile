@@ -9,17 +9,23 @@ const side = (padding: Raw | undefined, name: string) =>
   typeof padding?.[name] === "number" ? padding[name] : 0;
 
 /**
- * The tallest a node lets its children be: the least of the height its parent hands it
- * (INCOMING_HEIGHT_KEY), its dp `height` and its `maxHeight`, less its vertical padding. A
- * `fill`, weighted or wrap-sized node is bounded by the incoming height alone, as Compose's
- * incoming max height bounds it. Infinity when no bound is statically known.
+ * The height a node's own size takes, as CSS and Compose's `sizeIn` then `height` resolve it: its
+ * dp `height` (else unbounded) held under `maxHeight`, then raised to `minHeight`, which wins.
+ */
+function ownHeight(style: Raw | undefined): number {
+  const capped = Math.min(finite(record(style?.height)?.dp), finite(style?.maxHeight));
+  const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
+  return Math.max(floor, capped);
+}
+
+/**
+ * The tallest a node lets its children be: its own height (see ownHeight) within the height its
+ * parent hands it (INCOMING_HEIGHT_KEY), less its vertical padding. A `fill`, weighted or
+ * wrap-sized node is bounded by the incoming height alone, as Compose's incoming max height
+ * bounds it. Infinity when no bound is statically known.
  */
 export function contentHeight(style: Raw | undefined): number {
-  const bound = Math.min(
-    finite(style?.[INCOMING_HEIGHT_KEY]),
-    finite(record(style?.height)?.dp),
-    finite(style?.maxHeight),
-  );
+  const bound = Math.min(finite(style?.[INCOMING_HEIGHT_KEY]), ownHeight(style));
   const padding = record(style?.padding);
   return Math.max(0, bound - side(padding, "top") - side(padding, "bottom"));
 }
@@ -29,10 +35,17 @@ const weightOf = (node: Raw | undefined): number | undefined => {
   return typeof weight === "number" && weight > 0 ? weight : undefined;
 };
 
-/** A child's dp height, or 0 when it is only known at layout time (an upper bound for the rest). */
+/**
+ * The height an unweighted child takes (see ownHeight), or its `minHeight` (else 0) when that is
+ * only known at layout time, so the rest is an upper bound.
+ */
 const fixedHeight = (node: Raw): number => {
-  const dp = record(record(node.style)?.height)?.dp;
-  return weightOf(node) === undefined && typeof dp === "number" ? dp : 0;
+  if (weightOf(node) !== undefined) {
+    return 0;
+  }
+  const style = record(node.style);
+  const own = ownHeight(style);
+  return own === Infinity ? (typeof style?.minHeight === "number" ? style.minHeight : 0) : own;
 };
 
 /**

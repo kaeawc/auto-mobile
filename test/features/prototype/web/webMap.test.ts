@@ -8,6 +8,7 @@ import {
   fromCentre,
   groundReach,
   groundTransform,
+  heightFromRatio,
   mapOffset,
   mapSize,
   mercator,
@@ -160,6 +161,63 @@ describe("prototype web map (#16539)", () => {
       width: 390,
       height: 200,
     });
+  });
+
+  test("holds each axis within its min and max, the min winning (#16671)", () => {
+    const screen = { width: 390, height: 844 };
+    // A min height larger than the dp height is the box's height, and so the eye's.
+    expect(mapSize({ height: { dp: 200 }, minHeight: 800 }, screen)).toEqual({
+      width: 390,
+      height: 800,
+    });
+    expect(mapSize({ height: "fill", maxHeight: 300 }, screen)).toEqual({
+      width: 390,
+      height: 300,
+    });
+    expect(mapSize({ height: "fill", minHeight: 1000 }, screen).height).toBe(1000);
+    expect(mapSize({ width: { dp: 300 }, maxWidth: 200 }, screen).width).toBe(200);
+    expect(mapSize({ minWidth: 500 }, screen).width).toBe(500);
+    // CSS lets the min win over a smaller max.
+    expect(mapSize({ minHeight: 400, maxHeight: 300 }, screen).height).toBe(400);
+    // Non-positive bounds are ignored.
+    expect(mapSize({ minHeight: -5, maxHeight: 0 }, screen).height).toBe(200);
+  });
+
+  test("an aspect ratio sizes the axis the style leaves open (#16671)", () => {
+    const screen = { width: 390, height: 844 };
+    // In a column the width is known or stretched, so the height follows it.
+    expect(mapSize({ width: { dp: 300 }, aspectRatio: 2 }, screen, "column")).toEqual({
+      width: 300,
+      height: 150,
+    });
+    expect(mapSize({ aspectRatio: 2 }, screen, "column")).toEqual({ width: 390, height: 195 });
+    expect(mapSize({ aspectRatio: 2, maxWidth: 200 }, screen, "column")).toEqual({
+      width: 200,
+      height: 100,
+    });
+    expect(mapSize({ aspectRatio: 2, minHeight: 300 }, screen, "column").height).toBe(300);
+    // A named height wins over the ratio in a column, which stretches the width.
+    expect(mapSize({ height: { dp: 100 }, aspectRatio: 2 }, screen, "column")).toEqual({
+      width: 390,
+      height: 100,
+    });
+    // In a row or a box the height is known (200 dp by default), so an open width follows it.
+    expect(mapSize({ height: { dp: 100 }, aspectRatio: 2 }, screen, "row")).toEqual({
+      width: 200,
+      height: 100,
+    });
+    expect(mapSize({ aspectRatio: 2 }, screen)).toEqual({ width: 400, height: 200 });
+    expect(mapSize({ width: { dp: 300 }, aspectRatio: 2 }, screen)).toEqual({
+      width: 300,
+      height: 200,
+    });
+    expect(mapSize({ width: "fill", aspectRatio: 2 }, screen, "row").width).toBe(390);
+    // A weight on the column wins over the ratio.
+    expect(mapSize({ weight: 1, aspectRatio: 2 }, screen, "column").height).toBe(844);
+    expect(heightFromRatio({ aspectRatio: 2 }, "column")).toBe(true);
+    expect(heightFromRatio({ aspectRatio: 2, height: "wrap" }, "column")).toBe(true);
+    expect(heightFromRatio({ aspectRatio: 2 }, "row")).toBe(false);
+    expect(heightFromRatio({ aspectRatio: 0 }, "column")).toBe(false);
   });
 
   test("an empty map draws the neutral canvas", () => {
@@ -360,5 +418,42 @@ describe("prototype web map (#16539)", () => {
       left: fromCentre(pier.x),
       top: fromCentre(pier.y),
     });
+  });
+  test("a tilted min-height map puts its eye out from the height it renders at (#16671)", () => {
+    const rendered = renderPrototypeStill({
+      ...reference,
+      data: { places },
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "map",
+            markers,
+            style: { height: { dp: 200 }, minHeight: 800 },
+            camera: { lat: 37.77, lng: -122.42, zoom: 12, tilt: 60 },
+          },
+        ],
+      },
+    });
+    const ground = find(rendered.element, (element) => element.attrs["data-part"] === "ground")[0]!;
+    const eye = eyeDistance(800);
+    expect(ground.style.transform).toBe(`perspective(${eye}px) rotateX(60deg) rotate(0deg)`);
+    // The horizon sits past the top of the 800 px box, and the ground reaches its corners.
+    expect(eye / Math.tan((60 * Math.PI) / 180)).toBeGreaterThan(800 / 2);
+    const side = Number(/^max\((\d+)px/.exec(String(ground.style.width))![1]!);
+    expect(side / 2).toBeGreaterThanOrEqual(groundReach({ width: SCREEN.width, height: 800 }, 60));
+  });
+
+  test("an aspect-ratio map in a column drops the 200 dp default height (#16671)", () => {
+    const html = (style: Record<string, unknown>) =>
+      toHtml(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "column", children: [{ type: "map", style }] },
+        }).element,
+      );
+    expect(html({ width: { dp: 300 }, aspectRatio: 2 })).not.toContain("height:200px");
+    expect(html({ width: { dp: 300 }, aspectRatio: 2 })).toContain("aspect-ratio:2");
+    expect(html({ width: { dp: 300 } })).toContain("height:200px");
   });
 });

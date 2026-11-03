@@ -1,0 +1,1194 @@
+[
+  {
+    "name": "next and previous walk the queue, restart after 3 s and stop past the last item",
+    "items": ["a", "b", "c", "d", "e"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "seek", "positionMs": 4000 },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": true,
+          "positionMs": 4000,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "previous" },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "previous" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "seek", "positionMs": 3000 },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 3000,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "previous" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "previous" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "skipTo", "itemId": "e" },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 4,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 4,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "repeat all wraps previous and next",
+    "items": ["a", "b", "c"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "setRepeat", "repeat": "all" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "previous" },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "repeat one replays on ended but an explicit next still advances",
+    "items": ["a", "b", "c"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "setRepeat", "repeat": "one" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "one",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "one",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "seek", "positionMs": 5000 },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 5000,
+          "shuffle": false,
+          "repeat": "one",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "ended" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "one",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "one",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "ended advances, then stops on the last item with repeat off",
+    "items": ["a", "b", "c"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "ended" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "skipTo", "itemId": "c" },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "ended" },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "skipTo", "itemId": "zz" },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": "item_not_found"
+        }
+      }
+    ]
+  },
+  {
+    "name": "shuffle keeps the current item first and is deterministic",
+    "items": ["a", "b", "c", "d", "e"],
+    "random": [0, 2, 1],
+    "steps": [
+      {
+        "op": { "op": "skipTo", "itemId": "c" },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setShuffle", "shuffle": true },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": true,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["c", "e", "b", "d", "a"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 4,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": true,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["c", "e", "b", "d", "a"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setShuffle", "shuffle": true },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 4,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": true,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["c", "e", "b", "d", "a"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setShuffle", "shuffle": false },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 4,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 4,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "sleep timer pauses when the clock runs out and 0 cancels",
+    "items": ["a", "b"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setRate", "rate": 1.5 },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setSleepTimer", "timer": { "ms": 60000 } },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": 60000,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "advance", "ms": 30000 },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": 30000,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "advance", "ms": 30000 },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setSleepTimer", "timer": { "ms": 1000 } },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": 1000,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setSleepTimer", "timer": { "ms": 0 } },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "advance", "ms": 5000 },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.5,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b"],
+          "itemChanged": false,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "sleep at end of item pauses instead of advancing",
+    "items": ["a", "b", "c"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setSleepTimer", "timer": { "endOfItem": true } },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": true,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": true,
+          "order": ["a", "b", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "advance", "ms": 60000 },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": true,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "ended" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "sync removes, appends and reorders around the current item",
+    "items": ["a", "b", "c", "d", "e"],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "skipTo", "itemId": "b" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["a", "c", "d", "e"] },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "c", "d", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["a", "c", "d", "e", "f"] },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 1,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "c", "d", "e", "f"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["a", "d", "c", "e", "f"] },
+        "expect": {
+          "currentItemId": "c",
+          "currentIndex": 2,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "d", "c", "e", "f"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "skipTo", "itemId": "f" },
+        "expect": {
+          "currentItemId": "f",
+          "currentIndex": 4,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "d", "c", "e", "f"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["a", "d", "c", "e"] },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 3,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "d", "c", "e"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "setRepeat", "repeat": "all" },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 3,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "d", "c", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "e",
+          "currentIndex": 3,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "d", "c", "e"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["a", "d", "c"] },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "d", "c"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": [] },
+        "expect": {
+          "currentItemId": null,
+          "currentIndex": -1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "all",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": [],
+          "itemChanged": true,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "sync under shuffle keeps play order and appends new items",
+    "items": ["a", "b", "c", "d", "e"],
+    "random": [1, 0, 0],
+    "steps": [
+      {
+        "op": { "op": "setShuffle", "shuffle": true },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": true,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "e", "d", "b", "c"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["c", "b", "a", "f"] },
+        "expect": {
+          "currentItemId": "a",
+          "currentIndex": 2,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": true,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "f"],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": "b",
+          "currentIndex": 1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": true,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["a", "b", "c", "f"],
+          "itemChanged": true,
+          "error": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "an empty queue ignores playback calls until items arrive",
+    "items": [],
+    "random": [],
+    "steps": [
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": null,
+          "currentIndex": -1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": [],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "next" },
+        "expect": {
+          "currentItemId": null,
+          "currentIndex": -1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": [],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "previous" },
+        "expect": {
+          "currentItemId": null,
+          "currentIndex": -1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": [],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "ended" },
+        "expect": {
+          "currentItemId": null,
+          "currentIndex": -1,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": [],
+          "itemChanged": false,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "sync", "items": ["x", "y"] },
+        "expect": {
+          "currentItemId": "x",
+          "currentIndex": 0,
+          "playing": false,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["x", "y"],
+          "itemChanged": true,
+          "error": null
+        }
+      },
+      {
+        "op": { "op": "play" },
+        "expect": {
+          "currentItemId": "x",
+          "currentIndex": 0,
+          "playing": true,
+          "positionMs": 0,
+          "shuffle": false,
+          "repeat": "off",
+          "rate": 1.0,
+          "sleepRemainingMs": null,
+          "sleepEndOfItem": false,
+          "order": ["x", "y"],
+          "itemChanged": false,
+          "error": null
+        }
+      }
+    ]
+  }
+]

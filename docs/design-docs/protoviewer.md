@@ -691,7 +691,7 @@ harnesses and a nightly CI job remain future work.
 | Store identity             | `dev.jasonpearson.automobile.protoviewer` on both stores, `.dev` for dev builds, title ProtoViewer (owner, 2026-10-31, #14144). |
 | Store accounts             | Personal enrollment on both stores; Play needs a 14-day closed test with 12 testers first (owner, 2026-10-31, #14144).          |
 | Store support and privacy  | Hosted on the docs site: `protoviewer/support.md` and `protoviewer/privacy.md` (owner, 2026-10-31, #14144).                     |
-| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                   |
+| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                                           |
 
 ## Issues
 

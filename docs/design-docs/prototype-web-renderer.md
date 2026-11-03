@@ -226,11 +226,14 @@ the host, so the page's script only switches between views it was given and neve
   shader support does, and is listed with reason `shaderFallback`.
 - **Typography.** `theme.typography` scales every type-scale role and sets its family, as the
   native theme does.
-- **Colour.** Theme roles resolve with the same Material 3 baseline and overrides as the
-  accessibility lint. A spec whose scheme derives from a seed or device source leaves unresolved
-  roles unpainted. Both devices paint nothing behind a window, so the app below shows through;
-  the still has no app below, so the screen paints the theme's `background` role (else `surface`),
-  or the Material 3 baseline background for the mode when the scheme leaves both unresolved. An explicit `theme.mode` of
+- **Colour.** Theme roles resolve from the Material 3 baseline, then the roles a `theme.colors.seed`
+  derives, then the explicit overrides. The seed roles are the HSL approximation both devices
+  share (`prototypeSeedScheme.ts`, Android's `prototypeSeedColorScheme`, the iOS agent's
+  `seedScheme`), rounded to 8-bit channels as Compose stores them. A `device` source has no
+  device scheme to read, so it falls through to the seed or the baseline, as iOS and Android
+  below API 31 do. The accessibility lint still treats a seed or device scheme as unknown. Both
+  devices paint nothing behind a window, so the app below shows through; the still has no app
+  below, so the screen paints the theme's `background` role (else `surface`). An explicit `theme.mode` of
   `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
   light.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
@@ -326,7 +329,8 @@ the host, so the page's script only switches between views it was given and neve
   since the still has no keyboard). Safe areas are exposed as
   `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. Both devices draw a
   window's content edge to edge and a top app bar takes no inset of its own, so it clears the
-  status bar only through `safeAreaPadding`.
+  status bar only through `safeAreaPadding`; likewise content clears the landscape cutout side
+  (an iPhone's 59 pt left inset) only through `safeAreaPadding` on the `start` edge.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

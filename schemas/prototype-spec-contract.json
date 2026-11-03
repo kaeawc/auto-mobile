@@ -25596,7 +25596,8 @@
             }
           },
           "permissions": [],
-          "background": []
+          "background": [],
+          "sensitive": false
         }
       },
       "events": {

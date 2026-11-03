@@ -7,6 +7,7 @@ import {
   assertDisposableAppId,
   DISPOSABLE_APP_ID_PREFIX,
   disposableAppId,
+  isDisposableAppId,
   type DisposableAppPlatform,
 } from "./disposableAppId";
 import {
@@ -140,6 +141,10 @@ export interface DisposableAppUninstallResult {
   skipped: DisposableAppRemoval[];
 }
 
+const REMOVED = Symbol("removed");
+const RENEWED = Symbol("renewed");
+type RemovalOutcome = typeof REMOVED | typeof RENEWED | string;
+
 function isoOrNull(epochMs: number | null): string | null {
   return epochMs === null ? null : new Date(epochMs).toISOString();
 }
@@ -155,11 +160,24 @@ function ttlMs(ttlHours: number | undefined): number | null {
 }
 
 export class DisposableAppManager {
+  /**
+   * Per-app lifecycle chains keyed by `deviceId/appId`, so an expiry decision made before a
+   * same-slug reinstall cannot delete the renewed installation.
+   */
+  private readonly appLocks = new Map<string, Promise<unknown>>();
+
   constructor(private readonly deps: DisposableAppManagerDependencies) {}
 
   async install(input: DisposableAppInstallInput): Promise<DisposableAppInstallResult> {
-    const { stamper, installer } = this.support(input.platform);
     const appId = disposableAppId(input.platform, input.app.slug);
+    return this.withAppLock(input.deviceId, appId, () => this.installLocked(input, appId));
+  }
+
+  private async installLocked(
+    input: DisposableAppInstallInput,
+    appId: string,
+  ): Promise<DisposableAppInstallResult> {
+    const { stamper, installer } = this.support(input.platform);
     const lifetime = ttlMs(input.app.ttlHours);
     const declarations = disposableAppDeclarations(input.spec);
     const grants = resolveDisposableAppGrants(
@@ -240,9 +258,9 @@ export class DisposableAppManager {
   ): Promise<DisposableAppUninstallResult> {
     if ("appId" in target) {
       assertDisposableAppId(target.appId);
-      const refusal = await this.removeOne(deviceId, platform, target.appId, "requested");
-      if (refusal) {
-        throw new ActionableError(refusal);
+      const outcome = await this.removeOne(deviceId, platform, target.appId, "requested");
+      if (typeof outcome === "string") {
+        throw new ActionableError(outcome);
       }
       return { removed: [{ appId: target.appId, reason: "requested" }], skipped: [] };
     }
@@ -252,8 +270,12 @@ export class DisposableAppManager {
         : [await this.expiredIds(deviceId, platform), "expired"];
     const result: DisposableAppUninstallResult = { removed: [], skipped: [] };
     for (const appId of ids) {
-      const refusal = await this.removeOne(deviceId, platform, appId, reason);
-      (refusal ? result.skipped : result.removed).push({ appId, reason: refusal ?? reason });
+      const outcome = await this.removeOne(deviceId, platform, appId, reason);
+      if (outcome === REMOVED) {
+        result.removed.push({ appId, reason });
+      } else if (outcome !== RENEWED) {
+        result.skipped.push({ appId, reason: outcome });
+      }
     }
     return result;
   }
@@ -296,26 +318,62 @@ export class DisposableAppManager {
       .map((record) => record.appId);
   }
 
-  /** Removes one app; resolves a refusal message instead of removing a foreign-signed package. */
+  private async withAppLock<T>(deviceId: string, appId: string, run: () => Promise<T>): Promise<T> {
+    const key = `${deviceId}/${appId}`;
+    const next = (this.appLocks.get(key) ?? Promise.resolve()).then(run, run);
+    const settled = next.catch(() => undefined);
+    this.appLocks.set(key, settled);
+    void settled.then(() => {
+      if (this.appLocks.get(key) === settled) {
+        this.appLocks.delete(key);
+      }
+    });
+    return next;
+  }
+
+  /**
+   * Removes one app under its lifecycle lock. Resolves REMOVED, RENEWED (an expiry target that a
+   * reinstall renewed meanwhile, left alone) or a refusal message for an id outside the reserved
+   * prefix or a package signed by another key.
+   */
   private async removeOne(
     deviceId: string,
     platform: DisposableAppPlatform,
     appId: string,
     reason: string,
-  ): Promise<string | undefined> {
-    const { stamper, installer } = this.support(platform);
-    const installation = await installer.inspect(deviceId, appId);
-    if (installation.installed && installation.signer !== undefined) {
-      const expected = await stamper.signer();
-      if (installation.signer !== expected) {
-        return `${appId} on ${deviceId} is not signed by this host's disposable-app key, so it was not removed. Remove it with the uninstallApp tool if it is yours.`;
+  ): Promise<RemovalOutcome> {
+    if (!isDisposableAppId(appId)) {
+      return `${appId} is outside the reserved prefix ${DISPOSABLE_APP_ID_PREFIX}, so it was not removed.`;
+    }
+    return this.withAppLock(deviceId, appId, async () => {
+      if (reason === "expired" && !(await this.stillExpired(deviceId, platform, appId))) {
+        return RENEWED;
       }
-    }
-    if (installation.installed) {
-      await installer.uninstall(deviceId, appId);
-    }
-    await this.deps.registry.remove(deviceId, appId);
-    logger.warn(`Removed disposable prototype app ${appId} from ${deviceId} (${reason}).`);
-    return undefined;
+      const { stamper, installer } = this.support(platform);
+      const installation = await installer.inspect(deviceId, appId);
+      if (installation.installed && installation.signer !== undefined) {
+        const expected = await stamper.signer();
+        if (installation.signer !== expected) {
+          return `${appId} on ${deviceId} is not signed by this host's disposable-app key, so it was not removed. Remove it with the uninstallApp tool if it is yours.`;
+        }
+      }
+      if (installation.installed) {
+        await installer.uninstall(deviceId, appId);
+      }
+      await this.deps.registry.remove(deviceId, appId);
+      logger.warn(`Removed disposable prototype app ${appId} from ${deviceId} (${reason}).`);
+      return REMOVED;
+    });
+  }
+
+  private async stillExpired(
+    deviceId: string,
+    platform: DisposableAppPlatform,
+    appId: string,
+  ): Promise<boolean> {
+    const record = (await this.platformRecords(deviceId, platform)).find(
+      (entry) => entry.appId === appId,
+    );
+    return record !== undefined && this.isExpired(record, this.deps.timer.now());
   }
 }

@@ -11,6 +11,11 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   readonly grants: { appId: string; grants: DisposableAppPermissionGrants }[] = [];
   readonly uninstalls: string[] = [];
 
+  /** When set, `inspect` waits for it, so a test can interleave another operation. */
+  inspectGate: Promise<void> | undefined;
+  /** Called as `inspect` starts, before it waits on `inspectGate`. */
+  onInspect: (() => void) | undefined;
+
   constructor(private readonly signer: string | undefined = "host-key") {}
 
   /** Seed a package, for example one signed by a foreign key. */
@@ -41,6 +46,8 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   }
 
   async inspect(deviceId: string, appId: string): Promise<DisposableAppInstallation> {
+    this.onInspect?.();
+    await this.inspectGate;
     const key = `${deviceId}/${appId}`;
     return this.packages.has(key)
       ? { installed: true, signer: this.packages.get(key) }

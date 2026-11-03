@@ -150,4 +150,49 @@ describe("DisposableAppManager TTL and uninstall", () => {
     expect(installer.uninstalls).toEqual([]);
     expect(await registry.list(DEVICE)).toEqual([]);
   });
+
+  test("bulk removal refuses registry records outside the reserved prefix", async () => {
+    await registry.put(DEVICE, {
+      appId: "com.example.real",
+      slug: "real",
+      platform: "android",
+      label: "Real",
+      specSha256: "a".repeat(64),
+      template: "base",
+      signer: "host-key",
+      installedAt: 0,
+      expiresAt: 1,
+    });
+    installer.seed(DEVICE, "com.example.real", undefined);
+    timer.advanceTime(2);
+    const swept = await manager.sweepExpired(DEVICE, "android");
+    expect(swept.removed).toEqual([]);
+    expect(swept.skipped.map((entry) => entry.appId)).toEqual(["com.example.real"]);
+    expect(installer.uninstalls).toEqual([]);
+  });
+
+  test("a same-slug reinstall during an expiry sweep survives the sweep", async () => {
+    await manager.install(input({ ttlHours: 1 }));
+    timer.advanceTime(HOUR);
+    let release: () => void = () => undefined;
+    installer.inspectGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const paused = new Promise<void>((resolve) => {
+      installer.onInspect = resolve;
+    });
+    const sweep = manager.sweepExpired(DEVICE, "android");
+    await paused;
+    const reinstall = manager.install(input({ ttlHours: 0 }));
+    // Let the reinstall run as far as it can while the sweep is paused mid-removal.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    installer.inspectGate = undefined;
+    release();
+    await sweep;
+    await reinstall;
+    const appId = disposableAppId("android", "feedly");
+    expect(await manager.list(DEVICE, "android")).toEqual([
+      expect.objectContaining({ appId, installed: true, expiresAt: null }),
+    ]);
+  });
 });

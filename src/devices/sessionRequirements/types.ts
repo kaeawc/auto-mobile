@@ -40,7 +40,9 @@ export type IosHardwareSelector =
 
 export type AndroidHardwareSelector =
   | { kind: "omitted" }
-  | { kind: "archetype"; archetype: AndroidArchetype };
+  | { kind: "archetype"; archetype: AndroidArchetype }
+  /** One installed AVD device profile; never falls back to an archetype default (#16427). */
+  | { kind: "exact-profile"; profileId: string };
 
 export type OsSelector =
   | { kind: "omitted" }
@@ -292,8 +294,16 @@ export interface NormalizedAndroidSessionDeviceRequirement {
     hardware: EffectiveAndroidHardwareSelector;
     os: EffectiveOsSelector;
   };
+  /** The installed, classified catalog profile for an explicit exact-profile selector. */
+  exactProfile?: AndroidExactCatalogProfile;
   provenance: RequirementProvenance;
 }
+
+/** A current catalog profile whose archetype is classified, as an exact-profile request requires. */
+export type AndroidExactCatalogProfile = AndroidCatalogProfile & {
+  archetype: AndroidArchetype;
+  metadataState: "current";
+};
 
 export type NormalizedSessionDeviceRequirement =
   | NormalizedIosSessionDeviceRequirement

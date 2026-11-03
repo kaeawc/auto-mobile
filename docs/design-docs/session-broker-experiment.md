@@ -337,7 +337,10 @@ profile IDs through `defaults.android.hardware.profiles`, for example
 with `androidProfileArchetypes: { "pixel_9_pro_fold": "foldable" }`. The optional
 `memoryMb` is an integer of at least 2048 MB and constrains creation and reuse.
 Unmapped foldables are refused without reservation with non-retryable
-`unsupported_hardware`; they never fall back to phone hardware. Foldable baseline
+`unsupported_hardware`; they never fall back to phone hardware. A request may instead
+name one installed profile with `{ "kind": "exact-profile", "profileId": "pixel_9" }`; it
+must be classified in `androidProfileArchetypes` and reuses only idle devices of that
+profile. Foldable baseline
 reset restores opened posture and a 180-degree hinge before final health checks.
 
 **Caps** are optional nonnegative integers. Reservations, native creation, active

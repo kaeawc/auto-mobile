@@ -36,6 +36,13 @@ the panel id, and pushed display transitions have never carried a panel key.
   `dumpsys display` (`DisplayDeviceInfo{... uniqueId="local:N", W x H ...}` records, one per
   physical panel whether or not it is active) and `cmd device_state print-states`. Roles come from
   pixel area: the largest internal panel is `inner`, the smallest is `cover`.
+- Overlay displays (`overlay_display_devices`, `type OVERLAY`, `uniqueId="overlay:N"`) have no
+  SurfaceFlinger physical id, so they join the inventory after the physical panels under role
+  `overlay` with the whole `overlay:N` as key: a bare `N` could be mistaken for a logical display
+  id. They are addressable by key or role, but are not panels: `display: "all"`, posture
+  defaults, the inventory-order fallback and `requires.panels` skip them, and `screencap -d`
+  cannot capture them. App-created `virtual:` displays stay out of the inventory because they
+  come and go with the app (screen recording creates one).
 - Per observation, `ObservedAndroidDisplayCache` maps a logical display id to a panel with
   `cmd display get-displays` (one `Display id N: DisplayInfo{... uniqueId "local:N" ...}` line per
   active logical display), cached for 5 seconds and cleared by a display transition.

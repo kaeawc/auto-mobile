@@ -7,6 +7,7 @@
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { Random } from "../../utils/Random";
 import type { Timer } from "../../utils/SystemTimer";
+import { PrototypeMockActors, type MockActorWrite } from "./PrototypeMockActors";
 import { answerCollection, type MockResponse } from "./prototypeMockCollections";
 import { bindMockValue, decodeURIComponentSafe, matchMockPath } from "./prototypeMockBinding";
 import {
@@ -39,7 +40,7 @@ export interface MockLogEntry {
 export interface MockBackendDeps {
   random: Random;
   ids: IdGenerator;
-  timer: Pick<Timer, "sleep">;
+  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
 }
 
 const MAX_LOG_ENTRIES = 200;
@@ -49,7 +50,9 @@ export class PrototypeMockBackend {
   private readonly faultHits = new Map<MockFault, number>();
   private readonly log: MockLogEntry[] = [];
   private seq = 0;
+  private readonly actors: PrototypeMockActors;
 
+  /** Timed actors start counting when the backend is constructed; call `dispose` to stop them. */
   constructor(
     private readonly definition: MockBackendDefinition,
     private readonly deps: MockBackendDeps,
@@ -57,6 +60,19 @@ export class PrototypeMockBackend {
     for (const [name, items] of Object.entries(definition.collections ?? {})) {
       this.collections.set(name, structuredClone(items));
     }
+    this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, (write) =>
+      this.applyActorWrite(write),
+    );
+    this.actors.start();
+  }
+
+  get actorCount(): number {
+    return this.definition.actors?.length ?? 0;
+  }
+
+  /** Cancels every scheduled actor step; the backend still answers requests. */
+  dispose(): void {
+    this.actors.dispose();
   }
 
   get routeCount(): number {
@@ -95,7 +111,28 @@ export class PrototypeMockBackend {
         body: { error: "No such route" },
       };
     this.record(method, request, response);
+    this.actors.onRequest(method, request.path, response.status, {
+      query: request.query,
+      body: request.body,
+    });
     return response;
+  }
+
+  private applyActorWrite(write: MockActorWrite): number {
+    const items = this.collections.get(write.collection);
+    if (items === undefined) {
+      return 404;
+    }
+    return answerCollection(
+      items,
+      {
+        method: write.method,
+        rest: write.id === undefined ? [] : [write.id],
+        query: {},
+        body: write.body,
+      },
+      { ids: this.deps.ids, fits: (next) => this.fitsWith(items, next) },
+    ).status;
   }
 
   private async waitLatency(): Promise<void> {

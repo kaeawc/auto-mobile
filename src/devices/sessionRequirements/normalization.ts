@@ -1,4 +1,5 @@
 import {
+  resolveAndroidExactProfile,
   iosModelTypeArchetype,
   iosModelTypesEqual,
   resolveIosModelReference,
@@ -251,10 +252,18 @@ function normalizeAndroid(
   if (!normalizedOs.ok) {
     return normalizedOs;
   }
+  const exactProfile =
+    effectiveHardware.kind === "exact-profile"
+      ? resolveAndroidExactProfile(effectiveHardware.profileId, catalog)
+      : success(undefined);
+  if (!exactProfile.ok) {
+    return exactProfile;
+  }
   return success({
     platform: "android",
     original,
     effective: { hardware: effectiveHardware, os: normalizedOs.value },
+    ...(exactProfile.value === undefined ? {} : { exactProfile: exactProfile.value }),
     provenance: provenance(defaults, catalog, appliedDefaults(original)),
   });
 }

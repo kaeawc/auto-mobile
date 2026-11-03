@@ -2216,6 +2216,16 @@ avatar?}` with unique ids. Each email must use a reserved domain (`example.test`
 `.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
 `sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
 validation. No production runtime advertises the module yet.
+`prototypeAuthSession.ts` is the session reference both runtimes copy. A sign-in writes the account to `into`
+(default `/data/session`) and then saves `{token, userId, expiresAtMs}` in the prototype's secure store. The
+token is an opaque `fake-<IdGenerator id>`, and the TTL is `sessionTtlSeconds`, default 3600. An account the
+block does not list, a `/data` write that fails or a store write that fails is `platform_error` and changes
+nothing. `cancelled` and `unavailable` keep their codes, any other code becomes `platform_error`, and a
+failed sign-in keeps the previous session. `auth.signOut` clears the store and removes `into`.
+`auth.sessionExpired` clears the store and leaves `/data` to the `platform.on` handlers. At launch, a session
+that is still valid for a listed account restores `/platform/auth`; any other is cleared. A session past its
+TTL is reported as expired, so the runtime raises `auth.sessionExpired`. The token appears in no result,
+`/data` value or `/platform` key, and a store error is reported by its name only.
 
 **Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
 `location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole

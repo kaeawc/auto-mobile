@@ -12,6 +12,10 @@ class RecordingTimer extends FakeTimer {
   override async sleep(ms: number): Promise<void> {
     this.sleeps.push(ms);
   }
+  setTimeout(): NodeJS.Timeout {
+    throw new Error("these fixtures define no actors");
+  }
+  clearTimeout(): void {}
 }
 
 function backend(definition: MockBackendDefinition, seed = 1) {

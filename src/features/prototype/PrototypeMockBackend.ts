@@ -10,6 +10,7 @@ import type { IdGenerator } from "../../utils/IdGenerator";
 import type { Random } from "../../utils/Random";
 import type { Timer } from "../../utils/SystemTimer";
 import { MAX_PROTOTYPE_CHANNEL_FRAME_BYTES } from "./prototypeChannelLimits";
+import { PrototypeMockActors, type MockActorWrite } from "./PrototypeMockActors";
 import { answerCollection, type MockResponse } from "./prototypeMockCollections";
 import { bindMockValue, decodeURIComponentSafe, matchMockPath } from "./prototypeMockBinding";
 import {
@@ -71,7 +72,9 @@ export class PrototypeMockBackend {
   private readonly log: MockLogEntry[] = [];
   private readonly rooms: MockRooms;
   private seq = 0;
+  private readonly actors: PrototypeMockActors;
 
+  /** Timed actors start counting when the backend is constructed; call `dispose` to stop them. */
   constructor(
     private readonly definition: MockBackendDefinition,
     private readonly deps: MockBackendDeps,
@@ -83,6 +86,14 @@ export class PrototypeMockBackend {
       timer: deps.timer,
       record: (room, from, data) => this.append({ seq: 0, room, from, data }),
     });
+    this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, (write) =>
+      this.applyActorWrite(write),
+    );
+    this.actors.start();
+  }
+
+  get actorCount(): number {
+    return this.definition.actors?.length ?? 0;
   }
 
   get roomCount(): number {
@@ -99,8 +110,12 @@ export class PrototypeMockBackend {
     return this.rooms.publish(room, frame, "publish");
   }
 
-  /** Ends every open connection; the backend is being replaced or cleared. */
-  dispose(reason: string): void {
+  /**
+   * Cancels every scheduled actor step and ends every open connection; the backend still answers
+   * requests. `reason` is the close reason its channels see.
+   */
+  dispose(reason = "Mock backend was disposed."): void {
+    this.actors.dispose();
     this.rooms.closeAll(reason);
   }
 
@@ -145,7 +160,28 @@ export class PrototypeMockBackend {
     if (written !== undefined) {
       this.broadcastWrite(method, request, written);
     }
+    this.actors.onRequest(method, request.path, response.status, {
+      query: request.query,
+      body: request.body,
+    });
     return response;
+  }
+
+  private applyActorWrite(write: MockActorWrite): number {
+    const items = this.collections.get(write.collection);
+    if (items === undefined) {
+      return 404;
+    }
+    return answerCollection(
+      items,
+      {
+        method: write.method,
+        rest: write.id === undefined ? [] : [write.id],
+        query: {},
+        body: write.body,
+      },
+      { ids: this.deps.ids, fits: (next) => this.fitsWith(items, next) },
+    ).status;
   }
 
   /** A successful write to a collection with a broadcast sends its frame to the bound room. */

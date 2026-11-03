@@ -2274,6 +2274,20 @@ whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, ga
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 `commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
+The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin `PrototypePurchaseOutcome`
+copies it, and both replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
+`gracePeriod` or `billingRetry`, and a consumable never holds one. `lastTransaction` is
+`{transactionId, productId, status}`, or null. Buying a product that is `active` or in `gracePeriod` fails
+with `alreadyOwned`, whatever outcome was queued; a product in `billingRetry` can be bought again. A product
+the catalog does not list is `platform_error` with reason `unavailable`. A failed purchase leaves the state
+untouched. A code other than `cancelled`, `alreadyOwned` or `platform_error` becomes `platform_error`, and only
+`platform_error` keeps a reason: `network`, `declined` or `unavailable`. Every result is recorded as
+`lastTransaction`, but only `purchased` grants the entitlement. A `deferred` or `pending` transaction is
+resolved later: `approved` grants the entitlement and `declined` records `declined`. Simulated
+`entitlementsChanged` events work on a subscription the user holds. `renew` sets it `active`, and
+`gracePeriod` and `billingRetry` set those states. `expire` and `refund` remove an entitlement and also apply to
+a non-consumable. `commerce.entitlementsChanged` is raised only when the entitlements actually change.
+
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
 and it may not also appear in `storage.keys`. The list needs the `secureStorage` module
@@ -2390,6 +2404,9 @@ one-key union), which is a node-scoped player released when the node leaves comp
   position into; a slider bound to it holds device writes while it is dragged and seeks on release.
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
+- At most `MAX_PROTOTYPE_VIDEO_NODES` (64) `videoPlayer` nodes, counted in the authored tree and
+  again after repeat expansion, so every repeat instance counts. A `poster` costs one image against
+  `MAX_PROTOTYPE_IMAGES` in both counts.
 
 **Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
 `{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`
@@ -3038,6 +3055,17 @@ broadcasts).
   the stored item, so a message one device posts reaches every device in its room.
 - Every answered request, client send, `publish` and broadcast is logged (latest 200, with one
   sequence number) for assertions; a frame entry is `{seq, room, from, data}`.
+- **Actors** (at most 16, each with 1–64 steps) write to collections on the backend's injected
+  timer. One fires after a successful (status below 400) request matching `on.route` (`"POST
+  /path/:id"`), or runs `maxRuns` times every `every` ms (100 ms or more; run k starts at
+  `afterMs + k * every`). Its steps run in order: `append`, `update` and `remove` go through the
+  same collection code as `POST`, `PATCH` and `DELETE` (ids, 409, 413 and the size budget apply), and
+  each step's `afterMs` is relative to the previous step. `value` and `id` bind the triggering
+  request's placeholders. A failing step is logged and skipped. A backend holds at most 256
+  scheduled steps; a trigger past that is dropped and logged. Redefining, clearing or ending the
+  session cancels every pending step. `publish`, `advance` and `notify` are refused at definition
+  until mock channels, polylines and simulated push exist, and actors follow the daemon's timer,
+  not the device clock that `prototype simulate` advances.
 
 The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
 {backendId, backend}` validates the definition and replaces the backend of that id (a failed

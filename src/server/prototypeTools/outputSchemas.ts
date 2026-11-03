@@ -239,6 +239,7 @@ export const prototypeOutputSchema = z.object({
         .describe("defineBackend: item count per collection"),
       routes: z.number().int().nonnegative().optional(),
       faults: z.number().int().nonnegative().optional(),
+      actors: z.number().int().nonnegative().optional(),
       rooms: z.number().int().nonnegative().optional(),
       delivered: z
         .number()
@@ -284,7 +285,7 @@ export const prototypeOutputSchema = z.object({
       display: z
         .object({
           key: z.string(),
-          role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+          role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
         })
         .optional()
         .describe(

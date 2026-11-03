@@ -57,6 +57,7 @@ export function mockBackendOutput(
         routes: definition.routeCount,
         faults: definition.faultCount,
         rooms: definition.roomCount,
+        actors: definition.actorCount,
       },
     };
   } catch (error) {

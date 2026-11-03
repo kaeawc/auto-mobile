@@ -162,15 +162,24 @@ class LibraryActivity : ComponentActivity() {
     actionFailed = !launchReport(this, getString(R.string.report_subject), body)
   }
 
-  private fun hide(entry: LibraryEntry) = updateBlocklist { hide(entry.specSha256) }
+  private fun hide(entry: LibraryEntry) =
+    updateBlocklist({ it.specSha256 == entry.specSha256 }) { hide(entry.specSha256) }
 
   private fun block(entry: LibraryEntry) {
     val host = entry.sourceHost ?: return
-    updateBlocklist { block(host) }
+    updateBlocklist({ it.sourceHost == host }) { block(host) }
   }
 
-  private fun updateBlocklist(change: ContentBlocklist.() -> Unit) {
+  /** Like Delete, closes every open viewer of content the change hides, not just this row's. */
+  private fun updateBlocklist(
+    affected: (LibraryEntry) -> Boolean,
+    change: ContentBlocklist.() -> Unit,
+  ) {
     lifecycleScope.launch {
+      (entries as? LibraryResult.Success)
+        ?.value
+        ?.filter { it.isReceived && affected(it) }
+        ?.forEach { ViewerLaunch.close(this@LibraryActivity, it.libraryId) }
       entries =
         withContext(services.io) {
           services.blocklist.change()

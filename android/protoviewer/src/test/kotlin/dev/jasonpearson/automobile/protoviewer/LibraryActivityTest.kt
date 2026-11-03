@@ -105,13 +105,15 @@ class LibraryActivityTest {
   @Test
   fun hideRequiresConfirmationThenRemovesTheRow() {
     repository.prototypes[FIRST] = Fixtures.prototype()
-    launch()
+    val activity = launch()
+    val task = existingTask(activity, FIRST)
     openMenu()
     compose.onNodeWithTag("hide-$FIRST").performClick()
     compose.onNodeWithText("Hide this prototype?").assertIsDisplayed()
     compose.onNodeWithTag("confirm-hide").performClick()
     assertEquals(setOf(Fixtures.entry().specSha256), blocklist.hidden)
     compose.onNodeWithTag("library-$FIRST").assertDoesNotExist()
+    assertTrue(shadowOf(task).isFinishedAndRemoved)
   }
 
   @Test

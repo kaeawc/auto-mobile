@@ -2,6 +2,7 @@ import { record, type Raw } from "../prototypeTemplate";
 import { defaultFillAxes, filling } from "./webCollections";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
+import { webPickerRenderers } from "./webPickers";
 import { cssColor, textCss } from "./webStyle";
 
 type Css = Record<string, string>;
@@ -323,11 +324,20 @@ const searchBarRenderer =
     ]);
   };
 
-export function webSelectionRenderers(kit: WebRenderKit): Record<string, NodeRenderer> {
+/**
+ * The selection and picker renderers. Android draws a paste button as a filled button labelled
+ * "Paste"; it reads the clipboard only when tapped, so a still draws the button alone.
+ */
+export function webSelectionRenderers(
+  kit: WebRenderKit,
+  button: NodeRenderer,
+): Record<string, NodeRenderer> {
   return {
     radioGroup: radioGroupRenderer(kit),
     select: selectRenderer(kit),
     segmentedButton: segmentedButtonRenderer(kit),
     searchBar: searchBarRenderer(kit),
+    pasteButton: (node, scope, path) => button({ ...node, label: "Paste" }, scope, path),
+    ...webPickerRenderers(kit),
   };
 }

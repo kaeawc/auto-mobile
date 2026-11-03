@@ -35,6 +35,8 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 include(":control-proxy")
 
+include(":content-seeder")
+
 include(":auto-mobile-sdk")
 
 include(":protocol")

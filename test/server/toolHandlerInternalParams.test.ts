@@ -23,7 +23,10 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { asMcpConnection } from "../helpers/mcpConnection";
-import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 
 const metadata = Object.freeze({
   ...Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true])),
@@ -158,6 +161,7 @@ function unsafeSchemaParses(file: string, source: string): string[] {
 const INGRESS_ONLY_KEYS = new Map([
   ["INTERNAL_MCP_SESSION_PARAM", INTERNAL_MCP_SESSION_PARAM],
   ["INTERNAL_ONE_SHOT_CLI_PARAM", INTERNAL_ONE_SHOT_CLI_PARAM],
+  ["INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM", INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM],
 ]);
 const INGRESS_ONLY_NAMES = new Set([...INGRESS_ONLY_KEYS.keys(), ...INGRESS_ONLY_KEYS.values()]);
 const INGRESS_ONLY_WIRE_KEYS = new Set<unknown>(INGRESS_ONLY_KEYS.values());
@@ -205,7 +209,7 @@ describe("the in-band connection keys stay at the ingress boundary (#15663)", ()
       .flatMap((file) => inBandConnectionReads(file, readFileSync(join(src, file), "utf8")));
   });
 
-  test("no src/server or src/features file names __mcpSessionId or __oneShotCli outside ingress", () => {
+  test("no src/server or src/features file names an ingress-only key outside ingress", () => {
     expect(offenders).toEqual([]);
   });
 
@@ -222,6 +226,7 @@ describe("the in-band connection keys stay at the ingress boundary (#15663)", ()
       const c = args[INTERNAL_ONE_SHOT_CLI_PARAM];
       const d = { __oneShotCli: true };
       const e = args["__oneShotCli"];
+      const f = args[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
     `,
       ),
     ).toEqual([
@@ -231,6 +236,7 @@ describe("the in-band connection keys stay at the ingress boundary (#15663)", ()
       "fixture.ts:7",
       "fixture.ts:8",
       "fixture.ts:9",
+      "fixture.ts:10",
     ]);
   });
 });
@@ -269,7 +275,7 @@ describe("handler internal metadata regression guard", () => {
   });
 
   test.each(["getAndroid", "getApple"] as const)(
-    "%s accepts full metadata and preserves session/presentation order",
+    "%s accepts full metadata and takes session and presentation order from the call context",
     async (name) => {
       const timer = new FakeTimer();
       const manager = new FakeDeviceUtils();
@@ -294,13 +300,16 @@ describe("handler internal metadata regression guard", () => {
       });
       const acquire = name === "getAndroid" ? handlers.getAndroidHandler : handlers.getAppleHandler;
       // Ingress runs the call under the connection the in-band key names (#15663).
-      await expect(asMcpConnection("session", () => acquire(args))).rejects.toThrow(
-        "fake device boundary",
-      );
+      // The in-band order ("reverse") is ignored; the ambient one is used (#15663).
+      await expect(
+        runWithToolSelectionContext({ acceptanceDiscoveryOrder: "forward" }, () =>
+          asMcpConnection("session", () => acquire(args)),
+        ),
+      ).rejects.toThrow("fake device boundary");
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         platform: name === "getAndroid" ? "android" : "ios",
-        presentationOrder: "reverse",
+        presentationOrder: "forward",
       });
       // The rebuilt boot args no longer forward the key; the boot sees the ambient connection.
       expect(calls[0]).not.toHaveProperty("__mcpSessionId");

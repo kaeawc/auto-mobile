@@ -29,7 +29,7 @@ import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ANDROID_INVENTORY_RETRY_AFTER_MS } from "../../../constants/deviceResourceUris";
 import { type DeviceMatchCriteria } from "../../../models/DeviceMatchCriteria";
-import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../../../daemon/wire/constants";
+import { currentAcceptanceDiscoveryOrder } from "../../toolSelection/toolSelectionContext";
 import { type AvdInfo } from "../../../utils/android-cmdline-tools/avdmanager";
 import type { PlatformArg } from "../../../utils/schemaHelpers";
 
@@ -331,11 +331,9 @@ export interface ListDevicesArgs {
   requires?: DeviceMatchCriteria["requires"];
 }
 
-export function acceptancePresentationOrder(
-  args: Record<string, unknown>,
-): "forward" | "reverse" | undefined {
-  const order = args[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
-  return order === "forward" || order === "reverse" ? order : undefined;
+/** The acceptance harness's discovery presentation order, read from the call context (#15663). */
+export function acceptancePresentationOrder(): "forward" | "reverse" | undefined {
+  return currentAcceptanceDiscoveryOrder();
 }
 
 export function detailedDiscoveryOptions(

@@ -94,6 +94,8 @@ export interface InternalToolInvocationContext {
   autolockMcpSessionId: undefined;
   /** Always `undefined`: an internal call is never a one-shot `--cli` call. */
   oneShotCli: undefined;
+  /** Always `undefined`: only the acceptance harness's own top-level call carries an order. */
+  acceptanceDiscoveryOrder: undefined;
 }
 
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,

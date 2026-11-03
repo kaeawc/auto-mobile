@@ -22,6 +22,7 @@ import {
 import { DaemonClient } from "../../src/daemon/client/client";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { acceptancePresentationOrder } from "../../src/features/deviceLifecycle/core/inventory";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { toolField } from "../helpers/toolResponse";
 import { z } from "zod/v4";
@@ -62,15 +63,17 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       "reports whether the daemon accepted a trusted acceptance presentation order",
       z.object({}).strict(),
       {
+        // The order reaches handlers only as ambient call context, never in their args (#15663).
         handler: async (args: unknown) =>
           createStructuredToolResponse({
             success: true,
-            receivedOrder:
-              (args as Record<string, unknown>)[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM] ?? null,
+            receivedOrder: acceptancePresentationOrder() ?? null,
+            inBandOrder: INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM in (args as object),
           }),
         outputSchema: z.object({
           success: z.boolean(),
           receivedOrder: z.enum(["forward", "reverse"]).nullable(),
+          inBandOrder: z.boolean(),
         }),
       },
     );
@@ -214,6 +217,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
     });
 
     expect(toolField(result, "receivedOrder")).toBe("reverse");
+    expect(toolField(result, "inBandOrder")).toBe(false);
   });
 
   test("retains no-schema structuredContent only for an authenticated acceptance request", async () => {

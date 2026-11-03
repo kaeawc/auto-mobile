@@ -38,6 +38,28 @@ export function filling(node: Raw, axes: readonly WebAxis[]): Raw {
   return { ...node, style: { ...fills, ...style } };
 }
 
+/** A spacer with no width, height or weight fills its parent, as the native spacer does. */
+export function isUnsizedSpacer(node: unknown): boolean {
+  const raw = record(node);
+  const style = record(raw?.style) ?? {};
+  return (
+    raw?.type === "spacer" &&
+    style.width === undefined &&
+    style.height === undefined &&
+    style.weight === undefined
+  );
+}
+
+/** Missing width and height default to `fill`, without touching authored sizes. */
+function fillMissing(node: Raw): Raw {
+  return filling(node, ["width", "height"]);
+}
+
+/** An unsized spacer with its missing width and height filled; other nodes unchanged. */
+export function spacerFilled(node: Raw): Raw {
+  return isUnsizedSpacer(node) ? fillMissing(node) : node;
+}
+
 /** The page a pager opens on: its numeric state value clamped to its pages and truncated, else 0. */
 export function pagerPage(node: Raw, scope: WebRenderScope, kit: WebRenderKit): number {
   const count = Array.isArray(node.children) ? node.children.length : 0;

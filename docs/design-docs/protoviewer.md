@@ -618,7 +618,7 @@ harnesses and a nightly CI job remain future work.
 | Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                |
 | Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
-| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK (owner, 2026-10-31, #14157).       |
+| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                   |
 
 ## Issues
 

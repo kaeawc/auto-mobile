@@ -37,6 +37,34 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 
 type Css = Record<string, string>;
 
+/**
+ * A style key the web renderer adds to a row's children, never authored (the style schema is
+ * strict): a flex shrink and basis that let CSS flex approximate Compose's sequential Row measure
+ * around a capped aspect ratio (see webRowAspect.ts).
+ */
+export const ROW_MEASURE_KEY = "webRowMeasure";
+
+/** A row child's measure hint: how fast it gives up width, and its own width before that. */
+export interface RowMeasure {
+  readonly shrink: number;
+  readonly basis?: number;
+}
+
+function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
+  const measure = record(style[ROW_MEASURE_KEY]);
+  if (context.parentAxis !== "row" || typeof measure?.shrink !== "number") {
+    return;
+  }
+  if (typeof measure.basis === "number") {
+    // The width also sets the item's max-content contribution, so a wrap row sizes around it.
+    css["flex-grow"] = "0";
+    css["flex-basis"] = px(measure.basis);
+    css.width = px(measure.basis);
+  }
+  css["flex-shrink"] = String(measure.shrink);
+  css["min-width"] = "0";
+}
+
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
 /** Material 3 shape scale, the same corner sizes both native renderers use. */
@@ -154,6 +182,7 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     css.flex = `${style.weight} ${style.weight} 0`;
     css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
   }
+  rowMeasureStyle(css, style, context);
   for (const [field, property] of [
     ["minWidth", "min-width"],
     ["maxWidth", "max-width"],

@@ -39,7 +39,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
-import { rowFillAxes, rowMeasured } from "./webRowAspect";
+import { rowBoundCss, rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -348,7 +348,8 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
-    const { attrs, style } = base(node, scope, lineCss(axis, node.style));
+    const bound = rowBoundCss(node, path, prepareIn(scope));
+    const { attrs, style } = base(node, scope, { ...lineCss(axis, node.style), ...bound });
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     const rowed = rowMeasured(node, path, prepareIn(inner));
     return el("div", { attrs, style }, children(rowed, inner, path));

@@ -476,11 +476,6 @@ export class SessionBroker {
     return latest && latest.state !== "active" ? this.result(latest) : result;
   }
 
-  /** Whether this host's configuration enables iPhone Duo sessions. */
-  supportsIosDuo(): boolean {
-    return this.options.capabilities?.iosDuo === true;
-  }
-
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {
     const request = await this.options.store.getRequest(requestId);
     return request && this.result(request);

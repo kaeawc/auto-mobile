@@ -78,6 +78,7 @@ internal fun CtrlProxy.startWebSocketServer() {
             onClientDisconnected = sessions::onClientDisconnected,
             onClientCountChanged = sessions::onClientCountChanged,
             onPrototypeResponse = hostPrototypeHttp::onResponse,
+            onPrototypeChannelFrame = hostPrototypeChannels::onFrame,
             onClientConnected = sessions::onClientConnected,
             onPermanentStartFailure = { disableSelf() },
           ),
@@ -173,8 +174,10 @@ private fun CtrlProxy.clientSessionRouter(
       override fun cancelGestureStreams(client: WebSocketServer.ConnectedClient) =
         gestureController.cancelStreamsOwnedBy(client)
 
-      override fun failHostRequests(client: WebSocketServer.ConnectedClient?) =
+      override fun failHostRequests(client: WebSocketServer.ConnectedClient?) {
         hostPrototypeHttp.onHostLost(client)
+        hostPrototypeChannels.onHostLost(client)
+      }
 
       override fun launch(block: suspend () -> Unit) {
         serviceScope.launch { block() }

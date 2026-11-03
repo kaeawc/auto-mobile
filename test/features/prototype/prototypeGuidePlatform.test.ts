@@ -79,6 +79,16 @@ describe("platform guide section", () => {
     const result = validatePrototypeSpec(block![1]);
     expect(result.success).toBe(true);
   });
+
+  test("the worked example deep-links a notification tap through a handler push", () => {
+    const block = /```json\n([\s\S]*?)\n```/.exec(
+      guide.slice(guide.indexOf("## Platform features")),
+    );
+    const spec = JSON.parse(block![1]);
+    const opened = spec.platform.on["notifications.opened"];
+    expect(opened).toContainEqual({ type: "push", stack: "nav", screen: "episode" });
+    expect(JSON.stringify(spec.root)).toContain("notifications.post");
+  });
 });
 
 describe("media actions guide section", () => {

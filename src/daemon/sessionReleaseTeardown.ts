@@ -1,3 +1,7 @@
+import {
+  pendingImeRestores,
+  type PendingImeRestoreRegistry,
+} from "../features/action/sendkeys/PendingImeRestore";
 import { ActionableError } from "../models/ActionableError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { logger } from "../utils/logger";
@@ -53,6 +57,7 @@ export class SessionReleaseTeardown {
   constructor(
     private readonly host: SessionReleaseTeardownHost,
     private readonly restores: SessionReleaseRestorers,
+    private readonly pendingIme: PendingImeRestoreRegistry = pendingImeRestores,
   ) {}
 
   /**
@@ -76,20 +81,59 @@ export class SessionReleaseTeardown {
     operation?: SessionReleaseOperation,
     options: SessionReleaseOptions = {},
   ): Promise<readonly Promise<void>[]> {
-    if (!options.deviceIdentityReplaced && !this.releaseNeedsTeardown(session)) {
+    const deviceId = session.assignedDevice;
+    if (options.deviceIdentityReplaced || releaseWasForced(operation)) {
+      // Never apply an old snapshot after identity or ownership was forcibly replaced.
+      this.pendingIme.discard(deviceId);
+    }
+    const needsIme =
+      !options.deviceIdentityReplaced &&
+      !releaseWasForced(operation) &&
+      this.pendingIme.hasPending(deviceId);
+    const needsTeardown = options.deviceIdentityReplaced || this.releaseNeedsTeardown(session);
+    if (!needsIme && !needsTeardown) {
       return [];
     }
     const forcedSignal = operation?.forcedAbort?.signal;
-    return this.runUnderTeardownShield(async () => {
+    return this.runUnderTeardownShield(async (shieldSignal) => {
+      if (needsIme) {
+        await this.flushPendingIme(deviceId, operation, shieldSignal);
+      }
+      if (!needsTeardown) {
+        return [];
+      }
       const stages = await this.startReleaseTeardown(sessionId, session, operation, options);
       // Setup remains in flight; skipped/aborted restores must arm neither quarantine nor retries.
       return options.deviceIdentityReplaced ? stages.filter((stage) => stage.setup) : stages;
     }, forcedSignal);
   }
 
+  /**
+   * Restore the typing IME under the teardown shield, so the cap and a forced release bound the
+   * wait for the IME lock and a release forced meanwhile discards the snapshot instead.
+   */
+  private async flushPendingIme(
+    deviceId: string,
+    operation: SessionReleaseOperation | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.pendingIme.flush(deviceId, {
+        signal,
+        isForced: () => releaseWasForced(operation),
+      });
+    } catch (error) {
+      // ImeRestore quarantines unsafe state; release still completes with a visible diagnostic.
+      logger.warn(`[SendKeys] Session-end IME restoration failed on ${deviceId}`, error);
+      if (releaseWasForced(operation) || signal.aborted) {
+        this.pendingIme.discard(deviceId);
+      }
+    }
+  }
+
   /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */
   async runUnderTeardownShield(
-    start: () => Promise<readonly ReleaseTeardownStage[]>,
+    start: (shieldSignal: AbortSignal) => Promise<readonly ReleaseTeardownStage[]>,
     /** Aborts the shield early: the release was forced and no longer holds the device (#11058). */
     forcedSignal?: AbortSignal,
   ): Promise<readonly Promise<void>[]> {
@@ -108,7 +152,7 @@ export class SessionReleaseTeardown {
       shield.abort(new ActionableError("Session release teardown exceeded its budget"));
     }, SESSION_RELEASE_TEARDOWN_CAP_MS);
     try {
-      const stages = await runWithAbortSignal(shield.signal, start);
+      const stages = await runWithAbortSignal(shield.signal, () => start(shield.signal));
       const cleanups = stages.flatMap((stage) => {
         const bounded = this.boundTeardownStage(stage, startedAtMs);
         return bounded ? [bounded] : [];

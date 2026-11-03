@@ -1,8 +1,8 @@
 # Prototype web renderer
 
 The web renderer draws a prototype inside a device frame as one self-contained HTML page. This
-document covers the per-prototype resources (the page and the single-file Compose and SwiftUI
-sources), spec revisions, the page, its browser check, the still renderer and the device frame
+document covers the per-prototype resources (the page, the embed envelope and the single-file
+Compose and SwiftUI sources), spec revisions, the page, its browser check, the still renderer and the device frame
 registry.
 
 ## Resource
@@ -23,6 +23,14 @@ registry.
   `ActionableError`s.
 - **Read result.** `_meta` is `{revision, deviceRevision?, revisions, variants, frame, sha256,
   rendererVersion}`; `rendererVersion` is the server release version.
+- **Embed envelope.** `automobile:prototype/{id}/embed{?revision,variant}` (`application/json`) is
+  read by `readPrototypeEmbedResource` in `src/features/prototype/web/prototypeEmbedResource.ts`.
+  Its text is `{format: "automobile-prototype-embed", version: 1, requires, spec}`, where `spec` is
+  the stored spec of the variant and revision the web page would show first and `requires` is
+  `requiredPrototypeCapabilities(spec)` computed by this host, so the web library can refuse a spec
+  it cannot draw whole ([Prototype web library](prototype-web-library.md)). Variant, revision and
+  errors are the web resource's; there is no `frame`. `_meta` is the web resource's without
+  `frame`, its `sha256` hashing the envelope text.
 - **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision}` (`text/x-kotlin`)
   and `automobile:prototype/{id}/swiftui{?frame,revision}` (`text/x-swift`) are read by
   `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render
@@ -37,15 +45,16 @@ registry.
   (`pixel-9`, `iphone-16`), since the format fixes the platform. The shader and Swift-equivalent
   asset id refusals are the native resource's. `_meta` is `{revision, deviceRevision?, revisions,
   frame, sha256, rendererVersion}`.
-- **Listing.** Each known id gets concrete resources `automobile:prototype/{id}/{web,compose,swiftui}`
-  named `prototype-{id}-{format}`, titled `{id} (web)`, `{id} (Compose)` and `{id} (SwiftUI)`,
+- **Listing.** Each known id gets concrete resources
+  `automobile:prototype/{id}/{web,embed,compose,swiftui}` named `prototype-{id}-{format}`, titled
+  `{id} (web)`, `{id} (embed)`, `{id} (Compose)` and `{id} (SwiftUI)`,
   registered when its first revision appears and unregistered when the id is evicted; each change
   sends `list_changed`. List entries carry no
   `size`, `annotations` or `_meta`, because the registry's entries do not; the read result carries
   `_meta`.
 - **Updates.** Every new revision, and every byte-cap pruning of another id's history, sends
-  `resources/updated` for the parameter-free URI of every format of the id, and for the web URI of
-  each id in its variant group and of each id in the group it left (or was evicted from), in
+  `resources/updated` for the parameter-free URI of every format of the id, and for the web and embed
+  URIs of each id in its variant group and of each id in the group it left (or was evicted from), in
   revision order. The concrete resource matches subscriptions
   exactly, so a subscription with any query (`?revision=N`, `?frame=…`) is never notified.
 
@@ -79,7 +88,8 @@ it inlined per variant.
   then the others in key order; such views carry `data-screen`). The first view is the chosen
   variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
   `hidden`.
-- **Controls.** Only five: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
+- **Controls.** Only five: rotate (portrait/landscape; absent for watch and TV frames, which
+  never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
   double-click to fit), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
@@ -90,8 +100,16 @@ it inlined per variant.
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
   self-contained. It only shows and hides views, lists the shown revision's screens in the
-  screen select and moves the stage; UI state stays in memory, with no storage, cookies or URL
+  screen select, moves the stage and animates rotation; UI state stays in memory, with no storage, cookies or URL
   changes. It must stay at or below 150 KB.
+- **Rotation.** Rotate turns the frame 90° (counterclockwise into landscape, clockwise back)
+  with the Web Animations API: the outgoing view turns away from upright while the incoming view,
+  pre-rendered in the new orientation, turns in from a quarter turn, so both track one frame, and
+  the stage's fitted scale animates with them. Android (`data-platform` on `body`) cross-fades
+  the content over a 500 ms turn; iOS hands over to the new layout in the first quarter of a
+  400 ms turn, as its window re-lays out while the bounds animate. The end state is the plain
+  landscape view. A second rotate finishes the running turn first. `prefers-reduced-motion:
+  reduce` skips the animation.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
 - **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
@@ -114,11 +132,13 @@ nothing at runtime drives a browser.
 - **Assertions.** The page is served from one fixed URL and every other request is aborted and
   fails the case, on top of the page's own CSP. No console error, page error or
   `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
-  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; rotate
-  shows the landscape view, wider than tall; a page with a screen select shows exactly the picked
+  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
+  through rotate both views are shown and turned, and the finished turn shows only the landscape
+  view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
   screen's view.
-- **Goldens.** One PNG per case in `test/fixtures/prototype-web/screenshots/`
-  (`<spec>--<frame>.png`, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
+  (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
+  turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
@@ -158,10 +178,19 @@ the host, so the page's script only switches between views it was given and neve
   field walk (`mapBindableFields`). A spans-only text node renders each span
   with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a
   caller-supplied clock (default 0), so derived relative times are fixed.
-- **Conditions.** `visibleWhen` evaluates `key` comparisons with `all`, `any` and `not` against
-  spec state. Parts the still cannot decide (`data` and `platform` pointers, unknown keys, validity,
-  string operators) stay undecided through `all`, `any` and `not`; only an undecided whole
-  condition counts as true, so a node is never hidden on a guess.
+- **Platform state.** The frame decides `/device/os`, `/device/widthClass` and `/device/posture`
+  from the active panel in the drawn orientation: `widthClass` is `compact`, `medium` or
+  `expanded` at the contract's 600 and 840 dp breakpoints on Android, and on iOS `regular` on a
+  tablet (smallest side 600 dp or more) or a phone at least 896 dp wide, else `compact`. On
+  Android an `opened` fold is `flat` and a `half_opened` one `tabletop` (horizontal hinge) or
+  `book` (vertical hinge); without a fold, and always on iOS, posture is missing. Other
+  `/platform` pointers stay undecided. `{platform:/pointer}` text binds with the data pass: a
+  decided value inserts (missing is empty) and an undecided placeholder stays literal.
+- **Conditions.** `visibleWhen` evaluates `key` comparisons and decided `platform` pointers with
+  `all`, `any` and `not` against spec and platform state. Parts the still cannot decide (`data`
+  pointers, undecided `platform` pointers, unknown keys, validity, string operators) stay undecided
+  through `all`, `any` and `not`; only an undecided whole condition counts as true, so a node is
+  never hidden on a guess.
 - **Window.** An explicit `window.layoutDirection` sets the content's `dir` (the frame is never
   mirrored), and `start`/`end` safe-area edges read the inset on the matching physical side. Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
   each axis it leaves unsized, as on devices; a sheet spans the screen width, `height` dp tall at its `edge`; a floating window
@@ -187,7 +216,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider` and `bottomSheet`. Where the devices differ,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `videoPlayer`,
+  `map`, `cameraPreview` and `castButton`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -234,7 +264,19 @@ the host, so the page's script only switches between views it was given and neve
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
   titled with the name, because the glyph set is not inlined. A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
-  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. A
+  as both devices do. A video player is a black 16:9 frame (a `colorBars` sample draws bars, a
+  `countdown` sample a 3; other sources are not inlined) under the skin's chrome at `startMs`
+  (Android: a centred 56 px play button over a bottom bar; iOS: play inside a rounded bottom bar),
+  with a CC button when it has captions and none when `controls` is `none`; a poster is listed
+  `assetNotInlined`. A map fetches no tiles: it draws a neutral canvas (`plain`, or a faint street
+  grid), 200 px tall unless sized, with its polylines in an inline SVG and its markers as pins, placed
+  by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
+  point; bearing and tilt are not drawn. A camera preview is a portrait viewfinder at its
+  `aspectRatio` (default 4:3) showing colour bars and a label naming its mode. A cast button is the
+  skin's idle route icon (Cast on Android, AirPlay on iOS) in a 48 px target; it is a `details`
+  disclosure, so a tap opens a device picker listing no devices without any script. Glyphs are inline
+  SVG; the serializer allows only `viewBox` and `preserveAspectRatio` as mixed-case attributes.
+  A card hugs its content unless its width is `fill`, as both devices do. A
   `bottomSheet` is open when its `openWhen` key holds exactly `equals` (a missing key keeps it shut)
   and draws nothing in place: like the devices' modal layer, an open one is drawn over its window
   (the screen, a sheet window's region or a floating window's box) after the tree, in tree order, a

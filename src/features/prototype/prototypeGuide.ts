@@ -41,6 +41,7 @@ import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
 import { MAX_PROTOTYPE_SPEC_REVISIONS } from "./prototypeSpecRevisions";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
+import { renderPlatformDrivingTools } from "./prototypePlatformDrivingTools";
 
 /** Resource URIs served by the prototype authoring guide. */
 export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
@@ -354,7 +355,17 @@ export function renderPrototypeGuide(): string {
     renderPlatformDifferences(),
     renderNativeCode(),
     renderWebPreview(),
-    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}\n\n${GUIDE_NOTIFICATIONS}\n\n${GUIDE_MEDIA_ACTIONS}`,
+    `${GUIDE_PLATFORM}
+
+${renderPlatformModules()}
+
+${renderPlatformDrivingTools()}
+
+${GUIDE_PLATFORM_EXAMPLE}
+
+${GUIDE_NOTIFICATIONS}
+
+${GUIDE_MEDIA_ACTIONS}`,
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

@@ -18,7 +18,17 @@ export interface DumpsysNotificationRecord {
   bodies: string[];
   /** Whether a custom `RemoteViews` layout can render unrelated text. */
   hasCustomLayout: boolean;
+  /**
+   * The prototype posting tag (`proto:...`) from the record's key, present
+   * only for a non-summary record; a group summary is never a rendered row.
+   */
+  prototypeTag?: string;
+  /** Set on a group summary record, which renders a group header, not a row. */
+  groupSummary?: true;
 }
+
+/** The tag prefix the prototype notification runtime posts with. */
+export const PROTOTYPE_NOTIFICATION_TAG_PREFIX = "proto:";
 
 const TITLE_EXTRAS = ["android.title", "android.title.big", "android.conversationTitle"];
 const BODY_EXTRAS = [
@@ -154,6 +164,17 @@ const readNotificationKey = (line: string): string | null => {
   return valueEnd > valueStart ? line.slice(valueStart, valueEnd) : null;
 };
 
+// A key is `<user>|<pkg>|<id>|<tag>|<uid>`; the tag is the app's own string
+// and may itself contain `|`, while `null` means the record was posted untagged.
+const readKeyTag = (key: string | null): string | undefined => {
+  const parts = key?.split("|") ?? [];
+  if (parts.length < 5) {
+    return undefined;
+  }
+  const tag = parts.slice(3, -1).join("|");
+  return tag === "null" ? undefined : tag;
+};
+
 const startParsedRecord = (
   line: string,
   inActiveSection: boolean,
@@ -194,6 +215,20 @@ const readRecordMetadata = (current: ParsedDumpsysNotificationRecord, line: stri
       (Number.isFinite(numericFlags) && (numericFlags & GROUP_SUMMARY_FLAG) !== 0);
   }
   return line.startsWith("extras={");
+};
+
+// Expose the tag only once the record's flags are known, so a group summary
+// sharing its children's tag never correlates as a row.
+const finalizeRecordTags = (records: readonly ParsedDumpsysNotificationRecord[]): void => {
+  for (const record of records) {
+    if (record.isGroupSummary) {
+      record.correlation.groupSummary = true;
+    }
+    const tag = readKeyTag(record.key);
+    if (tag?.startsWith(PROTOTYPE_NOTIFICATION_TAG_PREFIX) && !record.isGroupSummary) {
+      record.correlation.prototypeTag = tag;
+    }
+  }
 };
 
 const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotificationSnapshot => {
@@ -255,6 +290,7 @@ const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotifica
     extrasLines.push(line);
   }
   flushExtras();
+  finalizeRecordTags(records);
   return {
     records,
     activeSectionRecognized,
@@ -390,4 +426,28 @@ export const attributeRowByDumpsys = (
   }
   const owners = packagesMatching(records, (record) => recordMatchesRow(record, rowTexts));
   return owners.size === 1 ? [...owners][0] : null;
+};
+
+/**
+ * The prototype tag of the record that rendered this row, or `undefined` when
+ * the rendered text cannot single that record out. Every non-summary record of
+ * the requested package that could have rendered the row — tagged or not, and
+ * including one whose extras the row only partly shows — competes, so a tag is
+ * named only when exactly one plausible record remains and it fully matches.
+ */
+export const prototypeTagForRow = (
+  records: readonly DumpsysNotificationRecord[],
+  appId: string,
+  rowTexts: ReadonlySet<string>,
+): string | undefined => {
+  const plausible = records.filter(
+    (record) =>
+      record.pkg === appId &&
+      !record.groupSummary &&
+      (recordIsOpaque(record) ||
+        record.hasCustomLayout ||
+        recordSharesRowEvidence(record, rowTexts)),
+  );
+  const [only] = plausible;
+  return plausible.length === 1 && recordMatchesRow(only, rowTexts) ? only.prototypeTag : undefined;
 };

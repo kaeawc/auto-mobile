@@ -161,11 +161,11 @@ interface Device3dState {
 
 function device3dState(page: Page): Promise<Device3dState> {
   return page.evaluate(() => {
-    const shown = document.querySelector<HTMLElement>("[data-view]:not([hidden])");
+    const orbit = document.querySelector<HTMLElement>("[data-orbit]");
     return {
       pressed: document.querySelector('[data-control="3d"]')?.getAttribute("aria-pressed") ?? null,
       wrapped: document.body.hasAttribute("data-device3d"),
-      transform: shown?.style.transform ?? "",
+      transform: orbit?.style.transform ?? "",
     };
   });
 }
@@ -178,22 +178,35 @@ function shownViewHtml(page: Page): Promise<string> {
 
 /**
  * 2D → 3D → 2D (#16458): the toggle transitions into the three-quarter pose, arrow keys orbit the
- * focused viewport, and leaving 3D restores the shown view's DOM byte for byte.
+ * focused viewport, a rotate keeps the orbit, and leaving 3D restores the shown view's DOM byte
+ * for byte.
  */
 async function checkDevice3d(page: Page): Promise<void> {
   const before = await shownViewHtml(page);
   await page.click('[data-control="3d"]');
   await page.waitForFunction(() =>
-    document
-      .querySelector<HTMLElement>("[data-view]:not([hidden])")
-      ?.style.transform.includes("rotateY(30deg)"),
+    document.querySelector<HTMLElement>("[data-orbit]")?.style.transform.includes("rotateY(30deg)"),
   );
   expect(await device3dState(page)).toMatchObject({ pressed: "true", wrapped: true });
   await page.focus("[data-viewport]");
   await page.keyboard.press("ArrowRight");
   expect((await device3dState(page)).transform).toContain("rotateY(35deg)");
+  // Rotating in 3D turns the views inside the orbiting box, so the orbit holds through the turn.
+  if (await page.$('[data-control="rotate"]')) {
+    await page.click('[data-control="rotate"]');
+    const orbiting = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-view]:not([hidden])")).every(
+        (view) => view.closest("[data-orbit]") !== null,
+      ),
+    );
+    expect(orbiting).toBe(true);
+    expect((await device3dState(page)).transform).toContain("rotateY(35deg)");
+    await finishAnimations(page);
+    await page.click('[data-control="rotate"]');
+    await finishAnimations(page);
+  }
   await page.click('[data-control="3d"]');
-  await page.waitForFunction(() => !document.body.hasAttribute("data-device3d"));
+  await page.waitForFunction(() => !document.querySelector("[data-orbit]"));
   expect(await device3dState(page)).toEqual({ pressed: "false", wrapped: false, transform: "" });
   expect(await shownViewHtml(page)).toBe(before);
 }

@@ -177,7 +177,7 @@ describe("prototype web 3D page wiring (#16458)", () => {
     );
     expect(PROTOTYPE_WEB_3D_CSS).toContain("[data-device3d] [data-viewport]{perspective:");
     expect(PROTOTYPE_WEB_3D_CSS).toContain(
-      "@media (prefers-reduced-motion:reduce){[data-wrapped],[data-leaf]{transition:none}}",
+      "@media (prefers-reduced-motion:reduce){[data-orbit],[data-leaf]{transition:none}}",
     );
   });
 

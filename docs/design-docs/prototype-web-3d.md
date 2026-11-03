@@ -48,7 +48,8 @@ three.js sizes are r180 tree-shaken by Bun with `--minify`; none can be lazy-loa
 ## How the CSS 3D view is built
 
 - The viewport gets `perspective`; the stage and the shown view get `transform-style: preserve-3d`.
-  The device orbit is a `rotateX`/`rotateY` on the shown view.
+  The device orbit is a `rotateX`/`rotateY` on a box wrapped around the stage, not on the view:
+  rotate animates the views' own transforms, so both views keep the orbit through the turn.
 - **Leaves.** The shown frame element stays in place as the fixed leaf, clipped at the hinge line
   with `clip-path`; it is never moved or re-rendered. The moving leaf is an `overflow: hidden` box
   for the rest of the frame, holding a clone of the frame offset by the hinge position, turned

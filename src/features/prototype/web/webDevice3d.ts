@@ -216,18 +216,18 @@ export function prototypeWeb3dBodyAttributes(fold: PrototypeWebFold | undefined)
 export const PROTOTYPE_WEB_3D_CSS = [
   "@supports not (transform-style:preserve-3d){[data-3d-control]{display:none!important}}",
   "[data-device3d] [data-viewport]{perspective:2400px}",
+  "[data-orbit]{position:absolute;inset:0;transform-style:preserve-3d}",
   "[data-device3d] [data-stage],[data-wrapped]{transform-style:preserve-3d}",
   "[data-wrapped]>*,[data-face],[data-back]{backface-visibility:hidden}",
   "[data-back]{background:linear-gradient(135deg,#3a3a3e,#1c1c1f)}",
-  "[data-wrapped],[data-leaf]{transition:transform .45s cubic-bezier(.2,.7,.2,1)}",
-  "@media (prefers-reduced-motion:reduce){[data-wrapped],[data-leaf]{transition:none}}",
+  "[data-orbit],[data-leaf]{transition:transform .45s cubic-bezier(.2,.7,.2,1)}",
+  "@media (prefers-reduced-motion:reduce){[data-orbit],[data-leaf]{transition:none}}",
 ].join("");
 
 /** One wrapped view: the elements 3D added and the attributes it changed, to restore exactly. */
 export interface PrototypeWeb3dWrapped {
   readonly view: HTMLElement;
   readonly frame: HTMLElement;
-  readonly viewStyle: string | null;
   readonly frameStyle: string | null;
   readonly extras: readonly HTMLElement[];
   /** The moving leaf; a frame that does not fold has none. */
@@ -312,7 +312,7 @@ export function prototypeWeb3dWrap(
   const [width, height] = [frame.offsetWidth, frame.offsetHeight];
   const radius = getComputedStyle(frame).borderTopLeftRadius;
   const corners = (mask: string) => mask.replaceAll("R", radius);
-  const saved = { viewStyle: view.getAttribute("style"), frameStyle: frame.getAttribute("style") };
+  const frameStyle = frame.getAttribute("style");
   const size = { width: `${width}px`, height: `${height}px` };
   let extras: HTMLElement[] = [
     box("back", { ...size, transform: "rotateY(180deg)", borderRadius: radius }),
@@ -341,10 +341,10 @@ export function prototypeWeb3dWrap(
   }
   view.append(...extras);
   view.setAttribute("data-wrapped", "");
-  return { view, frame, ...saved, extras, leaf, axis: line?.axis ?? "vertical" };
+  return { view, frame, frameStyle, extras, leaf, axis: line?.axis ?? "vertical" };
 }
 
-/** Removes what wrapping added and restores the view's and frame's own attributes byte for byte. */
+/** Removes what wrapping added and restores the frame's own style attribute byte for byte. */
 export function prototypeWeb3dUnwrap(wrapped: PrototypeWeb3dWrapped): void {
   const restore = (element: HTMLElement, style: string | null) => {
     // Chromium writes CSSOM changes back to the attribute lazily; reading it first flushes that
@@ -357,7 +357,6 @@ export function prototypeWeb3dUnwrap(wrapped: PrototypeWeb3dWrapped): void {
     }
   };
   wrapped.extras.forEach((extra) => extra.remove());
-  restore(wrapped.view, wrapped.viewStyle);
   restore(wrapped.frame, wrapped.frameStyle);
   wrapped.view.removeAttribute("data-wrapped");
 }
@@ -467,6 +466,9 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
   const hinge = rules.bodyHinge(doc.body);
   const state = { on: false, orbit: rules.flat, hinge: 180 };
   let wrapped: PrototypeWeb3dWrapped | undefined;
+  // The orbit turns a box around the stage, not the view: a rotate animates the views' own
+  // transforms, so both views keep the orbit through the turn.
+  let orbitBox: HTMLElement | undefined;
   doc.querySelectorAll<HTMLElement>("[data-3d-control]").forEach((control) => {
     control.hidden = false;
   });
@@ -489,6 +491,12 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
       return;
     }
     unwrap();
+    if (!orbitBox) {
+      orbitBox = doc.createElement("div");
+      orbitBox.setAttribute("data-orbit", "");
+      stage.before(orbitBox);
+      orbitBox.append(stage);
+    }
     wrapped = rules.wrap(
       view,
       hinge && rules.hingeLine(hinge, view.dataset.orientation ?? ""),
@@ -506,7 +514,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     }
     if (wrapped) {
       const pose = rules.pose(state.orbit, state.hinge, wrapped.axis);
-      wrapped.view.style.transform = `translate(-50%, -50%) ${pose.device}`;
+      orbitBox?.style.setProperty("transform", pose.device);
       wrapped.leaf?.style.setProperty("transform", pose.leaf);
     }
   };
@@ -536,10 +544,13 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
       postureSelect.value = flat.posture;
     }
     apply();
-    const leaving = wrapped?.view;
+    const leaving = orbitBox;
     const done = () => {
-      if (!state.on && wrapped?.view === leaving) {
+      if (!state.on && orbitBox === leaving && leaving) {
         unwrap();
+        leaving.before(stage);
+        leaving.remove();
+        orbitBox = undefined;
       }
     };
     if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true) {
@@ -547,7 +558,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
       return;
     }
     // Reading the animations flushes style, so the transition back to flat is already running; a
-    // view that was already flat has none and unwraps at once.
+    // device that was already flat has none and unwraps at once.
     const running = [leaving, wrapped?.leaf].flatMap((element) => element?.getAnimations() ?? []);
     void Promise.allSettled(running.map((animation) => animation.finished)).then(done);
   };

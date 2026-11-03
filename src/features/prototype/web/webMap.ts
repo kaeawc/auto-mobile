@@ -556,8 +556,8 @@ export function mapSize(
 /**
  * The route lines in an SVG whose origin is the box centre, one user unit a dp. Under a camera the
  * SVG is a pixel square at the centre (a zero-size one draws nothing), so the lines keep their zoom
- * at any rendered size. Under a fit (`fitted` is the size it was fitted in) the SVG covers the box
- * with that size as a `meet` viewBox, so a box rendered smaller shrinks the lines uniformly, as
+ * at any rendered size. Under a fit (`fitted` is the size it was fitted in) the SVG is the box's
+ * content size (`100cqw` × `100cqh`) about the same centre, with that size as a `meet` viewBox, so a box rendered smaller shrinks the lines uniformly, as
  * `fittedFromCentre` places the pins; the stroke keeps its dp width.
  */
 function routeLayer(
@@ -568,13 +568,21 @@ function routeLayer(
   const frame: { attrs: Record<string, string>; style: Record<string, string> } = fitted
     ? {
         attrs: {
-          width: "100%",
-          height: "100%",
           viewBox: `${-fitted.width / 2} ${-fitted.height / 2} ${fitted.width} ${fitted.height}`,
           preserveAspectRatio: "xMidYMid meet",
           "aria-hidden": "true",
         },
-        style: { position: "absolute", left: "0", top: "0", overflow: "visible" },
+        // Sized in container units, the content box `fittedFromCentre` scales the pins by, and
+        // centred where the pins' `50%` is, so padding cannot part the lines from the pins.
+        style: {
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          width: "100cqw",
+          height: "100cqh",
+          transform: "translate(-50%,-50%)",
+          overflow: "visible",
+        },
       }
     : {
         attrs: { width: "1", height: "1", "aria-hidden": "true" },

@@ -333,8 +333,8 @@ the host, so the page's script only switches between views it was given and neve
   known when rendering, so the framing and perspective use the screen's size on that axis, the most
   the box can take. That keeps a camera's true zoom at any box size; a fit (`fit`, or every point
   when there is no camera) instead chose its zoom to span 80% of that size, so its pins scale by
-  `min(100cqw / width, 100cqh / height)` (the box a size container) and its SVG covers the box with
-  the fitted size as a `meet` viewBox and a non-scaling stroke: a box rendered narrower than the
+  `min(100cqw / width, 100cqh / height)` (the box a size container) and its SVG, `100cqw` × `100cqh` about the
+  same centre so padding moves pins and lines alike, takes the fitted size as a `meet` viewBox and a non-scaling stroke: a box rendered narrower than the
   screen shrinks the fit uniformly and keeps every point inside. A camera framing turns
   by its `bearing` and `tilt` (a fit frames north up): the canvas moves to a ground square under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, sized from the
   box corners traced back onto the plane so it covers any aspect ratio, and lines and pins are

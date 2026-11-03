@@ -128,7 +128,7 @@ describe("prototype web map (#16539)", () => {
     );
     // A fit's lines scale with the box like its pins: the fitted size is a `meet` viewBox.
     expect(map.html).toContain(
-      `preserveAspectRatio="xMidYMid meet" style="left:0;overflow:visible;position:absolute;top:0" viewBox="${-SCREEN.width / 2} ${-SCREEN.height / 2} ${SCREEN.width} ${SCREEN.height}"`,
+      `preserveAspectRatio="xMidYMid meet" style="height:100cqh;left:50%;overflow:visible;position:absolute;top:50%;transform:translate(-50%,-50%);width:100cqw" viewBox="${-SCREEN.width / 2} ${-SCREEN.height / 2} ${SCREEN.width} ${SCREEN.height}"`,
     );
     expect(map.html).toContain('vector-effect="non-scaling-stroke"');
     expect(map.html).not.toMatch(/\b(src|href)=|url\(/);

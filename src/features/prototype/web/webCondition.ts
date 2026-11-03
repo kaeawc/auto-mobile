@@ -1,9 +1,12 @@
 import { record, type Raw } from "../prototypeTemplate";
+import type { StillPlatformState } from "./webPlatformState";
 
-/** What a still render knows when it evaluates a condition: spec state only. */
+/** What a still render knows when it evaluates a condition: spec state and frame platform state. */
 export interface ConditionScope {
   readonly state: Raw;
   readonly platform: "android" | "ios";
+  /** Platform state the frame decides; a pointer not listed here is undecidable. */
+  readonly platformState?: StillPlatformState;
 }
 
 /** `undefined` means the still render cannot decide. */
@@ -61,16 +64,20 @@ export function decide(condition: unknown, scope: ConditionScope): Decision {
     const inner = decide(raw.not, scope);
     return inner === undefined ? undefined : !inner;
   }
-  // `data` and `platform` are pointers into data and platform state the still does not model.
   if (typeof raw.key === "string" && Object.hasOwn(scope.state, raw.key)) {
     return compare(scope.state[raw.key], raw);
+  }
+  // A platform pointer the frame decides compares like state; `data` pointers stay undecidable.
+  const platformState = scope.platformState ?? {};
+  if (typeof raw.platform === "string" && Object.hasOwn(platformState, raw.platform)) {
+    return compare(platformState[raw.platform], raw);
   }
   return undefined;
 }
 
 /**
- * Whether a `visibleWhen` or `enabledWhen` condition holds. Undecidable parts (data and platform
- * pointers, unknown keys, validity, string operators) stay undecided through `all`, `any` and
+ * Whether a `visibleWhen` or `enabledWhen` condition holds. Undecidable parts (data pointers,
+ * platform pointers the frame does not decide, unknown keys, validity, string operators) stay undecided through `all`, `any` and
  * `not`, and only the whole condition falls back to true, so a node is never hidden by a guess.
  */
 export function conditionHolds(condition: unknown, scope: ConditionScope): boolean {

@@ -233,6 +233,9 @@ internal object PrototypeDataText {
 
   fun hasBinding(text: String): Boolean = hasBinding(text, "data")
 
+  /** The `{data:/pointer}` pointers in authored order, scanned exactly as binding does. */
+  fun pointers(text: String): List<String> = placeholders(text).map { it.pointer }
+
   fun hasBinding(text: String, namespace: String): Boolean =
     placeholders(text, namespace).isNotEmpty()
 

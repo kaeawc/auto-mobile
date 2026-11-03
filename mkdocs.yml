@@ -143,6 +143,7 @@ nav:
       - "Android Automotive OS": using/android-automotive.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
+      - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
@@ -162,6 +163,7 @@ nav:
       - "Session broker experiment": design-docs/session-broker-experiment.md
       - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
       - "Session broker device reuse": design-docs/session-broker-device-reuse.md
+      - "Session broker remote devices": design-docs/session-broker-remote-devices.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md

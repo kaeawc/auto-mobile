@@ -14,6 +14,7 @@ import { ActionableError } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { combineRequestAbortSignals } from "../../../utils/AbortContext";
 import { stripUndeclaredSessionUuid } from "../../../utils/toolParams";
+import { assertToolParamArraysBounded } from "../../../utils/toolParamArrayLimit";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
 import { assertBrokerConnectionPlainToolCall } from "../../brokerConnectionToolGate";
 import { holdsOwnerHeartbeatLease } from "../../../daemon/sessionBroker/provisioning/executionLiveness";
@@ -135,6 +136,7 @@ function validateInput(
     tool.schema,
   );
   try {
+    assertToolParamArraysBounded(strippedToolParams);
     parsedParams = tool.schema.parse(strippedToolParams);
   } catch (error) {
     const ParamsError = error instanceof ZodError ? InvalidToolParamsError : ActionableError;

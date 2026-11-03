@@ -515,6 +515,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     observeSchema,
     {
       handler: withWatchObserve(observeHandler, dependencies),
+      keepsImeRestorePending: true,
       ...PLAN_RELEVANT,
       defaultEnabled: true,
       // Watching is allowed on any device, whichever session holds it (#10730).

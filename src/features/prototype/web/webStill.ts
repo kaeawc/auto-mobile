@@ -5,6 +5,7 @@ import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
+import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
 import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
@@ -168,6 +169,8 @@ function stillScope(
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
   const authored = record(spec.theme)?.mode;
+  const size = screenSize(frame, options.orientation ?? "portrait");
+  const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
   return {
     style: {
@@ -175,15 +178,22 @@ function stillScope(
       palette: prototypeRolePalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
+      platform: frame.platform,
+      ...(record(spec.window)?.layoutDirection === "rtl" ? { rtl: true } : {}),
     },
-    condition: { state: record(spec.state) ?? {}, platform: frame.platform },
+    condition: {
+      state: record(spec.state) ?? {},
+      platform: frame.platform,
+      // The frame's one panel is the active panel; no registry frame has a hinge yet (#16444).
+      platformState: stillPlatformState({ platform: frame.platform, ...screenDp }),
+    },
     data: spec.data,
     spec,
     format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
     instances: [],
     inBox: false,
     unsupported: [],
-    screenWidth: screenSize(frame, options.orientation ?? "portrait").width,
+    screenWidth: size.width,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
     layers: [],

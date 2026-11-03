@@ -4145,21 +4145,18 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   because the command clears all CtrlProxy shortcuts.
 - Uninstalling or clearing CtrlProxy deletes saved prototypes and every pinned shortcut; the host
   mirror (#12268) restores the saved content, never the icons.
-- Device-verified facts (#12261; Pixel Launcher on API 30, 33, 34, 36 and 37, AOSP Launcher3 on
-  API 30):
-  - The accessibility-bound CtrlProxy may call `requestPinShortcut` with no activity visible (its
-    process is a bound foreground service).
-  - The dialog is `AddItemActivity` (`QuickstepAddItemActivity` on API 37) and its shape differs
-    by API and launcher: a platform AlertDialog with "ADD AUTOMATICALLY" (Launcher3, API 30), a
-    bottom sheet with an "Add to home screen" `Button` (Pixel, API 33-36), or a Compose sheet
-    whose labels are plain text under a clickable parent (Pixel, API 37). The accept match is by
-    label and covers all three; the captures are in `test/fixtures/android-pin-dialog/`.
-  - The launcher badges the pinned icon with CtrlProxy's icon (circular on Pixel, square on
-    Launcher3).
-  - The icon often lands on workspace page 2 even when page 1 has room.
-  - `clear-shortcuts` removes the icons from the workspace, not only the shortcut records.
-  - Samsung One UI Home is unverified (physical hardware only); the accept button is matched by
-    label, so a different label there is reported (`unrecognized` or a timeout), never Cancel.
+- The accessibility-bound CtrlProxy may call `requestPinShortcut` with no activity visible (its
+  process is a bound foreground service).
+- The dialog is `AddItemActivity` (`QuickstepAddItemActivity` on API 37 Pixel Launcher) and its
+  shape differs by API and launcher: a platform AlertDialog with "ADD AUTOMATICALLY" (AOSP
+  Launcher3), a bottom sheet with an "Add to home screen" `Button` (Pixel Launcher before API 37),
+  or a Compose sheet whose labels are plain text under a clickable parent (Pixel Launcher, API 37).
+  The accept match is by label and covers all three (fixtures in
+  `test/fixtures/android-pin-dialog/`); a launcher with another label is reported
+  (`unrecognized` or a timeout) and Cancel is never tapped.
+- The launcher badges the pinned icon with CtrlProxy's icon, and often places it on workspace
+  page 2 even when page 1 has room.
+- `clear-shortcuts` removes the icons from the workspace, not only the shortcut records.
 
 ## Lazy lists (`prototype_lazy_list_v1`, #14182, not device-verified)
 

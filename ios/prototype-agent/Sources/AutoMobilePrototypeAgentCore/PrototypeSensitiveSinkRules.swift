@@ -34,7 +34,9 @@ enum PrototypeSensitiveSinkRules {
             }
         }
         guard !seeds.isEmpty || !platformTaints.isEmpty else { return [] }
-        let taints = propagateCopies(seeds, platformTaints: platformTaints, actions: actions)
+        guard let taints = propagateCopies(seeds, platformTaints: platformTaints, actions: actions) else {
+            return [.invalidSpec(path: "$", message: "Secure binding scan exceeds 4194304 expanded UTF-8 bytes")]
+        }
         let sinks = sinkFields(spec, actions: actions).sorted {
             $0.path.utf16.lexicographicallyPrecedes($1.path.utf16)
         }
@@ -99,10 +101,14 @@ enum PrototypeSensitiveSinkRules {
         return errors
     }
 
-    /// A data action copying a tainted read into `/data` taints its destination, transitively.
+    /// A data action copying a tainted read into `/data` taints its destination, transitively. A
+    /// worklist over copies bucketed by their source's first segment keeps long chains linear;
+    /// nil means the check cap was exceeded, so callers fail closed.
     private static func propagateCopies(
         _ seeds: [String], platformTaints: [String], actions: [PrototypeLocatedValue]
-    ) -> [String] {
+    )
+        -> [String]?
+    {
         let writes: Set<String> = ["setData", "appendData", "prependData", "upsertData"]
         let copies = actions.compactMap { action -> (into: String, source: String, from: String)? in
             guard let type = action.value["type"]?.stringValue, writes.contains(type),
@@ -113,19 +119,51 @@ enum PrototypeSensitiveSinkRules {
             }
             return nil
         }
+        func firstSegment(_ pointer: String) -> String {
+            String(pointer.dropFirst().split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        }
         var taints = seeds
-        var changed = true
-        while changed {
-            changed = false
-            for copy in copies where !taints.contains(copy.into) {
-                let sources = copy.source == "data" ? taints : platformTaints
-                if sources.contains(where: { overlaps($0, copy.from, pointerIndexWildcard: false) }) {
-                    taints.append(copy.into)
-                    changed = true
+        var known = Set(seeds)
+        var queue = seeds
+        func mark(_ pointer: String) {
+            if known.insert(pointer).inserted {
+                taints.append(pointer)
+                queue.append(pointer)
+            }
+        }
+        var checks = 0
+        var buckets: [String: [(into: String, from: String)]] = [:]
+        for copy in copies {
+            if copy.source == "data" {
+                buckets[firstSegment(copy.from), default: []].append((copy.into, copy.from))
+            } else {
+                checks += platformTaints.count
+                if platformTaints.contains(where: { overlaps($0, copy.from, pointerIndexWildcard: false) }) {
+                    mark(copy.into)
                 }
             }
         }
-        return taints
+        var cursor = 0
+        while cursor < queue.count {
+            let taint = queue[cursor]
+            cursor += 1
+            let key = firstSegment(taint)
+            // A leading {index} taint segment matches any source segment.
+            for name in key == "{index}" ? Array(buckets.keys) : [key] {
+                var rest: [(into: String, from: String)] = []
+                for copy in buckets[name] ?? [] {
+                    checks += 1
+                    if overlaps(taint, copy.from, pointerIndexWildcard: false) {
+                        mark(copy.into)
+                    } else {
+                        rest.append(copy)
+                    }
+                }
+                buckets[name] = rest
+            }
+            if checks > 4_000_000 { return nil }
+        }
+        return checks > 4_000_000 ? nil : taints
     }
 
     private static func sinkFields(_ spec: [String: JSONValue], actions: [PrototypeLocatedValue]) -> [Field] {

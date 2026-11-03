@@ -114,7 +114,9 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
   const { requests, fields, dataWrites } = libraryFields(spec, nodes, true);
-  propagateDataTaint(tainted, platformTainted, dataWrites);
+  if (!propagateDataTaint(tainted, platformTainted, dataWrites)) {
+    return [{ path: "$", message: SECURE_SCAN_BUDGET_MESSAGE }];
+  }
   const sinkFields = fields.filter(
     // Key fields name state entries, which a `/data` pointer cannot reach.
     (field) => !field.key && requestSinkPath(field.path, requests),
@@ -203,29 +205,69 @@ export function prototypeSensitiveWarnings(spec: unknown): string[] {
   );
 }
 
+/** Overlap checks one copy-taint propagation may spend before it fails closed. */
+const MAX_COPY_TAINT_CHECKS = 4_000_000;
+
 /**
  * A data action that copies a tainted `/data` or sensitive `/platform` read into `/data` taints
- * its destination, transitively (a copy of a copy stays tainted). Mutates `tainted`.
+ * its destination, transitively (a copy of a copy stays tainted). Mutates `tainted`; a worklist
+ * over copies bucketed by the first segment of their source keeps long chains linear. Returns
+ * false when the check cap is exceeded, so callers fail closed.
  */
 function propagateDataTaint(
   tainted: string[],
   platformTainted: readonly string[],
   writes: readonly DataWrite[],
-): void {
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const write of writes) {
-      const sources = write.source === "data" ? tainted : platformTainted;
-      if (
-        !tainted.includes(write.into) &&
-        sources.some((taint) => pointersOverlap(taint, write.from, false))
-      ) {
-        tainted.push(write.into);
-        changed = true;
+): boolean {
+  const known = new Set(tainted);
+  const queue = [...tainted];
+  const mark = (pointer: string) => {
+    if (!known.has(pointer)) {
+      known.add(pointer);
+      tainted.push(pointer);
+      queue.push(pointer);
+    }
+  };
+  const buckets = new Map<string, DataWrite[]>();
+  let checks = 0;
+  for (const write of writes) {
+    if (write.source === "data") {
+      const key = firstPointerSegment(write.from);
+      buckets.set(key, [...(buckets.get(key) ?? []), write]);
+    } else {
+      checks += platformTainted.length;
+      if (platformTainted.some((taint) => pointersOverlap(taint, write.from, false))) {
+        mark(write.into);
       }
     }
   }
+  for (let at = 0; at < queue.length; at += 1) {
+    const taint = queue[at];
+    const key = firstPointerSegment(taint);
+    // A leading `{index}` taint segment matches any source segment.
+    for (const name of key === "{index}" ? [...buckets.keys()] : [key]) {
+      const bucket = buckets.get(name) ?? [];
+      checks += bucket.length;
+      buckets.set(
+        name,
+        bucket.filter((write) => {
+          const hit = pointersOverlap(taint, write.from, false);
+          if (hit) {
+            mark(write.into);
+          }
+          return !hit;
+        }),
+      );
+    }
+    if (checks > MAX_COPY_TAINT_CHECKS) {
+      return false;
+    }
+  }
+  return checks <= MAX_COPY_TAINT_CHECKS;
+}
+
+function firstPointerSegment(pointer: string): string {
+  return pointer.slice(1).split("/", 1)[0];
 }
 
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {

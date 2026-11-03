@@ -31,7 +31,11 @@ internal object PrototypeSensitiveSinkRules {
     val platformTaints = sensitivePlatformPointers(spec)
     val seeds = sensitiveDataPointers(spec, context)
     if (seeds.isEmpty() && platformTaints.isEmpty()) return emptyList()
-    val dataTaints = propagateCopies(seeds, platformTaints, context)
+    val dataTaints =
+      propagateCopies(seeds, platformTaints, context)
+        ?: return listOf(
+          PrototypeSpecError("$", "Secure binding scan exceeds 4194304 expanded UTF-8 bytes"),
+        )
     val fields = sinkFields(spec, context).sortedBy { it.path }
     val validRepeats = PrototypeRepeatValidator.validate(spec) == null
     val scopes = if (validRepeats) PrototypeRepeatValidator.scopes(spec) else emptyList()
@@ -70,12 +74,16 @@ internal object PrototypeSensitiveSinkRules {
       .filter { callDefinition(it.action.text("call"))?.second?.flag("sensitive") == true }
       .mapNotNull { it.action.text("into")?.let(PrototypeDataWriter::pathPointer) }
 
-  /** A data action copying a tainted read into `/data` taints its destination, transitively. */
+  /**
+   * A data action copying a tainted read into `/data` taints its destination, transitively. A
+   * worklist over copies bucketed by their source's first segment keeps long chains linear; null
+   * means the check cap was exceeded, so callers fail closed.
+   */
   private fun propagateCopies(
     seeds: List<String>,
     platformTaints: List<String>,
     context: PrototypeStateChecks.Context,
-  ): List<String> {
+  ): List<String>? {
     val copies =
       context.actions
         .filter { it.value.text("type") in DATA_WRITES }
@@ -92,15 +100,44 @@ internal object PrototypeSensitiveSinkRules {
           }
         }
     val taints = seeds.toMutableList()
-    do {
-      val added = copies.filter { (into, source, from) ->
-        into !in taints &&
-          (if (source == "data") taints else platformTaints).any { overlaps(it, from, false) }
+    val known = seeds.toMutableSet()
+    val queue = ArrayDeque(seeds)
+    val mark = { pointer: String ->
+      if (known.add(pointer)) {
+        taints.add(pointer)
+        queue.add(pointer)
       }
-      taints.addAll(added.map { it.first }.distinct())
-    } while (added.isNotEmpty())
-    return taints
+    }
+    var checks = 0L
+    val buckets = mutableMapOf<String, MutableList<Pair<String, String>>>()
+    for ((into, source, from) in copies) {
+      if (source == "data") {
+        buckets.getOrPut(firstSegment(from)) { mutableListOf() }.add(into to from)
+      } else {
+        checks += platformTaints.size
+        if (platformTaints.any { overlaps(it, from, false) }) mark(into)
+      }
+    }
+    while (queue.isNotEmpty()) {
+      val taint = queue.removeFirst()
+      val key = firstSegment(taint)
+      // A leading {index} taint segment matches any source segment.
+      for (name in if (key == "{index}") buckets.keys.toList() else listOf(key)) {
+        val rest = mutableListOf<Pair<String, String>>()
+        for (copy in buckets[name].orEmpty()) {
+          checks++
+          if (overlaps(taint, copy.second, false)) mark(copy.first) else rest.add(copy)
+        }
+        buckets[name] = rest
+      }
+      if (checks > MAX_COPY_TAINT_CHECKS) return null
+    }
+    return if (checks > MAX_COPY_TAINT_CHECKS) null else taints
   }
+
+  private fun firstSegment(pointer: String): String = pointer.drop(1).substringBefore('/')
+
+  private const val MAX_COPY_TAINT_CHECKS = 4_000_000L
 
   private val DATA_WRITES = setOf("setData", "appendData", "prependData", "upsertData")
 

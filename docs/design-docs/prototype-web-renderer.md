@@ -205,7 +205,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider` and `bottomSheet`. Where the devices differ,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `videoPlayer`,
+  `map`, `cameraPreview` and `castButton`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -252,7 +253,19 @@ the host, so the page's script only switches between views it was given and neve
   Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
   titled with the name, because the glyph set is not inlined. A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
-  as both devices do. A card hugs its content unless its width is `fill`, as both devices do. A
+  as both devices do. A video player is a black 16:9 frame (a `colorBars` sample draws bars, a
+  `countdown` sample a 3; other sources are not inlined) under the skin's chrome at `startMs`
+  (Android: a centred 56 px play button over a bottom bar; iOS: play inside a rounded bottom bar),
+  with a CC button when it has captions and none when `controls` is `none`; a poster is listed
+  `assetNotInlined`. A map fetches no tiles: it draws a neutral canvas (`plain`, or a faint street
+  grid), 200 px tall unless sized, with its polylines in an inline SVG and its markers as pins, placed
+  by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
+  point; bearing and tilt are not drawn. A camera preview is a portrait viewfinder at its
+  `aspectRatio` (default 4:3) showing colour bars and a label naming its mode. A cast button is the
+  skin's idle route icon (Cast on Android, AirPlay on iOS) in a 48 px target; it is a `details`
+  disclosure, so a tap opens a device picker listing no devices without any script. Glyphs are inline
+  SVG; the serializer allows only `viewBox` and `preserveAspectRatio` as mixed-case attributes.
+  A card hugs its content unless its width is `fill`, as both devices do. A
   `bottomSheet` is open when its `openWhen` key holds exactly `equals` (a missing key keeps it shut)
   and draws nothing in place: like the devices' modal layer, an open one is drawn over its window
   (the screen, a sheet window's region or a floating window's box) after the tree, in tree order, a

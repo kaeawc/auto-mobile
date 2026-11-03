@@ -519,6 +519,35 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     ).toBeNull();
   });
 
+  it("does not count an overlay display as a panel for requires.panels (#13138)", () => {
+    const phone = bootedDevice({
+      deviceId: "phone-with-overlay",
+      displays: {
+        panels: [
+          { key: "phone", role: "unknown", sizePx: { width: 1080, height: 2400 } },
+          { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+        ],
+        postures: ["unknown"],
+      },
+    });
+    expect(
+      matcher.matchBootedDevice(
+        { platform: "android", requires: { panels: 2 } },
+        [phone],
+        "LATEST",
+      ),
+    ).toBeNull();
+    expect(
+      matcher.matchBootedDevice({ platform: "android", requires: { panels: 1 } }, [phone], "LATEST")
+        ?.deviceId,
+    ).toBe("phone-with-overlay");
+    expect(
+      describeDisplayRequirements({ platform: "android", requires: { panels: 2 } }, [
+        { name: "Overlay phone", displays: phone.displays, booted: true },
+      ]),
+    ).toContain("Overlay phone: 1 panel(s)");
+  });
+
   it("does not infer unbooted AVD panel or posture support from foldable form factor", () => {
     const images = [deviceImage({ name: "Fold", formFactor: "foldable" })];
     expect(

@@ -103,7 +103,7 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(
         .nullable()
         .optional()
         .describe(
-          "Session display pin: display key or inner/cover/rear/external; null clears, omitted preserves. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Requires a daemon session. JSON result displayPin reports the resulting selector or null after clearing; omitted for a never-pinned session.",
+          "Session display pin: display key or inner/cover/rear/external/overlay; null clears, omitted preserves. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Requires a daemon session. JSON result displayPin reports the resulting selector or null after clearing; omitted for a never-pinned session.",
         ),
       // #5870: the platform is inferred from the resolved device (or the session),
       // so callers targeting a concrete `deviceId` need not also send `platform`.
@@ -922,7 +922,7 @@ export function registerUtilityTools(
   // Register with the tool registry
   ToolRegistry.register(
     "setActiveDevice",
-    "Set active device using existing session binding or a sessionless per-MCP-connection device pin that lasts for that connection (cleared when the connection disconnects or the device is released). With a daemon session, display pins a display key or role (inner/cover/rear/external); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
+    "Set active device using existing session binding or a sessionless per-MCP-connection device pin that lasts for that connection (cleared when the connection disconnects or the device is released). With a daemon session, display pins a display key or role (inner/cover/rear/external/overlay); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
     setActiveDeviceSchema,
     { handler: setActiveDeviceHandler, ...SET_ACTIVE_DEVICE_OPTIONS },
   );

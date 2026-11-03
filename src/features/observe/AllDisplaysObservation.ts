@@ -11,6 +11,7 @@ import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { publishScreenshotPaths } from "./ScreenshotRetention";
 import { computeFreshness } from "./observationFreshness";
 import { displayTransitions } from "./DisplayTransition";
+import { isPhysicalPanel } from "../../models/DisplayPanel";
 import {
   assertAllDisplayObserveSupported,
   DisplaySelectionError,
@@ -53,7 +54,8 @@ export class AllDisplaysObservation {
       deadline,
       deviceReadScreenshot,
     });
-    const panels = this.d.device().displays?.panels;
+    // Overlay displays are addressable one at a time but never join the aggregate.
+    const panels = this.d.device().displays?.panels.filter(isPhysicalPanel);
     if (!panels?.length) {
       // Discovery omits single-screen inventory: retain exactly the ordinary result.
       return active;

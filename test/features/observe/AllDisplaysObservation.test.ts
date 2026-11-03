@@ -80,6 +80,23 @@ describe("AllDisplaysObservation", () => {
     ]);
   });
 
+  test("never reads an overlay display into the aggregate (#13138)", async () => {
+    const withOverlay: BootedDevice = {
+      ...androidDevice,
+      displays: {
+        panels: [
+          ...androidDevice.displays!.panels,
+          { key: "overlay:1", role: "overlay", sizePx: { width: 108, height: 192 } },
+        ],
+        postures: [],
+      },
+    };
+    const { observation, calls } = build({ device: () => withOverlay });
+    const result = await observation.execute();
+    expect(calls.map((call) => call.display)).toEqual(["active", "cover-id"]);
+    expect(result.displays?.map((d) => d.display.key)).toEqual(["inner-id", "cover-id"]);
+  });
+
   test("returns the plain active result when the device has no panel inventory", async () => {
     const { observation, calls } = build({
       device: () => ({ ...androidDevice, displays: undefined }),

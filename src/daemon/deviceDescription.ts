@@ -490,7 +490,7 @@ export const deviceDescriptionSchema = z
           z
             .object({
               key: z.string(),
-              role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+              role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
               sizePx: z.object({ width: z.number(), height: z.number() }).strict(),
               scale: z.number().optional(),
             })

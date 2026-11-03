@@ -14,6 +14,22 @@ export function screenSize(frame: DeviceFrame, orientation: WebOrientation) {
     : { width: heightDp, height: widthDp };
 }
 
+/** The safe-area insets as the custom properties `safeAreaPadding` and the chrome read. */
+export function safeAreaVars(
+  frame: DeviceFrame,
+  orientation: WebOrientation,
+): Record<string, string> {
+  const insets = frame.safeArea[orientation];
+  return {
+    "--safe-top": px(insets.top),
+    "--safe-bottom": px(insets.bottom),
+    "--safe-left": px(insets.left),
+    "--safe-right": px(insets.right),
+    "--safe-start": "var(--safe-left)",
+    "--safe-end": "var(--safe-right)",
+  };
+}
+
 /**
  * Where a portrait point lands after rotating the device a quarter turn counter-clockwise, which
  * moves the top edge (and so the cutout) to the left edge.
@@ -170,7 +186,6 @@ export function renderDeviceFrame(
   content: WebElement,
 ): WebElement {
   const { width, height } = screenSize(frame, orientation);
-  const insets = frame.safeArea[orientation];
   const screen = el(
     "div",
     {
@@ -187,12 +202,7 @@ export function renderDeviceFrame(
         color: options.textColor,
         "font-family": "system-ui, -apple-system, Roboto, sans-serif",
         "font-size": "14px",
-        "--safe-top": px(insets.top),
-        "--safe-bottom": px(insets.bottom),
-        "--safe-left": px(insets.left),
-        "--safe-right": px(insets.right),
-        "--safe-start": "var(--safe-left)",
-        "--safe-end": "var(--safe-right)",
+        ...safeAreaVars(frame, orientation),
       },
     },
     [

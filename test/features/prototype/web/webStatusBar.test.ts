@@ -384,6 +384,47 @@ test("a bottom-arranged footer inside a box overlay leaves the full-fill colour 
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("a weighted child fills an end-arranged column, so its colour reaches the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "weighted",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#000000", arrangement: "end" },
+      children: [{ type: "column", style: { width: "fill", weight: 2, background: "#ffffff" } }],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a full-width child inside a narrow ancestor does not cover the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "narrow-ancestor",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill" },
+          children: [
+            {
+              type: "column",
+              style: { width: { dp: 20 }, height: "fill" },
+              children: [{ type: "column", style: { width: "fill", background: "#ffffff" } }],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

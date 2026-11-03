@@ -143,6 +143,17 @@ function spansWidth(child: WebElement, layout: Layout): boolean {
   }
 }
 
+/** Whether a flex child grows along the main axis: its `flex` shorthand's grow factor is above 0. */
+function grows(child: WebElement): boolean {
+  const factor = Number(child.style.flex?.trim().split(/\s+/)[0]);
+  return Number.isFinite(factor) && factor > 0;
+}
+
+/** An explicit width other than full: the element and everything inside it is narrower. */
+function narrowed(element: WebElement): boolean {
+  return element.style.width !== undefined && element.style.width !== "100%";
+}
+
 /**
  * Whether a child's top edge is its container's: it fills the height, or the container places it
  * at the top (cross-axis alignment in a box or row; main-axis arrangement, or growing, as a
@@ -157,10 +168,7 @@ function reachesTop(child: WebElement, parent: WebElement, layout: Layout): bool
     case "row":
       return startAligned(child.style["align-self"] ?? parent.style["align-items"]);
     case "column":
-      return (
-        (child.style.flex?.startsWith("1") ?? false) ||
-        MAIN_START.has(parent.style["justify-content"])
-      );
+      return grows(child) || MAIN_START.has(parent.style["justify-content"]);
     case "flow":
       return true;
   }
@@ -185,8 +193,9 @@ function topCandidates(element: WebElement): Candidate[] {
       .reverse()
       .map((child) => ({ child, spans: true }));
   }
+  // A narrowed child's descendants span at most its width, so nothing inside it covers the top.
   const leading = children[0];
-  return leading && reachesTop(leading, element, layout)
+  return leading && !narrowed(leading) && reachesTop(leading, element, layout)
     ? [{ child: leading, spans: spansWidth(leading, layout) }]
     : [];
 }

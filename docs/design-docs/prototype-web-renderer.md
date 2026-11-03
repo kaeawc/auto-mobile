@@ -316,7 +316,8 @@ the host, so the page's script only switches between views it was given and neve
   starts behind the status bar (a fullscreen window or a `top` sheet; a bottom sheet or floating window
   keeps the screen background). It is the innermost opaque background along the content's leading children (a top app bar). The walk
   follows a child only when its container places it at the top (a column's first child under a start
-  arrangement or growing, a box or row child aligned to the top, or one filling the height), and a
+  arrangement or growing, a box or row child aligned to the top, or one filling the height) and is not
+  narrowed by an explicit width, and a
   background counts only on a child spanning its container's width, read on that container's axes. In a
   `box` the walk samples the children that span it and reach its top, from the last painted to the first,
   and the first with an opaque top colour wins. Element opacity multiplies down the walk, so a background

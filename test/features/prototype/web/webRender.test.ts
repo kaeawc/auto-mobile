@@ -1130,12 +1130,33 @@ describe("prototype web still parity (#16382)", () => {
     expect(toHtml(screen)).not.toContain("conic-gradient");
   });
 
-  test("a seed or device scheme paints the Material 3 baseline background for the mode", () => {
+  test("a seed paints its derived background; a device source without one, the baseline", () => {
     const seeded = { ...bare, theme: { colors: { seed: "#336699" } } };
-    expect(screenOf(seeded).style["background-color"]).toBe("rgba(254,247,255,1)");
-    expect(screenOf(seeded, { mode: "dark" }).style["background-color"]).toBe("rgba(20,18,24,1)");
+    expect(screenOf(seeded).style["background-color"]).toBe("rgba(250,250,250,1)");
+    expect(screenOf(seeded, { mode: "dark" }).style["background-color"]).toBe("rgba(17,18,19,1)");
     const device = { ...bare, theme: { colors: { source: "device" } } };
     expect(screenOf(device).style["background-color"]).toBe("rgba(254,247,255,1)");
+  });
+
+  test("seed-derived roles reach node styles, under the theme's explicit overrides (#16611)", () => {
+    const spec = {
+      ...bare,
+      theme: { colors: { seed: "#6750A4", primary: "#B3261E", dark: { primary: "#F2B8B5" } } },
+      root: {
+        type: "column",
+        style: { background: "primaryContainer", border: { width: 1, color: "primary" } },
+        children: [],
+      },
+    };
+    const root = (mode: "light" | "dark") =>
+      find(
+        renderPrototypeStill(spec, { mode }).element,
+        (e) => e.attrs["data-node"] === "column",
+      )[0]!.style;
+    // The seed's dark primaryContainer is hsl(256, 0.34, 0.30), not the baseline's #4F378B.
+    expect(root("dark")["background-color"]).toBe("rgba(65,50,103,1)");
+    expect(root("dark").border).toBe("1px solid rgba(242,184,181,1)");
+    expect(root("light").border).toBe("1px solid rgba(179,38,30,1)");
   });
 
   test("a top app bar without safeAreaPadding takes no status-bar inset, as on the devices", () => {

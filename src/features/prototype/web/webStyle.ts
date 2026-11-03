@@ -183,7 +183,7 @@ function aspectRatioFill(css: Css, style: Raw, ratio: number, context: WebStyleC
   if (sized || ratio <= 0 || context.parentAxis === "row") {
     return;
   }
-  css[context.parentAxis === "column" ? "align-self" : "justify-self"] = "stretch";
+  // Sizing only: a capped width still follows the parent's authored cross-axis alignment.
   css.width = "100%";
   if (typeof style.maxHeight === "number") {
     const heightBound = style.maxHeight * ratio;

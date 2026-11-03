@@ -34,16 +34,13 @@ test("weight shares the parent's main axis", () => {
 });
 
 test("an unsized aspect ratio fills the incoming width, as Compose sizes it width-first", () => {
-  expect(nodeCss({ aspectRatio: 1.7777778 }, { ...context, parentAxis: "column" })).toMatchObject({
-    "aspect-ratio": "1.7777778",
-    "align-self": "stretch",
-    width: "100%",
-  });
-  // A box lays children out on a grid, where the width stretches through justify-self.
-  expect(nodeCss({ aspectRatio: 2 }, context)).toMatchObject({
-    "justify-self": "stretch",
-    width: "100%",
-  });
+  const column = nodeCss({ aspectRatio: 1.7777778 }, { ...context, parentAxis: "column" });
+  expect(column).toMatchObject({ "aspect-ratio": "1.7777778", width: "100%" });
+  expect(nodeCss({ aspectRatio: 2 }, context)).toMatchObject({ width: "100%" });
+  // A capped width keeps the parent's authored alignment, so the node never overrides it.
+  const capped = nodeCss({ aspectRatio: 2, maxWidth: 100 }, { ...context, parentAxis: "column" });
+  expect(capped).not.toHaveProperty("align-self");
+  expect(nodeCss({ aspectRatio: 2, maxWidth: 100 }, context)).not.toHaveProperty("justify-self");
 });
 
 test("an aspect ratio falls back to the height bound when the width would overflow it", () => {

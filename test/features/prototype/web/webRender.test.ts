@@ -580,6 +580,73 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")["max-width"]).toBe("0px");
   });
 
+  test("a row's capped aspect ratio takes its cap and the row stays within its parent (#16673)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2, maxHeight: 30 } },
+                { type: "text", text: "b", testTag: "after" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // The row wraps its children but never outgrows its parent, as a Compose Row's max does.
+    expect(row.style["max-width"]).toBe("100%");
+    expect(row.style).not.toHaveProperty("width");
+    const style = (tag: string) => byTag({ element: row }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({
+      "aspect-ratio": "2",
+      "flex-basis": "60px",
+      "flex-grow": "0",
+      "min-width": "0",
+      width: "60px",
+    });
+    // The later sibling keeps its width while the cap leaves room, and gives it up first.
+    expect(style("after")).toMatchObject({ "flex-shrink": "1000000000", "min-width": "0" });
+    expect(style("after")).not.toHaveProperty("max-width");
+  });
+
+  test("a nested capped row after an unsized aspect ratio keeps its parent's zero width (#16695)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", style: { aspectRatio: 2 } },
+                {
+                  type: "row",
+                  testTag: "nested",
+                  style: { maxWidth: 300 },
+                  children: [
+                    { type: "box", style: { aspectRatio: 1, maxWidth: 40 } },
+                    { type: "text", text: "b" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "nested",
+    )[0]!;
+    // The outer row measures it against no width, which its own bound must not widen.
+    expect(row.style["max-width"]).toBe("0px");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

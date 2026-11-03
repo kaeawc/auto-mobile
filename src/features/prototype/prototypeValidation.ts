@@ -15,7 +15,8 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypeLazyListError, prototypeLazyListLimitError } from "./prototypeLazyList";
-import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
+import { imageSlotUses, nodeImageUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
+import { chargeVideoNode } from "./prototypeMediaSchema";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
@@ -68,6 +69,7 @@ interface Context {
   effects: number;
   animatedEffects: number;
   keyframeNodes: number;
+  videoNodes: number;
   /** Current nesting per bounded reference (see `nestedReferences`). */
   nesting: Record<string, number>;
 }
@@ -155,15 +157,15 @@ function chargeNodeBudgets(
   path: string,
   context: Context,
 ): PrototypeValidationError | undefined {
-  if (node.type === "image") {
-    context.images += Math.max(1, imageSlotUses(node.asset));
-  }
+  context.images += nodeImageUses(node);
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
   }
-  const keyframeLimit = chargeKeyframeNode(node, context, contract.limits, path);
-  if (keyframeLimit) {
-    return fail(keyframeLimit.path, keyframeLimit.message);
+  const nodeLimit =
+    chargeKeyframeNode(node, context, contract.limits, path) ??
+    chargeVideoNode(node, context, path);
+  if (nodeLimit) {
+    return fail(nodeLimit.path, nodeLimit.message);
   }
   const uses = effectUses(node);
   context.effects += uses.total;
@@ -800,6 +802,7 @@ function platformArgumentError(
     effects: 0,
     animatedEffects: 0,
     keyframeNodes: 0,
+    videoNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   return walk(value, rule, path, { context, depth: 0 });
@@ -878,6 +881,7 @@ function validateValue(
     effects: 0,
     animatedEffects: 0,
     keyframeNodes: 0,
+    videoNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};

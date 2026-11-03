@@ -57,7 +57,8 @@ posture lights and how the hinge splits it.
 
 ## Watches and TVs
 
-- **Watch.** A `round` mask clips the screen with a circle; the frame has no status bar or
+- **Watch.** A Wear OS round watch has a `round` mask, which clips the screen to a circle. An
+  Apple Watch keeps the `rect` mask with its corner radius. A watch frame has no status bar or
   navigation bar. A Digital Crown or rotary bezel is frame decoration (`input: "rotary"`), not
   behaviour. A watch is `compact` and has no landscape view.
 - **TV.** A TV frame has no bezel padding beyond its stand, no status or navigation bar and
@@ -69,6 +70,24 @@ posture lights and how the hinge splits it.
 A car frame is a landscape panel with the system bars the head unit draws. A frame is enough for
 the still view; driving restrictions (#14922) are device behaviour the web page does not
 simulate, so a car frame never hides content.
+
+## Initial frames
+
+The first v2 entries match the hardware profiles AutoMobile already provisions, so a frame's
+geometry can be measured on the same emulator or simulator a session runs on.
+
+| Frame               | Platform | Form factor    | Postures (active panel)                                               | Geometry source                                             |
+| ------------------- | -------- | -------------- | --------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Pixel Fold          | Android  | foldable, book | `closed` (cover), `half_opened` (inner, `book`), `opened` (inner)     | `pixel_fold` hardware profile, the default foldable profile |
+| Flip foldable       | Android  | foldable, flip | `closed` (cover), `half_opened` (inner, `tabletop`), `opened` (inner) | the SDK's horizontal-fold foldable profile                  |
+| Wear OS small round | Android  | watch          | none                                                                  | `wearos_small_round`, the default watch profile             |
+| Apple Watch         | iOS      | watch          | none                                                                  | the simulator device type                                   |
+| Android TV 1080p    | Android  | tv             | none                                                                  | `tv_1080p`, the default TV profile                          |
+| Apple TV            | iOS      | tv             | none                                                                  | the simulator device type                                   |
+| Car 1024p landscape | Android  | automotive     | none                                                                  | `automotive_1024p_landscape`, the default car profile       |
+
+`rear_display`, `flipped` and `tent` are left out until a frame's device supports them. The
+existing phone and tablet frames stay v1 entries.
 
 ## Where geometry comes from
 

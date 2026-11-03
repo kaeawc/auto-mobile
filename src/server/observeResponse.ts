@@ -133,6 +133,22 @@ export async function withCarAppTemplates(
 }
 
 /**
+ * The extras only the `observe` tool's own result carries: device diagnostics, then the foreground
+ * app's Car App Library templates. A non-owner read of a held device makes no app provider calls.
+ */
+export async function withServedObservationExtras(
+  result: ObserveResult,
+  device: BootedDevice,
+  deviceRead: boolean,
+  dependencies: Pick<ObserveToolDependencies, "audioInputDiagnostic" | "carAppTemplates">,
+): Promise<ObserveResult> {
+  const diagnosed = await withDeviceDiagnostics(result, device, dependencies.audioInputDiagnostic);
+  return deviceRead
+    ? diagnosed
+    : await withCarAppTemplates(diagnosed, device, dependencies.carAppTemplates);
+}
+
+/**
  * An Android CtrlProxy or a connected iOS prototype agent advertising `screenshot_hide_prototype_v1`
  * (#9305). The iOS agent hides itself around the host's simulator screenshot.
  */

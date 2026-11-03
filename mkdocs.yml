@@ -102,6 +102,7 @@ markdown_extensions:
 # Author/design docs kept in the repo but intentionally off the site nav. They
 # are still built (so in-repo links resolve) but hidden from navigation.
 not_in_nav: |
+  /decisions/androidx-car-app-template-snapshots.md
   /design-docs/mcp/daemon/screen-control-mapping.md
   /design-docs/plat/android/system-tray-lookfor.md
   /design-docs/plat/android/accessibility-data-sensitive-windows.md

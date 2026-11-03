@@ -513,6 +513,35 @@ describe("prototype web still (#16346)", () => {
     expect(byTag({ element: row }, "field")[0]!.style).not.toHaveProperty("flex");
   });
 
+  test("a row's unsized aspect ratio takes the width its earlier siblings left (#16659)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "text", text: "a", testTag: "before" },
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b", testTag: "after" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // A wrap row grows to its parent, as Compose's Row reaches its max around the ratio.
+    expect(root.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({ "aspect-ratio": "2", flex: "1 1 0", "min-width": "0" });
+    expect(style("before")).not.toHaveProperty("max-width");
+    expect(style("after")["max-width"]).toBe("0px");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

@@ -2981,9 +2981,24 @@ is an integer 1..2000; oldest rows are dropped after replacement/append and befo
 limits. Missing/non-array targets and invalid writes leave input unchanged.
 
 The daemon holds the upstream connection for `via: "host"` channels (see
-[Host channel transport](#host-channel-transport)). Runtime work remains owed: the device-side
-transports, device client frame routing, routing and atomic frame writes, reconnect/backoff, send queues, counters/events, inspection, simulation and
-foreground/background/patch/reset/dismiss lifecycle. Pure TS, Kotlin and Swift rules replay shared
+[Host channel transport](#host-channel-transport)).
+
+On Android, `PrototypeChannelController` (`prototype-compose`) is the per-prototype state machine
+behind a `PrototypeChannelTransport`: OkHttp WebSocket/okhttp-sse from the device (`prototype-saved`,
+same egress policy as device requests, no redirects followed, 25 s pings) or the CtrlProxy-socket
+relay for `via: "host"`, which fails an open at once with `network` when no host is connected.
+Transport callbacks pass through one ordered inbox, and every effect reaches its sink under one lock:
+the `/platform/realtime/<channel>` snapshot, `realtime.status`/`realtime.frame` events, and route,
+callback and `statusKey` actions to apply atomically. The first matching route wins (`{event}`
+defaults to `message`); matched frames wait for the flush window and are coalesced. A frame that is
+not JSON on a json channel, or larger than the frame cap, counts in `framesDropped`. Status runs
+idle → connecting → open, then reconnecting with backoff, ending closed (or error when the last
+close carried one). Attempts reset after 5 s open. Sends wait in a 32-entry queue while
+(re)connecting, flush on open and drop on close. A patch closes removed channels and reconnects only
+changed live ones; dismiss closes every connection with 1001 and silences the sink. Runtime work
+remains owed: wiring the controller into the prototype runtime as the `realtime` module (calls,
+data writes including `upsertData`/`maxItems`), capability advertisement, foreground/background
+lifecycle, inspection and simulation. Pure TS, Kotlin and Swift rules replay shared
 backoff and coalescing vectors under `test/fixtures/prototype-spec/realtime/`. Reconnect uses
 full jitter: `floor(random * min(maxDelayMs, initialDelayMs * 2^(attempt-1)))`, with defaults of
 8 attempts, 500 ms initial delay and 30000 ms maximum delay; exhausted attempts consume no

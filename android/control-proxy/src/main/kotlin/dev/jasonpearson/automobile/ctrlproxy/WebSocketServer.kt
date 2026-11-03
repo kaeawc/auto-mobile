@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.pointer.PointerInjectionSupport
+import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeChannelTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
@@ -1313,6 +1314,10 @@ class WebSocketServer(
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     if (message.startsWith(PrototypeNetworkFrames.RESPONSE_PREFIX)) {
       options.onPrototypeResponse(message)
+      return
+    }
+    if (message.startsWith(HostPrototypeChannelTransport.FRAME_PREFIX)) {
+      options.onPrototypeChannelFrame(message)
       return
     }
     val handler = options.messageHandler

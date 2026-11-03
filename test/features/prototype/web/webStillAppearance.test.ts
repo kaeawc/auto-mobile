@@ -157,4 +157,22 @@ describe("prototype web still mode resolution (#16654)", () => {
     expect(byTag(element, "body").style["background-color"]).toBe("rgba(34,34,34,1)");
     expect(screenOf(element).style["background-color"]).toBe("rgba(17,17,17,1)");
   });
+
+  test("a repeat's template decides only through the rows it draws", () => {
+    const repeated = (items: unknown[]) => ({
+      id: "repeat",
+      root: {
+        type: "column",
+        repeat: { as: "item", items },
+        children: [text("row", { background: "#000000" })],
+      },
+    });
+    const empty = renderPrototypeStill(repeated([]), { frame: "pixel-9", mode: "light" });
+    expect(screenOf(empty.element).style["background-color"]).toBe("rgba(254,247,255,1)");
+    const drawn = renderPrototypeStill(repeated([{ id: "a" }]), {
+      frame: "pixel-9",
+      mode: "light",
+    });
+    expect(screenOf(drawn.element).style["background-color"]).toBe("rgba(0,0,0,1)");
+  });
 });

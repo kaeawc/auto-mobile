@@ -39,6 +39,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import { repeatRows } from "./webRepeat";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -99,9 +100,6 @@ export interface WebRenderKit {
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
 }
-
-/** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
-const MAX_WEB_REPEAT_ITEMS = 200;
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
 function bindBare(text: string, scope: WebRenderScope): string {
@@ -210,21 +208,6 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
 }
 
 /**
- * A repeat's rows: a literal array or a pointer into the spec's data. As on the devices, only
- * object items repeat (scalars are skipped before indices are assigned), up to the item cap.
- */
-function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
-  const itemsPath = record(repeat.items)?.path;
-  const items = Array.isArray(repeat.items)
-    ? repeat.items
-    : typeof itemsPath === "string"
-      ? resolvePrototypeDataPointer(scope.data, itemsPath)
-      : undefined;
-  const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
-  return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
-}
-
-/**
  * Lets a container decorate each child, given the child node it was drawn from. A hidden child
  * arrives as undefined, so a container that keeps a slot for every child (a carousel) can still
  * draw one; returning undefined draws nothing.
@@ -234,20 +217,14 @@ export type WebCellDecorator = (
   authored: Raw,
 ) => WebElement | undefined;
 
-export function children(
-  node: Raw,
-  scope: WebRenderScope,
-  path: string,
-  cell?: WebCellDecorator,
-): WebChild[] {
+/** The children a container draws, each in its own scope and path: a repeat's once per row. */
+export function childEntries(node: Raw, scope: WebRenderScope, path: string): WebChildEntry[] {
   const list = Array.isArray(node.children) ? node.children : [];
   const repeat = record(node.repeat);
   if (!repeat) {
-    return list.flatMap((entry, index) =>
-      renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
-    );
+    return list.map((entry, index) => ({ node: entry, scope, path: `${path}.children[${index}]` }));
   }
-  const rows = repeatRows(repeat, scope);
+  const rows = repeatRows(repeat, scope.data);
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
@@ -260,10 +237,29 @@ export function children(
       index,
     };
     const itemScope = child(scope, { instances: [...scope.instances, instance] });
-    return list.flatMap((entry, at) =>
-      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
-    );
+    return list.map((entry, at) => ({
+      node: entry,
+      scope: itemScope,
+      path: `${path}.children[${at}]`,
+    }));
   });
+}
+
+export interface WebChildEntry {
+  readonly node: unknown;
+  readonly scope: WebRenderScope;
+  readonly path: string;
+}
+
+export function children(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
+  return childEntries(node, scope, path).flatMap((entry) =>
+    renderOrSkip(entry.node, entry.scope, entry.path, cell),
+  );
 }
 
 function renderOrSkip(
@@ -327,7 +323,7 @@ const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box",
  */
 function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
   const repeat = record(raw.repeat);
-  if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope).length === 0)) {
+  if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope.data).length === 0)) {
     return [];
   }
   const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));

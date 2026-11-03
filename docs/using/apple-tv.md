@@ -15,8 +15,8 @@ AutoMobile never downloads simulator runtimes. Install one with Xcode first:
 xcodebuild -downloadPlatform tvOS
 ```
 
-`listDeviceImages` with `platform: "tvos"` and the `automobile:devices/images/tvos` resource list
-the installed tvOS runtimes and Apple TV models. A `provisionDevice` request that names a missing or
+The `automobile:devices/images/tvos` resource lists the installed tvOS runtimes, the Apple TV
+models and which runtimes each model supports, along with the configured Apple TV simulators. A `provisionDevice` request that names a missing or
 unavailable runtime fails, lists the available runtimes and repeats the install command.
 
 ## Supported tools
@@ -51,7 +51,7 @@ focus navigation.
 ## Create and start an Apple TV simulator
 
 `provisionDevice` takes the simulator's exact `name`, an optional `deviceId` (UDID), and the
-runtime and device type identifiers from `listDeviceImages`:
+runtime and device type identifiers from `automobile:devices/images/tvos`:
 
 ```json
 {
@@ -86,18 +86,27 @@ fixing the cause.
 
 ## Lifecycle
 
-| Step       | Call                                                                                 |
-| ---------- | ------------------------------------------------------------------------------------ |
-| Detect     | `listDevices` or `listDeviceImages` with `platform: "tvos"`                          |
-| Create     | `provisionDevice` with `device.platform: "tvos"`                                     |
-| Start/boot | `startDevice { platform: "tvos", name }` or `provisionDevice`                        |
-| Shut down  | `killDevice`                                                                         |
-| Delete     | `deleteDevice { target: { platform: "tvos", isVirtual: true, stableId: "<UDID>" } }` |
+| Step       | Call                                                          |
+| ---------- | ------------------------------------------------------------- |
+| Detect     | `listDevices` or `listDeviceImages` with `platform: "tvos"`   |
+| Create     | `provisionDevice` with `device.platform: "tvos"`              |
+| Start/boot | `startDevice { platform: "tvos", name }` or `provisionDevice` |
+| Shut down  | `killDevice`                                                  |
+| Delete     | `deleteDevice` (below)                                        |
 
-`deleteDevice` also takes `mode: "destroy"` and `verifyAbsence: true`. It stops a running simulator
-and releases its session first. An absent UDID returns `already_absent`; a mismatched
-`target.stableName` fails with `identity_conflict`, and an unsuccessful deletion with
-`tv_delete_failed`. Releasing the session, killing or deleting the simulator stops its runner.
+`deleteDevice` requires `mode: "destroy"` and `verifyAbsence: true`:
+
+```json
+{
+  "target": { "platform": "tvos", "isVirtual": true, "stableId": "<UDID>" },
+  "mode": "destroy",
+  "verifyAbsence": true
+}
+```
+
+It stops a running simulator and releases its session first. An absent UDID returns
+`already_absent`; a mismatched `target.stableName` fails with `identity_conflict`, and an
+unsuccessful deletion with `tv_delete_failed`. Releasing the session, killing or deleting the simulator stops its runner.
 
 Check inventory completeness before treating an empty listing as no devices, and retry a failed
 listing.

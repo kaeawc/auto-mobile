@@ -1,4 +1,5 @@
 import { record, type Raw } from "../prototypeTemplate";
+import { contentHeight } from "./webIncomingHeight";
 import { ROW_BOUND_KEY, ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
 
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
@@ -47,24 +48,6 @@ export type PrepareChild = (entry: unknown, path: string) => Raw | undefined;
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
-const side = (padding: Raw | undefined, name: string) =>
-  typeof padding?.[name] === "number" ? padding[name] : 0;
-
-/**
- * The tallest a row lets its children be, when the row authors a definite one: its dp `height`
- * or `maxHeight`, less its vertical padding. Compose's `sizeIn` then `aspectRatio` on a child
- * respects that incoming max height. Infinity when the row's height comes from elsewhere.
- */
-export function rowContentHeight(style: Raw | undefined): number {
-  const dp = record(style?.height)?.dp;
-  const bounds = [
-    typeof dp === "number" ? dp : Infinity,
-    typeof style?.maxHeight === "number" ? style.maxHeight : Infinity,
-  ];
-  const padding = record(style?.padding);
-  return Math.max(0, Math.min(...bounds) - side(padding, "top") - side(padding, "bottom"));
-}
-
 /**
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the
  * remaining width, since a wrap-sized Compose Row then reaches its max width.
@@ -76,7 +59,7 @@ export function rowFillAxes(node: Raw, path: string, prepare: PrepareChild): "wi
     node.children.some((entry, index) =>
       isUnsizedAspectRatio(
         prepare(entry, childPath(path, index)),
-        rowContentHeight(record(node.style)),
+        contentHeight(record(node.style)),
       ),
     );
   return fills ? ["width"] : [];
@@ -93,7 +76,7 @@ export function rowMeasured(node: Raw, path: string, prepare: PrepareChild): Raw
     return node;
   }
   const styled = node.children.map((entry, index) => prepare(entry, childPath(path, index)));
-  const height = rowContentHeight(record(node.style));
+  const height = contentHeight(record(node.style));
   const children = rowSequentialChildren(node.children, (_entry, index) => styled[index], height);
   if (children === node.children) {
     return node;
@@ -141,7 +124,7 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * Every hint goes through ROW_MEASURE_KEY, which no `styleWhen` can author, so a conditional
  * `maxWidth` or `weight` that rendering merges again cannot undo it.
  *
- * `rowHeight` is the row's definite content height (see rowContentHeight), which caps every
+ * `rowHeight` is the row's definite content height (see contentHeight), which caps every
  * aspect ratio in it as a `maxHeight` would.
  *
  * `prepared` resolves an entry as rendering will (bound, visible, `styleWhen` merged), or

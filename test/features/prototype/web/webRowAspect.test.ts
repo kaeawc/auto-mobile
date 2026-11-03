@@ -5,7 +5,6 @@ import {
   CAPPED_SHRINK,
   isUnsizedAspectRatio,
   LATER_SHRINK,
-  rowContentHeight,
   rowMeasured,
   rowSequentialChildren,
 } from "../../../../src/features/prototype/web/webRowAspect";
@@ -218,16 +217,6 @@ test("a conditional maxWidth or weight cannot undo the row measure (styleWhen me
   expect(nodeCss(zeroed, context)["max-width"]).toBe("0px");
   const taker = { aspectRatio: 2, [ROW_MEASURE_KEY]: { take: true }, weight: 3 };
   expect(nodeCss(taker, context)).toMatchObject({ flex: "1 1 0", "min-width": "0" });
-});
-
-test("a row's definite content height is its dp height or maxHeight less vertical padding", () => {
-  expect(rowContentHeight({ height: { dp: 20 } })).toBe(20);
-  expect(
-    rowContentHeight({ height: { dp: 40 }, maxHeight: 30, padding: { top: 4, bottom: 6 } }),
-  ).toBe(20);
-  expect(rowContentHeight({ height: { dp: 4 }, padding: { top: 4, bottom: 6 } })).toBe(0);
-  expect(rowContentHeight({ height: "fill" })).toBe(Infinity);
-  expect(rowContentHeight(undefined)).toBe(Infinity);
 });
 
 test("a row's definite height caps its aspect ratios, as the incoming max height does natively", () => {

@@ -239,3 +239,24 @@ subscription to a URI with `revision=` is never notified again.
 To compare design alternatives, show each under its own id with the same `variant` group, for
 example `variant: {group: "checkout", label: "Compact"}`. The web page of any of them offers every
 alternative in the group by its label. The device keeps showing whichever was shown last.
+
+## Embed envelope
+
+To take a prototype's spec together with what it needs from a renderer, read
+`automobile:prototype/<id>/embed` (`application/json`). It returns:
+
+```json
+{
+  "format": "automobile-prototype-embed",
+  "version": 1,
+  "requires": ["..."],
+  "spec": { "...": "..." }
+}
+```
+
+`spec` is the prototype's spec and `requires` lists the renderer capabilities it needs, as this
+server computed them. Keep the two together: a renderer that lacks a listed capability should
+refuse the spec rather than draw part of it. A `version` other than `1` is a newer format.
+
+`revision` and `variant` work as for the web page; there is no `frame`. Errors, listing and
+subscriptions also match the web page, and `_meta` reports the same fields except `frame`.

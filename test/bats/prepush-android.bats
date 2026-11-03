@@ -636,6 +636,27 @@ SCRIPT
   grep -qx -- '--no-daemon :bar:lintDebug --continue' "$invocations_file"
 }
 
+@test "prints the JAVA_HOME launcher JVM before the first Gradle call" {
+  lint_fixture
+  mkdir -p "$fixture_repo/fake-jdk/bin"
+  printf '#!/usr/bin/env bash\necho "openjdk version \\"21.0.5\\"" >&2\n' > "$fixture_repo/fake-jdk/bin/java"
+  chmod +x "$fixture_repo/fake-jdk/bin/java"
+  printf '<manifest package="test"/>\n' > android/bar/src/main/AndroidManifest.xml
+  run env JAVA_HOME="$fixture_repo/fake-jdk" ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'Gradle launcher JVM' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"Gradle launcher JVM (JAVA_HOME): $fixture_repo/fake-jdk/bin/java (openjdk version \"21.0.5\")"* ]]
+}
+
+@test "fails fast when JAVA_HOME points at a removed JDK" {
+  lint_fixture
+  printf '<manifest package="test"/>\n' > android/bar/src/main/AndroidManifest.xml
+  run env JAVA_HOME="$fixture_repo/removed-jdk" ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"JAVA_HOME=$fixture_repo/removed-jdk is not a JDK"* ]]
+  [ ! -s "$invocations_file" ]
+}
+
 @test "lint selects and deduplicates owners of unstaged resources and manifests" {
   lint_fixture
   printf '<resources><string name="x">x</string></resources>\n' > android/foo/src/main/res/values/strings.xml

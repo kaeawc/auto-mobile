@@ -6,12 +6,13 @@ import {
   MAX_MOCK_BACKEND_BYTES,
 } from "../../../src/features/prototype/prototypeMockSchema";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { SeededRandom } from "../../fakes/SeededRandom";
 
 const registry = (createRandom?: (seed: number | undefined) => SeededRandom) =>
   new PrototypeMockBackendRegistry({
     ids: new FakeIdGenerator(),
-    timer: { sleep: async () => {} },
+    timer: new FakeTimer(),
     createRandom,
   });
 
@@ -27,6 +28,27 @@ describe("PrototypeMockBackendRegistry", () => {
     r.define("shop", { collections: { items: [{ id: 1 }] } });
     expect((await get(r, "shop", "/items")).body).toEqual([{ id: 1 }]);
     expect(r.ids()).toEqual(["shop"]);
+  });
+
+  test("replacing, clearing and session end close the backend's open channels", () => {
+    const r = registry();
+    const closes: string[] = [];
+    const join = (id: string) =>
+      r
+        .get(id)!
+        .join("/r", {}, { deliver: () => {}, close: (_code, reason) => closes.push(reason) });
+    r.defineAll({ a: { rooms: [{ path: "/r" }] }, b: { rooms: [{ path: "/r" }] } });
+    join("a");
+    r.define("a", { rooms: [{ path: "/r" }] });
+    join("a");
+    join("b");
+    r.clear("a");
+    r.clearAll();
+    expect(closes).toEqual([
+      'Mock backend "a" was replaced.',
+      'Mock backend "a" was cleared.',
+      'Mock backend "b" was cleared.',
+    ]);
   });
 
   test("clear and clearAll remove backends", () => {
@@ -77,7 +99,35 @@ describe("PrototypeMockBackendRegistry", () => {
   });
 
   test.each<[string, unknown, RegExp]>([
-    ["unknown top-level key", { rooms: {} }, /rooms|Unrecognized/],
+    ["unknown top-level key", { sockets: {} }, /Unrecognized/],
+    ["rooms not an array", { rooms: {} }, /rooms/],
+    ["bad room path", { rooms: [{ path: "rooms" }] }, /rooms\.0\.path/],
+    ["unknown room key", { rooms: [{ path: "/r", fanout: true }] }, /rooms\.0/],
+    [
+      "too many rooms",
+      { rooms: Array.from({ length: 65 }, (_, i) => ({ path: `/r${i}` })) },
+      /rooms/,
+    ],
+    [
+      "timeline past the cap",
+      { rooms: [{ path: "/r", timeline: [{ afterMs: 600_001, frame: 1 }] }] },
+      /rooms\.0\.timeline\.0\.afterMs/,
+    ],
+    [
+      "broadcast for a missing collection",
+      { broadcasts: { messages: { room: "/r", frame: 1 } } },
+      /every broadcasts key must name a collection/,
+    ],
+    [
+      "broadcast on GET",
+      { collections: { m: [] }, broadcasts: { m: { room: "/r", frame: 1, on: ["GET"] } } },
+      /broadcasts\.m\.on/,
+    ],
+    [
+      "broadcast room not a path",
+      { collections: { m: [] }, broadcasts: { m: { room: "r", frame: 1 } } },
+      /broadcasts\.m\.room/,
+    ],
     ["bad collection name", { collections: { "1x": [] } }, /collection names/],
     [
       "too many collections",

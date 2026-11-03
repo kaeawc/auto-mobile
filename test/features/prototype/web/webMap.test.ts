@@ -177,6 +177,27 @@ describe("prototype web map across the 180° line (#16593)", () => {
     expect(fitFraming([], size, [[]])).toBeUndefined();
   });
 
+  test("fitting routes that only together wrap the world keeps every vertex in view (#16658)", () => {
+    const lines = [
+      [-170, 0, 170].map((lng) => mercator(0, lng)),
+      [0, 170, -20].map((lng) => mercator(0, lng)),
+    ];
+    const view = fitFraming([], size, lines)!;
+    const placed = lines.map((line) => routePercents(line, view, size).map((point) => point.left));
+    // Drawn 340° wide each and offset by 170°, the lines span 510°: framed edge to edge.
+    expect(placed[0]![0]).toBeCloseTo(10, 2);
+    expect(placed[1]![2]).toBeCloseTo(90, 2);
+    expect(placed.flat().every((left) => left >= 0 && left <= 100)).toBe(true);
+    expect(view.worldSize).toBeCloseTo((400 * 0.8) / (510 / 360), 6);
+    // Markers framed with them sit on the copy the fit placed them on.
+    const marked = fitFraming([mercator(0, 90)], size, lines)!;
+    const lefts = [
+      mapPercent(mercator(0, 90), marked, size).left,
+      ...lines.flatMap((line) => routePercents(line, marked, size).map((point) => point.left)),
+    ];
+    expect(lefts.every((left) => left >= 0 && left <= 100)).toBe(true);
+  });
+
   test("the rendered still pins and routes across 180°", () => {
     const pacific = [
       { id: "w", lat: 0, lng: 179, name: "West" },

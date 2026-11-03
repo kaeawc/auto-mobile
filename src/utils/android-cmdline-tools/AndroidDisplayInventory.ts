@@ -4,7 +4,11 @@ import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
 import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
-import { parseSurfaceFlingerDisplayIds } from "./AndroidDisplayParsers";
+import {
+  parseSurfaceFlingerDisplayIds,
+  virtualDisplayKey,
+  virtualDisplayOwnerPackage,
+} from "./AndroidDisplayParsers";
 
 interface AndroidDisplayRecord {
   key: string;
@@ -99,14 +103,60 @@ function parseDisplayType(value: string | undefined): AndroidDisplayRecord["type
   }
 }
 
-/** Overlay displays keep their whole `overlay:<n>` id; physical panels key by the bare id. */
+/**
+ * Overlay displays keep their whole `overlay:<n>` id, app-created virtual displays key as
+ * `virtual:<package>:<name>`, and physical panels key by the bare id.
+ */
 function displayRecordKey(
   type: AndroidDisplayRecord["type"] | undefined,
   uniqueId: string,
 ): string | undefined {
-  return type === "OVERLAY"
-    ? /^overlay:.+$/.exec(uniqueId)?.[0]
-    : /^(?:local|external|virtual):(.+)$/.exec(uniqueId)?.[1];
+  if (type === "OVERLAY") {
+    return /^overlay:.+$/.exec(uniqueId)?.[0];
+  }
+  return (
+    (type === "VIRTUAL" ? virtualDisplayKey(uniqueId) : undefined) ??
+    /^(?:local|external|virtual):(.+)$/.exec(uniqueId)?.[1]
+  );
+}
+
+/**
+ * Owners of AutoMobile's own virtual displays. The video server runs under `app_process` as the
+ * shell uid, so its recording display is owned by `com.android.shell`; listing it would change the
+ * inventory, and every inventory-keyed cache, each time a recording starts or stops.
+ */
+const SELF_OWNED_VIRTUAL_DISPLAY_PACKAGES: readonly string[] = ["com.android.shell"];
+const SELF_OWNED_VIRTUAL_DISPLAY_PACKAGE_PREFIX = "dev.jasonpearson.automobile";
+
+function isSelfOwnedVirtualDisplay(key: string): boolean {
+  const owner = virtualDisplayOwnerPackage(key);
+  return (
+    owner !== undefined &&
+    (SELF_OWNED_VIRTUAL_DISPLAY_PACKAGES.includes(owner) ||
+      owner === SELF_OWNED_VIRTUAL_DISPLAY_PACKAGE_PREFIX ||
+      owner.startsWith(`${SELF_OWNED_VIRTUAL_DISPLAY_PACKAGE_PREFIX}.`))
+  );
+}
+
+/**
+ * App-created virtual displays that tools may target. AutoMobile's own displays are left out, and
+ * so is any key two live displays share (one app showing two same-named displays), because a key
+ * that names two displays cannot target either.
+ */
+function addressableVirtualRecords(
+  records: readonly AndroidDisplayRecord[],
+): AndroidDisplayRecord[] {
+  const virtuals = records.filter(
+    (record) =>
+      record.type === "VIRTUAL" &&
+      record.key.startsWith("virtual:") &&
+      !isSelfOwnedVirtualDisplay(record.key),
+  );
+  const counts = new Map<string, number>();
+  for (const record of virtuals) {
+    counts.set(record.key, (counts.get(record.key) ?? 0) + 1);
+  }
+  return virtuals.filter((record) => counts.get(record.key) === 1);
 }
 
 function parseAndroidDisplayDeviceInfo(line: string): AndroidDisplayRecord | undefined {
@@ -191,19 +241,26 @@ export function parseAndroidPostures(output: string): Posture[] {
 }
 
 /**
- * Split display-service records into SurfaceFlinger-backed physical panels and overlay displays.
- * Overlay displays (`settings put global overlay_display_devices ...`) have no SurfaceFlinger
- * physical id; they are kept so tools can address them by their `overlay:<n>` key.
+ * Split display-service records into SurfaceFlinger-backed physical panels and addressable
+ * non-panel displays. Overlay displays (`settings put global overlay_display_devices ...`) and
+ * app-created virtual displays (`DisplayManager.createVirtualDisplay`) have no SurfaceFlinger
+ * physical id; they are kept so tools can address them by their `overlay:<n>` or
+ * `virtual:<package>:<name>` key.
  */
 function partitionDisplayRecords(
   physicalIdsOutput: string,
   displayDeviceInfosOutput: string,
-): { physical: AndroidDisplayRecord[]; overlays: AndroidDisplayRecord[] } {
+): {
+  physical: AndroidDisplayRecord[];
+  overlays: AndroidDisplayRecord[];
+  virtuals: AndroidDisplayRecord[];
+} {
   const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
   const records = parseAndroidDisplayDeviceInfos(displayDeviceInfosOutput);
   return {
     physical: records.filter((record) => record.type !== "OVERLAY" && ids.has(record.key)),
     overlays: records.filter((record) => record.type === "OVERLAY"),
+    virtuals: addressableVirtualRecords(records),
   };
 }
 
@@ -213,13 +270,14 @@ export function parseAndroidDeviceDisplays(
   displayDeviceInfosOutput: string,
   statesOutput: string,
 ): DeviceDisplays | undefined {
-  const { physical: records, overlays } = partitionDisplayRecords(
-    physicalIdsOutput,
-    displayDeviceInfosOutput,
-  );
-  // Single-screen devices without an overlay display retain their pre-existing inventory JSON
-  // shape; overlays alone (no readable physical panel) cannot establish an inventory.
-  if (records.length === 0 || records.length + overlays.length < 2) {
+  const {
+    physical: records,
+    overlays,
+    virtuals,
+  } = partitionDisplayRecords(physicalIdsOutput, displayDeviceInfosOutput);
+  // Single-screen devices without an overlay or virtual display retain their pre-existing
+  // inventory JSON shape; those alone (no readable physical panel) cannot establish an inventory.
+  if (records.length === 0 || records.length + overlays.length + virtuals.length < 2) {
     return undefined;
   }
   const internal = records.filter((record) => record.type === "INTERNAL");
@@ -236,13 +294,17 @@ export function parseAndroidDeviceDisplays(
     }
     return { key: record.key, role, sizePx: record.sizePx };
   });
-  // Physical panels come first so inventory-order fallbacks never land on an overlay.
-  const overlayPanels: DisplayPanel[] = overlays.map((record) => ({
+  // Physical panels come first so inventory-order fallbacks never land on an overlay or virtual
+  // display.
+  const nonPanel = (role: PanelRole) => (record: AndroidDisplayRecord) => ({
     key: record.key,
-    role: "overlay",
+    role,
     sizePx: record.sizePx,
-  }));
-  return { panels: [...panels, ...overlayPanels], postures: parseAndroidPostures(statesOutput) };
+  });
+  return {
+    panels: [...panels, ...overlays.map(nonPanel("overlay")), ...virtuals.map(nonPanel("virtual"))],
+    postures: parseAndroidPostures(statesOutput),
+  };
 }
 
 /** Distinguish a proven single panel from a failed physical-display join. */
@@ -251,14 +313,15 @@ export function parseAndroidDeviceDisplayOutcome(
   displayDeviceInfosOutput: string,
   statesOutput: string,
 ): DisplayInventoryOutcome {
-  const { physical: matched, overlays } = partitionDisplayRecords(
-    physicalIdsOutput,
-    displayDeviceInfosOutput,
-  );
+  const {
+    physical: matched,
+    overlays,
+    virtuals,
+  } = partitionDisplayRecords(physicalIdsOutput, displayDeviceInfosOutput);
   if (matched.length === 0) {
     return { kind: "unreadable", reason: "no matched physical display records" };
   }
-  if (matched.length === 1 && overlays.length === 0) {
+  if (matched.length === 1 && overlays.length === 0 && virtuals.length === 0) {
     return { kind: "single" };
   }
   // The existing parser owns panel roles and posture extraction.

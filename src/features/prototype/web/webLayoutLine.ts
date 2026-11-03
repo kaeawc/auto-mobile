@@ -44,6 +44,10 @@ function layoutOf(element: WebElement): Layout {
   return "flow";
 }
 
+/** Whether a flex line runs from its main-end (`row-reverse` or `column-reverse`). */
+const reversed = (element: WebElement): boolean =>
+  element.style["flex-direction"]?.trim().endsWith("-reverse") === true;
+
 /** Whether a child leaves the flow (absolute or fixed) and is placed against its container. */
 export const outOfFlow = (child: WebElement): boolean =>
   child.style.position === "absolute" || child.style.position === "fixed";
@@ -398,6 +402,41 @@ function crossPlacement(child: WebElement, main: Axis, mainSize: Len, box: Conta
   return [alignOffset(align, box.content[cross], size), size];
 }
 
+/** The container-side keywords a reversed line swaps so they stay put once it is mirrored. */
+const SIDE_SWAP: Readonly<Record<string, string>> = {
+  start: "end",
+  end: "start",
+  left: "right",
+  right: "left",
+};
+
+/**
+ * `justify-content` as an offset from the line's main-start. `start`, `end`, `left` and `right`
+ * name the container's own sides, so in a reversed line they swap to stay put once the line is
+ * mirrored; `flex-start`, `flex-end` and the `space-*` arrangements follow the line. `left` and
+ * `right` mean `start` on a column, as CSS has them off the inline axis.
+ */
+function lineJustify(
+  justify: string | undefined,
+  main: Axis,
+  reverse: boolean,
+): string | undefined {
+  const physical =
+    main === "height" && (justify === "left" || justify === "right") ? "start" : justify;
+  if (!reverse) {
+    return physical;
+  }
+  return physical === undefined ? undefined : (SIDE_SWAP[physical] ?? physical);
+}
+
+/**
+ * A main-axis position from an offset along the line. A reversed line runs from its main-end,
+ * so an item's offset is measured back from the end of the line's extent.
+ */
+function mainPosition(start: Len, extent: Len, offset: Len, size: Len, reverse: boolean): Len {
+  return reverse ? add(start, sub(extent, add(offset, size))) : add(start, offset);
+}
+
 /** A flex line: items grow into the free space, then the arrangement places them. */
 function placeLine(children: readonly WebChild[], main: Axis, box: Container): PlacedChild[] {
   const cross = crossOf(main);
@@ -411,14 +450,24 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   // A container sized by its content hugs it, leaving no free space.
   const free = room === undefined ? 0 : sub(room, used);
   const { sizes, remaining } = grownSizes(items, free);
-  const [lead, between] = arrangement(box.parent.style["justify-content"], remaining, items.length);
+  const reverse = reversed(box.parent);
+  const justify = lineJustify(box.parent.style["justify-content"], main, reverse);
+  const [lead, between] = arrangement(justify, remaining, items.length);
+  // A container sized by its content ends where its items do.
+  const extent =
+    room ??
+    sizes.reduce<Len>((total, size) => add(total, size), gap * Math.max(0, items.length - 1));
+  const lineStart = startOf(box.content, main);
   const placed: PlacedChild[] = [];
-  let cursor = add(startOf(box.content, main), lead);
+  let cursor: Len = lead;
   for (const [index, item] of items.entries()) {
     const size = sizes[index];
     if (item.element) {
       const [offset, crossSize] = crossPlacement(item.element, main, size, box);
-      const position: [Len, Len] = [cursor, add(startOf(box.content, cross), offset)];
+      const position: [Len, Len] = [
+        mainPosition(lineStart, extent, cursor, size, reverse),
+        add(startOf(box.content, cross), offset),
+      ];
       const rect = oriented(main, position, [size, crossSize]);
       placed.push({
         element: item.element,

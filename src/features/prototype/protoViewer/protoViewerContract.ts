@@ -78,6 +78,28 @@ export function protoViewerMcpRoot(userId: number): string {
   return `${storage}/Android/data/${PROTOVIEWER_PACKAGE}/files/mcp`;
 }
 
+/**
+ * What the app says it can render (#14156): written atomically by the app as `mcp/capabilities.json`
+ * whenever it prepares its MCP folders (every app start and every PREPARE). The host reads it before
+ * a save, so a spec needing a capability the installed build lacks fails before anything is pushed.
+ */
+export const PROTOVIEWER_CAPABILITIES_FILE = "capabilities.json";
+
+export function protoViewerCapabilitiesPath(userId: number): string {
+  return `${protoViewerMcpRoot(userId)}/${PROTOVIEWER_CAPABILITIES_FILE}`;
+}
+
+// Unknown keys are stripped, so a newer app may describe itself further without breaking this host.
+export const protoViewerCapabilitiesSchema = z.object({
+  versionCode: z.number().int().nonnegative(),
+  versionName: z.string().max(64).optional(),
+  capabilities: z.array(z.string().max(128)).max(1024),
+});
+export type ProtoViewerCapabilitiesFile = z.infer<typeof protoViewerCapabilitiesSchema>;
+
+/** Store page for an update hint; the package name is fixed, so the link is stable. */
+export const PROTOVIEWER_PLAY_STORE_URL = `https://play.google.com/store/apps/details?id=${PROTOVIEWER_PACKAGE}`;
+
 export function protoViewerInboxDir(userId: number): string {
   return `${protoViewerMcpRoot(userId)}/inbox`;
 }

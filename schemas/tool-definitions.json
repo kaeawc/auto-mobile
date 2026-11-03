@@ -39127,6 +39127,27 @@
           "required": ["app", "libraryId", "label"],
           "additionalProperties": false
         },
+        "update": {
+          "description": "save with errorCode unsupported_capability: the installed ProtoViewer lacks capabilities the spec needs, so nothing was pushed. Update ProtoViewer and save again.",
+          "type": "object",
+          "properties": {
+            "missingCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "installedVersion": {
+              "type": "string"
+            },
+            "url": {
+              "description": "Where to get a newer ProtoViewer.",
+              "type": "string"
+            }
+          },
+          "required": ["missingCapabilities"],
+          "additionalProperties": false
+        },
         "savedPrototypes": {
           "type": "array",
           "items": {

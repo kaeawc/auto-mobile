@@ -18,7 +18,11 @@ import {
   PROTOVIEWER_MCP_OPEN_ACTION,
   PROTOVIEWER_MCP_PREPARE_ACTION,
   PROTOVIEWER_PACKAGE,
+  PROTOVIEWER_PLAY_STORE_URL,
   PROTOVIEWER_REQUEST_ID,
+  protoViewerCapabilitiesPath,
+  protoViewerCapabilitiesSchema,
+  type ProtoViewerCapabilitiesFile,
   protoViewerInboxDir,
   protoViewerInboxPath,
   protoViewerMcpRoot,
@@ -31,10 +35,13 @@ import { ProtoViewerEntryPointMissingError } from "./ProtoViewerEntryPointMissin
 import { ProtoViewerStorageError } from "./ProtoViewerStorageError";
 
 import {
+  type ProtoViewerCapabilityOptions,
+  type ProtoViewerCapabilityReport,
   type ProtoViewerDevice,
   type ProtoViewerTempFiles,
   PROTOVIEWER_CLEANUP_TIMEOUT_MS,
 } from "./protoViewerDevice";
+import { getAndroidAppMetadataFromAdb } from "../../observe/GetAppMetadata";
 import { pollProtoViewerResult } from "./pollProtoViewerResult";
 
 /** The app only creates three folders; a longer wait means it cannot (shell-owned folders). */
@@ -74,6 +81,76 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     });
     this.userId = installed ? userId : undefined;
     return installed;
+  }
+
+  /**
+   * Reads the report the app publishes in `mcp/capabilities.json` (#14156). The app rewrites it on
+   * every start and PREPARE, so a report for another versionCode (an update the app has not run
+   * since) or a refresh request sends PREPARE first. A missing report while the folders were already
+   * there means a build from before the handshake: undefined, without another round trip.
+   */
+  async capabilities({
+    timeoutMs,
+    refresh,
+    signal,
+  }: ProtoViewerCapabilityOptions): Promise<ProtoViewerCapabilityReport | undefined> {
+    const userId = await this.requireUser(signal);
+    await this.ensureStorage(userId, timeoutMs, signal);
+    const installed = await this.installedVersionCode(signal);
+    let published = await this.readCapabilities(userId, signal);
+    const stale =
+      published !== undefined && installed !== undefined && published.versionCode !== installed;
+    if (refresh || stale) {
+      await this.prepare(userId, timeoutMs, signal);
+      published = await this.readCapabilities(userId, signal);
+    }
+    if (
+      published === undefined ||
+      (installed !== undefined && published.versionCode !== installed)
+    ) {
+      return undefined;
+    }
+    return {
+      ...(published.versionName ? { version: published.versionName } : {}),
+      capabilities: new Set(published.capabilities),
+      updateUrl: PROTOVIEWER_PLAY_STORE_URL,
+    };
+  }
+
+  /** Undefined when dumpsys does not say; the report is then taken as is. */
+  private async installedVersionCode(signal?: AbortSignal): Promise<number | undefined> {
+    const metadata = await getAndroidAppMetadataFromAdb(this.deps.adb, PROTOVIEWER_PACKAGE, {
+      signal,
+      optional: true,
+    });
+    const code = metadata?.buildNumber ? Number(metadata.buildNumber) : Number.NaN;
+    return Number.isSafeInteger(code) ? code : undefined;
+  }
+
+  private async readCapabilities(
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<ProtoViewerCapabilitiesFile | undefined> {
+    const path = shellQuote(protoViewerCapabilitiesPath(userId));
+    // `if` keeps the exit status 0 when the file is missing (a bare cat exits 1, #15174).
+    const text = (await this.shell(`if [ -f ${path} ]; then cat ${path}; fi`, signal)).trim();
+    if (text === "") {
+      return undefined;
+    }
+    let parsed: ReturnType<typeof protoViewerCapabilitiesSchema.safeParse>;
+    try {
+      parsed = protoViewerCapabilitiesSchema.safeParse(JSON.parse(text));
+    } catch (error) {
+      logger.warn(`[protoviewer] unreadable capabilities report: ${errorMessage(error)}`);
+      return undefined;
+    }
+    if (!parsed.success) {
+      logger.warn(
+        `[protoviewer] capabilities report has an unexpected shape: ${parsed.error.message}`,
+      );
+      return undefined;
+    }
+    return parsed.data;
   }
 
   async importBundle(
@@ -180,6 +257,16 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     // A folder an earlier adb session made is shell-owned and unusable to the app; the shell can
     // remove what it owns, after which the app creates it.
     await this.removeShellOwnedFolders(userId, signal);
+    await this.prepare(userId, timeoutMs, signal);
+    if (!(await this.storageReady(userId, signal))) {
+      throw new ProtoViewerStorageError(
+        "ProtoViewer reported its inbox ready, but the folders are not there.",
+      );
+    }
+  }
+
+  /** PREPARE: the app creates its folders and republishes its capabilities report. */
+  private async prepare(userId: number, timeoutMs: number, signal?: AbortSignal): Promise<void> {
     const request = this.requestId();
     try {
       const prepared = await this.exchange(userId, request, PROTOVIEWER_MCP_PREPARE_ACTION, {
@@ -200,11 +287,6 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       throw new ProtoViewerStorageError(
         `ProtoViewer could not prepare its inbox (${errorMessage(error)}).`,
         { cause: error },
-      );
-    }
-    if (!(await this.storageReady(userId, signal))) {
-      throw new ProtoViewerStorageError(
-        "ProtoViewer reported its inbox ready, but the folders are not there.",
       );
     }
   }

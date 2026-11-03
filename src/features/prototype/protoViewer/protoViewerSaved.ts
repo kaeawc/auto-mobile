@@ -11,11 +11,14 @@ import type { PrototypeSpec } from "../prototypeSpec";
 import type { DeviceDisplays } from "../../../models/DisplayPanel";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { requiredPrototypeCapabilities } from "../prototypeCapabilityGates";
 import {
   PROTOVIEWER_DEFAULT_TIMEOUT_MS,
   ProtoViewerEntryPointMissingError,
   ProtoViewerInboxUnsupportedError,
   ProtoViewerStorageError,
+  type ProtoViewerCapabilityOptions,
+  type ProtoViewerCapabilityReport,
   type ProtoViewerDevice,
 } from "./protoViewerDevice";
 import { protoViewerDisplayFor, type ProtoViewerDisplay } from "./protoViewerDisplay";
@@ -40,12 +43,20 @@ export interface ProtoViewerEntry {
 
 export type ProtoViewerErrorCode = SavedPrototypeErrorCode | "unsupported_capability";
 
+/** Why a save was refused before anything was pushed: the installed ProtoViewer is too old. */
+export interface ProtoViewerUpdateHint {
+  missingCapabilities: string[];
+  installedVersion?: string;
+  url?: string;
+}
+
 export interface ProtoViewerOutput {
   success: boolean;
   error?: string;
   errorCode?: ProtoViewerErrorCode;
   viewer?: ProtoViewerEntry;
   warning?: string;
+  update?: ProtoViewerUpdateHint;
 }
 
 export interface ProtoViewerInput {
@@ -146,14 +157,13 @@ async function saveInProtoViewer(
   if ("failure" in bundle) {
     return bundle.failure;
   }
+  const timeoutMs = args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS;
+  const gate = await capabilityGate(spec, deps.device, timeoutMs, signal);
+  if (gate !== undefined) {
+    return gate === UNREACHABLE ? undefined : gate;
+  }
   return await deviceCall(
-    () =>
-      deps.device.importBundle(
-        bundle.bytes,
-        label.label,
-        args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS,
-        signal,
-      ),
+    () => deps.device.importBundle(bundle.bytes, label.label, timeoutMs, signal),
     (error) => {
       // An absent entry point or unusable app storage means nothing was imported; retain the
       // platform save path (including Android shell-owned storage, #15174).
@@ -163,6 +173,88 @@ async function saveInProtoViewer(
     deps.displays,
     args.display,
   );
+}
+
+const UNREACHABLE = Symbol("unreachable");
+
+/**
+ * The capability handshake (#14156): before pushing, compare what the spec needs with what the
+ * installed build reports. A refusal is re-checked once against a refreshed report, so a stale one
+ * (a debug rebuild keeps versionCode 1) never blocks a build that can show the spec. No report, or a
+ * failed read, leaves the decision to the app's own import gate.
+ */
+async function capabilityGate(
+  spec: PrototypeSpec,
+  device: ProtoViewerDevice,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ProtoViewerOutput | typeof UNREACHABLE | undefined> {
+  const required = requiredPrototypeCapabilities(spec);
+  if (required.length === 0) {
+    return undefined;
+  }
+  let report = await readCapabilities(device, { timeoutMs, signal });
+  let missing = missingCapabilities(required, report);
+  if (missing.length > 0 && report !== UNREACHABLE) {
+    report = await readCapabilities(device, { timeoutMs, refresh: true, signal });
+    missing = missingCapabilities(required, report);
+  }
+  if (report === UNREACHABLE) {
+    return UNREACHABLE;
+  }
+  return report === undefined || missing.length === 0 ? undefined : updateFailure(report, missing);
+}
+
+async function readCapabilities(
+  device: ProtoViewerDevice,
+  options: ProtoViewerCapabilityOptions,
+): Promise<ProtoViewerCapabilityReport | typeof UNREACHABLE | undefined> {
+  try {
+    return await device.capabilities(options);
+  } catch (error) {
+    if (options.signal?.aborted) {
+      throw error;
+    }
+    if (
+      error instanceof ProtoViewerEntryPointMissingError ||
+      error instanceof ProtoViewerStorageError
+    ) {
+      // The import would fail the same way: keep the platform save path, as the import does.
+      logger.warn(`[protoviewer] ${error.message} Keeping the platform save path.`);
+      return UNREACHABLE;
+    }
+    logger.warn(
+      `[protoviewer] could not read ProtoViewer's capabilities, leaving the check to the app: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
+}
+
+function missingCapabilities(
+  required: readonly string[],
+  report: ProtoViewerCapabilityReport | typeof UNREACHABLE | undefined,
+): string[] {
+  if (report === undefined || report === UNREACHABLE) {
+    return [];
+  }
+  return required.filter((capability) => !report.capabilities.has(capability));
+}
+
+function updateFailure(report: ProtoViewerCapabilityReport, missing: string[]): ProtoViewerOutput {
+  const installed = report.version === undefined ? "" : ` (${report.version})`;
+  const where = report.updateUrl === undefined ? "" : ` from ${report.updateUrl}`;
+  return {
+    ...failure(
+      "unsupported_capability",
+      `The installed ProtoViewer${installed} cannot show this prototype: it lacks ${missing.join(", ")}. Update ProtoViewer${where} and save again. Nothing was saved.`,
+    ),
+    update: {
+      missingCapabilities: missing,
+      ...(report.version === undefined ? {} : { installedVersion: report.version }),
+      ...(report.updateUrl === undefined ? {} : { url: report.updateUrl }),
+    },
+  };
 }
 
 /** The caller's label, checked with the app's rule, or one derived from the spec id. */

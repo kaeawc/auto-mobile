@@ -152,16 +152,29 @@ describe("encodePrototypeWebImages", () => {
     ).toEqual([]);
   });
 
-  test("stops once the encoded images alone fill the page", async () => {
-    const assets = source(["a", "b", "c"]);
+  test("skips only an image whose data URI alone exceeds the page, then keeps going", async () => {
+    const assets = source(["big", "small"]);
+    const sized: PrototypeWebImageEncoder = {
+      encode: async (bytes) => ({
+        bytes: new Uint8Array(bytes.length === 2 ? 300 : 30),
+        width: 4,
+        height: 3,
+      }),
+    };
+    const bigFirst: PrototypeWebAssetSource = {
+      get: async (id) =>
+        (await assets.get(id)) && {
+          mimeType: "image/png",
+          bytes: id === "big" ? Uint8Array.of(1, 2) : Uint8Array.of(1),
+        },
+    };
     const images = await encodePrototypeWebImages(
-      ["a", "b", "c"].map((id) => ({ id, boxes: [] })),
-      assets,
-      encoder(60),
+      ["big", "small"].map((id) => ({ id, boxes: [] })),
+      bigFirst,
+      sized,
       100,
     );
-    expect(images.map((image) => image.id)).toEqual(["a", "b"]);
-    expect(assets.reads).toEqual(["a", "b"]);
+    expect(images.map((image) => image.id)).toEqual(["small"]);
   });
 });
 
@@ -175,6 +188,24 @@ describe("buildPrototypeWebPageWithImages", () => {
     );
     expect(built.inlinedImages).toEqual(["a", "b"]);
     expect(encode.boxes).toEqual([[{ height: 525, cover: true }], [{ height: 525, cover: true }]]);
+  });
+
+  test("keeps the placeholder page when image markup alone overflows the budget", async () => {
+    const input = page([feed("a", "b")]);
+    const placeholders = buildPrototypeWebPage(input);
+    // Room for the placeholder page and its shell's history list, not for four image views'
+    // layers (each several hundred bytes).
+    const built = await buildPrototypeWebPageWithImages(
+      { ...input, maxBytes: Buffer.byteLength(placeholders.html) + 200 },
+      source(["a", "b"]),
+      encoder(3),
+    );
+    expect(built.html).toBe(placeholders.html);
+    expect(built.inlinedImages).toEqual([]);
+    expect(built.unsupportedNodes.map((node) => node.reason)).toEqual([
+      "assetOverBudget",
+      "assetOverBudget",
+    ]);
   });
 
   test("a page that draws no image is built once, without asking for bytes", async () => {

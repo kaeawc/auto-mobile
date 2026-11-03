@@ -1,3 +1,4 @@
+import { ActionableError } from "../../../models";
 import { errorMessage } from "../../../models/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { loadSharp, type SharpFactory } from "../../../utils/image/loadSharp";
@@ -24,7 +25,7 @@ export interface PrototypeWebImageEncoder {
 }
 
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-/** Base64 grows bytes by 4/3; an asset whose data URI alone exceeds the page cannot fit. */
+/** Base64 grows bytes by 4/3; an image whose data URI alone exceeds the page cannot fit. */
 const base64Bytes = (bytes: number) => Math.ceil(bytes / 3) * 4;
 export const PROTOTYPE_WEB_IMAGE_WEBP_QUALITY = 80;
 
@@ -51,9 +52,9 @@ export class SharpPrototypeWebImageEncoder implements PrototypeWebImageEncoder {
 }
 
 /**
- * Encodes the requested assets in order, skipping one the host has no image bytes for or cannot
- * decode, and stopping once the encoded total alone would fill the page, since the page could not
- * inline any more.
+ * Encodes the requested assets in order, skipping one the host has no image bytes for, cannot
+ * decode, or whose data URI alone exceeds the page, since the page could never inline it. The rest
+ * are all kept: the page's budget, not the encoded total, decides which fit.
  */
 export async function encodePrototypeWebImages(
   requests: readonly PrototypeWebImageRequest[],
@@ -62,19 +63,16 @@ export async function encodePrototypeWebImages(
   maxBytes = MAX_PROTOTYPE_WEB_PAGE_BYTES,
 ): Promise<PrototypeWebImage[]> {
   const images: PrototypeWebImage[] = [];
-  let total = 0;
   for (const request of requests) {
-    if (total >= maxBytes) {
-      break;
-    }
     const asset = await source.get(request.id);
     if (!asset || !IMAGE_MIME_TYPES.has(asset.mimeType)) {
       continue;
     }
     try {
       const encoded = await encoder.encode(asset.bytes, request.boxes);
-      images.push({ id: request.id, ...encoded });
-      total += base64Bytes(encoded.bytes.byteLength);
+      if (base64Bytes(encoded.bytes.byteLength) <= maxBytes) {
+        images.push({ id: request.id, ...encoded });
+      }
     } catch (error) {
       // The page still renders: this asset keeps its placeholder with reason `assetNotInlined`.
       logger.warn(
@@ -89,7 +87,9 @@ export async function encodePrototypeWebImages(
 /**
  * The page with its assets inlined: one build finds what the views draw and where, the assets are
  * encoded at the largest size the frame draws them, and a second build inlines them while the
- * page budget allows. Without a drawn asset the host has bytes for, it is the first build.
+ * page budget allows. Without a drawn asset the host has bytes for, it is the first build. An
+ * image draws more markup than a placeholder, so when that markup alone pushes the always-kept
+ * views over the budget, the placeholder page stands, its images reported `assetOverBudget`.
  */
 export async function buildPrototypeWebPageWithImages(
   input: PrototypeWebPageInput,
@@ -106,5 +106,27 @@ export async function buildPrototypeWebPageWithImages(
     encoder,
     input.maxBytes,
   );
-  return images.length === 0 ? first : buildPrototypeWebPage({ ...input, images });
+  if (images.length === 0) {
+    return first;
+  }
+  try {
+    return buildPrototypeWebPage({ ...input, images });
+  } catch (error) {
+    if (!(error instanceof ActionableError)) {
+      throw error;
+    }
+    // The first build fit, so only the image layers' markup overflowed: keep the placeholders.
+    logger.debug(
+      `[PROTOTYPE] Web page images do not fit; keeping placeholders: ${errorMessage(error)}`,
+    );
+    const encoded = new Set(images.map((image) => image.id));
+    return {
+      ...first,
+      unsupportedNodes: first.unsupportedNodes.map((node) =>
+        node.asset !== undefined && encoded.has(node.asset)
+          ? { ...node, reason: "assetOverBudget" as const }
+          : node,
+      ),
+    };
+  }
 }

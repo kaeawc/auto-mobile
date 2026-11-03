@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { PrototypeSpecRevisions } from "../../../../src/features/prototype/prototypeSpecRevisions";
-import { readPrototypeWebResource } from "../../../../src/features/prototype/web/prototypeWebResource";
+import {
+  readPrototypeWebResource,
+  type PrototypeWebImageSources,
+} from "../../../../src/features/prototype/web/prototypeWebResource";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const spec = (id: string, text: string) => ({
@@ -85,5 +88,24 @@ describe("readPrototypeWebResource", () => {
     const b = await readPrototypeWebResource(revisions(), { id: "checkout" }, "v");
     expect(a.html).toBe(b.html);
     expect(a.meta.sha256).toBe(b.meta.sha256);
+  });
+
+  test("reports the revisions it rendered when a show lands while images encode", async () => {
+    const store = revisions();
+    const image = { id: "checkout", root: { type: "image", asset: "hero" } };
+    store.recordShow("checkout", { spec: image });
+    const images: PrototypeWebImageSources = {
+      assets: () => ({
+        // A show lands while the page waits for asset bytes.
+        get: async () => {
+          store.recordShow("checkout", { spec: spec("checkout", "later") });
+          return undefined;
+        },
+      }),
+      encoder: { encode: async () => ({ bytes: new Uint8Array(0), width: 1, height: 1 }) },
+    };
+    const web = await readPrototypeWebResource(store, { id: "checkout" }, "v", images);
+    expect(web.meta.revisions).toEqual([1, 2, 3]);
+    expect(store.history("checkout").map((entry) => entry.revision)).toEqual([1, 2, 3, 4]);
   });
 });

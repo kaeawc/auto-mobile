@@ -116,6 +116,9 @@ export async function readPrototypeWebResource(
   const platform = shown.revision.platform ?? "android";
   const frame = deviceFrameOrThrow(query.frame ?? defaultDeviceFrameId(platform)).id;
   const group = source.revision(query.id).variant?.group;
+  // Read before awaiting the encoder: a show landing meanwhile, or the byte cap evicting this id,
+  // must not change the metadata of the page already being built.
+  const revisions = source.history(shown.id).map((entry) => entry.revision);
   const page = await buildPrototypeWebPageWithImages(
     {
       title: group ?? query.id,
@@ -135,7 +138,7 @@ export async function readPrototypeWebResource(
     meta: {
       revision: shown.revision.revision,
       ...(deviceRevision === undefined ? {} : { deviceRevision }),
-      revisions: source.history(shown.id).map((entry) => entry.revision),
+      revisions,
       variants: variantIds,
       frame: page.frame,
       sha256: page.sha256,

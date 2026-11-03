@@ -123,10 +123,14 @@ it inlined per variant.
   `PrototypeWebAssetSource`, re-encodes it with sharp (`loadSharp`) to WebP quality 80 at the
   largest size the frame draws it, and builds again with the encoded images. A box is the frame
   density times the node's fixed dp size; `crop` and `fill` must cover their fixed axes, `fit` and
-  unfixed axes fit inside the screen's long side; the image is never enlarged. Encoding stops once
-  the encoded total alone would fill the page. A missing, non-image or undecodable asset is skipped
-  (an undecodable one is logged). The resource reads assets from the host asset cache of each device currently
+  unfixed axes fit inside the screen's long side; the image is never enlarged. A missing, non-image
+  or undecodable asset (logged), or one whose data URI alone exceeds the page, is skipped; the page
+  budget decides which of the rest fit. An image draws more markup than a placeholder, so when the
+  second build's always-kept views no longer fit, the first build stands, its images reported
+  `assetOverBudget`. The resource reads assets from the host asset cache of each device currently
   showing one of the variants (Android caches its uploads); without one, images stay placeholders.
+  It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
+  not change the page's `_meta`.
 - **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
   `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio) and `-on` (1); views only
   reference the slot, so view bytes do not depend on which images fit and every orientation and

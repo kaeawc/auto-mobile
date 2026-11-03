@@ -1,8 +1,5 @@
-import {
-  adoptRestartResumeTargets,
-  internalMcpSessionId,
-  internalOneShotCli,
-} from "./internalToolParams";
+import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
+import { adoptRestartResumeTargets, internalOneShotCli } from "./internalToolParams";
 import { holderOf } from "../daemon/deviceBinding";
 import { currentTaskContext } from "./tasks/runAsTask";
 import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
@@ -306,7 +303,7 @@ export function devicesHeldByOtherSessions(
   if (!pool) {
     return undefined;
   }
-  const mcpSessionId = internalOneShotCli(args) ? undefined : internalMcpSessionId(args);
+  const mcpSessionId = internalOneShotCli(args) ? undefined : currentAutolockMcpSessionId();
   const sessionManager = daemonState.getSessionManager();
   const callerMayReuse = (deviceId: string, holderSessionId: string): boolean => {
     if (mcpSessionId === undefined) {

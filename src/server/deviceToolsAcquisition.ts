@@ -658,7 +658,6 @@ async function getAndroidHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  const { __mcpSessionId } = rawArgs;
   const oneShotCli = oneShotCliMarker(rawArgs);
   const presentationOrder = acceptancePresentationOrder(rawArgs);
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
@@ -667,7 +666,6 @@ async function getAndroidHandler(
   const automationReadyTimeoutMs =
     args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
   const startedAtMs = getDeviceToolsDependencies().timer.now();
-  const mcpSessionId = typeof __mcpSessionId === "string" ? __mcpSessionId : undefined;
   // Prefer the AVD name (exact virtual-device identity); otherwise target the
   // booted serial by deviceId (#5870). A paired AVD name and serial keeps
   // lifecycle coordination by stable name while directing boot to the
@@ -684,7 +682,6 @@ async function getAndroidHandler(
         ...(presentationOrder !== undefined ? { presentationOrder } : {}),
         preferRunning: true,
         createIfMissing: false,
-        __mcpSessionId: mcpSessionId,
         __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
         ...oneShotCli,
       }
@@ -694,7 +691,6 @@ async function getAndroidHandler(
         deviceId: args.deviceId,
         preferRunning: true,
         createIfMissing: false,
-        __mcpSessionId: mcpSessionId,
         __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
         ...oneShotCli,
       };
@@ -740,7 +736,6 @@ async function getAppleHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  const { __mcpSessionId } = rawArgs;
   const presentationOrder = acceptancePresentationOrder(rawArgs);
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
   const args = getAppleSchema.parse(externalArgs);
@@ -763,7 +758,6 @@ async function getAppleHandler(
             preferRunning: true,
             ...(presentationOrder !== undefined ? { presentationOrder } : {}),
             createIfMissing: false,
-            __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
             __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
             ...oneShotCliMarker(rawArgs),
           },

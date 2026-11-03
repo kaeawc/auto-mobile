@@ -26,6 +26,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { asMcpConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -259,10 +260,9 @@ describe.each([
       signal?: AbortSignal,
       client = "mcp-client",
     ) =>
-      ToolRegistry.getTool(tool)!.handler(
-        { ...args, __mcpSessionId: client },
-        undefined,
-        signal,
+      // Run as MCP ingress does: under the caller's connection (#15663).
+      asMcpConnection(client, () =>
+        ToolRegistry.getTool(tool)!.handler(args, undefined, signal),
       ) as Promise<{ content: Array<{ text: string }> }>;
 
     const acquire = (

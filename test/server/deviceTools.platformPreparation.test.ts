@@ -34,6 +34,7 @@ import type {
   VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { toolJson } from "../helpers/toolResponse";
+import { withWireConnection } from "../helpers/mcpConnection";
 
 isolateToolRegistry();
 
@@ -127,7 +128,8 @@ describe("platform device preparation tools", () => {
     if (!tool) {
       throw new Error(`${name} is not registered`);
     }
-    const result = await tool.handler(args);
+    // Run as MCP ingress does: under the connection the in-band key names (#15663).
+    const result = await withWireConnection(args, (wireArgs) => tool.handler(wireArgs));
     return typeof result === "string" ? JSON.parse(result) : toolJson(result);
   }
 

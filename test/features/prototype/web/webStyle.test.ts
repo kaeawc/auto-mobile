@@ -34,9 +34,11 @@ test("weight shares the parent's main axis", () => {
 });
 
 test("an unsized aspect ratio fills the incoming width, as Compose sizes it width-first", () => {
-  expect(nodeCss({ aspectRatio: 1.7777778 }, { ...context, parentAxis: "column" })).toMatchObject(
-    { "aspect-ratio": "1.7777778", "align-self": "stretch", width: "100%" },
-  );
+  expect(nodeCss({ aspectRatio: 1.7777778 }, { ...context, parentAxis: "column" })).toMatchObject({
+    "aspect-ratio": "1.7777778",
+    "align-self": "stretch",
+    width: "100%",
+  });
   // A box lays children out on a grid, where the width stretches through justify-self.
   expect(nodeCss({ aspectRatio: 2 }, context)).toMatchObject({
     "justify-self": "stretch",

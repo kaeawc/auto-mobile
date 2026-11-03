@@ -22,7 +22,9 @@ import {
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
+import { webPickerRenderers } from "./webPickers";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -945,6 +947,9 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   icon,
   image,
   button,
+  // Android draws a paste button as a filled button labelled "Paste"; it reads the clipboard only
+  // when tapped, so a still draws the button alone.
+  pasteButton: (node, scope, path) => button({ ...node, label: "Paste" }, scope, path),
   topAppBar,
   textField,
   switch: toggle("switch"),
@@ -953,6 +958,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   listItem,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
+  ...webSelectionRenderers(KIT),
+  ...webPickerRenderers(KIT),
   ...webStackRenderers(KIT),
 };
 

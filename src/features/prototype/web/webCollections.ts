@@ -22,6 +22,9 @@ const DEFAULT_FILL: Readonly<Record<string, readonly WebAxis[]>> = {
   slider: ["width"],
   tabBar: ["width"],
   bottomNav: ["width"],
+  radioGroup: ["width"],
+  select: ["width"],
+  searchBar: ["width"],
 };
 
 /** The axes a node fills by default and leaves unsized in its own style. */

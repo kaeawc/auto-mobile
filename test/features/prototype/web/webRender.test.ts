@@ -616,6 +616,37 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")).not.toHaveProperty("max-width");
   });
 
+  test("a nested capped row after an unsized aspect ratio keeps its parent's zero width (#16695)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", style: { aspectRatio: 2 } },
+                {
+                  type: "row",
+                  testTag: "nested",
+                  style: { maxWidth: 300 },
+                  children: [
+                    { type: "box", style: { aspectRatio: 1, maxWidth: 40 } },
+                    { type: "text", text: "b" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "nested",
+    )[0]!;
+    // The outer row measures it against no width, which its own bound must not widen.
+    expect(row.style["max-width"]).toBe("0px");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

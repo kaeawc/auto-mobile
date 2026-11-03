@@ -173,7 +173,10 @@ the host, so the page's script only switches between views it was given and neve
   top-level `derive` entry. Repeat placeholders
   bind each object item (a literal `items` array or a data pointer; scalar items are skipped
   before indices are assigned, as on devices), including the repeat's own `derive`
-  fields. Text binds once, in that order: every inserted data or repeat value is shielded until binding
+  fields. A repeat draws at most 200 items, except a `list`, which draws up to the list contract
+  limit (2,000) capped by its `maxItems`, as devices do. A 2,000-row list of plain list items is
+  about 0.7 MB of markup, inside the page budget; a page whose kept start screens exceed it fails
+  the build as described under **Budget**. Text binds once, in that order: every inserted data or repeat value is shielded until binding
   ends, so it is never read again as a placeholder. Nested conditions with typed operands and state keys bind through the devices' own
   field walk (`mapBindableFields`). A spans-only text node renders each span
   with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a

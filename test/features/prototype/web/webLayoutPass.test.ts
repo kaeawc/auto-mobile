@@ -4,11 +4,11 @@ import {
   topEdgePaintOrder,
   type PaintedBox,
 } from "../../../../src/features/prototype/web/webLayoutPass";
-import { el, type WebElement } from "../../../../src/features/prototype/web/webNodes";
+import { el, type WebChild } from "../../../../src/features/prototype/web/webNodes";
 import { appTopColor } from "../../../../src/features/prototype/web/webStatusBar";
 
 const SCREEN = { width: 400, height: 800 };
-const named = (name: string, style: Record<string, string>, children: WebElement[] = []) =>
+const named = (name: string, style: Record<string, string>, children: WebChild[] = []) =>
   el("div", { attrs: { "data-name": name }, style }, children);
 const rectOf = (painted: PaintedBox[], name: string) =>
   painted.find((box) => box.element.attrs["data-name"] === name)?.rect;

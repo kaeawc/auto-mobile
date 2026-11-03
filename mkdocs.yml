@@ -184,6 +184,7 @@ nav:
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
       - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
+      - "iOS CarPlay prototypes": design-docs/plat/ios/carplay-prototypes.md
       - "ProtoViewer": design-docs/protoviewer.md
       - "ProtoViewer localization": design-docs/protoviewer-localization.md
       - "ProtoViewer agent": design-docs/protoviewer-agent.md

@@ -4,8 +4,11 @@ import type {
   PrototypeStatusModule,
   PrototypeStatusValues,
 } from "./prototypeDeviceStatusReference";
-import { PROTOTYPE_PLATFORM_MODULES } from "./prototypePlatform";
-import { prototypePlatformDeliveredEventOf } from "./prototypePlatformEvent";
+import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformStateEntry } from "./prototypePlatform";
+import {
+  prototypePlatformDeliveredEventOf,
+  type PrototypePlatformDeliveredEventPayload,
+} from "./prototypePlatformEvent";
 
 /** The device status modules whose `<module>.changed` values the host mirrors (#14316). */
 export const PROTOTYPE_STATUS_MODULES: readonly PrototypeStatusModule[] = [
@@ -44,6 +47,26 @@ function ruleAccepts(value: unknown, rule: Rule): boolean {
   }
 }
 
+/** The status module a delivered `<module>.changed` event names, when the event is untruncated. */
+function changedModule(
+  delivered: PrototypePlatformDeliveredEventPayload | undefined,
+): PrototypeStatusModule | undefined {
+  const dot = delivered?.event.indexOf(".") ?? -1;
+  return delivered && !delivered.truncated && delivered.event.slice(dot + 1) === "changed"
+    ? statusModule(delivered.event.slice(0, dot))
+    : undefined;
+}
+
+/** Every key is in the module's state table and every value passes that key's contract rule. */
+function stateValid(
+  data: Record<string, unknown>,
+  state: Record<string, PrototypePlatformStateEntry>,
+): boolean {
+  return Object.entries(data).every(
+    ([key, value]) => Object.hasOwn(state, key) && ruleAccepts(value, state[key].value),
+  );
+}
+
 /**
  * The module and values a delivered `battery|power|audio.changed` event carries, or undefined for any
  * other event. Data that names a key outside the module's state table, or a value its contract rule
@@ -53,24 +76,15 @@ export function prototypeDeviceStatusOf(
   event: Pick<PrototypeEvent, "kind" | "name" | "payload">,
 ): { module: PrototypeStatusModule; values: PrototypeStatusValues; simulated?: true } | undefined {
   const delivered = prototypePlatformDeliveredEventOf(event);
-  const dot = delivered?.event.indexOf(".") ?? -1;
-  if (!delivered || delivered.truncated || delivered.event.slice(dot + 1) !== "changed") {
-    return undefined;
-  }
-  const module = statusModule(delivered.event.slice(0, dot));
-  const data = object(delivered.data);
+  const module = changedModule(delivered);
+  const data = object(delivered?.data);
   const state = module ? PROTOTYPE_PLATFORM_MODULES[module]?.state : undefined;
-  if (!module || !data || !state) {
+  if (!module || !data || !state || !stateValid(data, state)) {
     return undefined;
   }
-  const valid = Object.entries(data).every(
-    ([key, value]) => Object.hasOwn(state, key) && ruleAccepts(value, state[key].value),
-  );
-  return valid
-    ? {
-        module,
-        values: { ...(data as PrototypeStatusValues) },
-        ...(delivered.simulated ? { simulated: true as const } : {}),
-      }
-    : undefined;
+  return {
+    module,
+    values: { ...(data as PrototypeStatusValues) },
+    ...(delivered?.simulated ? { simulated: true as const } : {}),
+  };
 }

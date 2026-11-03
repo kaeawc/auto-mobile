@@ -1,5 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { resolvePrototypeColor, type PrototypeColorMode, type Rgba } from "../prototypeContrast";
+import type { TextScale } from "./webTextScale";
 
 /** What a node's style needs from its surroundings: the colour mode and the parent's main axis. */
 export interface WebStyleContext {
@@ -9,6 +10,8 @@ export interface WebStyleContext {
   readonly parentAxis?: "row" | "column";
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
+  /** The system text size (Android font scale, iOS Dynamic Type); absent at the default size. */
+  readonly textScale?: TextScale;
 }
 
 const THEME_FONT_FAMILY: Readonly<Record<string, string>> = {
@@ -31,6 +34,15 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 type Css = Record<string, string>;
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
+
+/** A font size or line height in sp (points on iOS), scaled by the system text size. */
+export function fontPx(sp: number, context: Pick<WebStyleContext, "textScale">): string {
+  return px(context.textScale ? context.textScale.font(sp) : sp);
+}
+
+function trackingPx(sp: number, context: WebStyleContext): string {
+  return px(context.textScale ? context.textScale.tracking(sp) : sp);
+}
 
 /** Material 3 shape scale, the same corner sizes both native renderers use. */
 const SHAPE_TOKENS: Readonly<Record<string, number>> = {
@@ -185,8 +197,8 @@ function typographyRole(style: Raw, context: WebStyleContext): Css {
   const scale = context.typography?.scale ?? 1;
   const family = context.typography?.fontFamily;
   return {
-    "font-size": px(role[0] * scale),
-    "line-height": px(role[1] * scale),
+    "font-size": fontPx(role[0] * scale, context),
+    "line-height": fontPx(role[1] * scale, context),
     "font-weight": String(role[2]),
     ...(family ? { "font-family": family } : {}),
   };
@@ -220,7 +232,7 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
     css.color = color;
   }
   if (typeof style.textSize === "number") {
-    css["font-size"] = px(style.textSize);
+    css["font-size"] = fontPx(style.textSize, context);
   }
   if (typeof style.fontWeight === "number") {
     css["font-weight"] = String(style.fontWeight);
@@ -229,10 +241,10 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
     css["text-align"] = TEXT_ALIGN[style.textAlign]!;
   }
   if (typeof style.lineHeight === "number") {
-    css["line-height"] = px(style.lineHeight);
+    css["line-height"] = fontPx(style.lineHeight, context);
   }
   if (typeof style.letterSpacing === "number") {
-    css["letter-spacing"] = px(style.letterSpacing);
+    css["letter-spacing"] = trackingPx(style.letterSpacing, context);
   }
   // Both values emit, so an explicit `normal` span overrides an italic parent.
   const fontStyle = FONT_STYLE[String(style.fontStyle)];

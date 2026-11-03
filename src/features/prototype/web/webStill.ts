@@ -8,10 +8,9 @@ import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
-import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
-
-/** The still renders in one fixed locale, so the same spec renders the same bytes. */
-const STILL_LOCALE = "en-US";
+import { localeLayoutDirection, stillLocale } from "./webLocale";
+import { cssColor, fontPx, themeTypography, type WebStyleContext } from "./webStyle";
+import { stillTextScale, type StillTextSize } from "./webTextScale";
 
 export interface PrototypeStillOptions {
   /** A device frame id; defaults to the platform's default frame. */
@@ -23,6 +22,13 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * The host locale (BCP 47, default `en-US`): string tables, formatting, and the layout direction
+   * of a window that sets no `layoutDirection`.
+   */
+  readonly locale?: string;
+  /** The system text size: `fontScale` on an Android frame, `contentSize` on an iOS one. */
+  readonly textSize?: StillTextSize;
 }
 
 export interface PrototypeStill {
@@ -115,21 +121,25 @@ function sizedRoot(spec: unknown): unknown {
 }
 
 /**
- * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
- * a floating window sits at its `gravity`, moved by its `offset`.
- */
-/**
- * The window's content with the spec's explicit layout direction, so rows, start/end alignment and
- * logical padding follow it; the device chrome around it is never mirrored.
+ * The window's content with its layout direction, so rows, start/end alignment and logical padding
+ * follow it; the device chrome around it is never mirrored. An explicit `window.layoutDirection`
+ * wins; otherwise the host locale decides, and an LTR locale leaves the page's own direction.
  */
 function placed(
   spec: unknown,
   content: WebElement | undefined,
   layers: readonly WebElement[],
+  locale: string,
 ): WebElement {
   const window = placedWindow(spec, content, layers);
-  const direction = record(record(spec)?.window)?.layoutDirection;
-  if (direction !== "rtl" && direction !== "ltr") {
+  const authored = record(record(spec)?.window)?.layoutDirection;
+  const direction =
+    authored === "rtl" || authored === "ltr"
+      ? authored
+      : localeLayoutDirection(locale) === "rtl"
+        ? "rtl"
+        : undefined;
+  if (direction === undefined) {
     return window;
   }
   // In RTL the logical start is the physical right, so the logical insets swap sides.
@@ -144,7 +154,11 @@ function placed(
   };
 }
 
-/** The window region holds the content, then its layers; a floating window's transform anchors them. */
+/**
+ * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
+ * a floating window sits at its `gravity`, moved by its `offset`. The window region holds the
+ * content, then its layers; a floating window's transform anchors them.
+ */
 function placedWindow(
   spec: unknown,
   content: WebElement | undefined,
@@ -165,6 +179,7 @@ function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
   frame: DeviceFrame,
+  locale: string,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
@@ -172,12 +187,14 @@ function stillScope(
   const size = screenSize(frame, options.orientation ?? "portrait");
   const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
+  const textScale = stillTextScale(frame.platform, options.textSize);
   return {
     style: {
       mode,
       palette: prototypeRolePalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
+      ...(textScale ? { textScale } : {}),
     },
     condition: {
       state: record(spec.state) ?? {},
@@ -187,7 +204,7 @@ function stillScope(
     },
     data: spec.data,
     spec,
-    format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
+    format: { locale, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
     instances: [],
     inBox: false,
     unsupported: [],
@@ -217,17 +234,23 @@ export function renderPrototypeStill(
   const frame = deviceFrameOrThrow(
     options.frame ?? defaultDeviceFrameId(options.platform ?? "android"),
   );
-  // Components expand, then string tables resolve for the still's fixed locale, as on devices.
-  const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
-  const scope = stillScope(expanded, options, frame);
+  const locale = stillLocale(options.locale);
+  // Components expand, then string tables resolve for the host locale, as on devices.
+  const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [locale]);
+  const scope = stillScope(expanded, options, frame, locale);
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const element = renderDeviceFrame(
     frame,
     options.orientation ?? "portrait",
-    { dark, textColor, background: screenBackground(scope.style) },
-    placed(expanded, root, scope.layers),
+    {
+      dark,
+      textColor,
+      background: screenBackground(scope.style),
+      ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
+    },
+    placed(expanded, root, scope.layers, locale),
   );
   const stack = scope.stacks?.[0];
   return {

@@ -226,3 +226,10 @@ workflow_json() {
   [ "$(jq -r '.jobs["promote-production"].needs | join(",")' <<<"$json")" = "resolve,promote-closed" ]
   [ "$(jq -r '.jobs.operate.if' <<<"$json")" = "github.event_name == 'workflow_dispatch'" ]
 }
+
+@test "runs serialize per version, so a halt never waits behind another version's approvals" {
+  local json
+  json="$(workflow_json "$WORKFLOW")"
+  [ "$(jq -r '.concurrency.group' <<<"$json")" = "protoviewer-play-\${{ github.event_name == 'push' && github.ref_name || format('protoviewer/{0}', inputs.version) }}" ]
+  [ "$(jq -r '.concurrency["cancel-in-progress"]' <<<"$json")" = "false" ]
+}

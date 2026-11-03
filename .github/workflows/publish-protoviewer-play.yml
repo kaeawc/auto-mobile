@@ -36,8 +36,10 @@ name: "Publish ProtoViewer to Google Play"
         type: string
         default: "0.1"
 
+# One run per version: a tag run and a dispatch for the same version queue behind each other,
+# but a halt for a version in production never waits behind another version's pending approvals.
 concurrency:
-  group: protoviewer-play
+  group: protoviewer-play-${{ github.event_name == 'push' && github.ref_name || format('protoviewer/{0}', inputs.version) }}
   cancel-in-progress: false
 
 permissions:

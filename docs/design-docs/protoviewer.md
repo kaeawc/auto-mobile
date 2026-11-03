@@ -606,7 +606,7 @@ only.
 - `halt` with the current `fraction`: stop the staged rollout. Users who already updated keep the
   build.
 
-Every dispatch needs a `google-play-release` approval. **Resume** a halted rollout in the Play
+Every dispatch needs a `google-play-release` approval. Runs are serialized per version only, so a halt never queues behind another version's pending approvals. **Resume** a halted rollout in the Play
 Console (Production → Releases → Resume rollout): `supply` only updates in-progress or draft
 releases. To roll back, ship a fix under a higher version. Play has no rollback to a lower
 versionCode.

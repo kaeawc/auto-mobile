@@ -248,15 +248,14 @@ describe("managed connection executePlan device labels (#11397)", () => {
     async () => {
       await sessionManager.createSession("outside-any-binding", free.deviceId, "ios");
       sessionManager.setDeviceReadiness("outside-any-binding", "automationReady");
-      const result = await runPlan(PLAN, { sessionUuid: "outside-any-binding" });
-
-      expect(allocatorCalls).toEqual([]);
-      // Its binding grants only the slot device, so even label A is refused for this connection.
-      expect(result).toMatchObject({
+      // The connection's binding does not grant that session, so executePlan's own target
+      // resolution refuses it before any plan label reaches an allocator.
+      await expect(runPlan(PLAN, { sessionUuid: "outside-any-binding" })).rejects.toMatchObject({
         code: DEVICE_OUTSIDE_BROKER_GRANT_CODE,
+        reason: "session",
         scopeKey: keyA.scopeKey,
-        deviceLabel: "A",
       });
+      expect(allocatorCalls).toEqual([]);
     },
   );
 

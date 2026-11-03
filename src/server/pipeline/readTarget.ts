@@ -1,4 +1,3 @@
-import { internalMcpSessionId } from "../internalToolParams";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import {
   explicitReadTargetPlatform,
@@ -42,8 +41,8 @@ import {
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/internalToolCall";
 import {
+  currentConnectionMcpSessionId,
   currentExecution,
-  getToolSelectionContext,
 } from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
@@ -656,8 +655,8 @@ export function canonicalizeCallDeviceId(input: ExecutionTargetInput): Promise<v
  * A deviceId-only call (no sessionUuid, no label) from the MCP connection that acquired the
  * session holding that device runs as that session (#10994): admitted, readied and counted as use
  * like a call naming it. The proxy omits the UUID for selector calls (#6807), so the daemon
- * recognizes its holder by the forwarded connection id (`__mcpSessionId`, set only by the
- * daemon's socket forward). Calls from any other connection keep the watcher/refusal paths.
+ * recognizes its holder by the call's connection identity (#15663), set only for a call the
+ * daemon's socket forwarded. Calls from any other connection keep the watcher/refusal paths.
  */
 export function adoptHolderConnectionSession(args: Record<string, unknown>): void {
   if (
@@ -670,7 +669,7 @@ export function adoptHolderConnectionSession(args: Record<string, unknown>): voi
   }
   // #11469: a plan step or nested call carries no socket identity of its own; it runs for the
   // connection of the call that started it.
-  const mcpSessionId = internalMcpSessionId(args) ?? getToolSelectionContext()?.callerMcpSessionId;
+  const mcpSessionId = currentConnectionMcpSessionId();
   if (!mcpSessionId) {
     return;
   }

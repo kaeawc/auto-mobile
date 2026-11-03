@@ -38,39 +38,40 @@ test.each([
   {
     name: "ambient caller",
     context: { callerMcpSessionId: "conn-x", deviceConnectionKey: "header" },
-    arg: undefined,
+    autolock: undefined,
     expected: "conn-x",
   },
   {
-    name: "explicit argument",
+    name: "own connection",
     context: { callerMcpSessionId: "caller", deviceConnectionKey: "header" },
-    arg: "explicit",
+    autolock: "explicit",
     expected: "explicit",
   },
   {
-    name: "blank argument",
+    name: "blank own connection",
     context: { callerMcpSessionId: "conn-x" },
-    arg: "  ",
+    autolock: "  ",
     expected: "conn-x",
   },
   {
     name: "blank caller",
     context: { callerMcpSessionId: "  ", deviceConnectionKey: "header" },
-    arg: undefined,
+    autolock: undefined,
     expected: "header",
   },
-  { name: "direct default", context: {}, arg: undefined, expected: undefined },
+  { name: "direct default", context: {}, autolock: undefined, expected: undefined },
 ] satisfies Array<{
   name: string;
   context: ToolSelectionContext;
-  arg: string | undefined;
+  autolock: string | undefined;
   expected: string | undefined;
 }>)(
   "$name determines the device pin and readiness connection",
-  async ({ context, arg, expected }) => {
+  async ({ context, autolock, expected }) => {
     const { readiness, select } = harness();
-    await runWithToolSelectionContext(context, () =>
-      select({ deviceId: deviceA.deviceId, __mcpSessionId: arg }),
+    // The call's own connection is ambient, as MCP ingress sets it (#15663).
+    await runWithToolSelectionContext({ ...context, autolockMcpSessionId: autolock }, () =>
+      select({ deviceId: deviceA.deviceId }),
     );
     expect(readiness.getLastOptions()?.connectionId).toBe(expected);
     expect(readiness.getExplicitDevicePin(expected)).toEqual(deviceA);

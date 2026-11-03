@@ -150,12 +150,13 @@ test("only a row, column, box or card hands its children a height (#16690)", () 
   expect(withChildHeights(node, "root", prepare)).toBe(node);
 });
 
-test("a column's weight allocation sizes a child past its own dp and min height (#16701)", () => {
+test("a column's weight allocation sizes a child past its own dp height (#16701)", () => {
   const allocated = { [INCOMING_HEIGHT_KEY]: 80, [INCOMING_ALLOCATED_KEY]: true };
   expect(contentHeight({ ...allocated, weight: 1, height: { dp: 20 } })).toBe(80);
-  expect(contentHeight({ ...allocated, weight: 1, minHeight: 100 })).toBe(80);
-  // CSS still applies max-height to a flex item, so maxHeight caps the allocation.
+  // CSS still applies max-height and then min-height to a flex item, so both clamp the share.
   expect(contentHeight({ ...allocated, weight: 1, maxHeight: 50, padding: { top: 5 } })).toBe(45);
+  expect(contentHeight({ ...allocated, weight: 1, minHeight: 100 })).toBe(100);
+  expect(contentHeight({ ...allocated, weight: 1, minHeight: 100, maxHeight: 50 })).toBe(100);
   // Without the mark, the incoming height is a ceiling the child's own height can undercut.
   expect(contentHeight({ [INCOMING_HEIGHT_KEY]: 80, weight: 1, height: { dp: 20 } })).toBe(20);
   // A mark with no incoming height bounds nothing.

@@ -13,22 +13,26 @@ const side = (padding: Raw | undefined, name: string) =>
  * dp `height` (else unbounded) held under `maxHeight`, then raised to `minHeight`, which wins.
  */
 function ownHeight(style: Raw | undefined): number {
-  const capped = Math.min(finite(record(style?.height)?.dp), finite(style?.maxHeight));
+  return clamped(style, finite(record(style?.height)?.dp));
+}
+
+/** `height` held under the node's `maxHeight`, then raised to its `minHeight`, which wins. */
+function clamped(style: Raw | undefined, height: number): number {
   const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
-  return Math.max(floor, capped);
+  return Math.max(floor, Math.min(height, finite(style?.maxHeight)));
 }
 
 /**
  * The height a node is laid out within: the height its parent hands it (INCOMING_HEIGHT_KEY)
  * capped by its own height (see ownHeight). A column's weight allocation
- * (INCOMING_ALLOCATED_KEY) instead sizes the node outright, as CSS's `flex: w w 0` replaces its
- * `height` and Compose's weight fixes its constraints, so its dp and min height are ignored. Its
- * `maxHeight` still caps it, as CSS applies `max-height` to a flex item.
+ * (INCOMING_ALLOCATED_KEY) instead takes the place of the node's dp height, as CSS's
+ * `flex: w w 0` replaces its `height` and Compose's weight fixes its constraints. The share is
+ * then clamped by the node's `maxHeight` and `minHeight`, as CSS still applies both to a flex item.
  */
 function boundHeight(style: Raw | undefined): number {
   const incoming = finite(style?.[INCOMING_HEIGHT_KEY]);
   if (style?.[INCOMING_ALLOCATED_KEY] === true && incoming !== Infinity) {
-    return Math.min(incoming, finite(style?.maxHeight));
+    return clamped(style, incoming);
   }
   return Math.min(incoming, ownHeight(style));
 }

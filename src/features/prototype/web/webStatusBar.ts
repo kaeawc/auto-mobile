@@ -79,29 +79,74 @@ export function statusBarContentFor(
 }
 
 function stretches(element: WebElement): boolean {
-  return element.style["align-self"] === "stretch" || element.style.width === "100%";
+  return (
+    element.style["align-self"] === "stretch" ||
+    element.style["justify-self"] === "stretch" ||
+    element.style.width === "100%"
+  );
 }
 
-function opaqueBackground(element: WebElement): string | undefined {
+/** The element's own `opacity` (1 when unset or unparseable). */
+function opacity(element: WebElement): number {
+  const value = Number(element.style.opacity);
+  return element.style.opacity === undefined || !Number.isFinite(value) ? 1 : value;
+}
+
+/** A background that paints fully opaque once the element's composite opacity applies. */
+function opaqueBackground(element: WebElement, composite: number): string | undefined {
   const background = element.style["background-color"];
-  return parseCssColor(background)?.a === 1 ? background : undefined;
+  const alpha = parseCssColor(background)?.a;
+  return alpha !== undefined && alpha * composite === 1 ? background : undefined;
+}
+
+/** A box (`boxLayoutCss`) stacks its children in one grid cell, so later ones paint over earlier. */
+function isBox(element: WebElement): boolean {
+  return element.style.display === "grid" && element.style["grid-template-areas"] === '"cell"';
+}
+
+const elementChildren = (element: WebElement): WebElement[] =>
+  element.children.filter((child): child is WebElement => typeof child !== "string");
+
+/**
+ * The child whose background shows at the top: a box's last visible stretching child, since it
+ * paints over its siblings, else the leading child.
+ */
+function topChild(element: WebElement): WebElement | undefined {
+  const children = elementChildren(element);
+  if (isBox(element)) {
+    const painted = children.filter((child) => opacity(child) > 0 && stretches(child)).at(-1);
+    if (painted) {
+      return painted;
+    }
+  }
+  return children[0];
 }
 
 /**
  * The app's top colour: the innermost opaque background along the content's leading children that
  * spans the screen, since it paints over its ancestors (a top app bar over a root column), else
- * `fallback` (the screen background). The walk stops at an element padded by the top safe area,
- * whose children start below the status bar.
+ * `fallback` (the screen background). In a box the walk follows the last stretching child, which
+ * paints over the others. Element opacity multiplies down the walk: a background is opaque only
+ * when its alpha times that composite is 1, and a fully transparent element ends the walk. The
+ * walk also stops at an element padded by the top safe area, whose children start below the
+ * status bar.
  */
 export function appTopColor(content: WebChild, fallback: string): string {
   let top = fallback;
-  let current: WebChild | undefined = content;
-  for (let depth = 0; depth < 32 && current !== undefined && typeof current !== "string"; depth++) {
-    const background = depth === 0 || stretches(current) ? opaqueBackground(current) : undefined;
+  let composite = 1;
+  let current: WebElement | undefined = typeof content === "string" ? undefined : content;
+  for (let depth = 0; depth < 32 && current !== undefined; depth++) {
+    composite *= opacity(current);
+    if (composite <= 0) {
+      // Nothing in a fully transparent subtree paints.
+      break;
+    }
+    const background =
+      depth === 0 || stretches(current) ? opaqueBackground(current, composite) : undefined;
     top = background ?? top;
     // Top safe-area padding moves the children below the status area, so this background shows.
     const clears: boolean = current.style["padding-top"]?.includes("--safe-top") ?? false;
-    current = clears ? undefined : current.children.find((child) => typeof child !== "string");
+    current = clears ? undefined : topChild(current);
   }
   return top;
 }

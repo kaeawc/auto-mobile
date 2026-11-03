@@ -214,8 +214,21 @@ function screenBackground(style: WebStyleContext): string {
 }
 
 /**
+ * Whether the window's content starts at the top of the screen, behind the status bar: a
+ * fullscreen window or a top sheet. A bottom sheet or floating window leaves the status area on
+ * the screen background.
+ */
+function coversStatusArea(spec: unknown): boolean {
+  const placement = record(record(record(spec)?.window)?.placement);
+  const type = placement?.type;
+  return (
+    type === undefined || type === "fullscreen" || (type === "sheet" && placement?.edge === "top")
+  );
+}
+
+/**
  * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
- * colour (a fullscreen window's), as both platforms' edge-to-edge defaults do.
+ * colour (a fullscreen window's or top sheet's), as both platforms' edge-to-edge defaults do.
  */
 function stillStatusBarContent(
   spec: unknown,
@@ -227,10 +240,7 @@ function stillStatusBarContent(
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  // A sheet or floating window leaves the status area on the screen background.
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  const fullscreen = placement === undefined || placement === "fullscreen";
-  const top = fullscreen ? appTopColor(content, background) : background;
+  const top = coversStatusArea(spec) ? appTopColor(content, background) : background;
   return statusBarContentFor(top, dark ? "light" : "dark");
 }
 

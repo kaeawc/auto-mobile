@@ -312,8 +312,12 @@ the host, so the page's script only switches between views it was given and neve
   four bars, Wi-Fi on, full battery). An iPhone with an island centres the clock and the marks in the
   ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
-  app's top colour, which is the first opaque background spanning the screen along the content's leading
-  children (a top app bar), else the screen background. Landscape swaps the screen size, uses
+  app's top colour, else the screen background. The top colour is sampled only when the window's content
+  starts behind the status bar (a fullscreen window or a `top` sheet; a bottom sheet or floating window
+  keeps the screen background). It is the innermost opaque background spanning the screen along the
+  content's leading children (a top app bar); in a `box` the walk follows the last stretching child,
+  which paints over its siblings. Element opacity multiplies down the walk, so a background counts only
+  when it is opaque after that opacity, and a fully transparent subtree is skipped. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own

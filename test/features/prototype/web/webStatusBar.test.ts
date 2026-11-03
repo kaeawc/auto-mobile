@@ -178,3 +178,90 @@ test("a root padded by the top safe area keeps its own colour behind the status 
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
+
+test("in a box the last stretching child paints over its siblings, so its colour wins", () => {
+  const fill = (color: string, extra: Record<string, string> = {}) =>
+    el("div", {
+      style: { "justify-self": "stretch", width: "100%", "background-color": color, ...extra },
+    });
+  const box = (children: WebElement[]) =>
+    el(
+      "div",
+      { style: { display: "grid", "grid-template-areas": '"cell"', width: "100%" } },
+      children,
+    );
+  expect(appTopColor(box([fill("#000000"), fill("#ffffff")]), "#777777")).toBe("#ffffff");
+  // A later child that does not span the screen does not hide the full-width one.
+  const chip = el("div", { style: { "background-color": "#ff0000" } });
+  expect(appTopColor(box([fill("#000000"), chip]), "#777777")).toBe("#000000");
+  // A fully transparent later child paints nothing.
+  expect(appTopColor(box([fill("#000000"), fill("#ffffff", { opacity: "0" })]), "#777777")).toBe(
+    "#000000",
+  );
+  // A column still follows its leading child.
+  const column = el("div", { style: { display: "flex", width: "100%" } }, [
+    fill("#000000"),
+    fill("#ffffff"),
+  ]);
+  expect(appTopColor(column, "#777777")).toBe("#000000");
+});
+
+test("element opacity multiplies down the walk: transparent subtrees and faded backgrounds are skipped", () => {
+  const black = (style: Record<string, string>, children: WebElement[] = []) =>
+    el("div", { style: { width: "100%", "background-color": "#000000", ...style } }, children);
+  expect(appTopColor(el("div", {}, [black({ opacity: "0" })]), "#ffffff")).toBe("#ffffff");
+  expect(appTopColor(el("div", {}, [black({ opacity: "0.5" })]), "#ffffff")).toBe("#ffffff");
+  // An ancestor's opacity applies to every descendant.
+  const faded = el("div", { style: { width: "100%", opacity: "0.5" } }, [black({})]);
+  expect(appTopColor(el("div", {}, [faded]), "#ffffff")).toBe("#ffffff");
+  const hidden = el("div", { style: { width: "100%", opacity: "0" } }, [black({})]);
+  expect(appTopColor(el("div", {}, [hidden]), "#ffffff")).toBe("#ffffff");
+  expect(appTopColor(el("div", {}, [black({ opacity: "1" })]), "#ffffff")).toBe("#000000");
+});
+
+test("a fullscreen box's last full-fill child sets the status bar content in a still", () => {
+  const still = renderPrototypeStill({
+    id: "box",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "dark" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        { type: "column", style: { width: "fill", height: "fill", background: "#ffffff" } },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a transparent root does not set the status bar content in a still", () => {
+  const still = renderPrototypeStill({
+    id: "alpha",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#000000", alpha: 0 },
+      children: [{ type: "text", text: "Hidden" }],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a top sheet's content sits behind the status bar; a bottom sheet's does not", () => {
+  const sheet = (edge: string) =>
+    renderPrototypeStill({
+      id: "sheet",
+      window: { placement: { type: "sheet", edge, height: 200 } },
+      theme: { mode: "light" },
+      root: {
+        type: "column",
+        style: { width: "fill", background: "#1d1b20" },
+        children: [{ type: "text", text: "Sheet" }],
+      },
+    });
+  expect(statusBarOf(sheet("top").element)?.attrs["data-status-content"]).toBe("light");
+  expect(statusBarOf(sheet("bottom").element)?.attrs["data-status-content"]).toBe("dark");
+});

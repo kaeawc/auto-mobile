@@ -1,4 +1,5 @@
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
+import type { BootedDevice } from "../models";
 import { registerTvosRunnerBuilder } from "../features/tvos/TvosRunnerLifecycle";
 import { registerWatchRunnerBuilder } from "../features/watch/WatchRunnerLifecycle";
 import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
@@ -220,9 +221,11 @@ export function registerMcpTools(daemonMode: boolean): void {
     lastToolRegistration?.daemonMode !== daemonMode ||
     lastToolRegistration.removalEpoch !== removalEpoch
   ) {
+    const iosRunnerClient = (device: BootedDevice) => IOSCtrlProxyClient.getInstance(device);
     registerAllTools({
       daemonMode,
-      iosRunnerLocation: (device) => IOSCtrlProxyClient.getInstance(device),
+      iosRunnerLocation: iosRunnerClient,
+      iosAccessibilityFocus: iosRunnerClient,
       keystoreReset: (device) => AndroidCtrlProxyClient.getInstance(device),
     });
     lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };

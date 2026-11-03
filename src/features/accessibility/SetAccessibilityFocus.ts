@@ -12,7 +12,6 @@ import {
 import type { ElementResolver } from "../utility/ElementResolver";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
-import { IOSCtrlProxyClient } from "../observe/ios";
 import type {
   CtrlProxyAccessibilityFocusResult,
   AccessibilityFocusSelector,
@@ -82,7 +81,13 @@ export class SetAccessibilityFocus {
     this.device = device;
     this.target = new AccessibilityTargetResolver(device, "accessibility focus", deps);
     this.timer = deps.timer ?? defaultTimer;
-    this.iosServiceFactory = deps.iosServiceFactory ?? ((d) => IOSCtrlProxyClient.getInstance(d));
+    this.iosServiceFactory =
+      deps.iosServiceFactory ??
+      (() => {
+        throw new ActionableError(
+          "iOS VoiceOver focus is not configured: no iOS runner client was provided.",
+        );
+      });
     this.serviceFactory =
       deps.serviceFactory ??
       ((d: BootedDevice) => AndroidCtrlProxyClient.getInstance(d, defaultAdbClientFactory));

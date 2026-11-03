@@ -3,7 +3,7 @@ import { registerAccessibilityFocusTools } from "../../src/server/accessibilityF
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { SetAccessibilityFocus } from "../../src/features/accessibility/SetAccessibilityFocus";
-import { ActionableError } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
 
 isolateToolRegistry();
 
@@ -61,6 +61,22 @@ describe("accessibilityFocusTools", () => {
     registerAccessibilityFocusTools();
     expect(focusTool()!.description).toContain("Android (TalkBack)");
     expect(focusTool()!.description).toContain("iOS (VoiceOver)");
+  });
+
+  test("passes the injected iOS client factory through to the feature", async () => {
+    const device = { deviceId: "fake-ios", platform: "ios" as const, name: "Fake" };
+    const devices: BootedDevice[] = [];
+    registerAccessibilityFocusTools({
+      iosServiceFactory: (resolvedDevice) => {
+        devices.push(resolvedDevice);
+        return {
+          requestAccessibilityFocus: async () => ({ success: true, totalTimeMs: 0 }),
+        };
+      },
+    });
+    const response = await focusTool()!.deviceAwareHandler!(device, { text: "Save" });
+    expect(devices).toEqual([device]);
+    expect(response).toHaveProperty("structuredContent.success", true);
   });
 
   test("iOS success returns unconfirmed focus with a warning", async () => {

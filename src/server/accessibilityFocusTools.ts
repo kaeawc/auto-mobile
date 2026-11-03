@@ -1,8 +1,11 @@
 import { z } from "zod/v4";
-import { ActionableError } from "../models";
+import { ActionableError, type BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defineDeviceTool } from "./defineTool";
-import { SetAccessibilityFocus } from "../features/accessibility/SetAccessibilityFocus";
+import {
+  SetAccessibilityFocus,
+  type IosAccessibilityFocusService,
+} from "../features/accessibility/SetAccessibilityFocus";
 import { accessibilityFocusResultSchema } from "./toolOutputSchemas";
 import { accessibilityActionTool } from "./accessibilityActionTool";
 
@@ -26,55 +29,66 @@ const accessibilityFocusInput = z.object({
 // to focus an arbitrary node. Re-evaluate whether it should be removed, kept as
 // an internal debug primitive, or implemented through human-representative
 // TalkBack navigation gestures instead.
-const accessibilityFocusTool = defineDeviceTool({
-  name: "accessibilityFocus",
-  description:
-    "Set accessibility focus on Android (TalkBack) and iOS (VoiceOver) by resourceId, text, or contentDesc. Clearing focus is supported on Android only.",
-  input: accessibilityFocusInput,
-  handler: async (device, args) => {
-    const feature = new SetAccessibilityFocus(device);
-    const result = await feature.execute({
-      action: args.action,
-      resourceId: args.resourceId,
-      text: args.text,
-      contentDesc: args.contentDesc,
-    });
-
-    if (!result.success) {
-      throw new ActionableError(
-        result.error ??
-          (device.platform === "ios"
-            ? "Failed to set VoiceOver focus"
-            : "Failed to update accessibility focus"),
+export function createAccessibilityFocusTool(
+  iosServiceFactory?: (device: BootedDevice) => IosAccessibilityFocusService,
+) {
+  return defineDeviceTool({
+    name: "accessibilityFocus",
+    description:
+      "Set accessibility focus on Android (TalkBack) and iOS (VoiceOver) by resourceId, text, or contentDesc. Clearing focus is supported on Android only.",
+    input: accessibilityFocusInput,
+    handler: async (device, args) => {
+      const feature = new SetAccessibilityFocus(
+        device,
+        iosServiceFactory ? { iosServiceFactory } : {},
       );
-    }
+      const result = await feature.execute({
+        action: args.action,
+        resourceId: args.resourceId,
+        text: args.text,
+        contentDesc: args.contentDesc,
+      });
 
-    if (device.platform === "ios") {
+      if (!result.success) {
+        throw new ActionableError(
+          result.error ??
+            (device.platform === "ios"
+              ? "Failed to set VoiceOver focus"
+              : "Failed to update accessibility focus"),
+        );
+      }
+
+      if (device.platform === "ios") {
+        return createStructuredToolResponse({
+          success: true,
+          confirmed: result.confirmed,
+          warning: result.warning,
+        });
+      }
       return createStructuredToolResponse({
         success: true,
+        focusedElement: result.focusedElement,
         confirmed: result.confirmed,
         warning: result.warning,
+        ...(result.alreadySatisfied ? { alreadySatisfied: true } : {}),
       });
-    }
-    return createStructuredToolResponse({
-      success: true,
-      focusedElement: result.focusedElement,
-      confirmed: result.confirmed,
-      warning: result.warning,
-      ...(result.alreadySatisfied ? { alreadySatisfied: true } : {}),
-    });
-  },
-  options: {
-    defaultEnabled: false,
-    debugOnly: true,
-    outputSchema: accessibilityFocusResultSchema,
-  },
-});
+    },
+    options: {
+      defaultEnabled: false,
+      debugOnly: true,
+      outputSchema: accessibilityFocusResultSchema,
+    },
+  });
+}
 
-export const accessibilityFocusSchema = accessibilityFocusTool.schema;
+export const accessibilityFocusSchema = createAccessibilityFocusTool().schema;
 
-export function registerAccessibilityFocusTools() {
-  accessibilityFocusTool.register();
+export interface AccessibilityFocusToolDependencies {
+  iosServiceFactory?: ((device: BootedDevice) => IosAccessibilityFocusService) | undefined;
+}
+
+export function registerAccessibilityFocusTools(deps: AccessibilityFocusToolDependencies = {}) {
+  createAccessibilityFocusTool(deps.iosServiceFactory).register();
   // Semantic and custom accessibility actions (#14077) share the focus tool's target resolution.
   accessibilityActionTool.register();
 }

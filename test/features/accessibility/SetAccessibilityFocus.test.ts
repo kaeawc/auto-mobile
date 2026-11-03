@@ -642,6 +642,16 @@ describe("SetAccessibilityFocus", () => {
     expect(result.warning).toBeUndefined();
   });
 
+  test("iOS without an injected client throws an actionable configuration error", async () => {
+    const feature = new SetAccessibilityFocus(iosDevice);
+    const result = feature.execute({ text: "Save" });
+    await expect(result).rejects.toBeInstanceOf(ActionableError);
+    await expect(result).rejects.toHaveProperty(
+      "message",
+      "iOS VoiceOver focus is not configured: no iOS runner client was provided.",
+    );
+  });
+
   test("iOS set forwards selectors and reports unconfirmed focus", async () => {
     const calls: object[] = [];
     const feature = new SetAccessibilityFocus(iosDevice, {

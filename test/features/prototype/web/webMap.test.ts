@@ -184,7 +184,11 @@ describe("prototype web map (#16539)", () => {
     expect(ground).toHaveLength(1);
     expect(ground[0]!.style.transform).toBe("perspective(300px) rotateX(45deg) rotate(-90deg)");
     // A 412 × 200 box at 45°: its top corners trace back to (±309, −212), about 375 dp out.
-    expect(ground[0]!.style).toMatchObject({ width: "752px", margin: "-376px 0 0 -376px" });
+    expect(ground[0]!.style).toMatchObject({
+      width: "max(752px,300cqmax)",
+      height: "max(752px,300cqmax)",
+      margin: "calc(max(752px,300cqmax) / -2) 0 0 calc(max(752px,300cqmax) / -2)",
+    });
     const pins = map.part("marker");
     expect(pins[0]!.style).toMatchObject({ left: "50%", top: "50%" });
     // The pier lies north-east; facing east it is ahead and to the left.
@@ -220,7 +224,7 @@ describe("prototype web map (#16539)", () => {
       style: { width: { dp: 390 }, height: { dp: 100 } },
       camera: { lat: 37.77, lng: -122.42, zoom: 12, bearing: 90, tilt: 60 },
     });
-    expect(map.part("ground")[0]!.style).toMatchObject({ width: "1040px", height: "1040px" });
+    expect(map.part("ground")[0]!.style.width).toBe("max(1040px,300cqmax)");
   });
 
   test("a route clips at the near plane instead of dropping its far vertex", () => {
@@ -252,5 +256,17 @@ describe("prototype web map (#16539)", () => {
       points.map((point) => mapPercent(point, view, size)),
     ]);
     expect(projectLine([], view, size, { bearing: 0, tilt: 0 })).toEqual([]);
+  });
+
+  test("a turned fill map sizes its ground from the box as rendered", () => {
+    const map = still({
+      markers,
+      style: { height: "fill" },
+      camera: { lat: 37.77, lng: -122.42, zoom: 12, bearing: 90 },
+    });
+    // The box is a size container, so `cqmax` is its longer rendered side, however tall it fills.
+    expect(map.html).toContain("container-type:size");
+    expect(map.part("ground")[0]!.style.height).toMatch(/^max\(\d+px,300cqmax\)$/);
+    expect(still({ markers }).html).not.toContain("container-type");
   });
 });

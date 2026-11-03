@@ -8,6 +8,8 @@ enum PrototypeStorageDropReason: String, Equatable {
     case unlisted
     /// The value no longer fits the spec.
     case mismatch
+    /// A secure key whose hardware key was revoked: its value is gone and the spec's value stands.
+    case invalidated
 }
 
 struct PrototypeStorageDrop: Equatable {
@@ -22,6 +24,8 @@ struct PrototypeStorageRestoreResult: Equatable {
     var applied: [String] = []
     /// Stored entries to delete, with why.
     var dropped: [PrototypeStorageDrop] = []
+    /// Biometric-bound secure keys holding a value that waits for `biometric.authenticate`.
+    var locked: [String] = []
 }
 
 /// The precedence rules for a prototype's stored values on a show (#12522, adopted decision), as one
@@ -36,14 +40,29 @@ struct PrototypeStorageRestoreResult: Equatable {
 ///   longer declares, a data value of a different JSON kind than the spec's value at that pointer, or
 ///   a data value `PrototypeDataWrite` refuses as a `set` (a missing parent, a data limit).
 ///
+/// Secure keys (#14321, `storage.secure`) follow the same version and listing rules, read from
+/// `PrototypeStoredValues.secure`:
+///
+/// - A secure value restores only into a key `storage.secure` lists, as a string of at most
+///   `MAX_PROTOTYPE_SECURE_VALUE_BYTES` UTF-8 bytes into a declared string state key; otherwise it is
+///   dropped as `mismatch`.
+/// - A plaintext stored copy of a secure key is not in `storage.keys`, so it is dropped as `unlisted`.
+/// - A biometric-bound key (`secureAuth: "biometric"`) holding a value is not read: its state holds
+///   `""` and it is listed in `locked`. A biometric key with nothing stored is not locked.
+/// - An invalidated key is dropped as `invalidated` and the spec's value stands.
+///
 /// Restoring emits no `change` and bumps no revision; the caller applies `state` and `data` before
 /// the first draw.
 enum PrototypeStorageRestore {
+    /// `MAX_PROTOTYPE_SECURE_VALUE_BYTES`: the largest secure value, in UTF-8 bytes.
+    static let maxSecureValueBytes = PrototypeContractValidator.limit("MAX_PROTOTYPE_SECURE_VALUE_BYTES")
+
     static func restore(spec: PrototypeSpec, stored: PrototypeStoredValues?) -> PrototypeStorageRestoreResult {
         var result = PrototypeStorageRestoreResult(state: spec.state ?? [:], data: spec.data)
         guard let stored else { return result }
         let listed = Set(spec.storage?.keys ?? [])
         let versionChanged = spec.storage.map { $0.version != stored.version } ?? false
+        restoreSecure(&result, stored, spec: spec, versionChanged: versionChanged)
         // Sorted for determinism: a dictionary has no order and the TS twin iterates insertion order.
         for key in stored.values.keys.sorted() {
             guard let value = stored.values[key] else { continue }
@@ -58,6 +77,52 @@ enum PrototypeStorageRestore {
             }
         }
         return result
+    }
+
+    /// Applies the secure store's values: dropped, locked behind biometrics, or written into state.
+    private static func restoreSecure(
+        _ result: inout PrototypeStorageRestoreResult, _ stored: PrototypeStoredValues, spec: PrototypeSpec,
+        versionChanged: Bool
+    ) {
+        let invalidated = stored.invalidated ?? []
+        for key in invalidated {
+            result.dropped.append(.init(key: key, reason: .invalidated))
+        }
+        let secure = stored.secure ?? [:]
+        // Sorted for determinism, as for plaintext values.
+        for key in secure.keys.sorted() where !invalidated.contains(key) {
+            guard let value = secure[key] else { continue }
+            let reason = secureDropReason(key, value, spec: spec, versionChanged: versionChanged)
+            guard reason == nil, case let .state(stateKey)? = PrototypeStorageKey.parse(key) else {
+                result.dropped.append(.init(key: key, reason: reason ?? .mismatch))
+                continue
+            }
+            if isBiometric(key, spec: spec) {
+                result.state[stateKey] = .string("")
+                result.locked.append(key)
+            } else {
+                result.state[stateKey] = value
+                result.applied.append(key)
+            }
+        }
+    }
+
+    private static func isBiometric(_ key: String, spec: PrototypeSpec) -> Bool {
+        spec.storage?.secureAuth?[key] == "biometric"
+    }
+
+    /// Why a secure value cannot restore, or nil when it fits (or waits for an unlock).
+    private static func secureDropReason(
+        _ key: String, _ value: JSONValue, spec: PrototypeSpec, versionChanged: Bool
+    ) -> PrototypeStorageDropReason? {
+        guard spec.storage?.secure?.contains(key) == true else { return .unlisted }
+        if versionChanged { return .version }
+        guard case let .state(stateKey)? = PrototypeStorageKey.parse(key),
+              case .string? = spec.state?[stateKey] else { return .mismatch }
+        // A biometric-bound value is sealed until authentication; only its presence is known here.
+        if isBiometric(key, spec: spec) { return nil }
+        guard case let .string(text) = value, text.utf8.count <= maxSecureValueBytes else { return .mismatch }
+        return nil
     }
 
     /// Applies one stored value onto the result; false leaves it untouched (the value does not fit).

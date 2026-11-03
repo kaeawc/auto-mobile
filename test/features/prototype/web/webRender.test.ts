@@ -542,6 +542,37 @@ describe("prototype web still (#16346)", () => {
     expect(rowOf(false)).not.toHaveProperty("width");
   });
 
+  test("a repeated weighted child grows its line only where its bound visibleWhen keeps it", () => {
+    const rowOf = (show: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { "show.a": show },
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "row",
+                testTag: "r",
+                repeat: { as: "item", items: [{ id: "a" }] },
+                children: [
+                  {
+                    type: "box",
+                    style: { weight: 1 },
+                    visibleWhen: { key: "show.{item.id}", equals: true },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "r",
+      )[0]!;
+    expect(rowOf(true).style).toMatchObject({ width: "100%" });
+    expect(rowOf(false).children).toEqual([]);
+    expect(rowOf(false).style).not.toHaveProperty("width");
+  });
+
   test("a box does not grow around a weighted child (#16682)", () => {
     const style = byTag(
       renderPrototypeStill({

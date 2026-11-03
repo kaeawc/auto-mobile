@@ -228,28 +228,30 @@ export function children(
   cell?: WebCellDecorator,
 ): WebChild[] {
   const list = Array.isArray(node.children) ? node.children : [];
+  return childScopes(node, scope).flatMap((itemScope) =>
+    list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell)),
+  );
+}
+
+/** The scopes a container's children render in: its own, or one per repeat row. */
+function childScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
   const repeat = record(node.repeat);
   if (!repeat) {
-    return list.flatMap((entry, index) =>
-      renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
-    );
+    return [scope];
   }
   const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  return rows.flatMap((item, index) => {
+  return rows.map((item, index) => {
     const values = record(item) ?? {};
     const instance: Instance = {
       binding: { alias, index: true },
       values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
       index,
     };
-    const itemScope = child(scope, { instances: [...scope.instances, instance] });
-    return list.flatMap((entry, at) =>
-      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
-    );
+    return child(scope, { instances: [...scope.instances, instance] });
   });
 }
 
@@ -310,16 +312,15 @@ function lineFillAxes(
   path: string,
   mainAxis?: WebAxis,
 ): WebAxis[] {
-  const repeat = record(raw.repeat);
-  if (
-    !Array.isArray(raw.children) ||
-    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
-  ) {
+  const scopes = childScopes(raw, scope);
+  if (!Array.isArray(raw.children) || scopes.length === 0) {
     return [];
   }
+  // Each child is judged in the scope it renders in, so a repeat's bound conditions apply.
+  const slots = scopes.flatMap((s) => (raw.children as unknown[]).map((e) => [e, s] as const));
   const own = rowFillAxes(raw, path, prepareIn(scope));
-  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
-  if (mainAxis && raw.children.some((entry) => isWeighted(entry, scope, path))) {
+  const axes = new Set([...own, ...slots.flatMap(([e, s]) => childFillAxes(e, s, path))]);
+  if (mainAxis && slots.some(([entry, s]) => isWeighted(entry, s, path))) {
     axes.add(mainAxis);
   }
   return (["width", "height"] as const).filter((axis) => axes.has(axis));

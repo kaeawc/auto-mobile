@@ -315,8 +315,8 @@ the host, so the page's script only switches between views it was given and neve
   app's top colour, else the screen background. The top colour is sampled only when the window's content
   starts behind the status bar (a fullscreen window or a `top` sheet; a bottom sheet or floating window
   keeps the screen background). It is the innermost opaque background spanning the screen along the
-  content's leading children (a top app bar); in a `box` the walk samples the children that reach its
-  top from the last painted to the first, and the first with an opaque top colour wins. Element opacity multiplies down the walk, so a background counts only
+  content's leading children (a top app bar); in a `box` the walk samples the children that span its
+  width and reach its top, from the last painted to the first, and the first with an opaque top colour wins. Element opacity multiplies down the walk, so a background counts only
   when it is opaque after that opacity, and a fully transparent subtree is skipped. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like

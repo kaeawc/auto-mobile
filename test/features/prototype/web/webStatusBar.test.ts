@@ -271,6 +271,23 @@ test("a bottom-aligned footer in a fullscreen box leaves the full-fill colour be
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("a narrow full-height child in a fullscreen box leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "rail",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        { type: "column", style: { width: { dp: 20 }, height: "fill", background: "#ffffff" } },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

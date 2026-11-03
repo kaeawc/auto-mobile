@@ -117,14 +117,24 @@ function reachesBoxTop(child: WebElement, box: WebElement): boolean {
 }
 
 /**
- * The children that can show at the top, in the order to sample them: a box's children that reach
- * its top, last painted first, since a later child paints over the earlier ones in the one cell;
+ * Whether a box child spans the box's width. In a grid `align-self` is the vertical axis, so only
+ * `justify-self` or a full width counts.
+ */
+function coversBoxWidth(child: WebElement): boolean {
+  return child.style["justify-self"] === "stretch" || child.style.width === "100%";
+}
+
+/**
+ * The children that can show at the top, in the order to sample them: a box's children that span
+ * its width and reach its top, last painted first, since a later child paints over the earlier ones in the one cell;
  * else the leading child.
  */
 function topCandidates(element: WebElement): WebElement[] {
   const children = elementChildren(element);
   if (isBox(element)) {
-    return children.filter((child) => reachesBoxTop(child, element)).reverse();
+    return children
+      .filter((child) => coversBoxWidth(child) && reachesBoxTop(child, element))
+      .reverse();
   }
   return children.slice(0, 1);
 }

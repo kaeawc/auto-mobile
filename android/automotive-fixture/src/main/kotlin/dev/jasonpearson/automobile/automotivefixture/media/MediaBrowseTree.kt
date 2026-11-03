@@ -78,11 +78,11 @@ class MediaBrowseTree(val root: MediaNode) {
                   "Commute Mix",
                   "Fixture Mix",
                   (1..3).map { track("playlist_commute", it, "Fixture Mix") },
-                )
+                ),
               ),
             ),
           ),
-        )
+        ),
       )
   }
 }

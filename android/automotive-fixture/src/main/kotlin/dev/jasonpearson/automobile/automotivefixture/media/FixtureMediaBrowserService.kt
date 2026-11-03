@@ -9,8 +9,8 @@ import android.os.Bundle
 import android.service.media.MediaBrowserService
 
 /**
- * Serves the fixed [MediaBrowseTree] to the car media center. Playback is simulated: playing an item
- * only updates the session's metadata and state, so no audio or network is involved.
+ * Serves the fixed [MediaBrowseTree] to the car media center. Playback is simulated: playing an
+ * item only updates the session's metadata and state, so no audio or network is involved.
  */
 class FixtureMediaBrowserService : MediaBrowserService() {
   private val tree = MediaBrowseTree.fixture()
@@ -29,7 +29,7 @@ class FixtureMediaBrowserService : MediaBrowserService() {
                   .putString(MediaMetadata.METADATA_KEY_MEDIA_ID, item.mediaId)
                   .putString(MediaMetadata.METADATA_KEY_TITLE, item.title)
                   .putString(MediaMetadata.METADATA_KEY_ARTIST, item.subtitle)
-                  .build()
+                  .build(),
               )
               setPlaybackState(state(PlaybackState.STATE_PLAYING))
             }
@@ -39,7 +39,7 @@ class FixtureMediaBrowserService : MediaBrowserService() {
             override fun onPause() = setPlaybackState(state(PlaybackState.STATE_PAUSED))
 
             override fun onStop() = setPlaybackState(state(PlaybackState.STATE_STOPPED))
-          }
+          },
         )
         setPlaybackState(state(PlaybackState.STATE_STOPPED))
         isActive = true
@@ -52,8 +52,11 @@ class FixtureMediaBrowserService : MediaBrowserService() {
     super.onDestroy()
   }
 
-  override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot =
-    BrowserRoot(MediaBrowseTree.ROOT_ID, null)
+  override fun onGetRoot(
+    clientPackageName: String,
+    clientUid: Int,
+    rootHints: Bundle?,
+  ): BrowserRoot = BrowserRoot(MediaBrowseTree.ROOT_ID, null)
 
   override fun onLoadChildren(
     parentId: String,
@@ -79,7 +82,7 @@ class FixtureMediaBrowserService : MediaBrowserService() {
         PlaybackState.ACTION_PLAY or
           PlaybackState.ACTION_PAUSE or
           PlaybackState.ACTION_STOP or
-          PlaybackState.ACTION_PLAY_FROM_MEDIA_ID
+          PlaybackState.ACTION_PLAY_FROM_MEDIA_ID,
       )
       .setState(state, 0L, if (state == PlaybackState.STATE_PLAYING) 1f else 0f)
       .build()

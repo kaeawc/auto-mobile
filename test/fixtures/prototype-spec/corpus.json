@@ -453,6 +453,7 @@
     "watch-49mm-now-playing.json",
     "webview-node-limits.json",
     "webview-node.json",
+    "webview-url-combining-path.json",
     "width-dp-at-max.json",
     "window-controls-system.json",
     "window-controls.json",
@@ -2522,6 +2523,7 @@
     "webview-origins-over.json",
     "webview-requires-undeclared.json",
     "webview-title-key-undeclared.json",
+    "webview-url-combining-authority.json",
     "webview-url-http.json",
     "webview-url-missing.json",
     "webview-url-origin-mismatch.json",
@@ -3508,6 +3510,12 @@
       "prototype_platform_v1",
       "prototype_platform_webview_v1"
     ],
-    "webview-node-limits.json": ["prototype_platform_v1", "prototype_platform_webview_v1"]
+    "webview-node-limits.json": ["prototype_platform_v1", "prototype_platform_webview_v1"],
+    "webview-url-combining-path.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_v1",
+      "prototype_platform_webview_v1"
+    ]
   }
 }

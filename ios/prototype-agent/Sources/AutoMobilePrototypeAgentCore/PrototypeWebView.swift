@@ -85,11 +85,18 @@ enum PrototypeWebView {
         return rest.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? rest
     }
 
-    /// The authority of an `https://` URL when it holds no placeholder; otherwise nil.
+    /// The authority of an `https://` URL when it holds no placeholder; otherwise nil. It is read by
+    /// Unicode scalar, not `Character`: a combining mark after a delimiter joins it in one grapheme
+    /// cluster, and the host and Kotlin validators split on the delimiter alone.
     private static func literalAuthority(_ url: String) -> String? {
-        guard url.hasPrefix("https://") else { return nil }
-        let authority = String(url.dropFirst("https://".count).prefix { !"/?#".contains($0) })
-        return authority.contains("{") ? nil : authority
+        let scheme = "https://".unicodeScalars
+        guard url.unicodeScalars.starts(with: scheme) else { return nil }
+        let delimiters = "/?#".unicodeScalars
+        let scalars = url.unicodeScalars.dropFirst(scheme.count).prefix { !delimiters.contains($0) }
+        guard !scalars.contains("{") else { return nil }
+        var authority = ""
+        authority.unicodeScalars.append(contentsOf: scalars)
+        return authority
     }
 
     private static func holds(_ value: JSONValue?, boolean: Bool) -> Bool {

@@ -22,7 +22,6 @@ export interface StartDeviceArgs {
   timeoutMs?: number;
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
-  __mcpSessionId?: string;
   /** Daemon-forwarded: the caller is a one-shot `--cli` connection, so it acquires anonymously (#11096). */
   __oneShotCli?: boolean;
   /** Request-local owner admitted before boot; never mint a replacement if recovery fails. */
@@ -74,7 +73,6 @@ export interface ProvisionDeviceArgs {
   readiness: "automation" | "none";
   resources?: DeviceResourceConfiguration;
   timeoutMs?: number;
-  __mcpSessionId?: string;
   /** Daemon-forwarded one-shot `--cli` marker (#11096). */
   __oneShotCli?: boolean;
   /** The request's absolute transport deadline, from the ambient call context (#15663). */

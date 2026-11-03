@@ -1,3 +1,4 @@
+import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
 import {
   getTvosRunnerLifecycle,
   type TvosRunnerLifecycle,
@@ -23,11 +24,7 @@ import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import { assertTvUnclaimed, defaultAppleTvBoot } from "./deviceToolsAppleTvProvision";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
-import {
-  internalMcpSessionId,
-  internalOneShotCli,
-  stripInternalToolParams,
-} from "./internalToolParams";
+import { internalOneShotCli, stripInternalToolParams } from "./internalToolParams";
 import { z } from "zod/v4";
 
 // The registered shape already advertises tvOS; only exact simulator selectors apply here.
@@ -202,7 +199,7 @@ function reusableTvSessionId(
   return internalOneShotCli(rawArgs)
     ? reusableAnonymousSessionId(deviceId, deps)
     : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
-        internalMcpSessionId(rawArgs),
+        currentAutolockMcpSessionId(),
         deviceId,
       );
 }

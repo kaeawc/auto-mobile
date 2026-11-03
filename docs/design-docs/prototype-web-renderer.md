@@ -74,24 +74,32 @@ registry.
 document, its `sha256`, the frame used, the unsupported nodes of the first view and the revisions
 it inlined per variant.
 
-- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape.
-  The first view is the chosen variant's chosen revision (default: latest) in portrait; the rest
-  are `hidden`.
-- **Controls.** Only four: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
-  double-click to fit), a variant select (only with more than one variant) and the revision
-  history (newest first, `r<N> · show|patch`; only when some variant has more than one revision
-  in the page). Controls are buttons and a select with labels. A toolbar note says the preview is
+- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape,
+  once per screen of its outermost stack when that stack has more than one screen (start first,
+  then the others in authored order; such views carry `data-screen`). The first view is the chosen
+  variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
+  `hidden`.
+- **Controls.** Only five: rotate (portrait/landscape), zoom and pan (fit, 50–400 %, wheel, drag,
+  double-click to fit), a variant select (only with more than one variant), a screen select (only
+  when some revision in the page has more than one screen view) and the revision history (newest
+  first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
+  screen select lists the shown revision's own screen views and is hidden with fewer than two, so
+  it never offers a view the page lacks; switching variant or revision keeps the chosen screen
+  when the new revision has it, else shows that revision's start. Controls are buttons and a select with labels. A toolbar note says the preview is
   static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
-  self-contained. It only shows and hides views and moves the stage; UI state stays in memory, with
-  no storage, cookies or URL changes. It must stay at or below 150 KB.
+  self-contained. It only shows and hides views, lists the shown revision's screens in the
+  screen select and moves the stage; UI state stays in memory, with no storage, cookies or URL
+  changes. It must stay at or below 150 KB.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
   styles, and `data:` images and fonts. The page references no external URL.
-- **Budget.** The page is at most 2 MiB. Each variant's latest revision and the revision shown
-  first are always kept; older revisions are added newest first while they fit, after measuring the
-  shell (head, toolbar, full history list and script). If the kept revisions alone do not fit, the
-  build fails with an `ActionableError` naming the largest view.
+- **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
+  of the revision shown first are always kept, then their other screens while they fit; older
+  revisions are added newest first while their start screen and history entry fit, each followed
+  by its other screens while they fit. The shell (head, toolbar with every screen of the shown
+  revision, full history list and script) is measured first. If the kept start screens alone do
+  not fit, the build fails with an `ActionableError` naming the largest view.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Browser check
@@ -107,7 +115,8 @@ nothing at runtime drives a browser.
   fails the case, on top of the page's own CSP. No console error, page error or
   `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
   non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; rotate
-  shows the landscape view, wider than tall.
+  shows the landscape view, wider than tall; a page with a screen select shows exactly the picked
+  screen's view.
 - **Goldens.** One PNG per case in `test/fixtures/prototype-web/screenshots/`
   (`<spec>--<frame>.png`, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
@@ -129,12 +138,15 @@ nothing at runtime drives a browser.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode})` in `src/features/prototype/web/webStill.ts`
-draws the spec as a still screen and returns an element tree plus `unsupportedNodes`. It renders on
+`renderPrototypeStill(spec, {frame, orientation, mode, screen})` in
+`src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
+tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in authored order, its
+start and the screen drawn). It renders on
 the host, so the page's script only switches between views it was given and never runs spec logic.
 
-- **Input.** The spec after component expansion, with its own `state` and `data`. The stack shows
-  its `start` screen. No action, timer or `request` runs.
+- **Input.** The spec after component expansion, with its own `state` and `data`. A stack shows its
+  `start` screen; the outermost stack (the first one drawn) shows `screen` instead when it has that
+  screen. No action, timer or `request` runs.
 - **Text.** String-table translations resolve first, in the still's fixed `en-US` locale. Then
   `{data:/pointer}` placeholders bind (a missing or non-scalar value is empty),
   then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a

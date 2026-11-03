@@ -165,6 +165,21 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
           expect(rotated.orientation).toBe("landscape");
           expect(rotated.width).toBeGreaterThan(rotated.height);
 
+          // A multi-screen stack's picker shows exactly the picked screen's view.
+          const screens = await page.$$eval(
+            '[data-control="screen"]:not([hidden]) option',
+            (options) => options.map((option) => (option as HTMLOptionElement).value),
+          );
+          if (screens.length > 1) {
+            await page.selectOption('[data-control="screen"]', screens.at(-1)!);
+            const picked = await page.evaluate(() =>
+              Array.from(document.querySelectorAll<HTMLElement>("[data-view]"))
+                .filter((view) => !view.hidden)
+                .map((view) => view.dataset.screen),
+            );
+            expect(picked).toEqual([screens.at(-1)]);
+          }
+
           const violations = await page.evaluate((): string[] =>
             Reflect.get(globalThis, "__cspViolations"),
           );

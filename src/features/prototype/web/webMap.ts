@@ -154,8 +154,16 @@ function horizontalBounds(spans: readonly Span[]): Span {
     (best, gap) => (best && best.width >= gap.width ? best : gap),
     undefined,
   );
-  // No gap: the spans wrap the whole world, so the fit is one world wide.
-  return widest ? { start: widest.start, end: widest.end } : { start: 0, end: 1 };
+  if (widest) {
+    return { start: widest.start, end: widest.end };
+  }
+  // No gap: the spans wrap the whole world. Fit the widest one where it is drawn, at least a world wide.
+  const longest = spans.reduce((best, span) =>
+    span.end - span.start > best.end - best.start ? span : best,
+  );
+  const middle = (longest.start + longest.end) / 2;
+  const half = Math.max(1, longest.end - longest.start) / 2;
+  return { start: middle - half, end: middle + half };
 }
 
 /**
@@ -271,8 +279,11 @@ export function routePercents(
   size: { width: number; height: number },
 ): { left: number; top: number }[] {
   const xs = unwrappedXs(points);
-  const first = points[0] ? wrapOffset(points[0].x - view.center.x) - points[0].x : 0;
-  const offsets = xs.map((x) => x + first);
+  // Anchor the line by its middle, as fitting frames it, so a line wider than half the world keeps
+  // the copy it was fitted on.
+  const middle = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const shift = wrapOffset(middle - view.center.x) - middle;
+  const offsets = xs.map((x) => x + shift);
   return points.map((point, index) =>
     offsetPercent(offsets[index]!, point.y - view.center.y, view, size),
   );

@@ -169,7 +169,11 @@ describe("prototype web map across the 180° line (#16593)", () => {
     expect(lefts[2]).toBeCloseTo(90, 2);
     // A line wrapping the whole world is fitted one world wide.
     const round = [0, 120, -120, 0].map((lng) => mercator(0, lng));
-    expect(fitFraming([], size, [round])!.worldSize).toBeCloseTo(400 * 0.8, 9);
+    const roundView = fitFraming([], size, [round])!;
+    expect(roundView.worldSize).toBeCloseTo(400 * 0.8, 9);
+    const roundLefts = routePercents(round, roundView, size).map((point) => point.left);
+    expect(roundLefts[0]).toBeCloseTo(10, 2);
+    expect(roundLefts[3]).toBeCloseTo(90, 2);
     expect(fitFraming([], size, [[]])).toBeUndefined();
   });
 

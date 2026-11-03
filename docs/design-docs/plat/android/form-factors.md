@@ -122,6 +122,22 @@ non-`user` build; `enable-uxr` is refused from `adb shell` on every build (syste
 state is read from `dumpsys car_service --services CarUxRestrictionsManagerService` and
 `CarDrivingStateService`, which work on both builds. Cluster and passenger displays are unchecked.
 
+### Automotive fixture app
+
+`android/automotive-fixture` (`dev.jasonpearson.automobile.automotivefixture`) is the deterministic
+target for automotive checks: no network and no Google services, so it installs on non-Play images.
+All text and ids come from `FixtureCatalog` and `MediaBrowseTree`; changing them is a contract change.
+
+- `DrivingSafeActivity` (launcher "AutoMobile Fixture", declared `distractionOptimized`): a status line
+  (`fixture_status`) and a list (`fixture_rows`) whose first row opens `ParkedOnlyActivity` and whose
+  `Row 01`..`Row 20` set the status to `Selected Row NN`.
+- `ParkedOnlyActivity`: no `distractionOptimized` meta-data, so it is blocked while driving.
+- `FixtureMediaBrowserService`: a framework `MediaBrowserService` serving two albums and a playlist of
+  three tracks each; playing an item only updates the session state.
+- `FixtureCarAppService` (navigation category, launcher "AutoMobile Templates" via `CarAppActivity`):
+  list, grid, pane and place-list navigation templates with fixed rows and four fixed places. It accepts
+  every templates host, so a non-Play image needs a templates host of its own to render it.
+
 ## Device selection change
 
 1. Extend `FormFactor` and `BINDING_DEVICE_FAMILIES` with `tv`, `watch`, `automotive`.

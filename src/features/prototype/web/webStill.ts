@@ -1,4 +1,5 @@
 import { prototypeSpecForDevice } from "../prototypeComponents";
+import type { PrototypeFormatLogger } from "../prototypeFormat";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
@@ -23,6 +24,8 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /** Traces rejected derived formats; the server passes its logger, a browser embed none. */
+  readonly logger?: PrototypeFormatLogger;
 }
 
 export interface PrototypeStill {
@@ -187,7 +190,12 @@ function stillScope(
     },
     data: spec.data,
     spec,
-    format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
+    format: {
+      locale: STILL_LOCALE,
+      timeZone: "UTC",
+      nowMs: options.nowMs ?? 0,
+      ...(options.logger === undefined ? {} : { logger: options.logger }),
+    },
     instances: [],
     inBox: false,
     unsupported: [],

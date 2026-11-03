@@ -18,12 +18,13 @@ link to a running daemon are separate decisions with their own gates, below.
   pure function from spec, frame, orientation, mode and screen to an element tree. It already
   runs no actions, timers or requests, and serializes deterministically. The page runtime
   (`webPageRuntime.ts`) only switches pre-rendered views and moves the stage.
-- Bundling `renderPrototypeStill` and `toHtml` for the browser today fails: `prototypeFormat.ts`
-  imports the shared logger, which reaches `src/utils/tempDir.ts` and `node:os`. Built for Node
-  instead, the same entry is 424 KB minified (84 KB gzip). The renderer and its prototype helpers
-  are about 71 KB of that; the rest is the whole spec contract JSON (228 KB, read for five limits
-  and one repeat option), zod (59 KB, for one `z.custom` in `prototypeStrings.ts`) and the
-  logger and environment config (62 KB).
+- `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 73 KB
+  minified (23 KB gzip). The renderer's closure reads only the contract values in the generated
+  `prototypeRenderContract.generated.ts`, not the whole contract JSON; the string-table zod
+  schema lives in `prototypeSpec.ts` and the frame schema in `deviceFrameSchema.ts`, outside
+  the closure; and the derived-format path takes an optional injected logger instead of
+  importing the server's. `stillBrowserBundle.test.ts` fails on any Node builtin, on the contract
+  JSON, zod or the server logger in the closure, and on the core budget below.
 - Shared JSON fixtures already drive parity across the TypeScript host, the Kotlin protocol and
   the Swift agent (`test/fixtures/prototype-spec/list-writes/`, `derive/`).
 
@@ -181,10 +182,6 @@ that entry:
 | `element`      | core plus the custom element       | 105 KB   | 32 KB  |
 | `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB |
 
-- Reaching the core budget needs the renderer's closure cut down: a generated constants module
-  with only the contract limits it reads instead of the whole contract JSON, the string-table
-  schema without zod, and the logger injected rather than imported. With those three cuts the
-  renderer and its helpers measure about 71 KB minified.
 - Per-node tree-shaking is not offered. Node renderers are dispatched by type from a spec only
   known at runtime, so a bundler cannot drop any. Splitting renderers into opt-in groups would
   make an embed silently show placeholders for nodes its author forgot to register; the budget

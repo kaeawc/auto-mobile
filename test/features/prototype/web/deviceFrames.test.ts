@@ -3,9 +3,11 @@ import {
   DEVICE_FRAMES,
   deviceFrameOrThrow,
   defaultDeviceFrameId,
+} from "../../../../src/features/prototype/web/deviceFrames";
+import {
   deviceFrameProblems,
   parseDeviceFrames,
-} from "../../../../src/features/prototype/web/deviceFrames";
+} from "../../../../src/features/prototype/web/deviceFrameSchema";
 import registry from "../../../../src/features/prototype/web/deviceFrames.json";
 
 const frame = (overrides: Record<string, unknown> = {}) => ({

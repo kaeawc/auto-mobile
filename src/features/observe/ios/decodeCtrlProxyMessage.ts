@@ -645,6 +645,15 @@ const messageDecoders = new Map<
     }),
   ],
   [
+    "accessibility_focus_result",
+    (message) => ({
+      success: message.success ?? false,
+      errorCode: message.errorCode,
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
+  [
     "magic_tap_result",
     (message) => ({
       success: message.success ?? false,

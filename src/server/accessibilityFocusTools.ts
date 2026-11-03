@@ -9,7 +9,10 @@ import { accessibilityActionTool } from "./accessibilityActionTool";
 // `defineDeviceTool` applies `.strict()` (#6712) and device targeting, and infers the
 // handler's args from this schema.
 const accessibilityFocusInput = z.object({
-  action: z.enum(["set", "clear"]).optional().describe("set default or clear TalkBack focus"),
+  action: z
+    .enum(["set", "clear"])
+    .optional()
+    .describe("set default or clear accessibility focus (clear is Android-only)"),
   resourceId: z.string().optional().describe("Target resource ID"),
   text: z.string().optional().describe("Target text"),
   contentDesc: z
@@ -25,15 +28,10 @@ const accessibilityFocusInput = z.object({
 // TalkBack navigation gestures instead.
 const accessibilityFocusTool = defineDeviceTool({
   name: "accessibilityFocus",
-  description: "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
+  description:
+    "Set accessibility focus on Android (TalkBack) and iOS (VoiceOver) by resourceId, text, or contentDesc. Clearing focus is supported on Android only.",
   input: accessibilityFocusInput,
   handler: async (device, args) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "accessibilityFocus is only supported on Android (TalkBack). iOS VoiceOver focus is not yet implemented.",
-      );
-    }
-
     const feature = new SetAccessibilityFocus(device);
     const result = await feature.execute({
       action: args.action,
@@ -43,9 +41,21 @@ const accessibilityFocusTool = defineDeviceTool({
     });
 
     if (!result.success) {
-      throw new ActionableError(result.error ?? "Failed to update accessibility focus");
+      throw new ActionableError(
+        result.error ??
+          (device.platform === "ios"
+            ? "Failed to set VoiceOver focus"
+            : "Failed to update accessibility focus"),
+      );
     }
 
+    if (device.platform === "ios") {
+      return createStructuredToolResponse({
+        success: true,
+        confirmed: result.confirmed,
+        warning: result.warning,
+      });
+    }
     return createStructuredToolResponse({
       success: true,
       focusedElement: result.focusedElement,

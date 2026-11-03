@@ -615,3 +615,13 @@ export interface CtrlProxyMagicTapResult extends BaseResult {
   unsupported: boolean;
   requiresVoiceOver: false;
 }
+
+/** Selector resolved by the foreground app's SDK, using native accessibility metadata. */
+export type AccessibilityFocusSelector = Pick<
+  import("../../../models/SetAccessibilityFocusOptions").SetAccessibilityFocusOptions,
+  "resourceId" | "text" | "contentDesc"
+>;
+
+export interface CtrlProxyAccessibilityFocusResult extends BaseResult {
+  errorCode?: import("../../../models/SetAccessibilityFocusResult").AccessibilityFocusErrorCode;
+}

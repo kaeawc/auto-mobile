@@ -645,6 +645,18 @@
       }
     },
     {
+      "name" : "accessibility_focus_result",
+      "wire" : {
+        "error" : "VoiceOver is off",
+        "errorCode" : "voiceover_off",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "accessibility_focus_result"
+      }
+    },
+    {
       "name" : "magic_tap_result",
       "wire" : {
         "available" : true,
@@ -1419,6 +1431,7 @@
   ],
   "responseTypes" : [
     "accessibility_audit_result",
+    "accessibility_focus_result",
     "action_result",
     "appearance_result",
     "append_text_result",

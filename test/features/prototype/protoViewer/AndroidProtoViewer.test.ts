@@ -31,7 +31,10 @@ const NO_PUSHED_PROTOTYPE = readFileSync(
   new URL("rejected-no-pushed-prototype.json", CAPTURES),
   "utf8",
 );
-const START = `shell am start -W --activity-multiple-task --user 0 -n ${PACKAGE}/.McpActivity`;
+const DEV_PACKAGE = `${PACKAGE}.dev`;
+const DEV_ROOT = `/sdcard/Android/data/${DEV_PACKAGE}/files/mcp`;
+// Fully qualified: the class keeps the store namespace under the `.dev` app ID too.
+const START = `shell am start -W --activity-multiple-task --user 0 -n ${PACKAGE}/${PACKAGE}.McpActivity`;
 const READY_PROBE = `shell if [ -d '${ROOT}/inbox' ] && [ -d '${ROOT}/results' ] && [ ! -O '${ROOT}' ] && [ ! -O '${ROOT}/inbox' ] && [ ! -O '${ROOT}/results' ]; then echo ready; fi`;
 const REMOVE_SHELL_OWNED = `shell for d in '${ROOT}' '${ROOT}/inbox' '${ROOT}/results'; do if [ -O "$d" ]; then rm -rf "$d"; fi; done`;
 const resultProbe = (request: string) =>
@@ -89,9 +92,9 @@ class ScriptedProtoViewerAdb extends FakeAdbExecutor {
   }
 
   /** The folders ProtoViewer creates for itself. */
-  appCreatesFolders(): void {
-    this.folders.add(`${ROOT}/inbox`);
-    this.folders.add(`${ROOT}/results`);
+  appCreatesFolders(root = ROOT): void {
+    this.folders.add(`${root}/inbox`);
+    this.folders.add(`${root}/results`);
   }
 
   /** The app's atomic result write, visible to the host after the given number of empty polls. */
@@ -215,6 +218,35 @@ describe("AndroidProtoViewer", () => {
     expect(await viewer.installed()).toBe(true);
     adb.setCommandResponse("pm list packages --user 0", exec("package:com.example\n"));
     expect(await viewer.installed()).toBe(false);
+  });
+
+  test("a dev build alone is driven under its .dev app ID with the store action names", async () => {
+    adb.setCommandResponse("pm list packages --user 0", exec(`package:${DEV_PACKAGE}\n`));
+    expect(await viewer.installed()).toBe(true);
+    adb.clearHistory();
+    adb.appCreatesFolders(DEV_ROOT);
+    adb.whenLaunched(({ request }) => adb.appWritesResult(request, imported(), 0, DEV_ROOT));
+
+    expect(await viewer.importBundle(new Uint8Array([1]), undefined, 5000)).toEqual(imported());
+    expect(adb.getExecutedArgv()[0]?.[2]).toBe(`${DEV_ROOT}/inbox/${REQUEST}.automobile-proto`);
+    expect(shellCommands()).toContain(
+      `shell am start -W --activity-multiple-task --user 0 -n ${DEV_PACKAGE}/${PACKAGE}.McpActivity -a ${PACKAGE}.mcp.IMPORT --es request ${REQUEST}`,
+    );
+    expect(shellCommands().some((command) => command.includes(`${ROOT}/`))).toBe(false);
+  });
+
+  test("a dev build wins over a store build installed beside it", async () => {
+    adb.setCommandResponse(
+      "pm list packages --user 0",
+      exec(`package:${PACKAGE}\npackage:${DEV_PACKAGE}\n`),
+    );
+    expect(await viewer.installed()).toBe(true);
+    adb.clearHistory();
+    adb.whenLaunched(({ request }) =>
+      adb.appWritesResult(request, { ...imported(), status: "opened" }, 0, DEV_ROOT),
+    );
+    expect((await viewer.open(LIBRARY_ID, 5000)).status).toBe("opened");
+    expect(adb.getExecutedCommands()[0]).toContain(`-n ${DEV_PACKAGE}/${PACKAGE}.McpActivity`);
   });
 
   test("the captured API 37 failure: a remote cat of a missing result exits 1 and adb throws", async () => {
@@ -468,7 +500,7 @@ describe("AndroidProtoViewer", () => {
     const result = await viewer.open(LIBRARY_ID, 5000);
     expect(result.status).toBe("opened");
     expect(adb.getExecutedCommands()).toEqual([
-      `shell am start -W --activity-multiple-task --user 10 -n ${PACKAGE}/.McpActivity -a ${PACKAGE}.mcp.OPEN --es request ${REQUEST} --es libraryId '${LIBRARY_ID}'`,
+      `shell am start -W --activity-multiple-task --user 10 -n ${PACKAGE}/${PACKAGE}.McpActivity -a ${PACKAGE}.mcp.OPEN --es request ${REQUEST} --es libraryId '${LIBRARY_ID}'`,
       `shell if [ -f '${root10}/results/${REQUEST}.json' ]; then cat '${root10}/results/${REQUEST}.json'; fi`,
       `shell rm -f '${root10}/results/${REQUEST}.json'`,
     ]);

@@ -14,7 +14,33 @@ import { z } from "zod/v4";
  * is owned by the shell and the app can neither traverse nor create entries in it (#15174).
  */
 export const PROTOVIEWER_PACKAGE = "dev.jasonpearson.automobile.protoviewer";
-export const PROTOVIEWER_MCP_COMPONENT = `${PROTOVIEWER_PACKAGE}/.McpActivity`;
+/**
+ * Dev builds (the Android debug build and the iOS cleartext simulator build) append `.dev` to the
+ * store ID, so a cleartext build never shares an ID with a store build (#14144).
+ */
+export const PROTOVIEWER_DEV_PACKAGE = `${PROTOVIEWER_PACKAGE}.dev`;
+/**
+ * Every app ID the host drives, in preference order: a dev build is only ever installed on purpose,
+ * by someone building ProtoViewer, so it wins over a store build on the same device.
+ */
+export const PROTOVIEWER_PACKAGES = [PROTOVIEWER_DEV_PACKAGE, PROTOVIEWER_PACKAGE] as const;
+export type ProtoViewerPackage = (typeof PROTOVIEWER_PACKAGES)[number];
+
+/** The first ProtoViewer app ID in preference order that `isInstalled` accepts. */
+export function preferredProtoViewerPackage(
+  isInstalled: (appId: string) => boolean,
+): ProtoViewerPackage | undefined {
+  return PROTOVIEWER_PACKAGES.find(isInstalled);
+}
+
+/**
+ * The MCP activity of one installed build. The class keeps the store namespace under every app ID,
+ * so it is fully qualified: `<app id>/.McpActivity` would resolve against the `.dev` app ID.
+ */
+export function protoViewerMcpComponent(appId: ProtoViewerPackage): string {
+  return `${appId}/${PROTOVIEWER_PACKAGE}.McpActivity`;
+}
+/** Action names are fixed in the app (McpInbox.kt) and do not follow the app ID. */
 export const PROTOVIEWER_MCP_IMPORT_ACTION = `${PROTOVIEWER_PACKAGE}.mcp.IMPORT`;
 export const PROTOVIEWER_MCP_OPEN_ACTION = `${PROTOVIEWER_PACKAGE}.mcp.OPEN`;
 export const PROTOVIEWER_MCP_PREPARE_ACTION = `${PROTOVIEWER_PACKAGE}.mcp.PREPARE`;
@@ -72,26 +98,34 @@ function truncateWholeCharacters(text: string, maxLength: number): string {
 }
 
 /** `getExternalFilesDir(null)/mcp` for the given Android user, as adb shell sees it. */
-export function protoViewerMcpRoot(userId: number): string {
+export function protoViewerMcpRoot(userId: number, appId: ProtoViewerPackage): string {
   // Same user-0 spelling as the externalFiles app-file container (appFileSupport.ts).
   const storage = userId === 0 ? "/sdcard" : `/storage/emulated/${userId}`;
-  return `${storage}/Android/data/${PROTOVIEWER_PACKAGE}/files/mcp`;
+  return `${storage}/Android/data/${appId}/files/mcp`;
 }
 
-export function protoViewerInboxDir(userId: number): string {
-  return `${protoViewerMcpRoot(userId)}/inbox`;
+export function protoViewerInboxDir(userId: number, appId: ProtoViewerPackage): string {
+  return `${protoViewerMcpRoot(userId, appId)}/inbox`;
 }
 
-export function protoViewerResultsDir(userId: number): string {
-  return `${protoViewerMcpRoot(userId)}/results`;
+export function protoViewerResultsDir(userId: number, appId: ProtoViewerPackage): string {
+  return `${protoViewerMcpRoot(userId, appId)}/results`;
 }
 
-export function protoViewerInboxPath(userId: number, request: string): string {
-  return `${protoViewerInboxDir(userId)}/${request}${PROTOVIEWER_BUNDLE_SUFFIX}`;
+export function protoViewerInboxPath(
+  userId: number,
+  appId: ProtoViewerPackage,
+  request: string,
+): string {
+  return `${protoViewerInboxDir(userId, appId)}/${request}${PROTOVIEWER_BUNDLE_SUFFIX}`;
 }
 
-export function protoViewerResultPath(userId: number, request: string): string {
-  return `${protoViewerResultsDir(userId)}/${request}.json`;
+export function protoViewerResultPath(
+  userId: number,
+  appId: ProtoViewerPackage,
+  request: string,
+): string {
+  return `${protoViewerResultsDir(userId, appId)}/${request}.json`;
 }
 
 const entry = {

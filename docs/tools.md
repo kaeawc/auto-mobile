@@ -318,4 +318,5 @@ of rows, a full-screen metric (one large number with a label and unit), a two-bu
 
 The mockup is a phone overlay sized like a watch. It does not simulate the Digital Crown, Always-On
 or wrist-down dimming, real watchOS or Wear OS fonts and controls, or the round Wear OS screen, and
-nothing runs on a watch. Check the final design on a real watch.
+nothing runs on a watch. Check the final design on a real watch. To drive a watch app itself, see
+[Apple Watch simulators](using/apple-watch.md).

@@ -55,23 +55,6 @@
       {
         "actions": [
           {
-            "type": "prependData",
-            "path": "/data/items",
-            "value": {
-              "value": ["a"]
-            }
-          }
-        ],
-        "expect": {
-          "data": {
-            "items": ["a", "b", "c"],
-            "title": "new"
-          }
-        }
-      },
-      {
-        "actions": [
-          {
             "type": "removeData",
             "path": "/data/items/1"
           },
@@ -82,7 +65,59 @@
         ],
         "expect": {
           "data": {
-            "items": ["a", "c"]
+            "items": ["b"]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "prependData inserts one row at the start",
+    "spec": {
+      "id": "trace-prepend",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "data": {
+        "items": ["b"]
+      },
+      "root": {
+        "type": "text",
+        "text": "Rows"
+      }
+    },
+    "steps": [
+      {
+        "actions": [
+          {
+            "type": "prependData",
+            "path": "/data/items",
+            "value": {
+              "value": "a"
+            }
+          }
+        ],
+        "expect": {
+          "data": {
+            "items": ["a", "b"]
+          }
+        }
+      },
+      {
+        "actions": [
+          {
+            "type": "prependData",
+            "path": "/data/items",
+            "value": {
+              "value": ["x", "y"]
+            }
+          }
+        ],
+        "expect": {
+          "data": {
+            "items": [["x", "y"], "a", "b"]
           }
         }
       }

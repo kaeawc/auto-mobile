@@ -41,6 +41,10 @@
     {
       "trace": "setStack replaces the whole path",
       "issue": 16620
+    },
+    {
+      "trace": "prependData inserts one row at the start",
+      "issue": 16715
     }
   ],
   "swift": [

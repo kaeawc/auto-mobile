@@ -84,7 +84,8 @@ function dataWrite(action: Action, value: unknown): PrototypeDataWrite {
     case "appendData":
       return { op: "append", path, value };
     case "prependData":
-      return { op: "prepend", path, value: value as unknown[] };
+      // One row at the start: the host's `prepend` writer op takes the row as a one-row page.
+      return { op: "prepend", path, value: [value] };
     case "upsertData":
       return { op: "upsert", path, key: String(action.key), value };
     default:

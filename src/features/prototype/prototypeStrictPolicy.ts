@@ -441,6 +441,35 @@ interface DataWrite {
   from: string;
 }
 
+/** Pairs a data action's `path` with its `value` read; both are visited at sibling paths. */
+class DataCopies {
+  private readonly destinations = new Map<string, string>();
+  private readonly reads = new Map<string, { source: "data" | "platform"; from: string }>();
+
+  visit(raw: unknown, at: string, kind: string): void {
+    if (kind === "dataPath" && at.endsWith(".path")) {
+      const into = prototypeDataPathPointer(raw);
+      if (into !== undefined) {
+        this.destinations.set(at.slice(0, -".path".length), into);
+      }
+    }
+    const binding = kind === "emitBinding" && at.endsWith(".value") ? object(raw) : undefined;
+    for (const source of ["data", "platform"] as const) {
+      const from = binding?.[source];
+      if (typeof from === "string") {
+        this.reads.set(at.slice(0, -".value".length), { source, from });
+      }
+    }
+  }
+
+  writes(): DataWrite[] {
+    return [...this.reads].flatMap(([prefix, read]) => {
+      const into = this.destinations.get(prefix);
+      return into === undefined ? [] : [{ into, ...read }];
+    });
+  }
+}
+
 function libraryFields(
   spec: unknown,
   nodes: readonly Located[],
@@ -448,15 +477,9 @@ function libraryFields(
 ): { requests: string[]; fields: LibraryField[]; dataWrites: DataWrite[] } {
   const requests: string[] = [];
   const fields: LibraryField[] = [];
-  const destinations = new Map<string, string>();
-  const reads = new Map<string, { source: "data" | "platform"; from: string }>();
+  const copies = new DataCopies();
   const collect: FieldVisitor = (raw, at, kind) => {
-    if (kind === "dataPath" && at.endsWith(".path")) {
-      const into = prototypeDataPathPointer(raw);
-      if (into !== undefined) {
-        destinations.set(at.slice(0, -".path".length), into);
-      }
-    }
+    copies.visit(raw, at, kind);
     if (kind === "request") {
       requests.push(at);
     }
@@ -468,9 +491,6 @@ function libraryFields(
       for (const source of ["data", "platform"] as const) {
         if (typeof binding[source] === "string") {
           fields.push({ text: binding[source], path: at, key: false, pointerSource: source });
-          if (at.endsWith(".value")) {
-            reads.set(at.slice(0, -".value".length), { source, from: binding[source] });
-          }
         }
       }
       if (typeof binding.item === "string") {
@@ -484,11 +504,7 @@ function libraryFields(
   }
   visitPrototypeHandlerFields(spec, collect);
   channelFields(spec, requests, fields, collect);
-  const dataWrites = [...reads].flatMap(([prefix, read]) => {
-    const into = destinations.get(prefix);
-    return into === undefined ? [] : [{ into, ...read }];
-  });
-  return { requests, fields, dataWrites };
+  return { requests, fields, dataWrites: copies.writes() };
 }
 
 function channelFields(

@@ -93,11 +93,10 @@ internal object PrototypeSensitiveSinkRules {
         }
     val taints = seeds.toMutableList()
     do {
-      val added =
-        copies.filter { (into, source, from) ->
-          into !in taints &&
-            (if (source == "data") taints else platformTaints).any { overlaps(it, from, false) }
-        }
+      val added = copies.filter { (into, source, from) ->
+        into !in taints &&
+          (if (source == "data") taints else platformTaints).any { overlaps(it, from, false) }
+      }
       taints.addAll(added.map { it.first }.distinct())
     } while (added.isNotEmpty())
     return taints

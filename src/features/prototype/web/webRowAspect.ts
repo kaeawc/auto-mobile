@@ -1,5 +1,5 @@
 import { record, type Raw } from "../prototypeTemplate";
-import { ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
+import { ROW_BOUND_KEY, ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
 
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
 function freeAspectRatio(node: Raw | undefined): number | undefined {
@@ -61,32 +61,23 @@ export function rowFillAxes(node: Raw, path: string, prepare: PrepareChild): "wi
 }
 
 /**
- * A row's own CSS around a capped aspect-ratio child: a Compose Row never measures wider than its
- * parent, but the child's width (its cap) would grow a wrap-sized CSS row past it, so the row is
- * bounded to its parent's width and the cap shrinks inside it instead. An authored `maxWidth` wins.
+ * A row with its children measured in order (see rowSequentialChildren); other nodes unchanged.
+ * Around a capped aspect ratio the row is also bounded to its parent's width (ROW_BOUND_KEY): a
+ * Compose Row never measures wider than its max, but the child's width (its cap) would grow a
+ * wrap-sized CSS row past it, so the cap shrinks inside the row instead.
  */
-export function rowBoundCss(
-  node: Raw,
-  path: string,
-  prepare: PrepareChild,
-): Record<string, string> {
-  const capped =
-    node.type === "row" &&
-    node.repeat === undefined &&
-    Array.isArray(node.children) &&
-    node.children.some((entry, index) => aspectRatioCap(prepare(entry, childPath(path, index))));
-  return capped ? { "max-width": "100%" } : {};
-}
-
-/** A row with its children measured in order (see rowSequentialChildren); other nodes unchanged. */
 export function rowMeasured(node: Raw, path: string, prepare: PrepareChild): Raw {
   if (node.type !== "row" || node.repeat !== undefined || !Array.isArray(node.children)) {
     return node;
   }
-  const children = rowSequentialChildren(node.children, (entry, index) =>
-    prepare(entry, childPath(path, index)),
-  );
-  return children === node.children ? node : { ...node, children };
+  const styled = node.children.map((entry, index) => prepare(entry, childPath(path, index)));
+  const children = rowSequentialChildren(node.children, (_entry, index) => styled[index]);
+  if (children === node.children) {
+    return node;
+  }
+  const bounded = styled.some((child) => aspectRatioCap(child) !== undefined);
+  const style = bounded ? { ...record(node.style), [ROW_BOUND_KEY]: true } : node.style;
+  return { ...node, children, ...(style === undefined ? {} : { style }) };
 }
 
 function withStyle(entry: unknown, patch: Raw): unknown {

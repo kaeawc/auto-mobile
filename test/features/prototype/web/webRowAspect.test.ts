@@ -5,9 +5,14 @@ import {
   CAPPED_SHRINK,
   isUnsizedAspectRatio,
   LATER_SHRINK,
+  rowMeasured,
   rowSequentialChildren,
 } from "../../../../src/features/prototype/web/webRowAspect";
-import { nodeCss, ROW_MEASURE_KEY } from "../../../../src/features/prototype/web/webStyle";
+import {
+  nodeCss,
+  ROW_BOUND_KEY,
+  ROW_MEASURE_KEY,
+} from "../../../../src/features/prototype/web/webStyle";
 
 const shown = (entry: unknown): Raw | undefined => record(entry);
 const styleOf = (entry: unknown) => record(record(entry)?.style);
@@ -172,4 +177,25 @@ test("a row measure becomes a flex basis and shrink in a row only", () => {
 test("a row without an unsized aspect ratio keeps its children as authored", () => {
   const entries = [{ type: "box", style: { aspectRatio: 2, width: { dp: 40 } } }];
   expect(rowSequentialChildren(entries, shown)).toBe(entries);
+});
+
+test("a row around a capped aspect ratio is bounded to its parent; an authored maxWidth wins", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const capped = { type: "box", style: { aspectRatio: 2, maxWidth: 100 } };
+  const row = { type: "row", style: { padding: 4 }, children: [capped] };
+  const measured = rowMeasured(row, "root", prepare);
+  expect(measured.style).toEqual({ padding: 4, [ROW_BOUND_KEY]: true });
+  // An unsized aspect ratio fills the row instead, so the row needs no bound.
+  const free = rowMeasured(
+    { type: "row", children: [{ type: "box", style: { aspectRatio: 2 } }] },
+    "root",
+    prepare,
+  );
+  expect(free.style).toBeUndefined();
+  const plain = { type: "row", children: [{ type: "text", text: "a" }] };
+  expect(rowMeasured(plain, "root", prepare)).toBe(plain);
+
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "column" as const };
+  expect(nodeCss(measured.style, context)["max-width"]).toBe("100%");
+  expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, context)["max-width"]).toBe("50px");
 });

@@ -44,6 +44,12 @@ type Css = Record<string, string>;
  */
 export const ROW_MEASURE_KEY = "webRowMeasure";
 
+/**
+ * A style key the web renderer adds to a row around a capped aspect ratio, never authored: the row
+ * is bounded to its parent's width, as a Compose Row's max is. An authored `maxWidth` wins.
+ */
+export const ROW_BOUND_KEY = "webRowBound";
+
 /** A row child's measure hint: how fast it gives up width, and its own width before that. */
 export interface RowMeasure {
   readonly shrink: number;
@@ -183,6 +189,9 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
   }
   rowMeasureStyle(css, style, context);
+  if (style[ROW_BOUND_KEY] === true) {
+    css["max-width"] = "100%";
+  }
   for (const [field, property] of [
     ["minWidth", "min-width"],
     ["maxWidth", "max-width"],

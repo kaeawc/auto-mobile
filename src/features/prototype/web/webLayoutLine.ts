@@ -429,20 +429,37 @@ function lineJustify(
   return physical === undefined ? undefined : (SIDE_SWAP[physical] ?? physical);
 }
 
-/** Where a line starts on its main axis, how far it extends, and whether it runs from its end. */
-interface MainLine {
-  readonly start: Len;
-  readonly extent: Len;
-  readonly reverse: boolean;
+/**
+ * Each item's offset from its line's main-start: the arrangement's lead, then each item's size,
+ * the gap and the arrangement's spacing in turn.
+ */
+function forwardOffsets(sizes: readonly Len[], gap: number, [lead, between]: [Len, Len]): Len[] {
+  let cursor = lead;
+  return sizes.map((size) => {
+    const offset = cursor;
+    cursor = add(add(add(cursor, size), gap), between);
+    return offset;
+  });
 }
 
 /**
- * A main-axis position from an offset along the line. A reversed line runs from its main-end,
- * so an item's offset is measured back from the end of the line's extent.
+ * Each item's offset from its line's physical start. A reversed line runs from its main-end, so
+ * an item sits back from the end of the line by its forward offset and its own size. A line
+ * sized by its content has no free space, so there an item sits after the items that follow it
+ * in source order: the last one starts at the line's start even when another size is unknown.
  */
-function mainPosition(line: MainLine, offset: Len, size: Len): Len {
-  const { start, extent, reverse } = line;
-  return reverse ? add(start, sub(extent, add(offset, size))) : add(start, offset);
+function physicalOffsets(
+  sizes: readonly Len[],
+  gap: number,
+  room: Len,
+  arranged: [Len, Len],
+): Len[] {
+  if (room !== undefined) {
+    return forwardOffsets(sizes, gap, arranged).map((offset, index) =>
+      sub(room, add(offset, sizes[index])),
+    );
+  }
+  return forwardOffsets([...sizes].reverse(), gap, [0, 0]).reverse();
 }
 
 /** A flex line: items grow into the free space, then the arrangement places them. */
@@ -460,23 +477,17 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   const { sizes, remaining } = grownSizes(items, free);
   const reverse = reversed(box.parent);
   const justify = lineJustify(box.parent.style["justify-content"], main, reverse);
-  const [lead, between] = arrangement(justify, remaining, items.length);
-  // A container sized by its content ends where its items do.
-  const line: MainLine = {
-    start: startOf(box.content, main),
-    extent:
-      room ??
-      sizes.reduce<Len>((total, size) => add(total, size), gap * Math.max(0, items.length - 1)),
-    reverse,
-  };
+  const arranged = arrangement(justify, remaining, items.length);
+  const offsets = reverse
+    ? physicalOffsets(sizes, gap, room, arranged)
+    : forwardOffsets(sizes, gap, arranged);
   const placed: PlacedChild[] = [];
-  let cursor: Len = lead;
   for (const [index, item] of items.entries()) {
     const size = sizes[index];
     if (item.element) {
       const [offset, crossSize] = crossPlacement(item.element, main, size, box);
       const position: [Len, Len] = [
-        mainPosition(line, cursor, size),
+        add(startOf(box.content, main), offsets[index]),
         add(startOf(box.content, cross), offset),
       ];
       const rect = oriented(main, position, [size, crossSize]);
@@ -485,7 +496,6 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
         rect: withAspectRatio(item.element, rect, box.content, box.vars),
       });
     }
-    cursor = add(add(add(cursor, size), gap), between);
   }
   return placed;
 }

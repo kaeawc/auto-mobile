@@ -1457,3 +1457,41 @@ describe("prototype web still platform state (#16448)", () => {
     expect(label({ frame: "ipad-10" })).toBe("ios regular||{platform:/device/idiom}");
   });
 });
+
+describe("a weighted child's main-axis bounds (#16698)", () => {
+  const bounded = (testTag: string) => ({
+    type: "box",
+    testTag,
+    style: { weight: 1, height: { dp: 100 }, maxHeight: 20 },
+  });
+  const still = renderPrototypeStill({
+    id: "weights",
+    window: { placement: { type: "fullscreen" } },
+    root: {
+      type: "column",
+      style: { height: { dp: 300 } },
+      children: [
+        bounded("in-column"),
+        { type: "card", children: [bounded("in-card")] },
+        { type: "scroll", style: { weight: 1 }, child: bounded("in-scroll") },
+        {
+          type: "row",
+          style: { weight: 1 },
+          children: [{ type: "scroll", child: bounded("in-nested-scroll") }],
+        },
+      ],
+    },
+  });
+  const maxHeight = (tag: string) => byTag(still, tag)[0]?.style["max-height"];
+
+  test("a column or card pins it to the share, dropping the bound", () => {
+    expect(byTag(still, "in-column")[0]?.style.flex).toBe("1 1 0");
+    expect(maxHeight("in-column")).toBeUndefined();
+    expect(maxHeight("in-card")).toBeUndefined();
+  });
+
+  test("scroll content keeps it, even inside a weighting row", () => {
+    expect(maxHeight("in-scroll")).toBe("20px");
+    expect(maxHeight("in-nested-scroll")).toBe("20px");
+  });
+});

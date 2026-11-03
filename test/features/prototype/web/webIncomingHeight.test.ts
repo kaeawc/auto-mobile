@@ -196,15 +196,26 @@ test("a weight drops the authored bounds on its main axis, as both devices pin i
     {
       ...light,
       parentAxis: "column",
+      weightsChildren: true,
     },
   );
   expect(inColumn).toMatchObject({ flex: "1 1 0", "min-height": "0", "min-width": "10px" });
   expect(inColumn["max-height"]).toBeUndefined();
   expect(inColumn["max-width"]).toBe("20px");
-  const inRow = nodeCss({ weight: 1, ...bounds }, { ...light, parentAxis: "row" });
+  const inRow = nodeCss(
+    { weight: 1, ...bounds },
+    {
+      ...light,
+      parentAxis: "row",
+      weightsChildren: true,
+    },
+  );
   expect(inRow).toMatchObject({ flex: "1 1 0", "min-width": "0", "min-height": "30px" });
   expect(inRow["max-width"]).toBeUndefined();
   expect(inRow["max-height"]).toBe("40px");
+  // A line that shares no weight (a scroll, sheet or stack) keeps every bound, as native does.
+  const inScroll = nodeCss({ weight: 1, ...bounds }, { ...light, parentAxis: "column" });
+  expect(inScroll).toMatchObject({ "min-height": "30px", "max-height": "40px" });
   // Unweighted, every bound holds.
   expect(nodeCss(bounds, { ...light, parentAxis: "column" })).toMatchObject({
     "min-height": "30px",

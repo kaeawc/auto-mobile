@@ -10,6 +10,11 @@ export interface WebStyleContext {
   readonly palette: ReadonlyMap<string, Rgba>;
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
+  /**
+   * Whether the parent shares its main axis by `weight`, as a native Row, Column or card does
+   * (Compose's `Modifier.weight`); a scroll, sheet or stack lays children out in a line without it.
+   */
+  readonly weightsChildren?: boolean;
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
   /** The frame's platform, for looks the devices draw differently (glass). Android when unset. */
@@ -230,7 +235,8 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     ["maxHeight", "max-height", "column"],
   ] as const) {
     // A weight pins its main axis to its share on both devices: the bounds there do not apply.
-    if (typeof style[field] === "number" && !(weighted && context.parentAxis === axis)) {
+    const pinned = weighted && context.weightsChildren === true && context.parentAxis === axis;
+    if (typeof style[field] === "number" && !pinned) {
       css[property] = px(style[field] as number);
     }
   }

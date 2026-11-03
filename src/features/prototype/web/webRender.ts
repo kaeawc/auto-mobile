@@ -320,7 +320,8 @@ const line =
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const sized = heightsIn(raw, scope, path);
     const node = filling(sized, lineFillAxes(sized, scope, path));
-    const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
+    const lineStyle = { ...scope.style, parentAxis: axis, weightsChildren: true };
+    const inner = child(scope, { inBox: false, style: lineStyle });
     const rowed = rowMeasured(node, path, prepareIn(inner));
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
@@ -368,7 +369,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
   });
   const inner = child(scope, {
     inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
+    style: { ...scope.style, parentAxis: horizontal ? "row" : "column", weightsChildren: false },
   });
   return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
@@ -827,7 +828,8 @@ const card: NodeRenderer = (raw, scope, path) => {
       "onSurface",
     ),
   });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
+  const cardStyle = { ...scope.style, parentAxis: "column" as const, weightsChildren: true };
+  const inner = child(scope, { inBox: false, style: cardStyle });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 

@@ -9,6 +9,7 @@ import {
   PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
   PROTOTYPE_PLATFORM_MODULES,
 } from "../../../src/features/prototype/prototypePlatform";
+import type { PrototypeJson } from "../../../src/features/prototype/prototypeJson";
 import { prototypeCastEventOf } from "../../../src/features/prototype/prototypePlatformEvent";
 
 interface EventCase {
@@ -20,7 +21,7 @@ interface EventCase {
 
 const cases: EventCase[] = fixture.cases;
 
-const delivered = (payload: Record<string, unknown>) => ({
+const delivered = (payload: Record<string, PrototypeJson>) => ({
   kind: "emit" as const,
   name: PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
   payload,

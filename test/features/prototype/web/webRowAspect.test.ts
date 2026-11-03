@@ -46,10 +46,14 @@ test("the first unsized aspect ratio takes the remaining width and later sibling
   ];
   const measured = rowSequentialChildren(entries, shown);
   expect(measured[0]).toBe(entries[0]);
-  expect(styleOf(measured[1])).toEqual({ aspectRatio: 2, background: "primary", weight: 1 });
-  expect(styleOf(measured[2])).toEqual({ maxWidth: 0 });
+  expect(styleOf(measured[1])).toEqual({
+    aspectRatio: 2,
+    background: "primary",
+    [ROW_MEASURE_KEY]: { take: true },
+  });
+  expect(styleOf(measured[2])).toEqual({ [ROW_MEASURE_KEY]: { zero: true } });
   // A later aspect ratio is measured against no width either, as Compose's Row does.
-  expect(styleOf(measured[3])).toEqual({ aspectRatio: 1, maxWidth: 0 });
+  expect(styleOf(measured[3])).toEqual({ aspectRatio: 1, [ROW_MEASURE_KEY]: { zero: true } });
 });
 
 test("weighted children get no width, wherever they sit, once the aspect ratio takes it", () => {
@@ -59,7 +63,7 @@ test("weighted children get no width, wherever they sit, once the aspect ratio t
     { type: "box", style: { aspectRatio: 2 } },
   ];
   const measured = rowSequentialChildren(entries, shown);
-  expect(styleOf(measured[0])).toEqual({ weight: 1, maxWidth: 0 });
+  expect(styleOf(measured[0])).toEqual({ weight: 1, [ROW_MEASURE_KEY]: { zero: true } });
   expect(measured[1]).toBe(entries[1]);
 });
 
@@ -74,7 +78,7 @@ test("hidden children neither take the width nor lose theirs", () => {
   );
   expect(measured[0]).toBe(entries[0]);
   expect(measured[1]).toBe(entries[1]);
-  expect(styleOf(measured[2])).toEqual({ aspectRatio: 3, weight: 1 });
+  expect(styleOf(measured[2])).toEqual({ aspectRatio: 3, [ROW_MEASURE_KEY]: { take: true } });
 });
 
 test("a capped aspect ratio's cap is the tighter of maxWidth and maxHeight times the ratio", () => {
@@ -139,8 +143,8 @@ test("an unsized aspect ratio after a capped one takes what the cap leaves", () 
   const measured = rowSequentialChildren(entries, shown);
   expect(styleOf(measured[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 100 });
   expect(styleOf(measured[1])).toEqual({ [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK } });
-  expect(styleOf(measured[2])).toEqual({ aspectRatio: 1, weight: 1 });
-  expect(styleOf(measured[3])).toEqual({ maxWidth: 0 });
+  expect(styleOf(measured[2])).toEqual({ aspectRatio: 1, [ROW_MEASURE_KEY]: { take: true } });
+  expect(styleOf(measured[3])).toEqual({ [ROW_MEASURE_KEY]: { zero: true } });
 });
 
 test("a capped aspect ratio after an unsized one gets no width", () => {
@@ -149,7 +153,11 @@ test("a capped aspect ratio after an unsized one gets no width", () => {
     { type: "box", style: { aspectRatio: 2, maxWidth: 100 } },
   ];
   const measured = rowSequentialChildren(entries, shown);
-  expect(styleOf(measured[1])).toEqual({ aspectRatio: 2, maxWidth: 0 });
+  expect(styleOf(measured[1])).toEqual({
+    aspectRatio: 2,
+    maxWidth: 100,
+    [ROW_MEASURE_KEY]: { zero: true },
+  });
 });
 
 test("a row measure becomes a flex basis and shrink in a row only", () => {
@@ -198,4 +206,13 @@ test("a row around a capped aspect ratio is bounded to its parent; an authored m
   const context = { mode: "light" as const, palette: new Map(), parentAxis: "column" as const };
   expect(nodeCss(measured.style, context)["max-width"]).toBe("100%");
   expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, context)["max-width"]).toBe("50px");
+});
+
+test("a conditional maxWidth or weight cannot undo the row measure (styleWhen merges again)", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  // Rendering merges an active styleWhen over the measured style; the hint key survives it.
+  const zeroed = { width: { dp: 40 }, [ROW_MEASURE_KEY]: { zero: true }, maxWidth: 100 };
+  expect(nodeCss(zeroed, context)["max-width"]).toBe("0px");
+  const taker = { aspectRatio: 2, [ROW_MEASURE_KEY]: { take: true }, weight: 3 };
+  expect(nodeCss(taker, context)).toMatchObject({ flex: "1 1 0", "min-width": "0" });
 });

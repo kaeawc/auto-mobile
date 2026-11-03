@@ -103,8 +103,8 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * unsized aspect-ratio child therefore takes all the remaining width, and every later unweighted
  * child and every weighted child gets none.
  *
- * CSS flex has no sequential measure, so the mapping zeroes those siblings (`maxWidth: 0`) and makes
- * the aspect-ratio child the row's lone grower (`weight: 1`, a zero flex basis). The earlier siblings
+ * CSS flex has no sequential measure, so the mapping zeroes those siblings (`max-width: 0`) and makes
+ * the aspect-ratio child the row's lone grower (`flex: 1 1 0`). The earlier siblings
  * keep their content width, and the grower takes the rest. Two cases still differ: the row's
  * `spacing` still separates the zeroed siblings, which Compose drops once no width is left, and an
  * earlier `fill` sibling shares the remaining width instead of taking all of it.
@@ -114,6 +114,9 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * later siblings keep their width while the cap leaves room and lose it first when it does not.
  * Weighted siblings keep their zero basis and grow into whatever is left. Later siblings share a
  * tier, so a shortfall is split across them by width rather than taken from the last one first.
+ *
+ * Every hint goes through ROW_MEASURE_KEY, which no `styleWhen` can author, so a conditional
+ * `maxWidth` or `weight` that rendering merges again cannot undo it.
  *
  * `prepared` resolves an entry as rendering will (bound, visible, `styleWhen` merged), or
  * undefined when it is hidden. A repeat's children are one template, so they are left as authored.
@@ -134,11 +137,11 @@ export function rowSequentialChildren(
       return entry;
     }
     if (index === taker) {
-      return withStyle(entry, { weight: 1 });
+      return measured(entry, { take: true });
     }
     const weighted = typeof record(node.style)?.weight === "number";
     if (taker >= 0 && (index > taker || weighted)) {
-      return withStyle(entry, { maxWidth: 0 });
+      return measured(entry, { zero: true });
     }
     return capped < 0 || index < capped || weighted
       ? entry

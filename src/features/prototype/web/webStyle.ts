@@ -39,8 +39,8 @@ type Css = Record<string, string>;
 
 /**
  * A style key the web renderer adds to a row's children, never authored (the style schema is
- * strict): a flex shrink and basis that let CSS flex approximate Compose's sequential Row measure
- * around a capped aspect ratio (see webRowAspect.ts).
+ * strict), so a `styleWhen` cannot overwrite it: how CSS flex approximates Compose's sequential
+ * Row measure around an aspect ratio (see webRowAspect.ts).
  */
 export const ROW_MEASURE_KEY = "webRowMeasure";
 
@@ -50,25 +50,45 @@ export const ROW_MEASURE_KEY = "webRowMeasure";
  */
 export const ROW_BOUND_KEY = "webRowBound";
 
-/** A row child's measure hint: how fast it gives up width, and its own width before that. */
+/**
+ * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
+ * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one.
+ */
 export interface RowMeasure {
-  readonly shrink: number;
+  readonly take?: true;
+  readonly zero?: true;
+  readonly shrink?: number;
   readonly basis?: number;
 }
 
-function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
-  const measure = record(style[ROW_MEASURE_KEY]);
-  if (context.parentAxis !== "row" || typeof measure?.shrink !== "number") {
-    return;
-  }
-  if (typeof measure.basis === "number") {
+function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
+  if (typeof basis === "number") {
     // The width also sets the item's max-content contribution, so a wrap row sizes around it.
     css["flex-grow"] = "0";
-    css["flex-basis"] = px(measure.basis);
-    css.width = px(measure.basis);
+    css["flex-basis"] = px(basis);
+    css.width = px(basis);
   }
-  css["flex-shrink"] = String(measure.shrink);
-  css["min-width"] = "0";
+  css["flex-shrink"] = String(shrink);
+}
+
+/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
+  const measure = record(style[ROW_MEASURE_KEY]);
+  if (context.parentAxis !== "row" || !measure) {
+    return;
+  }
+  if (measure.take === true) {
+    css.flex = "1 1 0";
+  }
+  if (typeof measure.shrink === "number") {
+    rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
+    css["min-width"] = "0";
+  }
+  if (measure.zero === true) {
+    css["max-width"] = "0px";
+  }
 }
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
@@ -188,10 +208,6 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     css.flex = `${style.weight} ${style.weight} 0`;
     css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
   }
-  rowMeasureStyle(css, style, context);
-  if (style[ROW_BOUND_KEY] === true) {
-    css["max-width"] = "100%";
-  }
   for (const [field, property] of [
     ["minWidth", "min-width"],
     ["maxWidth", "max-width"],
@@ -201,6 +217,10 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     if (typeof style[field] === "number") {
       css[property] = px(style[field] as number);
     }
+  }
+  rowMeasureStyle(css, style, context);
+  if (style[ROW_BOUND_KEY] === true && typeof style.maxWidth !== "number") {
+    css["max-width"] = "100%";
   }
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);

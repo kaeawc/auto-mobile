@@ -265,6 +265,22 @@ internal fun prototypeImageSlotUses(value: JsonElement?): Int {
   return if (light != null && dark != null && light != dark) 2 else 1
 }
 
+/** The node's own image slots: an `image` costs at least 1, a `videoPlayer` its `poster`. */
+internal fun prototypeNodeImageUses(node: JsonObject): Int =
+  when ((node["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content) {
+    "image" -> maxOf(1, prototypeImageSlotUses(node["asset"]))
+    "videoPlayer" -> prototypeImageSlotUses(node["poster"])
+    else -> 0
+  }
+
+/**
+ * Counts a `videoPlayer` against `MAX_PROTOTYPE_VIDEO_NODES` through [charge], which returns the
+ * new running count; true when this node crosses the limit.
+ */
+internal inline fun prototypeVideoNodeOverLimit(node: JsonObject, charge: () -> Int): Boolean =
+  (node["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content == "videoPlayer" &&
+    charge() > PrototypeSpecValidator.MAX_PROTOTYPE_VIDEO_NODES
+
 object PrototypeFontFamilySerializer :
   PrototypeJsonValueSerializer<PrototypeFontFamily>("PrototypeFontFamily") {
   override fun fromJson(value: JsonElement): PrototypeFontFamily {

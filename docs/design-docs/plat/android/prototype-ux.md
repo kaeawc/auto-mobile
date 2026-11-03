@@ -2390,6 +2390,9 @@ one-key union), which is a node-scoped player released when the node leaves comp
   position into; a slider bound to it holds device writes while it is dragged and seeks on release.
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
+- At most `MAX_PROTOTYPE_VIDEO_NODES` (64) `videoPlayer` nodes, counted in the authored tree and
+  again after repeat expansion, so every repeat instance counts. A `poster` costs one image against
+  `MAX_PROTOTYPE_IMAGES` in both counts.
 
 **Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
 `{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`

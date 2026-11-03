@@ -349,6 +349,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     sendKeysSchema,
     {
       handler: createSendKeysHandler(deps),
+      keepsImeRestorePending: true,
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: sendKeysResultSchema,

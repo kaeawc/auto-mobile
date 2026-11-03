@@ -1,0 +1,88 @@
+{
+  "name": "A pending purchase grants nothing until it is approved",
+  "products": [
+    {
+      "id": "pro_monthly",
+      "kind": "subscription"
+    },
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    },
+    {
+      "id": "coins_100",
+      "kind": "consumable"
+    }
+  ],
+  "state": {
+    "entitlements": {},
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "purchase",
+      "productId": "no_ads",
+      "outcome": {
+        "result": {
+          "status": "pending",
+          "transactionId": "p1"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "p1",
+            "productId": "no_ads",
+            "status": "pending"
+          }
+        },
+        "into": {
+          "status": "pending",
+          "transactionId": "p1"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "resolve",
+      "transactionId": "p1",
+      "resolution": "approved",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "p1",
+            "productId": "no_ads",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    },
+    {
+      "op": "resolve",
+      "transactionId": "p1",
+      "resolution": "approved",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "p1",
+            "productId": "no_ads",
+            "status": "purchased"
+          }
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "No open transaction p1"
+        },
+        "entitlementsChanged": false
+      }
+    }
+  ]
+}

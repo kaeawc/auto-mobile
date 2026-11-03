@@ -16,15 +16,29 @@ export const MAX_MOCK_BACKEND_BYTES = 1024 * 1024;
 export const MAX_MOCK_DOCUMENT_BYTES = 2 * MAX_MOCK_BACKEND_BYTES;
 export const MAX_MOCK_LATENCY_MS = 10_000;
 export const MAX_MOCK_ROUTE_DELAY_MS = 10_000;
+/** Room definitions per backend, and connections per room path. */
+export const MAX_MOCK_ROOMS = 64;
+export const MAX_MOCK_ROOM_MEMBERS = 64;
+export const MAX_MOCK_ROOM_FRAMES = 64;
+/** A timeline entry fires at most this long after its connection opened. */
+export const MAX_MOCK_TIMELINE_MS = 600_000;
+export const MAX_MOCK_ACTORS = 16;
+export const MAX_MOCK_ACTOR_STEPS = 64;
+export const MAX_MOCK_ACTOR_DELAY_MS = 600_000;
+export const MIN_MOCK_ACTOR_EVERY_MS = 100;
+export const MAX_MOCK_ACTOR_RUNS = 10_000;
 
 const MAX_DEPTH = contract.limits.MAX_PROTOTYPE_DATA_DEPTH;
 
 export const MOCK_BACKEND_ID = /^[a-z0-9][a-z0-9-]{0,30}$/;
 const COLLECTION_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 /** `/feed/:id` — literal segments and `:name` parameters. */
-const ROUTE_PATH =
-  /^\/(?:[A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9_]*)(?:\/(?:[A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9_]*))*$|^\/$/;
+const ROUTE_PATH_BODY =
+  /\/(?:[A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9_]*)(?:\/(?:[A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9_]*))*|\//
+    .source;
+const ROUTE_PATH = new RegExp(`^(?:${ROUTE_PATH_BODY})$`);
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+const WRITE_METHODS = ["POST", "PUT", "PATCH"] as const;
 
 const jsonValue: z.ZodType<PrototypeRequestJson> = z.lazy(() =>
   z.union([
@@ -100,6 +114,92 @@ const faultSchema = z
     message: "a fault takes exactly one of every or rate",
   });
 
+const ACTOR_ROUTE = new RegExp(`^(?:${METHODS.join("|")}) (?:${ROUTE_PATH_BODY})$`);
+/** Steps the issue names that need a piece mock backends do not have yet (rooms, maps, push). */
+const UNSUPPORTED_STEPS = {
+  publish: "mock backends have no realtime channels yet",
+  advance: "mock backends have no routes along a polyline yet",
+  notify: "mock backends cannot deliver simulated push yet",
+} as const;
+
+const actorDelay = z.number().int().min(0).max(MAX_MOCK_ACTOR_DELAY_MS);
+
+const actorStepSchema = z
+  .object({
+    afterMs: actorDelay.optional(),
+    append: z.string().regex(COLLECTION_NAME).optional(),
+    update: z.string().regex(COLLECTION_NAME).optional(),
+    remove: z.string().regex(COLLECTION_NAME).optional(),
+    id: z.union([z.string().min(1).max(256), z.number().finite()]).optional(),
+    value: z.record(jsonValue).optional(),
+    publish: z.unknown().optional(),
+    advance: z.unknown().optional(),
+    notify: z.unknown().optional(),
+  })
+  .strict()
+  .superRefine((step, context) => {
+    for (const [key, why] of Object.entries(UNSUPPORTED_STEPS)) {
+      if (step[key as keyof typeof UNSUPPORTED_STEPS] !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: `${key} is not supported: ${why}`,
+        });
+      }
+    }
+    const kinds = (["append", "update", "remove"] as const).filter(
+      (kind) => step[kind] !== undefined,
+    );
+    if (kinds.length > 1) {
+      context.addIssue({
+        code: "custom",
+        message: "a step takes at most one of append, update or remove",
+      });
+    } else if (kinds.length === 0 && step.afterMs === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "a step needs append, update, remove or afterMs",
+      });
+    }
+    const kind = kinds.length === 1 ? kinds[0] : undefined;
+    if ((kind === "append" || kind === "update") !== (step.value !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["value"],
+        message: "value goes with append or update",
+      });
+    }
+    if ((kind === "update" || kind === "remove") !== (step.id !== undefined)) {
+      context.addIssue({ code: "custom", path: ["id"], message: "id goes with update or remove" });
+    }
+    if (depthOf(step.value) > MAX_DEPTH) {
+      context.addIssue({
+        code: "custom",
+        path: ["value"],
+        message: `value may nest at most ${MAX_DEPTH} levels`,
+      });
+    }
+  });
+
+const actorSchema = z
+  .object({
+    on: z
+      .object({ route: z.string().regex(ACTOR_ROUTE, 'route must look like "POST /feed/:id"') })
+      .strict()
+      .optional(),
+    every: z.number().int().min(MIN_MOCK_ACTOR_EVERY_MS).max(MAX_MOCK_ACTOR_DELAY_MS).optional(),
+    maxRuns: z.number().int().min(1).max(MAX_MOCK_ACTOR_RUNS).optional(),
+    afterMs: actorDelay.optional(),
+    do: z.array(actorStepSchema).min(1).max(MAX_MOCK_ACTOR_STEPS),
+  })
+  .strict()
+  .refine((actor) => (actor.on === undefined) !== (actor.every === undefined), {
+    message: "an actor takes exactly one of on or every",
+  })
+  .refine((actor) => (actor.every === undefined) === (actor.maxRuns === undefined), {
+    message: "every needs maxRuns, and maxRuns goes only with every",
+  });
+
 const latencySchema = z
   .object({
     min: z.number().int().min(0).max(MAX_MOCK_LATENCY_MS),
@@ -107,6 +207,45 @@ const latencySchema = z
   })
   .strict()
   .refine((latency) => latency.min <= latency.max, "latencyMs.min cannot exceed max");
+
+const frameSchema = jsonValue.refine(
+  (frame) => depthOf(frame) <= MAX_DEPTH,
+  `a frame may nest at most ${MAX_DEPTH} levels`,
+);
+
+const roomSchema = z
+  .object({
+    path: z.string().regex(ROUTE_PATH, "path must look like /rooms/:roomId"),
+    /** Sent to each connection as it opens, before anything else. */
+    onConnect: z.array(frameSchema).max(MAX_MOCK_ROOM_FRAMES).optional(),
+    /** A client's send comes back to that client. */
+    echo: z.boolean().optional(),
+    /** A client's send goes to every other member of the same room path. */
+    relay: z.boolean().optional(),
+    /** Scripted frames, each `afterMs` after its connection opened. */
+    timeline: z
+      .array(
+        z
+          .object({
+            afterMs: z.number().int().min(0).max(MAX_MOCK_TIMELINE_MS),
+            frame: frameSchema,
+          })
+          .strict(),
+      )
+      .max(MAX_MOCK_ROOM_FRAMES)
+      .optional(),
+  })
+  .strict();
+
+const broadcastSchema = z
+  .object({
+    /** The room path a write goes to, e.g. `/rooms/{item:/roomId}`. */
+    room: z.string().startsWith("/").max(256),
+    frame: frameSchema,
+    /** The collection writes that broadcast; POST only by default. */
+    on: z.array(z.enum(WRITE_METHODS)).min(1).max(3).optional(),
+  })
+  .strict();
 
 export const mockBackendDefinitionSchema = z
   .object({
@@ -124,19 +263,64 @@ export const mockBackendDefinitionSchema = z
       .optional(),
     routes: z.array(routeSchema).max(MAX_MOCK_ROUTES).optional(),
     faults: z.array(faultSchema).max(MAX_MOCK_FAULTS).optional(),
+    rooms: z.array(roomSchema).max(MAX_MOCK_ROOMS).optional(),
+    /** `{collection: broadcast}`: a successful write to that collection is sent to a room. */
+    broadcasts: z.record(broadcastSchema).optional(),
     latencyMs: latencySchema.optional(),
     /** Seed of the random stream behind latency and `rate` faults. */
     seed: z.number().int().min(0).max(0xffff_ffff).optional(),
+    /** Timed and route-triggered writes to the collections (#14211). */
+    actors: z.array(actorSchema).max(MAX_MOCK_ACTORS).optional(),
   })
   .strict()
+  .superRefine((definition, context) => {
+    const names = new Set(Object.keys(definition.collections ?? {}));
+    for (const [at, actor] of (definition.actors ?? []).entries()) {
+      for (const [index, step] of actor.do.entries()) {
+        const name = step.append ?? step.update ?? step.remove;
+        if (name !== undefined && !names.has(name)) {
+          context.addIssue({
+            code: "custom",
+            path: ["actors", at, "do", index],
+            message: `no collection named "${name}"`,
+          });
+        }
+      }
+    }
+  })
   .refine(
     (definition) =>
-      Buffer.byteLength(JSON.stringify([definition.collections, definition.routes])) <=
-      MAX_MOCK_BACKEND_BYTES,
-    `a backend holds at most ${MAX_MOCK_BACKEND_BYTES} bytes of collections and routes`,
+      Object.keys(definition.broadcasts ?? {}).every((name) =>
+        Object.hasOwn(definition.collections ?? {}, name),
+      ),
+    { message: "every broadcasts key must name a collection", path: ["broadcasts"] },
+  )
+  .refine(
+    (definition) => mockBackendBytes(definition, definition.collections) <= MAX_MOCK_BACKEND_BYTES,
+    `a backend holds at most ${MAX_MOCK_BACKEND_BYTES} bytes of collections, routes, rooms and broadcasts`,
   );
+
+/** The size the backend budget counts: collection data plus every static definition part. */
+export function mockBackendBytes(
+  definition: Pick<MockBackendDefinitionInput, "routes" | "rooms" | "broadcasts">,
+  collections: unknown,
+): number {
+  return Buffer.byteLength(
+    JSON.stringify([collections, definition.routes, definition.rooms, definition.broadcasts]),
+  );
+}
+
+interface MockBackendDefinitionInput {
+  routes?: unknown;
+  rooms?: unknown;
+  broadcasts?: unknown;
+}
 
 export type MockBackendDefinition = z.infer<typeof mockBackendDefinitionSchema>;
 export type MockItem = Record<string, PrototypeRequestJson>;
 export type MockRoute = z.infer<typeof routeSchema>;
 export type MockFault = z.infer<typeof faultSchema>;
+export type MockRoom = z.infer<typeof roomSchema>;
+export type MockBroadcast = z.infer<typeof broadcastSchema>;
+export type MockActor = z.infer<typeof actorSchema>;
+export type MockActorStep = z.infer<typeof actorStepSchema>;

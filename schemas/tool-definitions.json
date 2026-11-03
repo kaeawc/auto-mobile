@@ -28899,7 +28899,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "shared:{key,as:\"element\"|\"bounds\"} requires prototype_shared_element_v2; sharedKey remains the v1 bounds alias; do not set both. Repeat shared.key templates need repeat.key and must reference that field. Shared pairs cannot cross dialog or bottomSheet boundaries. style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. testSessionBegin (id, goal?, cohort?), testSessionEnd (id) and testSessionReport (id or testSessionId) record and report host-local user-testing sessions without a device request. Reports include screen funnels, time, validation failures and dead taps; text values are never stored. Show with window.deadTaps:true (prototype_dead_tap_v1) to enable dead taps. Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), screenMap (host-only: spec or specPath in, {screenMap:{nodes,edges},mermaid} out; stack screens, pager pages, sheets and dialogs with the push/replace/pop/popToRoot/setPage actions between them), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing). After a pin or shortcut update the host looks for the shortcut on the home screen and, if it is missing, restarts the default launcher once (launcherRestarted, shortcutVisible); restartLauncher:false opts out. deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. On Android or an iOS simulator with the ProtoViewer app installed, save without pin or icon imports the spec and its assets into the ProtoViewer library instead of the platform save path, and returns viewer {app, libraryId, label} plus a warning: ProtoViewer marks the entry imported, keeps its requests off until the user allows network in ProtoViewer, and does not attach it to this host (no awaitEvent, patch or inspect). If ProtoViewer is absent, older than this route, or its inbox is unusable, save keeps the platform save path. Each such save is a new library entry that listSaved and deleteSaved do not see. open with id set to that libraryId launches it on Android or an iOS simulator; open needs ProtoViewer installed. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page; or show each design under its own id with variant {group,label} sharing one group (host-side only, the device is unchanged), so automobile:prototype/<id>/web offers them as switchable variants. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. simulate with id and advanceTimeMs (integer 1..3600000) advances prototype timers without waiting and returns fired; it requires prototype_timers_v1. startTimer {id,afterMs,everyMs?,maxRuns?,actions} and cancelTimer {id} require that capability; inspect reports timers {id,nextFireInMs,runs}. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/chart/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet/tooltip/drawer/adaptive; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/prependData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a tonal fill where blur is unavailable). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}, or an Android-only .agsl source referenced from style.shader as {asset,uniforms?}; AGSL needs AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 and is refused by iOS and ProtoViewer bundles) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. A successful show or patch also returns accessibilityFindings, an advisory host-side lint (unlabeled controls, images and text fields, low text contrast in light and dark, tap targets under 48dp) with spec paths; it never refuses a show. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value}, prependData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. Read automobile:prototype/native?id=<id> for the spec, assets and a Compose or SwiftUI host file that embed it in an app. Read automobile:prototype/<id>/web (optional frame, revision, variant) for a shown prototype as one self-contained HTML page in a device frame; it updates on every show and landed patch. tooltip requires prototype_tooltip_v1; drawer requires prototype_drawer_v1. searchBar requires prototype_search_bar_v1 for show and patch. State-key contains/startsWith/lengthGt/lengthLt conditions and textField errorWhen/errorText require prototype_string_conditions_v1. errorWhen forces error styling without changing checks-based validity. {data, empty} conditions and style shimmer require prototype_loading_states_v1. animate.tempo fast|default|slow requires prototype_motion_tokens_v1 (iOS 17+); tempo excludes durationMs and easing and uses contract springs by property role and spec motion scheme. animate, style scale/rotation, transition slideStart|slideEnd|scale and image zoomable require prototype_motion_v2. Keyframes: node keyframes {trigger: {key} or {data: pointer}, durationMs: 100-3000, tracks}; 2-8 [fraction,value] points per track, rest endpoints, 16 expanded nodes, prototype_keyframes_v1 (iOS 17+). Plays once on changes, skips mount; reduced retains alpha. Expressive motion, node press {scale?,alpha?}, and animate of border, cornerRadius, elevation, shadowColor, padding or dp width/height require prototype_motion_v3 (Android only). transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. window.transition auto|none|fade|slide|scale and repeat.stagger (0-100 ms per instance, capped at 600 ms) require prototype_window_motion_v1 on Android. Text-only contentTransition numeric|crossfade|none (default none) requires prototype_content_transition_v1 unless none; numeric rolls changed digits by resolved value, spans crossfade; motion none snaps. icon.effect {type, trigger? | repeat?} requires prototype_icon_effects_v1: bounce|pulse|scale|variableColor|wiggle|rotate|breathe|replace|drawOn; trigger {key} or {data} replays per change, repeat is infinite or 1-20, mutually exclusive. String tables and {t:key|count} require prototype_strings_v1; show locale overrides device locales only for strings. Node semantics {heading,liveRegion,group,label,hint,traits} requires prototype_semantics_v1. list {repeat:{items:{path},as,key},children:[row],header?,footer?,axis?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?} is a lazy scrolling collection requiring prototype_lazy_list_v1 and prototype_data_model_v1. Its row template counts once, supports up to 500 keyed data rows, and refresh needs a vertical list. prependData {path,value} inserts one row at the start and requires prototype_lazy_list_v1; maxItems trims from the end. request.append {from,to} extends an existing data array from a response array; maxItems trims oldest rows atomically. motion: \"reduced\" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1; visibility morphs require visibleWhen and exactly two non-nested nodes per key, while a zoom source key names exactly one node without visibleWhen. At most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; sharedAxisX|sharedAxisY|fadeThrough|zoom and push/replace source require prototype_stack_patterns_v1. Zoom needs source naming exactly one sharedKey node; Android substitutes fadeThrough and iOS substitutes platform push; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart (line/area/bar/ring over /data arrays) requires prototype_chart_v1; observe reports its summary. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them. Mock backends (no server code): defineBackend {backendId, backend:{collections?, routes?, faults?, latencyMs?, seed?}} registers an in-process REST backend for this daemon session; a request action to https://<backendId>.mock.automobile.invalid/<path> with via \"host\" is answered by it, with no network, DNS or egress policy. Collections are json-server style (GET /<name> with ?field=value, q, _sort, _page/_limit, after/size; GET/POST/PATCH/PUT/DELETE /<name>/:id; every item needs an id); routes are canned {method,path:\"/feed/:id\",status?,headers?,body?,delayMs?} with {params.x}, {query.x} and {body:/pointer} placeholders; faults fail every nth or a seeded fraction of matching requests; backendLog {backendId, since?} returns the requests answered; clearBackend {backendId} removes it. show also takes mock ({backendId: definition}) or mockPath (an absolute JSON file of the same) to define backends before the spec is sent. Platform features (clipboard, share, haptics, sound, realtime channels, device state) use a root requires, the platform action and platform.on handlers; the Platform features guide section lists every module, call and event.",
+    "description": "shared:{key,as:\"element\"|\"bounds\"} requires prototype_shared_element_v2; sharedKey remains the v1 bounds alias; do not set both. Repeat shared.key templates need repeat.key and must reference that field. Shared pairs cannot cross dialog or bottomSheet boundaries. style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. testSessionBegin (id, goal?, cohort?), testSessionEnd (id) and testSessionReport (id or testSessionId) record and report host-local user-testing sessions without a device request. Reports include screen funnels, time, validation failures and dead taps; text values are never stored. Show with window.deadTaps:true (prototype_dead_tap_v1) to enable dead taps. Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), screenMap (host-only: spec or specPath in, {screenMap:{nodes,edges},mermaid} out; stack screens, pager pages, sheets and dialogs with the push/replace/pop/popToRoot/setPage actions between them), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing). After a pin or shortcut update the host looks for the shortcut on the home screen and, if it is missing, restarts the default launcher once (launcherRestarted, shortcutVisible); restartLauncher:false opts out. deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. On Android or an iOS simulator with the ProtoViewer app installed, save without pin or icon imports the spec and its assets into the ProtoViewer library instead of the platform save path, and returns viewer {app, libraryId, label} plus a warning: ProtoViewer marks the entry imported, keeps its requests off until the user allows network in ProtoViewer, and does not attach it to this host (no awaitEvent, patch or inspect). If ProtoViewer is absent, older than this route, or its inbox is unusable, save keeps the platform save path. Each such save is a new library entry that listSaved and deleteSaved do not see. open with id set to that libraryId launches it on Android or an iOS simulator; open needs ProtoViewer installed. share (spec or specPath, assets, url) is host-only and needs no device request: it writes the canonical .automobile-proto bundle under the AutoMobile data directory and returns share {bundlePath, sha256, bytes}; with url (where the team will host the bundle, https only) it also returns link (automobile-proto://import?url=…&sha256=…), qrPngPath and qr (a terminal rendering). AutoMobile uploads nothing: put the bundle at url byte-for-byte. An Android ProtoViewer with URL import opens the link from the QR after confirming the host and hash; otherwise send the bundle file, which ProtoViewer imports as a file. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page; or show each design under its own id with variant {group,label} sharing one group (host-side only, the device is unchanged), so automobile:prototype/<id>/web offers them as switchable variants. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. simulate with id and advanceTimeMs (integer 1..3600000) advances prototype timers without waiting and returns fired; it requires prototype_timers_v1. startTimer {id,afterMs,everyMs?,maxRuns?,actions} and cancelTimer {id} require that capability; inspect reports timers {id,nextFireInMs,runs}. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/chart/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet/tooltip/drawer/adaptive; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/prependData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a tonal fill where blur is unavailable). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}, or an Android-only .agsl source referenced from style.shader as {asset,uniforms?}; AGSL needs AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 and is refused by iOS and ProtoViewer bundles) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. A successful show or patch also returns accessibilityFindings, an advisory host-side lint (unlabeled controls, images and text fields, low text contrast in light and dark, tap targets under 48dp) with spec paths; it never refuses a show. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value}, prependData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. Read automobile:prototype/native?id=<id> for the spec, assets and a Compose or SwiftUI host file that embed it in an app. Read automobile:prototype/<id>/web (optional frame, revision, variant) for a shown prototype as one self-contained HTML page in a device frame; it updates on every show and landed patch. tooltip requires prototype_tooltip_v1; drawer requires prototype_drawer_v1. searchBar requires prototype_search_bar_v1 for show and patch. State-key contains/startsWith/lengthGt/lengthLt conditions and textField errorWhen/errorText require prototype_string_conditions_v1. errorWhen forces error styling without changing checks-based validity. {data, empty} conditions and style shimmer require prototype_loading_states_v1. animate.tempo fast|default|slow requires prototype_motion_tokens_v1 (iOS 17+); tempo excludes durationMs and easing and uses contract springs by property role and spec motion scheme. animate, style scale/rotation, transition slideStart|slideEnd|scale and image zoomable require prototype_motion_v2. Keyframes: node keyframes {trigger: {key} or {data: pointer}, durationMs: 100-3000, tracks}; 2-8 [fraction,value] points per track, rest endpoints, 16 expanded nodes, prototype_keyframes_v1 (iOS 17+). Plays once on changes, skips mount; reduced retains alpha. Expressive motion, node press {scale?,alpha?}, and animate of border, cornerRadius, elevation, shadowColor, padding or dp width/height require prototype_motion_v3 (Android only). transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child's total delay at most 600 ms), require prototype_choreography_v1. window.transition auto|none|fade|slide|scale and repeat.stagger (0-100 ms per instance, capped at 600 ms) require prototype_window_motion_v1 on Android. Text-only contentTransition numeric|crossfade|none (default none) requires prototype_content_transition_v1 unless none; numeric rolls changed digits by resolved value, spans crossfade; motion none snaps. icon.effect {type, trigger? | repeat?} requires prototype_icon_effects_v1: bounce|pulse|scale|variableColor|wiggle|rotate|breathe|replace|drawOn; trigger {key} or {data} replays per change, repeat is infinite or 1-20, mutually exclusive. String tables and {t:key|count} require prototype_strings_v1; show locale overrides device locales only for strings. Node semantics {heading,liveRegion,group,label,hint,traits} requires prototype_semantics_v1. list {repeat:{items:{path},as,key},children:[row],header?,footer?,axis?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?} is a lazy scrolling collection requiring prototype_lazy_list_v1 and prototype_data_model_v1. Its row template counts once, supports up to 500 keyed data rows, and refresh needs a vertical list. prependData {path,value} inserts one row at the start and requires prototype_lazy_list_v1; maxItems trims from the end. request.append {from,to} extends an existing data array from a response array; maxItems trims oldest rows atomically. motion: \"reduced\" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1; visibility morphs require visibleWhen and exactly two non-nested nodes per key, while a zoom source key names exactly one node without visibleWhen. At most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; sharedAxisX|sharedAxisY|fadeThrough|zoom and push/replace source require prototype_stack_patterns_v1. Zoom needs source naming exactly one sharedKey node; Android substitutes fadeThrough and iOS substitutes platform push; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart (line/area/bar/ring over /data arrays) requires prototype_chart_v1; observe reports its summary. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them. Mock backends (no server code): defineBackend {backendId, backend:{collections?, routes?, faults?, latencyMs?, seed?}} registers an in-process REST backend for this daemon session; a request action to https://<backendId>.mock.automobile.invalid/<path> with via \"host\" is answered by it, with no network, DNS or egress policy. Collections are json-server style (GET /<name> with ?field=value, q, _sort, _page/_limit, after/size; GET/POST/PATCH/PUT/DELETE /<name>/:id; every item needs an id); routes are canned {method,path:\"/feed/:id\",status?,headers?,body?,delayMs?} with {params.x}, {query.x} and {body:/pointer} placeholders; faults fail every nth or a seeded fraction of matching requests; rooms [{path:\"/rooms/:roomId\",onConnect?,echo?,relay?,timeline?:[{afterMs,frame}]}] serve websocket (wss://<backendId>.mock.automobile.invalid/<path>) and sse channels with via \"host\": onConnect frames greet each connection, timeline frames follow per connection, echo returns a send, relay fans it out to the room's other members; broadcasts {collection:{room:\"/rooms/{item:/roomId}\",frame:{item:\"{item}\"},on?}} send a successful collection write to a room; publish {backendId, room, frame} speaks as the other side to every member and returns delivered; backendLog {backendId, since?} returns the requests answered and room frames seen; clearBackend {backendId} removes it and closes its channels. show also takes mock ({backendId: definition}) or mockPath (an absolute JSON file of the same) to define backends before the spec is sent. Platform features (clipboard, share, haptics, sound, realtime channels, device state) use a root requires, the platform action and platform.on handlers; the Platform features guide section lists every module, call and event.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -28917,6 +28917,7 @@
             "listSaved",
             "deleteSaved",
             "open",
+            "share",
             "clearStorage",
             "simulate",
             "screenMap",
@@ -28925,7 +28926,8 @@
             "testSessionReport",
             "defineBackend",
             "clearBackend",
-            "backendLog"
+            "backendLog",
+            "publish"
           ]
         },
         "goal": {
@@ -28941,12 +28943,12 @@
           "maxLength": 64
         },
         "backendId": {
-          "description": "defineBackend, clearBackend and backendLog: the mock backend id; requests to https://<backendId>.mock.automobile.invalid are answered by it",
+          "description": "defineBackend, clearBackend, backendLog and publish: the mock backend id; requests and channels to https://<backendId>.mock.automobile.invalid (wss:// for WebSocket) are answered by it",
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]{0,30}$"
         },
         "backend": {
-          "description": "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?}. Replaces the backend of that id",
+          "description": "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?, rooms?:[{path:'/rooms/:roomId',onConnect?:[frame],echo?,relay?,timeline?:[{afterMs,frame}]}], broadcasts?:{collection:{room:'/rooms/{item:/roomId}',frame,on?:[POST|PUT|PATCH]}}, actors?:[{on:{route:'POST /path/:id'}|every+maxRuns, afterMs?, do:[{afterMs?, append|update|remove: collection, id?, value?}]}]}. Actors write to collections after a matching successful request or every N ms (at most 16 actors, 64 steps each; publish, advance and notify are not supported yet). Replaces the backend of that id and closes its open channels",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -28967,10 +28969,20 @@
           "minLength": 1
         },
         "since": {
-          "description": "backendLog only: return requests with a sequence number above this",
+          "description": "backendLog only: return requests and frames with a sequence number above this",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "room": {
+          "description": "publish only: the room path, such as /rooms/general",
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^\\/.*"
+        },
+        "frame": {
+          "description": "publish only: the frame every member of the room receives (a string as written, other JSON as JSON text)",
+          "$ref": "#/$defs/__schema0"
         },
         "testSessionId": {
           "description": "testSessionReport: stored session id, instead of the latest session for id",
@@ -38679,7 +38691,7 @@
           "maximum": 9007199254740991
         },
         "specPath": {
-          "description": "show only: instead of spec, an absolute path of a local JSON file holding the same spec (up to 1048576 bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.",
+          "description": "show, screenMap or share: instead of spec, an absolute path of a local JSON file holding the same spec (up to 1048576 bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.",
           "type": "string",
           "minLength": 1
         },
@@ -38742,7 +38754,7 @@
           "minLength": 1
         },
         "assets": {
-          "description": "show or save only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "description": "show, save or share only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
           "minItems": 1,
           "maxItems": 32,
           "type": "array",
@@ -38769,6 +38781,12 @@
             "required": ["id"],
             "additionalProperties": false
           }
+        },
+        "url": {
+          "description": "share only: the https URL the team will upload the bundle to (a release asset, gist raw URL or object storage), without credentials or #fragment. With it, share also returns the automobile-proto://import link and its QR; without it, only the bundle is written",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
         },
         "label": {
           "description": "save only: label, defaults to spec.id; ProtoViewer takes one line without control or direction-override characters",
@@ -38853,7 +38871,40 @@
         }
       },
       "required": ["action"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            }
+          ]
+        }
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -38996,7 +39047,7 @@
           "additionalProperties": false
         },
         "backend": {
-          "description": "defineBackend and clearBackend: the mock backend acted on",
+          "description": "defineBackend, clearBackend and publish: the mock backend acted on",
           "type": "object",
           "properties": {
             "id": {
@@ -39028,6 +39079,22 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "actors": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "rooms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "delivered": {
+              "description": "publish: how many open connections in the room received the frame",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
             "cleared": {
               "description": "clearBackend: false when no such backend existed",
               "type": "boolean"
@@ -39037,42 +39104,68 @@
           "additionalProperties": false
         },
         "backendLog": {
-          "description": "backendLog: requests the backend answered, oldest first (latest 200 kept)",
+          "description": "backendLog: requests answered and room frames seen ({room, from, data}), oldest first (latest 200 kept)",
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "seq": {
-                "type": "integer",
-                "exclusiveMinimum": 0,
-                "maximum": 9007199254740991
-              },
-              "method": {
-                "type": "string"
-              },
-              "path": {
-                "type": "string"
-              },
-              "query": {
+            "anyOf": [
+              {
                 "type": "object",
-                "propertyNames": {
-                  "type": "string"
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "query": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "status": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "body": {
+                    "$ref": "#/$defs/__schema0"
+                  }
                 },
-                "additionalProperties": {
-                  "type": "string"
-                }
+                "required": ["seq", "method", "path", "query", "status"],
+                "additionalProperties": false
               },
-              "status": {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
-              },
-              "body": {
-                "$ref": "#/$defs/__schema0"
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "room": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "type": "string",
+                    "enum": ["client", "publish", "broadcast"]
+                  },
+                  "data": {
+                    "type": "string"
+                  }
+                },
+                "required": ["seq", "room", "from", "data"],
+                "additionalProperties": false
               }
-            },
-            "required": ["seq", "method", "path", "query", "status"],
-            "additionalProperties": false
+            ]
           }
         },
         "report": {
@@ -39095,6 +39188,43 @@
             }
           },
           "required": ["id", "slug", "replaced"],
+          "additionalProperties": false
+        },
+        "share": {
+          "description": "share only: the bundle written on the host and, with url, its import link and QR.",
+          "type": "object",
+          "properties": {
+            "bundlePath": {
+              "description": "The canonical .automobile-proto bundle to upload.",
+              "type": "string"
+            },
+            "sha256": {
+              "description": "SHA-256 of the bundle bytes; ProtoViewer refuses others.",
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "url": {
+              "description": "Where the bundle must be served, as given.",
+              "type": "string"
+            },
+            "link": {
+              "description": "automobile-proto://import?url=…&sha256=… for the QR or a message.",
+              "type": "string"
+            },
+            "qrPngPath": {
+              "description": "The link as a black-on-white QR PNG.",
+              "type": "string"
+            },
+            "qr": {
+              "description": "The link as a QR drawn with block characters.",
+              "type": "string"
+            }
+          },
+          "required": ["bundlePath", "sha256", "bytes"],
           "additionalProperties": false
         },
         "viewer": {
@@ -39200,7 +39330,8 @@
             "internal_error",
             "render_failed",
             "unsupported_capability",
-            "unsupported_platform"
+            "unsupported_platform",
+            "invalid_url"
           ]
         },
         "revision": {
@@ -39531,6 +39662,22 @@
           "required": ["lastAction", "success", "timestamp"],
           "additionalProperties": false
         },
+        "platformStatus": {
+          "description": "status and inspect: the last battery, power and audio values the device delivered through <module>.changed; a module is absent until its first change",
+          "type": "object",
+          "properties": {
+            "battery": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "power": {
+              "$ref": "#/$defs/__schema32"
+            },
+            "audio": {
+              "$ref": "#/$defs/__schema32"
+            }
+          },
+          "additionalProperties": false
+        },
         "screenRound": {
           "description": "Wear OS show only: whether the watch display is round, so content in the corners is clipped; absent on other devices or when unreadable",
           "type": "boolean"
@@ -39716,7 +39863,7 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema32"
+              "$ref": "#/$defs/__schema33"
             },
             "context": {
               "$ref": "#/$defs/__schema29"
@@ -40431,6 +40578,43 @@
           "const": true
         },
         "__schema32": {
+          "type": "object",
+          "properties": {
+            "values": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              }
+            },
+            "timestamp": {
+              "description": "Device time of the change event the values came from",
+              "type": "number"
+            },
+            "receivedAt": {
+              "type": "number"
+            },
+            "simulated": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": ["values", "timestamp", "receivedAt"],
+          "additionalProperties": false
+        },
+        "__schema33": {
           "anyOf": [
             {
               "type": "string"
@@ -40447,7 +40631,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema32"
+                "$ref": "#/$defs/__schema33"
               }
             },
             {
@@ -40456,7 +40640,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema32"
+                "$ref": "#/$defs/__schema33"
               }
             }
           ]
@@ -40472,12 +40656,14 @@
             "inspect",
             "listSaved",
             "screenMap",
+            "share",
             "testSessionBegin",
             "testSessionEnd",
             "testSessionReport",
             "defineBackend",
             "clearBackend",
-            "backendLog"
+            "backendLog",
+            "publish"
           ]
         }
       ]
@@ -49987,6 +50173,12 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "pinnedDisplay": {
           "$ref": "#/$defs/__schema0"
         },
@@ -60836,6 +61028,9 @@
               "ownership": {
                 "type": "string",
                 "enum": ["header", "dumpsys"]
+              },
+              "tag": {
+                "type": "string"
               }
             },
             "required": [

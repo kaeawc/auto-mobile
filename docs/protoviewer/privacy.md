@@ -15,6 +15,11 @@ the privacy policy for the app and the source of the App Store and Google Play p
 - **Export.** Sharing a prototype writes a clean bundle (spec plus the assets it references) to the
   system share sheet. It never contains the prototype's saved state, your library list, a source
   URL or when you opened it. You choose the destination.
+- **Crash reports.** The app has no crash SDK. Android and iOS may send crash and performance data
+  to Google Play and Apple under your device's own diagnostics settings. On Android, **Copy
+  diagnostics** in the viewer copies the app version, Android version, supported features and the
+  last error code to the clipboard. It never includes prototype contents or saved state, and it
+  leaves the device only if you paste it somewhere.
 - **Delete everything.** Delete a prototype in the library to remove its spec, assets and saved
   state. Uninstalling the app removes all remaining data.
 

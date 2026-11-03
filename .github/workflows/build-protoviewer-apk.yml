@@ -5,6 +5,8 @@ name: "Build ProtoViewer APK"
 # simulator template viewer. The APK is signed with the shared release keystore
 # (the same one CtrlProxy uses) and the build fails closed: a missing keystore
 # input fails Gradle, and the post-build gate rejects a debug-signed APK.
+# With build-aab (publish-protoviewer-play.yml, #14147) the same job also builds
+# the Play AAB from the same commit and inputs.
 
 on:
   workflow_call:
@@ -28,6 +30,11 @@ on:
         required: false
         type: number
         default: 7
+      build-aab:
+        description: "Also build the Play AAB (bundleRelease) and upload it with its R8 mapping"
+        required: false
+        type: boolean
+        default: false
     secrets:
       GRADLE_ENCRYPTION_KEY:
         required: true
@@ -43,6 +50,9 @@ on:
       sha256:
         description: "SHA256 checksum of the built ProtoViewer APK"
         value: ${{ jobs.build.outputs.sha256 }}
+      aab-sha256:
+        description: "SHA256 checksum of the built ProtoViewer AAB (empty unless build-aab)"
+        value: ${{ jobs.build.outputs.aab-sha256 }}
 
 jobs:
   build:
@@ -59,6 +69,7 @@ jobs:
       PROTOVIEWER_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
     outputs:
       sha256: ${{ steps.checksum.outputs.sha256 }}
+      aab-sha256: ${{ steps.aab_checksum.outputs.sha256 }}
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v6
@@ -69,7 +80,8 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":protoviewer:assembleRelease"
+          # bundleRelease is finalized by verifyProtoViewerReleaseAab and the mapping archive.
+          gradle-tasks: ${{ inputs.build-aab && ':protoviewer:assembleRelease :protoviewer:bundleRelease' || ':protoviewer:assembleRelease' }}
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/build-protoviewer-apk"
           reuse-configuration-cache: true
@@ -105,3 +117,32 @@ jobs:
           name: protoviewer-apk
           path: /tmp/automobile-protoviewer.apk
           retention-days: ${{ inputs.artifact-retention-days }}
+
+      - name: "Calculate AAB SHA256"
+        if: ${{ inputs.build-aab }}
+        id: aab_checksum
+        run: |
+          set -euo pipefail
+          AAB_PATH="android/protoviewer/build/outputs/bundle/release/protoviewer-release.aab"
+          SHA256=$(sha256sum "$AAB_PATH" | cut -d' ' -f1)
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "AAB SHA256: $SHA256"
+          cp "$AAB_PATH" /tmp/automobile-protoviewer.aab
+
+      - name: "Upload ProtoViewer AAB"
+        if: ${{ inputs.build-aab && inputs.upload-artifact }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: protoviewer-aab
+          path: /tmp/automobile-protoviewer.aab
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error
+
+      - name: "Upload ProtoViewer R8 mapping"
+        if: ${{ inputs.build-aab && inputs.upload-artifact }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: protoviewer-mapping
+          path: android/protoviewer/build/outputs/release-archive/mapping-*.txt
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error

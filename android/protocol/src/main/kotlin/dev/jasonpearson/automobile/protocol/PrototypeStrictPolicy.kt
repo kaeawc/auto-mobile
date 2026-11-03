@@ -34,7 +34,10 @@ internal object PrototypeStrictPolicy {
     if (library && window?.text("persistence") == "device")
       return PrototypeSpecError("window.persistence", "Privileged window")
     if (!library) return null
-    return hostRequestError(context) ?: hostChannelError(spec) ?: secureLibraryError(spec, context)
+    return hostRequestError(context)
+      ?: hostChannelError(spec)
+      ?: secureLibraryError(spec, context)
+      ?: PrototypeSensitiveSinkRules.error(spec, context)
   }
 
   private fun hostRequestError(context: PrototypeStateChecks.Context): PrototypeSpecError? {

@@ -1,5 +1,6 @@
 import { ZodError, ZodObject, type z } from "zod/v4";
 import { formatToolParamError } from "../toolParamError";
+import { assertToolParamArraysBounded } from "../toolParamArrayLimit";
 import { stripUndeclaredSessionUuid } from "../toolParams";
 
 // The MCP boundary (`src/server/index.ts`) renders a schema `ZodError` through
@@ -24,10 +25,13 @@ export function formatStepError(
  * Parse a plan step's params against its tool schema: applies defaults and
  * aliases and, for strict schemas, rejects unknown keys. Shared by the top-level
  * plan step loop and `criticalSection` sub-steps so both behave identically
- * (#9927). Throws a `ZodError` on invalid params.
+ * (#9927). Throws a `ZodError` on invalid params, including any array longer
+ * than `MAX_TOOL_PARAM_ARRAY_LENGTH` (checked before the parse, #16102).
  */
 export function parseStepParams(schema: z.ZodType, params: unknown): Record<string, unknown> {
-  return schema.parse(stripUndeclaredSessionUuid(params, schema)) as Record<string, unknown>;
+  const stripped = stripUndeclaredSessionUuid(params, schema);
+  assertToolParamArraysBounded(stripped);
+  return schema.parse(stripped) as Record<string, unknown>;
 }
 
 /**

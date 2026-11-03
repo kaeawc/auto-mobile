@@ -9,7 +9,10 @@ import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/we
 
 const FIXTURES = join(import.meta.dir, "../../../fixtures");
 
-/** Committed goldens: one PNG per case, `<spec>--<frame>.png`. */
+/**
+ * Committed goldens: two PNGs per case, `<spec>--<frame>.png` in portrait and
+ * `<spec>--<frame>--landscape.png` at the end of the animated rotation (#16545).
+ */
 export const WEB_SCREENSHOT_GOLDEN_DIR = join(FIXTURES, "prototype-web/screenshots");
 
 export const WEB_SCREENSHOT_FRAMES = ["pixel-9", "iphone-16"] as const;
@@ -23,6 +26,8 @@ export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
   "material-controls": "prototype-spec/valid/material-controls.json",
   "component-gallery": "prototype-spec/valid/component-gallery.json",
   "doc-example-2": "prototype-spec/valid/doc-example-2.json",
+  "status-bar-light-content": "prototype-web/status-bar-light-content.json",
+  "status-bar-dark-content": "prototype-web/status-bar-dark-content.json",
 };
 
 /** The browser viewport, in CSS px at device scale factor 1, so a golden is exactly this size. */
@@ -41,6 +46,7 @@ export interface WebScreenshotCase {
   readonly frame: (typeof WEB_SCREENSHOT_FRAMES)[number];
   readonly fixture: string;
   readonly golden: string;
+  readonly landscapeGolden: string;
 }
 
 export function webScreenshotCases(): WebScreenshotCase[] {
@@ -51,6 +57,7 @@ export function webScreenshotCases(): WebScreenshotCase[] {
       frame,
       fixture: join(FIXTURES, fixture),
       golden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${spec}--${frame}.png`),
+      landscapeGolden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${spec}--${frame}--landscape.png`),
     })),
   );
 }

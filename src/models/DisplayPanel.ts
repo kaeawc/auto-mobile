@@ -1,10 +1,10 @@
 /**
  * A stable screen identity, independent of the current logical display. Every role names a
- * physical panel except `overlay`: an Android overlay display (`overlay_display_devices`), which
- * is addressable for targeting but never counts as a panel, joins `display: "all"`, or serves as a
- * posture default.
+ * physical panel except `overlay` (an Android overlay display, `overlay_display_devices`) and
+ * `virtual` (an app-created Android virtual display): those are addressable for targeting but
+ * never count as a panel, join `display: "all"`, or serve as a posture default.
  */
-export type PanelRole = "inner" | "cover" | "rear" | "external" | "overlay" | "unknown";
+export type PanelRole = "inner" | "cover" | "rear" | "external" | "overlay" | "virtual" | "unknown";
 
 /** A device state; a panel itself has no posture. */
 export type Posture =
@@ -49,9 +49,9 @@ export interface DeviceDisplays {
   postures: Posture[];
 }
 
-/** Whether an inventory entry is a physical panel rather than an addressable overlay display. */
+/** Whether an inventory entry is a physical panel rather than an addressable overlay or virtual display. */
 export function isPhysicalPanel(panel: Pick<DisplayPanel, "role">): boolean {
-  return panel.role !== "overlay";
+  return panel.role !== "overlay" && panel.role !== "virtual";
 }
 
 /** Shared targeting inventory, including the ordinary single-display fallback. */

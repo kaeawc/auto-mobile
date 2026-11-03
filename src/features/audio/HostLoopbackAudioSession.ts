@@ -35,8 +35,8 @@ const STREAM_STOP_GRACE_MS = 2_000;
 export const CAPTURE_DRAIN_MS = 1_000;
 
 export interface HostLoopbackAudioSessionDeps {
-  /** The helper executable, or undefined when none is configured. */
-  helperPath: () => string | undefined;
+  /** The helper executable, or undefined when none is available. */
+  helperPath: () => string | undefined | Promise<string | undefined>;
   launchHelper: LoopbackHelperSpawner;
   timer?: Pick<Timer, "now" | "monotonicNow" | "setTimeout" | "clearTimeout">;
 }
@@ -53,7 +53,8 @@ interface FeedControl {
 function helperMissing(code: EmulatorAudioErrorCode, envName: string): EmulatorAudioError {
   return new EmulatorAudioError(
     code,
-    "iOS Simulator audio needs the audio-loopback helper on a macOS host. Set " +
+    "iOS Simulator audio needs the released audio-loopback helper on a macOS host. " +
+      "Check release asset availability, or set " +
       `${envName} to the path of an audio-loopback-helper executable.`,
   );
 }
@@ -302,7 +303,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     args: string[],
     onStdout?: PcmSink,
   ): Promise<RunningLoopbackHelper> {
-    const path = this.deps.helperPath();
+    const path = await this.deps.helperPath();
     if (!path) {
       throw helperMissing(
         operation === "inject" ? "audio_injection_unsupported" : "audio_capture_unsupported",

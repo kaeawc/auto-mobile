@@ -220,6 +220,26 @@ function paintStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
 }
 
+const SIZE_BOUNDS = [
+  ["minWidth", "min-width", "row"],
+  ["maxWidth", "max-width", "row"],
+  ["minHeight", "min-height", "column"],
+  ["maxHeight", "max-height", "column"],
+] as const;
+
+/**
+ * The authored min/max bounds, except on the main axis of a weighted child whose parent shares by
+ * weight: both devices pin that axis to its share, so the bounds there do not apply.
+ */
+function boundsStyle(css: Css, style: Raw, context: WebStyleContext, weighted: boolean) {
+  const pinnedAxis = weighted && context.weightsChildren === true ? context.parentAxis : undefined;
+  for (const [field, property, axis] of SIZE_BOUNDS) {
+    if (typeof style[field] === "number" && axis !== pinnedAxis) {
+      css[property] = px(style[field] as number);
+    }
+  }
+}
+
 function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
   dimension(css, "width", style.width, context);
   dimension(css, "height", style.height, context);
@@ -228,18 +248,7 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
     css.flex = `${style.weight} ${style.weight} 0`;
     css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
   }
-  for (const [field, property, axis] of [
-    ["minWidth", "min-width", "row"],
-    ["maxWidth", "max-width", "row"],
-    ["minHeight", "min-height", "column"],
-    ["maxHeight", "max-height", "column"],
-  ] as const) {
-    // A weight pins its main axis to its share on both devices: the bounds there do not apply.
-    const pinned = weighted && context.weightsChildren === true && context.parentAxis === axis;
-    if (typeof style[field] === "number" && !pinned) {
-      css[property] = px(style[field] as number);
-    }
-  }
+  boundsStyle(css, style, context, weighted);
   rowMeasureStyle(css, style, context);
   if (style[ROW_BOUND_KEY] === true) {
     // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.

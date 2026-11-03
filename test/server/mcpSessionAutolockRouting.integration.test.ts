@@ -1,5 +1,8 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  currentAutolockMcpSessionId,
+  currentOneShotCli,
+} from "../../src/features/toolSelection/toolSelectionContext";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -387,22 +390,31 @@ describe("MCP session autolock routing", () => {
     expect(ambient).toBeUndefined();
   });
 
-  // #11096: the daemon's one-shot CLI marker reaches handlers only over its internal transport.
-  test("passes the daemon's one-shot CLI marker to handlers", async () => {
+  // #11096: the daemon's one-shot CLI marker reaches handlers only over its internal transport,
+  // and only as ambient call context, never in their args (#15663).
+  test("runs the handler as a one-shot CLI call when the daemon marks it", async () => {
     fixture = new McpTestFixture({
       daemonMode: true,
       sessionContext: { sessionId: "shared-loopback-session" },
     });
     await fixture.setup();
 
-    const capturedArgs = await callCaptureTool(fixture, {
-      value: "ok",
-      __mcpSessionId: "unix-socket-session",
-      [INTERNAL_ONE_SHOT_CLI_PARAM]: true,
-    });
+    let oneShot: boolean | undefined;
+    const capturedArgs = await callCaptureTool(
+      fixture,
+      {
+        value: "ok",
+        __mcpSessionId: "unix-socket-session",
+        [INTERNAL_ONE_SHOT_CLI_PARAM]: true,
+      },
+      () => {
+        oneShot = currentOneShotCli();
+      },
+    );
 
     expect(capturedArgs.value).toBe("ok");
-    expect(capturedArgs[INTERNAL_ONE_SHOT_CLI_PARAM]).toBe(true);
+    expect(capturedArgs).not.toHaveProperty(INTERNAL_ONE_SHOT_CLI_PARAM);
+    expect(oneShot).toBe(true);
   });
 
   test("ignores a direct caller's forged one-shot CLI marker", async () => {
@@ -412,17 +424,20 @@ describe("MCP session autolock routing", () => {
     await fixture.setup();
 
     let ambient: string | undefined;
+    let oneShot: boolean | undefined;
     const capturedArgs = await callCaptureTool(
       fixture,
       { value: "ok", [INTERNAL_ONE_SHOT_CLI_PARAM]: true },
       () => {
         ambient = currentAutolockMcpSessionId();
+        oneShot = currentOneShotCli();
       },
     );
 
     expect(capturedArgs).not.toHaveProperty(INTERNAL_ONE_SHOT_CLI_PARAM);
     expect(capturedArgs).not.toHaveProperty("__mcpSessionId");
     expect(ambient).toBe("direct-mcp-session");
+    expect(oneShot).toBe(false);
   });
 
   test("keeps direct MCP sessions available as implicit autolock keys", async () => {

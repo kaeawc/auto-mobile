@@ -4,7 +4,7 @@ import type { DeviceInfo } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
-import { deleteInternalToolParams, INTERNAL_ONE_SHOT_CLI_PARAM } from "../daemon/wire/constants";
+import { deleteInternalToolParams } from "../daemon/wire/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
@@ -640,11 +640,6 @@ async function prepareDevice(
   }
 }
 
-/** Carry the daemon-forwarded one-shot `--cli` marker into the acquisition target (#11096). */
-function oneShotCliMarker(rawArgs: Record<string, unknown>): { __oneShotCli?: true } {
-  return rawArgs[INTERNAL_ONE_SHOT_CLI_PARAM] === true ? { __oneShotCli: true } : {};
-}
-
 // Compatibility implementation. New callers use getAndroid/getApple so their
 // platform identity and readiness budgets are explicit.
 function stripInternalAcquisitionParams(rawArgs: object) {
@@ -658,7 +653,6 @@ async function getAndroidHandler(
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
-  const oneShotCli = oneShotCliMarker(rawArgs);
   const presentationOrder = acceptancePresentationOrder(rawArgs);
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
   const args = getAndroidSchema.parse(externalArgs);
@@ -683,7 +677,6 @@ async function getAndroidHandler(
         preferRunning: true,
         createIfMissing: false,
         __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-        ...oneShotCli,
       }
     : {
         platform: "android",
@@ -692,7 +685,6 @@ async function getAndroidHandler(
         preferRunning: true,
         createIfMissing: false,
         __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-        ...oneShotCli,
       };
   return await runWithAcquisitionDeadline(
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
@@ -759,7 +751,6 @@ async function getAppleHandler(
             ...(presentationOrder !== undefined ? { presentationOrder } : {}),
             createIfMissing: false,
             __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-            ...oneShotCliMarker(rawArgs),
           },
           {
             bootTimeoutMs,

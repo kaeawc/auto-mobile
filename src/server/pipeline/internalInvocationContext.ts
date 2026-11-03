@@ -43,6 +43,7 @@ export function internalToolInvocationContext(
     tapAtPlanContext: options.tapAtPlanContext,
     requestDeadline: internalCallRequestDeadline(context, options),
     autolockMcpSessionId: undefined,
+    oneShotCli: undefined,
     routingSessionUuid: sessionUuid,
     toolSelectionProfileUuid: context?.toolSelectionProfileUuid,
     sessionToolSelectionService:

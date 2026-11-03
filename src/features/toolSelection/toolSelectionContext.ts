@@ -58,6 +58,12 @@ export type ToolSelectionContext = {
    * `callerMcpSessionId`, an internal call (plan step, nested tool) never inherits it.
    */
   autolockMcpSessionId?: string;
+  /**
+   * The top-level call comes from a one-shot `--cli` connection, which acquires anonymously
+   * (#11096, #15663). Set at MCP ingress; like `autolockMcpSessionId`, an internal call never
+   * inherits it.
+   */
+  oneShotCli?: true;
   /** The connection key the call's per-connection device pin is stored under (#14385). */
   deviceConnectionKey?: string;
   /** Connection-bound ownership proof for read-only cross-device checks. */
@@ -164,6 +170,10 @@ export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
 /** The connection this top-level call autolocks and records for; absent inside internal calls. */
 export const currentAutolockMcpSessionId = (): string | undefined =>
   toolSelectionContext.getStore()?.autolockMcpSessionId;
+
+/** Whether this top-level call comes from a one-shot `--cli` connection; false inside internal calls. */
+export const currentOneShotCli = (): boolean =>
+  toolSelectionContext.getStore()?.oneShotCli === true;
 
 /**
  * The connection a call runs for: its own autolock identity, else the enclosing call's (#11469). A

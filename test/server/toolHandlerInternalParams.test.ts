@@ -5,6 +5,7 @@ import { parseSync, Visitor, type Expression } from "oxc-parser";
 import {
   INTERNAL_TOOL_PARAM_NAMES,
   INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
 } from "../../src/daemon/wire/constants";
@@ -153,9 +154,17 @@ function unsafeSchemaParses(file: string, source: string): string[] {
   return offenders;
 }
 
+/** The in-band keys only ingress reads, by constant name and wire key (#15663). */
+const INGRESS_ONLY_KEYS = new Map([
+  ["INTERNAL_MCP_SESSION_PARAM", INTERNAL_MCP_SESSION_PARAM],
+  ["INTERNAL_ONE_SHOT_CLI_PARAM", INTERNAL_ONE_SHOT_CLI_PARAM],
+]);
+const INGRESS_ONLY_NAMES = new Set([...INGRESS_ONLY_KEYS.keys(), ...INGRESS_ONLY_KEYS.values()]);
+const INGRESS_ONLY_WIRE_KEYS = new Set<unknown>(INGRESS_ONLY_KEYS.values());
+
 /**
- * Every place outside comments that names the in-band connection key: the constant or the literal
- * key. Handlers read the connection from the ambient call context instead (#15663).
+ * Every place outside comments that names an ingress-only key: its constant or the literal key.
+ * Handlers read the connection and the one-shot marker from the ambient call context (#15663).
  */
 function inBandConnectionReads(file: string, source: string): string[] {
   const { program, errors } = parseSync(file, source);
@@ -164,12 +173,12 @@ function inBandConnectionReads(file: string, source: string): string[] {
   const line = (start: number) => `${file}:${source.slice(0, start).split("\n").length}`;
   new Visitor({
     Identifier(node) {
-      if (node.name === "INTERNAL_MCP_SESSION_PARAM" || node.name === INTERNAL_MCP_SESSION_PARAM) {
+      if (INGRESS_ONLY_NAMES.has(node.name)) {
         offenders.push(line(node.start));
       }
     },
     Literal(node) {
-      if (node.value === INTERNAL_MCP_SESSION_PARAM) {
+      if (INGRESS_ONLY_WIRE_KEYS.has(node.value)) {
         offenders.push(line(node.start));
       }
     },
@@ -178,7 +187,7 @@ function inBandConnectionReads(file: string, source: string): string[] {
   return [...new Set(offenders)];
 }
 
-describe("the in-band connection key stays at the ingress boundary (#15663)", () => {
+describe("the in-band connection keys stay at the ingress boundary (#15663)", () => {
   // `parseCallContext` reads the forwarded wire key once; nothing past it may.
   const ALLOWED = new Set(["server/pipeline/ingress/callContext.ts"]);
 
@@ -196,7 +205,7 @@ describe("the in-band connection key stays at the ingress boundary (#15663)", ()
       .flatMap((file) => inBandConnectionReads(file, readFileSync(join(src, file), "utf8")));
   });
 
-  test("no src/server or src/features file names __mcpSessionId outside ingress", () => {
+  test("no src/server or src/features file names __mcpSessionId or __oneShotCli outside ingress", () => {
     expect(offenders).toEqual([]);
   });
 
@@ -209,9 +218,20 @@ describe("the in-band connection key stays at the ingress boundary (#15663)", ()
       const a = args[INTERNAL_MCP_SESSION_PARAM];
       const b = args["__mcpSessionId"];
       const { __mcpSessionId } = args;
+      // nor is one naming __oneShotCli
+      const c = args[INTERNAL_ONE_SHOT_CLI_PARAM];
+      const d = { __oneShotCli: true };
+      const e = args["__oneShotCli"];
     `,
       ),
-    ).toEqual(["fixture.ts:3", "fixture.ts:4", "fixture.ts:5"]);
+    ).toEqual([
+      "fixture.ts:3",
+      "fixture.ts:4",
+      "fixture.ts:5",
+      "fixture.ts:7",
+      "fixture.ts:8",
+      "fixture.ts:9",
+    ]);
   });
 });
 
@@ -284,6 +304,7 @@ describe("handler internal metadata regression guard", () => {
       });
       // The rebuilt boot args no longer forward the key; the boot sees the ambient connection.
       expect(calls[0]).not.toHaveProperty("__mcpSessionId");
+      expect(calls[0]).not.toHaveProperty("__oneShotCli");
       expect(bootConnections).toEqual(["session"]);
       expect(args).toMatchObject(metadata);
     },
@@ -320,11 +341,12 @@ describe("handler internal metadata regression guard", () => {
     });
     // The rebuilt args no longer forward the key; preparation sees the ambient connection.
     expect(calls[0]).not.toHaveProperty("__mcpSessionId");
+    expect(calls[0]).not.toHaveProperty("__oneShotCli");
     expect(prepareConnections).toEqual(["session"]);
     expect(args).toMatchObject(metadata);
   });
 
-  test("provisionDevice argument seam strips full metadata and the in-band session, keeps the CLI marker, takes the request's deadline", () => {
+  test("provisionDevice argument seam strips full metadata, the in-band session and CLI marker, takes the request's deadline", () => {
     const args = Object.freeze({
       device: {
         platform: "ios" as const,
@@ -342,14 +364,14 @@ describe("handler internal metadata regression guard", () => {
         device: args.device,
         boot: true,
         readiness: "automation",
-        // The connection identity is ambient, not carried in the parsed args (#15663); the
-        // one-shot CLI marker is still preserved (#11096).
-        __oneShotCli: true,
+        // The connection identity and the one-shot CLI marker are ambient, not carried in the
+        // parsed args (#15663).
         transportDeadlineMs: 90_000,
         liveDeadlineKey: "live",
       },
     );
     expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("__mcpSessionId");
+    expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("__oneShotCli");
     expect(parseProvisionDeviceArgs(args, undefined)).not.toHaveProperty("transportDeadlineMs");
     expect(args).toMatchObject(metadata);
   });

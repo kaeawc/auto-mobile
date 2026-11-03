@@ -22,8 +22,6 @@ export interface StartDeviceArgs {
   timeoutMs?: number;
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
-  /** Daemon-forwarded: the caller is a one-shot `--cli` connection, so it acquires anonymously (#11096). */
-  __oneShotCli?: boolean;
   /** Request-local owner admitted before boot; never mint a replacement if recovery fails. */
   __restartResumeSessionUuid?: string;
   /** Routing snapshot carried across acquisition schema parsing. */
@@ -73,8 +71,6 @@ export interface ProvisionDeviceArgs {
   readiness: "automation" | "none";
   resources?: DeviceResourceConfiguration;
   timeoutMs?: number;
-  /** Daemon-forwarded one-shot `--cli` marker (#11096). */
-  __oneShotCli?: boolean;
   /** The request's absolute transport deadline, from the ambient call context (#15663). */
   transportDeadlineMs?: number;
   /** The daemon-generated key of this forwarded call; correlates a cancellation outcome. */

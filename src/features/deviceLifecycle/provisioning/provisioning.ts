@@ -1,4 +1,3 @@
-import { internalOneShotCli } from "../../../daemon/wire/internalToolParams";
 import {
   currentRequestDeadline,
   type RequestDeadline,
@@ -196,7 +195,6 @@ export function parseProvisionDeviceArgs(
   input: Partial<InternalProvisionDeviceArgs>,
   requestDeadline: RequestDeadline | undefined = currentRequestDeadline(),
 ): InternalProvisionDeviceArgs {
-  const __oneShotCli = internalOneShotCli(input);
   const publicInput: Record<string, unknown> = { ...input };
   // `provisionDeviceSchema` is `.strict()`, so EVERY internal param the daemon
   // may inject has to go before re-parsing -- hence the canonical shared list
@@ -217,7 +215,6 @@ export function parseProvisionDeviceArgs(
     ...(input.discardSnapshotOnExit === true ? { discardSnapshotOnExit: true } : {}),
     boot: parsed.boot ?? true,
     readiness: parsed.readiness ?? "automation",
-    ...(__oneShotCli ? { __oneShotCli } : {}),
     ...provisionDeadlineFields(requestDeadline),
   };
 }

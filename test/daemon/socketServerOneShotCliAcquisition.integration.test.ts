@@ -6,7 +6,7 @@
  * registered `getAndroid` handler; only the loopback MCP hop is replaced by a direct dispatch.
  */
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import { asMcpConnection } from "../helpers/mcpConnection";
+import { withWireConnection } from "../helpers/mcpConnection";
 import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -125,16 +125,14 @@ async function createHarness(): Promise<Harness> {
   const socketPath = join(tmpdir(), `one-shot-cli-${randomUUID()}.sock`);
   const server = new UnixSocketServer(socketPath, DaemonState.getInstance(), new FakeTimer());
   // The loopback MCP hop dispatches straight to the registered handler with the arguments the
-  // socket server forwards, internal markers included, under the forwarded connection as MCP
-  // ingress runs it (#15663).
+  // socket server forwards, under the forwarded connection and one-shot marker as MCP ingress runs
+  // it (#15663).
   server.mcpClientFactory = async () =>
     new StubMcpClient({
       callTool: async ({ name, arguments: args }) => {
-        const forwarded = (args ?? {}) as Record<string, unknown>;
-        const connection = forwarded.__mcpSessionId;
-        const result = await asMcpConnection(
-          typeof connection === "string" ? connection : undefined,
-          () => ToolRegistry.getTool(name)!.handler(forwarded),
+        const result = await withWireConnection(
+          (args ?? {}) as Record<string, unknown>,
+          (forwarded) => ToolRegistry.getTool(name)!.handler(forwarded),
         );
         if (!isCallToolResult(result)) {
           throw new Error(`Tool ${name} returned a non-MCP result`);

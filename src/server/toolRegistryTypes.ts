@@ -92,6 +92,8 @@ export interface InternalToolInvocationContext {
   requestDeadline: RequestDeadline | undefined;
   /** Always `undefined`: an internal call never autolocks or records for the connection. */
   autolockMcpSessionId: undefined;
+  /** Always `undefined`: an internal call is never a one-shot `--cli` call. */
+  oneShotCli: undefined;
 }
 
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,

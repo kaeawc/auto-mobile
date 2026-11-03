@@ -1,7 +1,6 @@
 import {
   adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
-  internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
 } from "../internalToolParams";
@@ -31,7 +30,6 @@ export function provisionSessionArgs(args: ProvisionDeviceArgs): StartDeviceArgs
     __restartResumeTargets: internalRestartResumeTargets(args),
     timeoutMs: args.timeoutMs,
     __restartResumeSessionUuid: internalRestartResumeSessionUuid(args),
-    ...(internalOneShotCli(args) ? { __oneShotCli: true } : {}),
   };
 }
 

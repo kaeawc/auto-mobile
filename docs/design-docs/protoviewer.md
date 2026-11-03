@@ -235,6 +235,14 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   internal scheme `automobile-proto://` remains for legacy callers (section 7): it imports a
   host-staged inbox bundle or opens an existing library entry. Simulator hosts use the file inbox
   instead. The scheme never fetches or carries spec bytes.
+- Link sharing (#14128) uses a team-supplied static https host; there is no AutoMobile relay and no
+  LAN serving from the daemon. MCP `prototype share` writes the canonical bundle under the data
+  directory and, given the https `url` it will be served from, returns
+  `automobile-proto://import?url=<percent-encoded>&sha256=<bundle hex>` and its QR (byte mode, level
+  M, link at most 1024 bytes). The hash pins the exact bytes: the importer must show host and hash,
+  fetch with the egress check, and refuse a mismatch before the strict import path, with
+  `source: "share"`. Links do not expire. Android only; iOS distribution beyond dev-signed builds is
+  out of scope.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 

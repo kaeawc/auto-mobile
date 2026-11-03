@@ -241,6 +241,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "listSaved",
           "deleteSaved",
           "open",
+          "share",
           "clearStorage",
           "simulate",
           "screenMap",
@@ -254,7 +255,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend or backendLog; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; ProtoViewer link: share; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend or backendLog; host-only: screenMap",
         },
       ),
       goal: z
@@ -355,7 +356,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          `show only: instead of spec, an absolute path of a local JSON file holding the same spec (up to ${MAX_PROTOTYPE_SPEC_BYTES} bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.`,
+          `show, screenMap or share: instead of spec, an absolute path of a local JSON file holding the same spec (up to ${MAX_PROTOTYPE_SPEC_BYTES} bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.`,
         ),
       display: z
         .string()
@@ -430,7 +431,15 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       assets: assetsInput
         .optional()
         .describe(
-          "show or save only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "show, save or share only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+        ),
+      url: z
+        .string()
+        .min(1)
+        .max(1024)
+        .optional()
+        .describe(
+          "share only: the https URL the team will upload the bundle to (a release asset, gist raw URL or object storage), without credentials or #fragment. With it, share also returns the automobile-proto://import link and its QR; without it, only the bundle is written",
         ),
       label: z
         .string()
@@ -532,6 +541,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "since",
     "mock",
     "mockPath",
+    "url",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -553,6 +563,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     listSaved: [],
     deleteSaved: ["id", "removeIcon"],
     open: ["id"],
+    share: ["spec", "specPath", "assets", "url"],
     clearStorage: ["id"],
     simulate: ["id", "advanceTimeMs"],
     dismiss: ["id", "all"],
@@ -671,7 +682,8 @@ function validateProtoViewerTimeout(
 }
 
 function validateSpecSource(value: z.infer<typeof prototypeSchema>, ctx: z.RefinementCtx): void {
-  const takesSpecSource = value.action === "show" || value.action === "screenMap";
+  const takesSpecSource =
+    value.action === "show" || value.action === "screenMap" || value.action === "share";
   if (takesSpecSource && (value.spec === undefined) === (value.specPath === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -706,6 +718,7 @@ export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
   "inspect",
   "listSaved",
   "screenMap",
+  "share",
   "testSessionBegin",
   "testSessionEnd",
   "testSessionReport",

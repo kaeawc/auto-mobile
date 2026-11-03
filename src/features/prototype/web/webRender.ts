@@ -28,6 +28,7 @@ import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -42,6 +43,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import { rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -102,9 +104,6 @@ export interface WebRenderKit {
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
 }
-
-/** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
-const MAX_WEB_REPEAT_ITEMS = 200;
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
 function bindBare(text: string, scope: WebRenderScope): string {
@@ -213,21 +212,6 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
 }
 
 /**
- * A repeat's rows: a literal array or a pointer into the spec's data. As on the devices, only
- * object items repeat (scalars are skipped before indices are assigned), up to the item cap.
- */
-function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
-  const itemsPath = record(repeat.items)?.path;
-  const items = Array.isArray(repeat.items)
-    ? repeat.items
-    : typeof itemsPath === "string"
-      ? resolvePrototypeDataPointer(scope.data, itemsPath)
-      : undefined;
-  const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
-  return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
-}
-
-/**
  * Lets a container decorate each child, given the child node it was drawn from. A hidden child
  * arrives as undefined, so a container that keeps a slot for every child (a carousel) can still
  * draw one; returning undefined draws nothing.
@@ -250,7 +234,7 @@ export function children(
       renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
     );
   }
-  const rows = repeatRows(repeat, scope);
+  const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
@@ -327,15 +311,21 @@ function lineFillAxes(
   mainAxis?: WebAxis,
 ): WebAxis[] {
   const repeat = record(raw.repeat);
-  if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope).length === 0)) {
+  if (
+    !Array.isArray(raw.children) ||
+    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
+  ) {
     return [];
   }
-  const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));
+  const own = rowFillAxes(raw, path, prepareIn(scope));
+  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
   if (mainAxis && raw.children.some((entry) => isWeighted(entry, scope, path))) {
     axes.add(mainAxis);
   }
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
+
+const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>
@@ -345,7 +335,8 @@ const line =
     const node = filling(raw, lineFillAxes(raw, scope, path, axis === "row" ? "width" : "height"));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    return el("div", { attrs, style }, children(node, inner, path));
+    const rowed = rowMeasured(node, path, prepareIn(inner));
+    return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
@@ -377,6 +368,7 @@ const text: NodeRenderer = (node, scope) => {
 
 const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
+  const fade = fadeEdgesCss(node, scope.style);
   const { attrs, style } = base(node, scope, {
     display: "flex",
     // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
@@ -384,13 +376,14 @@ const scroll: NodeRenderer = (node, scope, path) => {
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
-    ...fadeEdgesCss(node, scope.style),
+    ...fade.style,
   });
   const inner = child(scope, {
     inBox: false,
     style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
   });
-  return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
+  const scrollAttrs = { ...attrs, ...fade.attrs };
+  return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
 
 const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node), scope));

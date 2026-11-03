@@ -84,7 +84,9 @@ const castCall = {
 };
 const permissionsCall = {
   ...label,
-  onTap: [{ type: "platform", call: "permissions.request", args: { names: { value: ["camera"] } } }],
+  onTap: [
+    { type: "platform", call: "permissions.request", args: { names: { value: ["camera"] } } },
+  ],
 };
 const contactsCall = {
   ...label,

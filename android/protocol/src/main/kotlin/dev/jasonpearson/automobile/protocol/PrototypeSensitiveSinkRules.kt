@@ -38,23 +38,23 @@ internal object PrototypeSensitiveSinkRules {
       return listOf(it)
     }
     // Data-backed rows are rebuilt from live data, so any read of a tainted row is a sink.
-    val taintedRows =
-      context.nodes.mapNotNull { node ->
-        val repeat = node.value["repeat"] as? JsonObject
-        val alias = repeat?.text("as")
-        val pointer = repeat?.member("items")?.text("path")
-        if (
-          alias != null &&
-            pointer != null &&
-            PrototypeDataPointer.isValid(pointer) &&
-            taints.any { overlaps(it, pointer, pointerIndexWildcard = false) }
-        )
-          node.path to alias
-        else null
-      }
+    val taintedRows = context.nodes.mapNotNull { node -> taintedRow(node, taints) }
     return sinks
       .filter { field -> readsTaintedRow(field, taintedRows) || reaches(field, scopes, taints) }
       .map { PrototypeSpecError(it.path, MESSAGE) }
+  }
+
+  /** The `(path, alias)` of a data-backed repeat whose items pointer overlaps a taint. */
+  private fun taintedRow(
+    node: PrototypeStateChecks.Located,
+    taints: List<String>,
+  ): Pair<String, String>? {
+    val repeat = node.value["repeat"] as? JsonObject
+    val alias = repeat?.text("as")
+    val pointer = repeat?.member("items")?.text("path")?.takeIf(PrototypeDataPointer::isValid)
+    val tainted =
+      pointer != null && taints.any { overlaps(it, pointer, pointerIndexWildcard = false) }
+    return if (tainted && alias != null) node.path to alias else null
   }
 
   private fun budgetError(
@@ -107,7 +107,23 @@ internal object PrototypeSensitiveSinkRules {
   }
 
   private fun sinkFields(spec: JsonObject, context: PrototypeStateChecks.Context): List<Field> {
+    val sinks = SinkCollector()
+    for (action in context.actions) {
+      if (action.value.text("type") == "request") sinks.request(action.value, action.path)
+    }
+    for ((id, raw) in (spec["channels"] as? JsonObject).orEmpty()) {
+      val at = keyPath("channels", id)
+      val channel = raw as? JsonObject
+      sinks.binding(channel?.get("url"), "$at.url", text = true)
+      sinks.entries(channel?.get("headers"), "$at.headers", text = true)
+    }
+    return sinks.fields
+  }
+
+  /** Wire fields of requests and channels: literal text, typed `{data}` and row `{item}` forms. */
+  private class SinkCollector {
     val fields = mutableListOf<Field>()
+
     fun binding(raw: JsonElement?, path: String, text: Boolean = false) {
       if (text && raw is JsonPrimitive && raw.isString) fields.add(Field(raw.content, path))
       val form = raw as? JsonObject ?: return
@@ -115,15 +131,14 @@ internal object PrototypeSensitiveSinkRules {
       form.text("data")?.let { fields.add(Field(it, path, dataPointer = true)) }
       if (form.text("item") != null) fields.add(Field("", path, itemBinding = true))
     }
+
     fun entries(raw: JsonElement?, path: String, text: Boolean) {
       for ((name, value) in (raw as? JsonObject).orEmpty()) {
         binding(value, keyPath(path, name), text)
       }
     }
-    for (action in context.actions) {
-      val value = action.value
-      if (value.text("type") != "request") continue
-      val at = action.path
+
+    fun request(value: JsonObject, at: String) {
       binding(value["url"], "$at.url", text = true)
       entries(value["headers"], "$at.headers", text = true)
       entries(value["query"], "$at.query", text = true)
@@ -138,13 +153,6 @@ internal object PrototypeSensitiveSinkRules {
         body?.get("file") == null -> binding(value["body"], "$at.body")
       }
     }
-    for ((id, raw) in (spec["channels"] as? JsonObject).orEmpty()) {
-      val at = keyPath("channels", id)
-      val channel = raw as? JsonObject
-      binding(channel?.get("url"), "$at.url", text = true)
-      entries(channel?.get("headers"), "$at.headers", text = true)
-    }
-    return fields
   }
 
   /** The `/data` pointers written by the `into` of every `sensitive` call, in authored order. */

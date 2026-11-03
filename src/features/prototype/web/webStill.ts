@@ -3,6 +3,7 @@ import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import { materialIconGlyphs, type PrototypeIconGlyphSource } from "./webIconGlyphs";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
@@ -24,6 +25,11 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * Where icons find their glyphs. Defaults to the Material Icons Android draws for an Android
+   * frame; an iOS frame keeps the placeholder until its glyph set is decided (#16526).
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
 }
 
 export interface PrototypeStill {
@@ -162,6 +168,16 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+function glyphScope(
+  options: PrototypeStillOptions,
+  frame: DeviceFrame,
+): { glyphs?: PrototypeIconGlyphSource } {
+  if (options.glyphs) {
+    return { glyphs: options.glyphs };
+  }
+  return frame.platform === "android" ? { glyphs: materialIconGlyphs() } : {};
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
@@ -194,6 +210,7 @@ function stillScope(
     instances: [],
     inBox: false,
     unsupported: [],
+    ...glyphScope(options, frame),
     screenWidth: size.width,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],

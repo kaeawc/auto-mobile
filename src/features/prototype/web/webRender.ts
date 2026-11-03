@@ -39,6 +39,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import { prototypeIconVariant, type PrototypeIconGlyphSource } from "./webIconGlyphs";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -47,9 +48,9 @@ export interface UnsupportedWebNode {
   readonly path: string;
   /**
    * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
-   * shader does.
+   * shader does. `iconMissing`: an icon name with no glyph drew the placeholder.
    */
-  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback";
+  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback" | "iconMissing";
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -65,6 +66,11 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /**
+   * Where icons find their glyphs; without one every icon draws the placeholder and none is
+   * reported, since no glyph set was asked for.
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
   /**
@@ -427,25 +433,46 @@ function iconInitial(name: unknown): string {
   return letter ? letter.toUpperCase() : "";
 }
 
-const icon: NodeRenderer = (node, scope) => {
-  // The Material glyph set is not inlined, so an icon draws as a tinted ring around its name's
-  // initial, titled with the full name.
+/** An icon's glyph from the scope's source, or undefined when it has none or no source is set. */
+function iconGlyph(node: Raw, scope: WebRenderScope): readonly WebElement[] | undefined {
+  return typeof node.name === "string"
+    ? scope.glyphs?.glyph(node.name, prototypeIconVariant(node.variant))
+    : undefined;
+}
+
+const ICON_BOX = { display: "inline-flex", width: "24px", height: "24px", "flex-shrink": "0" };
+
+const icon: NodeRenderer = (node, scope, path) => {
+  const glyph = iconGlyph(node, scope);
+  const title = String(node.name ?? "");
+  if (glyph) {
+    // Tinted by `currentColor`, as Compose tints by LocalContentColor unless the style sets one.
+    const { attrs, style } = base(node, scope, ICON_BOX);
+    const svgAttrs = { viewbox: "0 0 24 24", width: "100%", height: "100%", fill: "currentColor" };
+    return el("span", { attrs: { ...attrs, title, role: "img" }, style }, [
+      el("svg", { attrs: { ...svgAttrs, "aria-hidden": "true" } }, glyph),
+    ]);
+  }
+  if (scope.glyphs) {
+    scope.unsupported.push({
+      type: "icon",
+      ...(typeof node.id === "string" ? { id: node.id } : {}),
+      path,
+      reason: "iconMissing",
+    });
+  }
+  // No glyph: a tinted ring around the name's initial, titled with the full name.
   const { attrs, style } = base(node, scope, {
-    display: "inline-flex",
+    ...ICON_BOX,
     "align-items": "center",
     "justify-content": "center",
-    width: "24px",
-    height: "24px",
     border: "2px solid currentColor",
     "border-radius": "6px",
     "font-size": "11px",
     "font-weight": "700",
     "line-height": "1",
-    "flex-shrink": "0",
   });
-  return el("span", { attrs: { ...attrs, title: String(node.name ?? ""), role: "img" }, style }, [
-    iconInitial(node.name),
-  ]);
+  return el("span", { attrs: { ...attrs, title, role: "img" }, style }, [iconInitial(node.name)]);
 };
 
 const image: NodeRenderer = (node, scope, path) => {

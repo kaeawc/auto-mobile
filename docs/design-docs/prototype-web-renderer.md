@@ -254,7 +254,7 @@ the host, so the page's script only switches between views it was given and neve
   `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
   their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
   draws its named icon, else a 24 px `surfaceVariant` square, since item images are not inlined. An
-  icon button draws the icon placeholder in a 40 px circle inside a 48 px target: `standard` and
+  icon button draws its icon in a 40 px circle inside a 48 px target: `standard` and
   `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
   `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no
   `stateKey` is an outlined assist chip and one with a `stateKey` a filter chip, whatever its
@@ -266,7 +266,7 @@ the host, so the page's script only switches between views it was given and neve
   carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column, box or card
   around such a child grows on that axis, as a Compose parent does around a `fillMax` child. A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
-  and actions as icon placeholders labelled with their action, and its `variant` sets its height,
+  and actions as icons labelled with their action, and its `variant` sets its height,
   title size and title alignment. A button, switch, checkbox, text field,
   list item, icon button, chip or slider whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, text decorations and built-in font
@@ -277,8 +277,15 @@ the host, so the page's script only switches between views it was given and neve
   lines); a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
-  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
-  titled with the name, because the glyph set is not inlined. A switch draws its label before a
+  Compose parent does around a `fillMaxSize` child. In an Android frame an icon draws its Material Icons
+  glyph (the set Compose's `material-icons-extended` bundles, read from the Apache-2.0
+  `@material-design-icons/svg` package) as inline SVG in a 24 px box, in its `variant`'s style, else
+  `filled` as Android falls back, and tinted by `currentColor` or its style `color`. Only the
+  glyphs a still draws are read and inlined. A glyph that would need `<defs>`/`<use>` ids is
+  treated as absent, since ids collide when a page draws it twice. A name with no glyph draws a
+  tinted rounded outline around its first letter, titled with the name, with reason `iconMissing`.
+  An iOS frame draws that outline for every icon, unreported, until its glyph set is decided
+  (#16526). A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
   as both devices do. A video player is a black 16:9 frame (a `colorBars` sample draws bars, a
   `countdown` sample a 3; other sources are not inlined) under the skin's chrome at `startMs`

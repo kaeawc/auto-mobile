@@ -148,14 +148,19 @@ export function prototypeRolePalette(
       palette.set(role, surface);
     }
   }
-  // Flat overrides hold in both modes; the mode's own map is painted over them.
-  for (const [role, color] of [
-    ...roleOverrides(colors),
-    ...roleOverrides(record(colors?.[mode])),
-  ]) {
+  for (const [role, color] of prototypeRoleOverrides(spec, mode)) {
     palette.set(role, color);
   }
   return palette;
+}
+
+/**
+ * A spec's explicit role colours for one mode, in paint order: flat overrides hold in both modes,
+ * and the mode's own map is painted over them.
+ */
+export function prototypeRoleOverrides(spec: unknown, mode: PrototypeColorMode): [string, Rgba][] {
+  const colors = record(record(record(spec)?.theme)?.colors);
+  return [...roleOverrides(colors), ...roleOverrides(record(colors?.[mode]))];
 }
 
 function roleOverrides(colors: Record<string, unknown> | undefined): [string, Rgba][] {

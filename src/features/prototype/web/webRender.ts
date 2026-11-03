@@ -25,6 +25,7 @@ import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -39,7 +40,6 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
-import { repeatRows } from "./webRepeat";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -224,7 +224,7 @@ export function childEntries(node: Raw, scope: WebRenderScope, path: string): We
   if (!repeat) {
     return list.map((entry, index) => ({ node: entry, scope, path: `${path}.children[${index}]` }));
   }
-  const rows = repeatRows(repeat, scope.data);
+  const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
@@ -323,7 +323,10 @@ const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box",
  */
 function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
   const repeat = record(raw.repeat);
-  if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope.data).length === 0)) {
+  if (
+    !Array.isArray(raw.children) ||
+    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
+  ) {
     return [];
   }
   const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));

@@ -30,6 +30,12 @@ const PAGE_URL = "http://prototype-web.test/";
 const PER_PIXEL_DELTA = 0.1;
 const PIXEL_RATIO = 0.001;
 const CASE_TIMEOUT_MS = 30_000;
+/**
+ * The page's status bar clock follows the browser clock (#16585); the check pins it to the stills'
+ * 9:41, in UTC, so the goldens stay byte-stable.
+ */
+const STILL_TIME = "2026-01-01T09:41:00Z";
+const TIMEZONE = "UTC";
 
 interface PageProblems {
   readonly consoleErrors: string[];
@@ -37,8 +43,21 @@ interface PageProblems {
   readonly requests: string[];
 }
 
-async function openPage(browser: Browser, html: string): Promise<{ page: Page } & PageProblems> {
-  const page = await browser.newPage({ viewport: WEB_SCREENSHOT_VIEWPORT, deviceScaleFactor: 1 });
+type ClockSetup = (page: Page) => Promise<void>;
+
+const freezeClock: ClockSetup = (page) => page.clock.setFixedTime(STILL_TIME);
+
+async function openPage(
+  browser: Browser,
+  html: string,
+  clock: ClockSetup = freezeClock,
+): Promise<{ page: Page } & PageProblems> {
+  const page = await browser.newPage({
+    viewport: WEB_SCREENSHOT_VIEWPORT,
+    deviceScaleFactor: 1,
+    timezoneId: TIMEZONE,
+  });
+  await clock(page);
   const problems: PageProblems = { consoleErrors: [], pageErrors: [], requests: [] };
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -259,4 +278,28 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
       CASE_TIMEOUT_MS,
     );
   }
+
+  test(
+    "the status bar clock follows the browser clock (#16585)",
+    async () => {
+      const [entry] = webScreenshotCases();
+      const { page } = await openPage(browser, webScreenshotPage(entry!), (opened) =>
+        opened.clock.install({ time: "2026-01-01T13:07:30Z" }),
+      );
+      const clocks = () =>
+        page.$$eval('[data-status="clock"]', (marks) =>
+          Array.from(new Set(marks.map((mark) => mark.textContent))),
+        );
+      try {
+        expect(await clocks()).toEqual(["1:07"]);
+        await page.clock.runFor(30_000);
+        expect(await clocks()).toEqual(["1:08"]);
+        await page.clock.runFor(60_000);
+        expect(await clocks()).toEqual(["1:09"]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
 });

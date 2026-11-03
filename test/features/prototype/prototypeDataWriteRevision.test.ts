@@ -126,7 +126,13 @@ describe("the host mirror follows device data writes", () => {
       });
     expect(upsert({ sku: "b", n: 1 }, 3)).toMatchObject({ kind: "mirrored" });
     expect(upsert({ sku: "a", n: 2 }, 4)).toMatchObject({ kind: "mirrored" });
-    expect(dataOf(shown)).toEqual({ cart: [{ sku: "a", n: 2 }, { sku: "b", n: 1 }], note: "hi" });
+    expect(dataOf(shown)).toEqual({
+      cart: [
+        { sku: "a", n: 2 },
+        { sku: "b", n: 1 },
+      ],
+      note: "hi",
+    });
   });
   test("a write the mirror cannot apply makes the host stop tracking the spec", () => {
     for (const write of [

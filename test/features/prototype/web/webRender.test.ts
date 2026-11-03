@@ -646,6 +646,53 @@ describe("prototype web still (#16346)", () => {
     expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
   });
 
+  test("a repeat column's instances each cap their aspect ratio by their own share (#16694)", () => {
+    const ratios = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 40 } },
+          repeat: { items: [{ id: 1 }, { id: 2 }] },
+          children: [
+            {
+              type: "row",
+              style: { weight: 1 },
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b" },
+              ],
+            },
+          ],
+        },
+      }),
+      "ratio",
+    );
+    // Each of the two weighted instances gets 20 dp, so its ratio is at most 40 dp wide.
+    expect(ratios.map((ratio) => ratio.style["flex-basis"])).toEqual(["40px", "40px"]);
+  });
+
+  test("a repeated row around an unsized aspect ratio does not fill its parent (#16694)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              repeat: { items: [{ id: 1 }] },
+              children: [{ type: "box", style: { aspectRatio: 2 } }],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    expect(row.style).not.toHaveProperty("width");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

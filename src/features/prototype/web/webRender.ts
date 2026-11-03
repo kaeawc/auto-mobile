@@ -43,7 +43,7 @@ import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
 import { rowFillAxes, rowMeasured } from "./webRowAspect";
-import { withChildHeights } from "./webIncomingHeight";
+import { repeatInstanceChildren, withChildHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -239,18 +239,22 @@ export function children(
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  return rows.flatMap((item, index) => {
+  const scopes = rows.map((item, index) => {
     const values = record(item) ?? {};
     const instance: Instance = {
       binding: { alias, index: true },
       values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
       index,
     };
-    const itemScope = child(scope, { instances: [...scope.instances, instance] });
-    return list.flatMap((entry, at) =>
-      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
-    );
+    return child(scope, { instances: [...scope.instances, instance] });
   });
+  // A repeat column's instances are siblings, so each gets its own share of the column's height.
+  const lists = repeatInstanceChildren(node, path, scopes.map(prepareIn));
+  return scopes.flatMap((itemScope, index) =>
+    lists[index]!.flatMap((entry, at) =>
+      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
+    ),
+  );
 }
 
 function renderOrSkip(

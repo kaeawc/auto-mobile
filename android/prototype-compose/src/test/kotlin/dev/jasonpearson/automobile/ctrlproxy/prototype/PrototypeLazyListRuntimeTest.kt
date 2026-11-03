@@ -101,7 +101,9 @@ class PrototypeLazyListRuntimeTest {
     )
   }
 
-  /** [listSpec] plus an unrendered `/data/tags` list, so a write there skips the list's row rules. */
+  /**
+   * [listSpec] plus an unrendered `/data/tags` list, so a write there skips the list's row rules.
+   */
   private fun tagsSpec(): PrototypeSpec {
     val spec = listSpec()
     return spec.copy(data = JsonObject(spec.data.orEmpty() + ("tags" to json("""["b"]"""))))

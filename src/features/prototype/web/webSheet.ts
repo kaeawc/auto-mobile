@@ -15,7 +15,7 @@ export type WebLayerRenderer = (node: Raw, scope: WebRenderScope, path: string) 
 const SCRIM_ROLE_ALPHA = 0.4;
 
 /** A layer covers its window: the still's window element is its positioned ancestor. */
-const LAYER_CSS: Readonly<Record<string, string>> = {
+export const LAYER_CSS: Readonly<Record<string, string>> = {
   position: "absolute",
   inset: "0",
   display: "flex",
@@ -24,7 +24,7 @@ const LAYER_CSS: Readonly<Record<string, string>> = {
 };
 
 /** A role from the palette, else the Material 3 baseline when a derived scheme leaves it out. */
-function roleColor(role: string, style: WebStyleContext): Rgba {
+export function roleColor(role: string, style: WebStyleContext): Rgba {
   return style.palette.get(role) ?? prototypeRolePalette({}, style.mode).get(role)!;
 }
 
@@ -50,12 +50,44 @@ function detentHeight(detents: unknown): string {
 }
 
 /** Whether the sheet's `openWhen` key holds exactly its boolean `equals`; a missing key does not. */
-function sheetOpen(node: Raw, scope: WebRenderScope): boolean {
+export function sheetOpen(node: Raw, scope: WebRenderScope): boolean {
   const when = record(node.openWhen);
   if (typeof when?.key !== "string" || typeof when.equals !== "boolean") {
     return false;
   }
   return scope.condition.state[when.key] === when.equals;
+}
+
+/** Drawn at the window, not in its parent: no grid cell, and no inset an ancestor consumed. */
+export function hoistedScope(scope: WebRenderScope): WebRenderScope {
+  return {
+    ...scope,
+    inBox: false,
+    consumedInsets: [],
+    style: { ...scope.style, parentAxis: "column" },
+  };
+}
+
+/**
+ * An open-by-state layer: nothing while closed, else the drawn layer at the position it held
+ * before its own subtree drew, so layers keep tree order, an outer layer before any inside it.
+ */
+export function openLayer(
+  draw: (node: Raw, scope: WebRenderScope, path: string) => WebElement,
+): WebLayerRenderer {
+  return (node, scope, path) => {
+    if (!sheetOpen(node, scope)) {
+      return;
+    }
+    // A closed layer draws nothing; an open one draws without its shader, so it is listed.
+    const shaded = shaderFallback(node, path);
+    if (shaded) {
+      scope.unsupported.push(shaded);
+    }
+    const at = scope.layers.length;
+    const layer = draw(node, scope, path);
+    scope.layers.splice(at, 0, layer);
+  };
 }
 
 /** Android's drag handle: a 32x4 `onSurfaceVariant` bar with 8 px around it, centred. */
@@ -80,13 +112,7 @@ function dragHandle(style: WebStyleContext): WebElement {
  * handle comes first, then the child. Authored style applies to the sheet and wins.
  */
 function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRenderKit) {
-  // Drawn at the window, not in its parent: no grid cell, and no inset an ancestor consumed.
-  const hoisted: WebRenderScope = {
-    ...scope,
-    inBox: false,
-    consumedInsets: [],
-    style: { ...scope.style, parentAxis: "column" },
-  };
+  const hoisted = hoistedScope(scope);
   const { attrs, style: base } = kit.base(node, hoisted, {
     display: "flex",
     "flex-direction": "column",
@@ -128,19 +154,7 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
 }
 
 export function webSheetLayers(kit: WebRenderKit): Readonly<Record<string, WebLayerRenderer>> {
-  const bottomSheet: WebLayerRenderer = (node, scope, path) => {
-    if (!sheetOpen(node, scope)) {
-      return;
-    }
-    // A closed sheet draws nothing; an open one draws without its shader, so it is listed.
-    const shaded = shaderFallback(node, path);
-    if (shaded) {
-      scope.unsupported.push(shaded);
-    }
-    // Layers keep tree order, a sheet before any sheet inside it, as both devices stack them.
-    const at = scope.layers.length;
-    const layer = sheetLayer(node, scope, path, kit);
-    scope.layers.splice(at, 0, layer);
-  };
+  // Layers keep tree order, a sheet before any sheet inside it, as both devices stack them.
+  const bottomSheet = openLayer((node, scope, path) => sheetLayer(node, scope, path, kit));
   return { bottomSheet };
 }

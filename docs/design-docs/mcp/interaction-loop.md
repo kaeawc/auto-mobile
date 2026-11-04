@@ -39,6 +39,16 @@ value. The marker describes state and does not change `tapOn` selection or
 execution. An enabled-state transition appears in hierarchy diffs and prevents
 the settle comparator from treating the two captures as equal.
 
+The skeleton stays actionable-only; non-actionable rows such as static status
+text go to `context`. A positive `waitFor` whose only element predicate is
+`text` or `textAny` first searches the hierarchy, then the rows of both arrays
+(their `label` and `sublabel`), so any text an agent can read in the default
+output can also be awaited. Compound, `container`- and `layer`-scoped waits,
+`selectionStrategy` and `absent` stay on the hierarchy search, which describes
+one source node. A text that any hierarchy node carries also stays there, so a
+row label hoisted from an off-screen child cannot override that search's
+visibility verdict.
+
 iOS simulator lock readings are shared per device: unlocked known readings use
 `knownTtlMs` (30 seconds), locked readings use `lockedTtlMs` (2 seconds), and
 unknown readings use `failureTtlMs` (5 seconds). The first known reading after

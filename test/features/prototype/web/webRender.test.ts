@@ -711,6 +711,27 @@ describe("prototype web still (#16346)", () => {
     expect(node.style["max-width"]).toBe("100px");
   });
 
+  test("a wrapped later sibling drops its component's default width to fill the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "iconButton", testTag: "after", icon: "add", style: { minWidth: 80 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    expect(cell.style.display).toBe("grid");
+    expect(byTag({ element: cell }, "after")[0]!.style).not.toHaveProperty("width");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

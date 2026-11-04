@@ -34,6 +34,9 @@ export function withLaterMinStrut(
   for (const [key, value] of Object.entries(element.style)) {
     (ROW_FACING.test(key) ? outer : inner)[key] = value;
   }
+  // A width here is a component default (an authored dp width never wraps): the node stretches
+  // across the cell instead, as the folded minimum replaced that default before.
+  delete inner.width;
   // An authored maximum also bounds the growing cell, so a `fill` width stops where it did.
   if (element.style["max-width"] !== undefined) {
     outer["max-width"] = element.style["max-width"];

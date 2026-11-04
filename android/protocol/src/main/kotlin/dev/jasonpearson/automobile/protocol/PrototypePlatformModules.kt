@@ -53,6 +53,16 @@ internal object PrototypePlatformModules {
       ?.content
   }
 
+  /** Whether a call's contract definition is marked `sensitive` (R1). */
+  fun sensitiveCall(call: String?): Boolean =
+    callDefinition(call)?.second?.flag("sensitive") == true
+
+  /** Whether an event's contract definition is marked `sensitive` (R1). */
+  fun sensitiveEvent(event: String): Boolean {
+    val (owner, member) = qualified(event) ?: return false
+    return module(owner)?.member("events")?.member(member)?.flag("sensitive") == true
+  }
+
   fun userInitiated(event: String): Boolean {
     val (owner, member) = qualified(event) ?: return false
     return module(owner)?.member("events")?.member(member)?.flag("userInitiated") == true

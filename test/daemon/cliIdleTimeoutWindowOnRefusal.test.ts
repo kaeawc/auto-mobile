@@ -116,7 +116,7 @@ describe("the cli-idle-timeout refusal carries the applied idle window (#16908)"
     expect("idleTimeoutMs" in payload.error).toBe(false);
   });
 
-  test("a call cut by the cli idle release carries the window too", () => {
+  test("a SessionReleasedDuringCallError built with the cli idle window carries it", () => {
     const payload = sessionReleasedDuringCallPayload(
       new SessionReleasedDuringCallError("s", "cli-idle-timeout", 300_000),
     );

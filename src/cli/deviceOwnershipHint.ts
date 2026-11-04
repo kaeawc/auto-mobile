@@ -45,6 +45,11 @@ function ownershipLossReason(payload: unknown): unknown {
 }
 
 function formatMinutes(ms: number): string {
+  if (ms < 60_000) {
+    // A session's own window can be under a minute; minutes would round it to 0 (#16908).
+    const seconds = Math.round((ms / 1000) * 10) / 10;
+    return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  }
   const minutes = Math.round((ms / 60_000) * 10) / 10;
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }

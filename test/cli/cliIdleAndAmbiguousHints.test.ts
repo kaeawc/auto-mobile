@@ -82,8 +82,11 @@ describe("cliDeviceOwnershipHint reports the session's own idle window (#16908)"
     expect(hint).toContain("AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS");
   });
 
-  test("states a window under a minute in milliseconds too", () => {
-    expect(cliDeviceOwnershipHint(lossWith(1_500), "observe")).toContain("(1500 ms)");
+  test("states a window under a minute in seconds, not 0 minutes", () => {
+    const hint = cliDeviceOwnershipHint(lossWith(1_500), "observe");
+    expect(hint).toContain("its idle timeout of 1.5 seconds (1500 ms)");
+    expect(hint).not.toContain("of 0 minutes");
+    expect(cliDeviceOwnershipHint(lossWith(1_000), "observe")).toContain("of 1 second (1000 ms)");
   });
 
   test.each([undefined, 0, -1, "300000", Number.NaN])(

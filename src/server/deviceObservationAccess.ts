@@ -116,6 +116,8 @@ async function findObservationReadTarget(
                 ios: scope === "either",
                 watchos: scope === "watchos",
                 tvos: scope === "tvos",
+                // A read never lists Vision Pro simulators until their inventory exists (#16849).
+                visionos: false,
               },
             };
         signal?.throwIfAborted();

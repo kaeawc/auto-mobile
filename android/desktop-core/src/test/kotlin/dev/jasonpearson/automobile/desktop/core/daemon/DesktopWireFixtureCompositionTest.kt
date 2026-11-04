@@ -415,13 +415,17 @@ class DesktopWireFixtureCompositionTest {
    * no observation stream, so the recorded `input/tap` frames carry no `frameContext`; this drops
    * the snapshot's context before the frame is built. It sits UNDER the production allocation
    * wrapper, so it cannot send anything the allocation did not allow.
+   *
+   * Like the app's per-action client (`inputSessionUuidProvider`), it resolves the desktop session
+   * when the tap is sent, not when it was enqueued: the allocation can rotate to a fresh session
+   * between the two.
    */
   private class FixtureInputClient(
-    private val delegate: McpDaemonClient,
+    private val current: () -> McpDaemonClient,
     private val onSent: (InputActionResult) -> Unit,
-  ) : AutoMobileClient by delegate {
+  ) : AutoMobileClient by current() {
     override fun inputTap(input: TapInput): InputActionResult =
-      delegate.inputTap(input.copy(frameContext = null)).also(onSent)
+      current().inputTap(input.copy(frameContext = null)).also(onSent)
   }
 
   private inner class Replay(
@@ -440,7 +444,7 @@ class DesktopWireFixtureCompositionTest {
     private val controlScope = CoroutineScope(SupervisorJob() + CONTROL_WORKER)
     // Stable across recompositions: a new provider resets the control session's queue.
     private val inputClientProvider: () -> AutoMobileClient = {
-      FixtureInputClient(client()) { pendingTap?.complete(TapOutcome.Sent(it)) }
+      FixtureInputClient(::client) { pendingTap?.complete(TapOutcome.Sent(it)) }
     }
 
     fun state(): DesktopDaemonSessionState = requireNotNull(state)

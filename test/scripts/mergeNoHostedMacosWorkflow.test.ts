@@ -31,6 +31,7 @@ describe("On Merge hosted macOS removal (#8583, #11010)", () => {
     }
     expect(jobs["node-unit-tests"]?.strategy?.matrix?.os).toEqual(["windows-latest"]);
     expect(jobs["ts-code-coverage"]?.["runs-on"]).toBe("ubuntu-latest");
+    expect(jobs["ts-coverage-part"]?.["runs-on"]).toBe("ubuntu-latest");
     for (const id of ["node-unit-tests", "node-host-integration-tests"]) {
       expect(jobs[id]?.strategy?.matrix?.os).toContain("windows-latest");
     }

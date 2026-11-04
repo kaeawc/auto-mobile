@@ -993,7 +993,7 @@ MAVEN_CENTRAL_403_LOG=$'2026-11-04T05:20:11.1234567Z A problem occurred configur
 
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
 @test "reruns a calibrated contended unit timeout before the both-attempts signature" {
-  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage"; do
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage" "TypeScript Code Coverage (1/2)"; do
     runner_shutdown_fixture "$job"
     run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
       FAKE_RUNNER_LOG=$'RUNNER-CONTENDED: unit shard 0 hit its 720s wall-clock budget after a retry on a starved runner (probe slowdown 8x >= 4x); not retrying on the same runner. Re-run the job to get a fresh runner.\nTIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry' bash "$SCRIPT" 123
@@ -1004,7 +1004,7 @@ MAVEN_CENTRAL_403_LOG=$'2026-11-04T05:20:11.1234567Z A problem occurred configur
 }
 
 @test "reruns suspected runner starvation before the plain timeout signature for both Node jobs" {
-  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage"; do
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage" "TypeScript Code Coverage (1/2)"; do
     runner_shutdown_fixture "$job"
     run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
       FAKE_RUNNER_LOG=$'TIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry\nRUNNER-STARVED-SUSPECTED: all 3 unit shards hit the 720 s wall-clock budget on both attempts (worst probe slowdown 2x); every shard being slow on a retried runner points at a starved runner, not a code regression.' bash "$SCRIPT" 123
@@ -1079,14 +1079,18 @@ MAVEN_CENTRAL_403_LOG=$'2026-11-04T05:20:11.1234567Z A problem occurred configur
 }
 
 @test "coverage infra retries preserve investigate verdicts without weakening ordinary assertion failures" {
-  runner_shutdown_fixture "TypeScript Code Coverage"
-  for diagnostic in 'TIMEOUT: coverage shard 1 exceeded its wall-clock budget after a retry' 'FAIL: coverage shard 1 exited with status 137 after a retry'; do
-    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$diagnostic" bash "$SCRIPT" 123
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"INVESTIGATE"* ]]
-    [[ "$output" == *"both attempts of the in-job infra retry"* ]]
-    [[ "$output" != *"RERUN-DONT-FIX"* ]]
+  # The lane runs in "TypeScript Code Coverage (N/2)" part jobs (#16377).
+  for job in "TypeScript Code Coverage" "TypeScript Code Coverage (2/2)"; do
+    runner_shutdown_fixture "$job"
+    for diagnostic in 'TIMEOUT: coverage shard 3 exceeded its wall-clock budget after a retry' 'FAIL: coverage shard 3 exited with status 137 after a retry'; do
+      run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$diagnostic" bash "$SCRIPT" 123
+      [ "$status" -eq 0 ]
+      [[ "$output" == *"INVESTIGATE"* ]]
+      [[ "$output" == *"both attempts of the in-job infra retry"* ]]
+      [[ "$output" != *"RERUN-DONT-FIX"* ]]
+    done
   done
+  runner_shutdown_fixture "TypeScript Code Coverage"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG='FAIL: coverage shard 1 exited with status 1' bash "$SCRIPT" 123
   [ "$status" -eq 0 ]
   [[ "$output" == *"UNKNOWN"* ]]

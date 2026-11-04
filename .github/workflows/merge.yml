@@ -1081,23 +1081,28 @@ jobs:
   # TypeScript Code Coverage
   # =============================================================================
 
-  ts-code-coverage:
-    name: "TypeScript Code Coverage"
-    # The per-merge README badge and Ubuntu unit gate share this one run (#13569).
-    # PRs retain their separate required, uninstrumented build-and-test check.
+  ts-coverage-part:
+    name: "TypeScript Code Coverage (${{ matrix.part }}/2)"
+    # The instrumented lane runs as two interleaved parts of two shards each
+    # (#16377): one 4-core runner is CPU-bound at two coverage shards, so the
+    # split halves wall time instead of crowding more shards onto one host.
+    # ts-code-coverage joins the parts for the badge and the Ubuntu unit gate.
     permissions:
       actions: write
       contents: read
     runs-on: ubuntu-latest
-    # 1560s lane + 600s rechecks + 480s for setup/build/global install,
-    # post-lane probes, report merging and badge upload < 2700s.
-    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
+    # 1560s lane + 480s for setup/build/global install, post-lane probes,
+    # chunk merging and artifact upload < 2100s.
+    timeout-minutes: 35
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
-          fetch-depth: 2
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
@@ -1107,10 +1112,82 @@ jobs:
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
           # One infra retry; the shared unit supervisor bounds both attempts.
           AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
+          AUTOMOBILE_COVERAGE_PART: ${{ matrix.part }}
+          AUTOMOBILE_COVERAGE_PARTS: "2"
         run: bash scripts/ci/run-ts-coverage.sh
 
       - name: "Recover Coverage if needed"
         run: bash scripts/ci/verify-ts-coverage-output.sh
+
+      - name: "Upload Coverage Part"
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-coverage-part-${{ matrix.part }}
+          path: |
+            coverage/lcov.info
+            coverage/junit.xml
+            coverage/shards/*.xml
+            coverage/shards/calibration-*.tsv
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: "Upload TypeScript Coverage Diagnostics"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-coverage-diagnostics-part-${{ matrix.part }}
+          path: |
+            ci-logs/ts-coverage.log
+            coverage/shards/**
+            scratch/watchdog-snapshot-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Last step on purpose: qualify a failure from this job's own summary file
+      # (test-ts.sh appends RUNNER-CONTENDED there) and, on attempt 1, ask
+      # rerun-contended-runner.yml to rerun the failed jobs once the run
+      # completes. A job cannot rerun its own in-progress run. Fork PRs have a
+      # read-only token, so they skip; the script is a logged no-op on any
+      # dispatch error and never changes this job's result (#12758).
+      - name: "Request fresh-runner rerun on runner contention"
+        if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
+
+  ts-code-coverage:
+    name: "TypeScript Code Coverage"
+    # The per-merge README badge and Ubuntu unit gate share the coverage parts'
+    # run (#13569, #16377). PRs retain their separate required, uninstrumented
+    # build-and-test check.
+    needs: ts-coverage-part
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # 600s rechecks + 480s for setup/build/global install, part download,
+    # report merging and badge upload < 1200s.
+    timeout-minutes: 20
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 2
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Download Coverage Parts"
+        uses: actions/download-artifact@v7
+        with:
+          pattern: ts-coverage-part-*
+          path: coverage-parts
+
+      - name: "Merge Coverage Parts"
+        run: bash scripts/ci/merge-ts-coverage-parts.sh 2 coverage-parts coverage
 
       - name: "Generate Coverage Badge"
         run: bash scripts/coverage/generate-badge.sh coverage/lcov.info coverage/ts-coverage-badge.json "TS coverage" "3178C6"
@@ -1131,7 +1208,7 @@ jobs:
           BUN_TEST_TIMING_BASE_REF: HEAD^
           BUN_TEST_TIMING_REPORT_DIR: coverage/shards
           BUN_TEST_TIMING_REPORTS_INSTRUMENTED: "true"
-          # The 45-minute job also reserves setup and post-lane headroom.
+          # The 20-minute job also reserves setup and merge headroom.
           BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
         run: bash scripts/validate-bun-test-timings.sh
 
@@ -1141,28 +1218,10 @@ jobs:
         with:
           name: ts-coverage-diagnostics
           path: |
-            ci-logs/ts-coverage.log
             coverage/shards/**
             scratch/bun-test-report.recheck.d/**
-            scratch/watchdog-snapshot-*.txt
           if-no-files-found: ignore
           retention-days: 7
-
-      # Last step on purpose: qualify a failure from this job's own summary file
-      # (test-ts.sh appends RUNNER-CONTENDED there) and, on attempt 1, ask
-      # rerun-contended-runner.yml to rerun the failed jobs once the run
-      # completes. A job cannot rerun its own in-progress run. Fork PRs have a
-      # read-only token, so they skip; the script is a logged no-op on any
-      # dispatch error and never changes this job's result (#12758).
-      - name: "Request fresh-runner rerun on runner contention"
-        if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
   # =============================================================================
   # Kotlin Code Coverage

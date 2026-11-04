@@ -164,6 +164,34 @@ describe("web still selection controls (#16537)", () => {
     expect(docked.style.flex).toBeUndefined();
   });
 
+  test("an expanded search bar in an unsized nested column grows that column too (#16803)", () => {
+    const bar = {
+      type: "searchBar",
+      stateKey: "q",
+      activeKey: "open",
+      placeholder: "Search",
+    };
+    const nested = (state: Spec, extra: Spec = {}): WebElement => {
+      const still = renderPrototypeStill({
+        id: "s",
+        state,
+        root: {
+          type: "column",
+          children: [{ type: "column", testTag: "inner", children: [{ ...bar, ...extra }] }],
+        },
+      });
+      expect(still.unsupportedNodes).toEqual([]);
+      return find(still.element, (node) => node.attrs["data-testid"] === "inner")[0]!;
+    };
+    const expanded = nested({ q: "", open: true });
+    expect(expanded.style.flex).toBe("1 1 auto");
+    expect(byNode(expanded, "searchBar")[0]!.style.flex).toBe("1 1 auto");
+    // Collapsed, docked, or with an authored height, the bar does not grow its column.
+    expect(nested({ q: "", open: false }).style.flex).toBeUndefined();
+    expect(nested({ q: "", open: true }, { variant: "docked" }).style.flex).toBeUndefined();
+    expect(nested({ q: "", open: true }, { style: { height: 80 } }).style.flex).toBeUndefined();
+  });
+
   test("an expanded search bar start-aligns its results so a compact button keeps its width", () => {
     const bar = draw(
       {

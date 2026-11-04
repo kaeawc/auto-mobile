@@ -27,7 +27,7 @@ import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
-import { webSelectionRenderers } from "./webSelection";
+import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { withLaterMinStrut } from "./webLaterMin";
@@ -302,8 +302,8 @@ function fillMissing(node: Raw): Raw {
 
 /**
  * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
- * fills by default (a slider's width, say). Its repeat placeholders bind, its visibleWhen must keep
- * it, and its style includes matching styleWhen entries.
+ * fills by default (a slider's width, or an expanded search bar's width and height). Its repeat
+ * placeholders bind, its visibleWhen must keep it, and its style includes matching styleWhen entries.
  */
 function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): WebAxis[] {
   const prepared = preparedNode(entry, scope, path);
@@ -320,7 +320,9 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
     ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
-    : defaultFillAxes(styled);
+    : styled.type === "searchBar"
+      ? searchBarFillAxes(styled, local, { bound })
+      : defaultFillAxes(styled);
   return [...authored, ...inferred];
 }
 

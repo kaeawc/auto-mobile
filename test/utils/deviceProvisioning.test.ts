@@ -166,6 +166,8 @@ describe("pickAndroidSystemImage handheld-only default selection (#14900)", () =
     "android-automotive-distant-display-playstore",
     "android-desktop",
     "android-xr-preview-playstore",
+    "android-xr-v3-playstore",
+    "google-xr",
     "ai-glasses",
   ];
 

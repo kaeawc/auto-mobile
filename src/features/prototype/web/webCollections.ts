@@ -1,8 +1,30 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  ARIA_HIDDEN,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  CENTER,
+  DATA_PART,
+  FLEX,
+  FLEX_DIRECTION,
+  FLEX_SHRINK,
+  GRID_TEMPLATE_COLUMNS,
+  JUSTIFY_CONTENT,
+  JUSTIFY_SELF,
+  MAX_WIDTH,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  POINTER_EVENTS,
+  RELATIVE,
+  STRETCH,
+} from "./webCss";
 import { walkPrototypeNodes } from "../prototypeNodeChildren";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
-import { boxLayoutCss, cssColor } from "./webStyle";
+import { boxLayoutCss, containerChildStyle, cssColor } from "./webStyle";
 
 type Css = Record<string, string>;
 
@@ -22,6 +44,9 @@ const DEFAULT_FILL: Readonly<Record<string, readonly WebAxis[]>> = {
   slider: ["width"],
   tabBar: ["width"],
   bottomNav: ["width"],
+  radioGroup: ["width"],
+  select: ["width"],
+  searchBar: ["width"],
 };
 
 /** The axes a node fills by default and leaves unsized in its own style. */
@@ -99,15 +124,15 @@ function pageFill(node: Raw, vertical: boolean): { width: boolean; height: boole
 function pageCss(node: Raw, vertical: boolean): Css {
   const fill = pageFill(node, vertical);
   const size = record(node.pageSize)?.dp;
-  const css: Css = { ...boxLayoutCss(undefined), "min-width": "0", "min-height": "0" };
+  const css: Css = { ...boxLayoutCss(undefined), [MIN_WIDTH]: "0", [MIN_HEIGHT]: "0" };
   if (vertical ? fill.width : fill.height) {
     css.flex = "1 1 auto";
   }
   if (vertical ? fill.height : fill.width) {
-    css["align-self"] = "stretch";
+    css[ALIGN_SELF] = "stretch";
   } else if (typeof size === "number") {
     css[vertical ? "height" : "width"] = px(size);
-    css["align-self"] = "flex-start";
+    css[ALIGN_SELF] = "flex-start";
   }
   return css;
 }
@@ -141,35 +166,35 @@ function pagerDots(
   const color = cssColor("onSurface", scope.style) ?? "currentColor";
   const dots = Array.from({ length: count }, (_unused, index) =>
     el("span", {
-      attrs: { "data-part": "dot" },
+      attrs: { [DATA_PART]: "dot" },
       style: {
         width: "6px",
         height: "6px",
-        "border-radius": "50%",
-        "background-color": color,
+        [BORDER_RADIUS]: "50%",
+        [BACKGROUND_COLOR]: color,
         ...(index === page ? {} : { opacity: "0.38" }),
       },
     }),
   );
   const axis: Css = {
-    display: "flex",
-    "flex-direction": layout.vertical ? "column" : "row",
-    "align-items": "center",
-    "justify-content": "center",
+    display: FLEX,
+    [FLEX_DIRECTION]: layout.vertical ? "column" : "row",
+    [ALIGN_ITEMS]: CENTER,
+    [JUSTIFY_CONTENT]: CENTER,
     gap: "8px",
   };
   const placement: Css = layout.over
     ? layout.vertical
-      ? { position: "absolute", top: "0", bottom: "0", right: "8px" }
-      : { position: "absolute", left: "0", right: "0", bottom: "8px" }
+      ? { position: ABSOLUTE, top: "0", bottom: "0", right: "8px" }
+      : { position: ABSOLUTE, left: "0", right: "0", bottom: "8px" }
     : layout.vertical
-      ? { width: px(DOT_STRIP), "align-self": "stretch", "flex-shrink": "0" }
-      : { height: px(DOT_STRIP), "align-self": "stretch", "flex-shrink": "0" };
+      ? { width: px(DOT_STRIP), [ALIGN_SELF]: STRETCH, [FLEX_SHRINK]: "0" }
+      : { height: px(DOT_STRIP), [ALIGN_SELF]: STRETCH, [FLEX_SHRINK]: "0" };
   return el(
     "div",
     {
-      attrs: { "data-part": "indicator", "aria-hidden": "true" },
-      style: { ...axis, ...placement, "pointer-events": "none" },
+      attrs: { [DATA_PART]: "indicator", [ARIA_HIDDEN]: "true" },
+      style: { ...axis, ...placement, [POINTER_EVENTS]: "none" },
     },
     dots,
   );
@@ -198,34 +223,34 @@ export const pagerRenderer =
     const dots = node.indicator === "dots" && pages.length > 0;
     const over = node.indicatorPlacement !== "below" || !canReserveStrip(node, vertical);
     const { attrs, style } = kit.base(node, scope, {
-      display: "flex",
-      "flex-direction": vertical ? "row" : "column",
+      display: FLEX,
+      [FLEX_DIRECTION]: vertical ? "row" : "column",
       overflow: "hidden",
-      position: "relative",
+      position: RELATIVE,
     });
     // The page inherits the locals renderWebNode set for this pager (`page`, `pageCount`).
     const inner = kit.child(scope, {
       inBox: true,
-      style: { ...scope.style, parentAxis: undefined },
+      style: containerChildStyle(scope, node, undefined),
     });
     const content = kit.renderNode(pages[page], inner, `${path}.children[${page}]`);
     const pageBox = el(
       "div",
-      { attrs: { "data-part": "page" }, style: pageCss(node, vertical) },
+      { attrs: { [DATA_PART]: "page" }, style: pageCss(node, vertical) },
       content ? [content] : [],
     );
     // Peek pads an inner viewport, so it adds to the pager's own padding as contentPadding does.
     const viewport = el(
       "div",
       {
-        attrs: { "data-part": "viewport" },
+        attrs: { [DATA_PART]: "viewport" },
         style: {
-          display: "flex",
-          "flex-direction": vertical ? "row" : "column",
+          display: FLEX,
+          [FLEX_DIRECTION]: vertical ? "row" : "column",
           flex: "1 1 auto",
-          "align-self": "stretch",
-          "min-width": "0",
-          "min-height": "0",
+          [ALIGN_SELF]: STRETCH,
+          [MIN_WIDTH]: "0",
+          [MIN_HEIGHT]: "0",
           ...peekCss(node, vertical),
         },
       },
@@ -264,7 +289,7 @@ const gridCell =
     const style: Css = { ...element.style };
     // Android measures the child at exactly its cell width, so neither width nor maxWidth narrows it.
     delete style.width;
-    delete style["max-width"];
+    delete style[MAX_WIDTH];
     delete style.flex;
     if (style.height === "100%") {
       delete style.height;
@@ -274,9 +299,9 @@ const gridCell =
       style: {
         ...style,
         "grid-column": `span ${Math.min(Math.max(1, span), columns)}`,
-        "justify-self": "stretch",
-        "align-self": "start",
-        "min-width": "0",
+        [JUSTIFY_SELF]: STRETCH,
+        [ALIGN_SELF]: "start",
+        [MIN_WIDTH]: "0",
       },
     };
   };
@@ -295,16 +320,16 @@ export const gridRenderer =
     const columns = gridColumnCount(node.columns, scope.screenWidth, gap);
     const base = kit.base(node, scope, {
       display: "grid",
-      "grid-template-columns": `repeat(${columns}, minmax(0, 1fr))`,
+      [GRID_TEMPLATE_COLUMNS]: `repeat(${columns}, minmax(0, 1fr))`,
       "column-gap": px(gap),
       "row-gap": px(rowGap),
-      "align-items": "start",
+      [ALIGN_ITEMS]: "start",
       // A grid taller than its rows keeps them at the top, as Android places them.
       "align-content": "start",
     });
     const inner = kit.child(scope, {
       inBox: false,
-      style: { ...scope.style, parentAxis: undefined },
+      style: containerChildStyle(scope, node, undefined),
     });
     return el("div", base, kit.children(node, inner, path, gridCell(columns)));
   };
@@ -319,25 +344,25 @@ export const carouselRenderer =
   (raw, scope, path) => {
     const node = filling(raw, defaultFillAxes(raw));
     const { attrs, style } = kit.base(node, scope, {
-      display: "flex",
-      "flex-direction": "row",
+      display: FLEX,
+      [FLEX_DIRECTION]: "row",
       overflow: "hidden",
       gap: px(dp(node.itemSpacing)),
     });
     const inner = kit.child(scope, {
       inBox: true,
-      style: { ...scope.style, parentAxis: undefined },
+      style: containerChildStyle(scope, node, undefined),
     });
     // Android keeps an item slot for every child, hiding only a hidden child's content.
     const item = (entry: WebElement | undefined): WebElement =>
       el(
         "div",
         {
-          attrs: { "data-part": "item" },
+          attrs: { [DATA_PART]: "item" },
           style: {
             ...boxLayoutCss(undefined),
             flex: `0 0 ${px(dp(node.itemWidth))}`,
-            "border-radius": "28px",
+            [BORDER_RADIUS]: "28px",
             overflow: "hidden",
           },
         },

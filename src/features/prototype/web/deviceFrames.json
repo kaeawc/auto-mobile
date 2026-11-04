@@ -13,11 +13,7 @@
         "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
         "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
       },
-      "frame": { "bezelDp": 10, "color": "#1b1b1b" },
-      "source": {
-        "screen": "Public spec: 1080 x 2424 px at 420 dpi (density 2.625)",
-        "insets": "Estimated; not yet measured on an emulator"
-      }
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" }
     },
     {
       "id": "small-phone",
@@ -32,11 +28,7 @@
         "portrait": { "top": 24, "bottom": 48, "left": 0, "right": 0 },
         "landscape": { "top": 24, "bottom": 0, "left": 0, "right": 48 }
       },
-      "frame": { "bezelDp": 12, "color": "#202124" },
-      "source": {
-        "screen": "Android Studio small_phone device definition: 720 x 1280 px at 320 dpi",
-        "insets": "AOSP defaults: 24 dp status bar, 48 dp three-button navigation bar"
-      }
+      "frame": { "bezelDp": 12, "color": "#202124" }
     },
     {
       "id": "medium-tablet",
@@ -51,11 +43,7 @@
         "portrait": { "top": 24, "bottom": 24, "left": 0, "right": 0 },
         "landscape": { "top": 24, "bottom": 24, "left": 0, "right": 0 }
       },
-      "frame": { "bezelDp": 16, "color": "#202124" },
-      "source": {
-        "screen": "Android Studio medium_tablet device definition: 1600 x 2560 px at 320 dpi",
-        "insets": "Estimated; not yet measured on an emulator"
-      }
+      "frame": { "bezelDp": 16, "color": "#202124" }
     },
     {
       "id": "iphone-16",
@@ -76,11 +64,7 @@
         "portrait": { "top": 59, "bottom": 34, "left": 0, "right": 0 },
         "landscape": { "top": 0, "bottom": 21, "left": 59, "right": 59 }
       },
-      "frame": { "bezelDp": 12, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 393 x 852 pt at @3x",
-        "insets": "UIKit safe area insets for this model; cutout geometry estimated"
-      }
+      "frame": { "bezelDp": 12, "color": "#1c1c1e" }
     },
     {
       "id": "iphone-16-pro-max",
@@ -101,11 +85,7 @@
         "portrait": { "top": 62, "bottom": 34, "left": 0, "right": 0 },
         "landscape": { "top": 0, "bottom": 21, "left": 62, "right": 62 }
       },
-      "frame": { "bezelDp": 12, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 440 x 956 pt at @3x",
-        "insets": "UIKit safe area insets for this model; cutout geometry estimated"
-      }
+      "frame": { "bezelDp": 12, "color": "#1c1c1e" }
     },
     {
       "id": "iphone-se-3",
@@ -120,11 +100,7 @@
         "portrait": { "top": 20, "bottom": 0, "left": 0, "right": 0 },
         "landscape": { "top": 0, "bottom": 0, "left": 0, "right": 0 }
       },
-      "frame": { "bezelDp": 14, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 375 x 667 pt at @2x",
-        "insets": "UIKit safe area insets for this model"
-      }
+      "frame": { "bezelDp": 14, "color": "#1c1c1e" }
     },
     {
       "id": "ipad-10",
@@ -139,11 +115,7 @@
         "portrait": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
         "landscape": { "top": 24, "bottom": 20, "left": 0, "right": 0 }
       },
-      "frame": { "bezelDp": 20, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 820 x 1180 pt at @2x",
-        "insets": "UIKit safe area insets for this model; corner radius estimated"
-      }
+      "frame": { "bezelDp": 20, "color": "#1c1c1e" }
     }
   ]
 }

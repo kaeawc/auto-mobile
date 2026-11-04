@@ -41,11 +41,19 @@ enum PrototypePlatformValidator {
         return modules[parts.module]?.calls[parts.member]?.capability
     }
 
+    /// The capability a handler for `event` needs on top of its module's, when its definition names one.
+    static func eventCapability(_ event: String) -> String? {
+        guard let parts = qualified(event) else { return nil }
+        return modules[parts.module]?.eventCapabilities[parts.member]
+    }
+
     struct Module: Equatable {
         let capability: String
         let calls: [String: Call]
         let events: Set<String>
         var state: Set<String>?
+        /// Events whose handlers need a capability on top of the module's (simulated push).
+        var eventCapabilities: [String: String] = [:]
     }
 
     /// The contract's `platformModules`; `PrototypePlatformTests` keeps the two equal. `test` is a
@@ -76,7 +84,9 @@ enum PrototypePlatformValidator {
                 capability: fields["capability"]?.stringValue ?? "",
                 calls: calls,
                 events: Set((fields["events"]?.objectFields ?? [:]).keys),
-                state: fields["state"]?.objectFields.map { Set($0.keys) }
+                state: fields["state"]?.objectFields.map { Set($0.keys) },
+                eventCapabilities: (fields["events"]?.objectFields ?? [:])
+                    .compactMapValues { $0.objectFields?["capability"]?.stringValue }
             )
         }
 

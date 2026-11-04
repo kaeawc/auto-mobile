@@ -60,11 +60,13 @@ internal object KeystoreFaultPlan {
   private fun faultFor(alias: String): Fault? {
     clearIfDisabled()
     if (!KeystoreTestState.isEnabled()) return null
+    // Most calls hit an empty plan; skip the declared-scope scan unless a fault is armed.
+    val fault = faults[alias] ?: return null
     if (!isDeclared(alias)) {
       faults.remove(alias)
       return null
     }
-    return faults[alias]
+    return fault
   }
 
   fun apply(alias: String, sleeper: KeystoreSleeper) {

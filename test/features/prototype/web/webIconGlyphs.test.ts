@@ -102,6 +102,24 @@ describe("Material icon glyph source (#16532)", () => {
     expect(glyphs.glyph("nope", "outlined")).toBeUndefined();
   });
 
+  test("a malformed SVG is no glyph rather than an error", () => {
+    expect(glyphShapes("<svg viewBox=")).toBeUndefined();
+  });
+
+  test("a failed read is not cached, so the next render retries it", () => {
+    let calls = 0;
+    const glyphs = new MaterialIconGlyphSource(() => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error("too many open files"), { code: "EMFILE" });
+      }
+      return svg('<path d="F"/>');
+    });
+    expect(glyphs.glyph("home", "filled")).toBeUndefined();
+    expect(glyphs.glyph("home", "filled")?.[0]?.attrs.d).toBe("F");
+    expect(calls).toBe(2);
+  });
+
   test("reads each file once and never a name outside the snake-case set", () => {
     const { glyphs, reads } = source();
     glyphs.glyph("home", "filled");

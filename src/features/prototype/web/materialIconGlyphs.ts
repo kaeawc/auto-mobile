@@ -55,13 +55,19 @@ const svgParser = new Parser({
 
 function parseSvg(svg: string): SvgNode | undefined {
   let parsed: SvgNode | undefined;
-  // xml2js calls back synchronously with `async: false`, so the render pass stays synchronous.
-  svgParser.parseString(svg, (error: unknown, value: SvgNode) => {
-    if (error) {
-      throw error;
-    }
-    parsed = value;
-  });
+  try {
+    // xml2js calls back synchronously with `async: false`, so the render pass stays synchronous.
+    svgParser.parseString(svg, (error: unknown, value: SvgNode) => {
+      if (error) {
+        throw error;
+      }
+      parsed = value;
+    });
+  } catch (error) {
+    // One unreadable glyph draws the placeholder rather than failing the whole page.
+    logger.warn(`Material icon SVG did not parse: ${errorMessage(error)}`);
+    return undefined;
+  }
   return parsed;
 }
 
@@ -92,7 +98,10 @@ export function glyphShapes(svg: string): readonly WebElement[] | undefined {
     : undefined;
 }
 
-/** Reads one style's SVG for a name; undefined when that style has no such file. */
+/**
+ * Reads one style's SVG for a name: undefined when that style has no such file (cached as absent);
+ * any other read failure throws, so the next render retries it.
+ */
 export type MaterialIconFileReader = (directory: string, name: string) => string | undefined;
 
 /**
@@ -117,7 +126,14 @@ export class MaterialIconGlyphSource implements PrototypeIconGlyphSource {
   private styled(name: string, variant: PrototypeIconVariant): readonly WebElement[] | undefined {
     const key = `${variant}/${name}`;
     if (!this.cache.has(key)) {
-      const svg = this.read(VARIANT_DIRECTORY[variant], name);
+      let svg: string | undefined;
+      try {
+        svg = this.read(VARIANT_DIRECTORY[variant], name);
+      } catch (error) {
+        // A transient failure (EMFILE, say) draws the placeholder now and is not cached.
+        logger.warn(`Material icon ${key} could not be read: ${errorMessage(error)}`);
+        return undefined;
+      }
       this.cache.set(key, svg === undefined ? undefined : glyphShapes(svg));
     }
     return this.cache.get(key);
@@ -137,10 +153,17 @@ function materialIconPackageRoot(): string {
   return packageRoot;
 }
 
+function isMissingFile(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
 function readMaterialIconFile(directory: string, name: string): string | undefined {
   try {
     return readFileSync(join(materialIconPackageRoot(), directory, `${name}.svg`), "utf8");
   } catch (error) {
+    if (!isMissingFile(error)) {
+      throw error;
+    }
     // A name the package lacks (a deprecated Compose-only icon) draws the placeholder instead.
     logger.debug(`Material icon ${directory}/${name} not found: ${errorMessage(error)}`);
     return undefined;

@@ -13,8 +13,8 @@ const AGENT = "a0000000-0000-4000-8000-00000000000a";
 
 // The capture (desktopWireContract.test.ts) records every fixture through DesktopWireHarness, which
 // runs this same started daemon; replaying it must reproduce every answer. Out-of-band events are
-// derived from the frames: the agent keeper from agent-bind/release, and daemon-restart's downtime
-// from the fixture interval before its heartbeat-lapse. End holders mirror each contract row's
+// derived from the frames: the agent keeper from agent-bind/release, and a daemon restart from the
+// frame that carries daemonRestartDowntimeMs. End holders mirror each contract row's
 // assertions and description.
 const ROWS = [
   { name: "no-click-start", holders: [null, null] },
@@ -22,6 +22,7 @@ const ROWS = [
   { name: "bound-device-control", holders: [DESKTOP_1, null] },
   { name: "close-pane-releases-device", holders: [DESKTOP_2, null] },
   { name: "daemon-restart", holders: [DESKTOP_2, null] },
+  { name: "daemon-restart-rehydrates", holders: [DESKTOP_1, null] },
   { name: "first-tap-binds-device", holders: [DESKTOP_1, null] },
   { name: "heartbeat-expiry", holders: [null, null] },
   { name: "held-by-another-session", holders: [DESKTOP_1, null] },

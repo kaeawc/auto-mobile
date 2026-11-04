@@ -94,7 +94,8 @@ shell) is internal.
 | `mode`        | `light`, `dark`, `system` (follows `prefers-color-scheme`)                  | `system`                       |
 | `screen`      | A screen key of the outermost stack                                         | the stack's `start`            |
 | `controls`    | `false`, or any of `rotate`, `zoom`, `screen`                               | `["rotate", "zoom", "screen"]` |
-| `locale`      | A BCP 47 tag for string tables and formatting                               | `en-US`                        |
+| `locale`      | A BCP 47 tag for string tables, formatting and layout direction             | `en-US`                        |
+| `textSize`    | `{fontScale}` (Android frame, 0.85–2) or `{contentSize}` (iOS frame)        | the platform default           |
 
 - **Chromeless** is `frame: false` with `controls: false`: the default frame's screen size and
   safe areas without bezel, status bar, cutout or navigation marks, for pages that draw their own

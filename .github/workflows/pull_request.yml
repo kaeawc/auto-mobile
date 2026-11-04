@@ -115,7 +115,7 @@ jobs:
 
             // Tests under test/lint read these contracts.
             // Doc-only edits must still run Node tests.
-            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-watch.md"];
+            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md", "docs/using/apple-watch.md"];
 
             // Check if a file matches any documentation pattern
             const isDocFile = (filename) => {
@@ -228,7 +228,7 @@ jobs:
               /^\.lycherc\.toml$/
             ];
             // Keep auto-chore consistent with docs_only for test-guarded docs.
-            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-watch.md"];
+            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md", "docs/using/apple-watch.md"];
             const isDocFile = (filename) =>
               !testGuardedDocs.includes(filename) &&
               docPatterns.some(pattern => pattern.test(filename));
@@ -2449,13 +2449,10 @@ jobs:
       # tested here.
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
+          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :wear-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
-          # Restore the android-all jars merge.yml's coverage job saves, so
-          # Robolectric does not download them at test time (#16396).
-          robolectric-jar-cache: "restore"
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Generate Kotlin Coverage Badge"

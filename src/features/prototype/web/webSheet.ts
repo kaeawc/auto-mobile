@@ -1,3 +1,19 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  CENTER,
+  COLUMN,
+  DATA_PART,
+  FLEX,
+  FLEX_DIRECTION,
+  FLEX_SHRINK,
+  JUSTIFY_CONTENT,
+  MAX_HEIGHT,
+  RELATIVE,
+} from "./webCss";
 import { prototypeRolePalette, type Rgba } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
@@ -16,11 +32,11 @@ const SCRIM_ROLE_ALPHA = 0.4;
 
 /** A layer covers its window: the still's window element is its positioned ancestor. */
 export const LAYER_CSS: Readonly<Record<string, string>> = {
-  position: "absolute",
+  position: ABSOLUTE,
   inset: "0",
-  display: "flex",
-  "flex-direction": "column",
-  "justify-content": "flex-end",
+  display: FLEX,
+  [FLEX_DIRECTION]: COLUMN,
+  [JUSTIFY_CONTENT]: "flex-end",
 };
 
 /** A role from the palette, else the Material 3 baseline when a derived scheme leaves it out. */
@@ -64,7 +80,7 @@ export function hoistedScope(scope: WebRenderScope): WebRenderScope {
     ...scope,
     inBox: false,
     consumedInsets: [],
-    style: { ...scope.style, parentAxis: "column" },
+    style: { ...scope.style, parentAxis: COLUMN },
   };
 }
 
@@ -93,15 +109,15 @@ export function openLayer(
 /** Android's drag handle: a 32x4 `onSurfaceVariant` bar with 8 px around it, centred. */
 function dragHandle(style: WebStyleContext): WebElement {
   return el("div", {
-    attrs: { "data-part": "handle" },
+    attrs: { [DATA_PART]: "handle" },
     style: {
       width: "32px",
       height: "4px",
       margin: "8px",
-      "border-radius": "2px",
-      "align-self": "center",
-      "flex-shrink": "0",
-      "background-color": rgbaCss(roleColor("onSurfaceVariant", style)),
+      [BORDER_RADIUS]: "2px",
+      [ALIGN_SELF]: CENTER,
+      [FLEX_SHRINK]: "0",
+      [BACKGROUND_COLOR]: rgbaCss(roleColor("onSurfaceVariant", style)),
     },
   });
 }
@@ -114,40 +130,40 @@ function dragHandle(style: WebStyleContext): WebElement {
 function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRenderKit) {
   const hoisted = hoistedScope(scope);
   const { attrs, style: base } = kit.base(node, hoisted, {
-    display: "flex",
-    "flex-direction": "column",
-    "align-items": "flex-start",
-    position: "relative",
+    display: FLEX,
+    [FLEX_DIRECTION]: COLUMN,
+    [ALIGN_ITEMS]: "flex-start",
+    position: RELATIVE,
     width: "100%",
     height: detentHeight(node.detents),
-    "max-height": "100%",
-    "flex-shrink": "0",
+    [MAX_HEIGHT]: "100%",
+    [FLEX_SHRINK]: "0",
   });
   // An authored background that resolves paints the sheet; otherwise (none, or an unresolved
   // colour) it keeps the `surface` the devices fall back to, under any authored gradient.
-  const style = base["background-color"]
+  const style = base[BACKGROUND_COLOR]
     ? base
-    : { ...base, "background-color": rgbaCss(roleColor("surface", scope.style)) };
-  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: "column" } });
+    : { ...base, [BACKGROUND_COLOR]: rgbaCss(roleColor("surface", scope.style)) };
+  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: COLUMN } });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const scrim = el("div", {
-    attrs: { "data-part": "scrim" },
+    attrs: { [DATA_PART]: "scrim" },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       inset: "0",
-      "background-color": scrimCss(node.scrim, scope.style),
+      [BACKGROUND_COLOR]: scrimCss(node.scrim, scope.style),
     },
   });
   // A gradient border and inner shadows paint over the sheet's content, as on any other node.
   const sheet = withOverContentLayers(
-    el("div", { attrs: { ...attrs, "data-part": "sheet" }, style }, [
+    el("div", { attrs: { ...attrs, [DATA_PART]: "sheet" }, style }, [
       ...(node.dragHandle === false ? [] : [dragHandle(scope.style)]),
       ...(content ? [content] : []),
     ]),
     node.style,
     scope.style,
   );
-  return el("div", { attrs: { "data-part": "sheetLayer" }, style: { ...LAYER_CSS } }, [
+  return el("div", { attrs: { [DATA_PART]: "sheetLayer" }, style: { ...LAYER_CSS } }, [
     scrim,
     sheet,
   ]);

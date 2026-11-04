@@ -322,6 +322,8 @@ describe("parseTraitFormFactor", () => {
     ["emulator, watch", "watch"],
     ["tv", "tv"],
     ["emulator, TV ,nosdcard", "tv"],
+    ["emulator,xr", "xr-headset"],
+    ["emulator, glasses", "xr-glasses"],
     ["tablet,nosdcard", null],
     ["", null],
     [null, null],
@@ -332,6 +334,7 @@ describe("parseTraitFormFactor", () => {
   test("matches whole characteristics, not substrings", () => {
     expect(parseTraitFormFactor("watchface,automotiveish")).toBeNull();
     expect(parseTraitFormFactor("tvout,smarttv")).toBeNull();
+    expect(parseTraitFormFactor("xrdisplay,sunglasses")).toBeNull();
   });
 
   test("the gates are positive-match only", () => {

@@ -771,6 +771,17 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
   },
+  prototype_platform_push_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["notifications"] },
+      platform: {
+        on: { "notifications.push": [{ type: "setState", key: "active", value: true }] },
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
+  },
   prototype_platform_media_v1: {
     minimalSpec: {
       ...base,

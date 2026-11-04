@@ -1,3 +1,15 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  COLUMN,
+  DATA_WINDOW,
+  FLEX,
+  FLEX_DIRECTION,
+  JUSTIFY_CONTENT,
+  RELATIVE,
+  STRETCH,
+} from "./webCss";
 import { prototypeSpecForDevice } from "../prototypeComponents";
 import type { PrototypeFormatLogger } from "../prototypeFormat";
 import { resolvePrototypeStrings } from "../prototypeStrings";
@@ -5,6 +17,7 @@ import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContr
 import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
@@ -25,6 +38,12 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * Where icons find their glyphs (the server passes the Material Icons Android draws). Used only
+   * for an Android frame: an iOS frame keeps the placeholder until its glyph set is decided
+   * (#16526). Without one every icon draws the placeholder.
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
   /**
    * The host locale (BCP 47, default `en-US`): string tables, formatting, and the layout direction
    * of a window that sets no `layoutDirection`.
@@ -59,11 +78,11 @@ const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
 // Window content start-aligns, so an explicit `wrap` root keeps its content width; a filling root
 // stretches itself.
 const LAYER = {
-  position: "absolute",
+  position: ABSOLUTE,
   inset: "0",
-  display: "flex",
-  "flex-direction": "column",
-  "align-items": "flex-start",
+  display: FLEX,
+  [FLEX_DIRECTION]: COLUMN,
+  [ALIGN_ITEMS]: "flex-start",
 };
 
 function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): WebElement {
@@ -72,14 +91,14 @@ function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): 
     "div",
     {
       style: {
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "flex-start",
+        display: FLEX,
+        [FLEX_DIRECTION]: COLUMN,
+        [ALIGN_ITEMS]: "flex-start",
         // A sheet spans the screen width (native MATCH_PARENT); its content keeps start alignment.
-        "align-self": "stretch",
+        [ALIGN_SELF]: STRETCH,
         height: `${height}px`,
         // Layers cover this region, not the whole screen.
-        ...(layered ? { position: "relative" } : {}),
+        ...(layered ? { position: RELATIVE } : {}),
       },
     },
     children,
@@ -87,7 +106,7 @@ function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): 
   const edge = placement.edge === "top" ? "flex-start" : "flex-end";
   return el(
     "div",
-    { attrs: { "data-window": "sheet" }, style: { ...LAYER, "justify-content": edge } },
+    { attrs: { [DATA_WINDOW]: "sheet" }, style: { ...LAYER, [JUSTIFY_CONTENT]: edge } },
     [sheet],
   );
 }
@@ -101,8 +120,8 @@ function floatingWindow(placement: Raw, children: WebElement[]): WebElement {
   return el(
     "div",
     {
-      attrs: { "data-window": "floating" },
-      style: { ...LAYER, display: "grid", "align-items": vertical, "justify-items": horizontal },
+      attrs: { [DATA_WINDOW]: "floating" },
+      style: { ...LAYER, display: "grid", [ALIGN_ITEMS]: vertical, "justify-items": horizontal },
     },
     [floating],
   );
@@ -180,7 +199,14 @@ function placedWindow(
   if (placement.type === "floating") {
     return floatingWindow(placement, children);
   }
-  return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
+  return el("div", { attrs: { [DATA_WINDOW]: "fullscreen" }, style: LAYER }, children);
+}
+
+function glyphScope(
+  options: PrototypeStillOptions,
+  frame: DeviceFrame,
+): { glyphs?: PrototypeIconGlyphSource } {
+  return options.glyphs && frame.platform === "android" ? { glyphs: options.glyphs } : {};
 }
 
 /** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
@@ -210,7 +236,7 @@ function stillScope(
     style: {
       mode,
       palette: prototypeDrawnPalette(expanded, mode),
-      parentAxis: "column",
+      parentAxis: COLUMN,
       typography: themeTypography(expanded),
       ...(textScale ? { textScale } : {}),
       platform: frame.platform,
@@ -228,7 +254,9 @@ function stillScope(
     instances: [],
     inBox: false,
     unsupported: [],
+    ...glyphScope(options, frame),
     screenWidth: size.width,
+    screenHeight: size.height,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
     layers: [],

@@ -95,7 +95,7 @@ export const startDeviceParametersSchema = z.object({
       "Generate a QR code PNG and use it as the Android emulator back camera wall poster; cold boot only. Mutually exclusive with cameraPosterPath.",
     ),
   formFactor: z
-    .enum(["phone", "tablet", "foldable", "tv", "watch", "automotive"])
+    .enum(["phone", "tablet", "foldable", "tv", "watch", "automotive", "xr-headset", "xr-glasses"])
     .optional()
     .describe("Device form factor"),
   requires: z

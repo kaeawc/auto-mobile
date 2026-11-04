@@ -1,4 +1,4 @@
-import { ActionableError } from "../../../models/ActionableError";
+import { PrototypeWebInputError } from "./prototypeWebInputError";
 
 /**
  * System text size for a still: Android's font scale and iOS's Dynamic Type content size, applied
@@ -127,7 +127,7 @@ function checkedFontScale(fontScale: number): number {
     fontScale < ANDROID_FONT_SCALE_MIN ||
     fontScale > ANDROID_FONT_SCALE_MAX
   ) {
-    throw new ActionableError(
+    throw new PrototypeWebInputError(
       `fontScale ${fontScale} is outside Android's range ${ANDROID_FONT_SCALE_MIN} to ${ANDROID_FONT_SCALE_MAX}.`,
     );
   }
@@ -137,7 +137,7 @@ function checkedFontScale(fontScale: number): number {
 function checkedContentSize(contentSize: string): PrototypeContentSize {
   const known = PROTOTYPE_CONTENT_SIZES.find((size) => size === contentSize);
   if (!known) {
-    throw new ActionableError(
+    throw new PrototypeWebInputError(
       `Unknown contentSize "${contentSize}". Valid sizes: ${PROTOTYPE_CONTENT_SIZES.join(", ")}.`,
     );
   }
@@ -147,12 +147,12 @@ function checkedContentSize(contentSize: string): PrototypeContentSize {
 /** Each option belongs to one platform, so naming the other platform's option is refused. */
 function checkPlatform(platform: "android" | "ios", size: StillTextSize): void {
   if (platform === "android" && size.contentSize !== undefined) {
-    throw new ActionableError(
+    throw new PrototypeWebInputError(
       "contentSize is iOS Dynamic Type; use fontScale for an Android frame.",
     );
   }
   if (platform === "ios" && size.fontScale !== undefined) {
-    throw new ActionableError("fontScale is Android's; use contentSize for an iOS frame.");
+    throw new PrototypeWebInputError("fontScale is Android's; use contentSize for an iOS frame.");
   }
 }
 

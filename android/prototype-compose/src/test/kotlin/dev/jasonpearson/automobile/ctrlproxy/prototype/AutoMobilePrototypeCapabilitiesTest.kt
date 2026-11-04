@@ -96,6 +96,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_permissions_v1",
       // Contract only; the scheduled notification runtimes are owed (#14283).
       "prototype_platform_notifications_scheduled_v1",
+      // Contract only; push delivery to prototype apps is owed (#14286).
+      "prototype_platform_push_v1",
       // Contract only; the media players and video renderers are owed (#14255, #14256).
       "prototype_platform_media_v1",
       "prototype_platform_camera_capture_v1",

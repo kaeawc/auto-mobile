@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "library-sound",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["sound"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "sound.play",
+          "args": {
+            "sound": {
+              "value": "send"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  }
+}

@@ -25,7 +25,7 @@ export interface BootedDeviceTraits {
   model: string | null;
   sdk: number | null;
   abi: string | null;
-  /** `"watch"`, `"automotive"` or `"tv"` when the build announces it; null otherwise. */
+  /** `"watch"`, `"automotive"`, `"tv"`, `"xr-headset"` or `"xr-glasses"` when the build announces it; null otherwise. */
   formFactor: TraitFormFactor | null;
   /** Vehicle states the car build can simulate; absent on every non-automotive device. */
   vehicle?: VehicleCapabilities;

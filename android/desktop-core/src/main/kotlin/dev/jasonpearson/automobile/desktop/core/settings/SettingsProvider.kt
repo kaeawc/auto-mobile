@@ -23,6 +23,8 @@ interface SettingsProvider {
   var hasSeenOnboarding: Boolean
   /** Whether the device picker's getting-started checklist card has been dismissed. */
   var hasDismissedBasicsChecklist: Boolean
+  /** Whether a device has ever been observed; ticks the checklist's last step for good. */
+  var hasObservedDevice: Boolean
   /** Live-mirror quality preset: "low", "medium", or "high". */
   var streamQualityPreset: String
   /** Whether the live mirror lowers/raises its quality preset automatically on frame drops. */

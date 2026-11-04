@@ -34,14 +34,5 @@
     }
   ],
   "kotlin": [],
-  "swift": [
-    {
-      "trace": "upsertData replaces the row with the same key",
-      "issue": 16620
-    },
-    {
-      "trace": "setStack replaces the whole path",
-      "issue": 16620
-    }
-  ]
+  "swift": []
 }

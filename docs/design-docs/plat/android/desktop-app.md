@@ -82,9 +82,11 @@ fallback), instead of opening their own socket:
   A lease joined onto a live subscription replays the stream's latest frame,
   which can be one cadence interval old, so the capture never accepts it: it
   snapshots the replay when it subscribes, sends `request_observation`, and
-  skips the replayed frames (by identity) and anything stamped older than them
-  (by the daemon's timestamp, so the desktop clock is never compared with the
-  daemon's). `request_observation` pushes a hierarchy but no screenshot, so a
+  skips the replayed frames (by identity). A screenshot capture also skips
+  anything stamped older than them: screenshots carry the daemon's clock, so the
+  desktop clock is never compared with it. Hierarchies are not ordered by
+  timestamp, because a hierarchy carries the device's capture time when it has
+  one and the daemon's otherwise. `request_observation` pushes a hierarchy but no screenshot, so a
   screenshot capture also asks for the daemon's minimum screenshot interval
   (250 ms) on its own lease; the hub's fastest-interval merge applies it while
   the lease is held, and releasing the lease restores the others' cadence. The

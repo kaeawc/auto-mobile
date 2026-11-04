@@ -36,7 +36,9 @@ suspend fun ObservationStream.awaitFreshScreenshot(
 
 /**
  * The first hierarchy frame captured after this call that [accept] takes, the hierarchy half of
- * [awaitFreshScreenshot]. `request_observation` pushes a new hierarchy, so no cadence is changed.
+ * [awaitFreshScreenshot]. `request_observation` pushes a new hierarchy, so no cadence is changed. A
+ * hierarchy's timestamp is the device's capture time when it has one and the daemon's otherwise, so
+ * hierarchies are never ordered by it: only the replayed frames themselves are skipped.
  */
 suspend fun ObservationStream.awaitFreshHierarchy(
   deviceId: String?,
@@ -44,7 +46,7 @@ suspend fun ObservationStream.awaitFreshHierarchy(
 ): HierarchyStreamUpdate =
   awaitFrameAfterRequest(
     frames = hierarchyUpdates,
-    timestampOf = HierarchyStreamUpdate::timestamp,
+    timestampOf = null,
     request = { requestObservation(deviceId) },
     accept = accept,
   )
@@ -52,13 +54,13 @@ suspend fun ObservationStream.awaitFreshHierarchy(
 /**
  * Subscribe to [frames], then snapshot what it replays and run [request], and return the first
  * later frame that [accept] takes. A replayed frame is recognised by identity (a shared flow
- * replays the same instance). A frame emitted between the subscription and the snapshot is
- * recognised by its daemon timestamp, which is older than the newest replayed one. Both timestamps
- * come from the daemon's clock, so the desktop's clock is never compared with it.
+ * replays the same instance). When [timestampOf] reads a single clock (a screenshot's daemon
+ * stamp), a frame emitted between the subscription and the snapshot is also skipped, by being older
+ * than the newest replayed one; the desktop's clock is never compared with it.
  */
 internal suspend fun <T : Any> awaitFrameAfterRequest(
   frames: SharedFlow<T>,
-  timestampOf: (T) -> Long,
+  timestampOf: ((T) -> Long)?,
   request: () -> Unit,
   accept: (T) -> Boolean,
 ): T {
@@ -67,10 +69,12 @@ internal suspend fun <T : Any> awaitFrameAfterRequest(
   return frames
     .onSubscription {
       stale = frames.replayCache
-      newestStale = stale.maxOfOrNull(timestampOf) ?: Long.MIN_VALUE
+      if (timestampOf != null) newestStale = stale.maxOfOrNull(timestampOf) ?: Long.MIN_VALUE
       request()
     }
     .first { frame ->
-      stale.none { it === frame } && timestampOf(frame) >= newestStale && accept(frame)
+      stale.none { it === frame } &&
+        (timestampOf == null || timestampOf(frame) >= newestStale) &&
+        accept(frame)
     }
 }

@@ -64,7 +64,7 @@ class FreshObservationFrameTest {
     }
 
   @Test
-  fun `a fresh hierarchy skips the replay and changes no cadence`() =
+  fun `a fresh hierarchy skips the replay, not frames stamped by another clock`() =
     runTest(UnconfinedTestDispatcher()) {
       val stream = connected()
       stream.emitHierarchy(tree(100, "com.stale"))
@@ -75,7 +75,8 @@ class FreshObservationFrameTest {
       stream.emitHierarchy(tree(101, null))
       assertFalse(capture.isCompleted)
 
-      stream.emitHierarchy(tree(102, "com.fresh"))
+      // Stamped by a device clock behind the daemon's that stamped the replay: still fresh.
+      stream.emitHierarchy(tree(50, "com.fresh"))
       assertEquals("com.fresh", capture.await().packageName)
       assertEquals(1, stream.observationRequestCount)
       assertTrue(stream.cadenceCalls.isEmpty())

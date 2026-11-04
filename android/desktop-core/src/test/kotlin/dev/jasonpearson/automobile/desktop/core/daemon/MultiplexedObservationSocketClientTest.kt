@@ -450,6 +450,36 @@ class MultiplexedObservationSocketClientTest {
       mux.close()
     }
 
+  @Test
+  fun `an outgoing epoch leaving does not release an observer the incoming epoch still needs`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      // Two epochs of one serial overlap on the shared socket while a pane moves between them.
+      val old = mux.stream().also { it.connect("emulator-0", "uuid-old") }
+      val next = mux.stream().also { it.connect("emulator-0", "uuid-new") }
+      val socket = daemon.nextSocket()
+      val subscribes = socket.nextSubscribes(2)
+      socket.send(ack(subscribes.getValue("uuid-old")["id"], "devicedatastream-old"))
+      socket.send(ack(subscribes.getValue("uuid-new")["id"], "devicedatastream-new"))
+      old.subscribeStorage("com.example", "prefs.xml")
+      val oldCommand = socket.nextRequest()
+      socket.send("""{"id":"${oldCommand["id"]}","type":"subscription_response","success":true}""")
+      old.storageSubscriptionResponses.awaitFirst()
+      next.subscribeStorage("com.example", "prefs.xml")
+      val nextCommand = socket.nextRequest()
+      assertEquals("subscribe_storage", nextCommand["command"])
+
+      old.dispose()
+
+      // Only the old epoch's stream subscription goes; the shared file observer stays.
+      val released = socket.nextRequest()
+      assertEquals("unsubscribe", released["command"])
+      assertEquals("devicedatastream-old", released["subscriptionId"])
+      assertNull(socket.fromClient.poll())
+      mux.close()
+    }
+
   companion object {
     private const val TIMEOUT_SECONDS = 5L
     private const val CLIENT_THREADS = 4

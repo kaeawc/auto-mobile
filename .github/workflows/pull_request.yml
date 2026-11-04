@@ -800,6 +800,8 @@ jobs:
         with:
           gradle-tasks: ":desktop-core:test"
           gradle-flags: '["--tests", "*ShellReachabilityTest"]'
+          # Same task list as desktop-core-unit-tests, so namespace the config-cache report.
+          artifact-name-suffix: "shell-reachability"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

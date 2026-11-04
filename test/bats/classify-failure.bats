@@ -970,6 +970,27 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
 
+# Gradle resolution failure shape from #16791 (run 41777981835).
+MAVEN_CENTRAL_403_LOG=$'2026-11-04T05:20:11.1234567Z A problem occurred configuring root project \'auto-mobile-android\'.\n> Could not resolve all files for configuration \':classpath\'.\n   > Could not resolve org.ow2.asm:asm:9.9.\n      > Could not GET \'https://repo.maven.apache.org/maven2/org/ow2/asm/asm/9.9/asm-9.9.pom\'. Received status code 403 from server: Forbidden'
+
+@test "classifies a Maven Central 403 Forbidden during Gradle resolution as a rerun (#16791)" {
+  for job in "SDK Debug Inspector Consumer" "Kotlin Code Coverage"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$MAVEN_CENTRAL_403_LOG" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — Maven Central returned 403 Forbidden"* ]]
+    [[ "$output" != *"UNKNOWN"* ]]
+  done
+}
+
+@test "does not classify a 403 Forbidden from a non-Maven-Central host as the Maven Central flake" {
+  runner_shutdown_fixture "SDK Debug Inspector Consumer"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="${MAVEN_CENTRAL_403_LOG//repo.maven.apache.org/maven.example.com}" bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"Maven Central returned 403"* ]]
+}
+
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
 @test "reruns a calibrated contended unit timeout before the both-attempts signature" {
   for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage"; do

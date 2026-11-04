@@ -27,6 +27,7 @@ import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
@@ -34,7 +35,9 @@ import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
   cssColor,
+  fontPx,
   lineCss,
+  multilineCss,
   nodeCss,
   textCss,
   type WebStyleContext,
@@ -82,7 +85,7 @@ export interface WebRenderScope {
   readonly screen?: string;
   /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
   readonly stacks?: WebStackScreens[];
-  /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
+  /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
@@ -570,7 +573,7 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
     // from an authored safeAreaPadding.
     "min-height": `${size.height}px`,
     "padding-inline": "16px",
-    "font-size": `${size.title}px`,
+    "font-size": fontPx(size.title, scope.style),
     "align-self": "stretch",
     position: "relative",
     ...roleCss(scope, "surface", "onSurface"),
@@ -604,22 +607,6 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
   return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
 }
 
-/** A multiline field keeps its newlines and its authored minLines and maxLines (24px lines). */
-function lineBounds(node: Raw): Record<string, string> {
-  if (node.multiline !== true) {
-    return {};
-  }
-  const css: Record<string, string> = { "white-space": "pre-wrap", "line-height": "24px" };
-  if (typeof node.minLines === "number") {
-    css["min-height"] = `${node.minLines * 24}px`;
-  }
-  if (typeof node.maxLines === "number") {
-    css["max-height"] = `${node.maxLines * 24}px`;
-    css.overflow = "hidden";
-  }
-  return css;
-}
-
 /**
  * A Material field's label sits inside an empty field with no placeholder (fieldValue draws it
  * there); once the field holds a value or shows a placeholder, the label floats above it.
@@ -631,7 +618,10 @@ function floatingLabel(node: Raw, empty: boolean, scope: WebRenderScope): WebEle
   return [
     el(
       "span",
-      { attrs: { "data-slot": "label" }, style: { "font-size": "12px", opacity: "0.8" } },
+      {
+        attrs: { "data-slot": "label" },
+        style: { "font-size": fontPx(12, scope.style), opacity: "0.8" },
+      },
       [bound(node.label, scope)],
     ),
   ];
@@ -673,7 +663,11 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
       "span",
       {
         attrs: error ? { role: "alert" } : {},
-        style: { "font-size": "12px", padding: "0 16px", ...(color ? { color } : {}) },
+        style: {
+          "font-size": fontPx(12, scope.style),
+          padding: "0 16px",
+          ...(color ? { color } : {}),
+        },
       },
       [bound(caption, scope)],
     ),
@@ -702,7 +696,7 @@ const textField: NodeRenderer = (node, scope, path) => {
     ...namedIcon(node.leadingIcon, scope),
     el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
       ...floatingLabel(node, empty, scope),
-      el("span", { style: lineBounds(node) }, [shown]),
+      el("span", { style: multilineCss(node, scope.style) }, [shown]),
     ]),
     // The trailing slot is an {icon, label} action, like an app-bar action.
     ...appBarIcons([node.trailingIcon], scope, path),
@@ -882,14 +876,19 @@ const listItem: NodeRenderer = (node, scope) => {
     node.supporting === undefined
       ? []
       : [
-          el("span", { style: { "font-size": "14px", opacity: "0.7" } }, [
+          el("span", { style: { "font-size": fontPx(14, scope.style), opacity: "0.7" } }, [
             bound(node.supporting, scope),
           ]),
         ];
   const texts = el(
     "div",
     { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
-    [el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]), ...supporting],
+    [
+      el("span", { style: { "font-size": fontPx(16, scope.style) } }, [
+        bound(node.headline, scope),
+      ]),
+      ...supporting,
+    ],
   );
   return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
     ...namedIcon(node.leadingIcon, scope),
@@ -934,7 +933,7 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webStackRenderers(KIT),
 };
 
-const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
+const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);

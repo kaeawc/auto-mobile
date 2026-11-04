@@ -164,6 +164,8 @@ export function renderDeviceFrame(
     dark: boolean;
     textColor: string;
     background: string;
+    /** The content's base font size; 14px unless the system text size scales it. */
+    fontSize?: string;
     /** The status bar's content style; absent follows `dark`. */
     statusBarContent?: WebStatusBarContent;
   },
@@ -186,7 +188,7 @@ export function renderDeviceFrame(
         "background-color": options.background,
         color: options.textColor,
         "font-family": "system-ui, -apple-system, Roboto, sans-serif",
-        "font-size": "14px",
+        "font-size": options.fontSize ?? "14px",
         "--safe-top": px(insets.top),
         "--safe-bottom": px(insets.bottom),
         "--safe-left": px(insets.left),

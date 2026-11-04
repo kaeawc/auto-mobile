@@ -31,7 +31,7 @@ import {
   attributeRowByDumpsys,
   intersectDumpsysRecordsForRow,
   parseActiveNotificationKeysForApp,
-  prototypeTagForRow,
+  stablePrototypeTagForRow,
   parseDumpsysNotificationRecords,
   type DumpsysNotificationRecord,
 } from "./notificationDumpsys";
@@ -394,6 +394,25 @@ type TrayBeforeSnapshot =
   | { status: "unavailable" }
   | { status: "records"; records: DumpsysNotificationRecord[] };
 
+const readTraySnapshot = async (
+  adb: SystemTrayAdb,
+  signal?: AbortSignal,
+): Promise<TrayBeforeSnapshot> => {
+  const records = await readDumpsysNotificationRecords(adb, signal);
+  return records === undefined ? { status: "unavailable" } : { status: "records", records };
+};
+
+// A tag-only pre-swipe dump is needed while no earlier dump was attempted and
+// this page shows a header row of the requested app.
+const needsTagSnapshot = (
+  tagHeaderLabel: string | null,
+  snapshots: readonly TrayBeforeSnapshot[],
+  pageNotifications: readonly TrayObservedRow[],
+): boolean =>
+  tagHeaderLabel !== null &&
+  snapshots.every((snapshot) => snapshot.status === "not-attempted") &&
+  pageNotifications.some((row) => row.notification.appLabel === tagHeaderLabel);
+
 const attributeTrayRow = (
   row: TrayObservedRow,
   appId: string,
@@ -445,9 +464,11 @@ const attributeTrayRows = (
   {
     beforeRecords,
     afterRecords,
+    tagBeforeSnapshots,
   }: {
     beforeRecords?: readonly DumpsysNotificationRecord[];
     afterRecords: readonly DumpsysNotificationRecord[];
+    tagBeforeSnapshots: readonly (readonly DumpsysNotificationRecord[])[];
   },
 ): { notifications: ListedTrayNotification[]; unattributedRows: number } => {
   const notifications: ListedTrayNotification[] = [];
@@ -462,7 +483,12 @@ const attributeTrayRows = (
     if (attribution === "other") {
       continue;
     }
-    const tag = prototypeTagForRow(afterRecords, appId, new Set(row.correlationTexts));
+    const tag = stablePrototypeTagForRow(
+      tagBeforeSnapshots,
+      afterRecords,
+      appId,
+      new Set(row.correlationTexts),
+    );
     const notification: ListedTrayNotification = {
       ...row.notification,
       appId,
@@ -541,17 +567,32 @@ export const listSystemTrayNotifications = async (
     { awaitTimeoutMs, signal },
   );
   const pageScan = await scanTrayNotificationPages(
-    { device, detector, observation, signal },
+    {
+      device,
+      detector,
+      observation,
+      signal,
+      tagHeaderLabel: readPrototypeTags ? appLabel : null,
+    },
     context,
   );
-  const { rows, beforeSnapshot, swipes } = pageScan;
+  const { rows, beforeSnapshot, tagBeforeSnapshot, swipes } = pageScan;
   observation = pageScan.observation;
   signal?.throwIfAborted();
   // Only pay for the dump when the shade rendered a row it could inform: one
   // the header rule cannot attribute, or the app's own row a tag could name.
   const { notifications, unattributedRows, requestedRecords, hasUnmatchedRequestedRecords } =
     await resolveTrayListingAttribution(
-      { rows, beforeSnapshot, device, appId, appLabel, signal, readPrototypeTags },
+      {
+        rows,
+        beforeSnapshot,
+        tagBeforeSnapshot,
+        device,
+        appId,
+        appLabel,
+        signal,
+        readPrototypeTags,
+      },
       context,
     );
   signal?.throwIfAborted();
@@ -584,21 +625,25 @@ async function scanTrayNotificationPages(
     detector: NotificationUIDetector;
     observation: ObserveResult;
     signal?: AbortSignal;
+    /** App label whose header rows need a pre-swipe dump to name tags; null skips it. */
+    tagHeaderLabel: string | null;
   },
   context: TrayNotificationListContext,
 ): Promise<{
   rows: TrayObservedRow[];
   beforeSnapshot: TrayBeforeSnapshot;
+  tagBeforeSnapshot: TrayBeforeSnapshot;
   swipes: number;
   observation: ObserveResult;
 }> {
   const { getSystemTrayDependencies, observeSystemTray } = context;
-  const { device, detector, signal } = options;
+  const { device, detector, signal, tagHeaderLabel } = options;
   let { observation } = options;
   const { adbFactory, observeScreenFactory, timer } = getSystemTrayDependencies();
   const rows: TrayObservedRow[] = [];
   let previousNotifications: TrayObservedRow[] = [];
   let beforeSnapshot: TrayBeforeSnapshot = { status: "not-attempted" };
+  let tagBeforeSnapshot: TrayBeforeSnapshot = { status: "not-attempted" };
   let swipes = 0;
   while (true) {
     signal?.throwIfAborted();
@@ -621,12 +666,17 @@ async function scanTrayNotificationPages(
       beforeSnapshot.status === "not-attempted" &&
       pageNotifications.some((row) => row.notification.appLabel === null)
     ) {
-      const records = await readDumpsysNotificationRecords(adbFactory(device), signal);
-      beforeSnapshot =
-        records === undefined ? { status: "unavailable" } : { status: "records", records };
+      beforeSnapshot = await readTraySnapshot(adbFactory(device), signal);
     }
     if (swipes === 3 || trayAtScrollEnd(observation.viewHierarchy)) {
       break;
+    }
+    // A header row kept from this page can outlive a same-text prototype
+    // record cancelled during the swipe; only a dump read before that swipe
+    // keeps its tag ambiguous (#16512). The ownership snapshot already serves
+    // when taken, and this one never feeds ownership attribution.
+    if (needsTagSnapshot(tagHeaderLabel, [beforeSnapshot, tagBeforeSnapshot], pageNotifications)) {
+      tagBeforeSnapshot = await readTraySnapshot(adbFactory(device), signal);
     }
     const { width, height } = observation.screenSize;
     const x = Math.floor(width / 2);
@@ -662,13 +712,14 @@ async function scanTrayNotificationPages(
     );
   }
 
-  return { rows, beforeSnapshot, swipes, observation };
+  return { rows, beforeSnapshot, tagBeforeSnapshot, swipes, observation };
 }
 
 async function resolveTrayListingAttribution(
   options: {
     rows: TrayObservedRow[];
     beforeSnapshot: TrayBeforeSnapshot;
+    tagBeforeSnapshot: TrayBeforeSnapshot;
     device: BootedDevice;
     appId: string;
     appLabel: string | null;
@@ -678,7 +729,16 @@ async function resolveTrayListingAttribution(
   context: TrayNotificationListContext,
 ) {
   const { getSystemTrayDependencies } = context;
-  const { rows, beforeSnapshot, device, appId, appLabel, signal, readPrototypeTags } = options;
+  const {
+    rows,
+    beforeSnapshot,
+    tagBeforeSnapshot,
+    device,
+    appId,
+    appLabel,
+    signal,
+    readPrototypeTags,
+  } = options;
   const { adbFactory } = getSystemTrayDependencies();
   const hasHeaderlessRows = rows.some((row) => row.notification.appLabel === null);
   const beforeRecords = beforeSnapshot.status === "records" ? beforeSnapshot.records : undefined;
@@ -697,9 +757,14 @@ async function resolveTrayListingAttribution(
     hasHeaderlessRows || hasHeaderRowsForApp
       ? ((await readDumpsysNotificationRecords(adbFactory(device), signal)) ?? [])
       : [];
+  // Tag-only evidence: every pre-swipe dump must agree with the after dump.
+  const tagBeforeSnapshots = [tagBeforeSnapshot, beforeSnapshot].flatMap((snapshot) =>
+    snapshot.status === "records" ? [snapshot.records] : [],
+  );
   const { notifications, unattributedRows } = attributeTrayRows(rows, appId, appLabel, {
     beforeRecords,
     afterRecords,
+    tagBeforeSnapshots,
   });
   // Partial attribution stays useful; only zero attributed rows plus positive
   // posting evidence is unsafe to present as a confident empty list (#6875).

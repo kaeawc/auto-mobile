@@ -154,23 +154,27 @@ internal fun ScreenHeading(screen: ScreenNode) {
   )
 }
 
+internal data class ScreenTransitionListOptions(
+  val title: String,
+  val transitions: List<ScreenTransition>,
+  val currentScreen: String,
+  val onScreenSelected: (String) -> Unit,
+  val activeContext: NavigationActiveContext?,
+)
+
 @Composable
-internal fun ScreenTransitionList(
-  title: String,
-  transitions: List<ScreenTransition>,
-  currentScreen: String,
-  onScreenSelected: (String) -> Unit,
-) {
+internal fun ScreenTransitionList(options: ScreenTransitionListOptions) {
   val colors = SharedTheme.globalColors
-  if (transitions.isEmpty()) return
-  Text(title, fontSize = 13.sp, color = colors.text.normal.copy(alpha = 0.8f))
+  if (options.transitions.isEmpty()) return
+  Text(options.title, fontSize = 13.sp, color = colors.text.normal.copy(alpha = 0.8f))
   Spacer(Modifier.height(8.dp))
-  transitions.forEach { transition ->
+  options.transitions.forEach { transition ->
     TransitionRow(
       transition = transition,
       onClick = {},
-      currentScreen = currentScreen,
-      onScreenClick = onScreenSelected,
+      currentScreen = options.currentScreen,
+      onScreenClick = options.onScreenSelected,
+      verification = NavigationBuildLens.verification(transition, options.activeContext),
     )
     Spacer(Modifier.height(4.dp))
   }

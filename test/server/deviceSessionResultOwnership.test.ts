@@ -340,6 +340,8 @@ test.each([
     sessionUuid: "s",
     reason,
     ...(idle ? { idle: true } : {}),
+    // The control-socket frame carries the CLI session's idle window too (#16908).
+    ...(reason === "cli-idle-timeout" ? { idleTimeoutMs: 1 } : {}),
   });
   expect(Object.keys(payload).slice(3, idle ? 5 : 4)).toEqual(
     idle ? ["reason", "idle"] : ["reason"],

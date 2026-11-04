@@ -12,7 +12,8 @@
     "details": {
       "sessionUuid": "11111111-2222-4333-8444-555555555555",
       "reason": "cli-idle-timeout",
-      "idle": true
+      "idle": true,
+      "idleTimeoutMs": 1000
     }
   }
 }

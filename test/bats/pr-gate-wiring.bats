@@ -617,7 +617,7 @@ load yq-helpers
   [[ "$block" == *"needs.ide-plugin-unit-tests.result"* ]]
 }
 
-@test "merge.yml runs the desktop wire-contract replay on every merge (#10983)" {
+@test "merge.yml runs the desktop wire-contract replay and allocation killers on every merge (#10983, #11443)" {
   require_mikefarah_yq
   local merge=".github/workflows/merge.yml"
   # The job is enabled (the old `if: ${{ false }}` is gone) ...
@@ -628,7 +628,10 @@ load yq-helpers
   run yq -r '.jobs."desktop-core-unit-tests".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks" + " " + .with."gradle-flags"' "$merge"
   [ "$status" -eq 0 ]
   [[ "$output" == *":desktop-core:test"* ]]
-  [[ "$output" == *"*DesktopWireFixtureCompositionTest"* ]]
+  # The daemon package holds the wire replay and the n/K2 killer; the control-session UI test kills
+  # K3 (#11443).
+  [[ "$output" == *'"--tests", "dev.jasonpearson.automobile.desktop.core.daemon.*"'* ]]
+  [[ "$output" == *'"--tests", "*RememberDeviceControlSessionUiTest"'* ]]
 }
 
 @test "shell-changed-gate is a stable, always-reporting, changed-file-scoped PR job (#11183)" {

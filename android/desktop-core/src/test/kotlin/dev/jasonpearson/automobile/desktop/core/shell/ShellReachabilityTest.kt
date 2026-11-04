@@ -107,6 +107,15 @@ class ShellReachabilityTest {
     assertEquals(listOf(true, true, true, true), parsed.map { it.isComponent })
   }
 
+  @Test
+  fun `an import alone does not make a component reachable`() {
+    val parsed = parseDeclarations(Path.of("Fake.kt"), "@Composable\nfun Shell() {}")
+    val importOnly = rootIdentifiersOf("package app\n\nimport x.Shell\n\nfun Main() {}")
+    assertEquals(emptySet(), reachableNames(parsed, importOnly))
+    val called = rootIdentifiersOf("import x.Shell\n\nfun Main() { Shell() }")
+    assertEquals(setOf("Shell"), reachableNames(parsed, called))
+  }
+
   private enum class Visibility {
     Public,
     Internal,
@@ -128,7 +137,7 @@ class ShellReachabilityTest {
         .filter { it.extension == "kt" }
         .sorted()
         .toList()
-        .flatMap { parseDeclarations(it, stripComments(it.readText())) }
+        .flatMap { parseDeclarations(it, stripNonCode(it.readText())) }
     }
   }
 
@@ -143,7 +152,7 @@ class ShellReachabilityTest {
             .toList()
         }
       }
-      .flatMapTo(mutableSetOf()) { stripComments(it.readText()).identifiers() }
+      .flatMapTo(mutableSetOf()) { rootIdentifiersOf(it.readText()) }
 
   private fun shellDirAbsolute(): Path = shellDir.toAbsolutePath().normalize()
 
@@ -163,6 +172,8 @@ class ShellReachabilityTest {
     }
     return visited.map { it.name }.toSet()
   }
+
+  private fun rootIdentifiersOf(source: String): Set<String> = stripNonCode(source).identifiers()
 
   private fun String.identifiers(): Set<String> =
     IDENTIFIER.findAll(this).mapTo(mutableSetOf()) { it.value }
@@ -198,8 +209,10 @@ class ShellReachabilityTest {
   private fun String.startsWithTopLevelDeclarationOrAnnotation(): Boolean =
     DECLARATION.containsMatchIn(this) || (startsWith("@") && DECLARATION.find(this) == null)
 
-  private fun stripComments(source: String): String =
+  /** Drops comments and package/import directives: only a use, not an import, is a reference. */
+  private fun stripNonCode(source: String): String =
     source
+      .replace(Regex("(?m)^\\s*(?:package|import)\\s.*$"), "")
       .replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")
       .replace(Regex("(?m)^\\s*//.*$"), "")
 

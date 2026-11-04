@@ -140,10 +140,12 @@ function ownsSelectorText(
   if (!selected) {
     return false;
   }
-  const query = normalizeQuotes(text).toLowerCase();
-  return Object.values(selected.textSources).some((value) =>
-    normalizeQuotes(value).toLowerCase().includes(query),
-  );
+  return Object.values(selected.textSources).some((value) => containsSelectorText(value, text));
+}
+
+/** The substring rule `narrowToSelectorText` applies to a `text` given beside `elementId`. */
+function containsSelectorText(value: string, text: string): boolean {
+  return normalizeQuotes(value).toLowerCase().includes(normalizeQuotes(text).toLowerCase());
 }
 
 /**
@@ -298,7 +300,8 @@ function matchesOnlyThroughOffScreenHoist(
   if (hoisted.every(visible)) {
     return false;
   }
-  return !matchesAnyText(visibleBackedTexts(source, visible), selector, matchMode);
+  const texts = visibleBackedTexts(source, visible, { selector, matchMode });
+  return !matchesAnyText(texts, selector, matchMode);
 }
 
 interface HoistCheck {
@@ -314,10 +317,9 @@ interface HoistCheck {
 function visibleBackedTexts(
   source: SearchableEntry,
   visible: (part: SearchableEntry) => boolean,
+  comparison: { selector: ConditionSelector; matchMode: MatchMode },
 ): string[] {
-  // Folded parts are deduplicated, so any visible descendant carrying the folded part supplies it.
-  const labelSources = source.hoistedLabelSources ?? [];
-  const labelBacked = labelSources.length === 0 || labelSources.some(visible);
+  const labelBacked = foldedPartIsVisible(source, visible, comparison);
   const own = Object.values(source.textSources);
   return [
     ...own,
@@ -330,14 +332,59 @@ function visibleBackedTexts(
   ];
 }
 
-/** Whether any of `texts` satisfies the selector text the way the resolver compared it. */
+/**
+ * Whether a visible descendant supplies the part folded into `source`'s label. The fold keeps one
+ * of the parts that differ only in whitespace (" 7:00" and "7:00 "), and the resolver normalizes
+ * the composed label the same way for each (#17026), so any visible descendant whose label is
+ * equivalent under the selector's normalization supplies it. Regex and `elementId` text keep
+ * whitespace, so there only a label that differs at most in quotes and case is equivalent.
+ */
+function foldedPartIsVisible(
+  source: SearchableEntry,
+  visible: (part: SearchableEntry) => boolean,
+  { selector, matchMode }: { selector: ConditionSelector; matchMode: MatchMode },
+): boolean {
+  const folded = source.hoistedLabelSources?.[0]?.label;
+  if (folded === undefined) {
+    return true;
+  }
+  const equivalent = labelEquivalence(selector, matchMode);
+  const part = equivalent(folded);
+  return (source.hoistedSources ?? []).some(
+    (other) => visible(other) && other.label !== undefined && equivalent(other.label) === part,
+  );
+}
+
+/** How the wait normalizes a label before comparing it with the selector text. */
+function labelEquivalence(
+  { caseSensitive, elementId }: ConditionSelector,
+  matchMode: MatchMode,
+): (label: string) => string {
+  if (elementId !== undefined) {
+    return (label) => normalizeQuotes(label).toLowerCase();
+  }
+  if (matchMode === "regex") {
+    return (label) =>
+      caseSensitive ? normalizeQuotes(label) : normalizeQuotes(label).toLowerCase();
+  }
+  return (label) => normalizeMatchText(label, caseSensitive);
+}
+
+/**
+ * Whether any of `texts` satisfies the selector text the way the wait compared it. With
+ * `elementId` the resolver's match mode describes the id lookup; the text was applied by
+ * `narrowToSelectorText`'s substring rule (#17026), so that rule is used here too.
+ */
 function matchesAnyText(
   texts: readonly string[],
-  { text, caseSensitive }: ConditionSelector,
+  { text, caseSensitive, elementId }: ConditionSelector,
   matchMode: MatchMode,
 ): boolean {
   if (text === undefined) {
     return true;
+  }
+  if (elementId !== undefined) {
+    return texts.some((value) => containsSelectorText(value, text));
   }
   if (matchMode === "regex") {
     // The resolver already compiled this pattern for the same match, so it is valid here.

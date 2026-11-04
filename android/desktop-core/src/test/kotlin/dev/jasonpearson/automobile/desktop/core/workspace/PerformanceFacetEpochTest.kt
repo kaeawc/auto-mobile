@@ -121,7 +121,11 @@ class PerformanceFacetEpochTest {
           }
         }
       }
-      waitUntil { loadsFor("device-A") == 1 && loadsFor("device-B") == 1 }
+      waitUntil { loadsFor("device-A") >= 1 && loadsFor("device-B") >= 1 }
+      waitForIdle()
+      // Each pane reads only its own device; connecting may refresh it, so count from here.
+      val loadsA = loadsFor("device-A")
+      val loadsB = loadsFor("device-B")
       assertTrue("no unscoped history read", synchronized(loads) { null !in loads })
 
       runOnIdle { streams.getValue("device-A").last().emitPerformance(perfUpdate("device-A")) }
@@ -129,8 +133,9 @@ class PerformanceFacetEpochTest {
 
       runOnIdle { epochA.value = "epoch-a2" }
 
-      waitUntil { loadsFor("device-A") == 2 }
-      assertEquals(1, loadsFor("device-B"))
+      waitUntil { loadsFor("device-A") > loadsA }
+      waitForIdle()
+      assertEquals(loadsB, loadsFor("device-B"))
       assertEquals(2, streams.getValue("device-A").size)
       assertEquals(1, streams.getValue("device-B").size)
       waitForIdle()

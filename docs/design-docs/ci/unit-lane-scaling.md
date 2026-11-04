@@ -150,7 +150,7 @@ Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
 and its retry window is judged against the lane cap at its own end time. A
 wall-budget timeout whose own attempt calibration reaches
 `AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
-and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`, `TypeScript Code Coverage`) qualifies
+and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`, a `TypeScript Code Coverage (N/2)` part) qualifies
 itself: its last step (`if: failure()`) runs
 `scripts/ci/rerun-contended-runner.sh dispatch` against the job's own step summary,
 and on attempt 1 only dispatches the `workflow_dispatch` Rerun contended runner
@@ -301,3 +301,19 @@ loops check the original lane owner before each group. See
 `scripts/README.md` for the environment controls and overloaded-host retry
 suppression. Changed-file selection remains Bun's responsibility; a shared
 changed-file list is deferred.
+
+### Coverage lane
+
+On Merge's instrumented lane (`scripts/test-ts.sh coverage`) runs as two
+`TypeScript Code Coverage (N/2)` part jobs of two shards each. A 4-core runner
+is already CPU-bound at two instrumented Bun shards, so a third shard on the
+same host does not help; the split halves wall time instead, keeping each shard
+inside its 720 s budget on the slower runner class. Part P
+(`AUTOMOBILE_COVERAGE_PART`/`AUTOMOBILE_COVERAGE_PARTS`) takes every second
+discovered file from offset P-1 and numbers its shards after the earlier
+parts', so the parts interleave like one four-shard lane and their chunk
+reports and calibration labels never collide. The `TypeScript Code Coverage`
+job joins the parts (`scripts/ci/merge-ts-coverage-parts.sh`) for the badge
+and runs the 100 ms gate over every chunk report. Coverage discovery skips
+`test/lint/**` and `test/scripts/**`: they scan repository files rather than
+exercise `src/`, and still run uninstrumented in the unit lanes.

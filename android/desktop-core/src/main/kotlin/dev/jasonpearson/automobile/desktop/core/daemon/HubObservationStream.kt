@@ -6,33 +6,36 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.map
 
 /**
  * An [ObservationStream] whose connection is owned and kept alive by a [DaemonStreamHub], so its
  * holder must not run its own reconnect loop: [ObservationStream.connect] only takes the lease, and
  * a dropped connection is revived by the hub.
  */
-interface HubManagedObservationStream : ObservationStream
+interface HubManagedObservationStream : ObservationStream {
+  /**
+   * How many times the hub has reconnected this stream since this holder took its lease: the signal
+   * for a facet to refresh, as it would after reconnecting its own stream. Counted at the reconnect
+   * itself, so a drop and recovery too quick to show in [connectionState] still counts.
+   */
+  val reconnects: Flow<Int>
+}
 
 /**
- * Call [onReconnected] each time [stream]'s shared connection comes back after dropping, so a facet
- * on a hub-managed stream refreshes exactly as it would after reconnecting its own stream. The
- * first connection (still in flight at mount) is not a reconnect.
+ * Call [onReconnected] each time the hub reconnects [stream], so a facet on a hub-managed stream
+ * refreshes exactly as it would after reconnecting its own stream. The first connection is not a
+ * reconnect.
  */
 internal suspend fun countHubReconnects(
   stream: HubManagedObservationStream,
   onReconnected: () -> Unit,
 ) {
-  var dropped = false
-  stream.connectionState.collect { state ->
-    when (state) {
-      is ConnectionState.Connected -> {
-        if (dropped) onReconnected()
-        dropped = false
-      }
-      is ConnectionState.Disconnected,
-      is ConnectionState.Error -> dropped = true
-      else -> Unit
+  var seen = 0
+  stream.reconnects.collect { count ->
+    if (count > seen) {
+      seen = count
+      onReconnected()
     }
   }
 }
@@ -54,6 +57,7 @@ internal class HubObservationStream(
   private val lock = Any()
   private var lease: HubObservationStreams.Lease? = null
   private var shared: ObservationStream? = null
+  private var reconnectBaseline = 0
 
   private fun current(): ObservationStream? = synchronized(lock) { shared }
 
@@ -81,13 +85,22 @@ internal class HubObservationStream(
 
   override val connectionState: StateFlow<ConnectionState> = streams.observationConnectionState(key)
 
+  override val reconnects: Flow<Int>
+    get() =
+      synchronized(lock) {
+        val held = lease ?: return@synchronized emptyFlow()
+        val baseline = reconnectBaseline
+        held.reconnects.map { it - baseline }
+      }
+
   override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     val acquired =
       synchronized(lock) {
         if (lease != null) return@synchronized false
-        val (newLease, stream) = streams.acquire(key)
+        val newLease = streams.acquire(key)
         lease = newLease
-        shared = stream
+        shared = newLease.stream
+        reconnectBaseline = newLease.reconnects.value
         true
       }
     // A repeated connect is a manual retry: revive a dropped shared connection without waiting.

@@ -1,9 +1,16 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -211,5 +218,82 @@ class SharedDaemonStreamHubObservationTest {
 
     assertTrue(h.streams.all { it.disconnectCallCount == 1 })
     assertFalse(view.isConnected())
+  }
+
+  @Test
+  fun `a reconnect counts even when the drop never shows in connection state`() = runTest {
+    val h = harness()
+    val layout = h.hub.observationStream(phoneA).also { it.connect() }
+    val shared = h.streamFor(phoneA)
+
+    // Dropped and revived before anything collects the state: a StateFlow conflates this away.
+    shared.emitConnectionState(ConnectionState.Error("socket closed"))
+    layout.connect()
+
+    assertEquals(1, layout.reconnects.first())
+    // A facet that leases afterwards counts only reconnects from its own lease on.
+    val late = h.hub.observationStream(phoneA).also { it.connect() }
+    assertEquals(0, late.reconnects.first())
+  }
+
+  /** Records connect/dispose order; reconnects (not the first connect) wait on [reconnectGate]. */
+  private class GatedStream(private val inner: FakeObservationStream = FakeObservationStream()) :
+    ObservationStream by inner {
+    val calls = CopyOnWriteArrayList<String>()
+    val reconnectStarted = CountDownLatch(1)
+    val reconnectGate = CountDownLatch(1)
+
+    override fun connect(deviceId: String?, deviceSessionUuid: String?) {
+      if (calls.isNotEmpty()) {
+        reconnectStarted.countDown()
+        reconnectGate.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+      }
+      calls.add("connect")
+      inner.connect(deviceId, deviceSessionUuid)
+    }
+
+    override fun dispose() {
+      calls.add("dispose")
+      inner.dispose()
+    }
+
+    fun drop() = inner.emitConnectionState(ConnectionState.Disconnected("Stream ended"))
+  }
+
+  @Test
+  fun `releasing the last lease waits for an in-flight reconnect before disposing`() {
+    val stream = GatedStream()
+    val reconnectThread = Executors.newSingleThreadExecutor()
+    val hub =
+      SharedDaemonStreamHub(
+        telemetryClientFactory = { FakeTelemetryPushClient() },
+        scope = CoroutineScope(SupervisorJob() + reconnectThread.asCoroutineDispatcher()),
+        observation =
+          ObservationHubConfig(
+            streamFactory = { stream },
+            reconnect = ObservationReconnectPolicy(backoffDelay = {}, socketAvailable = { true }),
+          ),
+      )
+    val layout = hub.observationStream(phoneA).also { it.connect() }
+
+    stream.drop()
+    assertTrue(stream.reconnectStarted.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+    val release = Thread { layout.dispose() }.also { it.start() }
+    // Let the release reach disposal first: it either waits on the in-flight connect (BLOCKED) or,
+    // without that serialization, disposes at once (TERMINATED).
+    while (release.state != Thread.State.BLOCKED && release.state != Thread.State.TERMINATED) {
+      Thread.onSpinWait()
+    }
+    stream.reconnectGate.countDown()
+    release.join(TIMEOUT_SECONDS * 1_000)
+
+    // The socket the reconnect opened is disposed, never orphaned by a dispose that ran first.
+    assertEquals(listOf("connect", "connect", "dispose"), stream.calls.toList())
+    hub.close()
+    reconnectThread.shutdownNow()
+  }
+
+  private companion object {
+    const val TIMEOUT_SECONDS = 5L
   }
 }

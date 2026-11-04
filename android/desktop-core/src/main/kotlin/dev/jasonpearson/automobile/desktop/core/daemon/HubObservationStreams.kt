@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -42,7 +43,12 @@ internal class HubObservationStreams(
   private val config: ObservationHubConfig,
   private val scope: CoroutineScope,
 ) : ObservationStreamHub {
-  class Lease(val key: DeviceStreamKey) {
+  /** A held lease on [key]'s shared [stream]; [reconnects] counts the hub's reconnects of it. */
+  class Lease(
+    val key: DeviceStreamKey,
+    val stream: ObservationStream,
+    val reconnects: StateFlow<Int>,
+  ) {
     // Guarded by the owning hub's lock.
     var cadence = ObservationCadence()
   }
@@ -50,6 +56,26 @@ internal class HubObservationStreams(
   private class Device(val stream: ObservationStream) {
     var supervision: Job? = null
     var appliedCadence = ObservationCadence()
+    // Counted at the reconnect call itself, so a drop and recovery that a conflating StateFlow
+    // collapses still reaches the facets.
+    val reconnects = MutableStateFlow(0)
+    // Serializes connect calls with disposal: the client opens its socket synchronously, so a
+    // dispose racing an in-flight background connect would otherwise leave that socket unowned.
+    private val connectLock = Any()
+    private var retired = false
+
+    fun connect(key: DeviceStreamKey, reconnect: Boolean) =
+      synchronized(connectLock) {
+        if (retired) return@synchronized
+        stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
+        if (reconnect) reconnects.update { it + 1 }
+      }
+
+    fun retire() =
+      synchronized(connectLock) {
+        retired = true
+        stream.dispose()
+      }
   }
 
   // Every field below is guarded by [lock].
@@ -68,19 +94,20 @@ internal class HubObservationStreams(
     HubObservationStream(this, key)
 
   /** Take a lease on [key]'s shared stream, opening and connecting it for the first lease. */
-  fun acquire(key: DeviceStreamKey): Pair<Lease, ObservationStream> {
-    val lease = Lease(key)
+  fun acquire(key: DeviceStreamKey): Lease {
     var opened: Device? = null
-    val device =
+    val lease =
       synchronized(lock) {
         check(!closed) { "DaemonStreamHub is closed" }
-        leases.add(lease)
-        publishSubscriptions()
-        devices.getOrPut(key) { Device(config.streamFactory()).also { opened = it } }
+        val device = devices.getOrPut(key) { Device(config.streamFactory()).also { opened = it } }
+        Lease(key, device.stream, device.reconnects.asStateFlow()).also {
+          leases.add(it)
+          publishSubscriptions()
+        }
       }
     // Connect outside the lock: the real client opens its socket synchronously.
     opened?.let { start(key, it) }
-    return lease to device.stream
+    return lease
   }
 
   fun release(lease: Lease) {
@@ -107,9 +134,10 @@ internal class HubObservationStreams(
 
   /** Reconnect [key]'s dropped shared stream now instead of after its backoff. */
   fun retry(key: DeviceStreamKey) {
-    val stream = synchronized(lock) { devices[key]?.stream } ?: return
+    val device = synchronized(lock) { devices[key] } ?: return
+    val stream = device.stream
     if (!stream.isConnected() && stream.connectionState.value !is ConnectionState.Connecting) {
-      stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
+      device.connect(key, reconnect = true)
     }
   }
 
@@ -126,7 +154,7 @@ internal class HubObservationStreams(
 
   private fun start(key: DeviceStreamKey, device: Device) {
     val stream = device.stream
-    stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
+    device.connect(key, reconnect = false)
     synchronized(lock) {
       // The last lease may have been released while the socket was opening.
       if (devices[key] !== device) return@synchronized null
@@ -138,9 +166,7 @@ internal class HubObservationStreams(
             synchronized(lock) { if (devices[key] === device) states.stateOf(key).value = next }
           }
         }
-        keepObservationConnected(stream, config.reconnect) {
-          stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
-        }
+        keepObservationConnected(stream, config.reconnect) { device.connect(key, reconnect = true) }
       }
       device
     } ?: return // The releasing lease already disposed the stream.
@@ -166,7 +192,7 @@ internal class HubObservationStreams(
 
   private fun shutDown(key: DeviceStreamKey, device: Device) {
     device.supervision?.cancel()
-    device.stream.dispose()
+    device.retire()
     // A lease taken since the release may already have opened a new stream for this key.
     synchronized(lock) {
       if (key !in devices) states[key]?.value = ConnectionState.Disconnected(null)

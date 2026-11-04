@@ -10,9 +10,11 @@ import {
   isWithin,
   matchedSourceNode,
 } from "../utility/ElementResolver";
+import { normalize as normalizeMatchText } from "../utility/ElementResolverMatching";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
+import { hasVisibleScreenPart } from "../utility/ElementGeometry";
 
 const waitHierarchyProjection = new SearchableHierarchy();
 
@@ -278,7 +280,87 @@ function boundedChosenAncestor(result: ElementResolution, source: SearchableEntr
   return chosen === source || isWithin(source, chosen, result.snapshotNodes) ? chosen : undefined;
 }
 
-function boundedMatchedSource(result: ElementResolution | undefined, selector: ConditionSelector) {
+/**
+ * Whether `source` matched the selector text only through text an off-screen hoisted
+ * descendant contributes to (#17007). Such a composite label ("7:00 Alarm" from a visible
+ * " Alarm" row and an off-screen "7:00" child) does not show the text, so a wait must not
+ * accept it. Text the node carries itself, a label folded only from visible descendants and
+ * a visible descendant's own label still match. Selector resolution for actions is unchanged.
+ */
+function matchesOnlyThroughOffScreenHoist(
+  source: SearchableEntry,
+  selector: ConditionSelector,
+  { matchMode, screenSize }: HoistCheck,
+): boolean {
+  const hoisted = source.hoistedSources ?? [];
+  const visible = (part: SearchableEntry) => hasVisibleScreenPart(part.bounds, screenSize);
+  if (hoisted.every(visible)) {
+    return false;
+  }
+  return !matchesAnyText(visibleBackedTexts(source, visible), selector, matchMode);
+}
+
+interface HoistCheck {
+  matchMode: MatchMode;
+  screenSize: ObserveResult["screenSize"];
+}
+
+/**
+ * The texts `source` is searchable by that no off-screen hoisted descendant contributes to: its
+ * own captured text (also trimmed), its composed label when a visible descendant supplies the
+ * folded part, and the label of each visible hoisted descendant.
+ */
+function visibleBackedTexts(
+  source: SearchableEntry,
+  visible: (part: SearchableEntry) => boolean,
+): string[] {
+  // Folded parts are deduplicated, so any visible descendant carrying the folded part supplies it.
+  const labelSources = source.hoistedLabelSources ?? [];
+  const labelBacked = labelSources.length === 0 || labelSources.some(visible);
+  const own = Object.values(source.textSources);
+  return [
+    ...own,
+    // The resolver also searches the row's trimmed own text (" Alarm" as "Alarm").
+    ...own.map((value) => value.trim()),
+    ...(labelBacked && source.displayedLabel !== undefined ? [source.displayedLabel] : []),
+    ...(source.hoistedSources ?? []).flatMap((part) =>
+      visible(part) && part.label !== undefined ? [part.label] : [],
+    ),
+  ];
+}
+
+/** Whether any of `texts` satisfies the selector text the way the resolver compared it. */
+function matchesAnyText(
+  texts: readonly string[],
+  { text, caseSensitive }: ConditionSelector,
+  matchMode: MatchMode,
+): boolean {
+  if (text === undefined) {
+    return true;
+  }
+  if (matchMode === "regex") {
+    // The resolver already compiled this pattern for the same match, so it is valid here.
+    const regex = new RegExp(normalizeQuotes(text), caseSensitive ? "" : "i");
+    return texts.some((value) => regex.test(normalizeQuotes(value)));
+  }
+  const query = normalizeMatchText(text, caseSensitive);
+  return texts.some((value) => {
+    const actual = normalizeMatchText(value, caseSensitive);
+    return matchMode === "exact" ? actual === query : actual.includes(query);
+  });
+}
+
+/**
+ * The bounded source a positive wait accepts. A source that matched only through a hoisted label
+ * with an off-screen contributor is not one (#17007); an unscoped wait then takes any other
+ * matched source that is, so a second visible match still counts. A scoped wait (index or
+ * selection strategy) keeps the resolver's single choice.
+ */
+function boundedMatchedSource(
+  result: ElementResolution | undefined,
+  selector: ConditionSelector,
+  screenSize: ObserveResult["screenSize"],
+) {
   if (!result) {
     return undefined;
   }
@@ -286,10 +368,22 @@ function boundedMatchedSource(result: ElementResolution | undefined, selector: C
   if (!source) {
     return undefined;
   }
-  if (source.bounds && source.element) {
-    return source;
+  const check = { matchMode: result.matchMode, screenSize };
+  if (!matchesOnlyThroughOffScreenHoist(source, selector, check)) {
+    return source.bounds && source.element ? source : boundedChosenAncestor(result, source);
   }
-  return boundedChosenAncestor(result, source);
+  if (usesScopedWait(selector)) {
+    return undefined;
+  }
+  return result.matches
+    .flatMap(({ sourceNodes, node }) => sourceNodes ?? [node])
+    .find(
+      (other) =>
+        other !== source &&
+        other.bounds !== undefined &&
+        other.element !== undefined &&
+        !matchesOnlyThroughOffScreenHoist(other, selector, check),
+    );
 }
 
 export function appear(
@@ -311,7 +405,7 @@ export function appear(
       result,
       fallback: sources.flatMap((node) => (node.element ? [node.element] : [])),
     });
-    const source = boundedMatchedSource(result, selector);
+    const source = boundedMatchedSource(result, selector, observation.screenSize);
     return {
       matched: Boolean(source),
       matchedElement: source?.element,
@@ -339,7 +433,10 @@ export function disappear(
     if (failure) {
       return failure;
     }
-    return { matched: !boundedMatchedSource(result, selector), candidates: elements(result) };
+    return {
+      matched: !boundedMatchedSource(result, selector, observation.screenSize),
+      candidates: elements(result),
+    };
   };
 }
 

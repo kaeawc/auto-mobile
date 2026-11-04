@@ -42,6 +42,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.isolatedBehindOverlay
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.BasicsChecklistOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberDaemonStreamHub
@@ -447,6 +448,19 @@ internal fun DesktopLaunchSurface(presentation: DesktopAppPresentation, ui: Desk
                 // (non-daemon) transport.
                 onRecoverDaemon = { recoveryLauncher.launch() },
                 sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                basicsChecklist =
+                  if (showBasicsChecklist) {
+                    BasicsChecklistOptions(
+                      // The picker is only up over an observed workspace once a device is observed.
+                      deviceObserved = workspaceState is WorkspaceUiState.Content,
+                      onDismiss = {
+                        settings.hasDismissedBasicsChecklist = true
+                        showBasicsChecklist = false
+                      },
+                    )
+                  } else {
+                    null
+                  },
               ),
           )
         else -> DesktopWorkspaceContent(presentation, ui)

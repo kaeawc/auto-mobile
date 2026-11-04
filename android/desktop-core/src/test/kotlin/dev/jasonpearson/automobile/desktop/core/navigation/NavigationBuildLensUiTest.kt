@@ -28,6 +28,7 @@ import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.time.FakeClock
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import dev.jasonpearson.automobile.desktop.domain.NavigationGraph
 import kotlin.test.assertEquals
@@ -67,6 +68,7 @@ class NavigationBuildLensUiTest {
               NavigationDashboardOptions(
                 providedGraph = graph,
                 providedCurrentScreen = "Home",
+                clock = FakeClock(1_000L),
                 activeContext = activeContext,
               ),
           )
@@ -88,7 +90,7 @@ class NavigationBuildLensUiTest {
 
     onNodeWithContentDescription("Build lens: filter v1 (hashA)").performClick()
 
-    awaitDescription("Search — not in build v1 (hashA)")
+    awaitDescription("Search — not in build v1 (hashA), last seen 1")
     onNodeWithContentDescription("Login — in build v1 (hashA)").assertExists()
     onNodeWithContentDescription("Legacy — no build recorded").assertExists()
   }
@@ -103,7 +105,7 @@ class NavigationBuildLensUiTest {
     onNodeWithContentDescription("Build lens: hide other builds").performClick()
 
     waitUntil(timeoutMillis = 5_000) {
-      onAllNodesWithContentDescription("Search — not in build v1 (hashA)")
+      onAllNodesWithContentDescription("Search — not in build v1 (hashA), last seen 1")
         .fetchSemanticsNodes()
         .isEmpty()
     }
@@ -159,6 +161,7 @@ class NavigationBuildLensUiTest {
               NavigationDashboardOptions(
                 providedGraph = v2Only,
                 providedCurrentScreen = "Home",
+                clock = FakeClock(1_000L),
                 activeContext = activeContext,
               ),
           )

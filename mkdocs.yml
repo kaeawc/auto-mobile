@@ -112,6 +112,7 @@ not_in_nav: |
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/androidx-car-app-template-snapshots.md
+  /decisions/androidx-wear-fixture-libraries.md
   /decisions/fastlane-supply-play-publishing.md
   /decisions/ios-user-files-provider.md
   /decisions/material-icons-web-glyphs.md

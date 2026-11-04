@@ -138,6 +138,31 @@ All text and ids come from `FixtureCatalog` and `MediaBrowseTree`; changing them
   list, grid, pane and place-list navigation templates with fixed rows and four fixed places. It accepts
   every templates host, so a non-Play image needs a templates host of its own to render it.
 
+### Wear fixture app
+
+`android/wear-fixture` (`dev.jasonpearson.automobile.wearfixture`, launcher "AutoMobile Wear Fixture")
+is the deterministic target for watch checks: Compose for Wear OS, no network and no Google account,
+standalone, so it installs on any Wear image. All text and ids come from `WearFixtureCatalog`; changing
+them is a contract change. Compose test tags are exposed as resource ids.
+
+- Home (`fixture_list`, a `ScalingLazyColumn`): the status line (`fixture_status`, starts `Ready`), six
+  action buttons (`action_picker`, `action_dismiss`, `action_confirm`, `action_notify`,
+  `action_ongoing_start`, `action_ongoing_stop`), then `Item 01`..`Item 30` (`item_01`..`item_30`).
+- Detail (`detail_title`, `detail_text` = `Detail for Item NN`): back or a right swipe returns home.
+- Rotary picker (`picker`, `picker_value`): `Level 0`..`Level 11`, clamped. Only rotary scroll events
+  move it (48 px per step); it has no touch handler. Each step sets the status to `Picked Level N`.
+- Swipe-to-dismiss screen (`dismiss_screen`): a right swipe pops it and sets the status to `Dismissed`.
+  Detail and picker pop the same way.
+- Confirmation dialog: `Confirm` (`confirm_button`) or `Cancel` (`cancel_button`) set the status to
+  `Confirmed` or `Cancelled`.
+- Notification (`Fixture alert`): actions `Reply` and `Archive` reopen the app with the status
+  `Notification action: Reply` / `Archive`. The ongoing activity (`Fixture run`) is an ongoing
+  notification started and stopped from home. Both need `POST_NOTIFICATIONS`; the app asks on first use,
+  and `pm grant` skips the prompt.
+- `FixtureTileService`: one clickable (`tile_open_item`) that opens `Item 07`'s detail.
+- `FixtureComplicationService`: `SHORT_TEXT` (`Item` / `07`) and `RANGED_VALUE` (7 of 0..10, `7/10`);
+  tapping opens `Item 07`'s detail. Values are fixed and never polled.
+
 ## Device selection change
 
 1. Extend `FormFactor` and `BINDING_DEVICE_FAMILIES` with `tv`, `watch`, `automotive`.

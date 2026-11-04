@@ -28,6 +28,17 @@ export interface CapabilityInventory {
   capabilities: CapabilityInventoryEntry[];
 }
 
+/** Whether a simulated vehicle state is available; `unknown` when nothing identifies the build. */
+export type DeviceVehicleCapabilityState = "supported" | "unsupported" | "unknown";
+
+/** Vehicle states an automotive device can simulate (#16767). */
+export interface DeviceVehicleCapabilities {
+  /** Driving state: refused by Play Store car images, which are `user` builds. */
+  motion: DeviceVehicleCapabilityState;
+  /** Day/night mode: available on every automotive emulator. */
+  nightMode: DeviceVehicleCapabilityState;
+}
+
 export interface DeviceDescription {
   unhealthy?: {
     readonly reason:
@@ -67,6 +78,8 @@ export interface DeviceDescription {
   };
   displays?: DeviceDisplays;
   capabilityInventory: CapabilityInventory | null;
+  /** Present only when `formFactor` is `automotive`; every other description omits it. */
+  vehicle?: DeviceVehicleCapabilities;
   image: {
     path: string | null;
     target: string | null;

@@ -80,8 +80,10 @@ fun rememberReconnectingObservationState(
         when {
           event is DeviceStreamEvent.DeviceSessionSuperseded && event.deviceId == deviceId ->
             onSuperseded(event)
-          event is DeviceStreamEvent.DeviceSessionEnded && event.deviceId == deviceId ->
-            onEnded(event)
+          // Forwarded for any device: an all-device stream (the focused pane's control stream)
+          // may be the only one that hears another pane's device leave. The handler checks the
+          // target column and its epoch.
+          event is DeviceStreamEvent.DeviceSessionEnded -> onEnded(event)
         }
       }
     }

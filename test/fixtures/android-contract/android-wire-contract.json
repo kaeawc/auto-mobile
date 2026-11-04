@@ -9967,6 +9967,18 @@
         "type": "list",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "orientation",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "statusBar",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStorageBlock": [

@@ -201,6 +201,9 @@ internal class NavigationCanvasContext(
   val activeContext
     get() = options.activeContext
 
+  val buildLens
+    get() = options.buildLens
+
   val ioDispatcher
     get() = options.ioDispatcher
 

@@ -66,6 +66,7 @@ test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts 
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.integration.test.ts | unsafe | Bun.spawn of a registry child process L134
 test/daemon/sessionBroker/registry/staleRegistryHandleWriteRefusal.integration.test.ts | safe | two SQLite registry handles over a private mkdtemp file with FakeTimer, closed and removed afterwards
 test/daemon/sessionBroker/sqliteStore.integration.test.ts | unsafe | Bun.spawn of competing admission children with owned process cancellation
+test/daemon/setFeatureFlagCommandSocket.integration.test.ts | safe | mkdtemp socket dir with fake bind lock, SafeDaemonManager fake spawner/signaler, in-memory flag repository; namespaceEnv injected, process.env untouched
 test/daemon/socketRequestCancel.integration.test.ts | safe | tmpdir sockets L55, UnixSocketServer with fake timer
 test/daemon/socketServer/BaseSocketServerBindGuard.integration.test.ts | safe | mkdtemp socket dirs L52 and L96
 test/daemon/socketServer/BaseSocketServerOwnership.integration.test.ts | safe | tmpdir uuid sockets L61

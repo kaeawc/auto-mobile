@@ -2122,7 +2122,15 @@ window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) reque
 `statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
 prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
-best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+best effort, and the iOS Simulator ignores `brightness`. CtrlProxy advertises the capability and applies
+`FLAG_KEEP_SCREEN_ON`, window-local `screenBrightness` (`system` uses `BRIGHTNESS_OVERRIDE_NONE`) and
+`screenOrientation`; `unlocked` and omission use `SCREEN_ORIENTATION_UNSPECIFIED`. Replacement rebuilds
+these values from the new spec; removal releases them, and an animated exit resets them before waiting
+for removal. Failed replacements restore the previous params. Inspect entries add `orientation` for the
+requested orientation and `statusBar: "unsupported"` for an authored status bar style. Hierarchy window
+entries add the same values as `prototypeOrientation` and `prototypeStatusBar`; omitted controls omit
+these fields. Orientation reports a request, not proof that the device rotated. Embedded Android does
+not advertise these overlay controls.
 
 **Prototype layout direction.** Optional `window.layoutDirection: "ltr" | "rtl"` requires
 `prototype_layout_direction_v1`. Omission inherits the host direction. The iOS renderer overrides
@@ -2132,8 +2140,10 @@ Android does not advertise this capability, so the host refuses specs that set i
 **Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
 `prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
 prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`
-`hide(ime())`; iOS `endEditing(true)`). With no keyboard up it does nothing. No production runtime advertises
-the capability yet.
+`hide(ime())`; iOS `endEditing(true)`). CtrlProxy advertises the capability and dispatches the action to
+the owning surface's host on main, hiding the IME before clearing its view focus. Without a shown
+window it does nothing; navigation focusability is retained. The embedded Android renderer does not
+advertise it.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The

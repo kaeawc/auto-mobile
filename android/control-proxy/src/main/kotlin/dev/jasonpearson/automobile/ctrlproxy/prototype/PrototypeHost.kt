@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.util.Log
@@ -165,6 +164,7 @@ data class PrototypeRequest(
   val onHostBack: (suspend () -> Unit)? = null,
   /** `window.backdrop` as resolved for this show (#15126); null without one. */
   val backdrop: PrototypeBackdropPlan? = null,
+  val windowControls: PrototypeWindowControls = PrototypeWindowControls(),
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
   val focusable: Boolean
@@ -223,6 +223,9 @@ interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
 
   /** Changes Back focusability without changing text-field or keyboard state. */
   suspend fun setStackBackEnabled(enabled: Boolean): Boolean
+
+  /** Hides this prototype's IME and clears its text focus, retaining navigation focusability. */
+  suspend fun hideKeyboard()
 
   /** Changes whole-view alpha in place; throws IllegalArgumentException outside 0..100. */
   suspend fun setOpacity(percent: Int)
@@ -312,6 +315,8 @@ class DefaultPrototypeHost(
   private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
   /** Must finish before the transport's 5000ms request timeout. */
   private val firstRenderTimeoutMillis: Long = 2_000L,
+  private val windowControls: PrototypeWindowControlApplier = AndroidPrototypeWindowControlApplier,
+  private val keyboard: PrototypeKeyboard = AndroidPrototypeKeyboard,
   /** Tests supply a deterministic waiter instead of driving real Compose frames. */
   private val firstRenderWaiter: PrototypeFirstRenderWaiter = CoroutinePrototypeFirstRenderWaiter,
 ) : PrototypeHost {
@@ -473,6 +478,7 @@ class DefaultPrototypeHost(
           surfaceId = request.surfaceId,
           blurBehindRadiusPx = backdropBlurPx(request, target.density()),
         )
+      windowControls.apply(params, request.windowControls)
       target.constrainDismissWindow(params, request)
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -691,6 +697,7 @@ class DefaultPrototypeHost(
         surfaceId = current.request.surfaceId,
         blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
       )
+    windowControls.apply(params, current.request.windowControls)
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     current.target.constrainDismissWindow(params, current.request)
     if (touchThroughToken != null)
@@ -748,10 +755,15 @@ class DefaultPrototypeHost(
     }
   }
 
-  /** Still focused here: ask the keyboard to go before the window stops being focusable. */
-  @SuppressLint("NewApi")
+  override suspend fun hideKeyboard() = mainThread.onMain {
+    window?.let { hideKeyboard(it.view) }
+    Unit
+  }
+
+  /** Still focused here: ask the keyboard to go before clearing the prototype's focus. */
   private fun hideKeyboard(view: View) {
-    if (sdkInt >= 30) view.windowInsetsController?.hide(android.view.WindowInsets.Type.ime())
+    keyboard.hideIme(view)
+    keyboard.clearFocus(view)
   }
 
   private fun backDecision(event: KeyEvent): PrototypeBackDecision =
@@ -830,6 +842,8 @@ class DefaultPrototypeHost(
   private fun beginExit(current: Window): Boolean {
     val params = WindowManager.LayoutParams().apply { copyFrom(current.params) }
     params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    // An exiting overlay can stay attached for its fade, but must release its window controls now.
+    windowControls.apply(params, PrototypeWindowControls())
     if (!update(current, params)) return false
     current.visible.value = false
     current.back.release()

@@ -3,6 +3,19 @@ import Foundation
 import XCTest
 
 final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
+    func testWindowKeyboardAndSettingsAreAdvertisedAtTheMinimumOS() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let capabilities = Set(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()))
+        for capability in [
+            "prototype_platform_window_controls_v1",
+            "prototype_hide_keyboard_v1",
+            "prototype_platform_settings_v1",
+        ] {
+            XCTAssertTrue(capabilities.contains(capability))
+            XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        }
+    }
+
     func testLayoutDirectionIsAdvertisedAtTheMinimumOS() {
         struct OS: OSVersionProvider { let majorVersion = 17 }
         XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: OS()).contains("prototype_layout_direction_v1"))
@@ -42,8 +55,6 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_connectivity_v1",
             // Contract only; the biometric prompt runtime is owed (#14328).
             "prototype_platform_biometric_v1",
-            // Contract only; the settings launcher runtime is owed (#14320).
-            "prototype_platform_settings_v1",
             // Registered by the agent and Viewer registries (#14238), not the static list.
             "prototype_platform_links_v1",
             // Contract only; the system picker runtimes are owed (#14318).
@@ -58,10 +69,6 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_mediaLibrary_v1", "prototype_platform_camera_v1",
             // Contract only; the fake store runtime is owed (#14314).
             "prototype_platform_commerce_v1",
-            // Contract only; the window controls runtime is owed (#14320).
-            "prototype_platform_window_controls_v1",
-            // Contract only; the keyboard dismiss runtime is owed (#14320).
-            "prototype_hide_keyboard_v1",
             // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
             "prototype_platform_cast_v1",
             // Contract only; the media queue runtime is owed (#14249).

@@ -402,6 +402,17 @@ describe("projected rows with a composite hoisted label (#16987)", () => {
     }
   });
 
+  test("a textEquals condition does not match the partly off-screen row", () => {
+    const selector = { text: "7:00 Alarm" };
+    const predicate = withProjectedTextFallback(
+      "textEquals",
+      selector,
+      buildConditionPredicate(new ElementResolver(), "textEquals", selector),
+    );
+
+    expect(predicate(createObserveResultForTest(observationFor(850))).matched).toBe(false);
+  });
+
   test("still matches the composite row when every source is on screen", () => {
     const observation = observationFor(700);
 

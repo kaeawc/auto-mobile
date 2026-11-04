@@ -1,0 +1,212 @@
+package dev.jasonpearson.automobile.desktop.core.navigation
+
+import dev.jasonpearson.automobile.desktop.domain.NavigationGraph
+
+/**
+ * The build lens over the app-union navigation graph (nav (app,build) Phase 4, #4987).
+ *
+ * The union graph stays a single graph; a lens only changes how it is presented:
+ * - [Union]: Phase 2 provenance opacity against the pane's active context (the default).
+ * - [Filter]: a selected build's reachable set at full emphasis, other builds faded or hidden.
+ * - [Compare]: a two-build diff of the reachable sets, rendered side by side.
+ */
+sealed interface BuildLens {
+  data object Union : BuildLens
+
+  data class Filter(val build: ProvenanceBuildKey, val hideOtherBuilds: Boolean = false) : BuildLens
+
+  data class Compare(val a: ProvenanceBuildKey, val b: ProvenanceBuildKey) : BuildLens
+}
+
+/**
+ * How a node/edge relates to a selected build.
+ * - [InBuild]: at least one classifiable observation was made on that build.
+ * - [OtherBuild]: every classifiable observation came from other builds.
+ * - [Unclassified]: no classifiable observation (empty provenance, or only legacy-device records),
+ *   so it cannot be attributed to any build. Mirrors Phase 2: unclassifiable stays opaque/visible.
+ */
+enum class BuildMembership {
+  InBuild,
+  OtherBuild,
+  Unclassified,
+}
+
+/** Two-build diff classification for one node/edge, in the shape of the hierarchy diff. */
+enum class BuildDiffStatus {
+  OnlyInA,
+  OnlyInB,
+  InBoth,
+}
+
+data class BuildDiffEntry<T>(val item: T, val status: BuildDiffStatus)
+
+/**
+ * Result of diffing two builds' reachable graphs. Entries keep the union graph's order; nodes and
+ * edges reached by neither build (or unclassifiable) are omitted.
+ */
+data class BuildGraphDiff(
+  val a: ProvenanceBuildKey,
+  val b: ProvenanceBuildKey,
+  val screens: List<BuildDiffEntry<ScreenNode>>,
+  val transitions: List<BuildDiffEntry<ScreenTransition>>,
+) {
+  fun screensWith(status: BuildDiffStatus): List<ScreenNode> =
+    screens.filter { it.status == status }.map { it.item }
+
+  fun transitionsWith(status: BuildDiffStatus): List<ScreenTransition> =
+    transitions.filter { it.status == status }.map { it.item }
+
+  val hasDifferences: Boolean
+    get() =
+      screens.any { it.status != BuildDiffStatus.InBoth } ||
+        transitions.any { it.status != BuildDiffStatus.InBoth }
+}
+
+/**
+ * Whether a transition is a verified path for the pane's active build.
+ * - [Verified]: not flagged — reached in the active context, reached by the active build on another
+ *   device, or unclassifiable (Phase 2 keeps those opaque, so they are not flagged either).
+ * - [UnverifiedForActiveBuild]: reached only by another build (or by another device whose build
+ *   cannot be matched). A hint, not a verified path: navigating along it is speculative.
+ * - [BrowseOnly]: no active context (offline); nothing is navigable, so nothing is flagged.
+ */
+enum class EdgeVerification {
+  Verified,
+  UnverifiedForActiveBuild,
+  BrowseOnly,
+}
+
+object NavigationBuildLens {
+  const val UNVERIFIED_LABEL: String = "unverified for the active build"
+
+  /**
+   * Distinct builds observed anywhere in [graph], newest first (by versionCode, then hash). Legacy
+   * device records are excluded: they carry no real build identity.
+   */
+  fun buildsIn(graph: NavigationGraph): List<ProvenanceBuildKey> =
+    (graph.screens.flatMap { it.provenance } + graph.transitions.flatMap { it.provenance })
+      .asSequence()
+      .filter { it.isClassifiable() }
+      .map { it.buildKey }
+      .distinct()
+      .sortedWith(
+        compareByDescending<ProvenanceBuildKey> { it.versionCode }
+          .thenBy { it.contentHash }
+          .thenBy { it.packageId },
+      )
+      .toList()
+
+  /** Short human label for a build, e.g. `v2 (hashB)`. */
+  fun label(build: ProvenanceBuildKey): String =
+    "v${build.versionCode} (${build.contentHash.ifEmpty { "no hash" }})"
+
+  fun membership(provenance: List<ScreenProvenance>, build: ProvenanceBuildKey): BuildMembership {
+    val classifiable = provenance.filter { it.isClassifiable() }
+    return when {
+      classifiable.isEmpty() -> BuildMembership.Unclassified
+      classifiable.any { it.buildKey == build } -> BuildMembership.InBuild
+      else -> BuildMembership.OtherBuild
+    }
+  }
+
+  /**
+   * Apply a hiding [BuildLens.Filter] to [graph]: nodes reached only by other builds are removed,
+   * as are edges reached only by other builds or touching a removed node. Fade filters and other
+   * lenses return [graph] unchanged (the canvas fades per element instead).
+   */
+  fun visibleGraph(graph: NavigationGraph, lens: BuildLens): NavigationGraph {
+    if (lens !is BuildLens.Filter || !lens.hideOtherBuilds) return graph
+    val screens =
+      graph.screens.filter { membership(it.provenance, lens.build) != BuildMembership.OtherBuild }
+    val names = screens.mapTo(HashSet()) { it.name }
+    val transitions =
+      graph.transitions.filter {
+        it.fromScreen in names &&
+          it.toScreen in names &&
+          membership(it.provenance, lens.build) != BuildMembership.OtherBuild
+      }
+    return NavigationGraph(screens = screens, transitions = transitions)
+  }
+
+  /** Opacity for a node/edge under [lens]; [BuildLens.Union] defers to Phase 2's opacity. */
+  fun alphaFor(
+    provenance: List<ScreenProvenance>,
+    context: NavigationActiveContext?,
+    lens: BuildLens,
+  ): Float =
+    when (lens) {
+      is BuildLens.Filter ->
+        if (membership(provenance, lens.build) == BuildMembership.OtherBuild) {
+          ProvenanceOpacity.FADED_ALPHA
+        } else {
+          ProvenanceOpacity.ACTIVE_ALPHA
+        }
+      else -> ProvenanceOpacity.alphaFor(provenance, context)
+    }
+
+  /** Accessible description for a node/edge under [lens]. */
+  fun contentDescription(
+    label: String,
+    provenance: List<ScreenProvenance>,
+    context: NavigationActiveContext?,
+    lens: BuildLens,
+  ): String =
+    when (lens) {
+      is BuildLens.Filter -> {
+        val build = label(lens.build)
+        when (membership(provenance, lens.build)) {
+          BuildMembership.InBuild -> "$label — in build $build"
+          BuildMembership.OtherBuild -> "$label — not in build $build"
+          BuildMembership.Unclassified -> "$label — no build recorded"
+        }
+      }
+      else -> ProvenanceOpacity.contentDescription(label, provenance, context)
+    }
+
+  /** Diff the reachable graphs of builds [a] and [b] within the app-union [graph]. */
+  fun diff(graph: NavigationGraph, a: ProvenanceBuildKey, b: ProvenanceBuildKey): BuildGraphDiff =
+    BuildGraphDiff(
+      a = a,
+      b = b,
+      screens = graph.screens.mapNotNull { diffEntry(it, it.provenance, a, b) },
+      transitions = graph.transitions.mapNotNull { diffEntry(it, it.provenance, a, b) },
+    )
+
+  /** Whether [transition] is a verified path for the active build of [context]. */
+  fun verification(
+    transition: ScreenTransition,
+    context: NavigationActiveContext?,
+  ): EdgeVerification {
+    if (context == null) return EdgeVerification.BrowseOnly
+    if (!ProvenanceOpacity.isFaded(transition.provenance, context)) return EdgeVerification.Verified
+    val activeBuild = context.buildKey
+    val reachedByActiveBuild =
+      activeBuild != null && transition.provenance.any { it.buildKey == activeBuild }
+    return if (reachedByActiveBuild) {
+      EdgeVerification.Verified
+    } else {
+      EdgeVerification.UnverifiedForActiveBuild
+    }
+  }
+
+  private fun <T> diffEntry(
+    item: T,
+    provenance: List<ScreenProvenance>,
+    a: ProvenanceBuildKey,
+    b: ProvenanceBuildKey,
+  ): BuildDiffEntry<T>? {
+    val inA = membership(provenance, a) == BuildMembership.InBuild
+    val inB = membership(provenance, b) == BuildMembership.InBuild
+    val status =
+      when {
+        inA && inB -> BuildDiffStatus.InBoth
+        inA -> BuildDiffStatus.OnlyInA
+        inB -> BuildDiffStatus.OnlyInB
+        else -> return null
+      }
+    return BuildDiffEntry(item, status)
+  }
+
+  private fun ScreenProvenance.isClassifiable(): Boolean =
+    deviceId != ProvenanceOpacity.LEGACY_DEVICE_SENTINEL
+}

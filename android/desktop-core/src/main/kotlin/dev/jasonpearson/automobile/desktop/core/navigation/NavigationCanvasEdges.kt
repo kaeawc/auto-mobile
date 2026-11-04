@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 
@@ -52,20 +53,33 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNavigationEdge
               else -> arrowColor
             }
           // Fade transitions reached only historically / by another build or device
-          // (#4985).
-          val provenanceAlpha = ProvenanceOpacity.alphaFor(transition.provenance, activeContext)
+          // (#4985), or outside the filtered build (#4987).
+          val provenanceAlpha =
+            NavigationBuildLens.alphaFor(transition.provenance, activeContext, buildLens)
           val edgeColor = baseEdgeColor.copy(alpha = baseEdgeColor.alpha * provenanceAlpha)
           val edgeStrokeWidth = if (isHighlighted) strokeWidth * 1.5f else strokeWidth
+          // Edges reached only by another build are hints, not verified paths: draw them dashed.
+          val unverified =
+            NavigationBuildLens.verification(transition, activeContext) ==
+              EdgeVerification.UnverifiedForActiveBuild
 
           drawPath(
             path = geometry.path(),
             color = edgeColor,
-            style = Stroke(width = edgeStrokeWidth, cap = StrokeCap.Round),
+            style =
+              Stroke(
+                width = edgeStrokeWidth,
+                cap = StrokeCap.Round,
+                pathEffect = if (unverified) unverifiedEdgeDash(scale) else null,
+              ),
           )
         }
       }
   }
 }
+
+private fun unverifiedEdgeDash(scale: Float): PathEffect =
+  PathEffect.dashPathEffect(floatArrayOf(12f * scale, 10f * scale))
 
 private fun nodeEdgePoints(
   position: NodePosition,

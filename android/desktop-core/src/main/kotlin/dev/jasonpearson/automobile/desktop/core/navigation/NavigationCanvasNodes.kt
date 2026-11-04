@@ -72,12 +72,14 @@ private fun CanvasNode(context: NavigationCanvasContext, pos: NodePosition) {
           isCurrentReplayStep = screen.name == currentReplayScreen,
           isFogFocused = fogModeEnabled && screen.name == focusedScreenName,
           isDimmed = hasAnyHighlight && screen.name !in highlightedScreens,
-          provenanceAlpha = ProvenanceOpacity.alphaFor(screen.provenance, activeContext),
+          provenanceAlpha =
+            NavigationBuildLens.alphaFor(screen.provenance, activeContext, buildLens),
           provenanceDescription =
-            ProvenanceOpacity.contentDescription(
+            NavigationBuildLens.contentDescription(
               screen.name,
               screen.provenance,
               activeContext,
+              buildLens,
             ),
           onClick = {
             onScreenSelected(screen.id)

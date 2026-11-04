@@ -115,7 +115,7 @@ jobs:
 
             // Tests under test/lint read these contracts.
             // Doc-only edits must still run Node tests.
-            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-watch.md"];
+            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md", "docs/using/apple-watch.md"];
 
             // Check if a file matches any documentation pattern
             const isDocFile = (filename) => {
@@ -228,7 +228,7 @@ jobs:
               /^\.lycherc\.toml$/
             ];
             // Keep auto-chore consistent with docs_only for test-guarded docs.
-            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-watch.md"];
+            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md", "docs/using/apple-watch.md"];
             const isDocFile = (filename) =>
               !testGuardedDocs.includes(filename) &&
               docPatterns.some(pattern => pattern.test(filename));

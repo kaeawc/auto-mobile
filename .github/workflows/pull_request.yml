@@ -1130,11 +1130,15 @@ jobs:
 
       - wait: [install-bats, install-uv]
 
+      # Diff against the PR's base commit, not origin/<base_ref>: a stacked PR's
+      # base branch may be missing from the clone or already deleted (#16972).
       - name: "Run changed-file shell checks"
         shell: bash
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: scripts/prepush-shell.sh --base "origin/${BASE_REF}"
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"
+          scripts/prepush-shell.sh --base "${base}"
 
   # Detekt used to be a step inside Fast Validation, where its ~7 minutes of
   # cold Gradle work dominated an otherwise ~1 minute job. It is its own job so
@@ -1212,11 +1216,12 @@ jobs:
       - name: "Check Android lint baselines only shrink"
         if: success() || failure()
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Fetch the actual target explicitly, including for stacked PRs.
-          git fetch origin "${BASE_REF}" "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          bash scripts/android/check-lint-baseline-shrink.sh --base-ref "origin/${BASE_REF}"
+          # The PR's base commit, which still resolves for a stacked PR whose
+          # base branch was deleted when the PR below it merged (#16972).
+          base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"
+          bash scripts/android/check-lint-baseline-shrink.sh --base-ref "${base}"
 
       - name: "Upload Android Lint Reports"
         if: failure()

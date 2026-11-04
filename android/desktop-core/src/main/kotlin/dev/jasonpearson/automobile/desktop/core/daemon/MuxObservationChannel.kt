@@ -18,36 +18,22 @@ import kotlinx.coroutines.flow.emptyFlow
  * flows carry only frames routed to this subscription's `subscriptionId` (or replies to its own
  * requests).
  *
- * Every flow is fed with `tryEmit` into a drop-oldest buffer: one reader serves every device, so no
- * device's slow collector may hold back another device's frames. The layout and performance flows
- * keep the latest frame as their replay, as the per-device client's do.
- *
  * Storage is not carried; the Storage facet keeps its own stream.
  */
 internal class MuxObservationChannel(private val mux: MultiplexedObservationSocketClient) :
   ObservationStream {
-  private val _hierarchyUpdates = latestFlow<HierarchyStreamUpdate>()
-  override val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> =
-    _hierarchyUpdates.asSharedFlow()
+  val flows = MuxChannelFlows()
 
-  private val _screenshotUpdates = latestFlow<ScreenshotStreamUpdate>()
+  override val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> = flows.hierarchy.asSharedFlow()
   override val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate> =
-    _screenshotUpdates.asSharedFlow()
-
-  private val _navigationUpdates = latestFlow<NavigationGraphStreamUpdate>()
+    flows.screenshot.asSharedFlow()
   override val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> =
-    _navigationUpdates.asSharedFlow()
-
-  private val _buildContextUpdates = latestFlow<BuildContextStreamUpdate>()
+    flows.navigation.asSharedFlow()
   override val buildContextUpdates: SharedFlow<BuildContextStreamUpdate> =
-    _buildContextUpdates.asSharedFlow()
-
-  private val _performanceUpdates = latestFlow<PerformanceStreamUpdate>()
+    flows.buildContext.asSharedFlow()
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
-    _performanceUpdates.asSharedFlow()
-
-  private val _deviceEvents = latestFlow<DeviceStreamEvent>()
-  override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
+    flows.performance.asSharedFlow()
+  override val deviceEvents: SharedFlow<DeviceStreamEvent> = flows.deviceEvents.asSharedFlow()
 
   override val storageUpdates: Flow<StorageStreamUpdate> = emptyFlow()
   override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> = emptyFlow()
@@ -56,7 +42,7 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
   val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
   override val connectionState: StateFlow<ConnectionState> = mutableState.asStateFlow()
 
-  // Guarded by the owning mux's lock.
+  // Guarded by the owning mux table's lock.
   /** On the mux: [connect] was called and neither [disconnect] nor [dispose] since. */
   var live = false
   var disposed = false
@@ -81,11 +67,7 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
   override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) =
     mux.setCadence(this, ObservationCadence(screenshotIntervalMs, hierarchyIntervalMs))
 
-  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-  override fun resetLayoutReplayCache() {
-    _screenshotUpdates.resetReplayCache()
-    _hierarchyUpdates.resetReplayCache()
-  }
+  override fun resetLayoutReplayCache() = flows.resetLayout()
 
   override fun requestNavigationGraph(appId: String?) = mux.requestNavigationGraph(this, appId)
 
@@ -96,16 +78,31 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
 
   override fun unsubscribeStorage(packageName: String, fileName: String) =
     throw UnsupportedOperationException("Storage keeps its own observation stream")
+}
+
+/**
+ * The per-device flows behind a [MuxObservationChannel]. Every flow is fed with `tryEmit` into a
+ * drop-oldest buffer: one reader serves every device, so no device's slow collector may hold back
+ * another device's frames. Each flow keeps the latest frame as its replay, as the per-device
+ * client's do.
+ */
+internal class MuxChannelFlows {
+  val hierarchy = latestFlow<HierarchyStreamUpdate>()
+  val screenshot = latestFlow<ScreenshotStreamUpdate>()
+  val navigation = latestFlow<NavigationGraphStreamUpdate>()
+  val buildContext = latestFlow<BuildContextStreamUpdate>()
+  val performance = latestFlow<PerformanceStreamUpdate>()
+  val deviceEvents = latestFlow<DeviceStreamEvent>()
 
   /** Deliver one frame routed to this device; false when the type is not a device data frame. */
   fun deliver(response: StreamResponse): Boolean {
     when (response.type) {
-      "hierarchy_update" -> _hierarchyUpdates.tryEmit(response.toHierarchyUpdate())
-      "screenshot_update" -> _screenshotUpdates.tryEmit(response.toScreenshotUpdate())
-      "navigation_update" -> response.toNavigationUpdate()?.let(_navigationUpdates::tryEmit)
-      "performance_update" -> response.toPerformanceUpdate()?.let(_performanceUpdates::tryEmit)
-      "device_build_context" -> response.toBuildContextUpdate()?.let(_buildContextUpdates::tryEmit)
-      "device_session_ended" -> response.toSessionSuperseded()?.let(_deviceEvents::tryEmit)
+      "hierarchy_update" -> hierarchy.tryEmit(response.toHierarchyUpdate())
+      "screenshot_update" -> screenshot.tryEmit(response.toScreenshotUpdate())
+      "navigation_update" -> response.toNavigationUpdate()?.let(navigation::tryEmit)
+      "performance_update" -> response.toPerformanceUpdate()?.let(performance::tryEmit)
+      "device_build_context" -> response.toBuildContextUpdate()?.let(buildContext::tryEmit)
+      "device_session_ended" -> response.toSessionSuperseded()?.let(deviceEvents::tryEmit)
       else -> return false
     }
     return true
@@ -113,11 +110,16 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
 
   /** The device's control connection dropped: stale frames must not re-arm the panes. */
   @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-  fun deviceConnectionLost(event: DeviceStreamEvent.DeviceConnectionLost) {
-    _hierarchyUpdates.resetReplayCache()
-    _screenshotUpdates.resetReplayCache()
-    _performanceUpdates.resetReplayCache()
-    _deviceEvents.tryEmit(event)
+  fun connectionLost(event: DeviceStreamEvent.DeviceConnectionLost) {
+    resetLayout()
+    performance.resetReplayCache()
+    deviceEvents.tryEmit(event)
+  }
+
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  fun resetLayout() {
+    screenshot.resetReplayCache()
+    hierarchy.resetReplayCache()
   }
 
   private companion object {

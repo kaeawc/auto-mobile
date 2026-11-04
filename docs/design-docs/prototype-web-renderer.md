@@ -87,10 +87,11 @@ it inlined per variant.
   once per screen of its outermost stack when that stack has more than one screen (start first,
   then the others in key order; such views carry `data-screen`). The first view is the chosen
   variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
-  `hidden`.
-- **Controls.** Only five: rotate (portrait/landscape; absent for watch and TV frames, which
+  `hidden`. Every view renders in the input's `locale` and `textSize`, passed to the still.
+- **Controls.** Only six: rotate (portrait/landscape; absent for watch and TV frames, which
   never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
-  double-click to fit), a variant select (only with more than one variant), a screen select (only
+  double-click to fit), the opt-in 3D view ([Prototype web 3D device view](prototype-web-3d.md);
+  posture and hinge controls only for a frame with a hinge and postures), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
   screen select lists the shown revision's own screen views and is hidden with fewer than two, so
@@ -98,8 +99,8 @@ it inlined per variant.
   when the new revision has it, else shows that revision's start. Controls are buttons and a select with labels. A toolbar note says the preview is
   static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
   history sits under the stage, so the stage keeps the width.
-- **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
-  self-contained. It only shows and hides views, lists the shown revision's screens in the
+- **Script.** `prototypeWebPageRuntime`, then `prototypeWeb3dRuntime`, are inlined from their
+  `toString()` into the one pinned script, so each must stay self-contained. It only shows and hides views, lists the shown revision's screens in the
   screen select, moves the stage and animates rotation; UI state stays in memory, with no storage, cookies or URL
   changes. It must stay at or below 150 KB.
 - **Rotation.** Rotate turns the frame 90° (counterclockwise into landscape, clockwise back)
@@ -135,8 +136,13 @@ nothing at runtime drives a browser.
   non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
-  screen's view. The browser clock is fixed at 9:41 UTC, so the live status bar clock matches the
-  stills; a separate case installs a running clock and checks the clock advances each minute.
+  screen's view; the 3D toggle turns the shown view to the three-quarter pose, an arrow key on the
+  focused viewport orbits it, and toggling back restores the shown view's DOM byte for byte. The
+  browser clock is fixed at 9:41 UTC, so the live status bar clock matches the stills; a separate
+  case installs a running clock and checks the clock advances each minute.
+- **Settings cases.** `reference-checkout` also renders in both frames at the largest text size
+  (`fontScale` 2, `accessibility-extra-extra-extra-large`) and in the `ar` locale (RTL), golden
+  `<spec>--<frame>--<setting>.png` (and `--landscape.png` after it).
 - **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
   (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
   turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
@@ -159,7 +165,7 @@ nothing at runtime drives a browser.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode, screen})` in
+`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
 tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on
@@ -168,7 +174,8 @@ the host, so the page's script only switches between views it was given and neve
 - **Input.** The spec after component expansion, with its own `state` and `data`. A stack shows its
   `start` screen; the outermost stack (the first one drawn) shows `screen` instead when it has that
   screen. No action, timer or `request` runs.
-- **Text.** String-table translations resolve first, in the still's fixed `en-US` locale. Then
+- **Text.** String-table translations resolve first, in the caller's `locale` (BCP 47, canonicalized;
+  default `en-US`; an invalid tag is an `ActionableError`). Then
   `{data:/pointer}` placeholders bind (a missing or non-scalar value is empty),
   then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a
   top-level `derive` entry. Repeat placeholders
@@ -180,7 +187,7 @@ the host, so the page's script only switches between views it was given and neve
   the build as described under **Budget**. Text binds once, in that order: every inserted data or repeat value is shielded until binding
   ends, so it is never read again as a placeholder. Nested conditions with typed operands and state keys bind through the devices' own
   field walk (`mapBindableFields`). A spans-only text node renders each span
-  with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses `en-US`, `UTC` and a
+  with its own text style. A `secure` or `password` text field shows its value masked. Formatting uses the locale, `UTC` and a
   caller-supplied clock (default 0), so derived relative times are fixed.
 - **Platform state.** The frame decides `/device/os`, `/device/widthClass` and `/device/posture`
   from the active panel in the drawn orientation: `widthClass` is `compact`, `medium` or
@@ -196,7 +203,9 @@ the host, so the page's script only switches between views it was given and neve
   through `all`, `any` and `not`; only an undecided whole condition counts as true, so a node is
   never hidden on a guess.
 - **Window.** An explicit `window.layoutDirection` sets the content's `dir` (the frame is never
-  mirrored), and `start`/`end` safe-area edges read the inset on the matching physical side. Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
+  mirrored); without one, a locale whose language or script is written right to left (Arabic,
+  including `ar-XB`, Hebrew, Persian, Urdu and the like) sets `rtl`, as a device in that locale
+  does, and any other locale leaves the page's direction. In either case `start`/`end` safe-area edges read the inset on the matching physical side. Fullscreen fills the screen, and a fullscreen or sheet root fills its window on
   each axis it leaves unsized, as on devices; a sheet spans the screen width, `height` dp tall at its `edge`; a floating window
   sits at its `gravity`, moved by its `offset`.
 - **Style precedence.** A control's default styling applies first and the spec's own style wins.
@@ -230,6 +239,16 @@ the host, so the page's script only switches between views it was given and neve
   shader support does, and is listed with reason `shaderFallback`.
 - **Typography.** `theme.typography` scales every type-scale role and sets its family, as the
   native theme does.
+- **System text size.** `textSize` is the device's text setting, refused on the other platform's
+  frame. On Android, `fontScale` (0.85 to 2) maps every sp value (size, line height, letter
+  spacing) through Android 14's non-linear `FontScaleConverterFactory` tables, interpolating
+  between neighbouring tables and linear below 1.03, as Compose does. On iOS, `contentSize` (the
+  `simctl ui content_size` names, `extra-small` to `accessibility-extra-extra-extra-large`) scales
+  every size and line height by the body style's point size over 17, as
+  `UIFontMetrics.default.scaledValue` does, and leaves letter spacing. It applies after
+  `theme.typography`, to text roles, explicit sizes, the 14 sp default and the fixed text of
+  controls (app bar title, field label, caption and lines, list item text); icons and the device
+  chrome do not scale. The default size (`1`, `large`) renders the same bytes as none.
 - **Colour.** Theme roles resolve from the Material 3 baseline, then the roles a `theme.colors.seed`
   derives, then the explicit overrides. The seed roles are the HSL approximation both devices
   share (`prototypeSeedScheme.ts`, Android's `prototypeSeedColorScheme`, the iOS agent's
@@ -243,8 +262,9 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `videoPlayer`,
-  `map`, `cameraPreview` and `castButton`. Where the devices differ,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `radioGroup`, `select`,
+  `segmentedButton`, `searchBar`, `datePicker`, `timePicker`, `pasteButton`, `bottomSheet`,
+  `dialog`, `snackbar`, `videoPlayer`, `map`, `cameraPreview` and `castButton`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -265,7 +285,7 @@ the host, so the page's script only switches between views it was given and neve
   `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
   their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
   draws its named icon, else a 24 px `surfaceVariant` square, since item images are not inlined. An
-  icon button draws the icon placeholder in a 40 px circle inside a 48 px target: `standard` and
+  icon button draws its icon in a 40 px circle inside a 48 px target: `standard` and
   `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
   `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no
   `stateKey` is an outlined assist chip and one with a `stateKey` a filter chip, whatever its
@@ -274,10 +294,10 @@ the host, so the page's script only switches between views it was given and neve
   slider draws its label above a 16 px track, `primary` up to the value and `secondaryContainer`
   after it with a stop dot at its end, and a 4x44 px `primary` thumb at the value: its numeric
   state, else 0, snapped to `step` and clamped to `min`..`max`. A pager fills both axes, and a grid,
-  carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column, box or card
+  carousel, slider, tab bar, bottom nav, radio group, select or search bar fills its width, unless sized; a row, column, box or card
   around such a child grows on that axis, as a Compose parent does around a `fillMax` child. A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
-  and actions as icon placeholders labelled with their action, and its `variant` sets its height,
+  and actions as icons labelled with their action, and its `variant` sets its height,
   title size and title alignment. A button, switch, checkbox, text field,
   list item, icon button, chip or slider whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, text decorations and built-in font
@@ -288,8 +308,18 @@ the host, so the page's script only switches between views it was given and neve
   lines); a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
-  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
-  titled with the name, because the glyph set is not inlined. A switch draws its label before a
+  Compose parent does around a `fillMaxSize` child. In an Android frame an icon draws its Material Icons
+  glyph (the set Compose's `material-icons-extended` bundles, read from the Apache-2.0
+  `@material-design-icons/svg` package) as inline SVG in a 24 px box, in its `variant`'s style, else
+  `filled` as Android falls back, and tinted by `currentColor` or its style `color`. Only the
+  glyphs a still draws are read and inlined. The still takes its glyph source as an option, so it
+  stays free of Node builtins for the browser bundle: the server's page builder passes the
+  Material Icons reader, and a still given none draws every icon as the placeholder, unreported.
+  A glyph that would need `<defs>`/`<use>` ids is
+  treated as absent, since ids collide when a page draws it twice. A name with no glyph draws a
+  tinted rounded outline around its first letter, titled with the name, with reason `iconMissing`.
+  An iOS frame draws that outline for every icon, unreported, until its glyph set is decided
+  (#16526). A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
   as both devices do. A video player is a black 16:9 frame (a `colorBars` sample draws bars, a
   `countdown` sample a 3; other sources are not inlined) under the skin's chrome at `startMs`
@@ -298,7 +328,21 @@ the host, so the page's script only switches between views it was given and neve
   `assetNotInlined`. A map fetches no tiles: it draws a neutral canvas (`plain`, or a faint street
   grid), 200 px tall unless sized, with its polylines in an inline SVG and its markers as pins, placed
   by Web Mercator under `fit` (`markers` or `route`), else the camera (literal or `/data`), else every
-  point; bearing and tilt are not drawn. A camera preview is a portrait viewfinder at its
+  point. Points are placed in dp from the box centre (`calc(50% + …px)`, the SVG's origin at the
+  centre), so CSS resolves them against the box as rendered. A width or height the parent sizes
+  (`fill`, a `weight` on the parent's main axis, a stretched width, the fullscreen root) cannot be
+  known when rendering, so the framing and perspective use the screen's size on that axis, the most
+  the box can take. That keeps a camera's true zoom at any box size; a fit (`fit`, or every point
+  when there is no camera) instead chose its zoom to span 80% of that size, so its pins scale by
+  `min(100cqw / width, 100cqh / height)` (the box a size container) and its SVG, `100cqw` × `100cqh` about the
+  same centre so padding moves pins and lines alike, takes the fitted size as a `meet` viewBox and a non-scaling stroke: a box rendered narrower than the
+  screen shrinks the fit uniformly and keeps every point inside. A camera framing turns
+  by its `bearing` and `tilt` (a fit frames north up): the canvas moves to a ground square under `perspective(1.5 × height) rotateX(tilt) rotate(-bearing)`, sized from the
+  box corners traced back onto the plane so it covers any aspect ratio, and lines and pins are
+  projected the same way in code: pins stay upright, and lines are clipped at a near plane (0.1 of the
+  eye distance) and break into separate runs there, while pins past it are dropped. Because the
+  height used is never less than the rendered one, the eye is far enough out that no horizon shows.
+  A camera preview is a portrait viewfinder at its
   `aspectRatio` (default 4:3) showing colour bars and a label naming its mode. A cast button is the
   skin's idle route icon (Cast on Android, AirPlay on iOS) in a 48 px target; it is a `details`
   disclosure, so a tap opens a device picker listing no devices without any script. Glyphs are inline
@@ -312,7 +356,31 @@ the host, so the page's script only switches between views it was given and neve
   colour exactly) under a full-width column at the bottom, as tall as its first detent (half, all,
   or `dp` capped at the window), painted `surface` unless an authored background resolves,
   with no corner radius or shadow; it holds a centred 32x4 px `onSurfaceVariant` drag handle with
-  8 px around it, unless `dragHandle` is false, then its child. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  8 px around it, unless `dragHandle` is false, then its child. A `dialog` and a `snackbar` open
+  and layer the same way. A dialog is a scrim (the `scrim` role at 0.32) under a centred
+  `surfaceContainerHigh` surface with 28 px corners, 24 px padding and 16 px gaps, 280 to 560 px
+  wide with 24 px around it: its icon (`secondary`), title (`headlineSmall`, `onSurface`), text
+  (`bodyMedium`, `onSurfaceVariant`), its child (scrolling when tall), then the dismiss and confirm
+  text buttons (`labelLarge`, `primary`) at the end, tagged `<testTag>.dismiss` and
+  `<testTag>.confirm`. A snackbar has no scrim and lets touches through around it; it sits at the
+  window's bottom with 12 px around it, as wide as the window up to 600 px, at least 48 px tall,
+  in `inverseSurface` with 4 px corners and `bodyMedium` `inverseOnSurface` text, then its
+  optional `inversePrimary` action tagged `<testTag>.action`. Choice controls select the option
+  whose `value` their `stateKey` holds and tag each option `<testTag>.<value>`. A radio group is a
+  column of 48 px rows, a 20 px radio ring (`primary` with a dot when selected) before each label. A
+  select draws only its closed field, since its list opens on tap: a 4 px-radius
+  `surfaceContainerLow` field with its `label` in `labelSmall` over the chosen label and an
+  `expand_more` icon. A segmented button is a row of equal-width 40 px outlined segments, the ends
+  rounded, the selected one `secondaryContainer` with a check. A search bar draws a 56 px
+  `surfaceContainerHigh` pill with its leading icon, its query (else the placeholder in
+  `onSurfaceVariant`) and its trailing actions; while its `activeKey` is `true` it draws its child
+  below, and the `bar` variant then fills its height too. A paste button is a filled button
+  labelled "Paste". A time picker draws its hour (selected, `primaryContainer`) and minute boxes, an
+  AM/PM selector unless it is 24-hour (`is24Hour`, else the still's `en-US` 12-hour clock), and a
+  256 px hour dial (a 24-hour dial adds an inner 12–23 ring) with the bound hour under a `primary`
+  selector. A date picker is 360 px of `surfaceContainerHigh`: "Select date", the bound date as its
+  headline, the month row with its arrows, and that month (else today's from the still's clock) in
+  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
@@ -341,8 +409,12 @@ the host, so the page's script only switches between views it was given and neve
 ## Device frame registry
 
 `src/features/prototype/web/deviceFrames.json` is data only: adding a device is one entry, with
-no code change. `deviceFrames.ts` validates it with a strict schema when the module loads, so an
-invalid entry fails the first import and its unit test instead of rendering wrong geometry.
+no code change. `deviceFrameSchema.ts` holds its strict schema, and the registry's unit test
+validates every entry, so an invalid entry fails CI instead of rendering wrong geometry. The
+registry is not validated at load: `deviceFrames.ts` stays free of zod so the still renderer
+bundles for the browser (see [Prototype web library](prototype-web-library.md)), and fills the
+schema's defaults and `inner` panel itself; a unit test holds that result equal to the schema's
+parse.
 
 It is called a _frame_ registry, never a device profile, because `deviceProfile` already means
 the session broker's OEM manufacturer profiles.

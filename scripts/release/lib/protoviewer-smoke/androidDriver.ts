@@ -106,6 +106,8 @@ export function createAndroidDriver(serial: string, runner: ToolRunner): SmokeDr
       timer: defaultTimer,
       ids: defaultIdGenerator,
       tempFiles: new NodeProtoViewerTempFiles(),
+      // The candidate under test is the store build; a `.dev` install beside it must not answer.
+      appIds: [PROTOVIEWER_PACKAGE],
     }),
     screens: new AndroidScreens(adb),
   };

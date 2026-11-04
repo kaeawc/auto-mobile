@@ -24353,7 +24353,8 @@
       "events": {
         "markerTap": {
           "sensitive": false,
-          "userInitiated": true
+          "userInitiated": true,
+          "emitContext": ["markerId"]
         },
         "cameraIdle": {
           "sensitive": false
@@ -24954,7 +24955,8 @@
         "dismissed": {
           "sensitive": false
         },
-        "scheduledFired": { "sensitive": false }
+        "scheduledFired": { "sensitive": false },
+        "push": { "sensitive": false, "capability": "prototype_platform_push_v1" }
       },
       "state": {
         "badge": {

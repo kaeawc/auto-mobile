@@ -2,7 +2,7 @@ import { walkPrototypeNodes } from "../prototypeNodeChildren";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
-import { boxLayoutCss, cssColor } from "./webStyle";
+import { boxLayoutCss, containerChildStyle, cssColor } from "./webStyle";
 
 type Css = Record<string, string>;
 
@@ -22,6 +22,9 @@ const DEFAULT_FILL: Readonly<Record<string, readonly WebAxis[]>> = {
   slider: ["width"],
   tabBar: ["width"],
   bottomNav: ["width"],
+  radioGroup: ["width"],
+  select: ["width"],
+  searchBar: ["width"],
 };
 
 /** The axes a node fills by default and leaves unsized in its own style. */
@@ -206,7 +209,7 @@ export const pagerRenderer =
     // The page inherits the locals renderWebNode set for this pager (`page`, `pageCount`).
     const inner = kit.child(scope, {
       inBox: true,
-      style: { ...scope.style, parentAxis: undefined },
+      style: containerChildStyle(scope, node, undefined),
     });
     const content = kit.renderNode(pages[page], inner, `${path}.children[${page}]`);
     const pageBox = el(
@@ -304,7 +307,7 @@ export const gridRenderer =
     });
     const inner = kit.child(scope, {
       inBox: false,
-      style: { ...scope.style, parentAxis: undefined },
+      style: containerChildStyle(scope, node, undefined),
     });
     return el("div", base, kit.children(node, inner, path, gridCell(columns)));
   };
@@ -326,7 +329,7 @@ export const carouselRenderer =
     });
     const inner = kit.child(scope, {
       inBox: true,
-      style: { ...scope.style, parentAxis: undefined },
+      style: containerChildStyle(scope, node, undefined),
     });
     // Android keeps an item slot for every child, hiding only a hidden child's content.
     const item = (entry: WebElement | undefined): WebElement =>

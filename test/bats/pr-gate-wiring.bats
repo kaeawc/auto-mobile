@@ -317,7 +317,8 @@ wiring_requires_yq() {
 
 @test "merge TypeScript coverage has headroom for infra retry and timing rechecks" {
   wiring_requires_yq
-  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" == 45' .github/workflows/merge.yml
+  # Each part runs the 1560s lane cap; the joining job runs the 600s rechecks (#16377).
+  run yq -r '.jobs."ts-coverage-part"."timeout-minutes" == 35 and .jobs."ts-code-coverage"."timeout-minutes" == 20' .github/workflows/merge.yml
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
@@ -341,7 +342,7 @@ wiring_requires_yq() {
   [[ "$ubuntu" == *"scripts/validate-bun-test-timings.sh"* ]]
   [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os[]' "$WF")" != *"ubuntu"* ]]
   [[ "$(job_block node-unit-tests)" != *"validate-bun-test-timings.sh"* ]]
-  [[ "$(job_block ts-code-coverage .github/workflows/merge.yml)" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-coverage-part .github/workflows/merge.yml)" == *"run-ts-coverage.sh"* ]]
 }
 
 @test "merge TypeScript coverage uploads diagnostics after failures with bounded retention" {
@@ -349,9 +350,14 @@ wiring_requires_yq() {
   run yq -r '.jobs."ts-code-coverage".steps[] | select(.name == "Upload TypeScript Coverage Diagnostics") | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$workflow"
   [ "$status" -eq 0 ]
   [[ "$output" == $'always()\tts-coverage-diagnostics\t'* ]]
-  [[ "$output" == *"ci-logs/ts-coverage.log"* ]]
   [[ "$output" == *"coverage/shards/**"* ]]
   [[ "$output" == *"scratch/bun-test-report.recheck.d/**"* ]]
+  [[ "$output" == *$'\tignore\t7' ]]
+  run yq -r '.jobs."ts-coverage-part".steps[] | select(.name == "Upload TypeScript Coverage Diagnostics") | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'always()\tts-coverage-diagnostics-part-${{ matrix.part }}\t'* ]]
+  [[ "$output" == *"ci-logs/ts-coverage.log"* ]]
+  [[ "$output" == *"coverage/shards/**"* ]]
   [[ "$output" == *$'\tignore\t7' ]]
 }
 
@@ -366,7 +372,8 @@ wiring_requires_yq() {
   local workflow=".github/workflows/merge.yml"
   [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os | join(",")' "$workflow")" = windows-latest ]]
   [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]
-  [[ "$(job_block ts-code-coverage "$workflow")" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-coverage-part "$workflow")" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-code-coverage "$workflow")" == *"merge-ts-coverage-parts.sh"* ]]
   [[ "$(job_block ts-code-coverage "$workflow")" == *"validate-bun-test-timings.sh"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh stress"* ]]

@@ -258,11 +258,10 @@ export function fadeEdgesCss(node: Raw, context: WebStyleContext): WebFadeEdges 
  * layout, not on time, so a screenshot is deterministic. A browser without scroll-driven
  * animations always draws the mask, as the still did before it could tell.
  */
-export const FADE_EDGES_PAGE_CSS = [
-  "@keyframes prototype-fade{from,to{mask-image:var(--fade-mask)}}",
-  "@supports (animation-timeline:scroll()){[data-fade]{animation-name:prototype-fade;animation-duration:auto;animation-timing-function:linear;animation-fill-mode:both;animation-timeline:scroll(self y)}[data-fade=x]{animation-timeline:scroll(self x)}}",
-  "@supports not (animation-timeline:scroll()){[data-fade]{mask-image:var(--fade-mask)}}",
-].join("");
+export const FADE_EDGES_PAGE_CSS =
+  "@keyframes prototype-fade{from,to{mask-image:var(--fade-mask)}}" +
+  "@supports (animation-timeline:scroll()){[data-fade]{animation-name:prototype-fade;animation-duration:auto;animation-timing-function:linear;animation-fill-mode:both;animation-timeline:scroll(self y)}[data-fade=x]{animation-timeline:scroll(self x)}}" +
+  "@supports not (animation-timeline:scroll()){[data-fade]{mask-image:var(--fade-mask)}}";
 
 /**
  * A node with `style.shader` draws without it, as a device without shader support does; the

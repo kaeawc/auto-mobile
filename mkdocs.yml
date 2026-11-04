@@ -114,6 +114,7 @@ not_in_nav: |
   /decisions/androidx-car-app-template-snapshots.md
   /decisions/fastlane-supply-play-publishing.md
   /decisions/ios-user-files-provider.md
+  /decisions/material-icons-web-glyphs.md
   /decisions/mcp-sdk-v2-split-packages.md
   /decisions/playwright-core-web-screenshots.md
   /decisions/prototype-embedded-request-routing.md
@@ -145,6 +146,7 @@ nav:
       - "Android Automotive OS": using/android-automotive.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
+      - "Apple TV": using/apple-tv.md
       - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
@@ -193,6 +195,7 @@ nav:
       - "ProtoViewer localization": design-docs/protoviewer-localization.md
       - "ProtoViewer agent": design-docs/protoviewer-agent.md
       - "ProtoViewer privacy": protoviewer/privacy.md
+      - "ProtoViewer support": protoviewer/support.md
       - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
       - "Native prototype embedding": design-docs/prototype-embedding.md
       - "Prototype platform security": design-docs/prototype-platform-security.md

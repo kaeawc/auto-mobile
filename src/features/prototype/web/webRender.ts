@@ -25,21 +25,36 @@ import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
+import { webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
+import { withLaterMinStrut } from "./webLaterMin";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
+  containerChildStyle,
   cssColor,
+  fontPx,
   lineCss,
+  multilineCss,
   nodeCss,
+  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import {
+  glyphSvg,
+  ICON_BOX,
+  ICON_PLACEHOLDER,
+  iconInitial,
+  prototypeIconVariant,
+  type PrototypeIconGlyphSource,
+} from "./webIconGlyphs";
 import { rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
@@ -49,9 +64,9 @@ export interface UnsupportedWebNode {
   readonly path: string;
   /**
    * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
-   * shader does.
+   * shader does. `iconMissing`: an icon name with no glyph drew the placeholder.
    */
-  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback";
+  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback" | "iconMissing";
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -67,8 +82,15 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /**
+   * Where icons find their glyphs; without one every icon draws the placeholder and none is
+   * reported, since no glyph set was asked for.
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
+  /** The screen height in dp for the orientation: the most a map that fills its parent can take. */
+  readonly screenHeight: number;
   /**
    * A pager's `page` and `pageCount`: text placeholders and every condition (`visibleWhen`,
    * `styleWhen`, `enabledWhen`, `errorWhen`) read them, as Android's local pager state does; a
@@ -79,7 +101,7 @@ export interface WebRenderScope {
   readonly screen?: string;
   /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
   readonly stacks?: WebStackScreens[];
-  /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
+  /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
@@ -334,9 +356,9 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
-    const { attrs, style } = base(node, scope, lineCss(axis, node.style));
-    const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
+    const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, axis) });
     const rowed = rowMeasured(node, path, prepareIn(inner));
+    const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
@@ -344,7 +366,7 @@ const box: NodeRenderer = (raw, scope, path) => {
   // A wrap-sized box grows around a filling child, as a Compose Box does.
   const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
-  const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
+  const inner = child(scope, { inBox: true, style: containerChildStyle(scope, node, undefined) });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -379,10 +401,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, {
-    inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
-  });
+  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope, node) });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
@@ -414,30 +433,16 @@ const divider: NodeRenderer = (node, scope) => {
   );
 };
 
-/** The first letter of an icon's name, so a placeholder reads as that icon; none without a name. */
-function iconInitial(name: unknown): string {
-  const letter = typeof name === "string" ? /[a-z0-9]/i.exec(name)?.[0] : undefined;
-  return letter ? letter.toUpperCase() : "";
-}
-
-const icon: NodeRenderer = (node, scope) => {
-  // The Material glyph set is not inlined, so an icon draws as a tinted ring around its name's
-  // initial, titled with the full name.
-  const { attrs, style } = base(node, scope, {
-    display: "inline-flex",
-    "align-items": "center",
-    "justify-content": "center",
-    width: "24px",
-    height: "24px",
-    border: "2px solid currentColor",
-    "border-radius": "6px",
-    "font-size": "11px",
-    "font-weight": "700",
-    "line-height": "1",
-    "flex-shrink": "0",
-  });
-  return el("span", { attrs: { ...attrs, title: String(node.name ?? ""), role: "img" }, style }, [
-    iconInitial(node.name),
+const icon: NodeRenderer = (node, scope, path) => {
+  const name = typeof node.name === "string" ? node.name : undefined;
+  const glyph = name ? scope.glyphs?.glyph(name, prototypeIconVariant(node.variant)) : undefined;
+  if (!glyph && scope.glyphs) {
+    const id = typeof node.id === "string" ? { id: node.id } : {};
+    scope.unsupported.push({ type: "icon", ...id, path, reason: "iconMissing" });
+  }
+  const { attrs, style } = base(node, scope, glyph ? ICON_BOX : ICON_PLACEHOLDER);
+  return el("span", { attrs: { ...attrs, title: name ?? "", role: "img" }, style }, [
+    glyph ? glyphSvg(glyph) : iconInitial(node.name),
   ]);
 };
 
@@ -581,7 +586,7 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
     // from an authored safeAreaPadding.
     "min-height": `${size.height}px`,
     "padding-inline": "16px",
-    "font-size": `${size.title}px`,
+    "font-size": fontPx(size.title, scope.style),
     "align-self": "stretch",
     position: "relative",
     ...roleCss(scope, "surface", "onSurface"),
@@ -615,22 +620,6 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
   return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
 }
 
-/** A multiline field keeps its newlines and its authored minLines and maxLines (24px lines). */
-function lineBounds(node: Raw): Record<string, string> {
-  if (node.multiline !== true) {
-    return {};
-  }
-  const css: Record<string, string> = { "white-space": "pre-wrap", "line-height": "24px" };
-  if (typeof node.minLines === "number") {
-    css["min-height"] = `${node.minLines * 24}px`;
-  }
-  if (typeof node.maxLines === "number") {
-    css["max-height"] = `${node.maxLines * 24}px`;
-    css.overflow = "hidden";
-  }
-  return css;
-}
-
 /**
  * A Material field's label sits inside an empty field with no placeholder (fieldValue draws it
  * there); once the field holds a value or shows a placeholder, the label floats above it.
@@ -642,7 +631,10 @@ function floatingLabel(node: Raw, empty: boolean, scope: WebRenderScope): WebEle
   return [
     el(
       "span",
-      { attrs: { "data-slot": "label" }, style: { "font-size": "12px", opacity: "0.8" } },
+      {
+        attrs: { "data-slot": "label" },
+        style: { "font-size": fontPx(12, scope.style), opacity: "0.8" },
+      },
       [bound(node.label, scope)],
     ),
   ];
@@ -684,7 +676,11 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
       "span",
       {
         attrs: error ? { role: "alert" } : {},
-        style: { "font-size": "12px", padding: "0 16px", ...(color ? { color } : {}) },
+        style: {
+          "font-size": fontPx(12, scope.style),
+          padding: "0 16px",
+          ...(color ? { color } : {}),
+        },
       },
       [bound(caption, scope)],
     ),
@@ -713,7 +709,7 @@ const textField: NodeRenderer = (node, scope, path) => {
     ...namedIcon(node.leadingIcon, scope),
     el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
       ...floatingLabel(node, empty, scope),
-      el("span", { style: lineBounds(node) }, [shown]),
+      el("span", { style: multilineCss(node, scope.style) }, [shown]),
     ]),
     // The trailing slot is an {icon, label} action, like an app-bar action.
     ...appBarIcons([node.trailingIcon], scope, path),
@@ -841,7 +837,7 @@ const card: NodeRenderer = (raw, scope, path) => {
       "onSurface",
     ),
   });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
+  const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -892,14 +888,19 @@ const listItem: NodeRenderer = (node, scope) => {
     node.supporting === undefined
       ? []
       : [
-          el("span", { style: { "font-size": "14px", opacity: "0.7" } }, [
+          el("span", { style: { "font-size": fontPx(14, scope.style), opacity: "0.7" } }, [
             bound(node.supporting, scope),
           ]),
         ];
   const texts = el(
     "div",
     { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
-    [el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]), ...supporting],
+    [
+      el("span", { style: { "font-size": fontPx(16, scope.style) } }, [
+        bound(node.headline, scope),
+      ]),
+      ...supporting,
+    ],
   );
   return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
     ...namedIcon(node.leadingIcon, scope),
@@ -939,12 +940,13 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   listItem,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
+  ...webSelectionRenderers(KIT, button),
   ...webMediaRenderers(KIT),
   ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
 };
 
-const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
+const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
@@ -1046,7 +1048,9 @@ export function renderWebNode(
     own.unsupported.push(shaded);
   }
   // The layers belong to the node's own box; a wrapper (a captioned field) layers its box itself.
-  return element.attrs["data-node"] === undefined
-    ? element
-    : withOverContentLayers(element, styled.style, own.style);
+  const layered =
+    element.attrs["data-node"] === undefined
+      ? element
+      : withOverContentLayers(element, styled.style, own.style);
+  return withLaterMinStrut(layered, styled.style, own.style);
 }

@@ -70,6 +70,17 @@ sealed interface WorkspaceAction {
    */
   data class RefreshDeviceSessionUuids(val sessionUuids: Map<String, String>) : WorkspaceAction
 
+  /**
+   * The daemon ended [deviceId]'s epoch [retiredUuid] and minted [successorUuid] for the same
+   * device (`device_session_ended`, e.g. a reboot that reused the serial). The column observing the
+   * retired epoch becomes a fresh column for the successor; any other column is untouched.
+   */
+  data class EndDeviceSession(
+    val deviceId: String,
+    val retiredUuid: String,
+    val successorUuid: String,
+  ) : WorkspaceAction
+
   /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */
   data class DiffTool(val tool: Tool) : WorkspaceAction
 }
@@ -132,6 +143,7 @@ class WorkspaceViewModel(
       is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
       is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
       is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
+      is WorkspaceAction.EndDeviceSession -> endDeviceSession(action)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }
@@ -191,12 +203,18 @@ class WorkspaceViewModel(
   }
 
   private fun observe(column: DeviceColumn) {
+    val existing = columnFor(column.deviceId)
+    if (existing != null && existing.isNewEpoch(column)) {
+      LOG.debug("Device ${column.deviceId} reobserved as a new epoch; replacing its column")
+      replaceEpoch(existing, existing.nextEpoch(column))
+      focus(column.deviceId)
+      return
+    }
     _state.update { current ->
       val columns = (current as? WorkspaceUiState.Content)?.columns ?: emptyList()
       if (columns.any { it.deviceId == column.deviceId }) {
-        // A restarted emulator can keep its serial while receiving a fresh daemon-minted epoch.
-        // Preserve the pane's UI state but replace identity/device metadata so its facets dispose
-        // stale streams and reconnect with the current session UUID.
+        // Same epoch (or an older daemon that sends none): refresh identity/device metadata and
+        // keep the pane's UI state.
         LOG.debug("Device ${column.deviceId} already observed; refreshing and refocusing")
         WorkspaceUiState.Content(
           columns.map { existing ->
@@ -217,6 +235,43 @@ class WorkspaceViewModel(
       } else {
         WorkspaceUiState.Content(columns + column, focusedDeviceId = column.deviceId)
       }
+    }
+  }
+
+  private fun endDeviceSession(action: WorkspaceAction.EndDeviceSession) {
+    val existing = columnFor(action.deviceId) ?: return
+    if (existing.deviceSessionUuid != action.retiredUuid) return
+    val successor =
+      DeviceColumn(
+        deviceId = existing.deviceId,
+        name = existing.name,
+        platform = existing.platform,
+        isVirtual = existing.isVirtual,
+        deviceSessionUuid = action.successorUuid,
+      )
+    replaceEpoch(existing, existing.nextEpoch(successor))
+  }
+
+  /**
+   * Swap [retired]'s column for [next] (a new epoch of the same device) and drop the retired
+   * epoch's per-device caches: the navigation screenshot loader and any locale request still in
+   * flight.
+   */
+  private fun replaceEpoch(retired: DeviceColumn, next: DeviceColumn) {
+    screenshotLoaderRegistry.forget(retired.deviceId)
+    localeJobs.remove(retired.deviceId)?.cancel()
+    _state.update { current ->
+      val content = current as? WorkspaceUiState.Content ?: return@update current
+      content.copy(
+        columns =
+          content.columns.map {
+            if (
+              it.deviceId == retired.deviceId && it.deviceSessionUuid == retired.deviceSessionUuid
+            )
+              next
+            else it
+          },
+      )
     }
   }
 

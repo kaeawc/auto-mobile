@@ -31,7 +31,9 @@ internal fun createPerformanceObservationClient(sessionUuidProvider: (() -> Stri
  *
  * Both the LIVE metrics (the stream carries a deviceId) and the audit-history fallback are scoped
  * to [column]'s device: [PerformanceDashboard] threads [DeviceColumn.deviceId] through
- * `listPerformanceAuditResults` so a pane only surfaces its own device's audit history.
+ * `listPerformanceAuditResults` so a pane only surfaces its own device's audit history. The
+ * dashboard is keyed on [DeviceColumn.deviceSessionUuid], so a new epoch of the device drops the
+ * shown run and reloads that history.
  */
 @Composable
 fun PerformanceFacet(
@@ -64,6 +66,7 @@ fun PerformanceFacet(
       observationStreamClient = observation.stream,
       connectionGeneration = observation.connectionGeneration,
       deviceId = column.deviceId,
+      deviceSessionUuid = column.deviceSessionUuid,
     ),
   )
 }

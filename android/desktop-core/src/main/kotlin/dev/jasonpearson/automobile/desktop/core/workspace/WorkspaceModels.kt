@@ -110,6 +110,10 @@ enum class WorkspaceStatus {
  * One observed device rendered as a column. Identity (name + platform) lives here — there is no
  * separate device-tab bar. A device is either observed (present as a column) or not; there is no
  * minimized state.
+ *
+ * A column is one device epoch: [deviceSessionUuid] is its identity and [deviceId] is the display
+ * label and adb target. A rebooted device that reuses its serial arrives with a new
+ * [deviceSessionUuid] and replaces the column through [nextEpoch], not as a continuation of it.
  */
 data class DeviceColumn(
   val deviceId: String,
@@ -128,3 +132,24 @@ data class DeviceColumn(
   /** Daemon-minted identity for this live device epoch; nullable for older resource payloads. */
   val deviceSessionUuid: String? = null,
 )
+
+/**
+ * The column for [incoming]'s device epoch, replacing this one. The layout the user chose (mode,
+ * open tool, pane sizing) carries over. Everything observed from the old epoch does not:
+ * orientation and lock state come from [incoming], and the workspace keys the pane's composition on
+ * the epoch, so remembered facet state is dropped too.
+ */
+internal fun DeviceColumn.nextEpoch(incoming: DeviceColumn): DeviceColumn =
+  incoming.copy(
+    mode = mode,
+    activeTool = activeTool,
+    shrunk = shrunk,
+    firstPaneFractionOverride = firstPaneFractionOverride,
+  )
+
+/** Whether [incoming] is a different daemon-minted epoch of this column's device. */
+internal fun DeviceColumn.isNewEpoch(incoming: DeviceColumn): Boolean =
+  deviceId == incoming.deviceId &&
+    deviceSessionUuid != null &&
+    incoming.deviceSessionUuid != null &&
+    deviceSessionUuid != incoming.deviceSessionUuid

@@ -65,39 +65,103 @@ class WorkspaceViewModelTest {
       assertEquals("a", state.focusedDeviceId)
     }
 
+  private fun epochColumn(uuid: String?, name: String = "Device a") =
+    DeviceColumn(
+      deviceId = "a",
+      name = name,
+      platform = Platform.Android,
+      activeTool = Tool.Storage,
+      deviceSessionUuid = uuid,
+    )
+
+  /** Observe epoch-a and give it state observed from that epoch plus user layout choices. */
+  private fun WorkspaceViewModel.observeEpochAWithState(
+    registry: NavigationScreenshotLoaderRegistry,
+  ) {
+    onAction(WorkspaceAction.ObserveDevice(epochColumn("epoch-a")))
+    onAction(WorkspaceAction.SetFirstPaneFraction("a", 0.5f))
+    onAction(WorkspaceAction.RunControl("a", EmulatorControl.Rotate))
+    onAction(WorkspaceAction.SetLockStates(mapOf("a" to true)))
+    registry.forDevice("a") { FakeAutoMobileClient() }
+  }
+
+  private fun WorkspaceViewModel.onlyColumn(): DeviceColumn =
+    (state.value as WorkspaceUiState.Content).columns.single()
+
   @Test
-  fun `reobserving a reincarnated device refreshes its session UUID`() = testScope.runTest {
-    val vm = WorkspaceViewModel(this)
-    vm.onAction(
-      WorkspaceAction.ObserveDevice(
-        DeviceColumn(
-          deviceId = "a",
-          name = "Device a",
-          platform = Platform.Android,
-          activeTool = Tool.Storage,
-          deviceSessionUuid = "epoch-a",
-        ),
-      ),
-    )
+  fun `reobserving a reincarnated device starts a fresh epoch and keeps the layout`() =
+    testScope.runTest {
+      val registry = NavigationScreenshotLoaderRegistry()
+      val vm = WorkspaceViewModel(this, screenshotLoaderRegistry = registry)
+      vm.observeEpochAWithState(registry)
+      assertEquals(Orientation.Landscape, vm.onlyColumn().orientation)
 
-    vm.onAction(WorkspaceAction.SetFirstPaneFraction("a", 0.5f))
-
-    vm.onAction(
-      WorkspaceAction.ObserveDevice(
-        DeviceColumn(
-          deviceId = "a",
-          name = "Device a (restarted)",
-          platform = Platform.Android,
-          deviceSessionUuid = "epoch-b",
+      vm.onAction(
+        WorkspaceAction.ObserveDevice(
+          epochColumn("epoch-b", name = "Device a (restarted)").copy(activeTool = null),
         ),
-      ),
-    )
+      )
+
+      val column = vm.onlyColumn()
+      assertEquals("epoch-b", column.deviceSessionUuid)
+      assertEquals("Device a (restarted)", column.name)
+      // The user's layout carries over.
+      assertEquals(Tool.Storage, column.activeTool)
+      assertEquals(0.5f, column.firstPaneFractionOverride)
+      // State observed from the retired epoch does not.
+      assertEquals(Orientation.Portrait, column.orientation)
+      assertEquals(false, column.locked)
+      assertNull("the retired epoch's screenshot cache is dropped", registry.peek("a"))
+    }
+
+  @Test
+  fun `reobserving the same epoch keeps its observed state and caches`() = testScope.runTest {
+    val registry = NavigationScreenshotLoaderRegistry()
+    val vm = WorkspaceViewModel(this, screenshotLoaderRegistry = registry)
+    vm.observeEpochAWithState(registry)
+
+    vm.onAction(WorkspaceAction.ObserveDevice(epochColumn("epoch-a")))
+
+    val column = vm.onlyColumn()
+    assertEquals("epoch-a", column.deviceSessionUuid)
+    assertEquals(Orientation.Landscape, column.orientation)
+    assertNotNull(registry.peek("a"))
+  }
+
+  @Test
+  fun `device session ended drops the retired epoch's state`() = testScope.runTest {
+    val registry = NavigationScreenshotLoaderRegistry()
+    val vm = WorkspaceViewModel(this, screenshotLoaderRegistry = registry)
+    vm.observeEpochAWithState(registry)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
+
+    vm.onAction(WorkspaceAction.EndDeviceSession("a", "epoch-a", "epoch-b"))
 
     val state = vm.state.value as WorkspaceUiState.Content
-    assertEquals(1, state.columns.size)
-    assertEquals("epoch-b", state.columns.single().deviceSessionUuid)
-    assertEquals(Tool.Storage, state.columns.single().activeTool)
-    assertEquals(0.5f, state.columns.single().firstPaneFractionOverride)
+    val a = state.columns.first { it.deviceId == "a" }
+    assertEquals(listOf("a", "b"), state.columns.map { it.deviceId })
+    assertEquals("epoch-b", a.deviceSessionUuid)
+    assertEquals("Device a", a.name)
+    assertEquals(Tool.Storage, a.activeTool)
+    assertEquals(0.5f, a.firstPaneFractionOverride)
+    assertEquals(Orientation.Portrait, a.orientation)
+    assertEquals(false, a.locked)
+    assertNull(registry.peek("a"))
+    assertEquals("b", state.focusedDeviceId)
+  }
+
+  @Test
+  fun `device session ended for another epoch is ignored`() = testScope.runTest {
+    val registry = NavigationScreenshotLoaderRegistry()
+    val vm = WorkspaceViewModel(this, screenshotLoaderRegistry = registry)
+    vm.observeEpochAWithState(registry)
+    val before = vm.state.value
+
+    vm.onAction(WorkspaceAction.EndDeviceSession("a", "epoch-old", "epoch-b"))
+    vm.onAction(WorkspaceAction.EndDeviceSession("absent", "epoch-a", "epoch-b"))
+
+    assertEquals(before, vm.state.value)
+    assertNotNull(registry.peek("a"))
   }
 
   @Test

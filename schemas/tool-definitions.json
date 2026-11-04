@@ -53137,6 +53137,11 @@
                   ],
                   "description": "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset."
                 },
+                "lockScreen": {
+                  "type": "string",
+                  "enum": ["pin", "none", "unset"],
+                  "description": "Sets an AutoMobile test PIN, or removes the PIN; reset restores no lock screen. Keys bound to the lock screen are invalidated by a removal. 'unset' restores."
+                },
                 "disablePackage": {
                   "anyOf": [
                     {

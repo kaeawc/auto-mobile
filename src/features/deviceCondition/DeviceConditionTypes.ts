@@ -151,6 +151,8 @@ export interface DeviceConditionInput {
     corruptAppFile?: DeviceConditionCorruptTarget | typeof DEVICE_CONDITION_UNSET;
     /** Permission revocation (#14069); the one fault so far that takes an object. */
     revokePermission?: DeviceConditionPermissionTarget | typeof DEVICE_CONDITION_UNSET;
+    /** Lock-screen credential fault; removing it invalidates keys bound to the lock screen. */
+    lockScreen?: "pin" | "none" | typeof DEVICE_CONDITION_UNSET;
     /** Package state (#14069): disable an app until reset, or clear its data once. */
     disablePackage?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
     /** Process faults (#14068): end an app's process, or send it a trim-memory level, once. */
@@ -310,6 +312,12 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .optional()
           .describe(
             "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset.",
+          ),
+        lockScreen: z
+          .enum(["pin", "none", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Sets an AutoMobile test PIN, or removes the PIN; reset restores no lock screen. Keys bound to the lock screen are invalidated by a removal. 'unset' restores.",
           ),
         disablePackage: z
           .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])

@@ -145,3 +145,24 @@ describe("hoisted-label waits judge every match the resolver found (#17007)", ()
     expect(disappear(resolver, { text: "Alarm Clock" })(observation).matched).toBe(false);
   });
 });
+
+describe("only descendants that contribute the matched text are judged (#17007)", () => {
+  const observation = screenWith([
+    {
+      text: " Alarm",
+      clickable: "true",
+      bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+      node: [
+        { text: "7:00", bounds: { left: 0, top: 20, right: 100, bottom: 60 } },
+        { text: "Edit", bounds: { left: 0, top: 850, right: 100, bottom: 890 } },
+      ],
+    },
+  ]);
+
+  test("an off-screen sublabel child does not reject a label folded from visible children", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(true);
+    expect(disappear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(false);
+  });
+});

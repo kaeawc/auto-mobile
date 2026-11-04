@@ -275,6 +275,8 @@ export interface SearchableEntry extends SearchableNode {
    * label order. Present only on a row that received hoisted labels.
    */
   hoistedSources?: readonly SearchableEntry[];
+  /** The subset of {@link hoistedSources} folded into the row's own label; empty when none was. */
+  hoistedLabelSources?: readonly SearchableEntry[];
 }
 
 /** `AccessibilityWindowInfo.TYPE_INPUT_METHOD`. */
@@ -480,9 +482,11 @@ function hoistSearchableLabels(entries: SearchableEntry[]): void {
       ),
     ];
     const folded = foldSearchableLabels(row, parts);
+    const labelPart = folded.label !== row.label ? parts[0] : undefined;
     row.displayedLabel = displayedSearchableLabel(folded.label);
     row.label = row.displayedLabel;
     row.hoistedSources = texts;
+    row.hoistedLabelSources = texts.filter((text) => text.label === labelPart);
     row.textFields = [
       ...new Set(
         [row.displayedLabel, ...row.textFields, ...parts].filter(

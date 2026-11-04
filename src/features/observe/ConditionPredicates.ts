@@ -281,22 +281,23 @@ function boundedChosenAncestor(result: ElementResolution, source: SearchableEntr
 }
 
 /**
- * Whether `source` matched the selector text only through a label hoisted from its
- * descendants, and one of those descendants has no visible part on screen (#17007).
- * Such a composite label ("7:00 Alarm" from a visible " Alarm" row and an off-screen
- * "7:00" child) does not show the text, so a wait must not accept it. Text the node
- * carries itself is unaffected. Selector resolution for actions is unchanged.
+ * Whether `source` matched the selector text only through text an off-screen hoisted
+ * descendant contributes to (#17007). Such a composite label ("7:00 Alarm" from a visible
+ * " Alarm" row and an off-screen "7:00" child) does not show the text, so a wait must not
+ * accept it. Text the node carries itself, a label folded only from visible descendants and
+ * a visible descendant's own label still match. Selector resolution for actions is unchanged.
  */
 function matchesOnlyThroughOffScreenHoist(
   source: SearchableEntry,
   selector: ConditionSelector,
   { matchMode, screenSize }: HoistCheck,
 ): boolean {
-  return (
-    source.hoistedSources !== undefined &&
-    !carriesSelectorTextItself(source, selector, matchMode) &&
-    source.hoistedSources.some((part) => !hasVisibleScreenPart(part.bounds, screenSize))
-  );
+  const hoisted = source.hoistedSources ?? [];
+  const visible = (part: SearchableEntry) => hasVisibleScreenPart(part.bounds, screenSize);
+  if (hoisted.every(visible)) {
+    return false;
+  }
+  return !matchesAnyText(visibleBackedTexts(source, visible), selector, matchMode);
 }
 
 interface HoistCheck {
@@ -305,25 +306,40 @@ interface HoistCheck {
 }
 
 /**
- * Whether `source`'s own captured text (not a label hoisted onto it) satisfies the selector text
- * the way the resolver compared it: whitespace-collapsed exact or contains, or the same regex.
+ * The texts `source` is searchable by that no off-screen hoisted descendant contributes to: its
+ * own captured text, its composed label when every descendant folded into it is visible, and the
+ * label of each visible hoisted descendant.
  */
-function carriesSelectorTextItself(
+function visibleBackedTexts(
   source: SearchableEntry,
+  visible: (part: SearchableEntry) => boolean,
+): string[] {
+  const labelBacked = (source.hoistedLabelSources ?? []).every(visible);
+  return [
+    ...Object.values(source.textSources),
+    ...(labelBacked && source.displayedLabel !== undefined ? [source.displayedLabel] : []),
+    ...(source.hoistedSources ?? []).flatMap((part) =>
+      visible(part) && part.label !== undefined ? [part.label] : [],
+    ),
+  ];
+}
+
+/** Whether any of `texts` satisfies the selector text the way the resolver compared it. */
+function matchesAnyText(
+  texts: readonly string[],
   { text, caseSensitive }: ConditionSelector,
   matchMode: MatchMode,
 ): boolean {
   if (text === undefined) {
     return true;
   }
-  const own = Object.values(source.textSources);
   if (matchMode === "regex") {
     // The resolver already compiled this pattern for the same match, so it is valid here.
     const regex = new RegExp(normalizeQuotes(text), caseSensitive ? "" : "i");
-    return own.some((value) => regex.test(normalizeQuotes(value)));
+    return texts.some((value) => regex.test(normalizeQuotes(value)));
   }
   const query = normalizeMatchText(text, caseSensitive);
-  return own.some((value) => {
+  return texts.some((value) => {
     const actual = normalizeMatchText(value, caseSensitive);
     return matchMode === "exact" ? actual === query : actual.includes(query);
   });

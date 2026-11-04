@@ -213,7 +213,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           .string()
           .optional()
           .describe(
-            "Panel key, role (inner, cover, rear, external, overlay), active, or opt-in Android all. All adds per-panel displays (never overlay displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
+            "Panel key, role (inner, cover, rear, external, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
           ),
         project: z
           .enum(["full", "skeleton"])
@@ -515,6 +515,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     observeSchema,
     {
       handler: withWatchObserve(observeHandler, dependencies),
+      keepsImeRestorePending: true,
       ...PLAN_RELEVANT,
       defaultEnabled: true,
       // Watching is allowed on any device, whichever session holds it (#10730).

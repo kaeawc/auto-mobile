@@ -246,4 +246,72 @@ describe("Android physical display inventory", () => {
       ),
     ).toBeUndefined();
   });
+  // App-created virtual displays (`DisplayManager.createVirtualDisplay`) carry `type VIRTUAL`
+  // and a `virtual:<package>,<uid>,<name>,<index>` uniqueId (#16462).
+  const virtualRecord = (uniqueId: string) =>
+    `    DisplayDeviceInfo{"Presentation": uniqueId="${uniqueId}", 1280 x 720, modeId 1, density 213, touch NONE, rotation 0, type VIRTUAL, owner com.example.app (uid 10123), state ON, FLAG_PRESENTATION}\n`;
+  const appVirtual = virtualRecord("virtual:com.example.app,10123,Presentation,0");
+
+  test("adds an app-created virtual display under the virtual role, after overlays", () => {
+    const infos = fixture("phone-display-device-info.txt") + appVirtual + overlayRecord;
+    expect(
+      parseAndroidDeviceDisplayOutcome(fixture("phone-surfaceflinger.txt"), infos, ""),
+    ).toEqual({ kind: "multi" });
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        infos,
+        fixture("phone-states.txt"),
+      )?.panels,
+    ).toEqual([
+      { key: "4619827259835644672", role: "unknown", sizePx: { width: 1080, height: 2400 } },
+      { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+      {
+        key: "virtual:com.example.app:Presentation",
+        role: "virtual",
+        sizePx: { width: 1280, height: 720 },
+      },
+    ]);
+  });
+
+  test("leaves AutoMobile's own virtual displays out so recording does not change inventory", () => {
+    for (const uniqueId of [
+      "virtual:com.android.shell,2000,automobile-mirror,0",
+      "virtual:dev.jasonpearson.automobile.ctrlproxy,10200,mirror,0",
+    ]) {
+      const infos = fixture("phone-display-device-info.txt") + virtualRecord(uniqueId);
+      expect(
+        parseAndroidDeviceDisplayOutcome(fixture("phone-surfaceflinger.txt"), infos, ""),
+      ).toEqual({ kind: "single" });
+      expect(
+        parseAndroidDeviceDisplays(fixture("phone-surfaceflinger.txt"), infos, ""),
+      ).toBeUndefined();
+    }
+  });
+
+  test("keeps a virtual key stable across uid and index changes", () => {
+    const panelsFor = (uniqueId: string) =>
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        fixture("phone-display-device-info.txt") + virtualRecord(uniqueId),
+        "",
+      )?.panels.at(-1)?.key;
+    expect(panelsFor("virtual:com.example.app,10123,Presentation,0")).toBe(
+      panelsFor("virtual:com.example.app,10456,Presentation,3"),
+    );
+  });
+
+  test("leaves out a virtual key two live displays share", () => {
+    const infos =
+      fixture("phone-display-device-info.txt") +
+      appVirtual +
+      virtualRecord("virtual:com.example.app,10123,Presentation,1");
+    expect(
+      parseAndroidDeviceDisplayOutcome(fixture("phone-surfaceflinger.txt"), infos, ""),
+    ).toEqual({ kind: "single" });
+  });
+
+  test("a virtual display without a readable physical panel cannot establish an inventory", () => {
+    expect(parseAndroidDeviceDisplays("", appVirtual + overlayRecord, "")).toBeUndefined();
+  });
 });

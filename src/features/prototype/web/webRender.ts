@@ -22,7 +22,10 @@ import {
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
+import { webMapRenderers } from "./webMap";
+import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -35,13 +38,20 @@ import {
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
+import { textRuns } from "./webText";
+import { rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
   readonly type: string;
   readonly id?: string;
   readonly path: string;
-  readonly reason: "unsupportedType" | "assetNotInlined";
+  /**
+   * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
+   * shader does.
+   */
+  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback";
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -91,9 +101,6 @@ export interface WebRenderKit {
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
 }
-
-/** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
-const MAX_WEB_REPEAT_ITEMS = 200;
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
 function bindBare(text: string, scope: WebRenderScope): string {
@@ -202,21 +209,6 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
 }
 
 /**
- * A repeat's rows: a literal array or a pointer into the spec's data. As on the devices, only
- * object items repeat (scalars are skipped before indices are assigned), up to the item cap.
- */
-function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
-  const itemsPath = record(repeat.items)?.path;
-  const items = Array.isArray(repeat.items)
-    ? repeat.items
-    : typeof itemsPath === "string"
-      ? resolvePrototypeDataPointer(scope.data, itemsPath)
-      : undefined;
-  const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
-  return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
-}
-
-/**
  * Lets a container decorate each child, given the child node it was drawn from. A hidden child
  * arrives as undefined, so a container that keeps a slot for every child (a carousel) can still
  * draw one; returning undefined draws nothing.
@@ -239,7 +231,7 @@ export function children(
       renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
     );
   }
-  const rows = repeatRows(repeat, scope);
+  const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
@@ -319,12 +311,18 @@ const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box",
  */
 function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
   const repeat = record(raw.repeat);
-  if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope).length === 0)) {
+  if (
+    !Array.isArray(raw.children) ||
+    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
+  ) {
     return [];
   }
-  const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));
+  const own = rowFillAxes(raw, path, prepareIn(scope));
+  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
+
+const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
 function spacerFilled(node: Raw): Raw {
   return isUnsizedSpacer(node) ? fillMissing(node) : node;
@@ -338,7 +336,8 @@ const line =
     const node = filling(raw, lineFillAxes(raw, scope, path));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    return el("div", { attrs, style }, children(node, inner, path));
+    const rowed = rowMeasured(node, path, prepareIn(inner));
+    return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
@@ -348,23 +347,6 @@ const box: NodeRenderer = (raw, scope, path) => {
   const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
   return el("div", { attrs, style }, children(node, inner, path));
 };
-
-/** A text node's content: its `text`, or each span with its own text style. */
-function textContent(node: Raw, scope: WebRenderScope): WebChild[] {
-  if (!Array.isArray(node.spans)) {
-    return [bound(node.text, scope)];
-  }
-  return node.spans.map((span) => {
-    const entry = record(span) ?? {};
-    const style = record(entry.style);
-    const background = cssColor(style?.background, scope.style);
-    const css = {
-      ...textCss(style, scope.style),
-      ...(background ? { "background-color": background } : {}),
-    };
-    return el("span", { style: css }, [bound(entry.text, scope)]);
-  });
-}
 
 const text: NodeRenderer = (node, scope) => {
   const maxLines = record(node.style)?.maxLines;
@@ -378,11 +360,16 @@ const text: NodeRenderer = (node, scope) => {
         }
       : {};
   const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
-  return el("span", { attrs, style }, textContent(node, scope));
+  return el(
+    "span",
+    { attrs, style },
+    textRuns(node, (value) => bound(value, scope), scope.style),
+  );
 };
 
 const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
+  const fade = fadeEdgesCss(node, scope.style);
   const { attrs, style } = base(node, scope, {
     display: "flex",
     // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
@@ -390,12 +377,14 @@ const scroll: NodeRenderer = (node, scope, path) => {
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
+    ...fade.style,
   });
   const inner = child(scope, {
     inBox: false,
     style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
   });
-  return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
+  const scrollAttrs = { ...attrs, ...fade.attrs };
+  return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
 
 const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node), scope));
@@ -720,19 +709,16 @@ const textField: NodeRenderer = (node, scope, path) => {
   const caption = fieldCaption(node, error, scope);
   // With a caption, the wrapper is what the parent lays out, so it takes the field's sizing.
   const [outer, inner] = caption.length === 0 ? [{}, style] : splitParentFacing(style);
-  const field = el(
-    "div",
-    { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner },
-    [
-      ...namedIcon(node.leadingIcon, scope),
-      el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
-        ...floatingLabel(node, empty, scope),
-        el("span", { style: lineBounds(node) }, [shown]),
-      ]),
-      // The trailing slot is an {icon, label} action, like an app-bar action.
-      ...appBarIcons([node.trailingIcon], scope, path),
-    ],
-  );
+  const box = el("div", { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner }, [
+    ...namedIcon(node.leadingIcon, scope),
+    el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
+      ...floatingLabel(node, empty, scope),
+      el("span", { style: lineBounds(node) }, [shown]),
+    ]),
+    // The trailing slot is an {icon, label} action, like an app-bar action.
+    ...appBarIcons([node.trailingIcon], scope, path),
+  ]);
+  const field = caption.length === 0 ? box : withOverContentLayers(box, node.style, scope.style);
   return caption.length === 0
     ? field
     : el("div", { style: { ...outer, display: "flex", "flex-direction": "column", gap: "4px" } }, [
@@ -953,6 +939,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   listItem,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
+  ...webMediaRenderers(KIT),
+  ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
 };
 
@@ -1052,5 +1040,13 @@ export function renderWebNode(
     return undefined;
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  return renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const shaded = shaderFallback(styled, path);
+  if (shaded) {
+    own.unsupported.push(shaded);
+  }
+  // The layers belong to the node's own box; a wrapper (a captioned field) layers its box itself.
+  return element.attrs["data-node"] === undefined
+    ? element
+    : withOverContentLayers(element, styled.style, own.style);
 }

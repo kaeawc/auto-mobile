@@ -472,9 +472,9 @@ export class PlanValidator {
 
   /**
    * Validates that no step authors the reserved `__lockNamespace` field
-   * (inline or under `params`). It is injected internally by PlanExecutor
-   * at runtime to scope a plan's lock state, and an authored plan must
-   * never set it: two participants authoring different truthy
+   * (inline or under `params`). PlanExecutor scopes a plan's lock state
+   * itself, passing the namespace to the step as call context (#15663), and
+   * an authored plan must never try to set it: two participants authoring different truthy
    * `__lockNamespace` values for the same lock would pass every per-lock
    * feasibility check yet wait in separate namespaced barriers/critical
    * sections at runtime until timeout, since CriticalSectionCoordinator

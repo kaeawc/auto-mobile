@@ -90,15 +90,16 @@ describe("criticalSection tool", () => {
       );
     try {
       await expect(
-        ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
-          { platform: "android", deviceId: "A", name: "A" },
-          {
-            lock: "mismatch",
-            device: "A",
-            deviceCount: 2,
-            __lockNamespace: "plan",
-            steps: [{ tool: "tapOn", params: { device: "B" } }],
-          },
+        runWithToolSelectionContext({ planLockNamespace: "plan" }, () =>
+          ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+            { platform: "android", deviceId: "A", name: "A" },
+            {
+              lock: "mismatch",
+              device: "A",
+              deviceCount: 2,
+              steps: [{ tool: "tapOn", params: { device: "B" } }],
+            },
+          ),
         ),
       ).rejects.toThrow('differs from criticalSection owner device="A"');
       await drainMicrotasks(40);
@@ -1104,16 +1105,17 @@ describe("criticalSection tool", () => {
 
     try {
       const tool = ToolRegistry.getToolForPlan("criticalSection")!;
-      const error = await tool.deviceAwareHandler!(
-        device,
-        {
-          lock: "loss-lock",
-          __lockNamespace: "loss-session",
-          deviceCount: 1,
-          steps: [{ tool: "mockDeviceLoss", params: { device: "A" } }],
-        },
-        undefined,
-        signal,
+      const error = await runWithToolSelectionContext({ planLockNamespace: "loss-session" }, () =>
+        tool.deviceAwareHandler!(
+          device,
+          {
+            lock: "loss-lock",
+            deviceCount: 1,
+            steps: [{ tool: "mockDeviceLoss", params: { device: "A" } }],
+          },
+          undefined,
+          signal,
+        ),
       ).then(
         () => undefined,
         (error: unknown) => error,

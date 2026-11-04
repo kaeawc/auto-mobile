@@ -4,7 +4,11 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import { AppNotInstalledError, type ClearAppDataResult } from "../../models";
 import { errorMessage } from "../describeUnknownError";
-import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "./iosAppContainerData";
+import {
+  getAppDataContainerPath,
+  IOS_APP_DATA_FOLDERS,
+  IOS_LIBRARY_STANDARD_FOLDERS,
+} from "./iosAppContainerData";
 import { SimulatorIosTerminateBackend } from "./SimulatorIosTerminateBackend";
 import type {
   IosClearDataBackend,
@@ -18,7 +22,10 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
 
   constructor(
     private readonly deviceId: string,
-    private readonly deps: Pick<IosClearDataBackendDeps, "simctl" | "rm" | "containerOwnership">,
+    private readonly deps: Pick<
+      IosClearDataBackendDeps,
+      "simctl" | "appDataFs" | "containerOwnership"
+    >,
   ) {}
 
   /** `signal` is checked once the container is resolved, so a cancelled call wipes nothing. */
@@ -53,13 +60,15 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
     // recalled, so this is the last point a cancellation can stop the wipe.
     signal?.throwIfAborted();
     try {
-      // Folders are independent — wipe them concurrently. force:true so a missing
-      // folder (e.g. an app that never wrote Documents) is a no-op, not an error.
+      // Keep the top-level directories and their metadata; only remove their contents.
       await Promise.all(
-        IOS_APP_DATA_FOLDERS.map((folder) =>
-          (this.deps.rm ?? fs.rm)(path.join(containerPath, folder), {
+        IOS_APP_DATA_FOLDERS.map((folder) => this.clearFolder(path.join(containerPath, folder))),
+      );
+      await Promise.all(
+        IOS_LIBRARY_STANDARD_FOLDERS.map((folder) =>
+          (this.deps.appDataFs ?? fs).mkdir(path.join(containerPath, "Library", folder), {
             recursive: true,
-            force: true,
+            mode: 0o755,
           }),
         ),
       );
@@ -69,6 +78,27 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
       logger.warn(`[iOS] Failed to clear app data for ${bundleId}: ${errorMessage(error)}`);
       return { success: false, packageName: bundleId, error: errorMessage(error) };
     }
+  }
+
+  private async clearFolder(folderPath: string): Promise<void> {
+    const appDataFs = this.deps.appDataFs ?? fs;
+    let entries: string[];
+    try {
+      entries = await appDataFs.readdir(folderPath);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        throw error;
+      }
+      // A missing app-data directory is expected and safe to recreate empty.
+      logger.debug(`[iOS] Creating missing app data directory ${folderPath}`);
+      await appDataFs.mkdir(folderPath, { mode: 0o755 });
+      return;
+    }
+    await Promise.all(
+      entries.map((entry) =>
+        appDataFs.rm(path.join(folderPath, entry), { recursive: true, force: true }),
+      ),
+    );
   }
 
   private async isConfirmedNotInstalled(bundleId: string): Promise<boolean> {

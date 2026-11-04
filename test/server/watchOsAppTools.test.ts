@@ -163,8 +163,12 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const wiped: string[] = [];
     const dataWipe = {
       containerOwnership: simulatorOwnership,
-      rm: async (target: unknown) => {
-        wiped.push(String(target));
+      appDataFs: {
+        readdir: async () => ["data"],
+        mkdir: async () => {},
+        rm: async (target: string) => {
+          wiped.push(target);
+        },
       },
     };
     registerAppTools({
@@ -317,7 +321,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     expect(cleared).toMatchObject({ success: true, packageName: BUNDLE });
     expect(wiped.sort()).toEqual(
       ["Documents", "Library", "tmp"].map((folder) =>
-        path.join(simulatorDataContainer(watch.deviceId), folder),
+        path.join(simulatorDataContainer(watch.deviceId), folder, "data"),
       ),
     );
 

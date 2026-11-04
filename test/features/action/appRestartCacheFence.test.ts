@@ -213,11 +213,15 @@ describe("app restart cache generation", () => {
               ...deps,
               containerOwnership: simulatorOwnership,
               simctl,
-              rm: async () => {
-                events.push("wipe");
-                if (fails) {
-                  throw new Error("partial wipe");
-                }
+              appDataFs: {
+                readdir: async () => ["data"],
+                mkdir: async () => {},
+                rm: async () => {
+                  events.push("wipe");
+                  if (fails) {
+                    throw new Error("partial wipe");
+                  }
+                },
               },
               createReinstaller: () => ({
                 clearAppDataViaReinstall: async () => {

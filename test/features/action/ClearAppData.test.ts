@@ -274,13 +274,15 @@ describe("ClearAppData", () => {
             resolveIosClearDataBackend(id, {
               ...deps,
               containerOwnership: simulatorOwnership,
-              rm: async (target, options) => {
-                if (typeof target !== "string") {
-                  throw new Error("Expected a string container path");
-                }
-                expect(options).toEqual({ recursive: true, force: true });
-                removed.push(target);
-                directories.delete(target);
+              appDataFs: {
+                readdir: async () => ["data"],
+                mkdir: async (target) => {
+                  directories.add(target);
+                },
+                rm: async (target, options) => {
+                  expect(options).toEqual({ recursive: true, force: true });
+                  removed.push(target);
+                },
               },
             }),
         }).execute(bundleId);
@@ -291,9 +293,18 @@ describe("ClearAppData", () => {
           { bundleId, deviceId: simDevice.deviceId },
         ]);
         expect(removed.sort()).toEqual(
-          ["Documents", "Library", "tmp"].map((folder) => path.join(container, folder)).sort(),
+          ["Documents", "Library", "tmp"]
+            .map((folder) => path.join(container, folder, "data"))
+            .sort(),
         );
-        expect([...directories]).toEqual([container]);
+        expect([...directories].sort()).toEqual(
+          [
+            container,
+            ...["Documents", "Library", "tmp", "Library/Caches", "Library/Preferences"].map(
+              (folder) => path.join(container, folder),
+            ),
+          ].sort(),
+        );
       });
 
       test("returns failure when the data container cannot be resolved for an installed app", async () => {

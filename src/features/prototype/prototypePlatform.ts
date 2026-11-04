@@ -1,8 +1,5 @@
 import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
-import {
-  prototypeChannelsError,
-  prototypeChannelCallError,
-} from "./prototypeChannels";
+import { prototypeChannelsError, prototypeChannelCallError } from "./prototypeChannels";
 import {
   prototypeCameraCallError,
   prototypeCameraPreviewError,
@@ -49,8 +46,9 @@ import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
  * contract types their shapes; this module adds what it cannot: known calls and events from the
  * `platformModules` table, per-call arguments, declared modules and permissions, `{event}` scope,
  * the `into` path and the reserved `prototype_` emit prefix. It also locates every use for the
- * generated capability gates in prototypePlatformGates (`prototype_platform_v1` plus one `prototype_platform_<module>_v1`
- * per module). Runtime dispatch lives on the devices (#14295, #14296).
+ * generated capability gates in prototypePlatformGates (`prototype_platform_v1` plus one
+ * `prototype_platform_<module>_v1` per module). Runtime dispatch lives on the devices (#14295,
+ * #14296).
  */
 
 /** Maximum UTF-8 bytes copied to or returned from the clipboard. */

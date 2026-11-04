@@ -41,7 +41,8 @@ export function withLaterMinStrut(
   if (element.style["max-width"] !== undefined) {
     outer["max-width"] = element.style["max-width"];
   }
-  const cell = { "grid-area": "1 / 1", "min-width": "0" };
+  // Explicit: grid does not stretch an item with an aspect ratio or a replaced element by default.
+  const cell = { "grid-area": "1 / 1", "min-width": "0", "justify-self": "stretch" };
   const strut = el("div", {
     attrs: { "aria-hidden": "true" },
     style: { "grid-area": "1 / 1", width: px(min), "max-width": "100%", height: "0" },

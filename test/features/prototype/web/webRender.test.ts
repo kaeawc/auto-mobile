@@ -666,7 +666,12 @@ describe("prototype web still (#16346)", () => {
     });
     const [node, strut] = cell.children as WebElement[];
     expect(node!.attrs["data-testid"]).toBe("after");
-    expect(node!.style).toMatchObject({ "grid-area": "1 / 1", "min-width": "0" });
+    // Stretched explicitly, since grid would not stretch an aspect-ratio or replaced node.
+    expect(node!.style).toMatchObject({
+      "grid-area": "1 / 1",
+      "min-width": "0",
+      "justify-self": "stretch",
+    });
     expect(node!.style).not.toHaveProperty("flex-shrink");
     expect(node!.style).not.toHaveProperty("width");
     expect(strut!.attrs["aria-hidden"]).toBe("true");

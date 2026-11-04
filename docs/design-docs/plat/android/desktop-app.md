@@ -71,7 +71,10 @@ fallback), instead of opening their own socket:
   device's leases. The first lease that asks sends `subscribe_storage` on the
   shared stream, and the last one to let go sends `unsubscribe_storage`. Updates,
   acknowledgements and reconciliation requests for a file reach only the leases
-  holding it, without loss. A lease that joins a file the device already
+  holding it, without loss. The daemon pushes a device's storage updates to every
+  subscription for that device, including files only another client observes;
+  the stream drops those on arrival, so a device with no local Storage lease
+  retains none of them. A lease that joins a file the device already
   observes is acknowledged at once, so it reconciles its snapshot. A dropped
   connection forgets every confirmation until the re-registration after the
   reconnect acknowledges the holders again. The daemon owns an observer per

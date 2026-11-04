@@ -90,8 +90,12 @@ async function refusalAfterRestart(reason: SessionReleaseReason): Promise<Termin
   const first = newManager();
   await baseWithLabel(first);
   await cascadeEnd(first, reason);
-  const restarted = newManager();
-  const refusal = await restarted
+  return refusalOf(newManager());
+}
+
+/** The terminal refusal `manager` gives a call naming the label. */
+async function refusalOf(manager: SessionManager): Promise<TerminalSessionError> {
+  const refusal = await manager
     .getOrCreateSession(LABEL, DEVICE_POOL, "android", { requireIssuedSession: true })
     .then(
       () => undefined,
@@ -157,6 +161,23 @@ describe("a label's refusal after a restart carries its base's cli idle window (
     expect(mcpRequestFailureDetails(refusal, undefined).details).not.toHaveProperty(
       "idleTimeoutMs",
     );
+  });
+});
+
+describe("a label that expired on its own cli idle window keeps it after a restart (#17009)", () => {
+  test("the refusal reports the label's window, not the base's later one", async () => {
+    const first = newManager();
+    await baseWithLabel(first);
+    first.adoptCliLivenessPolicy(LABEL, 120_000);
+    await first.releaseSession(LABEL, "cli-idle-timeout");
+    await first.releaseSession(BASE, "cli-idle-timeout");
+    const restarted = newManager();
+
+    const refusal = await refusalOf(restarted);
+    expect(refusal.release).toMatchObject({
+      releaseReason: "cli-idle-timeout",
+      cliIdleTimeoutMs: 120_000,
+    });
   });
 });
 

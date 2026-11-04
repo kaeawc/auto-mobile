@@ -12,6 +12,7 @@ import {
 import { SessionSlotShadowProbe } from "../sessionSlotShadowProbe";
 import {
   cliIdleWindowMarker,
+  persistedCliIdleWindowMs,
   persistedInheritedCliIdleWindowMs,
   type SessionLifecycleSlots,
 } from "./internalContracts";
@@ -122,10 +123,14 @@ export class SessionPlanLabels {
     if (recoverable && this.host.planLabels.isRunning(sessionId)) {
       return;
     }
-    // The label's row records only an inherited `cli-idle-timeout`; the window is its base's.
-    const inheritedWindowMs = await persistedInheritedCliIdleWindowMs(sessionId, persisted, (id) =>
-      this.host.readPersistedSession(id),
-    );
+    // A label on its own `cli-idle` policy keeps its own window. Otherwise its row records only an
+    // inherited `cli-idle-timeout`, and the window is its base's.
+    const inheritedWindowMs =
+      persistedCliIdleWindowMs(persisted) === undefined
+        ? await persistedInheritedCliIdleWindowMs(sessionId, persisted, (id) =>
+            this.host.readPersistedSession(id),
+          )
+        : undefined;
     throw new TerminalSessionError(sessionId, {
       ...this.host.releaseSnapshotFromPersisted(
         sessionId,

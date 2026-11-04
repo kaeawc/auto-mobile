@@ -233,7 +233,12 @@ function propagateDataTaint(
   for (const write of writes) {
     if (write.source === "data") {
       const key = firstPointerSegment(write.from);
-      buckets.set(key, [...(buckets.get(key) ?? []), write]);
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.push(write);
+      } else {
+        buckets.set(key, [write]);
+      }
     } else {
       checks += platformTainted.length;
       if (platformTainted.some((taint) => pointersOverlap(taint, write.from, false))) {

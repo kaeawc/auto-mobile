@@ -41,4 +41,37 @@ describe("sensitive copy-taint propagation", () => {
   test("an unrelated destination stays untainted", () => {
     expect(prototypeSensitiveSinkErrors(chainSpec("data:/other"))).toEqual([]);
   });
+
+  test("many copies sharing one source segment bucket in linear time", () => {
+    const COMMON = 10_000;
+    const spec = {
+      id: "common",
+      requires: { platform: ["clipboard"] },
+      root: {
+        type: "column",
+        children: [
+          { type: "pasteButton", into: "/data/secret" },
+          {
+            type: "button",
+            label: "Copy",
+            onTap: [
+              ...Array.from({ length: COMMON }, (_, i) => ({
+                type: "setData",
+                path: `/data/d${i}`,
+                value: { data: `/common/x${i}` },
+              })),
+              { type: "setData", path: "/data/sink", value: { data: "/secret" } },
+            ],
+          },
+        ],
+      },
+      storage: { version: 1, keys: ["data:/sink"] },
+    };
+    const started = performance.now();
+    const errors = prototypeSensitiveSinkErrors(spec);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(errors).toEqual([
+      { path: "storage.keys[0]", message: "Sensitive value cannot be persisted" },
+    ]);
+  });
 });

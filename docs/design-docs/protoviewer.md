@@ -162,6 +162,13 @@ Import needs identical accept/reject behaviour on all three platforms.
 - Import uses `fileImporter` and `onOpenURL` (document UTI `dev.jasonpearson.automobile.prototype`).
   Image decode has a pixel budget and a PNG/JPEG/WebP magic-byte allowlist before `UIImage(data:)`.
   Fonts are unregistered when switching prototypes.
+- **Copy diagnostics** in the viewer actions menu copies plain text with fixed, unlocalized keys:
+  app version, iOS version, sorted renderer capabilities, the last fixed failure code and whether
+  the render watchdog tripped. `ViewerDiagnostics` in Core has no field for spec text, validator
+  paths or messages, labels, library ids, saved state or requests. Library load failures use
+  `library-corrupt`, storage opening uses `storage-load`, metadata/reset failures use `library-storage`,
+  renderer validation uses `validation`, and watchdog expiry uses `watchdog`. The watchdog flag stays
+  true for the open screen even after relaunch. Core tests cover formatting and content exclusion.
 - Network: requests go through a pin-capable transport, not `URLSession`; App Transport Security is
   relaxed only in the simulator and dev build; see section 6.
 

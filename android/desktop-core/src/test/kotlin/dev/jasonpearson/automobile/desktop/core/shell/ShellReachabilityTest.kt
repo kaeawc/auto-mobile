@@ -36,9 +36,7 @@ class ShellReachabilityTest {
   private val knownDormant =
     setOf(
       "CenterTabStrip",
-      "DetachedInspectorWindow",
       "HorizontalSplitPane",
-      "InspectorPaneHeader",
       "NotificationRulesEditor",
       "PlatformTheme",
       "ToastStack",

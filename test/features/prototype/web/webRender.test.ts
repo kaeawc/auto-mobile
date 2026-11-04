@@ -679,6 +679,38 @@ describe("prototype web still (#16346)", () => {
     expect(toHtml(row)).not.toContain("calc-size");
   });
 
+  test("a wrapped later column keeps its own direction; its maxWidth bounds the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            {
+              type: "column",
+              testTag: "after",
+              style: { width: "fill", minWidth: 40, maxWidth: 100 },
+              children: [
+                { type: "text", text: "A" },
+                { type: "text", text: "B" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    const node = byTag({ element: cell }, "after")[0]!;
+    expect(node.style).toMatchObject({ display: "flex", "flex-direction": "column" });
+    expect(cell.style).not.toHaveProperty("flex-direction");
+    expect(cell.style).toMatchObject({ display: "grid", "max-width": "100px", flex: "1 1 auto" });
+    expect(node.style["max-width"]).toBe("100px");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

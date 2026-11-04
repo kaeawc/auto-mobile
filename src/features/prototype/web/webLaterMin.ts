@@ -1,8 +1,11 @@
 import { el, type WebElement } from "./webNodes";
 import { laterMinStrut, px, type WebStyleContext } from "./webStyle";
 
-/** CSS the row reads from its flex item: these move to the wrapping cell. */
-const ROW_FACING = /^(flex|flex-.*|align-self|order|margin.*)$/;
+/**
+ * CSS the row reads from its flex item: these move to the wrapping cell. Flex-container properties
+ * (`flex-direction`, `flex-wrap`) stay on the node, which still lays out its own children.
+ */
+const ROW_FACING = /^(flex|flex-grow|flex-shrink|flex-basis|align-self|order|margin.*)$/;
 
 /**
  * A later sibling (see RowMeasure) with a content or `fill` width and an authored `minWidth`,
@@ -30,6 +33,10 @@ export function withLaterMinStrut(
   const inner: Record<string, string> = {};
   for (const [key, value] of Object.entries(element.style)) {
     (ROW_FACING.test(key) ? outer : inner)[key] = value;
+  }
+  // An authored maximum also bounds the growing cell, so a `fill` width stops where it did.
+  if (element.style["max-width"] !== undefined) {
+    outer["max-width"] = element.style["max-width"];
   }
   const cell = { "grid-area": "1 / 1", "min-width": "0" };
   const strut = el("div", {

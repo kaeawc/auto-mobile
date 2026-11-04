@@ -1,3 +1,14 @@
+import {
+  ARIA_HIDDEN,
+  BORDER_BOX,
+  BOX_SIZING,
+  GRID_AREA,
+  GRID_TEMPLATE_COLUMNS,
+  JUSTIFY_SELF,
+  MAX_WIDTH,
+  MIN_WIDTH,
+  STRETCH,
+} from "./webCss";
 import { el, type WebElement } from "./webNodes";
 import { laterMinStrut, px, type WebStyleContext } from "./webStyle";
 
@@ -38,14 +49,14 @@ export function withLaterMinStrut(
   // across the cell instead, as the folded minimum replaced that default before.
   delete inner.width;
   // An authored maximum also bounds the growing cell, so a `fill` width stops where it did.
-  if (element.style["max-width"] !== undefined) {
-    outer["max-width"] = element.style["max-width"];
+  if (element.style[MAX_WIDTH] !== undefined) {
+    outer[MAX_WIDTH] = element.style[MAX_WIDTH];
   }
   // Explicit: grid does not stretch an item with an aspect ratio or a replaced element by default.
-  const cell = { "grid-area": "1 / 1", "min-width": "0", "justify-self": "stretch" };
+  const cell = { [GRID_AREA]: "1 / 1", [MIN_WIDTH]: "0", [JUSTIFY_SELF]: STRETCH };
   const strut = el("div", {
-    attrs: { "aria-hidden": "true" },
-    style: { "grid-area": "1 / 1", width: px(min), "max-width": "100%", height: "0" },
+    attrs: { [ARIA_HIDDEN]: "true" },
+    style: { [GRID_AREA]: "1 / 1", width: px(min), [MAX_WIDTH]: "100%", height: "0" },
   });
   return el(
     "div",
@@ -53,9 +64,9 @@ export function withLaterMinStrut(
       style: {
         ...outer,
         display: "grid",
-        "grid-template-columns": "minmax(0, auto)",
-        "min-width": "0",
-        "box-sizing": "border-box",
+        [GRID_TEMPLATE_COLUMNS]: "minmax(0, auto)",
+        [MIN_WIDTH]: "0",
+        [BOX_SIZING]: BORDER_BOX,
       },
     },
     [{ ...element, style: { ...inner, ...cell } }, strut],

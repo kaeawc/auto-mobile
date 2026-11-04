@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   parseDeviceFrames,
   type DeviceFrame,
+  withDeviceFrameSources,
 } from "../../../../src/features/prototype/web/deviceFrameSchema";
-import registry from "../../../../src/features/prototype/web/deviceFrames.json";
+import rawRegistry from "../../../../src/features/prototype/web/deviceFrames.json";
+import sources from "../../../../src/features/prototype/web/deviceFrameSources.json";
 import {
   PROTOTYPE_WEB_3D_CSS,
   prototypeWeb3dBodyAttributes,
@@ -21,6 +23,8 @@ import {
   buildPrototypeWebPage,
   PROTOTYPE_WEB_RUNTIME,
 } from "../../../../src/features/prototype/web/webPage";
+
+const registry = withDeviceFrameSources(rawRegistry, sources);
 
 const BOOK_POSTURES = [
   { posture: "closed", panel: "cover", hingeDegrees: 0 },

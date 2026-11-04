@@ -1,3 +1,14 @@
+import {
+  ABSOLUTE,
+  ARIA_HIDDEN,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SHADOW,
+  BOX_SIZING,
+  POINTER_EVENTS,
+  RELATIVE,
+} from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import { resolvePrototypeColor, type Rgba } from "../prototypeContrast";
 import { el, type WebElement } from "./webNodes";
@@ -117,7 +128,7 @@ export function glassCss(style: Raw, context: WebStyleContext): Css {
   const glass = record(style.glass);
   const tint = resolvePrototypeColor(glass?.tint, context.mode, context.palette);
   const capsule: Css =
-    style.cornerRadius === undefined ? { "border-radius": "9999px", overflow: "hidden" } : {};
+    style.cornerRadius === undefined ? { [BORDER_RADIUS]: "9999px", overflow: "hidden" } : {};
   const look =
     context.platform === "ios"
       ? iosGlass(tint, glass?.variant === "clear", context)
@@ -127,7 +138,7 @@ export function glassCss(style: Raw, context: WebStyleContext): Css {
 
 function androidGlassFallback(tint: Rgba | undefined, context: WebStyleContext): Css {
   const fill = tint ?? resolvePrototypeColor("surfaceContainer", context.mode, context.palette);
-  return fill ? { "background-color": rgbaCss({ ...fill, a: GLASS_FALLBACK_ALPHA }) } : {};
+  return fill ? { [BACKGROUND_COLOR]: rgbaCss({ ...fill, a: GLASS_FALLBACK_ALPHA }) } : {};
 }
 
 function iosGlass(tint: Rgba | undefined, clear: boolean, context: WebStyleContext): Css {
@@ -135,18 +146,18 @@ function iosGlass(tint: Rgba | undefined, clear: boolean, context: WebStyleConte
   // Untinted glass reads dimmer over a dark backdrop.
   const dim = !tint && context.mode === "dark" ? 0.5 : 1;
   return {
-    "background-color": rgbaCss({ ...base, a: (clear ? 0.12 : 0.32) * dim }),
+    [BACKGROUND_COLOR]: rgbaCss({ ...base, a: (clear ? 0.12 : 0.32) * dim }),
     "backdrop-filter": `blur(${clear ? 6 : 16}px) saturate(1.8)`,
-    "box-shadow": "inset 0 0 0 1px rgba(255,255,255,0.35)",
+    [BOX_SHADOW]: "inset 0 0 0 1px rgba(255,255,255,0.35)",
   };
 }
 
 const OVERLAY: Css = {
-  position: "absolute",
+  position: ABSOLUTE,
   inset: "0",
-  "border-radius": "inherit",
-  "box-sizing": "border-box",
-  "pointer-events": "none",
+  [BORDER_RADIUS]: "inherit",
+  [BOX_SIZING]: BORDER_BOX,
+  [POINTER_EVENTS]: "none",
 };
 
 /**
@@ -165,7 +176,7 @@ export function overContentLayers(style: unknown, context: WebStyleContext): Web
   if (ring && typeof border?.width === "number" && border.width > 0) {
     layers.push(
       el("span", {
-        attrs: { "aria-hidden": "true", "data-layer": "border" },
+        attrs: { [ARIA_HIDDEN]: "true", "data-layer": "border" },
         style: {
           ...OVERLAY,
           padding: px(border.width),
@@ -181,8 +192,8 @@ export function overContentLayers(style: unknown, context: WebStyleContext): Web
   if (inner) {
     layers.push(
       el("span", {
-        attrs: { "aria-hidden": "true", "data-layer": "innerShadow" },
-        style: { ...OVERLAY, "box-shadow": inner },
+        attrs: { [ARIA_HIDDEN]: "true", "data-layer": "innerShadow" },
+        style: { ...OVERLAY, [BOX_SHADOW]: inner },
       }),
     );
   }
@@ -201,7 +212,7 @@ export function withOverContentLayers(
   }
   return {
     ...element,
-    style: { position: "relative", ...element.style },
+    style: { position: RELATIVE, ...element.style },
     children: [...element.children, ...layers],
   };
 }

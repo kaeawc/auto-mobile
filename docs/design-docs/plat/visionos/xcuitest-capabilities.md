@@ -23,7 +23,7 @@ verbatim capture is `test/fixtures/visionos-xcuitest/probe-capture.json`.
 | ---------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Launch                       | Yes           | `build-for-testing` then `test-without-building` runs the test. One test took about 38 s, including app launch.                                                                                                   |
 | Hierarchy                    | Yes           | `descendants(matching: .any)` returns type, identifier, label, frame, `hasFocus` and `isEnabled` for 32 elements. The window frame is 1680×1328 in the capture.                                                   |
-| Focus                        | Yes           | The text field reports `hasFocus: true` at launch. Focus is read from the snapshot, not set.                                                                                                                      |
+| Focus                        | Yes           | `field` reports `hasFocus: false` at launch and `true` after the tap and typing. Focus is reported after interaction, not at launch. It is read from the snapshot, not set.                                       |
 | Element tap in window        | Yes           | `app.buttons["B01"].tap()` changes the label to `last: B01`.                                                                                                                                                      |
 | Element tap in ornament      | Yes           | `app.buttons["orn"].tap()` changes the label to `last: orn`. The ornament's reported frame is `(16, 16)` in the scene's top-left space, not its visual position at the bottom. Tap by identifier, never by frame. |
 | Text input                   | Yes           | `field.tap()` then `field.typeText("hello")` sets the value to `hello`.                                                                                                                                           |
@@ -53,6 +53,5 @@ Outside the GO scope, each item needs its own probe before a command depends on 
   frame actually changes.
 - Gaze and pinch. Treat these as not scriptable from XCUITest.
 
-#16854 (dogfood, blocked by #16852) also needs the manual-test skill to add a
-visionOS simulator step. Its screenshot path must go through `simctl` because
-`XCUIScreen` is unusable on this runtime.
+Screenshots must come from `xcrun simctl io <udid> screenshot`, because
+`XCUIScreen` returns a 1×1 image on this runtime.

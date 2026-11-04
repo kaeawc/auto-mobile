@@ -1,4 +1,4 @@
-import { idleReleaseField } from "./releaseReasons";
+import { cliIdleTimeoutField, idleReleaseField } from "./releaseReasons";
 import {
   ACQUIRE_NEW_SESSION_NEXT_ACTION,
   DEVICE_SESSION_RECOVERY_TOOLS,
@@ -122,11 +122,14 @@ export function sessionOwnershipLostPayload({
   sessionUuid,
   reason,
   release,
+  idleTimeoutMs,
 }: {
   message: string;
   sessionUuid: string;
   reason: string;
   release?: SessionReleaseSnapshot;
+  /** The idle window a `cli-idle-timeout` release ran out, when there is no release snapshot. */
+  idleTimeoutMs?: number;
 }) {
   return {
     error: {
@@ -135,6 +138,8 @@ export function sessionOwnershipLostPayload({
       sessionUuid,
       reason,
       ...idleReleaseField(reason),
+      // A cli-idle session's heartbeat timeout is its adopted idle window (#16908).
+      ...cliIdleTimeoutField(reason, idleTimeoutMs ?? release?.heartbeat.timeoutMs),
       ...terminalSessionRefusalFields(release?.ownerPid),
       ...(release ? { release } : {}),
     },
@@ -159,6 +164,7 @@ export function sessionReleasedDuringCallPayload(
     message: released.message,
     sessionUuid: released.sessionUuid,
     reason: released.releaseReason,
+    idleTimeoutMs: released.details.idleTimeoutMs,
   });
 }
 

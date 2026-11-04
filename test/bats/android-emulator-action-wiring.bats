@@ -2,17 +2,10 @@
 
 ACTION=".github/actions/android-emulator/action.yml"
 
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify android-emulator action wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "default profile preserves the existing AVD cache keys" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local profile_fragment key restore_keys
   profile_fragment="\${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}"
   [ "$(yq -r '.inputs.profile.default' "$ACTION")" = "" ]
@@ -26,7 +19,7 @@ wiring_requires_yq() {
 }
 
 @test "windowed emulation is opt in for resize-display" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local prep_options boot_options retry_options
   [ "$(yq -r '.inputs.windowed.default' "$ACTION")" = "false" ]
   prep_options="$(yq -r '.runs.steps[] | select(.name == "Create AVD and generate snapshot for caching") | .with."emulator-options"' "$ACTION")"
@@ -39,7 +32,7 @@ wiring_requires_yq() {
 }
 
 @test "emulator retry marker is wired only to the retry step" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local retry_run attempt_run
   retry_run="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-2") | .run' "$ACTION")"
   attempt_run="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-1") | .run' "$ACTION")"
@@ -49,7 +42,7 @@ wiring_requires_yq() {
 }
 
 @test "both emulator attempts use the boot entrypoint that verifies keyguard state" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local first_attempt retry_attempt
   first_attempt="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-1") | .run' "$ACTION")"
   retry_attempt="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-2") | .run' "$ACTION")"
@@ -59,7 +52,7 @@ wiring_requires_yq() {
 }
 
 @test "daemon reset runs only after a failed first attempt and before retry" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local reset_index retry_index reset_condition reset_run attempt_condition reset_working_directory
   reset_index="$(yq -r '.runs.steps | to_entries[] | select(.value.name == "Reset AutoMobile Daemon Before Retry") | .key' "$ACTION")"
   retry_index="$(yq -r '.runs.steps | to_entries[] | select(.value.id == "emulator-attempt-2") | .key' "$ACTION")"
@@ -77,7 +70,7 @@ wiring_requires_yq() {
 }
 
 @test "foldable posture lane stays advisory and nightly-only with profile artifacts" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local nightly workflow artifact_name artifact_paths
   nightly=".github/workflows/nightly.yml"
   [ "$(yq -r '.jobs | has("foldable-posture-tests")' "$nightly")" = "true" ]
@@ -94,7 +87,7 @@ wiring_requires_yq() {
 }
 
 @test "AVD creation failure immediately collects and prints diagnostics" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local creation_index diagnostics_index condition diagnostics_run
   creation_index="$(yq -r '.runs.steps | to_entries[] | select(.value.id == "avd-create") | .key' "$ACTION")"
   diagnostics_index="$(yq -r '.runs.steps | to_entries[] | select(.value.name == "Surface AVD Creation Diagnostics") | .key' "$ACTION")"
@@ -108,7 +101,7 @@ wiring_requires_yq() {
 }
 
 @test "retry failure immediately prints diagnostics even after job failure" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local retry_index diagnostics_index diagnostics_run
   retry_index="$(yq -r '.runs.steps | to_entries[] | select(.value.id == "emulator-attempt-2") | .key' "$ACTION")"
   diagnostics_index="$(yq -r '.runs.steps | to_entries[] | select(.value.name == "Surface Emulator Diagnostics After Retry") | .key' "$ACTION")"
@@ -119,13 +112,13 @@ wiring_requires_yq() {
 }
 
 @test "diagnostic upload covers AVD creation failure and all attempt directories" {
-  wiring_requires_yq
+  require_mikefarah_yq
   [ "$(yq -r '.runs.steps[] | select(.name == "Upload Emulator Diagnostics") | .if' "$ACTION")" = "always() && (steps.emulator-attempt-1.outcome == 'failure' || steps.avd-create.outcome == 'failure')" ]
   [ "$(yq -r '.runs.steps[] | select(.name == "Upload Emulator Diagnostics") | .with.path' "$ACTION")" = "android-emulator-diagnostics/" ]
 }
 
 @test "pull requests restore the AVD cache but never save it (#11578)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local save_if save_index verify_index
   # The combined actions/cache action saves in a post-job step, while the
   # emulator still runs: on pull requests that save failed on every cache miss.
@@ -145,7 +138,7 @@ wiring_requires_yq() {
 }
 
 @test "the emulator action reads Gradle caches with the version that writes them (#11578)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local writer reader
   writer="$(yq -r '.runs.steps[] | select(.name == "Setup Gradle") | .uses' .github/actions/gradle-task-run/action.yml)"
   reader="$(yq -r '.runs.steps[] | select(.name == "Setup Gradle") | .uses' "$ACTION")"
@@ -154,7 +147,7 @@ wiring_requires_yq() {
 }
 
 @test "optional prebuild wraps boot before the suites in both attempts (#11578)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local attempt attempt_run
   [ "$(yq -r '.inputs."prebuild-script".default' "$ACTION")" = "" ]
   [ "$(yq -r '.inputs."prebuild-script".required' "$ACTION")" = "false" ]

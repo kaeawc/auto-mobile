@@ -29,6 +29,25 @@ car image is installed in the range, the error names the `sdkmanager` command to
 reuses the car emulator instead of creating another. Creating and booting a car emulator this way works
 with an `android-automotive` image; with a Play Store car image it is unverified.
 
+If the test will drive the car, ask for that up front so you never get a Play image:
+
+```json
+{
+  "platform": "android",
+  "formFactor": "automotive",
+  "createIfMissing": true,
+  "requires": { "vehicle": { "motion": "supported" } }
+}
+```
+
+`requires.vehicle.motion: "supported"` (on `startDevice` and `getAndroid`) matches only an emulator
+built from an `android-automotive` image and creates one from such an image instead of the Play
+image. If none is installed in the range, the error names the `sdkmanager` package to install. It is
+refused for a non-automotive request. A booted car emulator's `traits.vehicle` in the booted-devices
+resource reports `motion` (`supported`, `unsupported`, or `unknown` when the build props could not be
+read) and `nightMode` (`supported`). A physical head unit reports both `unsupported`, because vehicle
+state is injected on emulators only. Other devices have no `vehicle` field.
+
 To choose the exact image and profile yourself, call `provisionDevice` with an `android-automotive`
 system image as `runtime` and an automotive profile as `deviceType`:
 
@@ -107,6 +126,12 @@ by default; see [Device condition fixtures](device-condition.md). The `vehicle` 
 - `vehicle.nightMode`: `on`, `off`, or `unset`.
 
 `vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
+
+To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description. It is
+present only on automotive devices, as `{ "motion": ..., "nightMode": ... }` with each value
+`supported`, `unsupported` or `unknown`: an `android-automotive` image reports motion `supported`, an
+`android-automotive-playstore` image reports it `unsupported`, and motion is `unknown` when no car image
+tag is known. A physical head unit reports both `unsupported`.
 
 Motion uses gear and parking-brake events with continuous speed events that renew while driving is
 active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;

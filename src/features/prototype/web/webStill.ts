@@ -1,4 +1,5 @@
 import { prototypeSpecForDevice } from "../prototypeComponents";
+import type { PrototypeFormatLogger } from "../prototypeFormat";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
 import { prototypeDrawnPalette } from "../prototypeSeedScheme";
@@ -31,6 +32,8 @@ export interface PrototypeStillOptions {
   readonly locale?: string;
   /** The system text size: `fontScale` on an Android frame, `contentSize` on an iOS one. */
   readonly textSize?: StillTextSize;
+  /** Traces rejected derived formats; the server passes its logger, a browser embed none. */
+  readonly logger?: PrototypeFormatLogger;
 }
 
 export interface PrototypeStill {
@@ -180,6 +183,16 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+/** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
+function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderScope["format"] {
+  return {
+    locale,
+    timeZone: "UTC",
+    nowMs: options.nowMs ?? 0,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  };
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
@@ -211,7 +224,7 @@ function stillScope(
     },
     data: spec.data,
     spec,
-    format: { locale, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
+    format: stillFormat(options, locale),
     instances: [],
     inBox: false,
     unsupported: [],

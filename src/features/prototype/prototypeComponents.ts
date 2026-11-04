@@ -1,5 +1,5 @@
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
-import contract from "../../../schemas/prototype-spec-contract.json";
+import { prototypeRenderLimits } from "./prototypeRenderContract.generated";
 import {
   bindNodeFields,
   bindTyped,
@@ -323,7 +323,7 @@ function expandNode(node: Raw, path: string, stack: string[], context: Context):
     return expandUse(node, path, stack, context);
   }
   context.nodes++;
-  if (context.nodes > contract.limits.MAX_PROTOTYPE_NODES) {
+  if (context.nodes > prototypeRenderLimits.MAX_PROTOTYPE_NODES) {
     return { error: fail(context, path, "Expanded node limit exceeded") };
   }
   return node.type === "list" || node.type === "adaptive"

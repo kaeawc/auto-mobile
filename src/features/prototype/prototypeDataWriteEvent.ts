@@ -4,7 +4,7 @@ import { prototypeDataPathPointer } from "./prototypeData";
 import { prototypeJsonSchema } from "./prototypeJson";
 
 /**
- * A device `/data` write (`setData`, `appendData`, `removeData`) is reported as a `change` event
+ * A device `/data` write (`setData`, `appendData`, `upsertData`, `removeData`) is reported as a `change` event
  * (`prototype_data_actions_v1`) that reuses the existing wire fields, so no event field is added:
  * `name` is the `/data/<pointer>` written (repeat `{index}` segments bound; for an append, the
  * array appended to) and `payload` is this object. `validity` may accompany it; `state` and
@@ -22,6 +22,16 @@ const payloadSchema = z.union([
   z
     .object({
       op: z.literal("append"),
+      value: prototypeJsonSchema.optional(),
+      maxItems: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+      revision: revisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("upsert"),
+      // The key pointer the row is matched on; the host replays the upsert with the shared writer.
+      key: z.string(),
       value: prototypeJsonSchema.optional(),
       maxItems: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
       revision: revisionSchema,

@@ -204,11 +204,18 @@ export class AndroidImeCatalog {
     return { id, ...(subtypes?.get(id) ? { locale: subtypes.get(id) } : {}) };
   }
 
-  /** Caller holds the per-device lock; an unavailable subtype table is verified by readback. */
-  async restoreSubtypeWithinLock(imeId: string, snapshot: ImeSubtypeSnapshot): Promise<void> {
-    const user = imeUserArgs(await this.users.foregroundUserId());
+  /**
+   * Caller holds the per-device lock; an unavailable subtype table is verified by readback.
+   * `signal` fences the write: once it aborts, no `settings` write is dispatched.
+   */
+  async restoreSubtypeWithinLock(
+    imeId: string,
+    snapshot: ImeSubtypeSnapshot,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const user = imeUserArgs(await this.users.foregroundUserId(signal));
     if (snapshot.id !== null) {
-      const advertised = await this.advertisedSubtypes(imeId);
+      const advertised = await this.advertisedSubtypes(imeId, signal);
       if (advertised && !advertised.has(snapshot.id)) {
         throw new Error(`Original IME subtype ${snapshot.id} is no longer advertised by ${imeId}.`);
       }
@@ -217,18 +224,19 @@ export class AndroidImeCatalog {
       snapshot.id === null
         ? ["shell", "settings", ...user, "delete", "secure", SUBTYPE_KEY]
         : ["shell", "settings", ...user, "put", "secure", SUBTYPE_KEY, String(snapshot.id)];
-    const result = await this.adb.execute(args, { noRetry: true });
+    signal?.throwIfAborted();
+    // Fence up to dispatch only: a dispatched write finishes and is verified by the readback.
+    const result = await this.adb.execute(args, {
+      noRetry: true,
+      beforeDispatch: async () => signal?.throwIfAborted(),
+    });
     if (result.stderr.trim()) {
       throw new Error(`Failed to restore IME subtype: ${result.stderr.trim()}`);
     }
-    const after = await this.readCommand([
-      "shell",
-      "settings",
-      ...user,
-      "get",
-      "secure",
-      SUBTYPE_KEY,
-    ]);
+    const after = await this.readCommand(
+      ["shell", "settings", ...user, "get", "secure", SUBTYPE_KEY],
+      signal,
+    );
     if (after.stderr.trim() || parseSelectedImeSubtype(after.stdout) !== snapshot.id) {
       throw new Error(`IME subtype restoration could not be verified for ${imeId}.`);
     }

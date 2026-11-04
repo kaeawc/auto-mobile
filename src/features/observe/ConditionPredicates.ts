@@ -337,7 +337,8 @@ function visibleBackedTexts(
  * of the parts that differ only in whitespace (" 7:00" and "7:00 "), and the resolver normalizes
  * the composed label the same way for each (#17026), so any visible descendant whose label is
  * equivalent under the selector's normalization supplies it. Regex and `elementId` text keep
- * whitespace, so there only a label that differs at most in quotes and case is equivalent.
+ * whitespace, so there only a label that differs at most in quotes and case is equivalent; a
+ * regex wait folds case the way its own pattern does (#17044).
  */
 function foldedPartIsVisible(
   source: SearchableEntry,
@@ -348,26 +349,38 @@ function foldedPartIsVisible(
   if (folded === undefined) {
     return true;
   }
-  const equivalent = labelEquivalence(selector, matchMode);
-  const part = equivalent(folded);
+  const equivalentToFolded = labelEquivalence(selector, matchMode)(folded);
   return (source.hoistedSources ?? []).some(
-    (other) => visible(other) && other.label !== undefined && equivalent(other.label) === part,
+    (other) => visible(other) && other.label !== undefined && equivalentToFolded(other.label),
   );
 }
 
-/** How the wait normalizes a label before comparing it with the selector text. */
+/**
+ * For a folded part, whether another label is equivalent to it under the wait's comparison. A
+ * regex wait compares through a `RegExp` with the wait's flags, because non-Unicode `/i` folds
+ * case differently from `toLowerCase()` ("\u212A" lowercases to "k" but `/K/i` rejects it).
+ */
 function labelEquivalence(
   { caseSensitive, elementId }: ConditionSelector,
   matchMode: MatchMode,
-): (label: string) => string {
-  if (elementId !== undefined) {
-    return (label) => normalizeQuotes(label).toLowerCase();
+): (folded: string) => (label: string) => boolean {
+  if (elementId === undefined && matchMode === "regex") {
+    return (folded) => {
+      const exact = new RegExp(
+        `^${RegExp.escape(normalizeQuotes(folded))}$`,
+        caseSensitive ? "" : "i",
+      );
+      return (label) => exact.test(normalizeQuotes(label));
+    };
   }
-  if (matchMode === "regex") {
-    return (label) =>
-      caseSensitive ? normalizeQuotes(label) : normalizeQuotes(label).toLowerCase();
-  }
-  return (label) => normalizeMatchText(label, caseSensitive);
+  const normalize =
+    elementId !== undefined
+      ? (label: string) => normalizeQuotes(label).toLowerCase()
+      : (label: string) => normalizeMatchText(label, caseSensitive);
+  return (folded) => {
+    const part = normalize(folded);
+    return (label) => normalize(label) === part;
+  };
 }
 
 /**

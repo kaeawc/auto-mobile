@@ -582,7 +582,9 @@ describe("prototype web map across the 180° line (#16593)", () => {
       },
     });
     const pins = find(rendered.element, (element) => element.attrs["data-part"] === "marker");
-    expect(pins.map((pin) => pin.style.left)).toEqual(["calc(50% - 160px)", "calc(50% + 160px)"]);
+    // A fit scales with the box (#16679); at its own 400 × 200 dp size that is ±160 dp.
+    const box = { width: 400, height: 200 };
+    expect(pins.map((pin) => offsetOf(pin.style.left, box))).toEqual([-160, 160]);
     expect(toHtml(rendered.element)).toContain('points="-160,0 160,0"');
   });
 });

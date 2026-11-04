@@ -4,6 +4,7 @@ import { logger } from "../../../utils/logger";
 import { materialIconGlyphs } from "./materialIconGlyphs";
 import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
+import { withActionableWebInput } from "./prototypeWebInputActionable";
 import {
   PROTOTYPE_WEB_3D_CSS,
   PROTOTYPE_WEB_FLAT_ORBIT,
@@ -488,6 +489,10 @@ function pageHtml(
  * `data:` images and fonts. The same input yields the same bytes.
  */
 export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWebPage {
+  return withActionableWebInput(() => assemblePrototypeWebPage(input));
+}
+
+function assemblePrototypeWebPage(input: PrototypeWebPageInput): PrototypeWebPage {
   const chosen = chooseVariant(input);
   const device = deviceFrameOrThrow(
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),

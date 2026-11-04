@@ -24,6 +24,7 @@ import type { PrototypeSpecRevisionSource } from "./prototypeSpecRevisions";
 import { prototypeResourceUri } from "./prototypeWebUris";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./web/deviceFrames";
 import { parsePrototypeRevision } from "./web/prototypeWebResource";
+import { withActionableWebInput } from "./web/prototypeWebInputActionable";
 
 /**
  * `automobile:prototype/{id}/compose` and `.../swiftui` (#16345): one source file per prototype,
@@ -122,6 +123,15 @@ function header(
 
 /** One prototype revision as a single Compose or SwiftUI file sized for a device frame. */
 export function readPrototypeSourceResource(
+  source: PrototypeSpecRevisionSource,
+  format: PrototypeSourceFormat,
+  query: PrototypeSourceResourceQuery,
+  rendererVersion: string,
+): PrototypeSourceResource {
+  return withActionableWebInput(() => buildSourceResource(source, format, query, rendererVersion));
+}
+
+function buildSourceResource(
   source: PrototypeSpecRevisionSource,
   format: PrototypeSourceFormat,
   query: PrototypeSourceResourceQuery,

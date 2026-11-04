@@ -991,6 +991,47 @@ MAVEN_CENTRAL_403_LOG=$'2026-11-04T05:20:11.1234567Z A problem occurred configur
   [[ "$output" != *"Maven Central returned 403"* ]]
 }
 
+# Gradle resolution of a Robolectric jar rate-limited by Maven Central (run 41799019138).
+MAVEN_CENTRAL_429_LOG=$'2026-11-04T08:25:42.8530004Z    > Could not resolve all files for configuration \':protoviewer:robolectricAndroidAll34\'.\n      > Could not download android-all-instrumented-14-robolectric-10818077-i7.jar\n               > Could not GET \'https://repo.maven.apache.org/maven2/org/robolectric/android-all-instrumented/14-robolectric-10818077-i7/android-all-instrumented-14-robolectric-10818077-i7.jar\'.\n                  > Received status code 429 from server: Too Many Requests'
+
+@test "classifies a Maven Central 429 during Gradle resolution as a rerun (#16802)" {
+  for job in "Run CtrlProxy Unit Tests" "Kotlin Code Coverage"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$MAVEN_CENTRAL_429_LOG" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — Maven Central returned 429 Too Many Requests"* ]]
+    [[ "$output" != *"UNKNOWN"* ]]
+  done
+}
+
+@test "does not classify a 429 from a non-Maven-Central host as the Maven Central flake" {
+  runner_shutdown_fixture "Run CtrlProxy Unit Tests"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="${MAVEN_CENTRAL_429_LOG//repo.maven.apache.org/maven.example.com}" bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+}
+
+# Robolectric android-all download failure shape from #16802 (run 41789949312).
+ROBOLECTRIC_FETCH_LOG=$'2026-11-04T07:09:55.9539251Z AutoMobileSDKFirstActivityTapTrackingTest > classMethod FAILED\n2026-11-04T07:09:55.9669437Z     java.lang.AssertionError at MavenArtifactFetcher.java:130\n2026-11-04T07:09:55.9800000Z         Caused by: java.util.concurrent.ExecutionException at AbstractFuture.java:168\n2026-11-04T07:09:55.9962332Z             Caused by: java.io.IOException at HttpURLConnection.java:2034'
+
+@test "classifies a Robolectric MavenArtifactFetcher IOException as a rerun (#16802)" {
+  for job in "Kotlin Code Coverage" "Run CtrlProxy Unit Tests"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$ROBOLECTRIC_FETCH_LOG" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — Robolectric's own android-all jar download from Maven Central failed"* ]]
+    [[ "$output" != *"UNKNOWN"* ]]
+  done
+}
+
+@test "does not classify a MavenArtifactFetcher assertion without the IOException cause as the download flake" {
+  runner_shutdown_fixture "Kotlin Code Coverage"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="${ROBOLECTRIC_FETCH_LOG//java.io.IOException/java.lang.SecurityException}" bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"android-all jar download"* ]]
+}
+
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
 @test "reruns a calibrated contended unit timeout before the both-attempts signature" {
   for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage" "TypeScript Code Coverage (1/2)"; do

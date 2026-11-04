@@ -39,7 +39,7 @@ import {
   hasRuntimeRangeMetadata,
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
-import { compareStrictNumericVersions } from "../utils/deviceMatcher";
+import { compareStrictNumericVersions, isMotionCapableAutomotiveTag } from "../utils/deviceMatcher";
 import { androidSystemImageTagsFor, defaultAndroidProfileIdFor } from "../models/formFactor";
 
 /** What was created, for logging and for handing straight to the boot path. */
@@ -595,6 +595,35 @@ function playStoreImagesOrThrow(images: SystemImage[], family: AndroidImageFamil
   return play;
 }
 
+/**
+ * `requires.vehicle.motion` (#16742): only non-Play car images, whose `userdebug` builds accept
+ * driving-state injection, or a refusal naming the image to install. This overrides the Play-first
+ * automotive default.
+ */
+function motionCapableImagesOrThrow(
+  candidates: SystemImage[],
+  images: SystemImage[],
+  bounds: ApiBounds,
+  architecture: string,
+): SystemImage[] {
+  const capable = candidates.filter((image) => isMotionCapableAutomotiveTag(image.tag));
+  if (capable.length > 0) {
+    return capable;
+  }
+  const api = Math.min(
+    Math.max(bounds.min, SUGGESTED_AUTOMOTIVE_API_LEVEL),
+    bounds.max ?? Number.POSITIVE_INFINITY,
+  );
+  const abis = preferredAbis(architecture);
+  throw new ActionableError(
+    "requires.vehicle.motion needs a non-Play Android Automotive system image (android-automotive), " +
+      `and none is installed in the requested API range ${describeRange(bounds)}: ` +
+      `${describeInstalled(images)}. Play Store car images are user builds that refuse driving-state ` +
+      "simulation. AutoMobile does not download system images. Install one with " +
+      `'sdkmanager "system-images;android-${api};android-automotive;${abis[0]}"', then retry.`,
+  );
+}
+
 /** Shared installation wording for selected and exact Android TV provisioning. */
 export function androidTvImageInstallGuidance(packageName: string): string {
   return (
@@ -704,9 +733,13 @@ export function pickAndroidSystemImage(
         : handheldImagesOrThrow(images, inRange, bounds);
 
   const preferences = preferredAbis(architecture);
-  const allowed = criteria.requires?.playStore
+  const playStoreAllowed = criteria.requires?.playStore
     ? playStoreImagesOrThrow(familyImages, family)
     : familyImages;
+  const allowed =
+    criteria.requires?.vehicle?.motion === "supported"
+      ? motionCapableImagesOrThrow(playStoreAllowed, images, bounds, architecture)
+      : playStoreAllowed;
   const runnable = allowed.filter((image) => preferences.includes(image.abi));
   const candidates = runnable.length > 0 ? runnable : allowed;
 

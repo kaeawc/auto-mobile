@@ -8,9 +8,14 @@ import type {
   CapabilityInventory,
   DeviceLifecycleState,
   ConfiguredImage,
+  DeviceVehicleCapabilities,
 } from "../models/deviceDescription";
-import { formFactorFrom } from "../models/formFactor";
-import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidSystemImageRuntime";
+import type { FormFactor } from "../models/DeviceMatchCriteria";
+import { androidSystemImageTagsFor, formFactorFrom } from "../models/formFactor";
+import {
+  isPlayStoreSystemImageTag,
+  parseAndroidSystemImageRuntime,
+} from "./android-cmdline-tools/AndroidSystemImageRuntime";
 import { iosSimulatorCapabilityInventory } from "./virtualDeviceCapabilities";
 import { hostAudioSnapshot } from "./audio/defaultHostAudioProbe";
 import type { StableConfiguredDeviceImage } from "./configuredDeviceInventory";
@@ -52,6 +57,7 @@ export function describeImage(
     display: displayFrom(image),
     ...(image.displays?.panels.length ? { displays: image.displays } : {}),
     capabilityInventory: capabilityInventory(image, true),
+    ...vehicleFrom(image, staticFacts.formFactor, true),
     image: imageProvenanceLink(image, androidProvenance),
     availabilityError:
       platform === "android"
@@ -107,6 +113,33 @@ function androidSystemImageTag(device: DeviceInfo): string | undefined {
   return device.platform === "android" && device.runtimeId
     ? parseAndroidSystemImageRuntime(device.runtimeId)?.tag
     : undefined;
+}
+
+/**
+ * `vehicle` for an automotive description (#16767), derived from the system-image tag: a non-Play
+ * `android-automotive` image is a `userdebug` build that accepts driving-state simulation, while a
+ * Play Store car image is a `user` build that refuses it. Vehicle state is injected on emulators
+ * only, so a physical head unit supports neither. Any other form factor gets no `vehicle` key.
+ */
+export function vehicleFrom(
+  device: DeviceInfo,
+  formFactor: FormFactor,
+  isVirtual: boolean,
+): { vehicle?: DeviceVehicleCapabilities } {
+  if (formFactor !== "automotive") {
+    return {};
+  }
+  if (!isVirtual) {
+    return { vehicle: { motion: "unsupported", nightMode: "unsupported" } };
+  }
+  const tag = androidSystemImageTag(device);
+  const motion =
+    tag === undefined || !androidSystemImageTagsFor("automotive").includes(tag)
+      ? "unknown"
+      : isPlayStoreSystemImageTag(tag)
+        ? "unsupported"
+        : "supported";
+  return { vehicle: { motion, nightMode: "supported" } };
 }
 
 export function staticFactsFrom(

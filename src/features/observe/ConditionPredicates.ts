@@ -139,10 +139,12 @@ function ownsSelectorText(
   if (!selected) {
     return false;
   }
-  const query = normalizeQuotes(text).toLowerCase();
-  return Object.values(selected.textSources).some((value) =>
-    normalizeQuotes(value).toLowerCase().includes(query),
-  );
+  return Object.values(selected.textSources).some((value) => containsSelectorText(value, text));
+}
+
+/** The substring rule `narrowToSelectorText` applies to a `text` given beside `elementId`. */
+function containsSelectorText(value: string, text: string): boolean {
+  return normalizeQuotes(value).toLowerCase().includes(normalizeQuotes(text).toLowerCase());
 }
 
 /**
@@ -297,7 +299,7 @@ function matchesOnlyThroughOffScreenHoist(
   if (hoisted.every(visible)) {
     return false;
   }
-  return !matchesAnyText(visibleBackedTexts(source, visible), selector, matchMode);
+  return !matchesAnyText(visibleBackedTexts(source, visible, selector), selector, matchMode);
 }
 
 interface HoistCheck {
@@ -313,10 +315,9 @@ interface HoistCheck {
 function visibleBackedTexts(
   source: SearchableEntry,
   visible: (part: SearchableEntry) => boolean,
+  selector: ConditionSelector,
 ): string[] {
-  // Folded parts are deduplicated, so any visible descendant carrying the folded part supplies it.
-  const labelSources = source.hoistedLabelSources ?? [];
-  const labelBacked = labelSources.length === 0 || labelSources.some(visible);
+  const labelBacked = foldedPartIsVisible(source, visible, selector);
   const own = Object.values(source.textSources);
   return [
     ...own,
@@ -329,14 +330,45 @@ function visibleBackedTexts(
   ];
 }
 
-/** Whether any of `texts` satisfies the selector text the way the resolver compared it. */
+/**
+ * Whether a visible descendant supplies the part folded into `source`'s label. The fold keeps one
+ * of the parts that differ only in whitespace (" 7:00" and "7:00 "), and the resolver normalizes
+ * the composed label the same way for each (#17026), so any visible descendant whose label is
+ * equivalent under the selector's normalization supplies it.
+ */
+function foldedPartIsVisible(
+  source: SearchableEntry,
+  visible: (part: SearchableEntry) => boolean,
+  { caseSensitive }: ConditionSelector,
+): boolean {
+  const folded = source.hoistedLabelSources?.[0]?.label;
+  if (folded === undefined) {
+    return true;
+  }
+  const part = normalizeMatchText(folded, caseSensitive);
+  return (source.hoistedSources ?? []).some(
+    (other) =>
+      visible(other) &&
+      other.label !== undefined &&
+      normalizeMatchText(other.label, caseSensitive) === part,
+  );
+}
+
+/**
+ * Whether any of `texts` satisfies the selector text the way the wait compared it. With
+ * `elementId` the resolver's match mode describes the id lookup; the text was applied by
+ * `narrowToSelectorText`'s substring rule (#17026), so that rule is used here too.
+ */
 function matchesAnyText(
   texts: readonly string[],
-  { text, caseSensitive }: ConditionSelector,
+  { text, caseSensitive, elementId }: ConditionSelector,
   matchMode: MatchMode,
 ): boolean {
   if (text === undefined) {
     return true;
+  }
+  if (elementId !== undefined) {
+    return texts.some((value) => containsSelectorText(value, text));
   }
   if (matchMode === "regex") {
     // The resolver already compiled this pattern for the same match, so it is valid here.

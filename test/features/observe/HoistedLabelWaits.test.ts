@@ -193,3 +193,63 @@ describe("visible equivalents of hoisted text still match (#17007)", () => {
     expect(disappear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(false);
   });
 });
+
+describe("elementId + text waits use the text narrowing's substring rule (#17026)", () => {
+  /** A clickable `alarm` row reading "Alarm Clock" with an unrelated "7:00" child at `childTop`. */
+  const alarmRow = (childTop: number) =>
+    screenWith([
+      {
+        ...rowWithChild("Alarm Clock", [0, 900], "7:00", childTop),
+        "resource-id": "alarm",
+      },
+    ]);
+  const selector = { elementId: "alarm", text: "Alarm" };
+
+  test("a substring of the row's own text matches while an unrelated child is off screen", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(alarmRow(850)).matched).toBe(true);
+    expect(disappear(resolver, selector)(alarmRow(850)).matched).toBe(false);
+  });
+
+  test("the answer does not depend on where the unrelated child sits", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(alarmRow(850)).matched).toBe(
+      appear(resolver, selector)(alarmRow(700)).matched,
+    );
+  });
+});
+
+describe("whitespace-variant contributors to the folded label (#17026)", () => {
+  /** A " Alarm" row with an off-screen "7:00 " child first and a "7:00" child at `visibleTop`. */
+  const alarmRow = (visibleTop: number) =>
+    screenWith([
+      {
+        text: " Alarm",
+        clickable: "true",
+        bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        node: [
+          { text: "7:00 ", bounds: { left: 0, top: -90, right: 100, bottom: -50 } },
+          {
+            text: "7:00",
+            bounds: { left: 0, top: visibleTop, right: 100, bottom: visibleTop + 40 },
+          },
+        ],
+      },
+    ]);
+
+  test("a visible equivalent contributor supplies the folded part", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "7:00 Alarm" })(alarmRow(20)).matched).toBe(true);
+    expect(disappear(resolver, { text: "7:00 Alarm" })(alarmRow(20)).matched).toBe(false);
+  });
+
+  test("the composite label is still refused when every equivalent contributor is off screen", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "7:00 Alarm" })(alarmRow(850)).matched).toBe(false);
+    expect(disappear(resolver, { text: "7:00 Alarm" })(alarmRow(850)).matched).toBe(true);
+  });
+});

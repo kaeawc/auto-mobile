@@ -8,6 +8,8 @@ export type FormFactor =
   | "tv"
   | "watch"
   | "automotive"
+  | "xr-headset"
+  | "xr-glasses"
   | "unknown";
 export type MatchingStrategy = "LATEST" | "RANDOM" | "MINIMUM";
 

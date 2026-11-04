@@ -15,6 +15,8 @@ export const BINDING_DEVICE_FAMILIES = [
   "tv",
   "watch",
   "automotive",
+  "xr-headset",
+  "xr-glasses",
 ] as const;
 export type BindingDeviceFamily = (typeof BINDING_DEVICE_FAMILIES)[number];
 

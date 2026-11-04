@@ -25,7 +25,7 @@ class SharedDaemonStreamHubStorageTest {
     private var nextId = 0
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = scope,
         observation =
           ObservationHubConfig(

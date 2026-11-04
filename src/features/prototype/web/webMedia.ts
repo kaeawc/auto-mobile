@@ -1,3 +1,25 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  ARIA_HIDDEN,
+  ARIA_LABEL,
+  ASPECT_RATIO,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  BOX_SHADOW,
+  CENTER,
+  DATA_PART,
+  FLEX,
+  FLEX_SHRINK,
+  FONT_SIZE,
+  FONT_WEIGHT,
+  JUSTIFY_CONTENT,
+  MIN_WIDTH,
+  RELATIVE,
+  STRETCH,
+  Z_INDEX,
+} from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
@@ -22,9 +44,9 @@ export function glyph(name: keyof typeof GLYPHS, size: number): WebElement {
         viewBox: "0 0 24 24",
         width: String(size),
         height: String(size),
-        "aria-hidden": "true",
+        [ARIA_HIDDEN]: "true",
       },
-      style: { display: "block", "flex-shrink": "0" },
+      style: { display: "block", [FLEX_SHRINK]: "0" },
     },
     [el("path", { attrs: { d: GLYPHS[name], fill: "currentColor" } })],
   );
@@ -43,7 +65,7 @@ export function mediaTime(ms: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-const fills: Css = { position: "absolute", inset: "0" };
+const fills: Css = { position: ABSOLUTE, inset: "0" };
 
 /** The node's inline source, else the source of the declared `media.players` entry it names. */
 function videoSource(node: Raw, scope: WebRenderScope): unknown {
@@ -61,23 +83,23 @@ function videoFrame(node: Raw, scope: WebRenderScope): WebElement {
   const sample = record(videoSource(node, scope))?.sample;
   if (sample === "colorBars") {
     return el("div", {
-      attrs: { "data-part": "frame" },
+      attrs: { [DATA_PART]: "frame" },
       style: { ...fills, background: BARS_CSS },
     });
   }
   const countdown =
     sample === "countdown"
-      ? [el("span", { style: { "font-size": "48px", "font-weight": "700" } }, ["3"])]
+      ? [el("span", { style: { [FONT_SIZE]: "48px", [FONT_WEIGHT]: "700" } }, ["3"])]
       : [];
   return el(
     "div",
     {
-      attrs: { "data-part": "frame" },
+      attrs: { [DATA_PART]: "frame" },
       style: {
         ...fills,
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         color: "#fff",
       },
     },
@@ -98,15 +120,15 @@ function captionButton(node: Raw): WebChild[] {
       {
         attrs: {
           role: "button",
-          "aria-label": `Captions: ${labels.join(", ")}`,
-          "data-part": "captions",
+          [ARIA_LABEL]: `Captions: ${labels.join(", ")}`,
+          [DATA_PART]: "captions",
         },
         style: {
           border: "1.5px solid currentColor",
-          "border-radius": "3px",
+          [BORDER_RADIUS]: "3px",
           padding: "0 3px",
-          "font-size": "10px",
-          "font-weight": "700",
+          [FONT_SIZE]: "10px",
+          [FONT_WEIGHT]: "700",
         },
       },
       ["CC"],
@@ -117,11 +139,11 @@ function captionButton(node: Raw): WebChild[] {
 /** The scrubber at the start position: a played and an unplayed part. */
 function scrubber(played: string): WebElement {
   return el("span", {
-    attrs: { "data-part": "scrubber" },
+    attrs: { [DATA_PART]: "scrubber" },
     style: {
       flex: "1 1 auto",
       height: "4px",
-      "border-radius": "2px",
+      [BORDER_RADIUS]: "2px",
       background: `linear-gradient(to right,#fff ${played},rgba(255,255,255,0.35) ${played})`,
     },
   });
@@ -133,26 +155,26 @@ function controlRow(node: Raw, ios: boolean): WebElement {
   return el(
     "div",
     {
-      attrs: { "data-part": "controls" },
+      attrs: { [DATA_PART]: "controls" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         left: ios ? "8px" : "0",
         right: ios ? "8px" : "0",
         bottom: ios ? "8px" : "0",
-        display: "flex",
-        "align-items": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
         gap: "8px",
         padding: "6px 12px",
         color: "#fff",
-        "font-size": "12px",
+        [FONT_SIZE]: "12px",
         ...(ios
-          ? { "background-color": "rgba(60,60,67,0.6)", "border-radius": "12px" }
+          ? { [BACKGROUND_COLOR]: "rgba(60,60,67,0.6)", [BORDER_RADIUS]: "12px" }
           : { background: "linear-gradient(to top,rgba(0,0,0,0.6),transparent)" }),
       },
     },
     [
       ...(ios ? [glyph("play", 20)] : []),
-      el("span", { attrs: { "data-part": "time" } }, [mediaTime(start)]),
+      el("span", { attrs: { [DATA_PART]: "time" } }, [mediaTime(start)]),
       scrubber(start > 0 ? "2%" : "0%"),
       ...captionButton(node),
       glyph("fullscreen", 20),
@@ -165,20 +187,20 @@ function centredPlay(): WebElement {
   return el(
     "span",
     {
-      attrs: { role: "button", "aria-label": "Play", "data-part": "play" },
+      attrs: { role: "button", [ARIA_LABEL]: "Play", [DATA_PART]: "play" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         left: "50%",
         top: "50%",
         transform: "translate(-50%,-50%)",
         width: "56px",
         height: "56px",
-        "border-radius": "50%",
-        "background-color": "rgba(0,0,0,0.5)",
+        [BORDER_RADIUS]: "50%",
+        [BACKGROUND_COLOR]: "rgba(0,0,0,0.5)",
         color: "#fff",
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
       },
     },
     [glyph("play", 32)],
@@ -203,15 +225,15 @@ const videoPlayerRenderer =
     }
     const ios = scope.condition.platform === "ios";
     const { attrs, style } = kit.base(node, scope, {
-      position: "relative",
+      position: RELATIVE,
       overflow: "hidden",
-      "background-color": "#000",
-      "aspect-ratio": "16 / 9",
-      "align-self": "stretch",
+      [BACKGROUND_COLOR]: "#000",
+      [ASPECT_RATIO]: "16 / 9",
+      [ALIGN_SELF]: STRETCH,
     });
     const chrome =
       node.controls === "none" ? [] : [...(ios ? [] : [centredPlay()]), controlRow(node, ios)];
-    return el("div", { attrs: { "aria-label": "Video player", ...attrs, role: "region" }, style }, [
+    return el("div", { attrs: { [ARIA_LABEL]: "Video player", ...attrs, role: "region" }, style }, [
       videoFrame(node, scope),
       ...chrome,
     ]);
@@ -233,17 +255,17 @@ const cameraPreviewRenderer =
   (node, scope) => {
     const aspect = CAMERA_ASPECT[String(node.aspectRatio)] ?? CAMERA_ASPECT["4:3"]!;
     const { attrs, style } = kit.base(node, scope, {
-      position: "relative",
+      position: RELATIVE,
       overflow: "hidden",
-      "background-color": "#000",
-      "aspect-ratio": aspect,
-      "align-self": "stretch",
+      [BACKGROUND_COLOR]: "#000",
+      [ASPECT_RATIO]: aspect,
+      [ALIGN_SELF]: STRETCH,
     });
     const mode = node.mode === "video" ? "video" : "photo";
     const pattern = el("div", {
-      attrs: { "data-part": "test-pattern" },
+      attrs: { [DATA_PART]: "test-pattern" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         left: "0",
         right: "0",
         top: "20%",
@@ -254,21 +276,21 @@ const cameraPreviewRenderer =
     const label = el(
       "span",
       {
-        attrs: { "data-part": "label" },
+        attrs: { [DATA_PART]: "label" },
         style: {
-          position: "absolute",
+          position: ABSOLUTE,
           left: "8px",
           top: "8px",
           padding: "2px 8px",
-          "border-radius": "10px",
-          "background-color": "rgba(0,0,0,0.6)",
+          [BORDER_RADIUS]: "10px",
+          [BACKGROUND_COLOR]: "rgba(0,0,0,0.6)",
           color: "#fff",
-          "font-size": "12px",
+          [FONT_SIZE]: "12px",
         },
       },
       [`Camera preview · ${mode}`],
     );
-    return el("div", { attrs: { "aria-label": "Camera preview", ...attrs, role: "img" }, style }, [
+    return el("div", { attrs: { [ARIA_LABEL]: "Camera preview", ...attrs, role: "img" }, style }, [
       pattern,
       label,
     ]);
@@ -284,20 +306,20 @@ const castButtonRenderer =
     const ios = scope.condition.platform === "ios";
     const tint = cssColor("onSurfaceVariant", scope.style);
     const { attrs, style } = kit.base(node, scope, {
-      position: "relative",
+      position: RELATIVE,
       display: "inline-block",
-      "flex-shrink": "0",
+      [FLEX_SHRINK]: "0",
       ...(tint ? { color: tint } : {}),
     });
     const name = ios ? "AirPlay" : "Cast";
     const summary = el(
       "summary",
       {
-        attrs: { "aria-label": attrs["aria-label"] ?? name },
+        attrs: { [ARIA_LABEL]: attrs[ARIA_LABEL] ?? name },
         style: {
-          display: "flex",
-          "align-items": "center",
-          "justify-content": "center",
+          display: FLEX,
+          [ALIGN_ITEMS]: CENTER,
+          [JUSTIFY_CONTENT]: CENTER,
           width: "48px",
           height: "48px",
           cursor: "pointer",
@@ -314,25 +336,25 @@ function devicePicker(name: string, scope: WebRenderScope): WebElement {
   return el(
     "div",
     {
-      attrs: { role: "dialog", "aria-label": `${name} devices`, "data-part": "device-picker" },
+      attrs: { role: "dialog", [ARIA_LABEL]: `${name} devices`, [DATA_PART]: "device-picker" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         top: "48px",
         right: "0",
-        "z-index": "10",
-        "min-width": "200px",
+        [Z_INDEX]: "10",
+        [MIN_WIDTH]: "200px",
         padding: "16px",
-        "border-radius": "16px",
-        "background-color": surface,
+        [BORDER_RADIUS]: "16px",
+        [BACKGROUND_COLOR]: surface,
         color: text,
-        "box-shadow": "0 2px 6px rgba(0,0,0,0.3)",
+        [BOX_SHADOW]: "0 2px 6px rgba(0,0,0,0.3)",
       },
     },
     [
-      el("div", { style: { "font-weight": "500", "margin-bottom": "8px" } }, [
+      el("div", { style: { [FONT_WEIGHT]: "500", "margin-bottom": "8px" } }, [
         name === "Cast" ? "Cast to" : "AirPlay",
       ]),
-      el("div", { style: { "font-size": "14px", opacity: "0.7" } }, ["No devices found"]),
+      el("div", { style: { [FONT_SIZE]: "14px", opacity: "0.7" } }, ["No devices found"]),
     ],
   );
 }

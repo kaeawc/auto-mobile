@@ -1,4 +1,4 @@
-import { ActionableError } from "../../../models/ActionableError";
+import { PrototypeWebInputError } from "./prototypeWebInputError";
 import type { DeviceFrame, DeviceFrameEntry } from "./deviceFrameSchema";
 import registry from "./deviceFrames.json";
 
@@ -49,7 +49,7 @@ export function defaultDeviceFrameId(platform: DeviceFrame["platform"]): string 
 export function deviceFrameOrThrow(id: string): DeviceFrame {
   const frame = DEVICE_FRAMES.find((candidate) => candidate.id === id);
   if (!frame) {
-    throw new ActionableError(
+    throw new PrototypeWebInputError(
       `Unknown device frame "${id}". Valid frames: ${DEVICE_FRAMES.map((f) => f.id).join(", ")}`,
     );
   }

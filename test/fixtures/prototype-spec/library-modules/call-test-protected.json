@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "library-protected",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["test"],
+      "permissions": [
+        {
+          "name": "camera",
+          "purpose": "Scan a code"
+        }
+      ],
+      "background": ["audio"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "test.protected"
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.onTap[0]",
+  "expectedMessage": "Sensitive platform call test.protected is unavailable in a library"
+}

@@ -1,3 +1,4 @@
+import { BACKGROUND_COLOR } from "./webCss";
 import { prototypeLinkifyMatches, type PrototypeLinkifyKind } from "../prototypeLinkify";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebChild } from "./webNodes";
@@ -8,7 +9,7 @@ function styledSpan(text: string, style: Raw | undefined, link: boolean, context
   const background = cssColor(style?.background, context);
   const css = {
     ...textCss(style, context),
-    ...(background ? { "background-color": background } : {}),
+    ...(background ? { [BACKGROUND_COLOR]: background } : {}),
   };
   return el("span", { attrs: link ? { "data-link": "true" } : {}, style: css }, [text]);
 }

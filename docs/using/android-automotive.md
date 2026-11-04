@@ -161,6 +161,26 @@ reports `pinned: "unsupported"` when the car launcher cannot pin shortcuts. Whet
 clears the car system bars and whether a prototype stays visible while driving restrictions are on is
 unverified.
 
+## Car App Library templates in `observe`
+
+An app built on the Car App Library (`androidx.car.app`) can report its template stack to `observe`, on a
+phone emulator or on AAOS, without a head unit. The block appears only for a debug build of an app that
+enabled the AutoMobile SDK template route; the app-side setup is in the
+[design doc](../design-docs/plat/android/car-app-templates.md#app-setup). While the foreground app has the
+route on, `observe` carries a `carAppTemplates` block:
+
+- `sessions[]`: one per screen stack, with `screens[]` listed root first; the top screen has `top: true`.
+- Each screen: `screenClass`, `marker`, and the `template` it last recorded (absent if it never did).
+- Each template: `type` (`ListTemplate`, `GridTemplate`, `PaneTemplate`, `MessageTemplate`,
+  `SearchTemplate`, `TabTemplate`, `NavigationTemplate`, ...), `title`, `headerActions`, `items` (title,
+  texts, `hasImage`, `toggle` checked state, `browsable`), `actions`, `actionStrips` and, for tabs,
+  `tabs` and `tabContent`.
+- Every element has a stable path `id`, such as `session0/screen1/template/items/2`.
+
+The block reports what the app built, not what the car host rendered; its `note` says so. If the app's
+main thread did not answer in time, the block has `error: "main_thread_timeout"` and no sessions. Apps
+that do not enable the route add nothing to `observe`.
+
 ## Not supported
 
 - Android Auto projection and the Desktop Head Unit (see #14118).

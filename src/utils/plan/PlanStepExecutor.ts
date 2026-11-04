@@ -55,6 +55,8 @@ export interface PlanStepTools<TTool extends PlanStepTool> {
       targetDevice?: BootedDevice;
       /** The geometry a replayed tapAt step resolves against (#15663). */
       tapAtPlanContext?: TapAtPlanContext;
+      /** The lock namespace a barrier or criticalSection step scopes its lock under (#15663). */
+      planLockNamespace?: string;
     },
   ): Promise<unknown>;
 }
@@ -474,16 +476,17 @@ export class DefaultPlanStepExecutor<
 
     this.injectDeviceRoutingParams(enhancedParams, step.tool, { platform, deviceId, sessionUuid });
 
-    // Scope the shared CriticalSectionCoordinator by the plan's base session UUID
-    // (identical across every device track of one plan, distinct across plans),
-    // so two concurrent plans reusing a lock name get isolated barriers. Strict
-    // schemas reject unknown keys, so only explicitly opted-in coordination tools
-    // may receive the internal namespace.
-    if (tool.acceptsPlanLockNamespace && sessionUuid && !enhancedParams.__lockNamespace) {
-      enhancedParams.__lockNamespace = sessionUuid;
-    }
-
     return enhancedParams;
+  }
+
+  /**
+   * Scope the shared CriticalSectionCoordinator by the plan's base session UUID (identical across
+   * every device track of one plan, distinct across plans), so two concurrent plans reusing a lock
+   * name get isolated barriers. It travels as call context for this one step (#15663), and only to
+   * the coordination tools that opted in.
+   */
+  private planLockNamespace(tool: TTool, sessionUuid: string | undefined): string | undefined {
+    return tool.requiresDevice && tool.acceptsPlanLockNamespace ? sessionUuid : undefined;
   }
 
   private injectDeviceRoutingParams(
@@ -591,10 +594,12 @@ export class DefaultPlanStepExecutor<
       logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
     }
 
+    const planLockNamespace = this.planLockNamespace(tool, context.sessionUuid);
     return this.tools.callInternal(tool, parsedParams, {
       signal: context.signal,
       forPlan: true,
       sessionUuid: context.sessionUuid,
+      ...(planLockNamespace ? { planLockNamespace } : {}),
       ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
       ...(step.tool === "tapAt" && step.geometry
         ? { tapAtPlanContext: { geometry: step.geometry } }

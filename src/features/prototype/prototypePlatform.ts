@@ -1,9 +1,5 @@
 import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
-import {
-  prototypeChannelsError,
-  prototypeChannelCallError,
-  prototypeRealtimeFields,
-} from "./prototypeChannels";
+import { prototypeChannelsError, prototypeChannelCallError } from "./prototypeChannels";
 import {
   prototypeCameraCallError,
   prototypeCameraPreviewError,
@@ -11,7 +7,7 @@ import {
 } from "./prototypeCameraPreview";
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
-import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
+import { prototypeMediaQueueError } from "./prototypeMediaQueue";
 import {
   prototypeCastButtonError,
   prototypeMediaCallError,
@@ -37,10 +33,7 @@ import {
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
 import { prototypeSensorsBlockError, prototypeSensorUseError } from "./prototypeSensorsBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { prototypePlatformUnsupported as unsupported } from "./prototypePlatformUnsupported";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypePlatformPlaceholders } from "./prototypeData";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import { PROTOTYPE_REQUEST_EVENT_NAME, prototypeIntoError } from "./prototypeRequest";
@@ -53,8 +46,9 @@ import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
  * contract types their shapes; this module adds what it cannot: known calls and events from the
  * `platformModules` table, per-call arguments, declared modules and permissions, `{event}` scope,
  * the `into` path and the reserved `prototype_` emit prefix. It also locates every use for the
- * generated capability gates (`prototype_platform_v1` plus one `prototype_platform_<module>_v1`
- * per module). Runtime dispatch lives on the devices (#14295, #14296).
+ * generated capability gates in prototypePlatformGates (`prototype_platform_v1` plus one
+ * `prototype_platform_<module>_v1` per module). Runtime dispatch lives on the devices (#14295,
+ * #14296).
  */
 
 /** Maximum UTF-8 bytes copied to or returned from the clipboard. */
@@ -86,6 +80,7 @@ export interface PrototypePlatformArgument {
   /** The contract rule a literal `{value}` argument must satisfy. */
   value: Rule;
 }
+type Cap = { capability?: string };
 export interface PrototypePlatformCall {
   args: Record<string, PrototypePlatformArgument>;
   permissions: string[];
@@ -102,6 +97,8 @@ export interface PrototypePlatformCall {
 }
 /** One key of a module's read-only `/platform/<module>` state (#15245). */
 export interface PrototypePlatformStateEntry {
+  /** Personal data that cannot flow into network or storage sinks (R2). */
+  sensitive?: boolean;
   /** The platforms that report the key; elsewhere it is absent and compares as missing. */
   platforms: string[];
   /** The default contract rule; valueByPlatform overrides it on a named platform. */
@@ -124,8 +121,11 @@ export interface PrototypePlatformModule {
   /** Shared runtime call budget; the host validates metadata but does not count calls. */
   rateLimit?: { calls: number; windowMs: number };
   calls: Record<string, PrototypePlatformCall>;
-  /** `debounceMs` coalesces bursts of the event into one delivery. */
-  events: Record<string, { sensitive: boolean; debounceMs?: number; userInitiated?: boolean }>;
+  /** `debounceMs` coalesces bursts; `capability` gates the event's handlers beyond the module. */
+  events: Record<
+    string,
+    { sensitive: boolean; debounceMs?: number; userInitiated?: boolean } & Cap
+  >;
   /**
    * The keys `/platform/<module>/<key>` can read. A module without this table (the placeholder
    * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
@@ -833,188 +833,6 @@ function rootBlockError(
   }
   return undefined;
 }
-
-/** The modules a use needs: its own for calls, handlers, reads and declarations. */
-function usedModule(use: PrototypePlatformUse): string | undefined {
-  switch (use.kind) {
-    case "declared":
-    case "node":
-      return use.module;
-    case "handler":
-      return prototypePlatformEventModule(use.event);
-    case "call":
-      return prototypePlatformCall(use.action.call)?.module;
-    case "read":
-      return prototypePlatformPointerModule(use.pointer);
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Uses at authored paths: the expanded tree's uses located back through component expansion,
- * then the component definitions no expansion visited (the `prototypeFieldsOfKind` order).
- */
-function authoredUses(spec: unknown): PrototypePlatformUse[] {
-  const authored = prototypePlatformUses(spec);
-  const expansion = expandPrototypeComponents(spec);
-  if (!expansion.success || !expansion.expanded) {
-    return authored;
-  }
-  const located = prototypePlatformUses(expansion.spec).map((use) => ({
-    ...use,
-    path: expansion.locate(use.path),
-  }));
-  const paths = new Set(located.map((use) => use.path));
-  return [
-    ...located,
-    ...authored.filter(
-      (use) => !paths.has(use.path) && !located.some((at) => at.path.endsWith(` → ${use.path}`)),
-    ),
-  ];
-}
-
-const unique = (paths: string[]): string[] => [...new Set(paths)];
-
-/** Authored paths needing `prototype_platform_v1`: every platform construct. */
-export function prototypePlatformFields(spec: unknown): string[] {
-  return unique(authoredUses(spec).map((use) => use.path));
-}
-
-/** Authored paths needing one module's capability. */
-export function prototypePlatformModuleFields(spec: unknown, name: string): string[] {
-  return unique(
-    [
-      ...(name === "realtime"
-        ? prototypeRealtimeFields(spec).map((path) => ({
-            kind: "declared" as const,
-            path,
-            module: name,
-          }))
-        : []),
-      ...authoredUses(spec),
-    ]
-      .filter((use) => usedModule(use) === name)
-      .map((use) => use.path),
-  );
-}
-
-export function prototypePlatformUnsupportedMessage(
-  fields: readonly string[],
-  platform: "android" | "ios",
-): string {
-  return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, "the platform vocabulary");
-}
-
-/** Authored paths of calls whose definition names `capability` on top of its module's. */
-export function prototypePlatformCallCapabilityFields(spec: unknown, capability: string): string[] {
-  return unique(
-    authoredUses(spec)
-      .filter(
-        (use) =>
-          use.kind === "call" &&
-          prototypePlatformCall(use.action.call)?.definition.capability === capability,
-      )
-      .map((use) => use.path),
-  );
-}
-
-/** Authored `backend` paths of the module's nodes that name `backend` (#14302). */
-export function prototypePlatformBackendFields(
-  spec: unknown,
-  name: string,
-  backend: string,
-): string[] {
-  return unique(
-    authoredUses(spec)
-      .filter((use) => use.kind === "node" && use.module === name && use.backend === backend)
-      .map((use) => `${use.path}.backend`),
-  );
-}
-
-/** The per-call capabilities in module order, each with the calls that need it. */
-const callCapabilities = (): { capability: string; calls: string[] }[] => {
-  const byCapability = new Map<string, string[]>();
-  for (const [name, definition] of Object.entries(PROTOTYPE_PLATFORM_MODULES)) {
-    for (const [op, call] of Object.entries(definition.calls)) {
-      if (call.capability) {
-        byCapability.set(call.capability, [
-          ...(byCapability.get(call.capability) ?? []),
-          `${name}.${op}`,
-        ]);
-      }
-    }
-  }
-  return [...byCapability].map(([capability, calls]) => ({ capability, calls }));
-};
-
-/** Spec fields beyond its calls that a per-call capability also gates: a queued player (#14249). */
-const CALL_CAPABILITY_FIELDS: Record<
-  string,
-  { fields: (spec: unknown) => string[]; name: string }
-> = {
-  prototype_platform_media_queue_v1: {
-    fields: prototypeMediaQueueFields,
-    name: "a media player `queue`",
-  },
-};
-
-/** One generated gate per per-call capability, after the module gates. */
-const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, calls }) => ({
-  capability,
-  fields: (spec: unknown) => [
-    ...(CALL_CAPABILITY_FIELDS[capability]?.fields(spec) ?? []),
-    ...prototypePlatformCallCapabilityFields(spec, capability),
-  ],
-  unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-    unsupported(
-      fields,
-      platform,
-      capability,
-      [
-        ...calls.map((call) => `\`${call}\``),
-        ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
-      ].join(" or "),
-    ),
-}));
-
-/** One generated gate per module in the `platformModules` table, then one per call capability. */
-const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(
-  ([name, definition]) => [
-    {
-      capability: definition.capability,
-      fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
-      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-        unsupported(fields, platform, definition.capability, `the ${name} platform module`),
-    },
-    ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => ({
-      capability,
-      fields: (spec: unknown) => prototypePlatformBackendFields(spec, name, backend),
-      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-        unsupported(fields, platform, capability, `the ${name} \`${backend}\` backend`),
-    })),
-    ...(definition.deviceCapability
-      ? [
-          {
-            capability: definition.deviceCapability,
-            fields: (spec: unknown) => prototypeRealtimeFields(spec, true),
-            unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-              unsupported(
-                fields,
-                platform,
-                definition.deviceCapability!,
-                "device realtime channels",
-              ),
-          },
-        ]
-      : []),
-  ],
-);
-
-export const PROTOTYPE_PLATFORM_MODULE_GATES = [
-  ...PROTOTYPE_PLATFORM_MODULE_ONLY_GATES,
-  ...PROTOTYPE_PLATFORM_CALL_GATES,
-];
 
 function argumentValueError(
   action: Raw,

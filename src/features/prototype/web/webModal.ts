@@ -1,3 +1,29 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  CENTER,
+  COLUMN,
+  DATA_PART,
+  DATA_TESTID,
+  FLEX,
+  FLEX_DIRECTION,
+  FLEX_SHRINK,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  MAX_HEIGHT,
+  MAX_WIDTH,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  PADDING_INLINE,
+  POINTER_EVENTS,
+  RELATIVE,
+  WHITE_SPACE,
+} from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
 import type { WebRenderKit, WebRenderScope } from "./webRender";
@@ -27,7 +53,7 @@ const role = (name: string, scope: WebRenderScope): string => rgbaCss(roleColor(
 
 /** A dialog or snackbar part's test tag, `<testTag>.<part>`, as the devices tag it. */
 function partTag(node: Raw, part: string): Record<string, string> {
-  return typeof node.testTag === "string" ? { "data-testid": `${node.testTag}.${part}` } : {};
+  return typeof node.testTag === "string" ? { [DATA_TESTID]: `${node.testTag}.${part}` } : {};
 }
 
 /**
@@ -47,15 +73,15 @@ function textButton(
     el(
       "span",
       {
-        attrs: { role: "button", "data-part": part, ...partTag(node, part) },
+        attrs: { role: "button", [DATA_PART]: part, ...partTag(node, part) },
         style: {
-          display: "inline-flex",
-          "align-items": "center",
-          "justify-content": "center",
-          "min-height": "40px",
+          display: INLINE_FLEX,
+          [ALIGN_ITEMS]: CENTER,
+          [JUSTIFY_CONTENT]: CENTER,
+          [MIN_HEIGHT]: "40px",
           padding: "0 12px",
-          "border-radius": "20px",
-          "flex-shrink": "0",
+          [BORDER_RADIUS]: "20px",
+          [FLEX_SHRINK]: "0",
           ...textCss({ textStyle: "labelLarge" }, scope.style),
           color: role(colorRole, scope),
         },
@@ -74,7 +100,7 @@ function dialogIcon(node: Raw, scope: WebRenderScope, kit: WebRenderKit): WebEle
   return [
     {
       ...glyph,
-      style: { ...glyph.style, "align-self": "center", color: role("secondary", scope) },
+      style: { ...glyph.style, [ALIGN_SELF]: CENTER, color: role("secondary", scope) },
     },
   ];
 }
@@ -92,9 +118,9 @@ function line(
   const css: Css = {
     ...textCss({ textStyle }, scope.style),
     color: role(colorRole, scope),
-    "white-space": "pre-wrap",
+    [WHITE_SPACE]: "pre-wrap",
   };
-  return [el("div", { attrs: { "data-part": textStyle }, style: css }, [kit.bound(text, scope)])];
+  return [el("div", { attrs: { [DATA_PART]: textStyle }, style: css }, [kit.bound(text, scope)])];
 }
 
 /**
@@ -107,33 +133,33 @@ function dialogLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
   const ctx: ModalContext = { node, scope, kit };
   const hoisted = hoistedScope(scope);
   const { attrs, style } = kit.base(node, hoisted, {
-    display: "flex",
-    "flex-direction": "column",
+    display: FLEX,
+    [FLEX_DIRECTION]: COLUMN,
     gap: "16px",
-    position: "relative",
-    "box-sizing": "border-box",
+    position: RELATIVE,
+    [BOX_SIZING]: BORDER_BOX,
     margin: "24px",
     padding: "24px",
-    "min-width": "min(280px, calc(100% - 48px))",
-    "max-width": "min(560px, calc(100% - 48px))",
-    "max-height": "calc(100% - 48px)",
-    "border-radius": "28px",
-    "background-color": role("surfaceContainerHigh", scope),
+    [MIN_WIDTH]: "min(280px, calc(100% - 48px))",
+    [MAX_WIDTH]: "min(560px, calc(100% - 48px))",
+    [MAX_HEIGHT]: "calc(100% - 48px)",
+    [BORDER_RADIUS]: "28px",
+    [BACKGROUND_COLOR]: role("surfaceContainerHigh", scope),
   });
-  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: "column" } });
+  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: COLUMN } });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const body = content
     ? [
         el(
           "div",
           {
-            attrs: { "data-part": "content" },
+            attrs: { [DATA_PART]: "content" },
             style: {
-              display: "flex",
-              "flex-direction": "column",
+              display: FLEX,
+              [FLEX_DIRECTION]: COLUMN,
               gap: "16px",
               flex: "0 1 auto",
-              "min-height": "0",
+              [MIN_HEIGHT]: "0",
               "overflow-y": "auto",
             },
           },
@@ -144,8 +170,8 @@ function dialogLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
   const buttons = el(
     "div",
     {
-      attrs: { "data-part": "buttons" },
-      style: { display: "flex", "justify-content": "flex-end", gap: "8px", width: "100%" },
+      attrs: { [DATA_PART]: "buttons" },
+      style: { display: FLEX, [JUSTIFY_CONTENT]: "flex-end", gap: "8px", width: "100%" },
     },
     [
       ...textButton(node.dismiss, { part: "dismiss", colorRole: "primary" }, ctx),
@@ -154,7 +180,7 @@ function dialogLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
   );
   // A gradient border and inner shadows paint over the surface's content, as on any other node.
   const surface = withOverContentLayers(
-    el("div", { attrs: { ...attrs, "data-part": "dialog" }, style }, [
+    el("div", { attrs: { ...attrs, [DATA_PART]: "dialog" }, style }, [
       ...dialogIcon(node, scope, kit),
       ...line(node.title, { part: "headlineSmall", colorRole: "onSurface" }, ctx),
       ...line(node.text, { part: "bodyMedium", colorRole: "onSurfaceVariant" }, ctx),
@@ -165,18 +191,18 @@ function dialogLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
     scope.style,
   );
   const scrim = el("div", {
-    attrs: { "data-part": "scrim" },
+    attrs: { [DATA_PART]: "scrim" },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       inset: "0",
-      "background-color": rgbaCss({ ...roleColor("scrim", scope.style), a: DIALOG_SCRIM_ALPHA }),
+      [BACKGROUND_COLOR]: rgbaCss({ ...roleColor("scrim", scope.style), a: DIALOG_SCRIM_ALPHA }),
     },
   });
   return el(
     "div",
     {
-      attrs: { "data-part": "dialogLayer" },
-      style: { ...LAYER_CSS, "justify-content": "center", "align-items": "center" },
+      attrs: { [DATA_PART]: "dialogLayer" },
+      style: { ...LAYER_CSS, [JUSTIFY_CONTENT]: CENTER, [ALIGN_ITEMS]: CENTER },
     },
     [scrim, surface],
   );
@@ -192,40 +218,40 @@ function snackbarLayer(node: Raw, scope: WebRenderScope, _path: string, kit: Web
   const ctx: ModalContext = { node, scope, kit };
   const action = textButton(node.action, { part: "action", colorRole: "inversePrimary" }, ctx);
   const { attrs, style } = kit.base(node, hoisted, {
-    display: "flex",
-    "align-items": "center",
-    position: "relative",
-    "box-sizing": "border-box",
+    display: FLEX,
+    [ALIGN_ITEMS]: CENTER,
+    position: RELATIVE,
+    [BOX_SIZING]: BORDER_BOX,
     margin: "12px",
     width: "calc(100% - 24px)",
-    "max-width": "600px",
-    "min-height": "48px",
-    "padding-inline": action.length > 0 ? "16px 8px" : "16px",
-    "border-radius": "4px",
-    "background-color": role("inverseSurface", scope),
+    [MAX_WIDTH]: "600px",
+    [MIN_HEIGHT]: "48px",
+    [PADDING_INLINE]: action.length > 0 ? "16px 8px" : "16px",
+    [BORDER_RADIUS]: "4px",
+    [BACKGROUND_COLOR]: role("inverseSurface", scope),
     color: role("inverseOnSurface", scope),
     ...textCss({ textStyle: "bodyMedium" }, scope.style),
-    "pointer-events": "auto",
+    [POINTER_EVENTS]: "auto",
   });
   const text = el(
     "span",
     {
-      attrs: { "data-part": "text" },
-      style: { flex: "1 1 auto", padding: "14px 0", "white-space": "pre-wrap" },
+      attrs: { [DATA_PART]: "text" },
+      style: { flex: "1 1 auto", padding: "14px 0", [WHITE_SPACE]: "pre-wrap" },
     },
     [kit.bound(node.text, scope)],
   );
   const snackbar = withOverContentLayers(
-    el("div", { attrs: { ...attrs, "data-part": "snackbar" }, style }, [text, ...action]),
+    el("div", { attrs: { ...attrs, [DATA_PART]: "snackbar" }, style }, [text, ...action]),
     node.style,
     scope.style,
   );
   return el(
     "div",
     {
-      attrs: { "data-part": "snackbarLayer" },
+      attrs: { [DATA_PART]: "snackbarLayer" },
       // Not modal: the layer passes touches through to the tree, only the snackbar takes them.
-      style: { ...LAYER_CSS, "align-items": "center", "pointer-events": "none" },
+      style: { ...LAYER_CSS, [ALIGN_ITEMS]: CENTER, [POINTER_EVENTS]: "none" },
     },
     [snackbar],
   );

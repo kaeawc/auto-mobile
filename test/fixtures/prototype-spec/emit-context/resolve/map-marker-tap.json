@@ -1,0 +1,64 @@
+{
+  "name": "map-marker-tap",
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["map"]
+    },
+    "root": {
+      "type": "map",
+      "markers": {
+        "path": "/drivers",
+        "as": "driver",
+        "id": "{driver.id}",
+        "lat": "{driver.lat}",
+        "lng": "{driver.lng}",
+        "title": "{driver.name}"
+      },
+      "onMarkerTap": [
+        {
+          "type": "emit",
+          "name": "driver_selected",
+          "context": {
+            "source": {
+              "value": "map"
+            },
+            "selected": {
+              "state": "selectedDriver"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "state": {
+    "selectedDriver": "d1"
+  },
+  "pages": {},
+  "data": {
+    "drivers": [
+      {
+        "id": "d1",
+        "name": "Ana",
+        "lat": 37.776,
+        "lng": -122.417
+      }
+    ]
+  },
+  "precedingActions": [],
+  "handlerContext": {
+    "markerId": "d1"
+  },
+  "expected": {
+    "context": {
+      "source": "map",
+      "selected": "d1",
+      "markerId": "d1"
+    }
+  }
+}

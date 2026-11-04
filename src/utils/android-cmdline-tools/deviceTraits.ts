@@ -50,6 +50,60 @@ export interface AndroidDeviceTraits {
    * match and leave every other device on today's path.
    */
   formFactor: TraitFormFactor | null;
+  /**
+   * What the car service lets AutoMobile simulate; present only on an automotive build, so
+   * every other device's traits stay unchanged. See {@link deriveVehicleCapabilities}.
+   */
+  vehicle?: VehicleCapabilities;
+}
+
+/** Whether a simulated vehicle state is available on this build; `unknown` when the props were unreadable. */
+export type VehicleCapabilityState = "supported" | "unsupported" | "unknown";
+
+/** Vehicle states an automotive build can simulate, read from build props without touching car state. */
+export interface VehicleCapabilities {
+  /** Driving state (`inject-vhal-event`, `emulate-driving-state`): refused on `user` builds. */
+  motion: VehicleCapabilityState;
+  /** Day/night mode works on every automotive emulator, including Play Store `user` images. */
+  nightMode: VehicleCapabilityState;
+}
+
+export const BUILD_TYPE_PROP = "ro.build.type";
+export const DEBUGGABLE_PROP = "ro.debuggable";
+
+/**
+ * Derive {@link VehicleCapabilities} from `ro.build.type` (preferred) or `ro.debuggable`.
+ * Play Store car images are `user` builds whose car service refuses driving-state injection;
+ * non-Play `android-automotive` images are `userdebug` and accept it. Vehicle state is injected
+ * on emulators only, so a device not positively identified as one supports neither control.
+ */
+export function deriveVehicleCapabilities(
+  isEmulator: boolean | null,
+  buildType: string | null,
+  debuggable: string | null,
+): VehicleCapabilities {
+  if (isEmulator !== true) {
+    return { motion: "unsupported", nightMode: "unsupported" };
+  }
+  return { motion: motionFromBuild(buildType, debuggable), nightMode: "supported" };
+}
+
+function motionFromBuild(
+  buildType: string | null,
+  debuggable: string | null,
+): VehicleCapabilityState {
+  const type = buildType?.trim().toLowerCase();
+  if (type === "user") {
+    return "unsupported";
+  }
+  if (type === "userdebug" || type === "eng") {
+    return "supported";
+  }
+  const flag = debuggable?.trim();
+  if (flag === "1") {
+    return "supported";
+  }
+  return flag === "0" ? "unsupported" : "unknown";
 }
 
 export interface DeviceTraitsReadOptions {
@@ -231,6 +285,14 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
         logger.debug(`[DeviceTraits] leanback feature probe failed: ${errorMessage(error)}`);
       }
     }
+    // Only a car build pays for the extra reads, so other devices' probes are unchanged.
+    const vehicle =
+      formFactor === "automotive"
+        ? deriveVehicleCapabilities(
+            isEmulator,
+            ...(await Promise.all([optional(BUILD_TYPE_PROP), optional(DEBUGGABLE_PROP)])),
+          )
+        : undefined;
     return {
       isEmulator,
       model,
@@ -240,6 +302,7 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
       brand,
       skin: null,
       formFactor,
+      ...(vehicle ? { vehicle } : {}),
     };
   }
 }

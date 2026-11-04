@@ -153,6 +153,13 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   hostInventory?: boolean;
   /** See {@link ToolTraits.keepsImeRestorePending}. */
   keepsImeRestorePending?: boolean;
+  /**
+   * The handler flushes its target device's pending IME restore itself, once it has admitted the
+   * caller for that device; the registry never flushes before dispatch (#16579). A lifecycle tool
+   * whose ownership check runs inside the handler declares this, so a refused call never consumes
+   * another session's pending restore.
+   */
+  flushesImeRestoreAfterAdmission?: boolean;
 }
 
 /**

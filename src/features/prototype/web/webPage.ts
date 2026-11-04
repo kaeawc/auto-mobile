@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models";
+import { logger } from "../../../utils/logger";
 import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import type { WebOrientation } from "./webFrame";
@@ -18,8 +19,10 @@ import {
   prototypeWebZoomScale,
 } from "./webPageRuntime";
 import { renderPrototypeStill } from "./webStill";
+import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
 import type { UnsupportedWebNode } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import type { StillTextSize } from "./webTextScale";
 
 /** One spec revision: its number, the operation that created it and the spec itself. */
 export interface PrototypeWebRevision {
@@ -47,6 +50,10 @@ export interface PrototypeWebPageInput {
   readonly platform?: "android" | "ios";
   readonly mode?: PrototypeColorMode;
   readonly nowMs?: number;
+  /** The host locale every view renders in (BCP 47, default `en-US`). */
+  readonly locale?: string;
+  /** The system text size every view renders at. */
+  readonly textSize?: StillTextSize;
   /** Total page budget; defaults to MAX_PROTOTYPE_WEB_PAGE_BYTES. */
   readonly maxBytes?: number;
 }
@@ -85,6 +92,7 @@ const PAGE_CSS = [
   // A narrow window keeps the width for the stage and moves the history below it.
   "@media (max-width:720px){[data-main]{flex-direction:column}[data-control=revisions]{width:auto;max-height:30vh;border-left:0;border-top:1px solid #ccc}}",
   "[hidden]{display:none!important}",
+  FADE_EDGES_PAGE_CSS,
 ].join("");
 
 function cspFor(script: string): string {
@@ -140,6 +148,9 @@ function renderView(
     orientation,
     mode: input.mode,
     nowMs: input.nowMs,
+    ...(input.locale === undefined ? {} : { locale: input.locale }),
+    ...(input.textSize === undefined ? {} : { textSize: input.textSize }),
+    logger,
     ...(at.screen === undefined ? {} : { screen: at.screen }),
   });
   const view = el(

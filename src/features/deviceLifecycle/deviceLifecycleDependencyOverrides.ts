@@ -114,6 +114,7 @@ function executionDependencyOverrides(
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     forgetDestroyedAvdFixtures:
       deps.forgetDestroyedAvdFixtures ?? currentDeps.forgetDestroyedAvdFixtures,
+    pendingImeRestores: deps.pendingImeRestores ?? currentDeps.pendingImeRestores,
     stopPerformanceMonitoring:
       deps.stopPerformanceMonitoring ?? currentDeps.stopPerformanceMonitoring,
     stopAndroidObservers: deps.stopAndroidObservers ?? currentDeps.stopAndroidObservers,

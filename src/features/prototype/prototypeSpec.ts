@@ -16,7 +16,7 @@ import {
   prototypePresentationNamespaceShape,
 } from "./prototypePlatformNamespaceSchema";
 import * as timers from "./prototypeTimerSchema";
-import { prototypeStringsSchema } from "./prototypeStrings";
+import { prototypeStringsSchema } from "./prototypeStringsSchema";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";

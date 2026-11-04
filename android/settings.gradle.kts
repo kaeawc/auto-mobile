@@ -37,6 +37,9 @@ include(":control-proxy")
 
 include(":auto-mobile-sdk")
 
+// Deterministic Android Automotive OS fixture app for automotive checks (#16745).
+include(":automotive-fixture")
+
 include(":protocol")
 
 include(":prototype-compose")

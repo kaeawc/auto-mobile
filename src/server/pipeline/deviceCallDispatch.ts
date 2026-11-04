@@ -587,7 +587,7 @@ function schemaAcceptsSessionDisplay(schema: unknown): boolean {
 export async function flushPendingImeRestoreBeforeTool(
   keepsImeRestorePending: boolean | undefined,
   deviceId: string | undefined,
-  registry: PendingImeRestoreRegistry = pendingImeRestores,
+  registry: Pick<PendingImeRestoreRegistry, "flush"> = pendingImeRestores,
 ): Promise<void> {
   if (!deviceId || keepsImeRestorePending) {
     return;

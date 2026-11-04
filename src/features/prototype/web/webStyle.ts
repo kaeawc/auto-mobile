@@ -418,10 +418,36 @@ const MAIN_ALIGN: Readonly<Record<string, string>> = {
   spaceEvenly: "space-evenly",
 };
 
+/** A container node and the style context it renders in. */
+interface ContainerScope {
+  readonly style: WebStyleContext;
+}
+
+/**
+ * What a container's children see: the axis it lays them out on, and an unbounded width only while
+ * the container leaves its width open. A dp `width` or a `maxWidth` bounds its children again, as
+ * Compose's `Modifier.width` and `widthIn` restore a finite max width inside a horizontal scroll.
+ */
+export function containerChildStyle(
+  scope: ContainerScope,
+  node: Raw,
+  parentAxis: "row" | "column" | undefined,
+): WebStyleContext {
+  const style = record(node.style);
+  const definite =
+    typeof record(style?.width)?.dp === "number" || typeof style?.maxWidth === "number";
+  return {
+    ...scope.style,
+    parentAxis,
+    unboundedWidth: scope.style.unboundedWidth === true && !definite,
+  };
+}
+
 /** What a scroll's child sees: the scroll's axis, and an unbounded width when it scrolls across. */
-export function scrollChildStyle(style: WebStyleContext, horizontal: boolean): WebStyleContext {
-  const unboundedWidth = horizontal || style.unboundedWidth === true;
-  return { ...style, parentAxis: horizontal ? "row" : "column", unboundedWidth };
+export function scrollChildStyle(scope: ContainerScope, node: Raw): WebStyleContext {
+  const horizontal = node.axis === "horizontal";
+  const inner = containerChildStyle(scope, node, horizontal ? "row" : "column");
+  return horizontal ? { ...inner, unboundedWidth: true } : inner;
 }
 
 /** A row or column's flex layout: direction, arrangement, spacing and cross-axis alignment. */

@@ -22,6 +22,7 @@ import { renderPrototypeStill } from "./webStill";
 import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
 import type { UnsupportedWebNode } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import type { StillTextSize } from "./webTextScale";
 
 /** One spec revision: its number, the operation that created it and the spec itself. */
 export interface PrototypeWebRevision {
@@ -49,6 +50,10 @@ export interface PrototypeWebPageInput {
   readonly platform?: "android" | "ios";
   readonly mode?: PrototypeColorMode;
   readonly nowMs?: number;
+  /** The host locale every view renders in (BCP 47, default `en-US`). */
+  readonly locale?: string;
+  /** The system text size every view renders at. */
+  readonly textSize?: StillTextSize;
   /** Total page budget; defaults to MAX_PROTOTYPE_WEB_PAGE_BYTES. */
   readonly maxBytes?: number;
 }
@@ -143,6 +148,8 @@ function renderView(
     orientation,
     mode: input.mode,
     nowMs: input.nowMs,
+    ...(input.locale === undefined ? {} : { locale: input.locale }),
+    ...(input.textSize === undefined ? {} : { textSize: input.textSize }),
     logger,
     ...(at.screen === undefined ? {} : { screen: at.screen }),
   });

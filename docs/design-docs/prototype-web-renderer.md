@@ -428,7 +428,11 @@ Each entry records:
   the navigation bar move to different edges on each platform.
 - `frame`: the bezel width and colour drawn around the screen.
 - `source`: where the screen geometry and the insets came from. Values not yet measured on an
-  emulator or simulator say so, and replacing them with measured values is a data change.
+  emulator or simulator say so, and replacing them with measured values is a data change. Sources
+  live in `deviceFrameSources.json`, keyed by frame id, because only the schema test reads them;
+  the renderer imports `deviceFrames.json`, so provenance stays out of the browser bundle. The
+  test validates each entry with its source merged back in, and rejects a frame without a source
+  or a source naming no frame.
 
 Beyond the schema, a registry is invalid when two entries share an id, a cutout lies outside the
 portrait screen, or a safe area leaves no screen in either orientation.

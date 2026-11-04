@@ -473,7 +473,7 @@ class DesktopWireFixtureCompositionTest {
               if (error != null) pendingTap?.complete(TapOutcome.Dropped(error))
             },
             streamingEnabled = false,
-            uiContext = Dispatchers.Unconfined,
+            uiContext = testDispatcher,
             ioDispatcher = CONTROL_WORKER,
           ),
         )

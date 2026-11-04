@@ -9,6 +9,7 @@ import {
   WEB_SCREENSHOT_VIEWPORT,
   webScreenshotCases,
   webScreenshotPage,
+  webSpecPage,
 } from "./webScreenshotCases";
 
 /**
@@ -30,6 +31,12 @@ const PAGE_URL = "http://prototype-web.test/";
 const PER_PIXEL_DELTA = 0.1;
 const PIXEL_RATIO = 0.001;
 const CASE_TIMEOUT_MS = 30_000;
+/**
+ * The page's status bar clock follows the browser clock (#16585); the check pins it to the stills'
+ * 9:41, in UTC, so the goldens stay byte-stable.
+ */
+const STILL_TIME = "2026-01-01T09:41:00Z";
+const TIMEZONE = "UTC";
 
 interface PageProblems {
   readonly consoleErrors: string[];
@@ -37,8 +44,21 @@ interface PageProblems {
   readonly requests: string[];
 }
 
-async function openPage(browser: Browser, html: string): Promise<{ page: Page } & PageProblems> {
-  const page = await browser.newPage({ viewport: WEB_SCREENSHOT_VIEWPORT, deviceScaleFactor: 1 });
+type ClockSetup = (page: Page) => Promise<void>;
+
+const freezeClock: ClockSetup = (page) => page.clock.setFixedTime(STILL_TIME);
+
+async function openPage(
+  browser: Browser,
+  html: string,
+  clock: ClockSetup = freezeClock,
+): Promise<{ page: Page } & PageProblems> {
+  const page = await browser.newPage({
+    viewport: WEB_SCREENSHOT_VIEWPORT,
+    deviceScaleFactor: 1,
+    timezoneId: TIMEZONE,
+  });
+  await clock(page);
   const problems: PageProblems = { consoleErrors: [], pageErrors: [], requests: [] };
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -252,6 +272,75 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
           expect(
             compareToGolden(`${entry.name}--landscape`, entry.landscapeGolden, landscape),
           ).toBeUndefined();
+        } finally {
+          await page.close();
+        }
+      },
+      CASE_TIMEOUT_MS,
+    );
+  }
+
+  test(
+    "the status bar clock follows the browser clock (#16585)",
+    async () => {
+      const [entry] = webScreenshotCases();
+      const { page } = await openPage(browser, webScreenshotPage(entry!), (opened) =>
+        opened.clock.install({ time: "2026-01-01T13:07:30Z" }),
+      );
+      const clocks = () =>
+        page.$$eval('[data-status="clock"]', (marks) =>
+          Array.from(new Set(marks.map((mark) => mark.textContent))),
+        );
+      try {
+        expect(await clocks()).toEqual(["1:07"]);
+        await page.clock.runFor(30_000);
+        expect(await clocks()).toEqual(["1:08"]);
+        await page.clock.runFor(60_000);
+        expect(await clocks()).toEqual(["1:09"]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
+});
+
+const FADE_FIXTURE = join(
+  import.meta.dir,
+  "../../../fixtures/prototype-web/fade-edges-overflow.json",
+);
+
+describeBrowser("scroll fade edges follow overflow in headless Chromium (#16606)", () => {
+  let browser: Browser;
+
+  beforeAll(async () => {
+    browser = await chromium.launch();
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  for (const direction of ["ltr", "rtl"] as const) {
+    test(
+      `only an overflowing scroll fades its trailing edge (${direction})`,
+      async () => {
+        const base = JSON.parse(readFileSync(FADE_FIXTURE, "utf8")) as Record<string, unknown>;
+        const window = { ...(base.window as Record<string, unknown>), layoutDirection: direction };
+        const { page } = await openPage(browser, webSpecPage({ ...base, window }, "fade-edges"));
+        try {
+          const masks = await page.evaluate(() =>
+            Object.fromEntries(
+              Array.from(
+                document.querySelectorAll<HTMLElement>("[data-view]:not([hidden]) [data-fade]"),
+              ).map((scroll) => [scroll.dataset.testid, getComputedStyle(scroll).maskImage]),
+            ),
+          );
+          const trailing = direction === "rtl" ? "to right" : "to left";
+          expect(masks["vertical-fits"]).toBe("none");
+          expect(masks["horizontal-fits"]).toBe("none");
+          expect(masks["vertical-overflows"]).toStartWith("linear-gradient(to top,");
+          expect(masks["horizontal-overflows"]).toStartWith(`linear-gradient(${trailing},`);
         } finally {
           await page.close();
         }

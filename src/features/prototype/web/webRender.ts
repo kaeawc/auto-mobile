@@ -25,13 +25,17 @@ import { webControlRenderers } from "./webControls";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webModalLayers } from "./webModal";
+import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
   cssColor,
+  fontPx,
   lineCss,
+  multilineCss,
   nodeCss,
   textCss,
   type WebStyleContext,
@@ -39,6 +43,7 @@ import {
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import { rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -77,7 +82,7 @@ export interface WebRenderScope {
   readonly screen?: string;
   /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
   readonly stacks?: WebStackScreens[];
-  /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
+  /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
@@ -99,9 +104,6 @@ export interface WebRenderKit {
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
 }
-
-/** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
-const MAX_WEB_REPEAT_ITEMS = 200;
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
 function bindBare(text: string, scope: WebRenderScope): string {
@@ -210,21 +212,6 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
 }
 
 /**
- * A repeat's rows: a literal array or a pointer into the spec's data. As on the devices, only
- * object items repeat (scalars are skipped before indices are assigned), up to the item cap.
- */
-function repeatRows(repeat: Raw, scope: WebRenderScope): unknown[] {
-  const itemsPath = record(repeat.items)?.path;
-  const items = Array.isArray(repeat.items)
-    ? repeat.items
-    : typeof itemsPath === "string"
-      ? resolvePrototypeDataPointer(scope.data, itemsPath)
-      : undefined;
-  const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
-  return rows.slice(0, MAX_WEB_REPEAT_ITEMS);
-}
-
-/**
  * Lets a container decorate each child, given the child node it was drawn from. A hidden child
  * arrives as undefined, so a container that keeps a slot for every child (a carousel) can still
  * draw one; returning undefined draws nothing.
@@ -247,7 +234,7 @@ export function children(
       renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
     );
   }
-  const rows = repeatRows(repeat, scope);
+  const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
@@ -327,12 +314,18 @@ const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box",
  */
 function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
   const repeat = record(raw.repeat);
-  if (!Array.isArray(raw.children) || (repeat && repeatRows(repeat, scope).length === 0)) {
+  if (
+    !Array.isArray(raw.children) ||
+    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
+  ) {
     return [];
   }
-  const axes = new Set(raw.children.flatMap((entry) => childFillAxes(entry, scope, path)));
+  const own = rowFillAxes(raw, path, prepareIn(scope));
+  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
+
+const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
 function spacerFilled(node: Raw): Raw {
   return isUnsizedSpacer(node) ? fillMissing(node) : node;
@@ -346,7 +339,8 @@ const line =
     const node = filling(raw, lineFillAxes(raw, scope, path));
     const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    return el("div", { attrs, style }, children(node, inner, path));
+    const rowed = rowMeasured(node, path, prepareIn(inner));
+    return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
@@ -378,6 +372,7 @@ const text: NodeRenderer = (node, scope) => {
 
 const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
+  const fade = fadeEdgesCss(node, scope.style);
   const { attrs, style } = base(node, scope, {
     display: "flex",
     // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
@@ -385,13 +380,14 @@ const scroll: NodeRenderer = (node, scope, path) => {
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
     "align-items": "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
-    ...fadeEdgesCss(node, scope.style),
+    ...fade.style,
   });
   const inner = child(scope, {
     inBox: false,
     style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
   });
-  return el("div", { attrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
+  const scrollAttrs = { ...attrs, ...fade.attrs };
+  return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
 
 const spacer: NodeRenderer = (node, scope) => el("div", base(spacerFilled(node), scope));
@@ -588,7 +584,7 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
     // from an authored safeAreaPadding.
     "min-height": `${size.height}px`,
     "padding-inline": "16px",
-    "font-size": `${size.title}px`,
+    "font-size": fontPx(size.title, scope.style),
     "align-self": "stretch",
     position: "relative",
     ...roleCss(scope, "surface", "onSurface"),
@@ -622,22 +618,6 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
   return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
 }
 
-/** A multiline field keeps its newlines and its authored minLines and maxLines (24px lines). */
-function lineBounds(node: Raw): Record<string, string> {
-  if (node.multiline !== true) {
-    return {};
-  }
-  const css: Record<string, string> = { "white-space": "pre-wrap", "line-height": "24px" };
-  if (typeof node.minLines === "number") {
-    css["min-height"] = `${node.minLines * 24}px`;
-  }
-  if (typeof node.maxLines === "number") {
-    css["max-height"] = `${node.maxLines * 24}px`;
-    css.overflow = "hidden";
-  }
-  return css;
-}
-
 /**
  * A Material field's label sits inside an empty field with no placeholder (fieldValue draws it
  * there); once the field holds a value or shows a placeholder, the label floats above it.
@@ -649,7 +629,10 @@ function floatingLabel(node: Raw, empty: boolean, scope: WebRenderScope): WebEle
   return [
     el(
       "span",
-      { attrs: { "data-slot": "label" }, style: { "font-size": "12px", opacity: "0.8" } },
+      {
+        attrs: { "data-slot": "label" },
+        style: { "font-size": fontPx(12, scope.style), opacity: "0.8" },
+      },
       [bound(node.label, scope)],
     ),
   ];
@@ -691,7 +674,11 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
       "span",
       {
         attrs: error ? { role: "alert" } : {},
-        style: { "font-size": "12px", padding: "0 16px", ...(color ? { color } : {}) },
+        style: {
+          "font-size": fontPx(12, scope.style),
+          padding: "0 16px",
+          ...(color ? { color } : {}),
+        },
       },
       [bound(caption, scope)],
     ),
@@ -720,7 +707,7 @@ const textField: NodeRenderer = (node, scope, path) => {
     ...namedIcon(node.leadingIcon, scope),
     el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
       ...floatingLabel(node, empty, scope),
-      el("span", { style: lineBounds(node) }, [shown]),
+      el("span", { style: multilineCss(node, scope.style) }, [shown]),
     ]),
     // The trailing slot is an {icon, label} action, like an app-bar action.
     ...appBarIcons([node.trailingIcon], scope, path),
@@ -899,14 +886,19 @@ const listItem: NodeRenderer = (node, scope) => {
     node.supporting === undefined
       ? []
       : [
-          el("span", { style: { "font-size": "14px", opacity: "0.7" } }, [
+          el("span", { style: { "font-size": fontPx(14, scope.style), opacity: "0.7" } }, [
             bound(node.supporting, scope),
           ]),
         ];
   const texts = el(
     "div",
     { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
-    [el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]), ...supporting],
+    [
+      el("span", { style: { "font-size": fontPx(16, scope.style) } }, [
+        bound(node.headline, scope),
+      ]),
+      ...supporting,
+    ],
   );
   return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
     ...namedIcon(node.leadingIcon, scope),
@@ -951,7 +943,7 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webStackRenderers(KIT),
 };
 
-const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
+const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);

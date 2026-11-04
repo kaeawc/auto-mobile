@@ -170,6 +170,8 @@ export function registerDeviceTools() {
     handler: killDeviceHandler,
     defaultEnabled: true,
     transportRecovery: "connect",
+    // killDevice's holder check runs inside its handler; it flushes once the caller is admitted.
+    flushesImeRestoreAfterAdmission: true,
   });
 
   ToolRegistry.register(

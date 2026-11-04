@@ -8,6 +8,22 @@ export interface PlanLabelRegistryHost {
 export interface EndedLabelBase {
   baseSessionId: string;
   releaseReason: string;
+  /**
+   * The base's CLI idle window, present only when the base ended with `cli-idle-timeout` and was
+   * itself on the `cli-idle` policy (#16971): the window that actually expired for the label.
+   */
+  cliIdleTimeoutMs?: number;
+}
+
+/** `ended`, with the base's CLI idle window kept only for a `cli-idle-timeout` end (#16971). */
+export function endedLabelBase(
+  baseSessionId: string,
+  releaseReason: string,
+  cliIdleTimeoutMs: number | undefined,
+): EndedLabelBase {
+  return releaseReason === "cli-idle-timeout" && cliIdleTimeoutMs !== undefined
+    ? { baseSessionId, releaseReason, cliIdleTimeoutMs }
+    : { baseSessionId, releaseReason };
 }
 
 /**
@@ -121,18 +137,21 @@ export class PlanLabelRegistry {
 
   /**
    * Remove and return every derived session indexed for `baseSessionId`. A terminal release
-   * retains the base's end for each still-published label, and the base's plan run is over.
+   * retains the base's end for each still-published label, with the base's CLI idle window when
+   * it ended with `cli-idle-timeout`, and the base's plan run is over.
    */
   takeDerivedLabelSessions(
     baseSessionId: string,
     releaseReason: string | undefined,
     isTerminalReleaseReason: (reason: string) => boolean,
+    baseCliIdleTimeoutMs?: number,
   ): string[] {
     const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
     if (releaseReason !== undefined && isTerminalReleaseReason(releaseReason)) {
+      const ended = endedLabelBase(baseSessionId, releaseReason, baseCliIdleTimeoutMs);
       for (const labelSessionId of derived ?? []) {
         if (this.host.hasSession(labelSessionId)) {
-          this.endedLabelBases.set(labelSessionId, { baseSessionId, releaseReason });
+          this.endedLabelBases.set(labelSessionId, ended);
         }
       }
     }

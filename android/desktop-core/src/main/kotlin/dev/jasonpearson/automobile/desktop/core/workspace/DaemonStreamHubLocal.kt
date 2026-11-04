@@ -65,7 +65,8 @@ internal fun hubObservationFactory(
  * A pane facet's observation stream for [column]: a lease on the app's [LocalDaemonStreamHub]
  * per-device stream when there is one, otherwise [fallback]'s own per-pane stream, with the
  * lifecycle of [rememberReconnectingObservationState]. A new device epoch takes a new lease, keyed
- * by the column's deviceSessionUuid.
+ * by the column's deviceSessionUuid. [requireDeviceSessionUuid] waits for the column's epoch before
+ * connecting, and scopes a fallback stream's subscription to it (the Storage facet).
  */
 @Composable
 internal fun rememberPaneObservationState(
@@ -73,12 +74,16 @@ internal fun rememberPaneObservationState(
   fallback: () -> ObservationStream,
   backoffDelay: suspend (attempt: Int) -> Unit,
   socketAvailable: () -> Boolean,
+  requireDeviceSessionUuid: Boolean = false,
 ): ReconnectingObservationState {
   val hub = LocalDaemonStreamHub.current
   return key(column.deviceSessionUuid) {
     rememberReconnectingObservationState(
       ReconnectingObservationOptions(
         deviceId = column.deviceId,
+        // Only a pane that requires the device epoch scopes its own fallback stream to it.
+        deviceSessionUuid = column.deviceSessionUuid.takeIf { requireDeviceSessionUuid },
+        requireDeviceSessionUuid = requireDeviceSessionUuid,
         streamFactory = hubObservationFactory(hub, column, fallback),
         backoffDelay = backoffDelay,
         socketAvailable = socketAvailable,

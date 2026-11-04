@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,7 +11,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * One device's subscription on a [MultiplexedObservationSocketClient], seen as an
@@ -22,7 +23,9 @@ import kotlinx.coroutines.flow.emptyFlow
  * device's slow collector may hold back another device's frames. The layout and performance flows
  * keep the latest frame as their replay, as the per-device client's do.
  *
- * Storage is not carried; the Storage facet keeps its own stream.
+ * Storage traffic is lossless and unicast, as on the per-device client: updates, acknowledgements
+ * and reconciliation requests queue without bound until this stream's one collector (the hub) takes
+ * them.
  */
 internal class MuxObservationChannel(private val mux: MultiplexedObservationSocketClient) :
   ObservationStream {
@@ -49,9 +52,16 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
   private val _deviceEvents = latestFlow<DeviceStreamEvent>()
   override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
 
-  override val storageUpdates: Flow<StorageStreamUpdate> = emptyFlow()
-  override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> = emptyFlow()
-  override val storageReconciliationRequests: Flow<StorageSubscriptionKey> = emptyFlow()
+  private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
+  override val storageUpdates: Flow<StorageStreamUpdate> = storageUpdateChannel.receiveAsFlow()
+
+  private val storageResponseChannel = Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
+  override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
+    storageResponseChannel.receiveAsFlow()
+
+  private val storageReconciliationChannel = Channel<StorageSubscriptionKey>(Channel.UNLIMITED)
+  override val storageReconciliationRequests: Flow<StorageSubscriptionKey> =
+    storageReconciliationChannel.receiveAsFlow()
 
   val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
   override val connectionState: StateFlow<ConnectionState> = mutableState.asStateFlow()
@@ -68,6 +78,7 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
   var cadence = ObservationCadence()
   /** The cadence changed while the `subscribe` carrying the older one was in flight. */
   var cadenceDirty = false
+  val storage = StorageSubscriptionLedger()
 
   override fun connect(deviceId: String?, deviceSessionUuid: String?) =
     mux.connect(this, deviceId, deviceSessionUuid)
@@ -92,10 +103,10 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
   override fun requestObservation(deviceId: String?) = mux.requestObservation(this, deviceId)
 
   override fun subscribeStorage(packageName: String, fileName: String) =
-    throw UnsupportedOperationException("Storage keeps its own observation stream")
+    mux.subscribeStorage(this, StorageSubscriptionKey(packageName, fileName))
 
   override fun unsubscribeStorage(packageName: String, fileName: String) =
-    throw UnsupportedOperationException("Storage keeps its own observation stream")
+    mux.unsubscribeStorage(this, StorageSubscriptionKey(packageName, fileName))
 
   /** Deliver one frame routed to this device; false when the type is not a device data frame. */
   fun deliver(response: StreamResponse): Boolean {
@@ -106,6 +117,7 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
       "performance_update" -> response.toPerformanceUpdate()?.let(_performanceUpdates::tryEmit)
       "device_build_context" -> response.toBuildContextUpdate()?.let(_buildContextUpdates::tryEmit)
       "device_session_ended" -> response.toSessionSuperseded()?.let(_deviceEvents::tryEmit)
+      "storage_update" -> response.toStorageUpdate()?.let(storageUpdateChannel::trySend)
       else -> return false
     }
     return true
@@ -118,6 +130,21 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
     _screenshotUpdates.resetReplayCache()
     _performanceUpdates.resetReplayCache()
     _deviceEvents.tryEmit(event)
+  }
+
+  fun storageResponse(response: StorageSubscriptionResponse) {
+    storageResponseChannel.trySend(response)
+  }
+
+  fun storageReconciliationRequired(key: StorageSubscriptionKey) {
+    storageReconciliationChannel.trySend(key)
+  }
+
+  /** Disposed: end the storage flows so their collector completes. */
+  fun closeStorage() {
+    storageUpdateChannel.close()
+    storageResponseChannel.close()
+    storageReconciliationChannel.close()
   }
 
   private companion object {

@@ -104,8 +104,7 @@ private fun ObservationStreamClient.finishObservationRead(
   if (stillOwner) {
     closeQuietly(activeTransport)
     synchronized(ownershipLock) {
-      confirmedStorageSubscriptions.clear()
-      pendingStorageSubscriptions.clear()
+      storageLedger.connectionReset()
     }
     _connectionState.update { ConnectionState.Disconnected("Stream ended") }
     log.info("Observation stream disconnected")

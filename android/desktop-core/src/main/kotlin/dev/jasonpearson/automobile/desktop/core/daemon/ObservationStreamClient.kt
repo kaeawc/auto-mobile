@@ -230,14 +230,8 @@ class ObservationStreamClient(
   internal var requestedScreenshotIntervalMs: Long? = null
   internal var requestedHierarchyIntervalMs: Long? = null
 
-  // Per-file storage subscription intent and confirmation are deliberately distinct. A command
-  // can be in flight while the UI removes a file, so "asked for" does not mean the observer exists
-  // on the runner. Every collection is guarded by [ownershipLock].
-  internal val desiredStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
-  internal val confirmedStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
-  internal val pendingStorageSubscriptions = LinkedHashMap<String, PendingStorageSubscription>()
-  internal val storageSubscriptionIntentVersions = LinkedHashMap<StorageSubscriptionKey, Long>()
-  internal val forcedStorageReconciliations = LinkedHashSet<StorageSubscriptionKey>()
+  // Per-file storage subscription intent and confirmation. Guarded by [ownershipLock].
+  internal val storageLedger = StorageSubscriptionLedger()
 
   /**
    * Connect to the observation stream socket and subscribe to updates. Any cadence configured via
@@ -280,8 +274,7 @@ class ObservationStreamClient(
         generation = ++connectionGeneration
         // A transport change makes previous acknowledgements unknowable. Retain desired intent,
         // but do not let a late response from the old socket confirm it on this connection.
-        confirmedStorageSubscriptions.clear()
-        pendingStorageSubscriptions.clear()
+        storageLedger.connectionReset()
       }
       closeQuietly(previousTransport)
 
@@ -331,8 +324,7 @@ class ObservationStreamClient(
     synchronized(ownershipLock) {
       // The daemon may have acted just before this transport died, but its acknowledgement can no
       // longer be trusted. Forget it rather than allowing a stale response to drive reconciliation.
-      confirmedStorageSubscriptions.clear()
-      pendingStorageSubscriptions.clear()
+      storageLedger.connectionReset()
     }
     subscriptionId = null
     streamSubscriptionRequestId = null
@@ -445,8 +437,7 @@ class ObservationStreamClient(
   override fun subscribeStorage(packageName: String, fileName: String) {
     val key = StorageSubscriptionKey(packageName, fileName)
     synchronized(ownershipLock) {
-      if (!desiredStorageSubscriptions.add(key)) return
-      incrementStorageSubscriptionIntentVersion(key)
+      if (!storageLedger.want(key)) return
     }
     driveStorageSubscription(key)
   }
@@ -454,8 +445,7 @@ class ObservationStreamClient(
   override fun unsubscribeStorage(packageName: String, fileName: String) {
     val key = StorageSubscriptionKey(packageName, fileName)
     synchronized(ownershipLock) {
-      if (!desiredStorageSubscriptions.remove(key)) return
-      incrementStorageSubscriptionIntentVersion(key)
+      if (!storageLedger.unwant(key)) return
     }
     // If subscribe is pending, this does nothing until its acknowledgement arrives. The response
     // handler then issues a compensating unsubscribe instead of leaking the newly-confirmed

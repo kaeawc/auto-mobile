@@ -75,6 +75,10 @@ internal class MultiplexedObservationSocketClient(
   private val bySubscribeRequest = HashMap<String, MuxObservationChannel>()
   // In-flight on-demand requests, whose replies carry only the request id.
   private val byRequest = HashMap<String, MuxObservationChannel>()
+  // In-flight storage observer commands, whose acknowledgements carry only the request id.
+  private val byStorageRequest = HashMap<String, MuxObservationChannel>()
+  // Advances with every socket, so a storage command is never recorded against a later one.
+  private var generation = 0L
   private var sessionRejected = false
   private var closed = false
 
@@ -126,29 +130,28 @@ internal class MultiplexedObservationSocketClient(
       return
     }
     write(open, request)
+    // Re-register the device's remembered storage observers, so live updates survive a reconnect.
+    synchronized(lock) { channel.storage.desiredKeys }.forEach { driveStorage(channel, it) }
   }
 
   fun disconnect(channel: MuxObservationChannel, dispose: Boolean) {
-    val (open, released, detached) =
+    val release =
       synchronized(lock) {
         if (dispose) channel.disposed = true
-        if (!channel.live)
-          return@synchronized Triple<TelemetrySocket?, String?, Detached?>(null, null, null)
-        channel.live = false
-        channels.remove(channel)
-        channel.requestId = null
-        channel.cadenceDirty = false
-        byRequest.values.removeAll { it === channel }
-        val released = channel.subscriptionId?.also { bySubscriptionId.remove(it) }
-        channel.subscriptionId = null
-        val open = socket
-        // Decide and detach in one step: a device connecting right after this release must open
-        // a fresh connection, not join the socket being shut down.
-        Triple(open, released, if (channels.isEmpty()) detach() else null)
+        if (channel.live) leave(channel) else null
       }
+    if (dispose) channel.closeStorage()
     channel.mutableState.value = ConnectionState.Disconnected()
-    if (open != null && released != null) write(open, unsubscribe(released))
-    detached?.let(::shutDown)
+    release?.let(::finishRelease)
+  }
+
+  fun subscribeStorage(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
+    if (synchronized(lock) { channel.storage.want(key) }) driveStorage(channel, key)
+  }
+
+  fun unsubscribeStorage(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
+    // A subscribe still in flight is compensated when its acknowledgement arrives.
+    if (synchronized(lock) { channel.storage.unwant(key) }) driveStorage(channel, key)
   }
 
   fun setCadence(channel: MuxObservationChannel, cadence: ObservationCadence) {
@@ -188,6 +191,120 @@ internal class MultiplexedObservationSocketClient(
         sessionUuid = sessionUuidProvider?.invoke(),
       )
     }
+
+  /** What a released device still owes the daemon, sent outside the lock. */
+  private class Release(
+    val channel: MuxObservationChannel,
+    val socket: TelemetrySocket?,
+    val subscriptionId: String?,
+    val storage: Set<StorageSubscriptionKey>,
+    val detached: Detached?,
+  )
+
+  // Called under [lock]: take [channel] off the socket.
+  private fun leave(channel: MuxObservationChannel): Release {
+    channel.live = false
+    channels.remove(channel)
+    channel.requestId = null
+    channel.cadenceDirty = false
+    byRequest.values.removeAll { it === channel }
+    byStorageRequest.values.removeAll { it === channel }
+    val released = channel.subscriptionId?.also { bySubscriptionId.remove(it) }
+    channel.subscriptionId = null
+    // The daemon keeps a storage observer while this socket owns it, so a device leaving a socket
+    // that stays open releases its observers explicitly; its desired files stay remembered.
+    val storage = channel.storage.daemonSideKeys()
+    channel.storage.connectionReset()
+    val open = socket
+    // Decide and detach in one step: a device connecting right after this release must open a
+    // fresh connection, not join the socket being shut down.
+    return Release(channel, open, released, storage, if (channels.isEmpty()) detach() else null)
+  }
+
+  private fun finishRelease(release: Release) {
+    val open = release.socket
+    if (open != null) {
+      release.subscriptionId?.let { write(open, unsubscribe(it)) }
+      // Closing the socket releases its observers on the daemon by itself.
+      if (release.detached == null) {
+        release.storage.forEach {
+          write(open, storageCommand(release.channel, it, false, newRequestId()))
+        }
+      }
+    }
+    release.detached?.let(::shutDown)
+  }
+
+  /** Send the one command that moves [key]'s daemon-side observer toward the device's intent. */
+  private fun driveStorage(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
+    val (open, command) =
+      synchronized(lock) {
+        if (!channel.live || !channel.isConnected()) return
+        val open = socket ?: return
+        val command = channel.storage.next(key, newRequestId, generation) ?: return
+        byStorageRequest[command.requestId] = channel
+        open to command
+      }
+    val sent = write(open, storageCommand(channel, key, command.subscribe, command.requestId))
+    synchronized(lock) {
+      channel.storage.sent(command, sent)
+      if (!sent) byStorageRequest.remove(command.requestId)
+    }
+  }
+
+  /** Record a storage command's answer; false when [id] is not a storage command. */
+  private fun resolveStorage(id: String, success: Boolean, error: String?): Boolean {
+    val (channel, resolution) =
+      synchronized(lock) {
+        val channel = byStorageRequest.remove(id) ?: return false
+        channel to channel.storage.resolve(id, success)
+      }
+    val command = resolution?.command ?: return true
+    channel.storageResponse(
+      StorageSubscriptionResponse(
+        requestId = id,
+        key = command.key,
+        subscribe = command.subscribe,
+        success = success,
+        error = error,
+      ),
+    )
+    if (resolution.redrive) driveStorage(channel, command.key)
+    return true
+  }
+
+  /** The daemon recreated [response]'s observer: its file needs a fresh snapshot. */
+  private fun reconciliationRequired(response: StreamResponse) {
+    val packageName = response.packageName
+    val fileName = response.fileName
+    if (packageName == null || fileName == null) {
+      log.warn("storage_reconciliation_required without packageName/fileName, ignoring")
+      return
+    }
+    val key = StorageSubscriptionKey(packageName, fileName)
+    // The daemon keys observers by device serial and names only that serial here.
+    val owners =
+      synchronized(lock) {
+        channels.filter { it.deviceId == response.deviceId && it.storage.isDesired(key) }
+      }
+    owners.forEach { it.storageReconciliationRequired(key) }
+  }
+
+  private fun storageCommand(
+    channel: MuxObservationChannel,
+    key: StorageSubscriptionKey,
+    subscribe: Boolean,
+    id: String,
+  ) =
+    StreamRequest(
+      id = id,
+      command = if (subscribe) "subscribe_storage" else "unsubscribe_storage",
+      deviceId = channel.deviceId,
+      deviceSessionUuid = channel.deviceSessionUuid,
+      sessionUuid = sessionUuidProvider?.invoke(),
+      packageName = key.packageName,
+      fileName = key.fileName,
+    )
 
   private fun canSubscribe(): Boolean =
     synchronized(lock) { !sessionRejected } &&
@@ -229,6 +346,7 @@ internal class MultiplexedObservationSocketClient(
           throw java.io.IOException("Observation multiplexer is closed")
         }
         socket = open
+        generation++
         connection = scope.launch { read(open) }
       }
       log.info("Connected to observation stream (multiplexed)")
@@ -321,6 +439,7 @@ internal class MultiplexedObservationSocketClient(
         if (response.success == true) acknowledge(open, response) else refuse(response)
       "error" -> refuse(response)
       "device_session_started" -> Unit
+      "storage_reconciliation_required" -> reconciliationRequired(response)
       else -> route(response)
     }
   }
@@ -339,6 +458,7 @@ internal class MultiplexedObservationSocketClient(
 
   private fun acknowledge(open: TelemetrySocket, response: StreamResponse) {
     val id = response.id ?: return
+    if (resolveStorage(id, success = true, error = null)) return
     val subscriptionId = response.subscriptionId
     val (stale, cadence) =
       synchronized(lock) {
@@ -364,6 +484,7 @@ internal class MultiplexedObservationSocketClient(
 
   private fun refuse(response: StreamResponse) {
     val error = response.error
+    if (response.id?.let { resolveStorage(it, success = false, error = error) } == true) return
     if (isStreamSessionRejection(error)) {
       rejectSession(error)
       return
@@ -435,7 +556,9 @@ internal class MultiplexedObservationSocketClient(
     bySubscriptionId.clear()
     bySubscribeRequest.clear()
     byRequest.clear()
+    byStorageRequest.clear()
     channels.forEach {
+      it.storage.connectionReset()
       it.subscriptionId = null
       it.requestId = null
       it.cadenceDirty = false
@@ -476,15 +599,18 @@ internal class MultiplexedObservationSocketClient(
   private fun unsubscribe(subscriptionId: String) =
     StreamRequest(id = newRequestId(), command = "unsubscribe", subscriptionId = subscriptionId)
 
-  private fun write(open: TelemetrySocket, request: StreamRequest) {
+  /**
+   * Write [request]; false when the socket is broken (the reader then reports every device down).
+   */
+  private fun write(open: TelemetrySocket, request: StreamRequest): Boolean =
     try {
       val line = DaemonJson.encodeToString(serializer<StreamRequest>(), request)
       synchronized(writeLock) { open.writeLine(line) }
+      true
     } catch (e: java.io.IOException) {
-      // The reader sees the broken socket and reports every device down.
       log.warn("Failed to send observation stream request: ${e.message}")
+      false
     }
-  }
 
   private fun closeQuietly(open: TelemetrySocket?) {
     try {

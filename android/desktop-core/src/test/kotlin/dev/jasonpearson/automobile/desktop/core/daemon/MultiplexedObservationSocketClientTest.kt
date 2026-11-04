@@ -374,6 +374,82 @@ class MultiplexedObservationSocketClientTest {
     mux.close()
   }
 
+  @Test
+  fun `storage commands, acknowledgements, updates and reconciliation stay with their device`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a, b) = connectDevices(mux, 2)
+      val socket = daemon.nextSocket()
+      val (subA, _) = subscribeAll(socket, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+
+      a.subscribeStorage("com.example", "prefs.xml")
+      val command = socket.nextRequest()
+      assertEquals("subscribe_storage", command["command"])
+      assertEquals("uuid-0", command["deviceSessionUuid"])
+      assertEquals("prefs.xml", command["fileName"])
+      socket.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+      socket.send(
+        """{"type":"storage_update","subscriptionId":"$subA","deviceId":"emulator-0","storageEvent":{"packageName":"com.example","fileName":"prefs.xml","key":"k","value":"v","sequenceNumber":5}}""",
+      )
+      socket.send(
+        """{"type":"storage_reconciliation_required","deviceId":"emulator-0","packageName":"com.example","fileName":"prefs.xml"}""",
+      )
+      socket.send(
+        """{"type":"storage_reconciliation_required","deviceId":"emulator-1","packageName":"com.example","fileName":"prefs.xml"}""",
+      )
+
+      val response = a.storageSubscriptionResponses.awaitFirst()
+      assertEquals(command["id"], response.requestId)
+      assertTrue(response.success && response.subscribe)
+      assertEquals(5L, a.storageUpdates.awaitFirst().sequenceNumber)
+      assertEquals(
+        StorageSubscriptionKey("com.example", "prefs.xml"),
+        a.storageReconciliationRequests.awaitFirst(),
+      )
+      // Device B asked for no file: nothing reaches it, and it sent nothing.
+      b.dispose()
+      assertEquals("unsubscribe", socket.nextRequest()["command"])
+      assertNull(socket.fromClient.poll())
+      mux.close()
+    }
+
+  @Test
+  fun `a device leaving an open socket releases its observers, and they come back on reconnect`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a, b) = connectDevices(mux, 2)
+      val first = daemon.nextSocket()
+      subscribeAll(first, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+      a.subscribeStorage("com.example", "prefs.xml")
+      val command = first.nextRequest()
+      first.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+      a.storageSubscriptionResponses.awaitFirst()
+
+      // The socket drops: the remembered file is registered again with the next subscribe.
+      first.drop()
+      a.connectionState.awaitFirst { it is ConnectionState.Disconnected }
+      a.connect(deviceId = "emulator-0", deviceSessionUuid = "uuid-0")
+      val second = daemon.nextSocket()
+      assertEquals("subscribe", second.nextRequest()["command"])
+      val again = second.nextRequest()
+      assertEquals("subscribe_storage", again["command"])
+      second.send("""{"id":"${again["id"]}","type":"subscription_response","success":true}""")
+      a.storageSubscriptionResponses.awaitFirst()
+
+      // B keeps the socket open, so A's leaving must release its observer explicitly.
+      b.connect(deviceId = "emulator-1", deviceSessionUuid = "uuid-1")
+      assertEquals("subscribe", second.nextRequest()["command"])
+      a.dispose()
+      val released = second.nextRequest()
+      assertEquals("unsubscribe_storage", released["command"])
+      assertEquals("uuid-0", released["deviceSessionUuid"])
+      mux.close()
+    }
+
   companion object {
     private const val TIMEOUT_SECONDS = 5L
     private const val CLIENT_THREADS = 4

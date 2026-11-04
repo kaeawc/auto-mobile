@@ -65,8 +65,18 @@ fallback), instead of opening their own socket:
   interval any facet asked for, sent as `update_cadence` on that device's
   subscription, and recomputed when a facet leaves. One device's slow collector
   never holds back another: the per-device flows keep the latest frame and drop
-  the oldest buffered one. Storage keeps its own per-pane stream, because
-  its updates and subscription acknowledgements are unicast to one pane.
+  the oldest buffered one. Layout, Performance, Navigation, Storage, the compare
+  view and the device-control stream all lease this one stream.
+- Storage intent is per lease. The hub counts each `(package, file)` across a
+  device's leases. The first lease that asks sends `subscribe_storage` on the
+  shared stream, and the last one to let go sends `unsubscribe_storage`. Updates,
+  acknowledgements and reconciliation requests for a file reach only the leases
+  holding it, without loss. A lease that joins a file the device already
+  observes is acknowledged at once, so it reconciles its snapshot. A dropped
+  connection forgets every confirmation until the re-registration after the
+  reconnect acknowledges the holders again. The daemon owns an observer per
+  socket, so a device that leaves a socket other devices keep open sends
+  `unsubscribe_storage` for its files.
 - Leases are ref-counted per device and stream kind; `subscriptions` and
   `observationSubscriptions` expose the live counts, and
   `telemetryConnectionState`/`observationConnectionState` the per-device health.
@@ -77,5 +87,7 @@ fallback), instead of opening their own socket:
   jitter so devices that dropped together do not reconnect in lockstep. Tests
   inject the delay and the random source.
 
-Storage, failures and video streams still connect per pane, as do observation
-streams in hosts without a hub (the IDE plugin).
+Failures and video streams still connect per pane, as do observation streams in
+hosts without a hub (the IDE plugin) and one-shot captures (a saved screenshot,
+a picker thumbnail, the foreground-app lookup), which need a fresh initial frame
+that a shared subscription does not replay.

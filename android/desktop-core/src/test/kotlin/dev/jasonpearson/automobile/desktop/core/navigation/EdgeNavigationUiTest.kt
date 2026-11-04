@@ -33,6 +33,7 @@ import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import dev.jasonpearson.automobile.desktop.domain.NavigationGraph
 import kotlin.test.assertEquals
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 
@@ -194,6 +195,58 @@ class EdgeNavigationUiTest {
         )
         .assertExists()
     }
+
+  @Test
+  fun `leaving transition detail mid-attempt still reports the outcome`() = runComposeUiTest {
+    val gate = CompletableDeferred<Unit>()
+    val gated = EdgeNavigator { _, target ->
+      gate.await()
+      EdgeNavigationResult(true, target)
+    }
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          NavigationDashboard(
+            options =
+              NavigationDashboardOptions(
+                providedGraph = initial,
+                providedCurrentScreen = "Home",
+                activeContext = activeContext,
+                edgeNavigator = gated,
+              ),
+          )
+        }
+      }
+    }
+    openToLoginDetail()
+    onNodeWithText("Try speculative navigation").performClick()
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Speculative attempt to Login running…").fetchSemanticsNodes().isNotEmpty()
+    }
+    // Leave transition detail while the device is still navigating, then let it arrive.
+    onNodeWithText("← Flow Map").performClick()
+    waitForIdle()
+    gate.complete(Unit)
+    waitForIdle()
+    openToLoginDetail()
+    val after = "Speculative attempt reached Login — waiting for the active build to record it"
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithContentDescription(after).fetchSemanticsNodes().isNotEmpty()
+    }
+  }
+
+  private fun ComposeUiTest.openToLoginDetail() {
+    val home = "Home — active in current context"
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithContentDescription(home).fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithContentDescription(home).performClick()
+    val details = "Transition details: Home → Login"
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithContentDescription(details).fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithContentDescription(details).performScrollTo().performClick()
+  }
 
   private fun testGraph(): AutoMobileGraphProvider {
     val client = FakeAutoMobileClient()

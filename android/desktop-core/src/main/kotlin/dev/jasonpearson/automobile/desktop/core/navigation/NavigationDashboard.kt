@@ -30,6 +30,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.time.Clock
 import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -116,6 +117,13 @@ internal class NavigationDashboardState(options: NavigationDashboardOptions) {
   var buildLens by mutableStateOf<BuildLens>(BuildLens.Union)
   var edgeNavigation by mutableStateOf<EdgeNavigationOutcome?>(null)
 
+  /**
+   * Runs navigate attempts for the dashboard's lifetime, so leaving transition detail mid-attempt
+   * neither cancels the attempt nor strands [edgeNavigation] at Running (#16953). Set by
+   * [NavigationDashboard]; null falls back to the action's own composition scope.
+   */
+  var navigationScope: CoroutineScope? = null
+
   fun failed(error: Exception) {
     LOG.error("Exception loading navigation data", error)
     this.error = error.message ?: "Unknown error"
@@ -141,6 +149,7 @@ fun NavigationDashboard(
   mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
 ) {
   val state = remember { NavigationDashboardState(options) }
+  state.navigationScope = rememberCoroutineScope()
   LaunchedEffect(state.currentSection) {
     options.onDetailViewChanged(state.currentSection != NavigationSection.FlowMap)
   }
@@ -324,7 +333,8 @@ internal fun rememberNavigateAction(
   transition: ScreenTransition,
   verification: EdgeVerification,
 ): TransitionNavigateAction? {
-  val scope = rememberCoroutineScope()
+  val localScope = rememberCoroutineScope()
+  val scope = state.navigationScope ?: localScope
   val navigator = options.edgeNavigator
   if (navigator == null && !options.readOnly) return null
   val deviceId = options.activeContext?.deviceId
@@ -344,9 +354,15 @@ internal fun rememberNavigateAction(
         val speculative = availability == EdgeNavigateAvailability.Speculative
         state.edgeNavigation = EdgeNavigationOutcome.Running(transition, speculative)
         scope.launch {
-          val outcome = EdgeNavigation.attempt(navigator, deviceId, transition, availability)
-          state.edgeNavigation = outcome
-          if (outcome is EdgeNavigationOutcome.Reached) options.onEdgeNavigated()
+          try {
+            val outcome = EdgeNavigation.attempt(navigator, deviceId, transition, availability)
+            state.edgeNavigation = outcome
+            if (outcome is EdgeNavigationOutcome.Reached) options.onEdgeNavigated()
+          } finally {
+            // A cancelled attempt (its scope left composition) must not leave every transition's
+            // action disabled behind a Running outcome.
+            if (state.edgeNavigation is EdgeNavigationOutcome.Running) state.edgeNavigation = null
+          }
         }
       }
     },

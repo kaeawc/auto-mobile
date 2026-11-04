@@ -5,7 +5,7 @@ import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContr
 import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
-import { materialIconGlyphs, type PrototypeIconGlyphSource } from "./webIconGlyphs";
+import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
@@ -27,8 +27,9 @@ export interface PrototypeStillOptions {
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
   /**
-   * Where icons find their glyphs. Defaults to the Material Icons Android draws for an Android
-   * frame; an iOS frame keeps the placeholder until its glyph set is decided (#16526).
+   * Where icons find their glyphs (the server passes the Material Icons Android draws). Used only
+   * for an Android frame: an iOS frame keeps the placeholder until its glyph set is decided
+   * (#16526). Without one every icon draws the placeholder.
    */
   readonly glyphs?: PrototypeIconGlyphSource;
   /**
@@ -193,10 +194,7 @@ function glyphScope(
   options: PrototypeStillOptions,
   frame: DeviceFrame,
 ): { glyphs?: PrototypeIconGlyphSource } {
-  if (options.glyphs) {
-    return { glyphs: options.glyphs };
-  }
-  return frame.platform === "android" ? { glyphs: materialIconGlyphs() } : {};
+  return options.glyphs && frame.platform === "android" ? { glyphs: options.glyphs } : {};
 }
 
 /** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */

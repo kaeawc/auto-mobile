@@ -308,7 +308,10 @@ the host, so the page's script only switches between views it was given and neve
   glyph (the set Compose's `material-icons-extended` bundles, read from the Apache-2.0
   `@material-design-icons/svg` package) as inline SVG in a 24 px box, in its `variant`'s style, else
   `filled` as Android falls back, and tinted by `currentColor` or its style `color`. Only the
-  glyphs a still draws are read and inlined. A glyph that would need `<defs>`/`<use>` ids is
+  glyphs a still draws are read and inlined. The still takes its glyph source as an option, so it
+  stays free of Node builtins for the browser bundle: the server's page builder passes the
+  Material Icons reader, and a still given none draws every icon as the placeholder, unreported.
+  A glyph that would need `<defs>`/`<use>` ids is
   treated as absent, since ids collide when a page draws it twice. A name with no glyph draws a
   tinted rounded outline around its first letter, titled with the name, with reason `iconMissing`.
   An iOS frame draws that outline for every icon, unreported, until its glyph set is decided

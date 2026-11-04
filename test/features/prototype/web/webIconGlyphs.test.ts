@@ -5,8 +5,10 @@ import {
   glyphShapes,
   MaterialIconGlyphSource,
   materialIconGlyphs,
-  type PrototypeIconGlyphSource,
-  type PrototypeIconVariant,
+} from "../../../../src/features/prototype/web/materialIconGlyphs";
+import type {
+  PrototypeIconGlyphSource,
+  PrototypeIconVariant,
 } from "../../../../src/features/prototype/web/webIconGlyphs";
 import {
   el,
@@ -14,6 +16,7 @@ import {
   type WebChild,
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
+import { buildPrototypeWebPage } from "../../../../src/features/prototype/web/webPage";
 import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 import { WEB_SCREENSHOT_SPECS } from "./webScreenshotCases";
 
@@ -168,11 +171,26 @@ describe("web still icons (#16532)", () => {
   });
 
   test("an iOS frame keeps the placeholder until its glyph set is decided (#16526)", () => {
+    const glyphs = new FakeGlyphSource(new Set(["home"]));
     const still = renderPrototypeStill(iconSpec([{ type: "icon", testTag: "i", name: "home" }]), {
       platform: "ios",
+      glyphs,
     });
+    expect(glyphs.asked).toEqual([]);
     expect(toHtml(still.element)).not.toContain("<svg");
     expect(still.unsupportedNodes).toEqual([]);
+  });
+
+  test("the page builder draws Material glyphs in an Android frame (#16532)", () => {
+    const spec = iconSpec([{ type: "icon", testTag: "i", name: "home" }]);
+    const page = buildPrototypeWebPage({
+      title: "icons",
+      frame: "pixel-9",
+      variants: [{ id: "v", label: "v", revisions: [{ revision: 1, operation: "show", spec }] }],
+    });
+    const home = materialIconGlyphs().glyph("home", "filled")!;
+    expect(page.html).toContain(toHtml(home[0]!));
+    expect(page.unsupportedNodes).toEqual([]);
   });
 
   test("each screenshot spec inlines under 20 KB of Material glyph data", () => {

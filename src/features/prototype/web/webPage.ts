@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models";
 import { logger } from "../../../utils/logger";
+import { materialIconGlyphs } from "./materialIconGlyphs";
 import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import type { WebOrientation } from "./webFrame";
@@ -151,6 +152,7 @@ function renderView(
     ...(input.locale === undefined ? {} : { locale: input.locale }),
     ...(input.textSize === undefined ? {} : { textSize: input.textSize }),
     logger,
+    glyphs: materialIconGlyphs(),
     ...(at.screen === undefined ? {} : { screen: at.screen }),
   });
   const view = el(

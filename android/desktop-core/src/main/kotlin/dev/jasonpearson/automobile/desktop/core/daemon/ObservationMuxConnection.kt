@@ -22,8 +22,8 @@ internal class ObservationMuxTransport(
 )
 
 /**
- * The one shared observation socket and its reader: opened by the first device that needs it,
- * read on one dedicated thread, and torn down when it ends or its last device leaves.
+ * The one shared observation socket and its reader: opened by the first device that needs it, read
+ * on one dedicated thread, and torn down when it ends or its last device leaves.
  */
 internal class ObservationMuxConnection(
   private val transport: ObservationMuxTransport,

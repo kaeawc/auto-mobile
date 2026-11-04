@@ -6,10 +6,10 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.serializer
 
 /**
- * Handles one frame from the multiplexed observation socket: routes data frames by
- * `subscriptionId` (or a reply by its request id), settles `subscribe` acknowledgements, and
- * confines a refused or daemon-ended subscription to its own device unless the daemon refused the
- * desktop session itself, which fails every device.
+ * Handles one frame from the multiplexed observation socket: routes data frames by `subscriptionId`
+ * (or a reply by its request id), settles `subscribe` acknowledgements, and confines a refused or
+ * daemon-ended subscription to its own device unless the daemon refused the desktop session itself,
+ * which fails every device.
  */
 internal class ObservationMuxFrames(
   private val table: ObservationMuxTable,

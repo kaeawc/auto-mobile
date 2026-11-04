@@ -61,7 +61,9 @@ internal class ObservationMuxWire(
 
   fun pong() = StreamRequest(id = newId(), command = "pong")
 
-  /** Write [request]; false when the socket is broken (the reader then reports every device down). */
+  /**
+   * Write [request]; false when the socket is broken (the reader then reports every device down).
+   */
   fun write(open: TelemetrySocket, request: StreamRequest): Boolean =
     try {
       val line = DaemonJson.encodeToString(serializer<StreamRequest>(), request)

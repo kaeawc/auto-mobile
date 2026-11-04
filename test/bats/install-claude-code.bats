@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # bats file_tags=parallel-within-file
 #
-# Tests for scripts/ci/install-claude-code.sh (#16963).
+# Tests for scripts/ci/install-claude-code.sh (#16963) and its CI cache (#16985).
 #
 # `curl` and `sha256sum` are stubbed on PATH: curl copies a local tarball that
 # holds a fake `claude`, and sha256sum prints a chosen digest, so no case reaches
@@ -81,7 +81,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(cat "$CURL_CALLS")" -eq 2 ]
 
-  rm -f "$CURL_CALLS"
+  rm -rf "$CURL_CALLS" "$CLAUDE_CODE_INSTALL_DIR"
   export CURL_FAIL_FIRST=9
   run bash "$SCRIPT_ABS"
   [ "$status" -eq 1 ]
@@ -96,4 +96,99 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"unsupported runner 'Darwin-arm64'"* ]]
   [ ! -f "$CURL_CALLS" ]
+}
+
+@test "--cache-key names the platform, pinned version and checksum without downloading" {
+  run bash "$SCRIPT_ABS" --cache-key
+  [ "$status" -eq 0 ]
+  [ "$output" = "claude-code-linux-x64-2.1.318-${X64_SHA}" ]
+
+  export CLAUDE_CODE_MACHINE="Linux-aarch64"
+  run bash "$SCRIPT_ABS" --cache-key
+  [ "$status" -eq 0 ]
+  [[ "$output" == "claude-code-linux-arm64-2.1.318-"* ]]
+  [[ "$output" != *"$X64_SHA" ]]
+  [ ! -f "$CURL_CALLS" ]
+}
+
+@test "a cache key that drifts from the pinned version or checksum differs" {
+  local pinned edited
+  pinned="$(bash "$SCRIPT_ABS" --cache-key)"
+  edited="${WORK}/install-claude-code.sh"
+
+  sed 's/^CLAUDE_CODE_VERSION=.*/CLAUDE_CODE_VERSION="2.1.319"/' "$SCRIPT_ABS" > "$edited"
+  [ "$(bash "$edited" --cache-key)" != "$pinned" ]
+
+  sed "s/^SHA256_LINUX_X64=.*/SHA256_LINUX_X64=\"${X64_SHA//2/3}\"/" "$SCRIPT_ABS" > "$edited"
+  [ "$(bash "$edited" --cache-key)" != "$pinned" ]
+}
+
+@test "an unknown argument fails" {
+  run bash "$SCRIPT_ABS" --bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unknown argument '--bogus'"* ]]
+}
+
+@test "a restored install with a matching stamp skips the download but still runs --version" {
+  run bash "$SCRIPT_ABS"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CURL_CALLS")" -eq 1 ]
+  rm -f "$GITHUB_PATH"
+
+  run bash "$SCRIPT_ABS"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"using cached 9.9.9 (Claude Code)"* ]]
+  [ "$(cat "$CURL_CALLS")" -eq 1 ]
+  grep -Fqx "$CLAUDE_CODE_INSTALL_DIR" "$GITHUB_PATH"
+}
+
+@test "a stamp from another pin reinstalls" {
+  run bash "$SCRIPT_ABS"
+  [ "$status" -eq 0 ]
+  echo "2.1.0 deadbeef" > "${CLAUDE_CODE_INSTALL_DIR}/.claude-code-pin"
+
+  run bash "$SCRIPT_ABS"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"installed 9.9.9 (Claude Code)"* ]]
+  [ "$(cat "$CURL_CALLS")" -eq 2 ]
+  grep -Fqx "2.1.318 ${X64_SHA}" "${CLAUDE_CODE_INSTALL_DIR}/.claude-code-pin"
+}
+
+@test "a cached binary that does not run is reinstalled" {
+  run bash "$SCRIPT_ABS"
+  [ "$status" -eq 0 ]
+  printf '#!/usr/bin/env bash\nexit 1\n' > "${CLAUDE_CODE_INSTALL_DIR}/claude"
+
+  run bash "$SCRIPT_ABS"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"did not run; reinstalling"* ]]
+  [[ "$output" == *"installed 9.9.9 (Claude Code)"* ]]
+  [ "$(cat "$CURL_CALLS")" -eq 2 ]
+}
+
+@test "a failed checksum leaves no stamp behind" {
+  export STUB_SHA="0000"
+  run bash "$SCRIPT_ABS"
+  [ "$status" -eq 1 ]
+  [ ! -e "${CLAUDE_CODE_INSTALL_DIR}/.claude-code-pin" ]
+}
+
+@test "CI jobs install through the cached composite action, not the bare script" {
+  local repo action
+  repo="$(pwd)"
+  action="${repo}/.github/actions/install-claude-code/action.yml"
+
+  [ "$(grep -c 'uses: "*./.github/actions/install-claude-code' "${repo}/.github/workflows/pull_request.yml")" -eq 2 ]
+  [ "$(grep -c 'uses: "*./.github/actions/install-claude-code' "${repo}/.github/workflows/merge.yml")" -eq 1 ]
+  ! grep -n 'run: scripts/ci/install-claude-code.sh' "${repo}"/.github/workflows/*.yml
+
+  grep -Fq 'scripts/ci/install-claude-code.sh --cache-key' "$action"
+  grep -Fq 'uses: actions/cache/restore@' "$action"
+  grep -Fq 'uses: actions/cache/save@' "$action"
+  grep -Fq "if: steps.restore.outputs.cache-hit != 'true'" "$action"
+  [ "$(grep -c 'path: ${{ runner.temp }}/claude-code' "$action")" -eq 2 ]
+  grep -Fq 'CLAUDE_CODE_INSTALL_DIR: ${{ runner.temp }}/claude-code' "$action"
 }

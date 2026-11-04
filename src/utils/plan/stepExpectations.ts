@@ -15,9 +15,10 @@ export const SUPPORTED_EXPECTATION_TYPES = [
 
 export type SupportedExpectationType = (typeof SUPPORTED_EXPECTATION_TYPES)[number];
 
-/** Selector keys an expectation accepts; `testTag`, `resourceId` and `elementId` are one id. */
-const ID_KEYS = ["testTag", "resourceId", "elementId"] as const;
-const PLAIN_KEYS = ["text", "contentDescription", "className"] as const;
+/** Selector keys an expectation accepts; `resourceId` and `elementId` are the same id. */
+const ID_KEYS = ["resourceId", "elementId"] as const;
+/** `testTag` stays a test tag, matched like `tapOn`'s `testTag` selector. */
+const PLAIN_KEYS = ["testTag", "text", "contentDescription", "className"] as const;
 
 export type ExpectationQuery =
   | { kind: "evaluate"; label: string; waitFor: Record<string, unknown> }
@@ -63,7 +64,7 @@ function selectorFields(selector: unknown): SelectorFields | string {
     }
     if ((ID_KEYS as readonly string[]).includes(key)) {
       if (fields.elementId !== undefined && fields.elementId !== value) {
-        return "selector names two different ids (testTag, resourceId, elementId)";
+        return "selector names two different ids (resourceId, elementId)";
       }
       fields.elementId = value;
     } else if ((PLAIN_KEYS as readonly string[]).includes(key)) {

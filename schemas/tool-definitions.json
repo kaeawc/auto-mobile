@@ -21201,6 +21201,10 @@
             "elementId": {
               "type": "string"
             },
+            "testTag": {
+              "type": "string",
+              "description": "Android test tag, matched like tapOn testTag"
+            },
             "text": {
               "type": "string"
             },
@@ -21282,6 +21286,9 @@
                 "elementId": {
                   "type": "string"
                 },
+                "testTag": {
+                  "type": "string"
+                },
                 "text": {
                   "type": "string"
                 },
@@ -21295,6 +21302,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -21367,6 +21377,9 @@
                   "required": ["elementId"]
                 },
                 {
+                  "required": ["testTag"]
+                },
+                {
                   "required": ["text"]
                 },
                 {
@@ -21388,6 +21401,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -24642,6 +24658,10 @@
             "elementId": {
               "type": "string"
             },
+            "testTag": {
+              "type": "string",
+              "description": "Android test tag, matched like tapOn testTag"
+            },
             "text": {
               "type": "string"
             },
@@ -24723,6 +24743,9 @@
                 "elementId": {
                   "type": "string"
                 },
+                "testTag": {
+                  "type": "string"
+                },
                 "text": {
                   "type": "string"
                 },
@@ -24736,6 +24759,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -24808,6 +24834,9 @@
                   "required": ["elementId"]
                 },
                 {
+                  "required": ["testTag"]
+                },
+                {
                   "required": ["text"]
                 },
                 {
@@ -24829,6 +24858,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]

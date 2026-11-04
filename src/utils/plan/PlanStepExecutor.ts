@@ -163,6 +163,9 @@ function withExpectationOutcome(
   };
 }
 
+/** Step params that route a call to a device; an expectation's observe follows the step's. */
+const EXPECTATION_ROUTING_KEYS = ["platform", "device", "deviceId"] as const;
+
 /** The optional-step skip record shared by every "tool answered but the step failed" branch. */
 function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResult {
   return {
@@ -660,26 +663,28 @@ export class DefaultPlanStepExecutor<
   }
 
   /**
-   * One fresh internal `observe` with the expectation's `waitFor`, routed exactly like the
-   * failure observation: the step's device label, session and critical-section owner (#16817).
+   * One fresh internal `observe` with the expectation's `waitFor`, routed exactly like the step's
+   * own call: the step's explicit platform/device/deviceId win, then the plan context fills the
+   * rest, and a critical section keeps its owner device (#16817).
    */
   private expectationObserve(step: PlanStep, context: StepExecutionContext): ExpectationObserve {
-    const deviceLabel = typeof step.params?.device === "string" ? step.params.device : undefined;
+    const routing = Object.fromEntries(
+      EXPECTATION_ROUTING_KEYS.flatMap((key) =>
+        step.params?.[key] === undefined ? [] : [[key, step.params[key]]],
+      ),
+    );
+    this.injectDeviceRoutingParams(routing, "observe", {
+      platform: context.platform,
+      deviceId: context.deviceId,
+      sessionUuid: context.sessionUuid,
+    });
     return async (waitFor) => {
       const observeTool = this.tools.getTool("observe");
       if (!observeTool) {
         throw new ActionableError("the observe tool is not available");
       }
-      const params = {
-        ...this.buildFailureObservationParams(
-          context.platform,
-          context.deviceId,
-          context.sessionUuid,
-          deviceLabel,
-        ),
-        waitFor,
-      };
-      return this.tools.callInternal(observeTool, parseStepParams(observeTool.schema, params), {
+      const params = parseStepParams(observeTool.schema, { ...routing, waitFor });
+      return this.tools.callInternal(observeTool, params, {
         signal: context.signal,
         ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
       });

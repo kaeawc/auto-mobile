@@ -181,8 +181,9 @@ step is `optional`, the step is skipped instead and the plan continues.
 | `textEquals`     | an element (matching `selector`, if given) shows exactly `text`         | `text`     |
 | `textContains`   | an element (matching `selector`, if given) shows text containing `text` | `text`     |
 
-`selector` accepts one id (`testTag`, `resourceId` or `elementId`) plus
-`text`, `contentDescription` and `className`. For `textEquals` and
+`selector` accepts `testTag` (matched like the `tapOn` `testTag` selector),
+one id (`resourceId` or `elementId`), `text`, `contentDescription` and
+`className`; every field given must match the same element. For `textEquals` and
 `textContains`, put the expected value in `text`, not in `selector.text`. Each
 expectation waits up to `timeoutMs` for the condition (the `observe.waitFor`
 default when you omit it), so it tolerates a screen that is still settling.

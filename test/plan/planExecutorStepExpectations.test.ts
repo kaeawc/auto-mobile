@@ -97,7 +97,7 @@ ${expectations}
         expect(stepCalls).toHaveLength(2);
         expect(stepCalls[0]).not.toHaveProperty("expectations");
         expect(observeCalls.map((call) => call.waitFor)).toEqual([
-          { elementId: "bug_repro_content" },
+          { testTag: "bug_repro_content" },
           { elementId: "counter", text: "3", textMatch: "exact" },
         ]);
         expect(observeCalls[0].platform).toBe(platform);
@@ -160,6 +160,24 @@ ${expectations}
       });
     });
   }
+
+  test("the expectation observes the device the step itself targeted", async () => {
+    const plan = new YamlPlanSerializer().importPlanFromYaml(`name: step-override
+steps:
+  - tool: expectationsStrictTool
+    params:
+      deviceId: emulator-5556
+    expectations:
+      - type: elementVisible
+        selector: { text: Done }
+`);
+
+    const result = await run(plan, "android");
+
+    expect(result.success).toBe(true);
+    expect(stepCalls[0].deviceId).toBe("emulator-5556");
+    expect(observeCalls[0]).toMatchObject({ platform: "android", deviceId: "emulator-5556" });
+  });
 
   test("an unsupported expectation type is reported as a warning, not silently passed", async () => {
     const plan = planWith(`      - type: hasAccessibilityIssues

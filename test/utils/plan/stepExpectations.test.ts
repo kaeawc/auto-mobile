@@ -7,7 +7,7 @@ import {
 
 describe("expectationQuery (#16817)", () => {
   test.each([
-    [{ type: "elementVisible", selector: { testTag: "a" } }, { elementId: "a" }],
+    [{ type: "elementVisible", selector: { testTag: "a" } }, { testTag: "a" }],
     [
       { type: "elementVisible", selector: { resourceId: "a", text: "Go" } },
       { elementId: "a", text: "Go" },
@@ -30,7 +30,10 @@ describe("expectationQuery (#16817)", () => {
 
   test.each([
     [{ type: "elementVisible" }, "elementVisible requires a selector"],
-    [{ type: "elementVisible", selector: { testTag: "a", resourceId: "b" } }, "two different ids"],
+    [
+      { type: "elementVisible", selector: { elementId: "a", resourceId: "b" } },
+      "two different ids",
+    ],
     [{ type: "elementVisible", selector: { xpath: "//a" } }, "selector.xpath is not supported"],
     [
       { type: "elementVisible", selector: { text: "" } },

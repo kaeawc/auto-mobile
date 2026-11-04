@@ -9,10 +9,12 @@ import {
   STATUS_BAR_BATTERY_STATES,
   STATUS_BAR_DATA_NETWORKS,
   type StatusBarController,
+  type StatusBarField,
   type StatusBarOverrides,
 } from "../features/utility/StatusBarOverride";
 import {
   defaultStatusBarOverrideRegistry,
+  type StatusBarOverrideRecord,
   type StatusBarOverrideStore,
 } from "../features/utility/StatusBarOverrideRegistry";
 import type { BootedDevice } from "../models";
@@ -139,14 +141,52 @@ async function clearStatusBar(call: StatusBarCall) {
   });
 }
 
+/** Puts the store back to `previous` (or nothing) for this device. */
+function restoreRecord(
+  registry: StatusBarOverrideStore,
+  device: BootedDevice,
+  previous: StatusBarOverrideRecord | null,
+): void {
+  registry.forget(device.deviceId);
+  if (previous) {
+    registry.record(previous.device, previous.sessionId, previous.overrides);
+  }
+}
+
+/** The requested values of the fields the platform applied. */
+function appliedOverrides(
+  requested: StatusBarOverrides,
+  applied: readonly StatusBarField[],
+): StatusBarOverrides {
+  return Object.fromEntries(
+    applied.map((field) => [field, requested[field]]),
+  ) as StatusBarOverrides;
+}
+
 async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverrides) {
   const { device, registry } = call;
+  // Recorded before the device command so a racing release still clears it (#14105); undone
+  // when the command rejects and narrowed to the applied fields when it succeeds (#17054).
+  let previous: StatusBarOverrideRecord | null = null;
+  let owner: string | null = null;
   const outcome = await runSessionStatusBarMutation({
     sessionManager: call.sessionManager,
     sessionUuid: call.args.sessionUuid,
     deviceId: device.deviceId,
-    record: (sessionId) => registry.record(device, sessionId, requested),
-    mutation: () => call.controller.override(requested, call.signal),
+    record: (sessionId) => {
+      previous = registry.get(device.deviceId);
+      owner = sessionId;
+      registry.record(device, sessionId, requested);
+      return () => restoreRecord(registry, device, previous);
+    },
+    mutation: async () => {
+      const result = await call.controller.override(requested, call.signal);
+      restoreRecord(registry, device, previous);
+      if (result.applied.length > 0) {
+        registry.record(device, owner, appliedOverrides(requested, result.applied));
+      }
+      return result;
+    },
   });
   const partial = outcome.unsupported.length > 0;
   const applied = outcome.applied.join(", ") || "nothing";
@@ -159,7 +199,7 @@ async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverri
     ...callBase(call),
     applied: outcome.applied,
     unsupported: outcome.unsupported,
-    override: registry.get(device.deviceId)?.overrides ?? requested,
+    override: registry.get(device.deviceId)?.overrides ?? null,
   });
 }
 

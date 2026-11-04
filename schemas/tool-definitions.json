@@ -53004,6 +53004,11 @@
           "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Every applied condition restores to a clean state on release, rebind or lease expiry. Send it in its own call, not combined with other setDeviceState fields.",
           "type": "object",
           "properties": {
+            "exportAttestation": {
+              "type": "boolean",
+              "const": true,
+              "description": "Export public Android KeyStore attestation certificates and parsed fields for a test backend. Send alone; temporary key is deleted. No trust verdict."
+            },
             "version": {
               "type": "number",
               "const": 1,

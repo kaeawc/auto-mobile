@@ -36,9 +36,9 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🆚 <code>compareScreenshot</code>    | Record or compare a named screenshot baseline            |
 | 👁️ <code>observe</code>              | Read the current screen, hierarchy, and screenshot       |
 | 🎯 <code>hitTest</code>              | Preview what a tap at a point would hit, without tapping |
-| 🧭 <code>explore</code>              | Automatically explore app to build navigation graph      |
-| 🗺️ <code>navigateTo</code>           | Navigate to screen using navigation graph                |
-| 🕸️ <code>getNavigationGraph</code>   | Get navigation graph for debugging                       |
+| 🧭 <code>explore</code>              | Explore the app to learn screens and transitions         |
+| 🗺️ <code>navigateTo</code>           | Replay learned transitions to reach a screen             |
+| 🕸️ <code>getNavigationGraph</code>   | List learned screens and transitions                     |
 | 🔎 <code>identifyInteractions</code> | Suggest likely interactions                              |
 | 🧪 <code>prototype</code>            | Show agent-authored UI on the device                     |
 | 🔦 <code>highlight</code>            | Draw a red hand-drawn circle around a UI element         |

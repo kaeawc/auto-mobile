@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
@@ -73,6 +74,7 @@ internal data class DesktopAppRuntime(
   val workspace: AppWorkspaceServices,
   val picker: AppPickerServices,
   val recoveryLauncher: CoalescingRecoveryLauncher,
+  val streamHub: DaemonStreamHub,
 ) {
   val desktopSessionState
     get() = session.state

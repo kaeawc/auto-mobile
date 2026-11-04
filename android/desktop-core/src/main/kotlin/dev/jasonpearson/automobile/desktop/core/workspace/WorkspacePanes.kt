@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.daemon.awaitFreshScreenshot
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.shell.VerticalSplitOptions
 import dev.jasonpearson.automobile.desktop.core.shell.VerticalSplitPane
@@ -37,7 +38,6 @@ import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -190,16 +190,11 @@ internal fun StreamArea(
         onHandledCapture(externalCaptureRequest)
       }
 
-      // Each Screenshot tap bumps captureRequest, re-running this effect: open a fresh per-device
-      // stream,
-      // ask for an observation, take the first screenshot frame the subscription delivers, write
-      // its
-      // PNG
-      // bytes to disk, and report where. Bounded by a timeout so a gone device can't hang the
-      // coroutine,
-      // and the stream is always disposed — including on cancellation when the pane closes or a
-      // newer
-      // tap
+      // Each Screenshot tap bumps captureRequest, re-running this effect: lease the device's
+      // stream (the hub's shared one when the app has a hub, otherwise a fresh per-device stream),
+      // take the first screenshot captured after the tap, write its PNG bytes to disk, and report
+      // where. Bounded by a timeout so a gone device can't hang the coroutine, and the stream is
+      // always released, including on cancellation when the pane closes or a newer tap
       // supersedes it.
       CaptureScreenshot(memory, column)
 
@@ -341,9 +336,14 @@ internal fun Modifier.focusDeviceColumn(
 @Composable
 internal fun StreamContent.CaptureScreenshot(memory: StreamCaptureMemory, column: DeviceColumn) {
   with(memory) {
+    // With a hub the capture leases the pane's shared stream, so it opens no socket of its own.
+    val streamFactory =
+      hubObservationFactory(LocalDaemonStreamHub.current, column) {
+        observationStreamFactory(column.deviceId)
+      }
     LaunchedEffect(column.deviceId, captureRequest) {
       if (captureRequest == 0) return@LaunchedEffect
-      val stream = observationStreamFactory(column.deviceId)
+      val stream = streamFactory()
       try {
         val base64 =
           withContext(ioDispatcher) {
@@ -352,11 +352,9 @@ internal fun StreamContent.CaptureScreenshot(memory: StreamCaptureMemory, column
               column.deviceId,
               deviceSessionUuid = column.deviceSessionUuid,
             )
-            stream.requestObservation(column.deviceId)
+            // Never the frame a shared stream replays: it can be one cadence interval old.
             withTimeoutOrNull(SCREENSHOT_CAPTURE_TIMEOUT_MS) {
-              stream.screenshotUpdates
-                .first { !it.screenshotBase64.isNullOrEmpty() }
-                .screenshotBase64
+              stream.awaitFreshScreenshot(column.deviceId).screenshotBase64
             }
           }
         savedNotice =

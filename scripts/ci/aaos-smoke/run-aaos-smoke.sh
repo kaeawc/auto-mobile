@@ -23,6 +23,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/../../.." && pwd)"
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${project_root}/scripts/ios/run_with_timeout.sh"
+# shellcheck source=scripts/ci/emulator-smoke/install-system-image.sh
+source "${project_root}/scripts/ci/emulator-smoke/install-system-image.sh"
 
 if [[ $# -ne 0 ]]; then
   echo "usage: run-aaos-smoke.sh (no arguments; configure with AAOS_SMOKE_* env)" >&2
@@ -111,39 +113,10 @@ mkdir -p "${out_dir}"
 
 if [[ "${AAOS_SMOKE_SKIP_IMAGE_INSTALL:-0}" != "1" ]]; then
   phase="locating sdkmanager"
-  sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-  sdkmanager="${sdk_root}/cmdline-tools/latest/bin/sdkmanager"
-  if [[ -z "${sdk_root}" || ! -x "${sdkmanager}" ]]; then
-    echo "sdkmanager not found under ANDROID_HOME/ANDROID_SDK_ROOT (${sdk_root:-unset})" >&2
-    exit 1
-  fi
+  sdkmanager="$(locate_sdkmanager)"
   phase="installing ${system_image}"
-  # set -e is lifted around both calls, as around the smoke below, so run_with_timeout keeps
-  # it inside (SC2310). `yes` exits on SIGPIPE once sdkmanager stops reading, and a licenses
-  # failure surfaces as the install failing, so only a timeout of that call is fatal.
-  set +e
-  { yes || true; } | run_with_timeout "${sdkmanager_timeout_seconds}" \
-    "${sdkmanager}" --licenses > "${out_dir}/sdkmanager-licenses.log" 2>&1
-  licenses_status=$?
-  set -e
-  if [[ "${licenses_status}" -eq 124 ]]; then
-    echo "::error title=AAOS smoke::sdkmanager --licenses timed out after ${sdkmanager_timeout_seconds}s"
-    exit 124
-  fi
-  set +e
-  run_with_timeout "${sdkmanager_timeout_seconds}" \
-    "${sdkmanager}" --install "${system_image}" > "${out_dir}/sdkmanager-install.log" 2>&1
-  install_status=$?
-  set -e
-  if [[ "${install_status}" -ne 0 ]]; then
-    tail -n 50 "${out_dir}/sdkmanager-install.log" >&2 || true
-    if [[ "${install_status}" -eq 124 ]]; then
-      echo "::error title=AAOS smoke::sdkmanager --install timed out after ${sdkmanager_timeout_seconds}s"
-    else
-      echo "::error title=AAOS smoke::sdkmanager could not install ${system_image}"
-    fi
-    exit "${install_status}"
-  fi
+  install_system_image "AAOS smoke" "${sdkmanager}" "${sdkmanager_timeout_seconds}" \
+    "${system_image}" "${out_dir}"
 fi
 
 # A run-private database keeps the enabled flag and the created AVD's records off any other host state.

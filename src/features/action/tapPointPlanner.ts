@@ -11,6 +11,7 @@ import {
 import { describeFocusTarget } from "./tapFocusIdentity";
 import { matchedTapElement } from "./tapPointGeometry";
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
+import type { SafeTapPointResult } from "../observe/ApplicationWindowCover";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { SearchableHierarchy } from "../utility/SearchableNode";
 import {
@@ -65,6 +66,12 @@ import {
 } from "../prototype/ios/prototypeAgentClient";
 import { IOS_PROTOTYPE_STATUS_TIMEOUT_MS } from "../prototype/ios/prototypeAgentSuspended";
 import { logger } from "../../utils/logger";
+
+function coveredTapMessage({ coveredBy, coveredByKind }: SafeTapPointResult): string {
+  return coveredByKind === "view"
+    ? `Target is covered by ${JSON.stringify(coveredBy)} drawn over it at its only visible tap area; scroll the target clear of it with swipeOn, then retry tapOn.`
+    : `Target is covered by ${coveredBy}; dismiss the covering window, then retry tapOn.`;
+}
 
 export interface PrototypeTapAgentConnections {
   get(deviceId: string, bundleId: string): Pick<PrototypeAgentClient, "request"> | undefined;
@@ -383,12 +390,7 @@ export class TapPointPlanner {
         views: true,
       });
       if (!safe.point) {
-        throw new TapTargetUnavailableError(
-          safe.coveredByKind === "view"
-            ? `Target is covered by ${JSON.stringify(safe.coveredBy)} drawn over it at its only visible tap area; scroll the target clear of it with swipeOn, then retry tapOn.`
-            : `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,
-          "no-visible-tap-area",
-        );
+        throw new TapTargetUnavailableError(coveredTapMessage(safe), "no-visible-tap-area");
       }
       return safe.point;
     }

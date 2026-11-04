@@ -135,57 +135,64 @@ interface SafeTapPointQuery {
   index: ApplicationWindowCoverIndex;
 }
 
-function safeTapPoint({
-  hierarchy,
-  target,
-  bounds,
-  point,
-  imeBounds,
-  ownWindows,
-  views = false,
-  index,
-}: SafeTapPointQuery): SafeTapPointResult {
-  const { entries, types } = index;
+function safeTapPoint(query: SafeTapPointQuery): SafeTapPointResult {
+  const { target, bounds, point, imeBounds, views = false, index } = query;
   const source = getHierarchyNodeSource(target);
-  const owner = entries.find((entry) => entry.source === source);
+  const owner = index.entries.find((entry) => entry.source === source);
   if (!owner) {
     return { point };
   }
+  const windowCover = windowCoverAt(query, owner);
   const viewCovers = views ? sameWindowViewCovers(index, owner, bounds) : [];
   const viewCover = viewCovers.find((cover) => contains(cover.bounds!, point.x, point.y));
-  // A deserialized merged-tree copy is not an owning window. Its fallback rank
-  // cannot establish that an application window is above the target's window.
-  const windowed = types.has(owner.source);
-  const prototypeCovers = windowed
-    ? ownPrototypeCoversAbove(hierarchy, entries, owner, ownWindows)
-    : [];
-  const first = windowed ? hitEntries(entries, point)[0] : undefined;
-  const appCovered =
-    first !== undefined && first.windowRank < owner.windowRank && types.get(first.source) === 1;
-  const prototypeCovered = prototypeCovers.some((cover) => contains(cover, point.x, point.y));
-  if (!appCovered && !prototypeCovered && !viewCover) {
+  const hit =
+    windowCover.hit ??
+    (viewCover && { coveredBy: viewLabel(viewCover), coveredByKind: "view" as const });
+  if (!hit) {
     return { point };
   }
-  const covers = windowed
-    ? entries
-        .filter(
-          (entry) =>
-            entry.bounds && entry.windowRank < owner.windowRank && types.get(entry.source) === 1,
-        )
-        .map((entry) => entry.bounds!)
-    : [];
-  covers.push(...prototypeCovers, ...viewCovers.map((cover) => cover.bounds!));
-  if (imeBounds) {
-    covers.push(imeBounds);
+  const covers = [
+    ...windowCover.covers(),
+    ...viewCovers.map((cover) => cover.bounds!),
+    ...(imeBounds ? [imeBounds] : []),
+  ];
+  return { point: exposedPoint(bounds, covers), ...hit };
+}
+
+/**
+ * Whether an application window or (per `ownWindows`) an AutoMobile prototype window ranked above
+ * `owner`'s window holds `point`, and every such window's bounds.
+ */
+function windowCoverAt(
+  { hierarchy, target, point, ownWindows, index: { entries, types } }: SafeTapPointQuery,
+  owner: SearchableEntry,
+): {
+  hit?: { coveredBy: string; coveredByKind: "window" };
+  covers: () => ElementBounds[];
+} {
+  // A deserialized merged-tree copy is not an owning window. Its fallback rank
+  // cannot establish that an application window is above the target's window.
+  if (!types.has(owner.source)) {
+    return { covers: () => [] };
   }
-  const exposed = exposedPoint(bounds, covers);
-  if (appCovered) {
-    return { point: exposed, coveredBy: coveringLabel(first, target), coveredByKind: "window" };
+  const prototypeCovers = ownPrototypeCoversAbove(hierarchy, entries, owner, ownWindows);
+  const covers = () => [
+    ...entries
+      .filter(
+        (entry) =>
+          entry.bounds && entry.windowRank < owner.windowRank && types.get(entry.source) === 1,
+      )
+      .map((entry) => entry.bounds!),
+    ...prototypeCovers,
+  ];
+  const first = hitEntries(entries, point)[0];
+  if (first !== undefined && first.windowRank < owner.windowRank && types.get(first.source) === 1) {
+    return { hit: { coveredBy: coveringLabel(first, target), coveredByKind: "window" }, covers };
   }
-  if (prototypeCovered) {
-    return { point: exposed, coveredBy: OWN_PROTOTYPE_COVER_LABEL, coveredByKind: "window" };
+  if (prototypeCovers.some((cover) => contains(cover, point.x, point.y))) {
+    return { hit: { coveredBy: OWN_PROTOTYPE_COVER_LABEL, coveredByKind: "window" }, covers };
   }
-  return { point: exposed, coveredBy: viewLabel(viewCover!), coveredByKind: "view" };
+  return { covers };
 }
 
 /**

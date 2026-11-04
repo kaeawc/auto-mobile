@@ -9,6 +9,7 @@ import type { TouchInputNode } from "./TouchNodeDiscovery";
 import type { GestureScaler } from "./AxisRanges";
 import { TouchFrameReconstructor } from "./TouchFrameReconstructor";
 import { GestureClassifier, type PressureRange } from "./GestureClassifier";
+import { KernelTimeLineMerge, type KernelTimeLineMergeScope } from "./KernelTimeLineMerge";
 
 interface GetEventReaderOptions {
   adb: AdbExecutor;
@@ -23,15 +24,19 @@ interface GetEventReaderOptions {
   /** Display density in dp multiplier (e.g. 2.75 for 440dpi) */
   density: number;
   timer?: Timer;
+  /** Private scope's reorder window (default 50 ms); a supplied lineMerge owns its window. */
+  kernelReorderWindowMs?: number;
+  /** Share kernel ordering with other readers in the same recording session. */
+  lineMerge?: KernelTimeLineMergeScope;
 }
 
 /**
  * Spawns one `adb shell getevent -lt <path>` process per input node through
  * AdbClient (the touch node first, then one per pen node) and pipes each
- * process's output through its own TouchFrameReconstructor → GestureClassifier.
+ * process's output through a shared kernel-time reorder window, then its own
+ * TouchFrameReconstructor → GestureClassifier, preserving host arrival times.
  * One process per node keeps every line attributed to its node without parsing
- * device-path prefixes, and the touch process is exactly what it was before pen
- * support. A pen process that fails is logged and dropped; finger recording
+ * device-path prefixes. A pen process that fails is logged and dropped; finger recording
  * continues. A touch process failure is reported through `onError`.
  *
  * Implements GestureEmitter so it can be replaced with a fake in tests.
@@ -54,13 +59,18 @@ export class GetEventReader implements GestureEmitter {
     } // already running
     this.starting = true;
     const generation = ++this.generation;
+    const lineMerge =
+      this.opts.lineMerge ??
+      new KernelTimeLineMerge({ timer: this.timer, windowMs: this.opts.kernelReorderWindowMs });
     void this.startProcess(generation, this.opts.touchNode, this.opts.scaler, {
       onGesture,
       onError,
+      lineMerge,
     });
     for (const { node, scaler } of this.opts.penNodes ?? []) {
       void this.startProcess(generation, node, scaler, {
         onGesture,
+        lineMerge,
         onError: (error) =>
           logger.warn(
             `[GetEventReader] pen node ${node.path} stopped; finger recording continues: ${error.message}`,
@@ -77,7 +87,12 @@ export class GetEventReader implements GestureEmitter {
     {
       onGesture,
       onError,
-    }: { onGesture: (event: GestureEvent) => void; onError?: (err: Error) => void },
+      lineMerge,
+    }: {
+      onGesture: (event: GestureEvent) => void;
+      onError?: (err: Error) => void;
+      lineMerge: KernelTimeLineMergeScope;
+    },
   ): Promise<void> {
     const reconstructor = new TouchFrameReconstructor({
       singleTouch: node.kind === "pen",
@@ -143,6 +158,25 @@ export class GetEventReader implements GestureEmitter {
     let lineBuffer = "";
     let stderrTail = "";
 
+    const unregister = lineMerge.register(node.path, (line, arrivedAt) => {
+      if (generation !== this.generation) {
+        return;
+      }
+      const result = reconstructor.feedLine(line, arrivedAt);
+      if (!result) {
+        return;
+      }
+      if (isRawTouchFrame(result)) {
+        const gesture = classifier.feedFrame(result);
+        if (gesture) {
+          onGesture(gesture);
+        }
+      } else {
+        // GestureEvent (pressButton)
+        onGesture(result);
+      }
+    });
+
     const onData = (data: Buffer): void => {
       lineBuffer += data.toString();
       const lines = lineBuffer.split("\n");
@@ -150,24 +184,11 @@ export class GetEventReader implements GestureEmitter {
       lineBuffer = lines.pop() ?? "";
 
       for (const line of lines) {
-        if (!line.trim()) {
+        if (!line.trim() || generation !== this.generation) {
           continue;
         }
         const arrivedAt = this.timer.now();
-        const result = reconstructor.feedLine(line, arrivedAt);
-        if (!result) {
-          continue;
-        }
-
-        if (isRawTouchFrame(result)) {
-          const gesture = classifier.feedFrame(result);
-          if (gesture) {
-            onGesture(gesture);
-          }
-        } else {
-          // GestureEvent (pressButton)
-          onGesture(result);
-        }
+        lineMerge.push(node.path, line, arrivedAt);
       }
     };
 
@@ -186,6 +207,7 @@ export class GetEventReader implements GestureEmitter {
       child.off("exit", onExit);
       this.children.delete(child);
       this.cleanups.delete(cleanup);
+      unregister();
     };
     const ignoreError = (): void => {};
     const onChildError = (err: Error): void => {

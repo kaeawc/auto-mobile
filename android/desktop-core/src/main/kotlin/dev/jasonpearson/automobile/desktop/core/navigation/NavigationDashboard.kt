@@ -101,6 +101,7 @@ internal class NavigationDashboardState(options: NavigationDashboardOptions) {
   var navigationGraph by mutableStateOf(options.providedGraph)
   var isLoading by mutableStateOf(options.providedGraph == null)
   var error by mutableStateOf<String?>(null)
+  var buildLens by mutableStateOf<BuildLens>(BuildLens.Union)
 
   fun failed(error: Exception) {
     LOG.error("Exception loading navigation data", error)
@@ -146,7 +147,8 @@ private fun NavigationSectionContent(
   when (state.currentSection) {
     NavigationSection.FlowMap -> NavigationFlowMap(state, options)
     NavigationSection.ScreenDetail -> NavigationScreenDetail(state, options, navigateToScreen)
-    NavigationSection.TransitionDetail -> NavigationTransitionDetail(state, navigateToScreen)
+    NavigationSection.TransitionDetail ->
+      NavigationTransitionDetail(state, options, navigateToScreen)
   }
 }
 
@@ -155,11 +157,50 @@ private fun NavigationFlowMap(
   state: NavigationDashboardState,
   options: NavigationDashboardOptions,
 ) {
+  val graph = state.navigationGraph ?: NavigationGraph(emptyList(), emptyList())
+  val builds = remember(graph) { NavigationBuildLens.buildsIn(graph) }
+  val lens = effectiveBuildLens(state.buildLens, builds)
+  Box(modifier = Modifier.fillMaxSize()) {
+    if (lens is BuildLens.Compare) {
+      BuildCompareView(
+        NavigationBuildLens.diff(graph, lens.a, lens.b),
+        Modifier.padding(top = 72.dp),
+      )
+    } else {
+      NavigationFlowCanvas(state, options, NavigationBuildLens.visibleGraph(graph, lens), lens)
+    }
+    // A lens needs at least two builds to contrast; with one build every lens equals the union.
+    if (builds.size >= 2) {
+      BuildLensBar(
+        builds = builds,
+        lens = lens,
+        onLensChange = { state.buildLens = it },
+        modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+      )
+    }
+  }
+}
+
+/** Fall back to the union when the selected lens names a build absent from the refreshed graph. */
+internal fun effectiveBuildLens(lens: BuildLens, builds: List<ProvenanceBuildKey>): BuildLens =
+  when (lens) {
+    BuildLens.Union -> lens
+    is BuildLens.Filter -> if (lens.build in builds) lens else BuildLens.Union
+    is BuildLens.Compare -> if (lens.a in builds && lens.b in builds) lens else BuildLens.Union
+  }
+
+@Composable
+private fun NavigationFlowCanvas(
+  state: NavigationDashboardState,
+  options: NavigationDashboardOptions,
+  graph: NavigationGraph,
+  lens: BuildLens,
+) {
   Box(modifier = Modifier.fillMaxSize()) {
     NavigationCanvasView(
       dev.jasonpearson.automobile.desktop.core.navigation.NavigationCanvasOptions(
-        screens = state.navigationGraph?.screens ?: emptyList(),
-        transitions = state.navigationGraph?.transitions ?: emptyList(),
+        screens = graph.screens,
+        transitions = graph.transitions,
         onScreenSelected = { state.selectScreen(it, options.onHighlightCleared) },
         externalHighlightedScreens = options.highlightedScreens,
         currentReplayScreen = options.currentStepScreen,
@@ -172,6 +213,7 @@ private fun NavigationFlowMap(
         },
         fitToViewTrigger = state.fitToViewTrigger,
         activeContext = options.activeContext,
+        buildLens = lens,
       ),
     )
   }
@@ -194,7 +236,7 @@ private fun NavigationScreenDetail(
       transitions = state.navigationGraph?.transitions ?: emptyList(),
       onBack = { state.currentSection = NavigationSection.FlowMap },
       onScreenSelected = navigateToScreen,
-      screenshotLoader = options.screenshotLoader,
+      environment = ScreenDetailEnvironment(options.screenshotLoader, options.activeContext),
     )
   } else state.currentSection = NavigationSection.FlowMap
 }
@@ -202,6 +244,7 @@ private fun NavigationScreenDetail(
 @Composable
 private fun NavigationTransitionDetail(
   state: NavigationDashboardState,
+  options: NavigationDashboardOptions,
   navigateToScreen: (String) -> Unit,
 ) {
   val transitions = state.navigationGraph?.transitions ?: emptyList()
@@ -212,6 +255,7 @@ private fun NavigationTransitionDetail(
       transition = transition,
       onBack = { state.currentSection = NavigationSection.FlowMap },
       onScreenSelected = navigateToScreen,
+      verification = NavigationBuildLens.verification(transition, options.activeContext),
     )
   } else state.currentSection = NavigationSection.FlowMap
 }

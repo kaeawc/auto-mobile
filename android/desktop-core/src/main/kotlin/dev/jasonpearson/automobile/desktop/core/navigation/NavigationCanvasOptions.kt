@@ -19,5 +19,7 @@ data class NavigationCanvasOptions(
   val onFogModeToggled: (Boolean) -> Unit = {},
   val fitToViewTrigger: Int = 0,
   val activeContext: NavigationActiveContext? = null,
+  // Build lens over the union graph (#4987); [BuildLens.Union] keeps Phase 2 opacity.
+  val buildLens: BuildLens = BuildLens.Union,
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
 )

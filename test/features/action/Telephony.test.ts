@@ -213,7 +213,9 @@ describe("Telephony", () => {
         phoneNumber: "5551234567",
       });
       expect(result.error).toContain("needs the app's AutoMobile SDK on the iOS Simulator");
-      expect(result.error).toContain("a physical iOS device has no public API for call or SMS simulation");
+      expect(result.error).toContain(
+        "a physical iOS device has no public API for call or SMS simulation",
+      );
       expect(sender.requests).toEqual([]);
     });
 
@@ -233,7 +235,9 @@ describe("Telephony", () => {
         messageLength: 5,
       });
       expect(result.error).toContain("needs the app's AutoMobile SDK on the iOS Simulator");
-      expect(result.error).toContain("a physical iOS device has no public API for call or SMS simulation");
+      expect(result.error).toContain(
+        "a physical iOS device has no public API for call or SMS simulation",
+      );
       expect(sender.requests).toEqual([]);
     });
 

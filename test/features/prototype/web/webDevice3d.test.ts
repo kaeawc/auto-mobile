@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   parseDeviceFrames,
   type DeviceFrame,
-} from "../../../../src/features/prototype/web/deviceFrames";
+} from "../../../../src/features/prototype/web/deviceFrameSchema";
 import registry from "../../../../src/features/prototype/web/deviceFrames.json";
 import {
   PROTOTYPE_WEB_3D_CSS,

@@ -684,3 +684,7 @@ and drives observe, launch, tap, scroll, back, home, driving and parked. Each st
 payload; step JSON, screenshots, `summary.md` and emulator diagnostics land in
 `AAOS_SMOKE_OUT_DIR` (default `scratch/aaos-smoke`). `AAOS_SMOKE_BREAK_ASSERTION=1` (the
 `break-assertion` dispatch input) swaps in an impossible assertion to check the failure summary.
+`AAOS_SMOKE_OS_VERSION` (default `14`) pins `startDevice`; an `AAOS_SMOKE_SYSTEM_IMAGE` override
+must be at the matching API level or the script exits 2 before installing. Each `sdkmanager` call
+is bounded by `AAOS_SMOKE_SDKMANAGER_TIMEOUT_SECONDS` (default 900). A setup failure still
+collects emulator diagnostics and adds a failure line to the job step summary.

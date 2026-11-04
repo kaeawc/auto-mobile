@@ -121,7 +121,7 @@ export function registerDeviceTools() {
 
   ToolRegistry.register(
     "getApple",
-    "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
+    "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device. getApple does not create iOS simulators; use provisionDevice (opt-in via enableTools) to create and boot one from a runtime and device type, and deleteDevice to remove it.",
     getAppleSchema,
     {
       handler: (args, progress, signal) =>

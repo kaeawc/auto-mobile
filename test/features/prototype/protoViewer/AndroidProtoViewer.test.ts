@@ -302,7 +302,9 @@ describe("AndroidProtoViewer", () => {
     await expect(viewer.importBundle(new Uint8Array([1]), undefined, 5000)).rejects.toBeInstanceOf(
       ProtoViewerStorageError,
     );
-    expect(shellCommands().at(-1)).toBe(`shell rm -f '/data/local/tmp/${REQUEST}.automobile-proto'`);
+    expect(shellCommands().at(-1)).toBe(
+      `shell rm -f '/data/local/tmp/${REQUEST}.automobile-proto'`,
+    );
   });
 
   test("secondary-user cancellation after the push removes the staging copy without the caller signal", async () => {

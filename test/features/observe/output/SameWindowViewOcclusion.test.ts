@@ -35,12 +35,15 @@ const PARTIAL_COVER: ElementBounds = { left: 800, top: 1565, right: 1011, bottom
 const DEMOS_TAB = "1401c7c8-b6f6-7829-8b24-c9eccf1d5f94";
 const SWIPE_TAB = "47fc1dbf-1283-36a6-a285-87facdf29157";
 
-function findWireNode(nodes: AccessibilityNode | AccessibilityNode[] | undefined, viewId: string) {
+function findWireNode(
+  nodes: AccessibilityNode | AccessibilityNode[] | undefined,
+  viewId: string,
+): AccessibilityNode | undefined {
   for (const node of nodes === undefined ? [] : Array.isArray(nodes) ? nodes : [nodes]) {
     if (node["view-id" as keyof AccessibilityNode] === viewId) {
       return node;
     }
-    const found: AccessibilityNode | undefined = findWireNode(node.node, viewId);
+    const found = findWireNode(node.node, viewId);
     if (found) {
       return found;
     }

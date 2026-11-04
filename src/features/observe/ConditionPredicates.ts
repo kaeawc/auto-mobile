@@ -14,7 +14,8 @@ import { normalize as normalizeMatchText } from "../utility/ElementResolverMatch
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
-import { hasVisibleScreenPart } from "../utility/ElementGeometry";
+import { hasVisibleScreenPart, screenSizeForOffscreenCheck } from "../utility/ElementGeometry";
+import type { ScreenSize } from "../../models/ScreenSize";
 
 const waitHierarchyProjection = new SearchableHierarchy();
 
@@ -305,7 +306,7 @@ function matchesOnlyThroughOffScreenHoist(
 
 interface HoistCheck {
   matchMode: MatchMode;
-  screenSize: ObserveResult["screenSize"];
+  screenSize: ScreenSize | undefined;
 }
 
 /**
@@ -397,16 +398,34 @@ function matchesAnyText(
   });
 }
 
+function boundedSource(result: ElementResolution, source: SearchableEntry) {
+  return source.bounds && source.element ? source : boundedChosenAncestor(result, source);
+}
+
 /**
- * The bounded source a positive wait accepts. A source that matched only through a hoisted label
- * with an off-screen contributor is not one (#17007); an unscoped wait then takes any other
- * matched source that is, so a second visible match still counts. A scoped wait (index or
- * selection strategy) keeps the resolver's single choice.
+ * The screen size the plain `waitFor` judges visibility against: capture metadata first,
+ * then the observation's size. Unknown leaves every bounded source eligible.
+ */
+function waitScreenSize(observation: ObserveResult): ScreenSize | undefined {
+  return observation.viewHierarchy
+    ? screenSizeForOffscreenCheck(observation.viewHierarchy, {
+        observationScreenSize: observation.screenSize,
+        display: observation.viewHierarchy,
+      })
+    : undefined;
+}
+
+/**
+ * The bounded source a positive wait accepts. It needs a visible part on screen, as in the plain
+ * `waitFor` (#17023), and must not match only through a hoisted label with an off-screen
+ * contributor (#17007). An unscoped wait then takes any other matched source that qualifies, so
+ * a second visible match still counts. A scoped wait (index or selection strategy) keeps the
+ * resolver's single choice. `disappear` negates this, so a source that fails it counts as gone.
  */
 function boundedMatchedSource(
   result: ElementResolution | undefined,
   selector: ConditionSelector,
-  screenSize: ObserveResult["screenSize"],
+  screenSize: ScreenSize | undefined,
 ) {
   if (!result) {
     return undefined;
@@ -416,21 +435,22 @@ function boundedMatchedSource(
     return undefined;
   }
   const check = { matchMode: result.matchMode, screenSize };
-  if (!matchesOnlyThroughOffScreenHoist(source, selector, check)) {
-    return source.bounds && source.element ? source : boundedChosenAncestor(result, source);
-  }
-  if (usesScopedWait(selector)) {
-    return undefined;
+  const accepted = (node: SearchableEntry) => {
+    if (matchesOnlyThroughOffScreenHoist(node, selector, check)) {
+      return undefined;
+    }
+    const bounded = boundedSource(result, node);
+    return bounded && hasVisibleScreenPart(bounded.bounds, screenSize) ? bounded : undefined;
+  };
+  const chosen = accepted(source);
+  if (chosen || usesScopedWait(selector)) {
+    return chosen;
   }
   return result.matches
     .flatMap(({ sourceNodes, node }) => sourceNodes ?? [node])
-    .find(
-      (other) =>
-        other !== source &&
-        other.bounds !== undefined &&
-        other.element !== undefined &&
-        !matchesOnlyThroughOffScreenHoist(other, selector, check),
-    );
+    .filter((other) => other !== source)
+    .map(accepted)
+    .find((other) => other !== undefined);
 }
 
 export function appear(
@@ -452,7 +472,7 @@ export function appear(
       result,
       fallback: sources.flatMap((node) => (node.element ? [node.element] : [])),
     });
-    const source = boundedMatchedSource(result, selector, observation.screenSize);
+    const source = boundedMatchedSource(result, selector, waitScreenSize(observation));
     return {
       matched: Boolean(source),
       matchedElement: source?.element,
@@ -481,7 +501,7 @@ export function disappear(
       return failure;
     }
     return {
-      matched: !boundedMatchedSource(result, selector, observation.screenSize),
+      matched: !boundedMatchedSource(result, selector, waitScreenSize(observation)),
       candidates: elements(result),
     };
   };

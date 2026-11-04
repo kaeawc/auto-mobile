@@ -29,12 +29,8 @@
           "height": "fill"
         },
         "safeAreaPadding": {
-          "edges": [
-            "top"
-          ],
-          "types": [
-            "systemBars"
-          ]
+          "edges": ["top"],
+          "types": ["systemBars"]
         },
         "children": [
           {

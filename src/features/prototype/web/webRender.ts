@@ -948,6 +948,9 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
 
+/** The node types renderWebNode hoists into a window layer; WEB_LAYER_TYPES must match it. */
+export const WEB_LAYER_RENDERED_TYPES: readonly string[] = Object.keys(WEB_LAYER_RENDERERS);
+
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
   const id = typeof node.id === "string" ? node.id : undefined;

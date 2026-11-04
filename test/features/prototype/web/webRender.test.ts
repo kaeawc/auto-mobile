@@ -6,6 +6,8 @@ import {
   type WebChild,
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
+import { WEB_LAYER_RENDERED_TYPES } from "../../../../src/features/prototype/web/webRender";
+import { WEB_LAYER_TYPES } from "../../../../src/features/prototype/web/webSheet";
 import {
   renderPrototypeStill,
   type PrototypeStillOptions,
@@ -679,6 +681,37 @@ describe("prototype web still (#16346)", () => {
     // The sheet draws in a window layer, open or closed, so the row's share is the whole 100 dp.
     expect(ratioOf({ open: false })).toMatchObject({ "flex-basis": "200px", width: "200px" });
     expect(ratioOf({ open: true })).toMatchObject({ "flex-basis": "200px", width: "200px" });
+  });
+
+  test("every hoisted layer type is out of a column's flow (#16720)", () => {
+    // The height pass's layer set must name every type renderWebNode hoists.
+    expect([...WEB_LAYER_TYPES].sort()).toEqual([...WEB_LAYER_RENDERED_TYPES].sort());
+    const layers: Record<string, Record<string, unknown>> = {
+      dialog: { type: "dialog", title: "Delete?", confirm: { label: "Delete" } },
+      snackbar: { type: "snackbar", text: "Saved" },
+    };
+    for (const [type, layer] of Object.entries(layers)) {
+      const ratio = byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { open: false },
+          root: {
+            type: "column",
+            style: { height: { dp: 100 }, spacing: 8 },
+            children: [
+              { ...layer, openWhen: { key: "open", equals: true }, style: { height: { dp: 100 } } },
+              {
+                type: "row",
+                style: { weight: 1 },
+                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+      expect([type, ratio["flex-basis"]]).toEqual([type, "200px"]);
+    }
   });
 
   test("a row's own safe-area padding comes out of its aspect ratio's height cap (#16720)", () => {

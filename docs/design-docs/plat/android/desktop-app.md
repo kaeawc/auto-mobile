@@ -30,3 +30,27 @@ another session holds the device, the app's input is refused with
 pane or hiding the window releases a device the app holds. See
 [device ownership](../../../using/device-ownership.md) and
 [environment variables](../../../using/environment-variables.md#session-heartbeat-timeout).
+
+## Device streams
+
+The app owns one `DaemonStreamHub` per process. Facets lease a device's stream
+from the hub, keyed by `deviceSessionUuid` (with `deviceId` as label and
+fallback), instead of opening their own socket:
+
+- Telemetry uses one connection per observed device, shared by every facet on
+  that device. It subscribes with the device's `deviceSessionUuid`, so the
+  daemon backfills that device's own history; an all-devices subscription would
+  backfill only the newest rows across every device. The hub also routes on the
+  `deviceSessionUuid` stamped on each event, so a rebooted device that reuses
+  its serial never receives the old epoch's events. A device's connection opens
+  with its first lease and closes with its last; a facet mounted on an open
+  connection first receives its device's recent events.
+- Leases are ref-counted per device; `subscriptions` exposes the live counts.
+- Blocking `readLine()` calls for JSON streams run on a dedicated thread per
+  connection, never on `Dispatchers.IO`, so many open streams cannot exhaust the
+  shared pool.
+- Observation-stream reconnects back off exponentially with up to 20% random
+  jitter so panes that dropped together do not reconnect in lockstep. Tests
+  inject the delay and the random source.
+
+Observation, failures and video streams still connect per pane.

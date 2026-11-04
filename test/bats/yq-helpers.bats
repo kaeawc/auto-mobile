@@ -17,9 +17,13 @@ stub_yq() {
   chmod +x "$STUB_BIN/yq"
 }
 
+# run_guard CI [NAME=VALUE...]: runs the guard with only CI and the given extra
+# variables set, so the host's GITHUB_ACTIONS / CIRCLECI / CLAUDE_CODE_REMOTE
+# cannot leak in.
 run_guard() {
   local ci="$1"
-  run env -i PATH="$STUB_BIN" CI="$ci" HELPER="$HELPER" BATS_TEST_FILENAME=/x/example.bats \
+  shift
+  run env -i PATH="$STUB_BIN" CI="$ci" "$@" HELPER="$HELPER" BATS_TEST_FILENAME=/x/example.bats \
     "$BASH_BIN" -c '
       skip() { printf "skip: %s\n" "$*"; exit 3; }
       source "$HELPER"
@@ -28,34 +32,54 @@ run_guard() {
     '
 }
 
-@test "mikefarah yq v4 passes the guard locally and in CI" {
-  stub_yq 'yq (https://github.com/mikefarah/yq/) version v4.44.3'
-  run_guard ""
-  [ "$status" -eq 0 ]
-  [ "$output" = "rc=0" ]
-  run_guard true
-  [ "$status" -eq 0 ]
-  [ "$output" = "rc=0" ]
+@test "mikefarah yq at or above v4.49.1 passes the guard locally and in CI" {
+  local version
+  for version in v4.49.1 v4.49.2 v4.54.1 v4.100.0; do
+    stub_yq "yq (https://github.com/mikefarah/yq/) version ${version}"
+    run_guard ""
+    [ "$status" -eq 0 ]
+    [ "$output" = "rc=0" ]
+    run_guard true
+    [ "$status" -eq 0 ]
+    [ "$output" = "rc=0" ]
+  done
 }
 
-@test "mikefarah yq v4 without the leading v passes the guard" {
+@test "mikefarah yq older than v4.49.1 skips locally with the reported version" {
+  stub_yq 'yq (https://github.com/mikefarah/yq/) version v4.44.3'
+  run_guard ""
+  [ "$status" -eq 3 ]
+  [ "$output" = "skip: requires mikefarah yq v4.49.1 or newer: mikefarah yq on PATH is older than v4.49.1 (reports: yq (https://github.com/mikefarah/yq/) version v4.44.3)" ]
+  stub_yq 'yq (https://github.com/mikefarah/yq/) version v4.49.0'
+  run_guard ""
+  [ "$status" -eq 3 ]
   stub_yq 'yq (https://github.com/mikefarah/yq/) version 4.9.6'
   run_guard ""
-  [ "$output" = "rc=0" ]
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"older than v4.49.1"* ]]
+}
+
+@test "mikefarah yq older than v4.49.1 fails in CI instead of skipping" {
+  stub_yq 'yq (https://github.com/mikefarah/yq/) version v4.44.3'
+  run_guard true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mikefarah yq v4.49.1 or newer is required in CI for example.bats: mikefarah yq on PATH is older than v4.49.1"* ]]
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" != *"skip:"* ]]
 }
 
 @test "python-yq skips locally with the reported version in the reason" {
   stub_yq 'yq 0.0.0'
   run_guard ""
   [ "$status" -eq 3 ]
-  [ "$output" = "skip: requires mikefarah yq v4: yq on PATH is not mikefarah yq v4 (reports: yq 0.0.0)" ]
+  [ "$output" = "skip: requires mikefarah yq v4.49.1 or newer: yq on PATH is not mikefarah yq v4 (reports: yq 0.0.0)" ]
 }
 
 @test "python-yq fails in CI instead of skipping" {
   stub_yq 'yq 0.0.0'
   run_guard true
   [ "$status" -eq 0 ]
-  [[ "$output" == *"mikefarah yq v4 is required in CI for example.bats: yq on PATH is not mikefarah yq v4 (reports: yq 0.0.0)"* ]]
+  [[ "$output" == *"mikefarah yq v4.49.1 or newer is required in CI for example.bats: yq on PATH is not mikefarah yq v4 (reports: yq 0.0.0)"* ]]
   [[ "$output" == *"rc=1"* ]]
   [[ "$output" != *"skip:"* ]]
 }
@@ -70,8 +94,25 @@ run_guard() {
 @test "missing yq skips locally and fails in CI" {
   run_guard ""
   [ "$status" -eq 3 ]
-  [ "$output" = "skip: requires mikefarah yq v4: yq is not installed" ]
+  [ "$output" = "skip: requires mikefarah yq v4.49.1 or newer: yq is not installed" ]
   run_guard 1
-  [[ "$output" == *"mikefarah yq v4 is required in CI for example.bats: yq is not installed"* ]]
+  [[ "$output" == *"mikefarah yq v4.49.1 or newer is required in CI for example.bats: yq is not installed"* ]]
   [[ "$output" == *"rc=1"* ]]
+}
+
+@test "the cloud dev container's CI=true skips instead of failing" {
+  stub_yq 'yq 0.0.0'
+  run_guard true CLAUDE_CODE_REMOTE=true
+  [ "$status" -eq 3 ]
+  [[ "$output" == "skip: requires mikefarah yq v4.49.1 or newer:"* ]]
+}
+
+@test "GitHub Actions and CircleCI fail closed even with the dev container marker or without CI" {
+  stub_yq 'yq 0.0.0'
+  run_guard true CLAUDE_CODE_REMOTE=true GITHUB_ACTIONS=true
+  [[ "$output" == *"is required in CI"* && "$output" == *"rc=1"* ]]
+  run_guard "" GITHUB_ACTIONS=true
+  [[ "$output" == *"is required in CI"* && "$output" == *"rc=1"* ]]
+  run_guard "" CIRCLECI=true CLAUDE_CODE_REMOTE=true
+  [[ "$output" == *"is required in CI"* && "$output" == *"rc=1"* ]]
 }

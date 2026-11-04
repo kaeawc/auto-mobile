@@ -32,6 +32,12 @@ export interface WireExchange {
   actor: WireActor;
   /** Step name a consumer looks responses up by. */
   label: string;
+  /**
+   * Present on the first frame after a daemon restart: the daemon process died after the previous
+   * frame and a new one started over the same database this long later. The replay restarts its
+   * daemon the same way before driving this frame.
+   */
+  daemonRestartDowntimeMs?: number;
   /** Present when one exchange stands for this many identical consecutive requests. */
   repeat?: number;
   everyMs?: number;

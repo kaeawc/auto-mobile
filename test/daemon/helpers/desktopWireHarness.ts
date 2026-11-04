@@ -39,6 +39,8 @@ export class DesktopWireHarness {
   private scenario!: LivenessScenario;
   private startedAt = 0;
   private readonly restore: Array<{ mockRestore(): void }> = [];
+  /** The downtime of a restart no frame has followed yet; the next frame records it. */
+  private restartDowntimeMs: number | undefined;
 
   constructor(private readonly devices: BootedDevice[] = [PIXEL, PIXEL_FOLD]) {}
 
@@ -55,10 +57,12 @@ export class DesktopWireHarness {
   /**
    * The daemon process dies and, `downtimeMs` later, a new one starts over the same database: it
    * rehydrates the sessions the last one persisted, expiring any whose idle window ran out while
-   * no daemon was up. No frame is recorded while it is down.
+   * no daemon was up. No frame is recorded while it is down; the next recorded frame carries the
+   * downtime as `daemonRestartDowntimeMs`, so the replay restarts at the same point.
    */
   async restartDaemon(downtimeMs: number): Promise<void> {
     await this.scenario.daemonRestart({ downtimeMs });
+    this.restartDowntimeMs = downtimeMs;
   }
 
   async stop(): Promise<void> {
@@ -180,8 +184,11 @@ export class DesktopWireHarness {
   ): Promise<WireExchange> {
     const atMs = this.scenario.timer.now() - this.startedAt;
     const response = await this.scenario.daemonMethod(method, params, wireConnection(actor));
+    const daemonRestartDowntimeMs = this.restartDowntimeMs;
+    this.restartDowntimeMs = undefined;
     return {
       atMs,
+      ...(daemonRestartDowntimeMs === undefined ? {} : { daemonRestartDowntimeMs }),
       actor,
       label,
       request: { method, params },

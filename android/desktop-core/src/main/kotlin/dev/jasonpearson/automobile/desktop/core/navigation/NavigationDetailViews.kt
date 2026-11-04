@@ -123,7 +123,9 @@ fun ScreenNodeRow(screen: ScreenNode, onClick: () -> Unit) {
 @Composable
 fun TransitionRow(
   transition: ScreenTransition,
-  onClick: () -> Unit,
+  // Opens the transition's detail. With [onScreenClick] the screen names are links, so this shows
+  // as a separate Details link (the way to the navigate action, #16953); null shows none.
+  onClick: (() -> Unit)?,
   currentScreen: String? = null, // Current screen name - won't be a link
   onScreenClick: ((String) -> Unit)? = null, // Optional: click on screen name to navigate
   verification: EdgeVerification = EdgeVerification.Verified,
@@ -143,7 +145,7 @@ fun TransitionRow(
       Modifier.fillMaxWidth()
         .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
         .then(
-          if (onScreenClick == null)
+          if (onScreenClick == null && onClick != null)
             Modifier.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand)
           else Modifier,
         )
@@ -158,6 +160,20 @@ fun TransitionRow(
     }
 
     TransitionStatistics(transition)
+
+    onClick
+      ?.takeIf { onScreenClick != null }
+      ?.let {
+        Link(
+          "Details",
+          onClick = it,
+          modifier =
+            Modifier.padding(start = 8.dp).semantics {
+              contentDescription =
+                "Transition details: ${transition.fromScreen} → ${transition.toScreen}"
+            },
+        )
+      }
   }
 }
 
@@ -168,6 +184,8 @@ fun TransitionRow(
 data class ScreenDetailEnvironment(
   val screenshotLoader: ScreenshotLoader? = null,
   val activeContext: NavigationActiveContext? = null,
+  // Opens a transition's detail by id; null leaves the rows without a Details link.
+  val onTransitionSelected: ((String) -> Unit)? = null,
 )
 
 @Composable
@@ -211,6 +229,7 @@ fun ScreenDetailView(
         screen.name,
         onScreenSelected,
         activeContext,
+        environment.onTransitionSelected,
       ),
     )
     if (outgoing.isNotEmpty()) Spacer(Modifier.height(12.dp))
@@ -221,6 +240,7 @@ fun ScreenDetailView(
         screen.name,
         onScreenSelected,
         activeContext,
+        environment.onTransitionSelected,
       ),
     )
   }
@@ -241,6 +261,7 @@ fun TransitionDetailView(
   onBack: () -> Unit,
   onScreenSelected: (String) -> Unit, // Navigate to a screen by name
   verification: EdgeVerification = EdgeVerification.Verified,
+  navigateAction: TransitionNavigateAction? = null,
 ) {
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
@@ -253,6 +274,9 @@ fun TransitionDetailView(
     Text("Transition Detail", fontSize = 16.sp)
     if (verification == EdgeVerification.UnverifiedForActiveBuild) {
       UnverifiedEdgeTag(transition, Modifier.padding(top = 6.dp))
+    }
+    navigateAction?.let {
+      TransitionNavigateActionView(transition, it, verification, Modifier.padding(top = 8.dp))
     }
     Row(
       horizontalArrangement = Arrangement.spacedBy(8.dp),

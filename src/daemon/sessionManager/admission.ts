@@ -4,7 +4,7 @@ import { SessionNoLongerOwnsDeviceError } from "../../models/sessionNoLongerOwns
 import { isDeviceLossCancellationReason } from "../../utils/deviceLossCancellationReason";
 import { logger } from "../../utils/logger";
 import {} from "../deviceStateRestoreQueue";
-import { PlanLabelRegistry } from "../planLabelRegistry";
+import { type EndedLabelBase, endedLabelBase, PlanLabelRegistry } from "../planLabelRegistry";
 import {
   isIdleReleaseReason,
   isTerminalReleaseReason,
@@ -29,6 +29,7 @@ import {
 } from "../sessionManager";
 import { ForcedStuckRelease } from "../sessionManager/forcedStuckRelease";
 import {
+  cliIdleWindowMarker,
   cliIdleWindowMs,
   cliIdleWindowReleaseMarker,
   persistedCliIdleWindowMs,
@@ -100,7 +101,7 @@ export interface SessionAdmissionHost {
     sessionId: string,
     current: SessionReleaseOperation | undefined,
   ): string | undefined;
-  endedBaseOfLabel(label: Session): { baseSessionId: string; releaseReason: string } | undefined;
+  endedBaseOfLabel(label: Session): EndedLabelBase | undefined;
   readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
   expiredReleaseOfUnheldRow(
     sessionId: string,
@@ -116,7 +117,11 @@ export interface SessionAdmissionHost {
   sessionEndReason(sessionId: string): string | undefined;
   expiredSessionReleaseReason(session: Session): SessionReleaseReason;
   releaseSessionPastIdleDeadline(sessionId: string, callerExecutionId?: string): void;
-  terminalReleaseAsOfNow(session: Session, releaseReason: string): SessionReleaseSnapshot;
+  terminalReleaseAsOfNow(
+    session: Session,
+    releaseReason: string,
+    endedBase?: EndedLabelBase,
+  ): SessionReleaseSnapshot;
   readonly leaseExpiry: SessionLeaseExpiry;
   liveBaseOfDerivedId(sessionId: string): string | undefined;
 }
@@ -341,7 +346,8 @@ export class SessionAdmission {
    * The CLI idle window a released UUID had (#16937), for a session-not-found answer naming a
    * `cli-idle-timeout` release: from its terminal snapshot, its still-published session, or its
    * persisted row (so a restarted daemon still knows it). Undefined unless that session was itself
-   * on the `cli-idle` policy: a plan label inheriting its base's end has no window (#16940).
+   * on the `cli-idle` policy (#16940), or is a plan label that inherited its base's
+   * `cli-idle-timeout`: the label reports the base's window, which is the one that expired (#16971).
    */
 
   async getReleasedSessionIdleTimeoutMs(sessionId: string): Promise<number | undefined> {
@@ -351,10 +357,47 @@ export class SessionAdmission {
     }
     const published = this.host.sessions.get(sessionId);
     if (published) {
-      return cliIdleWindowMs(published);
+      return cliIdleWindowMs(published) ?? this.host.endedBaseOfLabel(published)?.cliIdleTimeoutMs;
     }
     const persisted = await this.host.readPersistedSession(sessionId);
-    return persisted ? persistedCliIdleWindowMs(persisted) : undefined;
+    if (!persisted) {
+      return undefined;
+    }
+    return (
+      persistedCliIdleWindowMs(persisted) ??
+      (await this.persistedInheritedCliIdleWindowMs(sessionId, persisted))
+    );
+  }
+
+  /**
+   * The window a plan label's row inherited from its base's `cli-idle-timeout` (#16971), read from
+   * the base's row: the label's row records only the reason. The nearest `${base}` prefix whose
+   * row ended with `cli-idle-timeout` on the `cli-idle` policy is the base that expired; an
+   * intermediate label inherited the same end and has no window of its own.
+   */
+  private async persistedInheritedCliIdleWindowMs(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): Promise<number | undefined> {
+    if (
+      persisted.source !== PLAN_LABEL_SESSION_SOURCE ||
+      persisted.release_reason !== "cli-idle-timeout"
+    ) {
+      return undefined;
+    }
+    for (
+      let separator = sessionId.lastIndexOf(":");
+      separator > 0;
+      separator = sessionId.lastIndexOf(":", separator - 1)
+    ) {
+      const base = await this.host.readPersistedSession(sessionId.slice(0, separator));
+      const window =
+        base?.release_reason === "cli-idle-timeout" ? persistedCliIdleWindowMs(base) : undefined;
+      if (window !== undefined) {
+        return window;
+      }
+    }
+    return undefined;
   }
 
   preFenceIdleReleaseReason(
@@ -468,12 +511,13 @@ export class SessionAdmission {
    * How the base of the plan label session `label` has ended, when it has (#11640): the base's
    * end ends its labels, so a label whose base is released, being released for a terminal reason,
    * or past its idle deadline and not yet scanned is no longer a live session to anyone. The
-   * reason is the base's recorded one, or the one its expiry would record. A read of state: it
+   * reason is the base's recorded one, or the one its expiry would record; a `cli-idle-timeout`
+   * end carries the base's window (#16971). A read of state: it
    * releases, stamps and fences nothing. Undefined for a session no plan run minted, and once the
    * label itself has been removed, including while the release cascade runs.
    */
 
-  endedBaseOfLabel(label: Session): { baseSessionId: string; releaseReason: string } | undefined {
+  endedBaseOfLabel(label: Session): EndedLabelBase | undefined {
     if (label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
       return undefined;
     }
@@ -489,7 +533,11 @@ export class SessionAdmission {
     ) {
       const releaseReason = this.host.sessionEndReason(baseSessionId);
       if (releaseReason !== undefined) {
-        return { baseSessionId, releaseReason };
+        return endedLabelBase(
+          baseSessionId,
+          releaseReason,
+          this.sessionEndCliIdleWindowMs(baseSessionId),
+        );
       }
     }
     return undefined;
@@ -515,15 +563,37 @@ export class SessionAdmission {
       : undefined;
   }
 
+  /**
+   * The CLI idle window `sessionId` ended with, or would end with by a lookup now: its terminal
+   * snapshot's, else the published session's own when it is on the `cli-idle` policy.
+   */
+
+  private sessionEndCliIdleWindowMs(sessionId: string): number | undefined {
+    const fenced = this.host.sessionSlots.getTerminalSnapshot(sessionId);
+    if (fenced) {
+      return fenced.cliIdleTimeoutMs;
+    }
+    const session = this.host.sessions.get(sessionId);
+    return session && cliIdleWindowMs(session);
+  }
+
   /** A looked-up session, unless it is a plan label whose base has ended (#11640). */
 
   unlessBaseEnded(session: Session | null): Session | null {
     return session && this.host.endedBaseOfLabel(session) ? null : session;
   }
 
-  /** The terminal release `session` is answered with before its own release has recorded one. */
+  /**
+   * The terminal release `session` is answered with before its own release has recorded one. A
+   * plan label answered with its ended base's reason reports the base's CLI idle window, not its
+   * own heartbeat lease (#16940, #16971).
+   */
 
-  terminalReleaseAsOfNow(session: Session, releaseReason: string): SessionReleaseSnapshot {
+  terminalReleaseAsOfNow(
+    session: Session,
+    releaseReason: string,
+    endedBase?: EndedLabelBase,
+  ): SessionReleaseSnapshot {
     const now = this.host.sessionNow();
     return {
       sessionId: session.sessionId,
@@ -531,8 +601,9 @@ export class SessionAdmission {
       releaseReason,
       releasedAtMs: now,
       terminal: true,
-      // A plan label answered with its ended base's reason has no CLI window of its own (#16940).
-      ...cliIdleWindowReleaseMarker(session),
+      ...(endedBase
+        ? cliIdleWindowMarker(endedBase.cliIdleTimeoutMs)
+        : cliIdleWindowReleaseMarker(session)),
       heartbeat: {
         lastHeartbeatMs: session.lastHeartbeat,
         hasReceivedHeartbeat: session.hasReceivedHeartbeat,
@@ -569,7 +640,7 @@ export class SessionAdmission {
     }
     throw new TerminalSessionError(
       sessionId,
-      this.host.terminalReleaseAsOfNow(label, ended.releaseReason),
+      this.host.terminalReleaseAsOfNow(label, ended.releaseReason, ended),
     );
   }
 
@@ -596,9 +667,10 @@ export class SessionAdmission {
 
   peekTerminalAnswerForEndedSession(sessionId: string): TerminalSessionError | undefined {
     const session = this.host.sessions.get(sessionId);
-    const releaseReason =
-      this.host.sessionEndReason(sessionId) ??
-      (session ? this.host.endedBaseOfLabel(session)?.releaseReason : undefined);
+    const ownReason = this.host.sessionEndReason(sessionId);
+    const endedBase =
+      ownReason === undefined && session ? this.host.endedBaseOfLabel(session) : undefined;
+    const releaseReason = ownReason ?? endedBase?.releaseReason;
     if (releaseReason === undefined) {
       return undefined;
     }
@@ -608,7 +680,7 @@ export class SessionAdmission {
     }
     return new TerminalSessionError(
       sessionId,
-      this.host.terminalReleaseAsOfNow(session, releaseReason),
+      this.host.terminalReleaseAsOfNow(session, releaseReason, endedBase),
     );
   }
 

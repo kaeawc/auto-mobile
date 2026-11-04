@@ -33,8 +33,8 @@ export interface SessionReleaseSnapshot {
   /**
    * The CLI idle window of a released session that was itself on the `cli-idle` liveness policy
    * (#16940): the window a `cli-idle-timeout` refusal reports as `idleTimeoutMs`. Absent for any
-   * other policy, including a plan label that only inherits its base's `cli-idle-timeout`: the
-   * label never adopted a CLI window, so its heartbeat lease is not one.
+   * other policy; its heartbeat lease is never one. A plan label ended by its base's
+   * `cli-idle-timeout` carries the base's window instead, the one that expired (#16971).
    */
   cliIdleTimeoutMs?: number;
   heartbeat: {

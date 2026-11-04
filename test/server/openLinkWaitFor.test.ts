@@ -19,6 +19,7 @@ import {
 import {
   acceptIosAppOpenAlert,
   buildOpenLinkPayload,
+  openLinkSucceeded,
   selectAndroidOpenLinkChooser,
 } from "../../src/server/interactionToolHandlers";
 import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
@@ -143,6 +144,59 @@ test("registered openLink waits for a known lone panel after a stub activeDispla
       content: [{ type: "text", text: expect.stringContaining('"awaitTimeout":false') }],
     });
     expect(screen.getExecuteCallCount()).toBe(2);
+  } finally {
+    openSpy.mockRestore();
+    observeSpy.mockRestore();
+    sleepSpy.mockRestore();
+    nowSpy.mockRestore();
+    ToolRegistry.clearTools();
+  }
+});
+
+describe("openLinkSucceeded (#16902)", () => {
+  test("a timed-out wait after a successful open is a failed call", () => {
+    expect(openLinkSucceeded({ success: true }, { awaitTimeout: true })).toBe(false);
+  });
+
+  test("a matched wait or no wait follows the open result", () => {
+    expect(openLinkSucceeded({ success: true }, { awaitTimeout: false })).toBe(true);
+    expect(openLinkSucceeded({ success: true }, null)).toBe(true);
+    expect(openLinkSucceeded({ success: false }, null)).toBe(false);
+  });
+});
+
+test("registered openLink marks a timed-out waitFor isError and keeps the wait diagnostics", async () => {
+  const device: BootedDevice = {
+    platform: "ios",
+    deviceId: "fake-phone",
+    name: "iPhone",
+    [displayInventoryOutcome]: { kind: "single" },
+  };
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const screen = new FakeObserveScreen();
+  screen.setObserveResult(makeObservation("main"));
+  const openSpy = spyOn(OpenURL.prototype, "execute").mockResolvedValue({
+    success: true,
+    url: "example://item",
+  });
+  const observeSpy = spyOn(RealObserveScreen.prototype, "execute").mockImplementation((options) =>
+    screen.execute(options),
+  );
+  const sleepSpy = spyOn(defaultTimer, "sleep").mockImplementation((ms) => timer.sleep(ms));
+  const nowSpy = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
+  try {
+    registerInteractionTools(interactionDeps);
+    const handler = ToolRegistry.getTool("openLink")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
+    const result = await handler!(device, {
+      url: "example://item",
+      waitFor: { text: "never shown", timeout: 200 },
+    });
+    expect(result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: expect.stringContaining('"awaitTimeout":true') }],
+    });
   } finally {
     openSpy.mockRestore();
     observeSpy.mockRestore();

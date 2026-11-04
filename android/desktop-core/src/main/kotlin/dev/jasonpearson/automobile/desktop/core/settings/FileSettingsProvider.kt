@@ -163,6 +163,10 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
     get() = boolean(KEY_HAS_DISMISSED_BASICS_CHECKLIST, false)
     set(value) = put(KEY_HAS_DISMISSED_BASICS_CHECKLIST, value)
 
+  override var hasObservedDevice: Boolean
+    get() = boolean(KEY_HAS_OBSERVED_DEVICE, false)
+    set(value) = put(KEY_HAS_OBSERVED_DEVICE, value)
+
   override var streamQualityPreset: String
     get() = string(KEY_STREAM_QUALITY_PRESET, "medium")
     set(value) = put(KEY_STREAM_QUALITY_PRESET, value)
@@ -188,6 +192,7 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
     private const val KEY_THEME_MODE = "themeMode"
     private const val KEY_HAS_SEEN_ONBOARDING = "hasSeenOnboarding"
     private const val KEY_HAS_DISMISSED_BASICS_CHECKLIST = "hasDismissedBasicsChecklist"
+    private const val KEY_HAS_OBSERVED_DEVICE = "hasObservedDevice"
     private const val KEY_STREAM_QUALITY_PRESET = "streamQualityPreset"
     private const val KEY_STREAM_QUALITY_AUTO_ADJUST = "streamQualityAutoAdjust"
 

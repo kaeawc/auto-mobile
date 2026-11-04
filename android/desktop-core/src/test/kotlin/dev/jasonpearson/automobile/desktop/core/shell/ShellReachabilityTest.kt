@@ -36,16 +36,9 @@ class ShellReachabilityTest {
   private val knownDormant =
     setOf(
       "CenterTabStrip",
-      // Only called from the dormant StatusBar.
-      "ConnectionStatusIndicator",
-      "DetachedInspectorWindow",
       "HorizontalSplitPane",
-      "InspectorPaneHeader",
       "NotificationRulesEditor",
       "PlatformTheme",
-      "StatusBar",
-      // Only called from the dormant StatusBar.
-      "StatusBarBadge",
       "ToastStack",
       "WindowSubtitle",
     )

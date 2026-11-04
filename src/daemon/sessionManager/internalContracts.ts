@@ -398,7 +398,8 @@ export function cliIdleWindowReleaseMarker(
   return cliIdleWindowMarker(cliIdleWindowMs(session));
 }
 
-function cliIdleWindowMarker(
+/** A CLI idle window as a release snapshot field, absent when there is none. */
+export function cliIdleWindowMarker(
   cliIdleTimeoutMs: number | undefined,
 ): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
   return cliIdleTimeoutMs === undefined ? {} : { cliIdleTimeoutMs };

@@ -117,16 +117,15 @@ function terminalReleaseDetails(release: object): Record<string, unknown> {
   const rawReason: unknown = Reflect.get(release, "releaseReason");
   const reason = typeof rawReason === "string" ? rawReason : undefined;
   const ownerPid: unknown = Reflect.get(release, "ownerPid");
-  const heartbeat: unknown = Reflect.get(release, "heartbeat");
-  const timeoutMs: unknown =
-    heartbeat !== null && typeof heartbeat === "object"
-      ? Reflect.get(heartbeat, "timeoutMs")
-      : undefined;
+  const cliIdleTimeoutMs: unknown = Reflect.get(release, "cliIdleTimeoutMs");
   return {
     ...(reason === undefined ? {} : { reason }),
     ...idleReleaseField(reason),
-    // A cli-idle session's heartbeat timeout is its adopted idle window (#16908).
-    ...cliIdleTimeoutField(reason, typeof timeoutMs === "number" ? timeoutMs : undefined),
+    // Only a release of a session on the cli-idle policy records its window (#16908, #16940).
+    ...cliIdleTimeoutField(
+      reason,
+      typeof cliIdleTimeoutMs === "number" ? cliIdleTimeoutMs : undefined,
+    ),
     ...(typeof ownerPid === "number" ? { ownerPid } : {}),
   };
 }

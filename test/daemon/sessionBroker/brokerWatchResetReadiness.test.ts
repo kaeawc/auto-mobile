@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import type { ResetResult } from "../../../src/daemon/sessionBroker/devicePort";
 import { adaptWatchSessionDeviceCatalog } from "../../../src/devices/sessionCatalog";
@@ -117,11 +117,9 @@ describe("watch reset readiness", () => {
         await tearDown();
       }
     }
-    // The suite has one test, so its own harness, seed acquisition and release are built once
-    // here too: they are fixture, not the concurrent admission under test.
-    await setUp();
   });
-  afterAll(tearDown);
+  beforeEach(setUp);
+  afterEach(tearDown);
 
   test("one of two concurrent watch acquisitions waits for the resetting watch", async () => {
     const { admitted, outcomes } = await acquireConcurrentlyDuringReset();

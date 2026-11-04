@@ -24355,7 +24355,8 @@
       "events": {
         "markerTap": {
           "sensitive": false,
-          "userInitiated": true
+          "userInitiated": true,
+          "emitContext": ["markerId"]
         },
         "cameraIdle": {
           "sensitive": false

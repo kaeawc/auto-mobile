@@ -1,0 +1,5 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="24dp">
+  <TextView android:id="@+id/fixture_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/driving_safe_title" android:textSize="32sp" />
+  <TextView android:id="@+id/fixture_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingVertical="12dp" android:textSize="24sp" />
+  <ListView android:id="@+id/fixture_rows" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+</LinearLayout>

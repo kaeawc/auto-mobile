@@ -1,0 +1,36 @@
+[
+  {
+    "name": "state actions write their keys in order",
+    "spec": {
+      "id": "trace-state",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "count": 0, "flag": false, "label": "start" },
+      "root": { "type": "text", "text": "{label}" }
+    },
+    "steps": [
+      {
+        "actions": [{ "type": "setState", "key": "label", "value": "next" }],
+        "expect": { "state": { "count": 0, "flag": false, "label": "next" } }
+      },
+      {
+        "actions": [{ "type": "toggle", "key": "flag" }],
+        "expect": { "state": { "count": 0, "flag": true, "label": "next" } }
+      },
+      {
+        "actions": [
+          { "type": "increment", "key": "count" },
+          { "type": "increment", "key": "count", "by": 5 }
+        ],
+        "expect": { "state": { "count": 6, "flag": true, "label": "next" } }
+      },
+      {
+        "actions": [
+          { "type": "decrement", "key": "count", "by": 2 },
+          { "type": "toggle", "key": "flag" },
+          { "type": "setState", "key": "label", "value": "done" }
+        ],
+        "expect": { "state": { "count": 4, "flag": false, "label": "done" } }
+      }
+    ]
+  }
+]

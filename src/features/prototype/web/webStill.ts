@@ -1,6 +1,8 @@
 import { prototypeSpecForDevice } from "../prototypeComponents";
+import type { PrototypeFormatLogger } from "../prototypeFormat";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
+import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
@@ -24,6 +26,8 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /** Traces rejected derived formats; the server passes its logger, a browser embed none. */
+  readonly logger?: PrototypeFormatLogger;
 }
 
 export interface PrototypeStill {
@@ -162,6 +166,16 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+/** The fixed locale and zone keep a still's bytes stable; the logger is optional for a browser embed. */
+function stillFormat(options: PrototypeStillOptions): WebRenderScope["format"] {
+  return {
+    locale: STILL_LOCALE,
+    timeZone: "UTC",
+    nowMs: options.nowMs ?? 0,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  };
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
@@ -176,7 +190,7 @@ function stillScope(
   return {
     style: {
       mode,
-      palette: prototypeRolePalette(expanded, mode),
+      palette: prototypeDrawnPalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
       platform: frame.platform,
@@ -190,7 +204,7 @@ function stillScope(
     },
     data: spec.data,
     spec,
-    format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
+    format: stillFormat(options),
     instances: [],
     inBox: false,
     unsupported: [],
@@ -202,8 +216,8 @@ function stillScope(
 }
 
 /**
- * The theme's `background` role (else `surface`); a seed or device scheme leaves both unresolved,
- * so the Material 3 baseline background for the mode stands in.
+ * The theme's `background` role (else `surface`), from the baseline, seed or overrides; the
+ * Material 3 baseline background for the mode stands in should neither resolve.
  */
 function screenBackground(style: WebStyleContext): string {
   return (

@@ -61,6 +61,24 @@
   <string name="import_interrupted">Import interrupted; open the file again</string>
   <!-- Import screen error when the import service is unavailable. -->
   <string name="import_unavailable">Import unavailable</string>
+  <!-- Title on the share-link confirmation screen, before any download. -->
+  <string name="share_import_title">Import shared prototype?</string>
+  <!-- Download host shown before confirmation; %1$s is the HTTPS hostname. -->
+  <string name="share_import_host">Download from: %1$s</string>
+  <!-- Expected bundle digest shown before confirmation; %1$s is the full SHA-256 hex hash. -->
+  <string name="share_import_hash">SHA-256: %1$s</string>
+  <!-- Confirmation button that starts the download and import. -->
+  <string name="share_import_confirm">Download and import</string>
+  <!-- Invalid share-link error; URL and SHA-256 identify the required link fields. -->
+  <string name="share_import_invalid">Invalid share link. Ask the sender for an HTTPS URL and a 64-character lowercase SHA-256 hash.</string>
+  <!-- Error when the egress policy or HTTPS checks refuse a download destination. -->
+  <string name="share_import_blocked">Download destination blocked. Ask the sender for an allowed HTTPS location.</string>
+  <!-- Error for HTTP failures, missing redirect targets, redirect loops or connection failures. -->
+  <string name="share_import_download_failed">Unable to download the prototype. Check your connection and ask the sender to verify the link.</string>
+  <!-- Error when the download exceeds the bundle compressed-byte limit. -->
+  <string name="share_import_too_large">Download exceeds the prototype bundle size limit.</string>
+  <!-- Error shown before parsing when the downloaded bytes differ from the confirmed hash. -->
+  <string name="share_import_hash_mismatch">The download does not match the shared SHA-256 hash. Ask the sender for a new link.</string>
   <!-- Library row and screen title that opens the bundled third-party license list. -->
   <string name="open_source_licenses">Open-source licenses</string>
   <!-- Licenses screen error when the bundled license list cannot be read. -->

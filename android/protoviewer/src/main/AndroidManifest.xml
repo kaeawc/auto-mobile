@@ -20,6 +20,12 @@
       <intent-filter>
         <action android:name="android.intent.action.VIEW" />
         <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="automobile-proto" android:host="import" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
         <data android:scheme="content" android:mimeType="application/vnd.automobile.prototype+zip" />
         <data android:scheme="content" android:mimeType="application/json" />
       </intent-filter>

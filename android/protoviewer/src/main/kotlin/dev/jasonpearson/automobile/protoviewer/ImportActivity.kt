@@ -27,16 +27,27 @@ import kotlinx.coroutines.withContext
 /** Every launch, including explicit intents, takes the same validated external-content route. */
 class ImportActivity : ComponentActivity() {
   private var rejection by mutableStateOf<LibraryImportResult.Rejected?>(null)
+  private var pendingShare by mutableStateOf<ShareImportLink?>(null)
+  private var shareFailure by mutableStateOf<Int?>(null)
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContent {
       ProtoViewerTheme {
-        val failed = rejection
-        val text =
-          if (failed == null) stringResource(R.string.loading)
-          else stringResource(R.string.import_rejected, failed.path, failed.reason)
-        ImportStatus(text) { finish() }
+        val share = pendingShare
+        if (share != null) {
+          ShareImportConfirmation(share, ::confirmShare) { finish() }
+        } else {
+          val failed = rejection
+          val failureResource = shareFailure
+          val text =
+            when {
+              failureResource != null -> stringResource(failureResource)
+              failed != null -> stringResource(R.string.import_rejected, failed.path, failed.reason)
+              else -> stringResource(R.string.loading)
+            }
+          ImportStatus(text) { finish() }
+        }
       }
     }
     if (savedInstanceState != null) {
@@ -53,6 +64,12 @@ class ImportActivity : ComponentActivity() {
       if (action == ImportAction.Send)
         IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
       else intent.data
+    if (uri?.scheme.equals("automobile-proto", ignoreCase = true)) {
+      pendingShare =
+        if (action == ImportAction.View) ShareImportLink.parse(uri.toString()) else null
+      if (pendingShare == null) shareFailure = R.string.share_import_invalid
+      return
+    }
     val services = (application as ProtoViewerApplication).services
     lifecycleScope.launch {
       val result =
@@ -60,17 +77,59 @@ class ImportActivity : ComponentActivity() {
           services.clearStaleExports()
           services.importer?.import(LibraryImportRequest(action, uri?.toString()))
         }
+      complete(result)
+    }
+  }
+
+  private fun confirmShare() {
+    val link = pendingShare ?: return
+    // Remove the confirmation immediately, so a second tap cannot start another download.
+    pendingShare = null
+    val services = (application as ProtoViewerApplication).services
+    lifecycleScope.launch {
+      val result = withContext(services.io) { services.shareImporter?.importConfirmed(link) }
       when (result) {
-        is LibraryImportResult.Imported -> {
-          startActivity(Intent(this@ImportActivity, LibraryActivity::class.java))
-          finish()
-        }
-        is LibraryImportResult.Rejected -> rejection = result
-        null ->
-          rejection =
-            LibraryImportResult.Rejected("library", getString(R.string.import_unavailable))
+        is ShareImportResult.Completed -> complete(result.result)
+        is ShareImportResult.Failed ->
+          shareFailure =
+            when (result.error) {
+              ShareImportError.Blocked -> R.string.share_import_blocked
+              ShareImportError.Download -> R.string.share_import_download_failed
+              ShareImportError.TooLarge -> R.string.share_import_too_large
+              ShareImportError.HashMismatch -> R.string.share_import_hash_mismatch
+            }
+        null -> shareFailure = R.string.import_unavailable
       }
     }
+  }
+
+  private fun complete(result: LibraryImportResult?) {
+    when (result) {
+      is LibraryImportResult.Imported -> {
+        startActivity(Intent(this, LibraryActivity::class.java))
+        finish()
+      }
+      is LibraryImportResult.Rejected -> rejection = result
+      null ->
+        rejection = LibraryImportResult.Rejected("library", getString(R.string.import_unavailable))
+    }
+  }
+}
+
+@Composable
+internal fun ShareImportConfirmation(
+  link: ShareImportLink,
+  confirm: () -> Unit,
+  cancel: () -> Unit,
+) {
+  Column(
+    Modifier.windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()),
+  ) {
+    Text(stringResource(R.string.share_import_title))
+    Text(stringResource(R.string.share_import_host, link.url.host))
+    Text(stringResource(R.string.share_import_hash, link.sha256))
+    TextButton(onClick = confirm) { Text(stringResource(R.string.share_import_confirm)) }
+    TextButton(onClick = cancel) { Text(stringResource(R.string.cancel)) }
   }
 }
 

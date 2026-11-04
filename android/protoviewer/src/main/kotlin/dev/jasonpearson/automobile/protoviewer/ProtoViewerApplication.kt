@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 
 /** Per-process shared ownership: all document tasks use the same repository/storage locks. */
@@ -60,14 +61,25 @@ class ProtoViewerApplication : Application() {
         },
       )
     ProtoViewerServices(
-      repository,
-      storage,
-      importer = importer,
-      mcpInbox =
-        app.getExternalFilesDir(null)?.let { McpInbox(File(it, "mcp"), importer, repository) },
-      sharer = sharer,
-      settings = SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
-    )
+        repository,
+        storage,
+        importer = importer,
+        mcpInbox =
+          app.getExternalFilesDir(null)?.let { McpInbox(File(it, "mcp"), importer, repository) },
+        sharer = sharer,
+        settings =
+          SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
+      )
+      .also { services ->
+        services.shareImporter =
+          VerifiedShareLibraryImporter(
+            PolicyShareBundleClient(
+              ShareBundleResolver(Dns.SYSTEM::lookup),
+              OkHttpShareBundleConnection(),
+            ),
+            importer,
+          )
+      }
   }
   val services: ProtoViewerServices by lazy {
     servicesFactory(this).also { services ->
@@ -103,6 +115,7 @@ class ProtoViewerServices(
     ::AndroidLocalNetworkPermission,
   val localNetworkGrant: LocalNetworkGrant = AndroidLocalNetworkGrant,
 ) {
+  internal var shareImporter: ShareLibraryImporter? = null
   val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
 
   // Outlives activities so a stop/destroy still finishes the renderer's pending disk flush.

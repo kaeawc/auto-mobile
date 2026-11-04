@@ -1,8 +1,29 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models";
 import { logger } from "../../../utils/logger";
+import { materialIconGlyphs } from "./materialIconGlyphs";
 import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
+import {
+  PROTOTYPE_WEB_3D_CSS,
+  PROTOTYPE_WEB_FLAT_ORBIT,
+  PROTOTYPE_WEB_START_ORBIT,
+  prototypeWeb3dBodyAttributes,
+  prototypeWeb3dBodyHinge,
+  prototypeWeb3dControls,
+  prototypeWeb3dDragOrbit,
+  prototypeWeb3dRuntime,
+  prototypeWeb3dUnwrap,
+  prototypeWeb3dWrap,
+  prototypeWebFold,
+  prototypeWebHingeLine,
+  prototypeWebLeaves,
+  prototypeWebOrbit,
+  prototypeWebOrbitKey,
+  prototypeWebPose,
+  prototypeWebPostureAt,
+  type PrototypeWebFold,
+} from "./webDevice3d";
 import type { WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
 import {
@@ -22,6 +43,7 @@ import { renderPrototypeStill } from "./webStill";
 import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
 import type { UnsupportedWebNode } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import type { StillTextSize } from "./webTextScale";
 
 /** One spec revision: its number, the operation that created it and the spec itself. */
 export interface PrototypeWebRevision {
@@ -49,6 +71,10 @@ export interface PrototypeWebPageInput {
   readonly platform?: "android" | "ios";
   readonly mode?: PrototypeColorMode;
   readonly nowMs?: number;
+  /** The host locale every view renders in (BCP 47, default `en-US`). */
+  readonly locale?: string;
+  /** The system text size every view renders at. */
+  readonly textSize?: StillTextSize;
   /** Total page budget; defaults to MAX_PROTOTYPE_WEB_PAGE_BYTES. */
   readonly maxBytes?: number;
 }
@@ -63,8 +89,11 @@ export interface PrototypeWebPage {
   readonly inlinedRevisions: Readonly<Record<string, readonly number[]>>;
 }
 
+const RUNTIME_2D = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
+/** The opt-in 3D view (#16458) runs after the 2D runtime, so its pan handler is already bound. */
+const RUNTIME_3D = `(${prototypeWeb3dRuntime.toString()})({ pose: ${prototypeWebPose.toString()}, orbit: ${prototypeWebOrbit.toString()}, hingeLine: ${prototypeWebHingeLine.toString()}, postureAt: ${prototypeWebPostureAt.toString()}, wrap: ${prototypeWeb3dWrap.toString()}, unwrap: ${prototypeWeb3dUnwrap.toString()}, bodyHinge: ${prototypeWeb3dBodyHinge.toString()}, orbitKey: ${prototypeWebOrbitKey.toString()}, dragOrbit: ${prototypeWeb3dDragOrbit.toString()}, leaves: ${prototypeWebLeaves.toString()}, flat: ${JSON.stringify(PROTOTYPE_WEB_FLAT_ORBIT)}, start: ${JSON.stringify(PROTOTYPE_WEB_START_ORBIT)} });`;
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
-export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
+export const PROTOTYPE_WEB_RUNTIME = `${RUNTIME_2D}\n${RUNTIME_3D}`;
 export const MAX_PROTOTYPE_WEB_RUNTIME_BYTES = 150 * 1024;
 export const MAX_PROTOTYPE_WEB_PAGE_BYTES = 2 * 1024 * 1024;
 
@@ -88,6 +117,7 @@ const PAGE_CSS = [
   "@media (max-width:720px){[data-main]{flex-direction:column}[data-control=revisions]{width:auto;max-height:30vh;border-left:0;border-top:1px solid #ccc}}",
   "[hidden]{display:none!important}",
   FADE_EDGES_PAGE_CSS,
+  PROTOTYPE_WEB_3D_CSS,
 ].join("");
 
 function cspFor(script: string): string {
@@ -143,7 +173,10 @@ function renderView(
     orientation,
     mode: input.mode,
     nowMs: input.nowMs,
+    ...(input.locale === undefined ? {} : { locale: input.locale }),
+    ...(input.textSize === undefined ? {} : { textSize: input.textSize }),
     logger,
+    glyphs: materialIconGlyphs(),
     ...(at.screen === undefined ? {} : { screen: at.screen }),
   });
   const view = el(
@@ -222,6 +255,8 @@ interface PageFrame {
   readonly platform: string;
   /** A device that never rotates gets no rotate control. */
   readonly rotates: boolean;
+  /** The frame's hinge and postures, for the 3D view's fold controls; none when it does not fold. */
+  readonly fold: PrototypeWebFold | undefined;
 }
 
 function toolbar(
@@ -269,6 +304,7 @@ function toolbar(
       button("zoom-fit", "Fit to window", "Fit"),
       ...variants,
       ...screenPicker(screens),
+      ...prototypeWeb3dControls(frame.fold),
       el("span", { attrs: { "data-note": "" } }, [
         "Static preview: taps do nothing; these controls switch pre-rendered views.",
       ]),
@@ -440,14 +476,14 @@ function pageHtml(
   first: { variant: PrototypeWebVariant; revision: number },
   { frame, views, history, screens }: PageParts,
 ): string {
-  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}">${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
+  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}"${prototypeWeb3dBodyAttributes(frame.fold)}>${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
   const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
 
 /**
  * One self-contained HTML page (#16346): the prototype in a device frame with animated rotate
- * (#16545), zoom and pan, a variant switcher and revision history. Every view is pre-rendered; the inlined script
+ * (#16545), an opt-in 3D view (#16458), zoom and pan, a variant switcher and revision history. Every view is pre-rendered; the inlined script
  * only switches between them. No network: the CSP allows only that script, inline styles and
  * `data:` images and fonts. The same input yields the same bytes.
  */
@@ -460,6 +496,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
   const pageFrame: PageFrame = {
     platform: device.platform,
     rotates: prototypeWebFrameRotates(device.formFactor),
+    fold: prototypeWebFold(device),
   };
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
   // The shell lists only the pinned revisions (each latest and the one shown first), which are

@@ -1,6 +1,7 @@
 import { record, type Raw } from "../prototypeTemplate";
 import type { PrototypeColorMode, Rgba } from "../prototypeContrast";
 import { cssColor, elevationCss, glassCss, gradientCss, shadowsCss } from "./webStylePolish";
+import type { TextScale } from "./webTextScale";
 
 export { cssColor, rgbaCss } from "./webStylePolish";
 
@@ -10,8 +11,15 @@ export interface WebStyleContext {
   readonly palette: ReadonlyMap<string, Rgba>;
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
+  /**
+   * Inside a horizontal scroll, where Compose measures content against an unbounded width (and
+   * descendants inherit it), so a row is not bounded to its parent's width there.
+   */
+  readonly unboundedWidth?: boolean;
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
+  /** The system text size (Android font scale, iOS Dynamic Type); absent at the default size. */
+  readonly textScale?: TextScale;
   /** The frame's platform, for looks the devices draw differently (glass). Android when unset. */
   readonly platform?: "android" | "ios";
   /** The window's explicit `rtl` direction, for physical edges such as a fade's. */
@@ -37,7 +45,99 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 
 type Css = Record<string, string>;
 
+/**
+ * A style key the web renderer adds to a row's children, never authored (the style schema is
+ * strict), so a `styleWhen` cannot overwrite it: how CSS flex approximates Compose's sequential
+ * Row measure around an aspect ratio (see webRowAspect.ts).
+ */
+export const ROW_MEASURE_KEY = "webRowMeasure";
+
+/**
+ * A style key the web renderer adds to a row around a capped aspect ratio, never authored: the row
+ * is bounded to its parent's width, as a Compose Row's max is, and to any authored `maxWidth`.
+ */
+export const ROW_BOUND_KEY = "webRowBound";
+
+/**
+ * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
+ * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
+ * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
+ * remains.
+ */
+export interface RowMeasure {
+  readonly take?: true;
+  readonly zero?: true;
+  readonly shrink?: number;
+  readonly basis?: number;
+  readonly later?: true;
+}
+
+function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
+  if (typeof basis === "number") {
+    // The width also sets the item's max-content contribution, so a wrap row sizes around it.
+    css["flex-grow"] = "0";
+    css["flex-basis"] = px(basis);
+    css.width = px(basis);
+  }
+  css["flex-shrink"] = String(shrink);
+}
+
+/**
+ * A later sibling's authored `minWidth`, folded into its width (`max(width, minWidth)`) with
+ * `min-width: 0`. Android's `sizeIn` intersects the minimum with the width the row has left, so the
+ * sibling still gets its minimum while width remains but gives it all up, down to zero, before the
+ * capped aspect ratio does. A CSS `min-width` would hold against flex shrinking and reserve the
+ * width ahead of the cap. A content or `fill` width has no px value, so it folds through
+ * `calc-size()`.
+ */
+function laterMinWidth(css: Css, style: Raw, min: number, basis: unknown) {
+  css["min-width"] = "0";
+  const dp = record(style.width)?.dp;
+  if (typeof basis === "number" || typeof dp === "number") {
+    const width = px(Math.max(typeof basis === "number" ? basis : (dp as number), min));
+    css.width = width;
+    if (typeof basis === "number") {
+      css["flex-basis"] = width;
+    }
+    return;
+  }
+  css.width = `calc-size(max-content, max(size, ${px(min)}))`;
+}
+
+/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
+  const measure = record(style[ROW_MEASURE_KEY]);
+  if (context.parentAxis !== "row" || !measure) {
+    return;
+  }
+  if (measure.take === true) {
+    css.flex = "1 1 0";
+  }
+  if (typeof measure.shrink === "number") {
+    rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (measure.later === true && typeof style.minWidth === "number") {
+    laterMinWidth(css, style, style.minWidth, measure.basis);
+    return;
+  }
+  if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
+    css["min-width"] = "0";
+  }
+  if (measure.zero === true) {
+    css["max-width"] = "0px";
+  }
+}
+
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
+
+/** A font size or line height in sp (points on iOS), scaled by the system text size. */
+export function fontPx(sp: number, context: Pick<WebStyleContext, "textScale">): string {
+  return px(context.textScale ? context.textScale.font(sp) : sp);
+}
+
+function trackingPx(sp: number, context: WebStyleContext): string {
+  return px(context.textScale ? context.textScale.tracking(sp) : sp);
+}
 
 /** Material 3 shape scale, the same corner sizes both native renderers use. */
 const SHAPE_TOKENS: Readonly<Record<string, number>> = {
@@ -164,6 +264,13 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
       css[property] = px(style[field] as number);
     }
   }
+  if (style[ROW_BOUND_KEY] === true && context.unboundedWidth !== true) {
+    // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
+    const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
+    css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
+  }
+  // After the bound: a nested row its parent row measures against no width stays at zero.
+  rowMeasureStyle(css, style, context);
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);
     aspectRatioFill(css, style, style.aspectRatio, context);
@@ -226,8 +333,8 @@ function typographyRole(style: Raw, context: WebStyleContext): Css {
   const scale = context.typography?.scale ?? 1;
   const family = context.typography?.fontFamily;
   return {
-    "font-size": px(role[0] * scale),
-    "line-height": px(role[1] * scale),
+    "font-size": fontPx(role[0] * scale, context),
+    "line-height": fontPx(role[1] * scale, context),
     "font-weight": String(role[2]),
     ...(family ? { "font-family": family } : {}),
   };
@@ -261,7 +368,7 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
     css.color = color;
   }
   if (typeof style.textSize === "number") {
-    css["font-size"] = px(style.textSize);
+    css["font-size"] = fontPx(style.textSize, context);
   }
   if (typeof style.fontWeight === "number") {
     css["font-weight"] = String(style.fontWeight);
@@ -270,10 +377,10 @@ export function textCss(style: Raw | undefined, context: WebStyleContext): Css {
     css["text-align"] = TEXT_ALIGN[style.textAlign]!;
   }
   if (typeof style.lineHeight === "number") {
-    css["line-height"] = px(style.lineHeight);
+    css["line-height"] = fontPx(style.lineHeight, context);
   }
   if (typeof style.letterSpacing === "number") {
-    css["letter-spacing"] = px(style.letterSpacing);
+    css["letter-spacing"] = trackingPx(style.letterSpacing, context);
   }
   // Both values emit, so an explicit `normal` span overrides an italic parent.
   const fontStyle = FONT_STYLE[String(style.fontStyle)];
@@ -310,6 +417,12 @@ const MAIN_ALIGN: Readonly<Record<string, string>> = {
   spaceAround: "space-around",
   spaceEvenly: "space-evenly",
 };
+
+/** What a scroll's child sees: the scroll's axis, and an unbounded width when it scrolls across. */
+export function scrollChildStyle(style: WebStyleContext, horizontal: boolean): WebStyleContext {
+  const unboundedWidth = horizontal || style.unboundedWidth === true;
+  return { ...style, parentAxis: horizontal ? "row" : "column", unboundedWidth };
+}
 
 /** A row or column's flex layout: direction, arrangement, spacing and cross-axis alignment. */
 export function lineCss(axis: "row" | "column", style: unknown): Css {
@@ -354,4 +467,26 @@ export function boxLayoutCss(style: unknown): Css {
     "align-items": verticalPart(value).replace("flex-", ""),
     "justify-items": horizontalPart(value).replace("flex-", ""),
   };
+}
+
+/**
+ * A multiline field keeps its newlines and its authored minLines and maxLines (24 sp lines, scaled
+ * with the system text size).
+ */
+export function multilineCss(node: Raw, context: WebStyleContext): Record<string, string> {
+  if (node.multiline !== true) {
+    return {};
+  }
+  // One line scales first; the bounds are whole lines of that height, since the non-linear
+  // Android curve would under-size a multi-line total.
+  const line = context.textScale ? context.textScale.font(24) : 24;
+  const css: Record<string, string> = { "white-space": "pre-wrap", "line-height": px(line) };
+  if (typeof node.minLines === "number") {
+    css["min-height"] = px(node.minLines * line);
+  }
+  if (typeof node.maxLines === "number") {
+    css["max-height"] = px(node.maxLines * line);
+    css.overflow = "hidden";
+  }
+  return css;
 }

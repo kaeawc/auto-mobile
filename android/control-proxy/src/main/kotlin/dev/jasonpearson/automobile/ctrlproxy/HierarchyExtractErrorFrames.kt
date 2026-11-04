@@ -3,6 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import kotlinx.coroutines.CancellationException
 
+/** A capture found neither accessibility windows nor a root on the requested secondary display. */
+internal data class MissingAccessibilityWindows(val displayId: Int)
+
 /**
  * Pure failure-decision + frame-construction for the `ACTION_EXTRACT_HIERARCHY` branch of
  * [CtrlProxy.handleCommand] (PR #3126, issue #3089). Isolated as an Android-free helper — mirroring
@@ -22,6 +25,12 @@ object HierarchyExtractErrorFrames {
   /** Error string emitted when `extractHierarchy` returns a null hierarchy. */
   const val NULL_HIERARCHY_ERROR = "Failed to extract hierarchy"
 
+  /** Guidance for a secondary display the accessibility service cannot observe. */
+  fun inaccessibleDisplayError(displayId: Int): String =
+    "Display $displayId exposes no accessibility windows on this device: " +
+      "the accessibility service does not track this display (overlay displays are not tracked). " +
+      "Use the default display or a display tracked by accessibility."
+
   /** Prefix for the error string emitted when `extractHierarchy` throws. */
   const val THROWN_PREFIX = "Hierarchy extraction failed: "
 
@@ -32,6 +41,17 @@ object HierarchyExtractErrorFrames {
    */
   fun nullResultFrame(uuid: String?): ErrorResponse? =
     if (uuid.isNullOrBlank()) null else CorrelatedErrorReporter.frame(uuid, NULL_HIERARCHY_ERROR)
+
+  internal fun nullResultFrame(
+    uuid: String?,
+    reason: MissingAccessibilityWindows?,
+  ): ErrorResponse? =
+    if (uuid.isNullOrBlank()) null
+    else
+      CorrelatedErrorReporter.frame(
+        uuid,
+        reason?.let { inaccessibleDisplayError(it.displayId) } ?: NULL_HIERARCHY_ERROR,
+      )
 
   /**
    * The correlated error frame to broadcast when `extractHierarchy` throws [error]. Returns `null`

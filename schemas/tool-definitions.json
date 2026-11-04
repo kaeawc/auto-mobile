@@ -18357,7 +18357,17 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+                "enum": [
+                  "phone",
+                  "tablet",
+                  "foldable",
+                  "tv",
+                  "watch",
+                  "automotive",
+                  "xr-headset",
+                  "xr-glasses",
+                  "unknown"
+                ]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -19026,7 +19036,17 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+                "enum": [
+                  "phone",
+                  "tablet",
+                  "foldable",
+                  "tv",
+                  "watch",
+                  "automotive",
+                  "xr-headset",
+                  "xr-glasses",
+                  "unknown"
+                ]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -42205,7 +42225,17 @@
             },
             "formFactor": {
               "type": "string",
-              "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+              "enum": [
+                "phone",
+                "tablet",
+                "foldable",
+                "tv",
+                "watch",
+                "automotive",
+                "xr-headset",
+                "xr-glasses",
+                "unknown"
+              ]
             },
             "deviceType": {
               "$ref": "#/$defs/__schema0"

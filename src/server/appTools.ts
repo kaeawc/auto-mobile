@@ -750,7 +750,8 @@ function createAppToolHandlers(dependencies: AppToolsDependencies) {
         device,
         dependencies.watchApps,
         dependencies.retargetWatchRunner ??
-          ((deviceId, bundleId) => getWatchRunnerLifecycle().retarget({ deviceId, bundleId })),
+          ((deviceId, bundleId, signal) =>
+            getWatchRunnerLifecycle().retarget({ deviceId, bundleId, signal })),
       ),
     ...dependencies.launchApp,
   };

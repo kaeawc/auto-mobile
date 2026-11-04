@@ -391,6 +391,22 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     expect(watchSimctl.pidOf(watch.deviceId, BUNDLE)).toBeDefined();
   });
 
+  test("the watch launch executor forwards the call's abort signal to the retarget", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const plist = new FakeWatchBundleIds();
+    const simctl = new FakeWatchAppsSimctl(plist);
+    simctl.seed(watch.deviceId, { CFBundleIdentifier: BUNDLE });
+    const factory = (device: BootedDevice) => new WatchAppManager(device, { simctl, plist });
+    const controller = new AbortController();
+
+    await createPlatformLaunchApp(watch, factory, async (_deviceId, _bundleId, signal) => {
+      signals.push(signal);
+      return undefined;
+    }).execute(BUNDLE, { clearAppData: false, coldBoot: false, signal: controller.signal });
+
+    expect(signals).toEqual([controller.signal]);
+  });
+
   test("iPhone and tvOS launch executors never retarget the watch runner", async () => {
     const retargets: string[] = [];
     const retarget = async (deviceId: string, bundleId: string) => {

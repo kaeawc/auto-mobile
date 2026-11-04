@@ -28,6 +28,7 @@ export type WatchAppManagerFactory = (device: BootedDevice) => WatchAppManager;
 export type WatchRunnerRetarget = (
   deviceId: string,
   bundleId: string,
+  signal?: AbortSignal,
 ) => Promise<string | undefined>;
 
 const defaultWatchAppManager: WatchAppManagerFactory = (device) => new WatchAppManager(device);
@@ -74,7 +75,7 @@ export function createPlatformLaunchApp(
     execute: async (appId, call) => {
       const result = await manager.launch(appId, call);
       if (result.success && device.platform === "watchos") {
-        const reason = await retarget(device.deviceId, appId);
+        const reason = await retarget(device.deviceId, appId, call?.signal);
         if (reason !== undefined) {
           throw new ActionableError(
             `launchApp started the app ${appId}, but the watch runner could not retarget to it: ${reason}`,

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { SkeletonElement, ViewHierarchyResult } from "../../../../src/models";
-import { findProjectedTextRow } from "../../../../src/features/observe/wait/WaitProjectedText";
+import {
+  findProjectedTextRow,
+  withProjectedTextFallback,
+} from "../../../../src/features/observe/wait/WaitProjectedText";
+import { buildConditionPredicate } from "../../../../src/features/observe/wait/WaitEvaluation";
+import type { ConditionSelector } from "../../../../src/features/observe/ConditionPredicates";
+import type { WaitForConditionKind } from "../../../../src/features/observe/wait/WaitForSchemas";
 import { evaluateWaitForObservation } from "../../../../src/features/observe/wait/WaitPredicates";
 import { ObserveElementsBuilder } from "../../../../src/features/observe/ObserveElementsBuilder";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
@@ -172,5 +178,88 @@ describe("evaluateWaitForObservation text over projected rows", () => {
 
   test("does not match when neither the hierarchy nor the rows carry the text", () => {
     expect(evaluate().matched).toBe(false);
+  });
+});
+
+describe("withProjectedTextFallback (for: appear / textEquals)", () => {
+  const observe = (nodes: object[], context: SkeletonElement[] = [loadedRow]) =>
+    createObserveResultForTest({
+      screenSize,
+      viewHierarchy: hierarchyWith(nodes),
+      skeleton: [],
+      context,
+    });
+
+  const condition = (
+    kind: WaitForConditionKind,
+    selector: ConditionSelector,
+    options?: { layer?: unknown },
+  ) =>
+    withProjectedTextFallback(
+      kind,
+      selector,
+      buildConditionPredicate(new ElementResolver(), kind, selector),
+      options,
+    );
+
+  test("appear matches text reported only in context", () => {
+    const result = condition("appear", { text: "Loaded" })(observe([loadButton]));
+
+    expect(result.matched).toBe(true);
+    expect(result.matchedElement?.text).toBe("Loaded 95 bytes");
+  });
+
+  test("appear does not match when neither the hierarchy nor the rows carry the text", () => {
+    expect(condition("appear", { text: "Loaded" })(observe([loadButton], [])).matched).toBe(false);
+  });
+
+  test("textEquals matches a row only on the exact, case-sensitive value", () => {
+    const observation = observe([loadButton]);
+
+    expect(condition("textEquals", { text: "Loaded 95 bytes" })(observation).matched).toBe(true);
+    expect(condition("textEquals", { text: "Loaded" })(observation).matched).toBe(false);
+    expect(condition("textEquals", { text: "loaded 95 bytes" })(observation).matched).toBe(false);
+  });
+
+  test("keeps the hierarchy's verdict when a hierarchy node carries the text", () => {
+    const missed = () => ({ matched: false, candidates: [] });
+    const statusNode = {
+      $: { text: "Loaded 95 bytes", bounds: { left: 0, top: 850, right: 100, bottom: 890 } },
+    };
+    const observation = observe([statusNode]);
+
+    expect(
+      withProjectedTextFallback("appear", { text: "Loaded" }, missed)(observation).matched,
+    ).toBe(false);
+    expect(
+      withProjectedTextFallback("textEquals", { text: "Loaded 95 bytes" }, missed)(observation)
+        .matched,
+    ).toBe(false);
+  });
+
+  test("clickable, disappear and scoped waits stay hierarchy-only", () => {
+    const observation = observe([loadButton]);
+
+    expect(condition("clickable", { text: "Loaded 95 bytes" })(observation).matched).toBe(false);
+    expect(condition("disappear", { text: "Loaded" })(observation).matched).toBe(true);
+    expect(condition("appear", { text: "Loaded", elementId: "status" })(observation).matched).toBe(
+      false,
+    );
+    expect(
+      condition("appear", { text: "Loaded", container: { elementId: "list" } })(observation)
+        .matched,
+    ).toBe(false);
+    expect(
+      condition("appear", { text: "Loaded", selectionStrategy: "unique" })(observation).matched,
+    ).toBe(false);
+    expect(condition("appear", { text: "Loaded" }, { layer: "app" })(observation).matched).toBe(
+      false,
+    );
+  });
+
+  test("does not fall back when the hierarchy is unavailable", () => {
+    const observation = createObserveResultForTest({ screenSize, context: [loadedRow] });
+
+    expect(condition("appear", { text: "Loaded" })(observation).matched).toBe(false);
   });
 });

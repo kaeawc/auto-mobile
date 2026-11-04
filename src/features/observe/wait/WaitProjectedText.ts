@@ -1,10 +1,24 @@
 import type { Element } from "../../../models/Element";
+import type { ConditionSelector } from "../ConditionPredicates";
+import type { ConditionPredicate } from "../interfaces/WaitForCondition";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import { hasVisibleScreenPart } from "../../utility/ElementGeometry";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { projectSkeleton } from "../output/SkeletonProjection";
-import type { ObserveWaitForOptions } from "./WaitForSchemas";
+import type { ObserveWaitForOptions, WaitForConditionKind } from "./WaitForSchemas";
+
+type ProjectedTextObservation = Pick<
+  ObserveResult,
+  "elements" | "screenSize" | "skeleton" | "context" | "viewHierarchy"
+>;
+
+/** How a projected-row search compares text; mirrors the hierarchy search it backs. */
+interface TextMatcher {
+  textMatch?: ObserveWaitForOptions["textMatch"];
+  /** `textEquals` compares the exact value; every other wait ignores case. */
+  caseSensitive?: boolean;
+}
 
 /**
  * Text-only waits also search the rows `observe` reports (#16890). `skeleton`
@@ -20,14 +34,58 @@ import type { ObserveWaitForOptions } from "./WaitForSchemas";
  */
 export function findProjectedTextRow(
   waitFor: ObserveWaitForOptions,
-  observation: Pick<
-    ObserveResult,
-    "elements" | "screenSize" | "skeleton" | "context" | "viewHierarchy"
-  >,
+  observation: ProjectedTextObservation,
 ): Element | null {
   if (!isTextOnlyWait(waitFor)) {
     return null;
   }
+  const texts = waitFor.textAny ?? (waitFor.text === undefined ? [] : [waitFor.text]);
+  return findRowForTexts(texts, { textMatch: waitFor.textMatch }, observation);
+}
+
+/**
+ * The condition form gets the same fallback (#16920): `for: "appear"` and
+ * `for: "textEquals"` with only `text` also match a `skeleton`/`context` row
+ * when the hierarchy predicate did not match and no hierarchy node carries the
+ * text. `textEquals` keeps its exact, case-sensitive comparison. `clickable`
+ * needs a tappable source node, `disappear` must not pass on a hierarchy miss,
+ * and `countStable` counts hierarchy nodes, so those stay hierarchy-only, as do
+ * `elementId`, `container`, `selectionStrategy` and `layer` waits.
+ */
+export function withProjectedTextFallback(
+  kind: WaitForConditionKind,
+  selector: ConditionSelector,
+  predicate: ConditionPredicate,
+  { layer }: { layer?: unknown } = {},
+): ConditionPredicate {
+  const text = selector.text;
+  const eligible =
+    (kind === "appear" || kind === "textEquals") &&
+    text !== undefined &&
+    selector.elementId === undefined &&
+    selector.container === undefined &&
+    selector.selectionStrategy === undefined &&
+    layer === undefined;
+  if (!eligible) {
+    return predicate;
+  }
+  const matcher: TextMatcher =
+    kind === "textEquals" ? { textMatch: "exact", caseSensitive: true } : {};
+  return (observation) => {
+    const evaluation = predicate(observation);
+    if (evaluation.matched || evaluation.diagnostic || !observation.viewHierarchy) {
+      return evaluation;
+    }
+    const row = findRowForTexts([text], matcher, observation);
+    return row ? { ...evaluation, matched: true, matchedElement: row } : evaluation;
+  };
+}
+
+function findRowForTexts(
+  texts: readonly string[],
+  matcher: TextMatcher,
+  observation: ProjectedTextObservation,
+): Element | null {
   const rows = projectedRows(observation).filter((row) =>
     hasVisibleScreenPart(toElementBounds(row.bounds), observation.screenSize),
   );
@@ -37,12 +95,11 @@ export function findProjectedTextRow(
   const sources = observation.viewHierarchy
     ? new SearchableHierarchy().project(observation.viewHierarchy)
     : [];
-  const texts = waitFor.textAny ?? (waitFor.text === undefined ? [] : [waitFor.text]);
   for (const text of texts) {
-    if (findMatch(sources, (node) => Object.values(node.textSources), text, waitFor.textMatch)) {
+    if (findMatch(sources, (node) => Object.values(node.textSources), text, matcher)) {
       continue;
     }
-    const row = findMatch(rows, rowTexts, text, waitFor.textMatch);
+    const row = findMatch(rows, rowTexts, text, matcher);
     if (row) {
       return { bounds: toElementBounds(row.bounds), text: row.label };
     }
@@ -75,8 +132,6 @@ function projectedRows(
   return [...skeleton, ...context];
 }
 
-const normalize = (value: string) => normalizeQuotes(value).toLowerCase();
-
 function rowTexts(row: SkeletonElement): string[] {
   return [row.label, row.sublabel].filter((value): value is string => Boolean(value));
 }
@@ -86,14 +141,16 @@ function findMatch<T>(
   items: readonly T[],
   textsOf: (item: T) => string[],
   text: string,
-  textMatch: ObserveWaitForOptions["textMatch"],
+  { textMatch, caseSensitive = false }: TextMatcher,
 ): T | undefined {
+  const normalize = (value: string) =>
+    caseSensitive ? normalizeQuotes(value) : normalizeQuotes(value).toLowerCase();
   const query = normalize(text);
   if (!query.trim()) {
     return undefined;
   }
   if (textMatch === "regex") {
-    const regex = new RegExp(normalizeQuotes(text), "i");
+    const regex = new RegExp(normalizeQuotes(text), caseSensitive ? "" : "i");
     return items.find((item) => textsOf(item).some((value) => regex.test(normalizeQuotes(value))));
   }
   const exact = items.find((item) => textsOf(item).some((value) => normalize(value) === query));

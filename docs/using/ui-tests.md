@@ -154,9 +154,12 @@ checkpoints so failures explain which state was missing.
 
 By default `observe` lists actionable rows in `skeleton` and static text, such as
 a status label or a validation error, in `context`. Read `context` to verify a
-result. A `waitFor` with only `text` or `textAny` matches text from either array;
-add `elementId`, `className`, `contentDescription`, `container`, `layer` or
-`selectionStrategy` to match a single hierarchy node instead.
+result. A `waitFor` with only `text` or `textAny`, or `for: "appear"` or
+`for: "textEquals"` with only `text`, matches text from either array
+(`textEquals` requires the exact, case-sensitive value). `for: "clickable"`,
+`"disappear"` and `"countStable"` check hierarchy nodes only. Add `elementId`,
+`className`, `contentDescription`, `container`, `layer` or `selectionStrategy` to
+match a single hierarchy node instead.
 
 </div>
 

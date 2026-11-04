@@ -10,12 +10,19 @@ export const IME_IDLE_RESTORE_MS = 5_000;
 export interface PendingImeRestore {
   snapshot: ImeSpanSnapshot;
   userId: number | undefined;
-  restore(): Promise<void>;
+  /**
+   * `signal` is the flush caller's ownership of the device: once it aborts, the restore must
+   * issue no further device writes (#16580). Absent for an idle flush, which owns no session.
+   */
+  restore(signal?: AbortSignal): Promise<void>;
 }
 
 /** Bounds a flush for a caller that must not restore after it lost the device. */
 export interface ImeFlushOptions {
-  /** Abandons the wait for the device IME lock. */
+  /**
+   * Abandons the wait for the device IME lock, and fences every device write of a restore
+   * already running: a forced release aborts it before the device returns to the pool.
+   */
   signal?: AbortSignal;
   /** Rechecked once the lock is held: when true the pending restore is discarded, not run. */
   isForced?: () => boolean;
@@ -104,7 +111,7 @@ export class DevicePendingImeRestores implements PendingImeRestoreRegistry {
         }
         this.inFlight.add(deviceId);
         try {
-          await pending.restore();
+          await pending.restore(options.signal);
         } finally {
           this.inFlight.delete(deviceId);
         }

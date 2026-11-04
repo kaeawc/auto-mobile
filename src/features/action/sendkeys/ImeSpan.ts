@@ -48,6 +48,7 @@ export interface ImeSpanHost {
     prior: string | null,
     wasEnabled: boolean,
     priorSubtype: ImeSubtypeSnapshot,
+    fence?: AbortSignal,
   ): Promise<void>;
   getPinnedUser(): number | undefined;
   setPinnedUser(userId: number | undefined): void;
@@ -190,10 +191,15 @@ export class ImeSpanService {
       {
         snapshot,
         userId,
-        restore: async () => {
+        restore: async (fence) => {
           this.host.setPinnedUser(userId);
           try {
-            await this.host.restoreIme(snapshot.prior, snapshot.wasEnabled, snapshot.priorSubtype);
+            await this.host.restoreIme(
+              snapshot.prior,
+              snapshot.wasEnabled,
+              snapshot.priorSubtype,
+              fence,
+            );
           } finally {
             this.host.clearPinnedUser();
           }

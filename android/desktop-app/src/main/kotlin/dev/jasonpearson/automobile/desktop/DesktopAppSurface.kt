@@ -360,8 +360,6 @@ internal fun DesktopWorkspaceShell(
                   column,
                   sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
                   streamingEnabled = streamingEnabled,
-                  // Inspect mode replaces the stream area, so the inspector keeps the title's
-                  // foreground app current from its own hierarchy frames.
                   onForegroundApp = foregroundApps::report,
                 ),
               )
@@ -373,12 +371,7 @@ internal fun DesktopWorkspaceShell(
             // provider yields null and the pane shows the auth refusal, with
             // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
             streamContent = { column ->
-              DesktopStreamContent(
-                presentation,
-                column,
-                streamingEnabled,
-                onForegroundApp = foregroundApps::report,
-              )
+              DesktopStreamContent(presentation, column, streamingEnabled, foregroundApps::report)
             },
           ),
       )

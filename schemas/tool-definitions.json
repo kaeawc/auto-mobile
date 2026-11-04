@@ -6538,7 +6538,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Automatically explore app to build navigation graph",
+    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -6555,7 +6555,7 @@
           "exclusiveMinimum": 0
         },
         "strategy": {
-          "description": "Strategy (default: weighted)",
+          "description": "Element choice (default: weighted): breadth-first tries the highest-scoring element on the current screen; depth-first prefers untried elements; weighted scores by navigation, novelty and coverage",
           "type": "string",
           "enum": ["breadth-first", "depth-first", "weighted"]
         },
@@ -6570,7 +6570,7 @@
           "maximum": 9007199254740991
         },
         "mode": {
-          "description": "Mode (default: hybrid)",
+          "description": "Goal (default: hybrid): discover favors new elements; validate re-walks known transitions to check they still hold; hybrid balances both",
           "type": "string",
           "enum": ["discover", "validate", "hybrid"]
         },
@@ -11328,7 +11328,7 @@
       "readOnlyHint": true,
       "openWorldHint": false
     },
-    "description": "Get navigation graph for debugging",
+    "description": "Get the learned navigation graph (screens, transitions, current screen) for the foreground or given app; use before navigateTo to find screen names",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -20901,13 +20901,13 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Navigate to screen using navigation graph",
+    "description": "Navigate to a learned screen by replaying recorded transitions from the navigation graph",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "targetScreen": {
-          "description": "Target screen name",
+          "description": "Screen name to reach; use a name from getNavigationGraph's screens",
           "type": "string"
         },
         "platform": {

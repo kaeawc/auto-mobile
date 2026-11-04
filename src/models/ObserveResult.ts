@@ -296,6 +296,13 @@ export type ObserveResult = {
   diagnostics?: AudioInputDiagnostic[];
 
   /**
+   * Car App Library template stacks the foreground app reported through the AutoMobile Android SDK
+   * route (#16751), present only on the `observe` tool's own result and only when the app enabled
+   * the route. Templates are what the app returned, not what the host rendered.
+   */
+  carAppTemplates?: import("./CarAppTemplates").CarAppTemplates;
+
+  /**
    * Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise,
    * iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right
    * (iOS landscapeRight / Android ROTATION_270).

@@ -1,3 +1,26 @@
+import {
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  ARIA_CHECKED,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  CENTER,
+  COLUMN,
+  DATA_PART,
+  DATA_TESTID,
+  FLEX,
+  FLEX_DIRECTION,
+  FLEX_SHRINK,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  MARGIN_INLINE_START,
+  MIN_HEIGHT,
+  PADDING_INLINE,
+  STRETCH,
+} from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultFillAxes, filling, type WebAxis } from "./webCollections";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -32,7 +55,7 @@ function chosenValue(node: Raw, scope: WebRenderScope, kit: WebRenderKit): unkno
 
 /** One option's tag, `<testTag>.<value>`, as both devices tag radio options and segments. */
 function optionTag(node: Raw, value: string): Css {
-  return typeof node.testTag === "string" ? { "data-testid": `${node.testTag}.${value}` } : {};
+  return typeof node.testTag === "string" ? { [DATA_TESTID]: `${node.testTag}.${value}` } : {};
 }
 
 /** The icon placeholder at a size other than its default 24 px. */
@@ -48,23 +71,23 @@ function sizedIcon(name: string, size: number, scope: WebRenderScope, kit: WebRe
 function radioMark(selected: boolean, scope: WebRenderScope): WebElement {
   const tint = cssColor(selected ? "primary" : "onSurfaceVariant", scope.style) ?? "currentColor";
   const dot = el("span", {
-    style: { width: "10px", height: "10px", "border-radius": "50%", "background-color": tint },
+    style: { width: "10px", height: "10px", [BORDER_RADIUS]: "50%", [BACKGROUND_COLOR]: tint },
   });
   return el(
     "span",
     {
-      attrs: { "data-part": "radio" },
+      attrs: { [DATA_PART]: "radio" },
       style: {
-        display: "inline-flex",
-        "align-items": "center",
-        "justify-content": "center",
-        "box-sizing": "border-box",
+        display: INLINE_FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
+        [BOX_SIZING]: BORDER_BOX,
         width: "20px",
         height: "20px",
         margin: "2px",
-        "border-radius": "50%",
+        [BORDER_RADIUS]: "50%",
         border: `2px solid ${tint}`,
-        "flex-shrink": "0",
+        [FLEX_SHRINK]: "0",
       },
     },
     selected ? [dot] : [],
@@ -81,8 +104,8 @@ const radioGroupRenderer =
     const chosen = chosenValue(node, scope, kit);
     const disabled = kit.disabledState(node, scope);
     const { attrs, style } = kit.base(filling(node, defaultFillAxes(node)), scope, {
-      display: "flex",
-      "flex-direction": "column",
+      display: FLEX,
+      [FLEX_DIRECTION]: COLUMN,
       ...kit.roleCss(scope, "transparent", "onSurface"),
       ...disabled.css,
     });
@@ -92,11 +115,11 @@ const radioGroupRenderer =
         {
           attrs: {
             role: "radio",
-            "aria-checked": String(option.value === chosen),
-            "aria-label": option.label,
+            [ARIA_CHECKED]: String(option.value === chosen),
+            [ARIA_LABEL]: option.label,
             ...optionTag(node, option.value),
           },
-          style: { display: "flex", "align-items": "center", gap: "12px", "min-height": "48px" },
+          style: { display: FLEX, [ALIGN_ITEMS]: CENTER, gap: "12px", [MIN_HEIGHT]: "48px" },
         },
         [radioMark(option.value === chosen, scope), option.label],
       ),
@@ -115,13 +138,13 @@ const selectRenderer =
     const chosen = chosenValue(node, scope, kit);
     const current = choiceOptions(node, scope, kit).find((option) => option.value === chosen);
     const { attrs, style } = kit.base(filling(node, defaultFillAxes(node)), scope, {
-      display: "flex",
-      "align-items": "center",
+      display: FLEX,
+      [ALIGN_ITEMS]: CENTER,
       gap: "12px",
-      "box-sizing": "border-box",
-      "min-height": "48px",
+      [BOX_SIZING]: BORDER_BOX,
+      [MIN_HEIGHT]: "48px",
       padding: "16px",
-      "border-radius": "4px",
+      [BORDER_RADIUS]: "4px",
       ...kit.roleCss(scope, "surfaceContainerLow", "onSurface"),
     });
     const label =
@@ -134,8 +157,8 @@ const selectRenderer =
         : [];
     const text = el(
       "span",
-      { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
-      [...label, el("span", { attrs: { "data-part": "value" } }, [current?.label ?? ""])],
+      { style: { display: FLEX, [FLEX_DIRECTION]: COLUMN, flex: "1 1 auto" } },
+      [...label, el("span", { attrs: { [DATA_PART]: "value" } }, [current?.label ?? ""])],
     );
     return el("div", { attrs: { ...attrs, role: "button", "aria-haspopup": "listbox" }, style }, [
       text,
@@ -162,20 +185,20 @@ function segment(
     {
       attrs: {
         role: "radio",
-        "aria-checked": String(selected),
-        "aria-label": option.label,
+        [ARIA_CHECKED]: String(selected),
+        [ARIA_LABEL]: option.label,
         ...place.tag,
       },
       style: {
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         gap: "8px",
-        "box-sizing": "border-box",
-        "min-height": "40px",
+        [BOX_SIZING]: BORDER_BOX,
+        [MIN_HEIGHT]: "40px",
         padding: "0 12px",
         border: `1px solid ${outline}`,
-        ...(index > 0 ? { "margin-inline-start": "-1px" } : {}),
+        ...(index > 0 ? { [MARGIN_INLINE_START]: "-1px" } : {}),
         "border-start-start-radius": start,
         "border-end-start-radius": start,
         "border-start-end-radius": end,
@@ -201,8 +224,8 @@ const segmentedButtonRenderer =
       display: "inline-grid",
       "grid-auto-flow": "column",
       "grid-auto-columns": "1fr",
-      "min-height": "48px",
-      "align-items": "center",
+      [MIN_HEIGHT]: "48px",
+      [ALIGN_ITEMS]: CENTER,
       ...textCss({ textStyle: "labelLarge" }, scope.style),
     });
     return el(
@@ -257,11 +280,11 @@ function searchActions(node: Raw, scope: WebRenderScope, kit: WebRenderKit): Web
     }
     const label = typeof action.label === "string" ? kit.bound(action.label, scope) : action.icon;
     const tag: Css =
-      typeof node.testTag === "string" ? { "data-testid": `${node.testTag}.actions.${index}` } : {};
+      typeof node.testTag === "string" ? { [DATA_TESTID]: `${node.testTag}.actions.${index}` } : {};
     return [
       el(
         "span",
-        { attrs: { role: "button", "aria-label": label, ...tag }, style: { padding: "12px" } },
+        { attrs: { role: "button", [ARIA_LABEL]: label, ...tag }, style: { padding: "12px" } },
         [kit.icon({ type: "icon", name: action.icon }, scope, "")],
       ),
     ];
@@ -284,17 +307,17 @@ function searchField(node: Raw, scope: WebRenderScope, kit: WebRenderKit): WebEl
   return el(
     "div",
     {
-      attrs: { role: "searchbox", "data-part": "input" },
+      attrs: { role: "searchbox", [DATA_PART]: "input" },
       style: {
-        display: "flex",
-        "align-items": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
         // The bar's column start-aligns its results; the input alone fills its width.
-        "align-self": "stretch",
+        [ALIGN_SELF]: STRETCH,
         gap: "16px",
-        "box-sizing": "border-box",
-        "min-height": "56px",
-        "padding-inline": leading.length > 0 ? "16px 4px" : "24px 4px",
-        "border-radius": "28px",
+        [BOX_SIZING]: BORDER_BOX,
+        [MIN_HEIGHT]: "56px",
+        [PADDING_INLINE]: leading.length > 0 ? "16px 4px" : "24px 4px",
+        [BORDER_RADIUS]: "28px",
         ...textCss({ textStyle: "bodyLarge" }, scope.style),
         ...kit.roleCss(scope, "surfaceContainerHigh", "onSurface"),
       },
@@ -317,17 +340,17 @@ const searchBarRenderer =
   (node, scope, path) => {
     const expanded = searchActive(node, scope, kit);
     const { attrs, style } = kit.base(filling(node, searchBarFillAxes(node, scope, kit)), scope, {
-      display: "flex",
-      "flex-direction": "column",
+      display: FLEX,
+      [FLEX_DIRECTION]: COLUMN,
       // Android's results Column is start-aligned, so a compact child keeps its own width.
-      "align-items": "flex-start",
+      [ALIGN_ITEMS]: "flex-start",
       ...kit.roleCss(scope, "surface", "onSurface"),
     });
     const results: WebChild[] = [];
     if (expanded && node.child !== undefined) {
       const inner = kit.child(scope, {
         inBox: false,
-        style: { ...scope.style, parentAxis: "column" },
+        style: { ...scope.style, parentAxis: COLUMN },
       });
       const drawn = kit.renderNode(node.child, inner, `${path}.child`);
       results.push(...(drawn ? [drawn] : []));

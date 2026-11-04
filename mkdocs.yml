@@ -111,6 +111,7 @@ not_in_nav: |
   /release/ios-simulator-continuity.md
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
+  /decisions/androidx-car-app-template-snapshots.md
   /decisions/fastlane-supply-play-publishing.md
   /decisions/ios-user-files-provider.md
   /decisions/material-icons-web-glyphs.md
@@ -231,6 +232,7 @@ nav:
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
       - "Android windowing": design-docs/plat/android/windowing.md
       - "Android form factors": design-docs/plat/android/form-factors.md
+      - "Car App Library template snapshots": design-docs/plat/android/car-app-templates.md
       - "Emulator gRPC audio": design-docs/plat/android/emulator-grpc-audio.md
       - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
       - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md

@@ -1,3 +1,27 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ARIA_LABEL,
+  ARIA_SELECTED,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  CENTER,
+  COLUMN,
+  DATA_PART,
+  FLEX,
+  FLEX_DIRECTION,
+  GRID_TEMPLATE_COLUMNS,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  MARGIN_INLINE_START,
+  MAX_WIDTH,
+  PADDING_BOTTOM,
+  PADDING_INLINE,
+  RELATIVE,
+  TEXT_ALIGN,
+} from "./webCss";
 import type { Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
@@ -39,12 +63,12 @@ function timeBox(text: string, selected: boolean, scope: WebRenderScope, kit: We
     "span",
     {
       style: {
-        display: "inline-flex",
-        "align-items": "center",
-        "justify-content": "center",
+        display: INLINE_FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         width: "96px",
         height: "80px",
-        "border-radius": "8px",
+        [BORDER_RADIUS]: "8px",
         ...textCss({ textStyle: "displayLarge" }, scope.style),
         ...kit.roleCss(
           scope,
@@ -64,10 +88,10 @@ function periodSelector(pm: boolean, scope: WebRenderScope, kit: WebRenderKit): 
       "span",
       {
         style: {
-          display: "flex",
+          display: FLEX,
           flex: "1 1 0",
-          "align-items": "center",
-          "justify-content": "center",
+          [ALIGN_ITEMS]: CENTER,
+          [JUSTIFY_CONTENT]: CENTER,
           ...kit.roleCss(
             scope,
             selected ? "tertiaryContainer" : "transparent",
@@ -81,16 +105,16 @@ function periodSelector(pm: boolean, scope: WebRenderScope, kit: WebRenderKit): 
   return el(
     "span",
     {
-      attrs: { "data-part": "period" },
+      attrs: { [DATA_PART]: "period" },
       style: {
-        display: "flex",
-        "flex-direction": "column",
+        display: FLEX,
+        [FLEX_DIRECTION]: COLUMN,
         width: "52px",
         height: "80px",
-        "margin-inline-start": "12px",
+        [MARGIN_INLINE_START]: "12px",
         overflow: "hidden",
-        "box-sizing": "border-box",
-        "border-radius": "8px",
+        [BOX_SIZING]: BORDER_BOX,
+        [BORDER_RADIUS]: "8px",
         border: `1px solid ${outline}`,
         ...textCss({ textStyle: "titleMedium" }, scope.style),
       },
@@ -105,7 +129,7 @@ function dialPosition(turn: number, radius: number): Css {
   const x = DIAL / 2 + radius * Math.sin(angle) - SELECTOR / 2;
   const y = DIAL / 2 - radius * Math.cos(angle) - SELECTOR / 2;
   return {
-    position: "absolute",
+    position: ABSOLUTE,
     left: px(x),
     top: px(y),
     width: px(SELECTOR),
@@ -139,9 +163,9 @@ function hourDial(hour: number, is24: boolean, scope: WebRenderScope, kit: WebRe
   const radius = is24 && hour >= 12 ? INNER_RADIUS : OUTER_RADIUS;
   const primary = kit.roleCss(scope, "primary", "onPrimary");
   const hand = el("span", {
-    attrs: { "data-part": "hand" },
+    attrs: { [DATA_PART]: "hand" },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       left: px(DIAL / 2 - 1),
       top: px(DIAL / 2 - radius),
       width: "2px",
@@ -152,17 +176,17 @@ function hourDial(hour: number, is24: boolean, scope: WebRenderScope, kit: WebRe
     },
   });
   const selector = el("span", {
-    attrs: { "data-part": "selector" },
-    style: { ...dialPosition(turn, radius), "border-radius": "50%", ...primary },
+    attrs: { [DATA_PART]: "selector" },
+    style: { ...dialPosition(turn, radius), [BORDER_RADIUS]: "50%", ...primary },
   });
   const centre = el("span", {
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       left: px(DIAL / 2 - 4),
       top: px(DIAL / 2 - 4),
       width: "8px",
       height: "8px",
-      "border-radius": "50%",
+      [BORDER_RADIUS]: "50%",
       ...primary,
     },
   });
@@ -174,9 +198,9 @@ function hourDial(hour: number, is24: boolean, scope: WebRenderScope, kit: WebRe
         {
           style: {
             ...dialPosition(at, ring.radius),
-            display: "flex",
-            "align-items": "center",
-            "justify-content": "center",
+            display: FLEX,
+            [ALIGN_ITEMS]: CENTER,
+            [JUSTIFY_CONTENT]: CENTER,
             ...(chosen ? { color: primary.color ?? "inherit" } : {}),
           },
         },
@@ -187,12 +211,12 @@ function hourDial(hour: number, is24: boolean, scope: WebRenderScope, kit: WebRe
   return el(
     "div",
     {
-      attrs: { "data-part": "dial" },
+      attrs: { [DATA_PART]: "dial" },
       style: {
-        position: "relative",
+        position: RELATIVE,
         width: px(DIAL),
         height: px(DIAL),
-        "border-radius": "50%",
+        [BORDER_RADIUS]: "50%",
         ...textCss({ textStyle: "bodyLarge" }, scope.style),
         ...kit.roleCss(scope, "surfaceContainerHighest", "onSurface"),
       },
@@ -213,9 +237,9 @@ const timePickerRenderer =
     const is24 = uses24Hour(node, scope);
     const disabled = kit.disabledState(node, scope);
     const { attrs, style } = kit.base(node, scope, {
-      display: "flex",
-      "flex-direction": "column",
-      "align-items": "center",
+      display: FLEX,
+      [FLEX_DIRECTION]: COLUMN,
+      [ALIGN_ITEMS]: CENTER,
       gap: "36px",
       ...kit.roleCss(scope, "transparent", "onSurface"),
       ...disabled.css,
@@ -223,7 +247,7 @@ const timePickerRenderer =
     const shownHour = is24 ? hour : hour % 12 === 0 ? 12 : hour % 12;
     const clock = el(
       "div",
-      { attrs: { "data-part": "clock" }, style: { display: "flex", "align-items": "center" } },
+      { attrs: { [DATA_PART]: "clock" }, style: { display: FLEX, [ALIGN_ITEMS]: CENTER } },
       [
         timeBox(twoDigits(shownHour), true, scope, kit),
         el(
@@ -231,7 +255,7 @@ const timePickerRenderer =
           {
             style: {
               width: "24px",
-              "text-align": "center",
+              [TEXT_ALIGN]: CENTER,
               ...textCss({ textStyle: "displayLarge" }, scope.style),
             },
           },
@@ -244,7 +268,7 @@ const timePickerRenderer =
     const label = `${twoDigits(hour)}:${twoDigits(minute)}`;
     return el(
       "div",
-      { attrs: { "aria-label": label, ...attrs, role: "group", ...disabled.attrs }, style },
+      { attrs: { [ARIA_LABEL]: label, ...attrs, role: "group", ...disabled.attrs }, style },
       [clock, hourDial(hour, is24, scope, kit)],
     );
   };
@@ -304,21 +328,21 @@ function dayCell(
   const ring: Css =
     marks.today && !marks.selected
       ? {
-          border: `1px solid ${primary["background-color"] ?? "currentColor"}`,
-          color: primary["background-color"] ?? "inherit",
+          border: `1px solid ${primary[BACKGROUND_COLOR] ?? "currentColor"}`,
+          color: primary[BACKGROUND_COLOR] ?? "inherit",
         }
       : {};
   const circle = el(
     "span",
     {
       style: {
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
-        "box-sizing": "border-box",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
+        [BOX_SIZING]: BORDER_BOX,
         width: "40px",
         height: "40px",
-        "border-radius": "50%",
+        [BORDER_RADIUS]: "50%",
         ...(marks.selected ? primary : {}),
         ...ring,
       },
@@ -328,11 +352,11 @@ function dayCell(
   return el(
     "span",
     {
-      attrs: { role: "gridcell", "aria-selected": String(marks.selected) },
+      attrs: { role: "gridcell", [ARIA_SELECTED]: String(marks.selected) },
       style: {
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         height: "48px",
       },
     },
@@ -359,9 +383,9 @@ function monthGrid(
       "span",
       {
         style: {
-          display: "flex",
-          "align-items": "center",
-          "justify-content": "center",
+          display: FLEX,
+          [ALIGN_ITEMS]: CENTER,
+          [JUSTIFY_CONTENT]: CENTER,
           height: "48px",
         },
       },
@@ -376,11 +400,11 @@ function monthGrid(
   return el(
     "div",
     {
-      attrs: { role: "grid", "data-part": "month" },
+      attrs: { role: "grid", [DATA_PART]: "month" },
       style: {
         display: "grid",
-        "grid-template-columns": "repeat(7, 48px)",
-        "padding-inline": "12px",
+        [GRID_TEMPLATE_COLUMNS]: "repeat(7, 48px)",
+        [PADDING_INLINE]: "12px",
         ...textCss({ textStyle: "bodyLarge" }, scope.style),
       },
     },
@@ -408,7 +432,7 @@ function dateHeader(selected: CalendarDate | undefined, scope: WebRenderScope, k
     el(
       "span",
       {
-        attrs: { "data-part": "headline" },
+        attrs: { [DATA_PART]: "headline" },
         style: {
           padding: "36px 12px 12px 24px",
           ...textCss({ textStyle: "headlineLarge" }, scope.style),
@@ -426,17 +450,17 @@ function dateHeader(selected: CalendarDate | undefined, scope: WebRenderScope, k
 function monthRow(shown: CalendarDate, scope: WebRenderScope, kit: WebRenderKit): WebElement {
   const glyph = (name: string) => kit.icon({ type: "icon", name }, scope, "");
   const button = (name: string) =>
-    el("span", { attrs: { role: "button", "aria-label": name }, style: { padding: "12px" } }, [
+    el("span", { attrs: { role: "button", [ARIA_LABEL]: name }, style: { padding: "12px" } }, [
       glyph(name),
     ]);
   return el(
     "div",
     {
       style: {
-        display: "flex",
-        "align-items": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
         height: "56px",
-        "padding-inline": "16px 12px",
+        [PADDING_INLINE]: "16px 12px",
         ...textCss({ textStyle: "titleSmall" }, scope.style),
         ...kit.roleCss(scope, "transparent", "onSurfaceVariant"),
       },
@@ -444,7 +468,7 @@ function monthRow(shown: CalendarDate, scope: WebRenderScope, kit: WebRenderKit)
     [
       el(
         "span",
-        { style: { display: "flex", "align-items": "center", gap: "8px", flex: "1 1 auto" } },
+        { style: { display: FLEX, [ALIGN_ITEMS]: CENTER, gap: "8px", flex: "1 1 auto" } },
         [formatDate(shown, { month: "long", year: "numeric" }, scope), glyph("arrow_drop_down")],
       ),
       button("chevron_left"),
@@ -465,11 +489,11 @@ const datePickerRenderer =
     const selected = key === undefined ? undefined : parseDate(scope.condition.state[key]);
     const disabled = kit.disabledState(node, scope);
     const { attrs, style } = kit.base(node, scope, {
-      display: "flex",
-      "flex-direction": "column",
+      display: FLEX,
+      [FLEX_DIRECTION]: COLUMN,
       width: "360px",
-      "max-width": "100%",
-      "padding-bottom": "8px",
+      [MAX_WIDTH]: "100%",
+      [PADDING_BOTTOM]: "8px",
       ...kit.roleCss(scope, "surfaceContainerHigh", "onSurface"),
       ...disabled.css,
     });

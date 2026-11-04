@@ -89,7 +89,7 @@ import {
   recordObservationBackStack,
   screenForObserve,
   type ObserveResponse,
-  withDeviceDiagnostics,
+  withServedObservationExtras,
   type ObserveToolDependencies,
 } from "./observeResponse";
 
@@ -444,10 +444,11 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
-      const served = await withDeviceDiagnostics(
+      const served = await withServedObservationExtras(
         layerScopedObserveResult(result, args.layer, platform, !waitOutcome),
         device,
-        dependencies.audioInputDiagnostic,
+        deviceRead,
+        dependencies,
       );
 
       if (waitOutcome) {

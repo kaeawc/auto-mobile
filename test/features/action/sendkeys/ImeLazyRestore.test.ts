@@ -16,11 +16,13 @@ function harness() {
   const registry = new DevicePendingImeRestores();
   let pinnedUser: number | undefined;
   const restored: unknown[] = [];
+  const fences: (AbortSignal | undefined)[] = [];
   const host: ImeSpanHost = {
     deviceId,
     verifySafeImeRecovery: async () => true,
-    restoreIme: async (...args) => {
-      restored.push([...args, pinnedUser]);
+    restoreIme: async (prior, wasEnabled, subtype, fence) => {
+      restored.push([prior, wasEnabled, subtype, pinnedUser]);
+      fences.push(fence);
     },
     getPinnedUser: () => pinnedUser,
     setPinnedUser: (user) => {
@@ -43,7 +45,17 @@ function harness() {
       }
       return { results: [{ index: 0, action: "type", resolvedMode: "ime", success: true }] };
     });
-  return { deviceId, timer, registry, service, commit, restored, host, captures: () => captures };
+  return {
+    deviceId,
+    timer,
+    registry,
+    service,
+    commit,
+    restored,
+    fences,
+    host,
+    captures: () => captures,
+  };
 }
 
 test("an empty flush completes while the device IME lock is held", async () => {
@@ -231,4 +243,20 @@ test("a forced flush discards the pending restore once it holds the lock", async
   await flush;
   expect(restores).toBe(0);
   expect(registry.hasPending(deviceId)).toBe(false);
+});
+
+test("a teardown flush hands its ownership signal to the deferred restore (#16580)", async () => {
+  const h = harness();
+  await h.commit();
+  const owner = new AbortController();
+  await h.registry.flush(h.deviceId, { signal: owner.signal });
+  expect(h.restored).toEqual([["keyboard/.Ime", false, { id: 7 }, 10]]);
+  expect(h.fences).toEqual([owner.signal]);
+});
+
+test("an idle flush restores without an ownership signal", async () => {
+  const h = harness();
+  await h.commit();
+  await h.registry.flush(h.deviceId);
+  expect(h.fences).toEqual([undefined]);
 });

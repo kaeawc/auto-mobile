@@ -283,6 +283,21 @@ export const prototypeOutputSchema = z.object({
   report: z.json().optional(),
   markdown: z.string().optional(),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
+  share: z
+    .object({
+      bundlePath: z.string().describe("The canonical .automobile-proto bundle to upload."),
+      sha256: z.string().describe("SHA-256 of the bundle bytes; ProtoViewer refuses others."),
+      bytes: z.number().int().nonnegative(),
+      url: z.string().optional().describe("Where the bundle must be served, as given."),
+      link: z
+        .string()
+        .optional()
+        .describe("automobile-proto://import?url=…&sha256=… for the QR or a message."),
+      qrPngPath: z.string().optional().describe("The link as a black-on-white QR PNG."),
+      qr: z.string().optional().describe("The link as a QR drawn with block characters."),
+    })
+    .optional()
+    .describe("share only: the bundle written on the host and, with url, its import link and QR."),
   viewer: z
     .object({
       app: z.literal("protoviewer"),
@@ -291,7 +306,16 @@ export const prototypeOutputSchema = z.object({
       display: z
         .object({
           key: z.string(),
-          role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
+          role: z.enum([
+            "inner",
+            "cover",
+            "rear",
+            "external",
+            "cluster",
+            "overlay",
+            "virtual",
+            "unknown",
+          ]),
         })
         .optional()
         .describe(
@@ -339,7 +363,12 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("Android: whether the shortcut was seen on the home screen after a pin or update."),
   errorCode: z
-    .enum([...SAVED_PROTOTYPE_ERROR_CODES, "unsupported_capability", "unsupported_platform"])
+    .enum([
+      ...SAVED_PROTOTYPE_ERROR_CODES,
+      "unsupported_capability",
+      "unsupported_platform",
+      "invalid_url",
+    ])
     .optional(),
   revision: z
     .number()

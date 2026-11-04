@@ -18,7 +18,11 @@ interface Workflow {
 const workflow = load(
   readGuardFile(join(import.meta.dir, "../../.github/workflows/pull_request.yml")),
 ) as Workflow;
-const guardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md"];
+const guardedDocs = [
+  "docs/using/screen-control.md",
+  "docs/using/apple-tv.md",
+  "docs/using/apple-watch.md",
+];
 const guardedDoc = guardedDocs[0];
 
 interface ListFilesParameters {

@@ -13,8 +13,9 @@ import kotlinx.coroutines.launch
 
 /**
  * How [SharedDaemonStreamHub] opens and revives shared observation connections. [streamFactory]
- * creates one device's connection (production: an [ObservationStreamClient]); [reconnect] revives
- * it after a drop, by default with [jitteredReconnectBackoffMs] drawn from [random] so devices that
+ * creates one device's stream (production: an [ObservationMultiplexer] stream, so every device
+ * shares one socket; the default is a per-device [ObservationStreamClient]); [reconnect] revives it
+ * after a drop, by default with [jitteredReconnectBackoffMs] drawn from [random] so devices that
  * dropped together on a daemon restart do not reconnect in the same instant.
  */
 class ObservationHubConfig(

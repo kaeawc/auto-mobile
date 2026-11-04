@@ -38,19 +38,7 @@ internal suspend fun ObservationStreamClient.handleStorageReconciliationRequired
 
 internal suspend fun ObservationStreamClient.handleDeviceSessionEnded(response: StreamResponse) {
 
-  val deviceId = response.deviceId
-  val retiredUuid = response.deviceSessionUuid
-  val successorUuid = response.successorSessionUuid
-  if (!deviceId.isNullOrBlank() && !retiredUuid.isNullOrBlank() && !successorUuid.isNullOrBlank()) {
-    _deviceEvents.emit(
-      DeviceStreamEvent.DeviceSessionSuperseded(
-        deviceId = deviceId,
-        retiredUuid = retiredUuid,
-        successorUuid = successorUuid,
-        timestamp = response.timestamp ?: System.currentTimeMillis(),
-      ),
-    )
-  }
+  response.toSessionSuperseded()?.let { _deviceEvents.emit(it) }
 }
 
 internal fun ObservationStreamClient.handlePing(response: StreamResponse) {

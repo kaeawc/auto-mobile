@@ -1,3 +1,4 @@
+import type { PendingImeRestoreRegistry } from "../../action/sendkeys/PendingImeRestore";
 import type { AppleTvSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
 import type { AppleTvSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorBoot";
 import type { WatchSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
@@ -161,6 +162,8 @@ export interface DeviceToolsDependencies {
    * to the daemon's snapshot manager, wired where the workflow runs.
    */
   forgetDestroyedAvdFixtures?: (avdName: string) => Promise<unknown>;
+  /** Pending keyboard restores killDevice flushes after admitting its caller (#16579). */
+  pendingImeRestores?: Pick<PendingImeRestoreRegistry, "flush">;
   stopPerformanceMonitoring: (deviceId: string) => void;
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
   idGenerator: IdGenerator;

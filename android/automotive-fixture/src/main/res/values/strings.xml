@@ -1,0 +1,8 @@
+<resources>
+  <string name="app_name">AutoMobile Fixture</string>
+  <string name="templates_label">AutoMobile Templates</string>
+  <string name="driving_safe_title">Driving-safe screen</string>
+  <string name="parked_only_title">Parked-only screen</string>
+  <string name="parked_only_body">This screen is not distraction-optimized.</string>
+  <string name="media_service_label">AutoMobile Fixture Media</string>
+</resources>

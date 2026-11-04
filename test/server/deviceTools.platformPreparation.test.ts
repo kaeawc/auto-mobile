@@ -156,6 +156,23 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("getApple absent-device error points to simulator provisioning and deletion", async () => {
+    const failure = await callTool("getApple", { udid: "sim-udid" }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    if (!(failure instanceof ActionableError)) {
+      throw new Error("Expected an actionable absent-device error");
+    }
+    expect(failure.message).toStartWith(
+      "Device 'sim-udid' not found. Available booted: none. Available images: none.",
+    );
+    expect(failure.message).toContain("provisionDevice");
+    expect(failure.message).toContain("enableTools");
+    expect(failure.message).toContain("deleteDevice");
+  });
+
   async function awaitPromptly(promise: Promise<void>, label: string): Promise<void> {
     await Promise.race([
       promise,

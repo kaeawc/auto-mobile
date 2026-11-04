@@ -312,9 +312,10 @@ describe("iOS clear-data backends", () => {
       }
       h.appDataFs.nodes.set(link, { kind: "symlink", target: outside });
 
-      expect(
-        await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId),
-      ).toEqual({ success: true, packageName: bundleId });
+      expect(await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId)).toEqual({
+        success: true,
+        packageName: bundleId,
+      });
 
       expect(h.appDataFs.reads).not.toContain(link);
       expect(h.removals).toContainEqual({ path: link, options: { recursive: false, force: true } });

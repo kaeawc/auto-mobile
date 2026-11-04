@@ -57,12 +57,13 @@ exact, case-sensitive comparison against the row). `clickable` needs a tappable
 source node, `disappear` must not pass on a hierarchy miss, and `countStable`
 counts hierarchy nodes, so those stay hierarchy-only.
 
-The hierarchy `appear` and `disappear` predicates ignore a match made only
-through a tappable row's hoisted label (descendant text folded onto the row) when
-any hoisted descendant has no visible part on screen, and an unscoped wait then
-takes any other match. Text the row carries itself still matches, compared the
-way the resolver compared it. Selector resolution for `tapOn` and other actions does not apply
-this check.
+The hierarchy `appear` and `disappear` predicates ignore a match on a tappable
+row with hoisted descendant text when the selector matches none of the row's text
+that only visible sources back: its own text, its composed label when a visible
+descendant supplies the folded part, and each visible descendant's label. The
+comparison follows the resolver's exact, contains and regex rules, and an unscoped
+wait then takes any other match. Selector resolution for `tapOn` and other actions
+does not apply this check.
 
 iOS simulator lock readings are shared per device: unlocked known readings use
 `knownTtlMs` (30 seconds), locked readings use `lockedTtlMs` (2 seconds), and

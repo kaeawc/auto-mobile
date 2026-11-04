@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -14,7 +15,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecyclePhase
+import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
+import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
+import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -111,4 +115,50 @@ class BasicsChecklistUiTest {
     onNodeWithText("Getting started", substring = true).assertDoesNotExist()
     onNodeWithContentDescription("Observe Pixel 8").assertIsDisplayed()
   }
+
+  @Test
+  fun `observed tick survives the picker giving way to the workspace and back`() =
+    runComposeUiTest {
+      val settings = FakeSettingsProvider()
+      val record = DeviceObservedRecord(settings)
+      var workspace by mutableStateOf<WorkspaceUiState>(WorkspaceUiState.Empty)
+      // Mirrors the app root: the record sits above the switch, the picker only on Empty.
+      setContent {
+        MaterialTheme {
+          RecordDeviceObserved(record, workspace)
+          if (workspace is WorkspaceUiState.Empty) {
+            DevicePicker(
+              options =
+                DevicePickerOptions(
+                  state = DevicePickerUiState.Content(listOf(booted)),
+                  onAction = {},
+                  onClose = {},
+                  bootstrapState = DaemonBootstrapState.Ready(restarted = false),
+                  basicsChecklist =
+                    BasicsChecklistOptions(deviceObserved = record.observed, onDismiss = {}),
+                  thumbnail = { _, _ -> },
+                ),
+            )
+          } else {
+            Text("Workspace")
+          }
+        }
+      }
+      onNodeWithContentDescription("A device is observed: not yet").assertIsDisplayed()
+
+      // Observing a device replaces the picker with the workspace…
+      workspace =
+        WorkspaceUiState.Content(
+          columns =
+            listOf(DeviceColumn(deviceId = "p8", name = "Pixel 8", platform = Platform.Android)),
+          focusedDeviceId = "p8",
+        )
+      onNodeWithText("Workspace").assertIsDisplayed()
+      assertTrue(settings.hasObservedDevice)
+
+      // …and closing it returns to the picker, where the step is still ticked.
+      workspace = WorkspaceUiState.Empty
+      onNodeWithText("Getting started (3/3)").assertIsDisplayed()
+      onNodeWithContentDescription("A device is observed: done").assertIsDisplayed()
+    }
 }

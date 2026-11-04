@@ -35,12 +35,13 @@ enum class BasicsStep(val label: String) {
 data class BasicsChecklistItem(val step: BasicsStep, val done: Boolean)
 
 /**
- * Derives the basics checklist from state the picker already has; nothing here is tracked
- * separately, so a step unticks again if its condition stops holding (e.g. the daemon fails).
+ * Derives the basics checklist. The first two steps read live picker state, so they untick again if
+ * their condition stops holding (e.g. the daemon fails); the last is a persisted milestone.
  * - Daemon ready: the bootstrap reported Ready, or — on a transport the app doesn't bootstrap
  *   ([DaemonBootstrapState.Inactive]) or before the first pass reports — the device list loaded.
  * - Device visible: the loaded list has at least one booted (observable) device.
- * - Device observed: the caller has a non-empty workspace to return to.
+ * - Device observed: a device has been observed at least once ([DeviceObservedRecord]); it stays
+ *   ticked after the workspace empties again.
  */
 fun basicsChecklist(
   bootstrap: DaemonBootstrapState,

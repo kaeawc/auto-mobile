@@ -16,6 +16,7 @@ class FakeSettingsProvider(values: Values = Values()) : SettingsProvider by valu
     override var themeMode: String = "dark",
     override var hasSeenOnboarding: Boolean = false,
     override var hasDismissedBasicsChecklist: Boolean = false,
+    override var hasObservedDevice: Boolean = false,
     override var streamQualityPreset: String = "medium",
     override var streamQualityAutoAdjust: Boolean = true,
   ) : SettingsProvider

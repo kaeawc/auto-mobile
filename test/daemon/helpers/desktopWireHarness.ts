@@ -1,261 +1,74 @@
 import { spyOn } from "bun:test";
-import { DAEMON_OWNED_SESSIONS_PARAM } from "../../../src/daemon/wire/constants";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { ObserverSessionRegistry } from "../../../src/daemon/observerSessionRegistry";
-import { releaseSessionAndDevice } from "../../../src/daemon/releaseSessionAndDevice";
-import { SessionHeartbeatMonitor } from "../../../src/daemon/SessionHeartbeatMonitor";
-import { SessionManager, TerminalSessionError } from "../../../src/daemon/sessionManager";
-import {
-  hasActiveSessionExecution,
-  subscribeToolCallEndActivity,
-} from "../../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import type { BootedDevice } from "../../../src/models";
-import { sessionOwnershipLostPayload } from "../../../src/daemon/deviceSessionResult";
-import { executionTracker } from "../../../src/daemon/executionTracker";
-import { createSetActiveDeviceHandler } from "../../../src/server/setActiveDevice";
-import { shapeToolCallError } from "../../../src/daemon/shapeToolCallError";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../../src/utils/logger";
-import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
-import { RealToolCallPath } from "../../helpers/realToolCallPath";
-import { NonThrowingFakeSocket } from "../../fakes/FakeNetServer";
-import { createFakeDeviceManager } from "./inputSocketHarness";
-import { parseDaemonResponseLine } from "./parseDaemonResponseLine";
-import { createHarnessServer } from "./UnixSocketServerHarness";
+import { LivenessScenario } from "../../helpers/livenessScenarioHarness";
+import {
+  AGENT_KEEPER_CONNECTION,
+  DESKTOP_HEARTBEAT_MS,
+  PIXEL,
+  PIXEL_FOLD,
+  relativeEnvelope,
+  wireConnection,
+  type WireActor,
+  type WireExchange,
+  type WireFixture,
+} from "./desktopWireFixture";
+import type { BootedDevice } from "../../../src/models";
+
+export { DESKTOP_CLIENT_NAME, PIXEL, PIXEL_FOLD, type WireFixture } from "./desktopWireFixture";
 
 /**
- * Drives the REAL daemon request handlers with the frames the desktop/IDE client
- * (the desktop-core Gradle module) sends, and records each request/response pair as a
- * desktop wire fixture (#10669).
+ * Records the frames the desktop/IDE client (the desktop-core Gradle module) sends, and the real
+ * daemon's answers, as desktop wire fixtures (#10669).
  *
- * - `daemon/*` and `input/*` frames go through the real {@link UnixSocketServer}
- *   connection handler, so the response envelope is the one the socket writes.
- * - `tools/call setActiveDevice` runs the real tool handler and maps a thrown
- *   error exactly as `src/server/index.ts`'s tool-call catch block does
- *   (`TerminalSessionError` -> `sessionOwnershipLostPayload`, anything else ->
- *   `shapeToolCallError`), wrapped in the socket's `success: true` envelope that a
- *   forwarded MCP result rides in. The call is a tracked execution under its
- *   `sessionUuid`, so its end restarts the session's idle window as in production.
- * - `tools/call rotate` (a pane's device control) runs the real `rotate` registration
- *   through the real `ToolRegistry` ({@link RealToolCallPath}): its ownership refusal,
- *   session admission and execution tracking are production's; only the device work is a
- *   stand-in success. Its refusal is shaped by the real `shapeToolCallError` (#10839).
- * - Idle release and heartbeat expiry run on {@link FakeTimer}: the
- *   SessionManager's own cleanup interval plus the daemon's
- *   {@link SessionHeartbeatMonitor} reaper, wired as `daemon.ts` wires them, with the
- *   daemon's own `subscribeToolCallEndActivity` and `hasActiveSessionExecution`.
+ * The daemon is a real `Daemon` started through `Daemon.startOn()` (#11441, #16946), via
+ * {@link LivenessScenario}: its constructor and start sequence wire the session lifecycle (expiry
+ * canceller, recording cleanup, tool-call-end activity, heartbeat monitor, rehydration), and every
+ * frame goes through its real control socket. A `tools/call` is forwarded by that socket to the
+ * real tool registration ({@link LivenessScenario}'s loopback hop); only the device work is a
+ * stand-in. A restart is a new `Daemon` started the same way over the same database, so it
+ * rehydrates what the last one persisted. The clock is the scenario's FakeTimer; the data
+ * directory is in memory, so nothing touches `~/.auto-mobile` or a host socket.
+ *
+ * The replay (`livenessDesktopFixtureReplay.test.ts`) drives the same frames on the same
+ * connections through the same harness, so recording and replay agree frame for frame.
  */
-
-export const DESKTOP_HEARTBEAT_MS = 2_000; // DesktopDaemonSessionComposition.kt HEARTBEAT_INTERVAL_MS
-export const DESKTOP_CLIENT_NAME = "AutoMobile Desktop"; // DesktopDaemonSession.kt
-
-export const PIXEL: BootedDevice = {
-  deviceId: "emulator-5554",
-  name: "Pixel",
-  platform: "android",
-};
-export const PIXEL_FOLD: BootedDevice = {
-  deviceId: "emulator-5556",
-  name: "Pixel Fold",
-  platform: "android",
-};
-
-export type WireActor = "desktop" | "agent" | "probe";
-
-export interface WireExchange {
-  /** Fake-clock time of the request, relative to the scenario start. */
-  atMs: number;
-  actor: WireActor;
-  /** Step name a consumer looks responses up by. */
-  label: string;
-  /** Present when one exchange stands for this many identical consecutive requests. */
-  repeat?: number;
-  everyMs?: number;
-  request: { method: string; params: Record<string, unknown> };
-  response: Omit<DaemonResponse, "id" | "type">;
-}
-
-export interface WireFixture {
-  $comment: string;
-  scenario: string;
-  description: string;
-  sessions: Record<string, string>;
-  exchanges: WireExchange[];
-}
-
-class RecordingSocket extends NonThrowingFakeSocket {
-  private readonly waiters = new Map<string, (response: DaemonResponse) => void>();
-  write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
-  write(
-    str: string | Uint8Array,
-    encoding?: BufferEncoding,
-    cb?: (err?: Error | null) => void,
-  ): boolean;
-  write(
-    data: string | Uint8Array,
-    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-    maybeCallback?: (error?: Error | null) => void,
-  ): boolean {
-    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
-    const text = typeof data === "string" ? data : Buffer.from(data).toString();
-    for (const line of text.split("\n").filter((chunk) => chunk.length > 0)) {
-      const response = parseDaemonResponseLine(line);
-      if (response.id !== null) {
-        this.waiters.get(response.id)?.(response);
-        this.waiters.delete(response.id);
-      }
-    }
-    callback?.();
-    return true;
-  }
-  request(request: DaemonRequest): Promise<DaemonResponse> {
-    const response = new Promise<DaemonResponse>((resolve) => {
-      this.waiters.set(request.id, resolve);
-    });
-    this.simulateData(`${JSON.stringify(request)}\n`);
-    return response;
-  }
-}
-
-const setActiveDeviceTool = createSetActiveDeviceHandler({
-  resumeCtrlProxy: async () => {},
-  transportWait: {
-    timer: new FakeTimer(),
-    probe: async () => new Map(),
-    invalidateDeviceList: () => {},
-  },
-});
-
-/** One daemon process: real SessionManager, DevicePool, registries and socket handler. */
-class DaemonUnderTest {
-  readonly manager: SessionManager;
-  readonly pool: DevicePool;
-  readonly monitor: SessionHeartbeatMonitor;
-  private readonly socket = new RecordingSocket();
-  private readonly unsubscribe: () => void;
-
-  private constructor(
-    readonly timer: FakeTimer,
-    pool: DevicePool,
-    manager: SessionManager,
-  ) {
-    this.manager = manager;
-    this.pool = pool;
-    DaemonState.getInstance().initialize(
-      manager,
-      pool,
-      new DeviceSessionRegistry(),
-      new ObserverSessionRegistry(timer),
-    );
-    // The daemon's own wiring: a tool call's END restarts the idle window.
-    this.unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
-    manager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(
-        { tracker: executionTracker, sessionManager: manager, devicePool: pool },
-        sessionId,
-        query,
-      ),
-    );
-    // daemon.ts wires the reaper's release to releaseSessionAndDevice.
-    this.monitor = new SessionHeartbeatMonitor(
-      manager,
-      () => false,
-      async (sessionId, reason) => {
-        const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
-          reason,
-        });
-      },
-      { timer },
-    );
-    this.monitor.start();
-    const server = createHarnessServer("unused", DaemonState.getInstance(), timer);
-    server.allowRequests();
-    server.connect(this.socket);
-  }
-
-  static async start(timer: FakeTimer, devices: BootedDevice[]): Promise<DaemonUnderTest> {
-    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
-      barrier: () => new FakeDbWriteBarrier(),
-    });
-    const utils = new FakeDeviceUtils();
-    utils.setBootedDevices("android", devices);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(manager, "desktop-wire-daemon", { timer, deviceManager: utils }),
-    );
-    await pool.initializeWithDevices(devices);
-    return new DaemonUnderTest(timer, pool, manager);
-  }
-
-  socketRequest(request: DaemonRequest): Promise<DaemonResponse> {
-    return this.socket.request(request);
-  }
-
-  async stop(): Promise<void> {
-    this.socket.destroy();
-    await this.monitor.stop();
-    this.manager.stopCleanupTimer();
-    this.unsubscribe();
-    DaemonState.getInstance().reset();
-  }
-}
-
-/** A recorded scenario: every frame is answered by the real handlers and appended to the fixture. */
 export class DesktopWireHarness {
-  readonly timer = new FakeTimer();
   readonly exchanges: WireExchange[] = [];
-  private daemon!: DaemonUnderTest;
-  private tools!: RealToolCallPath;
-  private frameSeq = 0;
+  /** Sessions another client keeps alive (the agent's proxy keeper); their beats are not recorded. */
+  readonly keepAlive = new Set<string>();
+  private scenario!: LivenessScenario;
+  private startedAt = 0;
   private readonly restore: Array<{ mockRestore(): void }> = [];
 
   constructor(private readonly devices: BootedDevice[] = [PIXEL, PIXEL_FOLD]) {}
 
-  get manager(): SessionManager {
-    return this.daemon.manager;
-  }
-
-  get pool(): DevicePool {
-    return this.daemon.pool;
-  }
-
   async start(): Promise<void> {
-    this.restore.push(
-      spyOn(logger, "info").mockImplementation(() => {}),
-      spyOn(logger, "warn").mockImplementation(() => {}),
-      spyOn(logger, "error").mockImplementation(() => {}),
-    );
-    this.tools = new RealToolCallPath(this.devices).install();
-    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager(this.devices));
-    this.daemon = await DaemonUnderTest.start(this.timer, this.devices);
+    // The scenario silences info and warn; a refused frame also logs an error.
+    this.restore.push(spyOn(logger, "error").mockImplementation(() => {}));
+    this.scenario = await LivenessScenario.start({
+      devices: this.devices.map((device) => device.deviceId),
+      deviceNames: Object.fromEntries(this.devices.map((device) => [device.deviceId, device.name])),
+    });
+    this.startedAt = this.scenario.timer.now();
   }
 
-  /** Models a daemon restart: a fresh process with no memory of earlier sessions. */
-  async restartDaemon(): Promise<void> {
-    await this.daemon.stop();
-    this.daemon = await DaemonUnderTest.start(this.timer, this.devices);
+  /**
+   * The daemon process dies and, `downtimeMs` later, a new one starts over the same database: it
+   * rehydrates the sessions the last one persisted, expiring any whose idle window ran out while
+   * no daemon was up. No frame is recorded while it is down.
+   */
+  async restartDaemon(downtimeMs: number): Promise<void> {
+    await this.scenario.daemonRestart({ downtimeMs });
   }
 
   async stop(): Promise<void> {
-    await this.daemon.stop();
-    this.tools.uninstall();
-    PlatformDeviceManagerFactory.reset();
-    for (const spy of this.restore.splice(0)) {
-      spy.mockRestore();
+    try {
+      await this.scenario?.stop();
+    } finally {
+      for (const spy of this.restore.splice(0)) {
+        spy.mockRestore();
+      }
     }
-  }
-
-  /** Step the fake clock, letting the cleanup interval and reaper sweeps settle. */
-  async advance(ms: number): Promise<void> {
-    await this.timer.advanceTimeAsync(ms, () => drainMicrotasks(40));
   }
 
   async send(
@@ -269,12 +82,9 @@ export class DesktopWireHarness {
     return exchange.response;
   }
 
-  /** Sessions another client keeps alive (the agent's proxy keeper); their beats are not recorded. */
-  readonly keepAlive = new Set<string>();
-
-  /** The device's current holder in the real pool, or null when it is idle. */
+  /** The device's current holder in the started daemon's pool, or null when it is idle. */
   holderOf(deviceId: string): string | null {
-    return this.pool.getDevice(deviceId)?.sessionId ?? null;
+    return this.scenario.poolState(deviceId).sessionId;
   }
 
   /** Let fake time pass with no desktop frame (a stalled or sleeping client). */
@@ -337,21 +147,23 @@ export class DesktopWireHarness {
 
   /** One desktop loop interval: fake time advances and kept-alive sessions beat. */
   private async passTick(): Promise<void> {
-    await this.advance(DESKTOP_HEARTBEAT_MS);
+    await this.scenario.idle(DESKTOP_HEARTBEAT_MS);
     for (const sessionId of this.keepAlive) {
-      await this.daemon.socketRequest({
-        id: `keepalive-${++this.frameSeq}`,
-        type: "mcp_request",
-        method: "daemon/heartbeat",
-        params: { sessionId },
-      });
+      const keeper = await this.scenario.daemonMethod(
+        "daemon/heartbeat",
+        { sessionId },
+        AGENT_KEEPER_CONNECTION,
+      );
+      if (!keeper.success) {
+        throw new Error(`agent keeper heartbeat refused: ${JSON.stringify(keeper)}`);
+      }
     }
   }
 
   fixture(scenario: string, description: string, sessions: Record<string, string>): WireFixture {
     return {
       $comment:
-        "Generated by test/daemon/desktopWireContract.test.ts from the real daemon handlers; " +
+        "Generated by test/daemon/desktopWireContract.test.ts from a real Daemon started through startOn(); " +
         "regenerate with `UPDATE_CAPTURED_FIXTURES=1 bun test test/daemon/desktopWireContract.test.ts`. Do not edit by hand.",
       scenario,
       description,
@@ -366,87 +178,16 @@ export class DesktopWireHarness {
     method: string,
     params: Record<string, unknown>,
   ): Promise<WireExchange> {
-    const atMs = this.timer.now();
-    const response =
-      method === "tools/call"
-        ? await this.callTool(params)
-        : await this.daemon.socketRequest({
-            id: `desktop-wire-${++this.frameSeq}`,
-            type: "mcp_request",
-            method,
-            params,
-          });
+    const atMs = this.scenario.timer.now() - this.startedAt;
+    const response = await this.scenario.daemonMethod(method, params, wireConnection(actor));
     return {
       atMs,
       actor,
       label,
       request: { method, params },
-      response: envelopeOf(response),
+      response: relativeEnvelope(response, this.startedAt),
     };
   }
-
-  private async callTool(params: Record<string, unknown>): Promise<DaemonResponse> {
-    const name = params.name;
-    const args = recordOf(params.arguments);
-    if (name === "rotate") {
-      return this.callDeviceControl(name, args);
-    }
-    if (name !== "setActiveDevice") {
-      throw new Error(`desktop wire harness does not route tools/call ${String(name)}`);
-    }
-    // The socket server strips its routing params before forwarding (withSocketSessionAutolockKey);
-    // restoring the owned-session list only re-attaches live sessions to the socket's MCP
-    // session, which these scenarios do not observe.
-    const forwarded: Record<string, unknown> = { ...args };
-    delete forwarded[DAEMON_OWNED_SESSIONS_PARAM];
-    const sessionUuid = typeof args.sessionUuid === "string" ? args.sessionUuid : undefined;
-    const execution = executionTracker.startExecution(name, undefined, sessionUuid);
-    try {
-      const result = await setActiveDeviceTool(setActiveDeviceArgsOf(forwarded));
-      return { id: "tool", type: "mcp_response", success: true, result };
-    } catch (error) {
-      return { id: "tool", type: "mcp_response", success: true, result: toolErrorResult(error) };
-    } finally {
-      executionTracker.endExecution(execution.id);
-      await drainMicrotasks(40);
-    }
-  }
-
-  /** A device-aware tool call through the real ToolRegistry; the device work is a stand-in. */
-  private async callDeviceControl(
-    name: string,
-    args: Record<string, unknown>,
-  ): Promise<DaemonResponse> {
-    const forwarded: Record<string, unknown> = { ...args };
-    delete forwarded[DAEMON_OWNED_SESSIONS_PARAM];
-    try {
-      const result = await this.tools.call(name, forwarded);
-      return { id: "tool", type: "mcp_response", success: true, result };
-    } catch (error) {
-      return {
-        id: "tool",
-        type: "mcp_response",
-        success: true,
-        result: toolErrorResult(error, name),
-      };
-    } finally {
-      await drainMicrotasks(40);
-    }
-  }
-}
-
-/** src/server/index.ts tool-call catch block, for the errors setActiveDevice can raise. */
-export function toolErrorResult(error: unknown, toolName = "setActiveDevice"): unknown {
-  if (error instanceof TerminalSessionError) {
-    const payload = sessionOwnershipLostPayload({
-      message: error.message,
-      sessionUuid: error.sessionUuid,
-      reason: error.release.releaseReason,
-      release: error.release,
-    });
-    return { content: [{ type: "text", text: JSON.stringify(payload) }], isError: true };
-  }
-  return shapeToolCallError(error, { toolName, source: "MCP" });
 }
 
 function sameResponse(a: WireExchange, b: WireExchange): boolean {
@@ -456,36 +197,4 @@ function sameResponse(a: WireExchange, b: WireExchange): boolean {
 function collapse(run: WireExchange[]): WireExchange {
   const first = run[0]!;
   return run.length > 1 ? { ...first, repeat: run.length, everyMs: DESKTOP_HEARTBEAT_MS } : first;
-}
-
-/** The socket envelope minus its per-request `id` and constant `type`. */
-function envelopeOf(response: DaemonResponse): WireExchange["response"] {
-  const { id, type, ...envelope } = response;
-  void id;
-  void type;
-  return envelope;
-}
-
-/** A request's `arguments` as a plain record; anything else is an empty argument list. */
-function recordOf(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? Object.fromEntries(Object.entries(value))
-    : {};
-}
-
-/** The typed arguments of a forwarded `setActiveDevice` call, read field by field. */
-function setActiveDeviceArgsOf(
-  args: Record<string, unknown>,
-): Parameters<typeof setActiveDeviceTool>[0] {
-  const { deviceId, platform, display, sessionUuid, __mcpSessionId } = args;
-  if (typeof deviceId !== "string") {
-    throw new Error("desktop wire harness: setActiveDevice needs a string deviceId");
-  }
-  return {
-    deviceId,
-    ...(platform === "android" || platform === "ios" ? { platform } : {}),
-    ...(typeof display === "string" || display === null ? { display } : {}),
-    ...(typeof sessionUuid === "string" ? { sessionUuid } : {}),
-    ...(typeof __mcpSessionId === "string" ? { __mcpSessionId } : {}),
-  };
 }

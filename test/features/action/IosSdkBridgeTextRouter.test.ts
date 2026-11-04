@@ -97,3 +97,19 @@ describe("createIosSdkBridgeTextRouter (#5159)", () => {
     ).rejects.toThrow("rejected the clear (element_not_actionable)");
   });
 });
+
+test("multi_scene rejects without an XCTest fallback", async () => {
+  const message =
+    "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.";
+  const reply: CtrlProxySdkActionResult = {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    totalTimeMs: 0,
+  };
+  const { router: route } = router(reply);
+  for (const action of ["insertText", "clearText"] as const) {
+    await expect(route.perform({ action, target, text: "x" })).rejects.toThrow(message);
+  }
+});

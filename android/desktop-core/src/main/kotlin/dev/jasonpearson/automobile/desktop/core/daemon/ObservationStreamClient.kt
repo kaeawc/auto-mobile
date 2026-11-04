@@ -99,6 +99,10 @@ class ObservationStreamClient(
   internal val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher =
     kotlinx.coroutines.Dispatchers.IO,
 ) : ObservationStream {
+  // Where the blocking readLine() parks: a dedicated thread per connection rather than a shared
+  // Dispatchers.IO slot, so dozens of open streams cannot exhaust that pool (#5262). Test seam.
+  internal var readerThreads: StreamReaderDispatcherFactory = DedicatedStreamReaderThreads
+
   internal fun authenticatedSessionUuid(): String? = sessionUuidProvider?.invoke()
 
   companion object {

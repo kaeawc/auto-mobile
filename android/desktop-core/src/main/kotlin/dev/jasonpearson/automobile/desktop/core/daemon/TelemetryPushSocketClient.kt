@@ -20,6 +20,7 @@ import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.min
+import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +76,10 @@ internal data class TelemetryPushSocketOptions(
   val beforeSocketPublish: () -> Unit = {},
   val sessionUuidProvider: (() -> String?)? = null,
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+  /** Where the blocking `readLine()` parks: a dedicated thread, never a `Dispatchers.IO` slot. */
+  val readerThreads: StreamReaderDispatcherFactory = DedicatedStreamReaderThreads,
+  /** Jitter source for the reconnect backoff; a test pins it for deterministic delays. */
+  val random: Random = Random.Default,
 )
 
 class TelemetryPushSocketClient
@@ -103,6 +108,7 @@ internal constructor(
 
   companion object {
     internal const val MAX_RECONNECT_ATTEMPTS = 5
+    internal const val READER_THREAD_NAME = "telemetry-push-reader"
     internal const val DEVICE_NOT_LIVE_MESSAGE = "Device session is not registered on the daemon"
     private const val DEVICE_NOT_LIVE_MARKER = "does not identify a live device session"
 
@@ -242,7 +248,8 @@ internal constructor(
           )
         return
       }
-      val delayMs = calculateTelemetryBackoff(attempt, initialRetryDelayMs, maxRetryDelayMs)
+      val delayMs =
+        calculateTelemetryBackoff(attempt, initialRetryDelayMs, maxRetryDelayMs, options.random)
       _state.value = ConnectionState.Reconnecting(attempt, delayMs)
       retryDelay.wait(delayMs)
     }
@@ -295,12 +302,21 @@ internal constructor(
     scope.coroutineContext[Job]?.cancel()
   }
 
-  private suspend fun readMessages(currentSocket: TelemetrySocket, onHealthy: () -> Unit) {
+  private suspend fun readMessages(currentSocket: TelemetrySocket, onHealthy: () -> Unit) =
+    options.readerThreads.create(READER_THREAD_NAME).use { readerThread ->
+      readMessagesOn(readerThread, currentSocket, onHealthy)
+    }
+
+  private suspend fun readMessagesOn(
+    readerThread: kotlinx.coroutines.CoroutineDispatcher,
+    currentSocket: TelemetrySocket,
+    onHealthy: () -> Unit,
+  ) {
     try {
       log.info("Starting telemetry push message read loop")
 
       while (_shouldReconnect) {
-        val line = runInterruptible(options.ioDispatcher) { currentSocket.readLine() } ?: break
+        val line = runInterruptible(readerThread) { currentSocket.readLine() } ?: break
         currentCoroutineContext().ensureActive()
         if (line.isBlank()) continue
 
@@ -351,9 +367,10 @@ private fun calculateTelemetryBackoff(
   attempt: Int,
   initialRetryDelayMs: Long,
   maxRetryDelayMs: Long,
+  random: Random,
 ): Long {
   val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
   val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
-  val jitter = (cappedDelay * 0.1 * Math.random()).toLong()
+  val jitter = (cappedDelay * 0.1 * random.nextDouble()).toLong()
   return cappedDelay + jitter
 }

@@ -4857,7 +4857,11 @@ describe("LaunchApp", () => {
               new SimulatorIosClearDataBackend(device.deviceId, {
                 simctl: fakeSimctl,
                 containerOwnership: simulatorOwnership,
-                appDataFs: { readdir: async () => [], mkdir: async () => {}, rm: async () => {} },
+                appDataFs: {
+                  lstat: async () => ({ isDirectory: () => true }),
+                  access: async () => {},
+                  readdir: async () => [],
+                  mkdir: async () => {}, rm: async () => {} },
               }).clearAppData(id),
           }),
         },

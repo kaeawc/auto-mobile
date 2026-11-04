@@ -33,6 +33,8 @@ async function arrange({ install = true } = {}) {
     dataWipe: {
       containerOwnership: simulatorOwnership,
       appDataFs: {
+        lstat: async () => ({ isDirectory: () => true }),
+        access: async () => {},
         readdir: async () => ["data"],
         mkdir: async () => {},
         rm: async (target) => {
@@ -128,6 +130,8 @@ describe("WatchAppManager launch", () => {
       dataWipe: {
         containerOwnership: simulatorOwnership,
         appDataFs: {
+          lstat: async () => ({ isDirectory: () => true }),
+          access: async () => {},
           readdir: async () => ["data"],
           mkdir: async () => {},
           rm: async () => {

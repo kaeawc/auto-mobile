@@ -275,6 +275,8 @@ describe("ClearAppData", () => {
               ...deps,
               containerOwnership: simulatorOwnership,
               appDataFs: {
+                lstat: async () => ({ isDirectory: () => true }),
+                access: async () => {},
                 readdir: async () => ["data"],
                 mkdir: async (target) => {
                   directories.add(target);

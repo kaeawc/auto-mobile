@@ -214,6 +214,8 @@ describe("app restart cache generation", () => {
               containerOwnership: simulatorOwnership,
               simctl,
               appDataFs: {
+                lstat: async () => ({ isDirectory: () => true }),
+                access: async () => {},
                 readdir: async () => ["data"],
                 mkdir: async () => {},
                 rm: async () => {

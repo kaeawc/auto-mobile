@@ -5,6 +5,7 @@ import {
   simulatorDataContainer,
 } from "../../helpers/simulatorContainerFixture";
 import { describe, expect, test } from "bun:test";
+import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { ClearAppData } from "../../../src/features/action/ClearAppData";
 import { AppNotInstalledError } from "../../../src/models";
@@ -37,7 +38,12 @@ class FakeReinstaller implements IosClearDataReinstaller {
 }
 
 class FakeAppDataFileSystem implements IosAppDataFileSystem {
-  readonly nodes = new Map<string, { kind: "directory" | "file" }>();
+  readonly nodes = new Map<string, { kind: "directory" | "file" | "symlink"; target?: string }>();
+  readonly reads: string[] = [];
+  readonly nonWritable = new Set<string>();
+  readonly removalErrors = new Map<string, Error>();
+  readonly removalGates = new Map<string, Promise<void>>();
+  onRead?: () => void;
   readonly removals: Array<{ path: string; options: { recursive: boolean; force: boolean } }> = [];
   readonly creations: Array<{ path: string; options?: { recursive?: boolean; mode?: number } }> =
     [];
@@ -76,7 +82,26 @@ class FakeAppDataFileSystem implements IosAppDataFileSystem {
     this.nodes.set(path, { kind: "file" });
   }
 
+  async lstat(path: string): Promise<{ isDirectory(): boolean }> {
+    const node = this.nodes.get(path);
+    if (!node) {
+      throw Object.assign(new Error(`Missing entry ${path}`), { code: "ENOENT" });
+    }
+    return { isDirectory: () => node.kind === "directory" };
+  }
+
+  async access(path: string, mode: number): Promise<void> {
+    expect(mode).toBe(constants.W_OK);
+    if (this.nonWritable.has(path)) {
+      throw Object.assign(new Error(`EACCES: permission denied, access '${path}'`), {
+        code: "EACCES",
+      });
+    }
+  }
+
   async readdir(path: string): Promise<string[]> {
+    this.reads.push(path);
+    this.onRead?.();
     if (this.readError) {
       throw this.readError;
     }
@@ -112,8 +137,15 @@ class FakeAppDataFileSystem implements IosAppDataFileSystem {
   async rm(path: string, options: { recursive: boolean; force: boolean }): Promise<void> {
     this.beforeRemove?.();
     this.removals.push({ path, options });
-    if (this.removalError) {
-      throw this.removalError;
+    await this.removalGates.get(path);
+    const error = this.removalError ?? this.removalErrors.get(path);
+    if (error) {
+      throw error;
+    }
+    if (this.nodes.get(path)?.kind === "symlink") {
+      // Like fs.rm: unlink the link itself, never its target.
+      this.nodes.delete(path);
+      return;
     }
     for (const entry of this.nodes.keys()) {
       if (entry === path || entry.startsWith(`${path}/`)) {
@@ -262,6 +294,92 @@ describe("iOS clear-data backends", () => {
     expect([...h.appDataFs.nodes]).toEqual(before);
     expect(h.removals).toEqual([]);
     expect(h.appDataFs.creations).toEqual([]);
+  });
+
+  test.each(IOS_APP_DATA_FOLDERS)(
+    "replaces a symlinked %s with a directory without touching its target",
+    async (folder) => {
+      const h = harness();
+      h.simctl.setContainerPath(bundleId, containerPath);
+      const outside = "/Users/someone/Important";
+      h.appDataFs.nodes.set(outside, { kind: "directory" });
+      h.appDataFs.nodes.set(join(outside, "keep.txt"), { kind: "file" });
+      const link = join(containerPath, folder);
+      for (const entry of [...h.appDataFs.nodes.keys()]) {
+        if (entry.startsWith(`${link}/`)) {
+          h.appDataFs.nodes.delete(entry);
+        }
+      }
+      h.appDataFs.nodes.set(link, { kind: "symlink", target: outside });
+
+      expect(
+        await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId),
+      ).toEqual({ success: true, packageName: bundleId });
+
+      expect(h.appDataFs.reads).not.toContain(link);
+      expect(h.removals).toContainEqual({ path: link, options: { recursive: false, force: true } });
+      expect(h.appDataFs.nodes.get(link)?.kind).toBe("directory");
+      expect(h.appDataFs.nodes.get(join(outside, "keep.txt"))?.kind).toBe("file");
+    },
+  );
+
+  test("fails the clear when an existing folder is not writable", async () => {
+    const h = harness();
+    h.simctl.setContainerPath(bundleId, containerPath);
+    const tmp = join(containerPath, "tmp");
+    h.appDataFs.beforeRemove = undefined;
+    await h.appDataFs.rm(join(tmp, "d"), { recursive: true, force: true });
+    h.appDataFs.nonWritable.add(tmp);
+
+    const result = await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId);
+
+    expect(result).toMatchObject({ success: false, packageName: bundleId });
+    expect(result.error).toContain("EACCES");
+    expect(h.appDataFs.reads).not.toContain(tmp);
+  });
+
+  test("waits for every removal before returning the first failure", async () => {
+    const h = harness();
+    h.simctl.setContainerPath(bundleId, containerPath);
+    h.appDataFs.removalErrors.set(join(containerPath, "Documents", "a.txt"), new Error("busy"));
+    let releaseGate = () => {};
+    const slow = join(containerPath, "tmp", "d");
+    h.appDataFs.removalGates.set(
+      slow,
+      new Promise<void>((resolve) => {
+        releaseGate = resolve;
+      }),
+    );
+    let settled = false;
+    const outcome = resolveIosClearDataBackend(simulatorId, h.deps)
+      .clearAppData(bundleId)
+      .finally(() => {
+        settled = true;
+      });
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+    expect(settled).toBe(false);
+    releaseGate();
+
+    expect(await outcome).toEqual({ success: false, packageName: bundleId, error: "busy" });
+    expect(h.appDataFs.nodes.has(slow)).toBe(false);
+  });
+
+  test("an abort while a folder listing is pending starts no removal", async () => {
+    const h = harness();
+    h.simctl.setContainerPath(bundleId, containerPath);
+    const controller = new AbortController();
+    h.appDataFs.onRead = () => controller.abort(new Error("cancelled"));
+
+    await expect(
+      new SimulatorIosClearDataBackend(simulatorId, h.deps).clearAppData(
+        bundleId,
+        controller.signal,
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(h.removals).toEqual([]);
+    expect(h.appDataFs.nodes.get(join(containerPath, "Documents", "a.txt"))?.kind).toBe("file");
   });
 
   test("returns non-ENOENT read failures without recreating directories", async () => {

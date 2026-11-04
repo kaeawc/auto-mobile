@@ -250,7 +250,14 @@ export interface IosClearDataReinstaller {
   clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void>;
 }
 
+export interface IosAppDataEntryStats {
+  isDirectory(): boolean;
+}
+
 export interface IosAppDataFileSystem {
+  /** Must not follow symlinks. */
+  lstat(path: string): Promise<IosAppDataEntryStats>;
+  access(path: string, mode: number): Promise<void>;
   readdir(path: string): Promise<string[]>;
   mkdir(
     path: string,

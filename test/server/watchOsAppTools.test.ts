@@ -164,6 +164,8 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const dataWipe = {
       containerOwnership: simulatorOwnership,
       appDataFs: {
+        lstat: async () => ({ isDirectory: () => true }),
+        access: async () => {},
         readdir: async () => ["data"],
         mkdir: async () => {},
         rm: async (target: string) => {

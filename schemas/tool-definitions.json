@@ -9475,7 +9475,7 @@
               "type": "boolean"
             },
             "screenRound": {
-              "description": "Wear OS profile: round when true or omitted (default), square when false",
+              "description": "Wear OS emulators only: true matches only a round Wear profile, false only a square one; a new watch is created round unless this is false",
               "type": "boolean"
             },
             "vehicle": {

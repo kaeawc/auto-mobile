@@ -73,6 +73,21 @@ export function defaultAndroidProfileIdFor(
   return NON_GEOMETRIC_FORM_FACTORS[formFactor].defaultProfileId;
 }
 
+/**
+ * The screen shape a Wear avdmanager profile id names (`wearos_small_round`, `wearos_square`,
+ * `wearos_rect`); undefined for a non-Wear profile or one whose id names no shape.
+ */
+export function wearProfileScreenRound(profileId: string | null | undefined): boolean | undefined {
+  const id = profileId?.trim() ?? "";
+  if (!NON_GEOMETRIC_FORM_FACTORS.watch.profileIdPattern.test(id)) {
+    return undefined;
+  }
+  if (/round/i.test(id)) {
+    return true;
+  }
+  return /square|rect/i.test(id) ? false : undefined;
+}
+
 function nonGeometricFormFactor(input: {
   systemImageTag?: string | null;
   profileId?: string | null;

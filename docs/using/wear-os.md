@@ -8,19 +8,47 @@ setting one up, the watch-specific behaviour, and what is out of scope.
 > profile, 384x384). Other images, square watches and physical watches are unverified. Sleep/wake
 > power-state changes have been measured; ambient mode itself has no usable readback.
 
-## Create the emulator by hand
+## Create the emulator
 
-AutoMobile does not pick a watch for you: `provisionDevice` never chooses a Wear OS image for a
-default Android device, and asking for `formFactor: "watch"` with `createIfMissing` fails with an
-error. Create the AVD with the Android command-line tools, or pass `provisionDevice` an explicit
-Wear OS `runtime` and `deviceType` (unverified).
+Install a Wear OS system image, then ask for a watch and let AutoMobile create it:
 
 ```bash
-# Pick a Wear OS system image. Use API 34 or newer; API 37 is the verified one.
-sdkmanager --list | grep android-wear
+# Use API 34 or newer; API 37 is the verified one.
 sdkmanager "system-images;android-37.0;android-wear-signed;arm64-v8a"
+```
 
-# List device profiles and pick a round one.
+```json
+{ "platform": "android", "formFactor": "watch", "createIfMissing": true }
+```
+
+Pass that to `startDevice`. AutoMobile picks only from installed `android-wear-signed`,
+`android-wear` and `android-wear-cn` images (in that order, newest API level in your
+`minOsVersion` / `maxOsVersion` range, an ABI your machine can run) and creates the AVD with the
+round `wearos_small_round` profile. A phone, tablet or foldable request never gets a Wear image. If
+no Wear image is installed in the range, the error names the `sdkmanager` command to run; nothing is
+downloaded. Asking again reuses the watch instead of creating another.
+
+To pick the screen shape, add `requires.screenRound`:
+
+```json
+{
+  "platform": "android",
+  "formFactor": "watch",
+  "createIfMissing": true,
+  "requires": { "screenRound": false }
+}
+```
+
+`true` matches only a watch whose profile is round and `false` only a square one, so an existing
+watch of the other shape is not reused; a new watch is created with `wearos_small_round` or
+`wearos_square`. A watch whose profile names no shape never satisfies `screenRound`. Leave it out to
+accept any watch and create a round one. `screenRound` on anything but an Android watch request
+fails without creating a device. Square watches are unverified.
+
+You can still create the AVD by hand:
+
+```bash
+# List device profiles and pick one.
 avdmanager list device | grep -i wear
 
 avdmanager create avd \
@@ -123,7 +151,7 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 
 ## Not supported
 
-- Choosing or creating a Wear OS emulator from `formFactor` alone, and physical watches.
+- Physical watches: only Wear OS emulators are matched and created.
 - Notifications, tiles, complications and watch faces (`systemTray` is built for the phone
   notification shade).
 - Ambient-mode verification, hardware wake by tilt or touch, and a paired phone and watch.

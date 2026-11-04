@@ -1,9 +1,12 @@
-import { z } from "zod";
 import {
   PROTOTYPE_STRINGS_CAPABILITY,
   PROTOTYPE_SEMANTICS_CAPABILITY,
-} from "../observe/android/ctrlProxyProtocol";
-import contract from "../../../schemas/prototype-spec-contract.json";
+} from "../observe/android/ctrlProxyProtocol/capabilities";
+import {
+  prototypeRenderLimits as limits,
+  prototypeStringFields,
+  prototypeStringOpaqueFields,
+} from "./prototypeRenderContract.generated";
 import { prototypeContractPatterns as patterns } from "./prototypeContractPatterns";
 import { isPrototypeDataPointer, resolvePrototypeDataPointer } from "./prototypeData";
 import { record } from "./prototypeTemplate";
@@ -12,14 +15,10 @@ import type { Located, PrototypeValidationError } from "./prototypeBindingValida
 
 export type PrototypeStrings = Record<string, Record<string, string | Record<string, string>>>;
 
-/** The spec `strings` field; the shared table check decides validity. */
-export const prototypeStringsSchema = z.custom<PrototypeStrings>(
-  (value) => prototypeStringsTableError(value) === undefined,
-);
 type Category = "zero" | "one" | "two" | "few" | "many" | "other";
 const categories = new Set(["zero", "one", "two", "few", "many", "other"]);
-const opaque = new Set(contract.stringOpaqueFields);
-const display = new Set(contract.stringFields);
+const opaque = new Set<string>(prototypeStringOpaqueFields);
+const display = new Set<string>(prototypeStringFields);
 const error = (path: string, message: string): PrototypeValidationError => ({ path, message });
 
 export function prototypeStringsTableError(value: unknown): PrototypeValidationError | undefined {
@@ -30,7 +29,7 @@ export function prototypeStringsTableError(value: unknown): PrototypeValidationE
   if (!Object.hasOwn(tables, "default")) {
     return error("strings", "Missing default string table");
   }
-  if (Object.keys(tables).length > contract.limits.MAX_PROTOTYPE_STRING_LOCALES) {
+  if (Object.keys(tables).length > limits.MAX_PROTOTYPE_STRING_LOCALES) {
     return error("strings", "String locale limit exceeded");
   }
   const seen = new Set<string>();
@@ -60,7 +59,7 @@ function translationValueError(
   if (
     typeof text !== "string" ||
     text.length === 0 ||
-    text.length > contract.limits.MAX_PROTOTYPE_STRING_LENGTH
+    text.length > limits.MAX_PROTOTYPE_STRING_LENGTH
   ) {
     return error(path, "Invalid translation string");
   }
@@ -95,7 +94,7 @@ function stringTableError(table: unknown, path: string): PrototypeValidationErro
   if (!entries) {
     return error(path, "Expected string table");
   }
-  if (Object.keys(entries).length > contract.limits.MAX_PROTOTYPE_STRING_KEYS) {
+  if (Object.keys(entries).length > limits.MAX_PROTOTYPE_STRING_KEYS) {
     return error(path, "String key limit exceeded");
   }
   for (const [key, entry] of Object.entries(entries)) {

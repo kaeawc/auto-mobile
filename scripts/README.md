@@ -672,3 +672,19 @@ itself keeps the tool's default parallelism; alongside another holder, or with f
 asked for, the checker is capped to the slots it holds (`GOMAXPROCS`, `tsgo --checkers`,
 `oxlint --threads`). With no free slot it waits up to `AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS`
 (default 60) and then runs on one thread. `AUTOMOBILE_HOST_TEST_SLOTS=off` disables the cap.
+
+### AAOS Emulator Smoke (advisory)
+
+`.github/workflows/aaos-emulator-smoke.yml` runs nightly, on dispatch, and on a pull request
+labelled `run-aaos`; it is not a required check. `scripts/ci/aaos-smoke/run-aaos-smoke.sh`
+installs the non-Play `android-automotive` API 34 ext9 image, enables the `device-condition`
+flag in a run-private database (`scripts/ci/aaos-smoke/enableFeatureFlags.ts`), and runs
+`scripts/ci/aaos-smoke/aaosSmoke.ts`, which creates the AVD with `startDevice` `createIfMissing`
+and drives observe, launch, tap, scroll, back, home, driving and parked. Each step asserts on its
+payload; step JSON, screenshots, `summary.md` and emulator diagnostics land in
+`AAOS_SMOKE_OUT_DIR` (default `scratch/aaos-smoke`). `AAOS_SMOKE_BREAK_ASSERTION=1` (the
+`break-assertion` dispatch input) swaps in an impossible assertion to check the failure summary.
+`AAOS_SMOKE_OS_VERSION` (default `14`) pins `startDevice`; an `AAOS_SMOKE_SYSTEM_IMAGE` override
+must be at the matching API level or the script exits 2 before installing. Each `sdkmanager` call
+is bounded by `AAOS_SMOKE_SDKMANAGER_TIMEOUT_SECONDS` (default 900). A setup failure still
+collects emulator diagnostics and adds a failure line to the job step summary.

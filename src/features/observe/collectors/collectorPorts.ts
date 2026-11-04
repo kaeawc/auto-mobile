@@ -10,6 +10,7 @@ export type HierarchyCollectorPort = Pick<
 /** The device-state collector surface observe consumers call; satisfied by the real class and fakes. */
 export type DeviceStateCollectorPort = Pick<
   DeviceStateCollector,
+  | "collectAutomotive"
   | "collectWakefulness"
   | "collectDeviceLock"
   | "collectBackStack"

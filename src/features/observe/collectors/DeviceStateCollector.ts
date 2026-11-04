@@ -1,3 +1,9 @@
+import {
+  parseDrivingState,
+  parseUxRestrictions,
+  parseDoActivities,
+} from "../automotive/carServiceDumpParsers";
+import { shell } from "../../deviceCondition/injectorSupport";
 import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { appendObserveError } from "../ObserveError";
@@ -24,6 +30,50 @@ export interface DeviceStateCollectorOptions {
  */
 export class DeviceStateCollector {
   constructor(private opts: DeviceStateCollectorOptions) {}
+
+  async collectAutomotive(
+    result: ObserveResult,
+    signal?: AbortSignal,
+    displayId = 0,
+  ): Promise<void> {
+    if (this.opts.device.formFactor !== "automotive") {
+      return;
+    }
+    const read = async (args: string[]): Promise<string> => {
+      try {
+        return await shell(this.opts.adb, args, signal);
+      } catch (error) {
+        // Automotive metadata is best-effort; preserve the rest of the observation.
+        logger.warn("Failed to read automotive observation state:", error);
+        return "";
+      }
+    };
+    const [drivingDump, uxDump] = await Promise.all([
+      read(["dumpsys", "car_service", "--services", "CarDrivingStateService"]),
+      read(["dumpsys", "car_service", "--services", "CarUxRestrictionsManagerService"]),
+    ]);
+    const drivingState = parseDrivingState(drivingDump);
+    const uxRestrictions = parseUxRestrictions(uxDump, displayId);
+    const { appId, activityName } = result.activeWindow ?? {};
+    let distractionOptimized: boolean | undefined;
+    if (appId && activityName) {
+      const activities = parseDoActivities(
+        await read(["cmd", "car_service", "get-do-activities", appId]),
+        appId,
+      );
+      const fullName = activityName.replace(/^\./, `${appId}.`);
+      distractionOptimized = activities?.has(fullName);
+    }
+    result.automotive = {
+      ...(drivingState !== undefined ? { drivingState } : {}),
+      ...(uxRestrictions ? { uxRestrictions } : {}),
+      ...(distractionOptimized !== undefined
+        ? { foregroundActivity: { distractionOptimized } }
+        : {}),
+      blocked:
+        uxRestrictions?.requiresDistractionOptimization === true && distractionOptimized === false,
+    };
+  }
 
   async collectWakefulness(result: ObserveResult, signal?: AbortSignal): Promise<void> {
     const { adb } = this.opts;

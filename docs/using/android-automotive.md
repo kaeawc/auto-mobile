@@ -96,6 +96,14 @@ Behaviour on the cluster and passenger displays is unchecked. The full pass/fail
 including which car-service commands each image accepts, is in
 [Android form factors](../design-docs/plat/android/form-factors.md#automotive-baseline-on-an-emulator).
 
+On automotive devices, `observe.automotive` reports `drivingState` (`parked`, `idling`, or `moving`),
+`uxRestrictions.requiresDistractionOptimization`, the numeric `uxRestrictions.activeRestrictions`
+bitmask for the observed display, and `foregroundActivity.distractionOptimized` when the foreground
+activity and its DO status are known. `blocked` is true when distraction optimization is required and
+the known foreground activity is not distraction optimized. Unavailable service reads omit the affected
+fields; `blocked: false` alone does not establish that the app is usable. Other device types omit the
+entire `automotive` block.
+
 ## Headless system user
 
 Most AAOS images run a headless system user (user 0 has no UI) and the driver is a secondary user,

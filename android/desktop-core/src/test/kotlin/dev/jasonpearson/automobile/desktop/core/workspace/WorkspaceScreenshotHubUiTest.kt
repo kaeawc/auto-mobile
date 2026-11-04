@@ -14,15 +14,16 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ObservationReconnectPolic
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /** Save Screenshot from a pane whose app has a [SharedDaemonStreamHub] (#17027). */
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 internal class WorkspaceScreenshotHubUiTest {
   private val onePxPng =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -32,17 +33,8 @@ internal class WorkspaceScreenshotHubUiTest {
     runComposeUiTest {
       val key = DeviceStreamKey("a", "session-a")
       val streams = mutableListOf<FakeObservationStream>()
-      val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-      val hub =
-        SharedDaemonStreamHub(
-          telemetryClientFactory = { FakeTelemetryPushClient() },
-          scope = scope,
-          observation =
-            ObservationHubConfig(
-              streamFactory = { FakeObservationStream().also { streams.add(it) } },
-              reconnect = ObservationReconnectPolicy({ awaitCancellation() }, { true }),
-            ),
-        )
+      val scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher())
+      val hub = hub(scope, streams)
       // A facet on the pane already holds the device's shared stream, with a frame from earlier.
       hub.observationStream(key).connect()
       val shared = streams.single()
@@ -95,4 +87,15 @@ internal class WorkspaceScreenshotHubUiTest {
       hub.close()
       scope.cancel()
     }
+
+  private fun hub(scope: CoroutineScope, streams: MutableList<FakeObservationStream>) =
+    SharedDaemonStreamHub(
+      telemetryClientFactory = { FakeTelemetryPushClient() },
+      scope = scope,
+      observation =
+        ObservationHubConfig(
+          streamFactory = { FakeObservationStream().also { streams.add(it) } },
+          reconnect = ObservationReconnectPolicy({ awaitCancellation() }, { true }),
+        ),
+    )
 }

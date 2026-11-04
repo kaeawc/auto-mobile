@@ -21,7 +21,7 @@ internal object PrototypeBundleCapabilities {
     }
     for (action in refs.context.actions) actions(action.value, caps)
     platform(refs, caps)
-    caps.addAll(PrototypePlatformModules.backendCapabilities(spec))
+    caps.addAll(PrototypeMapBackends.backendCapabilities(spec))
     return caps.sorted()
   }
 

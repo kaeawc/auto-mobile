@@ -262,7 +262,7 @@ internal object PrototypeStrictPolicy {
       PrototypePlatformModules.eventCapability(event)?.let(scanner.result::add)
     }
     if ("hideKeyboard" in locatedActionTypes(spec)) scanner.result.add("prototype_hide_keyboard_v1")
-    scanner.result.addAll(PrototypePlatformModules.backendCapabilities(spec))
+    scanner.result.addAll(PrototypeMapBackends.backendCapabilities(spec))
     return scanner.result
   }
 

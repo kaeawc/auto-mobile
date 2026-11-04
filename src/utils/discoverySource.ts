@@ -66,6 +66,9 @@ export function sourcesForPlatform(platform: Platform): DiscoverySource[] {
       return ["watchos-simulator"];
     case "tvos":
       return ["tvos-simulator"];
+    case "visionos":
+      // Vision Pro simulators are not discovered yet (#16849).
+      return [];
   }
 }
 

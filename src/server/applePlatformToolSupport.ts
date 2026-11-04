@@ -44,6 +44,17 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "setActiveDevice",
     "killDevice",
   ]),
+  // Device lifecycle only (owner decision on #16848). Input schemas do not name `visionos` until
+  // the simctl lifecycle lands (#16849); every other tool joins once verified on a Vision Pro.
+  visionos: new Set<string>([
+    "listDevices",
+    "listDeviceImages",
+    "provisionDevice",
+    "deleteDevice",
+    "startDevice",
+    "setActiveDevice",
+    "killDevice",
+  ]),
 };
 
 export function unsupportedPlatformToolMessage(
@@ -62,7 +73,7 @@ export function unsupportedPlatformToolMessage(
   );
 }
 
-/** Throws an ActionableError when `device` is a watch or an Apple TV and `toolName` has not opted in. */
+/** Throws an ActionableError when `device` is a non-iOS Apple device and `toolName` has not opted in. */
 export function assertToolSupportsDevicePlatform(
   toolName: string,
   device: Pick<BootedDevice, "platform">,

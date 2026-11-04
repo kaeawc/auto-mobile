@@ -41,11 +41,16 @@ class PrototypeSensitiveSinkRulesTest {
               PrototypeSpecValidator.validate(spec, library = true),
             )
           } else {
-            assertTrue(
-              PrototypeSpecValidator.validate(spec, library = true)
-                is PrototypeSpecValidation.Success,
-            )
+            // The spec's sensitive source is itself refused in a library (R1), so check R2 directly.
+            assertEquals(emptyList<PrototypeSpecError>(), sinkErrors(spec), file.name)
           }
         }
       }
+
+  private fun sinkErrors(input: String): List<PrototypeSpecError> {
+    val context = PrototypeStateChecks.Context()
+    val result = PrototypeSpecInput.validateInput(input, context)
+    assertTrue(result !is PrototypeSpecValidation.Failure, result.toString())
+    return PrototypeSensitiveSinkRules.errors(checkNotNull(context.root).jsonObject, context)
+  }
 }

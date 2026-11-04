@@ -88,9 +88,10 @@ it inlined per variant.
   then the others in key order; such views carry `data-screen`). The first view is the chosen
   variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
   `hidden`. Every view renders in the input's `locale` and `textSize`, passed to the still.
-- **Controls.** Only five: rotate (portrait/landscape; absent for watch and TV frames, which
+- **Controls.** Only six: rotate (portrait/landscape; absent for watch and TV frames, which
   never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
-  double-click to fit), a variant select (only with more than one variant), a screen select (only
+  double-click to fit), the opt-in 3D view ([Prototype web 3D device view](prototype-web-3d.md);
+  posture and hinge controls only for a frame with a hinge and postures), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
   screen select lists the shown revision's own screen views and is hidden with fewer than two, so
@@ -98,8 +99,8 @@ it inlined per variant.
   when the new revision has it, else shows that revision's start. Controls are buttons and a select with labels. A toolbar note says the preview is
   static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
   history sits under the stage, so the stage keeps the width.
-- **Script.** `prototypeWebPageRuntime` is inlined from its `toString()`, so it must stay
-  self-contained. It only shows and hides views, lists the shown revision's screens in the
+- **Script.** `prototypeWebPageRuntime`, then `prototypeWeb3dRuntime`, are inlined from their
+  `toString()` into the one pinned script, so each must stay self-contained. It only shows and hides views, lists the shown revision's screens in the
   screen select, moves the stage and animates rotation; UI state stays in memory, with no storage, cookies or URL
   changes. It must stay at or below 150 KB.
 - **Rotation.** Rotate turns the frame 90° (counterclockwise into landscape, clockwise back)
@@ -135,8 +136,10 @@ nothing at runtime drives a browser.
   non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
-  screen's view. The browser clock is fixed at 9:41 UTC, so the live status bar clock matches the
-  stills; a separate case installs a running clock and checks the clock advances each minute.
+  screen's view; the 3D toggle turns the shown view to the three-quarter pose, an arrow key on the
+  focused viewport orbits it, and toggling back restores the shown view's DOM byte for byte. The
+  browser clock is fixed at 9:41 UTC, so the live status bar clock matches the stills; a separate
+  case installs a running clock and checks the clock advances each minute.
 - **Settings cases.** `reference-checkout` also renders in both frames at the largest text size
   (`fontScale` 2, `accessibility-extra-extra-extra-large`) and in the `ar` locale (RTL), golden
   `<spec>--<frame>--<setting>.png` (and `--landscape.png` after it).
@@ -281,7 +284,7 @@ the host, so the page's script only switches between views it was given and neve
   `scrollable` one starts after 52 px with 90 px minimum tabs and clips the rest. Both bars select
   their linked `pager`'s initial page, else their numeric `stateKey`, else the first item. A nav item
   draws its named icon, else a 24 px `surfaceVariant` square, since item images are not inlined. An
-  icon button draws the icon placeholder in a 40 px circle inside a 48 px target: `standard` and
+  icon button draws its icon in a 40 px circle inside a 48 px target: `standard` and
   `outlined` (an `outlineVariant` outline) tint it `onSurfaceVariant`, `filled` sits on `primary` and
   `tonal` on `secondaryContainer`; the icon name labels it when no label is authored. A chip with no
   `stateKey` is an outlined assist chip and one with a `stateKey` a filter chip, whatever its
@@ -293,7 +296,7 @@ the host, so the page's script only switches between views it was given and neve
   carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column, box or card
   around such a child grows on that axis, as a Compose parent does around a `fillMax` child. A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
-  and actions as icon placeholders labelled with their action, and its `variant` sets its height,
+  and actions as icons labelled with their action, and its `variant` sets its height,
   title size and title alignment. A button, switch, checkbox, text field,
   list item, icon button, chip or slider whose `enabledWhen` is decidably false draws disabled. A button draws its `icon` before
   its label, a divider paints its authored colour, text decorations and built-in font
@@ -304,8 +307,18 @@ the host, so the page's script only switches between views it was given and neve
   lines); a captioned field's wrapper takes its size,
   weight and alignment in the parent. A spacer with no width, height or weight
   fills its line, and a line around one grows to its parent's size on its unsized axes, as a
-  Compose parent does around a `fillMaxSize` child. Icons draw as a tinted rounded outline around the icon name's first letter,
-  titled with the name, because the glyph set is not inlined. A switch draws its label before a
+  Compose parent does around a `fillMaxSize` child. In an Android frame an icon draws its Material Icons
+  glyph (the set Compose's `material-icons-extended` bundles, read from the Apache-2.0
+  `@material-design-icons/svg` package) as inline SVG in a 24 px box, in its `variant`'s style, else
+  `filled` as Android falls back, and tinted by `currentColor` or its style `color`. Only the
+  glyphs a still draws are read and inlined. The still takes its glyph source as an option, so it
+  stays free of Node builtins for the browser bundle: the server's page builder passes the
+  Material Icons reader, and a still given none draws every icon as the placeholder, unreported.
+  A glyph that would need `<defs>`/`<use>` ids is
+  treated as absent, since ids collide when a page draws it twice. A name with no glyph draws a
+  tinted rounded outline around its first letter, titled with the name, with reason `iconMissing`.
+  An iOS frame draws that outline for every icon, unreported, until its glyph set is decided
+  (#16526). A switch draws its label before a
   Material 3 track whose thumb sits at the end when on; a checkbox draws its box before its label,
   as both devices do. A video player is a black 16:9 frame (a `colorBars` sample draws bars, a
   `countdown` sample a 3; other sources are not inlined) under the skin's chrome at `startMs`

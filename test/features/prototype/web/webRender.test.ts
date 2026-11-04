@@ -1279,15 +1279,19 @@ describe("prototype web still parity (#16382)", () => {
   });
 
   test("an icon placeholder shows its name's initial", () => {
+    // An iOS frame has no glyph set yet (#16526), so every icon draws the placeholder.
     const iconOf = (name?: string) =>
       byTag(
-        renderPrototypeStill({
-          ...bare,
-          root: {
-            type: "column",
-            children: [{ type: "icon", testTag: "i", ...(name === undefined ? {} : { name }) }],
+        renderPrototypeStill(
+          {
+            ...bare,
+            root: {
+              type: "column",
+              children: [{ type: "icon", testTag: "i", ...(name === undefined ? {} : { name }) }],
+            },
           },
-        }),
+          { platform: "ios" },
+        ),
         "i",
       )[0]!;
     expect(textOf(iconOf("search"))).toBe("S");

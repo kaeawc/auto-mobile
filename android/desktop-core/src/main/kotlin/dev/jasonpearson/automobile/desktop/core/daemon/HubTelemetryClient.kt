@@ -5,14 +5,15 @@ import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * A pane's [TelemetryPushClient] that holds a lease on the [DaemonStreamHub]'s shared telemetry
- * connection instead of opening its own socket. [connect] takes the lease (once) and asks the hub
- * to revive a failed shared connection, [disconnect]/[dispose] release it, and [telemetryEvents]
- * carry only [key]'s events. The device arguments of [connect] are ignored: the view is bound to
- * [key].
+ * connection for its device instead of opening its own socket. [connect] takes the lease (once) and
+ * asks the hub to revive a failed shared connection, [disconnect]/[dispose] release it, and
+ * [telemetryEvents] carry only [key]'s events. The device arguments of [connect] are ignored: the
+ * view is bound to [key].
  */
 internal class HubTelemetryClient(
   private val hub: DaemonStreamHub,
@@ -29,7 +30,7 @@ internal class HubTelemetryClient(
     )
   override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
 
-  override val connectionState: SharedFlow<ConnectionState> = hub.telemetryConnectionState
+  override val connectionState: StateFlow<ConnectionState> = hub.telemetryConnectionState(key)
 
   override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     synchronized(lock) {
@@ -37,7 +38,7 @@ internal class HubTelemetryClient(
     }
     // Also revives a shared connection that failed or never started (e.g. before the desktop
     // session registered); a no-op while it is connected or already connecting.
-    hub.retry()
+    hub.retry(key)
   }
 
   override fun reconnect() = connect()
@@ -48,8 +49,7 @@ internal class HubTelemetryClient(
   }
 
   override fun isConnected(): Boolean =
-    synchronized(lock) { lease != null } &&
-      hub.telemetryConnectionState.value is ConnectionState.Connected
+    synchronized(lock) { lease != null } && connectionState.value is ConnectionState.Connected
 
   override fun dispose() = disconnect()
 

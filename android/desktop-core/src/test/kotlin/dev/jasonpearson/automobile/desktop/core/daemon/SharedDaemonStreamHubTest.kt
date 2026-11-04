@@ -12,7 +12,6 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,6 +23,10 @@ class SharedDaemonStreamHubTest {
   private class Harness(scope: CoroutineScope) {
     val clients = mutableListOf<FakeTelemetryPushClient>()
     val hub = SharedDaemonStreamHub({ FakeTelemetryPushClient().also { clients.add(it) } }, scope)
+
+    fun clientFor(key: DeviceStreamKey) = clients.single {
+      it.getLastDeviceSessionUuid() == key.deviceSessionUuid
+    }
   }
 
   private fun TestScope.harness() =
@@ -46,15 +49,20 @@ class SharedDaemonStreamHubTest {
   }
 
   @Test
-  fun `forty observed devices share one all-devices telemetry connection`() = runTest {
+  fun `facets on the same device share one device-scoped connection`() = runTest {
     val h = harness()
-    val leases =
-      (0 until 40).map { h.hub.subscribeTelemetry(DeviceStreamKey("emulator-$it", "uuid-$it")) {} }
+    val devices = (0 until 40).map { DeviceStreamKey("emulator-$it", "uuid-$it") }
+    // Two facets (e.g. Logs and a second telemetry consumer) per device.
+    val leases = devices.flatMap { key ->
+      listOf(h.hub.subscribeTelemetry(key) {}, h.hub.subscribeTelemetry(key) {})
+    }
 
-    assertEquals(1, h.clients.size)
-    assertNull(h.clients.single().getLastDeviceId())
-    assertNull(h.clients.single().getLastDeviceSessionUuid())
-    assertEquals(1, h.clients.single().getConnectCallCount())
+    assertEquals(40, h.clients.size)
+    devices.forEach { key ->
+      val client = h.clientFor(key)
+      assertEquals(key.deviceId, client.getLastDeviceId())
+      assertEquals(1, client.getConnectCallCount())
+    }
     leases.forEach { it.close() }
   }
 
@@ -63,12 +71,11 @@ class SharedDaemonStreamHubTest {
     val h = harness()
     val paneA = h.hub.telemetryClient(phoneA).also { it.connect() }
     val paneB = h.hub.telemetryClient(phoneB).also { it.connect() }
-    val shared = h.clients.single()
 
-    shared.emitEvent(log("a1", "emulator-5554", "uuid-a"))
-    shared.emitEvent(log("b1", "emulator-5556", "uuid-b"))
-    shared.emitEvent(log("unattributed", null, null))
-    shared.emitEvent(log("a2", "emulator-5554", "uuid-a"))
+    h.clientFor(phoneA).emitEvent(log("a1", "emulator-5554", "uuid-a"))
+    h.clientFor(phoneB).emitEvent(log("b1", "emulator-5556", "uuid-b"))
+    h.clientFor(phoneA).emitEvent(log("unattributed", null, null))
+    h.clientFor(phoneA).emitEvent(log("a2", "emulator-5554", "uuid-a"))
 
     assertEquals(listOf("a1", "a2"), messages(paneA.telemetryEvents.replayCache))
     assertEquals(listOf("b1"), messages(paneB.telemetryEvents.replayCache))
@@ -90,34 +97,37 @@ class SharedDaemonStreamHubTest {
   }
 
   @Test
-  fun `subscriptions are ref-counted and the connection closes with the last lease`() = runTest {
-    val h = harness()
-    val first = h.hub.subscribeTelemetry(phoneA) {}
-    val second = h.hub.subscribeTelemetry(phoneA) {}
-    val other = h.hub.subscribeTelemetry(phoneB) {}
-    assertEquals(mapOf(phoneA to 2, phoneB to 1), h.hub.subscriptions.value)
+  fun `subscriptions are ref-counted and a device's connection closes with its last lease`() =
+    runTest {
+      val h = harness()
+      val first = h.hub.subscribeTelemetry(phoneA) {}
+      val second = h.hub.subscribeTelemetry(phoneA) {}
+      val other = h.hub.subscribeTelemetry(phoneB) {}
+      assertEquals(mapOf(phoneA to 2, phoneB to 1), h.hub.subscriptions.value)
 
-    first.close()
-    first.close()
-    assertEquals(mapOf(phoneA to 1, phoneB to 1), h.hub.subscriptions.value)
-    second.close()
-    assertEquals(mapOf(phoneB to 1), h.hub.subscriptions.value)
-    assertEquals(0, h.clients.single().getDisconnectCallCount())
+      first.close()
+      first.close()
+      assertEquals(mapOf(phoneA to 1, phoneB to 1), h.hub.subscriptions.value)
+      assertEquals(0, h.clientFor(phoneA).getDisconnectCallCount())
 
-    other.close()
-    assertEquals(emptyMap<DeviceStreamKey, Int>(), h.hub.subscriptions.value)
-    assertEquals(1, h.clients.single().getDisconnectCallCount())
+      second.close()
+      assertEquals(mapOf(phoneB to 1), h.hub.subscriptions.value)
+      assertEquals(1, h.clientFor(phoneA).getDisconnectCallCount())
+      assertEquals(0, h.clientFor(phoneB).getDisconnectCallCount())
 
-    h.hub.subscribeTelemetry(phoneA) {}.close()
-    assertEquals(2, h.clients.size)
-  }
+      other.close()
+      assertEquals(emptyMap<DeviceStreamKey, Int>(), h.hub.subscriptions.value)
+      assertEquals(1, h.clientFor(phoneB).getDisconnectCallCount())
+
+      h.hub.subscribeTelemetry(phoneA) {}.close()
+      assertEquals(3, h.clients.size)
+    }
 
   @Test
-  fun `a pane mounted on an open connection receives its device's recent events`() = runTest {
+  fun `a facet mounted on an open connection receives its device's recent events`() = runTest {
     val h = harness()
-    val early = h.hub.subscribeTelemetry(phoneB) {}
+    val early = h.hub.subscribeTelemetry(phoneA) {}
     h.clients.single().emitEvent(log("before", "emulator-5554", "uuid-a"))
-    h.clients.single().emitEvent(log("other", "emulator-5556", "uuid-b"))
 
     val received = mutableListOf<TelemetryDisplayEvent>()
     val late = h.hub.subscribeTelemetry(phoneA) { received.add(it) }
@@ -146,13 +156,13 @@ class SharedDaemonStreamHubTest {
   }
 
   @Test
-  fun `view reconnect retries the failed shared connection without a second lease`() = runTest {
+  fun `view reconnect retries its failed device connection without a second lease`() = runTest {
     val h = harness()
     val pane = h.hub.telemetryClient(phoneA)
     pane.connect()
     val shared = h.clients.single()
     shared.setConnectionState(ConnectionState.Error("down"))
-    assertEquals(ConnectionState.Error("down"), h.hub.telemetryConnectionState.value)
+    assertEquals(ConnectionState.Error("down"), h.hub.telemetryConnectionState(phoneA).value)
     assertFalse(pane.isConnected())
 
     pane.connect()
@@ -161,6 +171,6 @@ class SharedDaemonStreamHubTest {
     assertEquals(mapOf(phoneA to 1), h.hub.subscriptions.value)
     assertTrue(pane.isConnected())
     pane.dispose()
-    assertEquals(ConnectionState.Disconnected(null), h.hub.telemetryConnectionState.value)
+    assertEquals(ConnectionState.Disconnected(null), h.hub.telemetryConnectionState(phoneA).value)
   }
 }

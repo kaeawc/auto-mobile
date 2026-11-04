@@ -32,14 +32,14 @@ fun interface StreamLease : AutoCloseable {
 /**
  * The desktop's shared, per-process owner of daemon streams (#5262). Facets ask the hub for a
  * device's stream instead of opening their own socket: the hub keeps one long-lived connection per
- * stream kind, ref-counts subscriptions per [DeviceStreamKey] as facets mount and unmount, and
- * demultiplexes events to each device. The connection opens on the first subscription and closes
- * when the last one is released.
+ * observed device and stream kind, shared by every facet showing that device, and ref-counts
+ * subscriptions per [DeviceStreamKey] as facets mount and unmount. A device's connection opens on
+ * its first subscription and closes when its last one is released.
  */
 interface DaemonStreamHub {
   /**
-   * Subscribe [sink] to [key]'s telemetry. Events already buffered on the shared connection for
-   * that device are delivered first. [sink] runs under the hub's routing lock and must not block.
+   * Subscribe [sink] to [key]'s telemetry. Events already buffered on that device's shared
+   * connection are delivered first. [sink] runs under the hub's routing lock and must not block.
    */
   fun subscribeTelemetry(key: DeviceStreamKey, sink: (TelemetryDisplayEvent) -> Unit): StreamLease
 
@@ -53,14 +53,14 @@ interface DaemonStreamHub {
    */
   fun telemetryClient(key: DeviceStreamKey): TelemetryPushClient
 
-  /** State of the shared telemetry connection. */
-  val telemetryConnectionState: StateFlow<ConnectionState>
+  /** State of [key]'s shared telemetry connection; Disconnected while no lease holds it. */
+  fun telemetryConnectionState(key: DeviceStreamKey): StateFlow<ConnectionState>
 
   /** Live subscription count per device; a key leaves the map when its last lease is released. */
   val subscriptions: StateFlow<Map<DeviceStreamKey, Int>>
 
-  /** Ask a failed or stopped shared connection to reconnect; no-op without subscribers. */
-  fun retry()
+  /** Ask [key]'s failed or stopped connection to reconnect; no-op without subscribers. */
+  fun retry(key: DeviceStreamKey)
 
   /** Release every connection. The hub must not be used afterwards. */
   fun close()

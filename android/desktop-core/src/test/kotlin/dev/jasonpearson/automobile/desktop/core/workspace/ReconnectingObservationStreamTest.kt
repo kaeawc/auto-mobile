@@ -7,10 +7,22 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationReconnectPolicy
+import dev.jasonpearson.automobile.desktop.core.daemon.RECONNECT_INITIAL_DELAY_MS
+import dev.jasonpearson.automobile.desktop.core.daemon.RECONNECT_MAX_DELAY_MS
+import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,7 +33,7 @@ import org.junit.Test
  * injected [GatedBackoff] seam (each attempt awaits a deferred the test releases), so reconnect
  * attempts step deterministically with zero wall time and nothing touches a real socket.
  */
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ReconnectingObservationStreamTest {
 
   @Test
@@ -301,4 +313,65 @@ class ReconnectingObservationStreamTest {
     }
     assertEquals(RECONNECT_MAX_DELAY_MS, reconnectBackoffMs(40))
   }
+
+  @Test
+  fun `facets on a hub share one connection and leave reconnecting to the hub`() =
+    runComposeUiTest {
+      val streams = CopyOnWriteArrayList<FakeObservationStream>()
+      val hubScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher())
+      val hub =
+        SharedDaemonStreamHub(
+          telemetryClientFactory = { FakeTelemetryPushClient() },
+          scope = hubScope,
+          observation =
+            ObservationHubConfig(
+              streamFactory = { FakeObservationStream().also { streams.add(it) } },
+              // The hub's own backoff never elapses here: the test only counts connections.
+              reconnect = ObservationReconnectPolicy({ awaitCancellation() }, { true }),
+            ),
+        )
+      val facetBackoffs = CopyOnWriteArrayList<Int>()
+      val column =
+        DeviceColumn(
+          deviceId = "dev-1",
+          name = "Phone",
+          platform = Platform.Android,
+          deviceSessionUuid = "epoch-a",
+        )
+      val mounted = mutableStateOf(true)
+      setContent {
+        if (mounted.value) {
+          // Layout, Performance and Navigation on the same device.
+          repeat(3) {
+            rememberReconnectingObservationState(
+              ReconnectingObservationOptions(
+                deviceId = column.deviceId,
+                streamFactory = hubObservationFactory(hub, column) { error("unused") },
+                backoffDelay = { facetBackoffs.add(it) },
+                socketAvailable = { true },
+              ),
+            )
+          }
+        }
+      }
+      waitForIdle()
+      assertEquals(1, streams.size)
+      assertEquals(
+        mapOf(DeviceStreamKey("dev-1", "epoch-a") to 3),
+        hub.observationSubscriptions.value,
+      )
+
+      runOnIdle {
+        streams.single().emitConnectionState(ConnectionState.Disconnected("Stream ended"))
+      }
+      waitForIdle()
+      assertTrue(facetBackoffs.isEmpty())
+      assertEquals(1, streams.single().connectCallCount)
+
+      mounted.value = false
+      waitForIdle()
+      assertTrue(hub.observationSubscriptions.value.isEmpty())
+      assertEquals(1, streams.single().disconnectCallCount)
+      hub.close()
+    }
 }

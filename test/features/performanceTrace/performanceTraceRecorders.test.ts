@@ -17,6 +17,8 @@ import {
   type XctraceRecorderDependencies,
 } from "../../../src/features/performanceTrace/XctraceRecorder";
 import { traceArtifactBytes } from "../../../src/features/performanceTrace/xctraceFinalization";
+import { XctraceTemplateUnavailableError } from "../../../src/features/performanceTrace/XctraceTemplateUnavailableError";
+import { parseXctraceTemplateList } from "../../../src/features/performanceTrace/performanceTraceTemplates";
 import { PerformanceTraceStopTimeoutError } from "../../../src/features/performanceTrace/PerformanceTraceStopTimeoutError";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -182,9 +184,31 @@ describe("Perfetto recorder (#14102)", () => {
   });
 });
 
+/** `xcrun xctrace list templates` on Xcode 26.6 (17F113): no "Hangs" template (#16970). */
+const XCODE_26_6_TEMPLATES = [
+  "== Standard Templates ==",
+  "Activity Monitor",
+  "Allocations",
+  "Animation Hitches",
+  "App Launch",
+  "Audio System Trace",
+  "Leaks",
+  "Logging",
+  "Network",
+  "SwiftUI",
+  "System Trace",
+  "Time Profiler",
+  "",
+  "== Custom Templates ==",
+  "",
+].join("\n");
+
 class FakeXctraceHost implements XctraceHost {
   readonly spawned: Array<{ file: string; args: string[]; child: FakeChildProcess }> = [];
   readonly exports: string[][] = [];
+  templateListCalls = 0;
+  templateList = XCODE_26_6_TEMPLATES;
+  templateListError: Error | undefined;
   startOutput = "Starting recording with the Hangs template. Ctrl-C to stop the recording.\n";
 
   constructor(private readonly timer: FakeTimer) {}
@@ -201,6 +225,13 @@ class FakeXctraceHost implements XctraceHost {
     args: string[] = [],
     _options?: HostCommandOptions,
   ): Promise<ExecResult> {
+    if (args.join(" ") === "xctrace list templates") {
+      this.templateListCalls += 1;
+      if (this.templateListError) {
+        throw this.templateListError;
+      }
+      return execResult(this.templateList);
+    }
     this.exports.push(args);
     if (args.includes("--toc")) {
       return execResult(fixture("xctrace-toc.xml"));
@@ -448,6 +479,62 @@ describe("xctrace recorder (#14102)", () => {
       return child;
     };
     await expect(recorder.start(iosRequest)).rejects.toThrow("Device not found");
+  });
+});
+
+describe("xctrace template availability (#16970)", () => {
+  test("records hangs with the Time Profiler template, which carries the Hangs instrument", async () => {
+    const { host, recorder } = xctrace();
+    await recorder.start(iosRequest);
+    const args = host.spawned[0]!.args;
+    expect(args[args.indexOf("--template") + 1]).toBe("Time Profiler");
+  });
+
+  test("refuses a template the installed Xcode lacks before spawning xctrace record", async () => {
+    const { host, recorder } = xctrace();
+    host.templateList = "== Standard Templates ==\nAllocations\nApp Launch\n";
+    const error = await recorder.start(iosRequest).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(XctraceTemplateUnavailableError);
+    expect(error).toBeInstanceOf(ActionableError);
+    const unavailable = error as XctraceTemplateUnavailableError;
+    expect(unavailable.template).toBe("hangs");
+    expect(unavailable.instrumentsTemplate).toBe("Time Profiler");
+    expect(unavailable.availableTemplates).toEqual(["appLaunch", "allocations"]);
+    expect(unavailable.message).toContain("appLaunch, allocations");
+    expect(host.spawned).toEqual([]);
+  });
+
+  test("names no alternatives when no mapped template is installed", async () => {
+    const { host, recorder } = xctrace();
+    host.templateList = "== Standard Templates ==\nLeaks\n";
+    await expect(recorder.start(iosRequest)).rejects.toThrow("xcrun xctrace list templates");
+  });
+
+  test("reads the template list once per recorder", async () => {
+    const { host, recorder } = xctrace();
+    await recorder.start(iosRequest);
+    await recorder.start({ ...iosRequest, traceId: "trace-3", template: "hitches" });
+    expect(host.templateListCalls).toBe(1);
+    expect(host.spawned).toHaveLength(2);
+  });
+
+  test("still records when the template list cannot be read, and retries the list next time", async () => {
+    const { host, recorder } = xctrace();
+    host.templateListError = new Error("xcrun: error: unable to find utility");
+    await recorder.start(iosRequest);
+    expect(host.spawned).toHaveLength(1);
+
+    host.templateListError = undefined;
+    await recorder.start({ ...iosRequest, traceId: "trace-3" });
+    expect(host.templateListCalls).toBe(2);
+  });
+
+  test("parses template names without section headings or blank lines", () => {
+    expect([...parseXctraceTemplateList(XCODE_26_6_TEMPLATES)]).not.toContain("Hangs");
+    expect(parseXctraceTemplateList(XCODE_26_6_TEMPLATES)).toEqual(
+      new Set(XCODE_26_6_TEMPLATES.split("\n").filter((line) => line && !line.startsWith("=="))),
+    );
   });
 });
 

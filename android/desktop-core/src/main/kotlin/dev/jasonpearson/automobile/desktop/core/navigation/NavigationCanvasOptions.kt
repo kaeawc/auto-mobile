@@ -5,6 +5,8 @@ package dev.jasonpearson.automobile.desktop.core.navigation
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import dev.jasonpearson.automobile.desktop.core.time.Clock
+import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.coroutines.Dispatchers
 
 data class NavigationCanvasOptions(
@@ -21,5 +23,7 @@ data class NavigationCanvasOptions(
   val activeContext: NavigationActiveContext? = null,
   // Build lens over the union graph (#4987); [BuildLens.Union] keeps Phase 2 opacity.
   val buildLens: BuildLens = BuildLens.Union,
+  // Time source for the recency-graded fade (#16952); tests inject a FakeClock.
+  val clock: Clock = SystemClock,
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
 )

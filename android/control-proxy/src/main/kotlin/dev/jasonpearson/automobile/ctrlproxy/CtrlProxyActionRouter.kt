@@ -461,6 +461,9 @@ internal class CtrlProxyActionRouter(private val service: CtrlProxy) : CtrlProxy
     alias: String?,
   ) = service.appDiscovery.resetKeystore(requestId, packageName, scope, alias)
 
+  override suspend fun exportAttestation(requestId: String?) =
+    service.appDiscovery.exportAttestation(requestId)
+
   override suspend fun discoverKeystore(requestId: String?, packageName: String) =
     service.appDiscovery.discoverKeystore(requestId, packageName)
 

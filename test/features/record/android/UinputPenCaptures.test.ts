@@ -368,6 +368,7 @@ async function recordedCapture(
       process.stdout.emit("data", Buffer.from(asNodeSpecificGeteventOutput(frame.text)));
     }
   }
+  timer.advanceTime(50);
   return { gestures, result: await recorder.stop({ hostOnly: true }) };
 }
 

@@ -23,7 +23,10 @@ import type { TerminalIntentDurability } from "./releaseWrite";
 import { releaseSuperseded, type ReleaseReasonState } from "../sessionManager/internalContracts";
 import { type SessionRowWriter } from "../sessionRowWriter";
 import type { SupersededRowReasserts } from "../supersededRowReasserts";
+import type { PlanLabelRegistry } from "../planLabelRegistry";
 import {
+  cliIdleWindowMarker,
+  cliIdleWindowReleaseMarker,
   managedExecutionReleaseMarker,
   setReleaseStage,
   type SessionLifecycleSlots,
@@ -37,6 +40,7 @@ export interface CommittedReleaseSnapshots {
 
 export interface SessionReleaseCommitHost {
   readonly stateRestore: SessionDeviceStateRestore;
+  readonly planLabels: Pick<PlanLabelRegistry, "retainedEndedBase">;
   revokeSupersededIdentityReplacement(operation?: SessionReleaseOperation): boolean;
   abandonSupersededRelease(
     sessionId: string,
@@ -338,6 +342,21 @@ export class SessionReleaseCommit {
     throw toActionableError(error, `Failed to finalize session ${session.sessionId} release`);
   }
 
+  /**
+   * The CLI idle window a release reports. A plan label the cascade ends with its base's
+   * `cli-idle-timeout` reports the base's window, retained with the base's end (#16971); any other
+   * release reports the session's own, present only on the `cli-idle` policy (#16940).
+   */
+  private cliIdleWindowOfRelease(
+    session: Session,
+    releaseReason: string,
+  ): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+    const endedBase = this.host.planLabels.retainedEndedBase(session.sessionId);
+    return endedBase?.releaseReason === releaseReason
+      ? cliIdleWindowMarker(endedBase.cliIdleTimeoutMs)
+      : cliIdleWindowReleaseMarker(session);
+  }
+
   /** The frozen snapshot of a release: its reason, timing and the row it will write. */
   private buildReleaseSnapshot(
     session: Session,
@@ -353,6 +372,7 @@ export class SessionReleaseCommit {
       releasedAtMs,
       terminal: isTerminalReleaseReason(releaseReason),
       ...managedExecutionReleaseMarker(session),
+      ...this.cliIdleWindowOfRelease(session, releaseReason),
       heartbeat: {
         lastHeartbeatMs: session.lastHeartbeat,
         hasReceivedHeartbeat: session.hasReceivedHeartbeat,

@@ -111,6 +111,13 @@ export const startDeviceParametersSchema = z.object({
         .describe(
           "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
         ),
+      /** Wear profile shape: matches only that shape; a new watch is round unless false. */
+      screenRound: z
+        .boolean()
+        .optional()
+        .describe(
+          "Wear OS emulators only: true matches only a round Wear profile, false only a square one; a new watch is created round unless this is false",
+        ),
       vehicle: z
         .object({
           motion: z

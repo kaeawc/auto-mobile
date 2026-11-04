@@ -131,20 +131,24 @@ object NavigationBuildLens {
     return NavigationGraph(screens = screens, transitions = transitions)
   }
 
-  /** Opacity for a node/edge under [lens]; [BuildLens.Union] defers to Phase 2's opacity. */
+  /**
+   * Opacity for a node/edge under [lens] as of [nowMs]; [BuildLens.Union] defers to Phase 2's
+   * opacity. Faded elements are graded by the recency of their other-build records (#16952).
+   */
   fun alphaFor(
     provenance: List<ScreenProvenance>,
     context: NavigationActiveContext?,
     lens: BuildLens,
+    nowMs: Long,
   ): Float =
     when (lens) {
       is BuildLens.Filter ->
         if (membership(provenance, lens.build) == BuildMembership.OtherBuild) {
-          ProvenanceOpacity.FADED_ALPHA
+          ProvenanceRecency.fadedAlphaFor(provenance.filter { it.isClassifiable() }, nowMs)
         } else {
           ProvenanceOpacity.ACTIVE_ALPHA
         }
-      else -> ProvenanceOpacity.alphaFor(provenance, context)
+      else -> ProvenanceOpacity.alphaFor(provenance, context, nowMs)
     }
 
   /** Accessible description for a node/edge under [lens]. */
@@ -159,7 +163,8 @@ object NavigationBuildLens {
         val build = label(lens.build)
         when (membership(provenance, lens.build)) {
           BuildMembership.InBuild -> "$label — in build $build"
-          BuildMembership.OtherBuild -> "$label — not in build $build"
+          BuildMembership.OtherBuild ->
+            "$label — not in build $build, last seen ${newestLastSeen(provenance)}"
           BuildMembership.Unclassified -> "$label — no build recorded"
         }
       }
@@ -209,6 +214,9 @@ object NavigationBuildLens {
       }
     return BuildDiffEntry(item, status)
   }
+
+  private fun newestLastSeen(provenance: List<ScreenProvenance>): Long =
+    provenance.filter { it.isClassifiable() }.maxOf { it.lastSeen }
 
   private fun ScreenProvenance.isClassifiable(): Boolean =
     deviceId != ProvenanceOpacity.LEGACY_DEVICE_SENTINEL

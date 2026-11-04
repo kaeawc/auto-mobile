@@ -23,6 +23,8 @@ const API_STANDBY_BUCKET = 28;
 const API_RESTRICTED_BUCKET = 30;
 /** RUN_ANY_IN_BACKGROUND (the op behind isBackgroundRestricted) is API 28+. */
 const API_RUN_ANY_IN_BACKGROUND = 28;
+/** WAKE_LOCK package-mode denial is supported by these recipes on API 28+. */
+const API_WAKE_LOCK = 28;
 const API_SCHEDULE_EXACT_ALARM = 31;
 const API_DEVICE_IDLE = 23;
 
@@ -34,6 +36,7 @@ export const UID_MODE_OPS: ReadonlySet<KillProfileAppOp> = new Set(["SCHEDULE_EX
 const APP_OP_MIN_API: Readonly<Record<KillProfileAppOp, number>> = {
   RUN_ANY_IN_BACKGROUND: API_RUN_ANY_IN_BACKGROUND,
   SCHEDULE_EXACT_ALARM: API_SCHEDULE_EXACT_ALARM,
+  WAKE_LOCK: API_WAKE_LOCK,
 };
 
 const APP_OP_MODE = /\b(allow|ignore|deny|default|foreground)\b/;
@@ -369,6 +372,7 @@ export async function applyKillProfile(
 /** AOSP defaults reset writes with `baseline: true` when nothing is recorded. */
 function baselinePlans(context: Context): StepPlan[] {
   const runAny = appOpCommand(context, "set", "RUN_ANY_IN_BACKGROUND");
+  const wakeLock = appOpCommand(context, "set", "WAKE_LOCK");
   const exactAlarm = appOpCommand(context, "set", "SCHEDULE_EXACT_ALARM");
   return [
     { label: "battery reset", command: "shell dumpsys battery reset" },
@@ -386,6 +390,12 @@ function baselinePlans(context: Context): StepPlan[] {
       label: "appops RUN_ANY_IN_BACKGROUND default",
       command: `${runAny} default`,
       minApi: API_RUN_ANY_IN_BACKGROUND,
+    },
+    {
+      label: "appops WAKE_LOCK default",
+      command: `${wakeLock} default`,
+      minApi: API_WAKE_LOCK,
+      unsupportedOutput: /Unknown operation string/i,
     },
     {
       label: "appops SCHEDULE_EXACT_ALARM default",

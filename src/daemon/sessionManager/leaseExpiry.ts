@@ -1,3 +1,4 @@
+import type { EndedLabelBase } from "../planLabelRegistry";
 import { type DbWriteBarrier } from "../../db/dbWriteBarrier";
 import { resolveOwnershipSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
 import { ignoresManagedExecutionIdleDeadline } from "../../models/managedExecutionLiveness";
@@ -50,6 +51,7 @@ import {
   isReleaseVetoedByExecutions,
 } from "../unsettledExecutionVeto";
 import {
+  cliIdleWindowMs,
   type ReleaseReasonState,
   type SessionClockExecution,
   type SessionLifecycleSlots,
@@ -90,7 +92,11 @@ export interface SessionLeaseExpiryHost {
     excludeExecutionId?: string,
   ): boolean;
   getPersistedTerminalRelease(sessionId: string): Promise<SessionReleaseSnapshot | undefined>;
-  terminalReleaseAsOfNow(session: Session, releaseReason: string): SessionReleaseSnapshot;
+  terminalReleaseAsOfNow(
+    session: Session,
+    releaseReason: string,
+    endedBase?: EndedLabelBase,
+  ): SessionReleaseSnapshot;
   readonly sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup;
   readonly expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller;
 }
@@ -675,8 +681,12 @@ export class SessionLeaseExpiry {
     const session = this.host.sessions.get(sessionId) ?? this.host.getReleasingSession(sessionId);
     this.host.expiryReleaseExecutionCanceller(
       sessionId,
-      // A cli-idle session's heartbeat timeout is its adopted idle window (#16908).
-      new SessionReleasedDuringCallError(sessionId, releaseReason, session?.heartbeatTimeoutMs),
+      // Only a session on the cli-idle policy has an idle window to report (#16908, #16940).
+      new SessionReleasedDuringCallError(
+        sessionId,
+        releaseReason,
+        session ? cliIdleWindowMs(session) : undefined,
+      ),
       query,
       session?.assignedDevice,
     );

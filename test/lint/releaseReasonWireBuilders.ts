@@ -54,6 +54,10 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Returns an in-memory persisted-release lookup for registration admission, not a wire answer.",
   ],
   [
+    "src/daemon/daemonRequestHandlersParts/sessionReporting.ts#lookupReleasedSessionEnd",
+    "Returns an in-memory release lookup; notFoundResult and the registration refusal serialize it through releasedSessionNotFoundFields.",
+  ],
+  [
     "src/daemon/proxy/notFoundDecision.ts#decideNotFoundAnswer",
     "Returns an in-memory heartbeat not-found decision used to update proxy binding state.",
   ],
@@ -102,8 +106,8 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Recovered in-memory release state moved from SessionManager; wire builders serialize its snapshots.",
   ],
   [
-    "src/daemon/planLabelRegistry.ts#PlanLabelRegistry.takeDerivedLabelSessions",
-    "Retains a base's in-memory terminal end for its published labels; nothing is serialized here.",
+    "src/daemon/planLabelRegistry.ts#endedLabelBase",
+    "Builds a base's in-memory terminal end (reason and CLI idle window) for its labels; nothing is serialized here.",
   ],
   [
     "src/daemon/sessionRowWriter.ts#write",

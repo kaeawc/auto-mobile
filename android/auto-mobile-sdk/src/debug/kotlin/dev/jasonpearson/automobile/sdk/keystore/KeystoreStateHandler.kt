@@ -33,33 +33,75 @@ internal data class AliasMetadata(
 )
 
 /**
- * Caller authorization belongs to the provider; scoped deletion also enforces opt-in and the
- * injected mutation gate here. Backend/probe fakes keep this boundary deterministic.
- * deviceLocked=locked comes only from the injected device lock probe and does not block reads.
- * Metadata locked/authentication_required outcomes remain reserved: AndroidKeyStore swallows
- * metadata lookup failures, so reads cannot observe them. Deletion maps failures per alias.
- * present=false means not present or not observable, including an indistinguishable Keystore daemon
- * failure.
+ * Caller authorization belongs to the provider; mutations also enforce opt-in and the injected
+ * mutation gate here. Backend/probe fakes keep this boundary deterministic. deviceLocked=locked
+ * comes only from the injected device lock probe and does not block reads. AndroidKeyStore swallows
+ * metadata lookup failures; debug fault injection can exercise the metadata failure mappings.
+ * Deletion maps failures per alias. present=false means not present or not observable, including an
+ * indistinguishable Keystore daemon failure.
  */
 internal class KeystoreStateHandler(
   private val backend: KeystoreBackend,
   private val lockProbe: DeviceLockProbe,
   private val mutationsAllowed: () -> Boolean = { false },
 ) {
-  fun handle(method: String, scope: String? = null, alias: String? = null): JSONObject {
+  fun handle(
+    method: String,
+    scope: String? = null,
+    alias: String? = null,
+    kind: String? = null,
+    delayMs: Long? = null,
+  ): JSONObject {
+    KeystoreFaultPlan.clearIfDisabled()
     if (method == "delete") return reset(scope, alias)
+    if (method == "injectFault" || method == "clearFaults") {
+      return updateFaults(method, scope, alias, kind, delayMs)
+    }
     if (!KeystoreTestState.isEnabled()) {
       return envelope(KeystoreResponse.Disabled, DeviceLockState.UNKNOWN)
     }
     val locked = probeLock()
     val response =
       when {
-        // The delete call uses its own narrow envelope above.
+        // Mutation calls use their own narrow envelopes above.
         method != "discover" && method != "metadata" -> KeystoreResponse.Unsupported
         method == "discover" -> KeystoreResponse.Ok()
         else -> metadata(scope, alias, locked)
       }
     return envelope(response, locked)
+  }
+
+  private fun updateFaults(
+    method: String,
+    scope: String?,
+    alias: String?,
+    kind: String?,
+    delayMs: Long?,
+  ): JSONObject {
+    val result =
+      JSONObject().apply {
+        put("schemaVersion", 1)
+        put("capability", "storage.keystore")
+        put("bridgeAvailable", true)
+        scope?.let { put("requestedScope", it) }
+        alias?.let { put("requestedAlias", it) }
+        kind?.let { put("requestedKind", it) }
+      }
+    fun refuse(outcome: String, reason: String): JSONObject =
+      result.put("outcome", outcome).put("reason", reason)
+    if (scope.isNullOrBlank() && alias.isNullOrBlank()) {
+      return refuse("invalid_selector", "EMPTY_SELECTOR")
+    }
+    if (!KeystoreTestState.isEnabled()) return refuse("disabled", "DISABLED")
+    if (!mutationsAllowed()) return refuse("authorization_denied", "MUTATION_NOT_ALLOWED")
+    val selected =
+      selectedAliases(scope, alias) ?: return refuse("scope_not_declared", "SCOPE_NOT_DECLARED")
+    if (method == "clearFaults") {
+      KeystoreFaultPlan.clear(selected)
+    } else if (!KeystoreFaultPlan.inject(selected, kind, delayMs)) {
+      return refuse("invalid_selector", "INVALID_FAULT")
+    }
+    return result.put("outcome", "ok")
   }
 
   /** Selectors and both authorization gates are checked before any backend operation. */

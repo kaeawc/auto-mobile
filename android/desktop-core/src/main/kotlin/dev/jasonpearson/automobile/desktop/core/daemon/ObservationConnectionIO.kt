@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.runInterruptible
 
 internal fun ObservationStreamClient.releaseActiveTransport() {
   val target =
@@ -34,6 +35,8 @@ internal suspend fun ObservationStreamClient.readMessages(generation: Long) {
     return
   }
   val currentReader = activeTransport.reader
+  // One reader thread per connection, released when this loop ends (#5262).
+  val readerThread = readerThreads.create("observation-stream-reader")
 
   try {
     log.info("Starting message read loop")
@@ -41,7 +44,7 @@ internal suspend fun ObservationStreamClient.readMessages(generation: Long) {
     // Stop as soon as a later connect()/disconnect() supersedes this generation, so a stale loop
     // never emits frames onto the shared flows after ownership has moved on.
     while (ownsGeneration(generation) && _connectionState.value.isConnected) {
-      val line = currentReader.readLine() ?: break
+      val line = runInterruptible(readerThread) { currentReader.readLine() } ?: break
       if (line.isBlank()) continue
 
       log.info("Received message (${line.length} chars): ${line.take(200)}...")
@@ -56,6 +59,7 @@ internal suspend fun ObservationStreamClient.readMessages(generation: Long) {
   } catch (e: java.io.IOException) {
     logObservationReadError(e)
   } finally {
+    readerThread.close()
     finishObservationRead(generation, activeTransport)
     onReadLoopExit()
   }

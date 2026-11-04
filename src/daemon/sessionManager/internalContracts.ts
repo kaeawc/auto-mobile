@@ -379,3 +379,44 @@ export function managedExecutionReleaseMarker(
     ? { livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY }
     : {};
 }
+
+/**
+ * The CLI idle window of a session on the `cli-idle` policy (#16940): its heartbeat timeout,
+ * which `adoptCliLivenessPolicy` sets to the clamped window. Undefined for any other policy, so a
+ * heartbeat lease is never reported as an idle window.
+ */
+export function cliIdleWindowMs(
+  session: Pick<Session, "livenessPolicy" | "heartbeatTimeoutMs">,
+): number | undefined {
+  return session.livenessPolicy === "cli-idle" ? session.heartbeatTimeoutMs : undefined;
+}
+
+/** {@link cliIdleWindowMs} as a release snapshot field, absent when the session has none. */
+export function cliIdleWindowReleaseMarker(
+  session: Pick<Session, "livenessPolicy" | "heartbeatTimeoutMs">,
+): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+  return cliIdleWindowMarker(cliIdleWindowMs(session));
+}
+
+/** A CLI idle window as a release snapshot field, absent when there is none. */
+export function cliIdleWindowMarker(
+  cliIdleTimeoutMs: number | undefined,
+): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+  return cliIdleTimeoutMs === undefined ? {} : { cliIdleTimeoutMs };
+}
+
+/** {@link cliIdleWindowMs} of a persisted row, read from its stored liveness policy. */
+export function persistedCliIdleWindowMs(
+  persisted: Pick<DeviceSession, "liveness_policy" | "heartbeat_timeout_ms">,
+): number | undefined {
+  return persistedLivenessPolicy(persisted.liveness_policy) === "cli-idle"
+    ? persisted.heartbeat_timeout_ms
+    : undefined;
+}
+
+/** {@link persistedCliIdleWindowMs} as a release snapshot field, absent when the row has none. */
+export function persistedCliIdleWindowMarker(
+  persisted: Pick<DeviceSession, "liveness_policy" | "heartbeat_timeout_ms">,
+): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+  return cliIdleWindowMarker(persistedCliIdleWindowMs(persisted));
+}

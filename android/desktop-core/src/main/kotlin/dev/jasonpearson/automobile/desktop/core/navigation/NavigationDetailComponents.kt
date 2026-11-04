@@ -160,6 +160,7 @@ internal data class ScreenTransitionListOptions(
   val currentScreen: String,
   val onScreenSelected: (String) -> Unit,
   val activeContext: NavigationActiveContext?,
+  val onTransitionSelected: ((String) -> Unit)? = null,
 )
 
 @Composable
@@ -171,7 +172,7 @@ internal fun ScreenTransitionList(options: ScreenTransitionListOptions) {
   options.transitions.forEach { transition ->
     TransitionRow(
       transition = transition,
-      onClick = {},
+      onClick = options.onTransitionSelected?.let { select -> { select(transition.id) } },
       currentScreen = options.currentScreen,
       onScreenClick = options.onScreenSelected,
       verification = NavigationBuildLens.verification(transition, options.activeContext),

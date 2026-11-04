@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
@@ -23,7 +24,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Studio UI transitions replayed against the REAL daemon's answers (#10669, #10730).
@@ -358,22 +358,24 @@ class DesktopWireFixtureCompositionTest {
    * So a client that skips the allocation (mutant n/K2) or a control session handed the raw
    * provider (mutant K3) sends a tap the fixture did not record, or no bind before it, and the
    * replay diverges.
+   *
+   * No wall-clock polling decides the frame count: this thread waits, advancing no frames, until
+   * the worker has either finished the tap or is parked inside the allocation (it entered the real
+   * [DesktopInputAllocation] and is blocked on its gate). Only then does the composition get
+   * exactly [SETTLE_FRAMES] frames, as every tap did before, so the heartbeat schedule matches the
+   * fixture.
    */
   private fun ComposeUiTest.tap(replay: Replay, deviceId: String): Boolean {
     val outcome = replay.expectTap()
+    val entered = replay.expectAllocation()
     assertTrue(replay.control().tap(testSnapshot(TestSnapshotSpec(deviceId = deviceId)), TAP_POINT))
-    var frames = 0
-    while (!outcome.isCompleted && frames < MAX_TAP_FRAMES) {
-      // Give the worker real time to reach the allocation gate (or finish) before the next frame.
-      runBlocking { withTimeoutOrNull(TAP_WAIT_MS) { outcome.await() } }
-      if (!outcome.isCompleted) {
-        mainClock.advanceTimeByFrame()
-        frames++
-      }
+    awaitWorker("tap on $deviceId never reached the allocation or the transport") {
+      outcome.isCompleted || (entered.isCompleted && CONTROL_WORKER_THREAD.isParked())
     }
-    // Keep each tap to the same frame budget so the heartbeat schedule matches the fixture.
-    repeat((SETTLE_FRAMES - frames).coerceAtLeast(0)) { mainClock.advanceTimeByFrame() }
-    assertTrue(outcome.isCompleted, "tapping $deviceId did not finish in $frames frames")
+    repeat(SETTLE_FRAMES) { mainClock.advanceTimeByFrame() }
+    awaitWorker("tap on $deviceId did not finish within $SETTLE_FRAMES frames") {
+      outcome.isCompleted
+    }
     return when (val result = runBlocking { outcome.await() }) {
       is TapOutcome.Sent -> {
         assertTrue(result.result.success, "tap on $deviceId: ${result.result.error}")
@@ -383,6 +385,18 @@ class DesktopWireFixtureCompositionTest {
         assertEquals(INPUT_NOT_ALLOCATED_ERROR, result.error, "tap on $deviceId")
         false
       }
+    }
+  }
+
+  /**
+   * Blocks this thread (advancing no frames) until the control worker reaches [done]; the deadline
+   * only turns a hang into a failure and never changes how many frames a tap gets.
+   */
+  private fun awaitWorker(failure: String, done: () -> Boolean) {
+    val deadline = System.nanoTime() + WORKER_DEADLINE_NANOS
+    while (!done()) {
+      check(System.nanoTime() < deadline) { failure }
+      Thread.onSpinWait()
     }
   }
 
@@ -441,6 +455,7 @@ class DesktopWireFixtureCompositionTest {
     private var control: DeviceControlSession? = null
     private var minted = 0
     @Volatile private var pendingTap: CompletableDeferred<TapOutcome>? = null
+    @Volatile private var pendingAllocation: CompletableDeferred<Unit>? = null
     private val controlScope = CoroutineScope(SupervisorJob() + CONTROL_WORKER)
     // Stable across recompositions: a new provider resets the control session's queue.
     private val inputClientProvider: () -> AutoMobileClient = {
@@ -456,6 +471,9 @@ class DesktopWireFixtureCompositionTest {
     fun expectTap(): CompletableDeferred<TapOutcome> =
       CompletableDeferred<TapOutcome>().also { pendingTap = it }
 
+    fun expectAllocation(): CompletableDeferred<Unit> =
+      CompletableDeferred<Unit>().also { pendingAllocation = it }
+
     fun start(test: ComposeUiTest, shown: MutableState<Boolean> = mutableStateOf(true)) {
       test.setContent { if (shown.value) state = host() }
       test.mainClock.autoAdvance = false
@@ -465,9 +483,18 @@ class DesktopWireFixtureCompositionTest {
     @Composable
     private fun host(): DesktopDaemonSessionState {
       val session = hostSession()
+      // The session's real allocation, observed only to know when the worker has entered it.
+      val allocation = session.inputAllocation
+      val observed =
+        remember(allocation) {
+          DesktopInputAllocation { deviceId ->
+            pendingAllocation?.complete(Unit)
+            allocation.awaitInputAllowed(deviceId)
+          }
+        }
       control =
         rememberDeviceControlSession(
-          session,
+          session.copy(inputAllocation = observed),
           RememberDeviceControlOptions(
             scope = controlScope,
             clientProvider = inputClientProvider,
@@ -506,15 +533,21 @@ class DesktopWireFixtureCompositionTest {
     const val HEARTBEAT_MS = 2_000L
     const val FRAME_MS = 16L
     const val SETTLE_FRAMES = 3
-    const val MAX_TAP_FRAMES = 20
-    const val TAP_WAIT_MS = 50L
+    val WORKER_DEADLINE_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
     val TAP_POINT = DevicePoint(x = 540, y = 1200, inBounds = true)
 
     /** The control session's dispatch thread: the app runs input off the UI thread too. */
+    val CONTROL_WORKER_THREAD = java.util.concurrent.atomic.AtomicReference<Thread?>(null)
     val CONTROL_WORKER =
       Executors.newSingleThreadExecutor { runnable ->
-          Thread(runnable, "wire-replay-control").apply { isDaemon = true }
+          Thread(runnable, "wire-replay-control")
+            .apply { isDaemon = true }
+            .also { CONTROL_WORKER_THREAD.set(it) }
         }
         .asCoroutineDispatcher()
+
+    /** The worker is parked: inside the allocation, that is its gate wait. */
+    fun java.util.concurrent.atomic.AtomicReference<Thread?>.isParked(): Boolean =
+      get()?.state.let { it == Thread.State.WAITING || it == Thread.State.TIMED_WAITING }
   }
 }

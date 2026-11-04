@@ -42,6 +42,9 @@ include(":auto-mobile-sdk")
 // Deterministic Android Automotive OS fixture app for automotive checks (#16745).
 include(":automotive-fixture")
 
+// Deterministic Wear OS fixture app for watch checks (#16828).
+include(":wear-fixture")
+
 include(":protocol")
 
 include(":prototype-compose")

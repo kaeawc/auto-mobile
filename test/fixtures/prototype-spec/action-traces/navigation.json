@@ -1,0 +1,77 @@
+[
+  {
+    "name": "stack actions move the path",
+    "spec": {
+      "id": "trace-stack",
+      "window": { "placement": { "type": "fullscreen" } },
+      "root": {
+        "type": "stack",
+        "id": "nav",
+        "start": "home",
+        "screens": {
+          "home": { "type": "text", "text": "Home" },
+          "detail": { "type": "text", "text": "Detail" },
+          "third": { "type": "text", "text": "Third" }
+        }
+      }
+    },
+    "steps": [
+      { "actions": [], "expect": { "stacks": { "nav": ["home"] } } },
+      {
+        "actions": [{ "type": "push", "stack": "nav", "screen": "detail" }],
+        "expect": { "stacks": { "nav": ["home", "detail"] } }
+      },
+      {
+        "actions": [{ "type": "replace", "stack": "nav", "screen": "third" }],
+        "expect": { "stacks": { "nav": ["home", "third"] } }
+      },
+      {
+        "actions": [
+          { "type": "push", "stack": "nav", "screen": "detail" },
+          { "type": "push", "stack": "nav", "screen": "third" }
+        ],
+        "expect": { "stacks": { "nav": ["home", "third", "detail", "third"] } }
+      },
+      {
+        "actions": [{ "type": "pop", "stack": "nav" }],
+        "expect": { "stacks": { "nav": ["home", "third", "detail"] } }
+      },
+      {
+        "actions": [{ "type": "popToRoot", "stack": "nav" }],
+        "expect": { "stacks": { "nav": ["home"] } }
+      },
+      {
+        "actions": [{ "type": "pop", "stack": "nav" }],
+        "expect": { "stacks": { "nav": ["home"] } }
+      }
+    ]
+  },
+  {
+    "name": "setStack replaces the whole path",
+    "spec": {
+      "id": "trace-set-stack",
+      "window": { "placement": { "type": "fullscreen" } },
+      "root": {
+        "type": "stack",
+        "id": "nav",
+        "start": "home",
+        "screens": {
+          "home": { "type": "text", "text": "Home" },
+          "detail": { "type": "text", "text": "Detail" }
+        }
+      }
+    },
+    "steps": [
+      {
+        "actions": [
+          {
+            "type": "setStack",
+            "stack": "nav",
+            "path": [{ "screen": "home" }, { "screen": "detail" }]
+          }
+        ],
+        "expect": { "stacks": { "nav": ["home", "detail"] } }
+      }
+    ]
+  }
+]

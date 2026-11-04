@@ -6,8 +6,10 @@ import {
   assertLandscapeObservation,
   assertMotionApplied,
   buildAaosSmokePlan,
+  expectNotForeground,
   renderAaosSmokeSummary,
   runAaosSmoke,
+  writeAaosSmokeOutputs,
   type AaosSmokeDeps,
   type Payload,
 } from "../../scripts/ci/aaos-smoke/aaosSmoke";
@@ -167,6 +169,16 @@ describe("assertions", () => {
     expect(assertLandscapeObservation({ viewHierarchy: {} })).toContain("screenSize");
   });
 
+  test("home check fails when the payload names no foreground app", () => {
+    const notSettings = expectNotForeground(AAOS_SETTINGS_APP_ID);
+    expect(notSettings({ activeWindow: { appId: "com.android.car.carlauncher" } })).toBeUndefined();
+    expect(notSettings({ activeWindow: { appId: AAOS_SETTINGS_APP_ID } })).toContain(
+      "still in the foreground",
+    );
+    expect(notSettings(LANDSCAPE)).toContain("observed no foreground app");
+    expect(notSettings({ activeWindow: {} })).toContain("observed no foreground app");
+  });
+
   test("motion must be applied, not unsupported", () => {
     expect(assertMotionApplied("driving")(motion("applied"))).toBeUndefined();
     expect(assertMotionApplied("driving")(motion("unchanged"))).toBeUndefined();
@@ -229,6 +241,42 @@ describe("runAaosSmoke", () => {
     expect(throwing.closed).toBe(true);
   });
 
+  test("a step JSON write failure is a detail and the plan still reaches the reset", async () => {
+    const client = motionClient("applied");
+    const { deps } = fakeDeps(client);
+    const logs: string[] = [];
+    deps.log = (message) => logs.push(message);
+    deps.writeFile = (path) => {
+      if (path.endsWith("01-start.json")) {
+        throw new Error("ENOSPC: no space left on device");
+      }
+    };
+    const result = await runAaosSmoke(buildAaosSmokePlan(), deps);
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]).toMatchObject({
+      id: "start",
+      status: "passed",
+      detail: "could not write step JSON: ENOSPC: no space left on device",
+    });
+    expect(result.steps.at(-1)).toMatchObject({ id: "reset", status: "passed" });
+    expect(logs.some((line) => line.includes("could not write"))).toBe(true);
+    expect(client.closed).toBe(true);
+  });
+
+  test("a write failure on a failing step keeps the verdict first", async () => {
+    const client = happyClient({ startDevice: envelope({ error: "no automotive image" }, true) });
+    const { deps } = fakeDeps(client);
+    deps.writeFile = () => {
+      throw new Error("EACCES");
+    };
+    const result = await runAaosSmoke(buildAaosSmokePlan(), deps);
+    expect(result.steps[0]!.status).toBe("failed");
+    expect(result.steps[0]!.detail).toMatch(
+      /^tool error: .*no automotive image.*; could not write step JSON: EACCES$/,
+    );
+    expect(result.steps.at(-1)).toMatchObject({ id: "reset", status: "passed" });
+  });
+
   test("summary escapes table pipes and reports a pass", () => {
     const summary = renderAaosSmokeSummary({
       ok: true,
@@ -236,6 +284,59 @@ describe("runAaosSmoke", () => {
     });
     expect(summary).toContain("**Passed**");
     expect(summary).toContain("x \\| y");
+  });
+});
+
+describe("writeAaosSmokeOutputs", () => {
+  const result = { ok: false, steps: [] };
+
+  test("writes summary.md, result.json and appends the step summary", () => {
+    const written = new Map<string, string>();
+    const appended: string[] = [];
+    const failures = writeAaosSmokeOutputs(result, "## summary", {
+      outDir: "/out",
+      stepSummaryPath: "/gh/summary",
+      writeFile: (path, contents) => written.set(path, contents),
+      appendFile: (path, contents) => appended.push(`${path}:${contents}`),
+      log: () => {},
+    });
+    expect(failures).toEqual([]);
+    expect(written.get(join("/out", "summary.md"))).toBe("## summary");
+    expect(JSON.parse(written.get(join("/out", "result.json"))!)).toEqual(result);
+    expect(appended).toEqual(["/gh/summary:## summary"]);
+  });
+
+  test("one failed write does not drop the others", () => {
+    const written: string[] = [];
+    const logs: string[] = [];
+    const appended: string[] = [];
+    const failures = writeAaosSmokeOutputs(result, "## summary", {
+      outDir: "/out",
+      stepSummaryPath: "/gh/summary",
+      writeFile: (path) => {
+        if (path.endsWith("summary.md")) {
+          throw new Error("EROFS");
+        }
+        written.push(path);
+      },
+      appendFile: (path) => appended.push(path),
+      log: (message) => logs.push(message),
+    });
+    expect(failures).toEqual(["could not write summary.md: EROFS"]);
+    expect(logs).toEqual(failures);
+    expect(written).toEqual([join("/out", "result.json")]);
+    expect(appended).toEqual(["/gh/summary"]);
+  });
+
+  test("skips the step summary when GITHUB_STEP_SUMMARY is unset", () => {
+    const appended: string[] = [];
+    writeAaosSmokeOutputs(result, "s", {
+      outDir: "/out",
+      writeFile: () => {},
+      appendFile: (path) => appended.push(path),
+      log: () => {},
+    });
+    expect(appended).toEqual([]);
   });
 });
 

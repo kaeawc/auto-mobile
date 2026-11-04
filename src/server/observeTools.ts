@@ -89,7 +89,7 @@ import {
   recordObservationBackStack,
   screenForObserve,
   type ObserveResponse,
-  withDeviceDiagnostics,
+  withServedObservationExtras,
   type ObserveToolDependencies,
 } from "./observeResponse";
 
@@ -213,7 +213,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           .string()
           .optional()
           .describe(
-            "Panel key, role (inner, cover, rear, external, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
+            "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
           ),
         project: z
           .enum(["full", "skeleton"])
@@ -444,10 +444,11 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
-      const served = await withDeviceDiagnostics(
+      const served = await withServedObservationExtras(
         layerScopedObserveResult(result, args.layer, platform, !waitOutcome),
         device,
-        dependencies.audioInputDiagnostic,
+        deviceRead,
+        dependencies,
       );
 
       if (waitOutcome) {

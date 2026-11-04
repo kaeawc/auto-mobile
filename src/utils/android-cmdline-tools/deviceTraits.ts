@@ -20,7 +20,7 @@ export interface DeviceSkin {
  * Handhelds (phone, tablet, foldable) are deliberately left null so their behaviour does
  * not change.
  */
-export type TraitFormFactor = "watch" | "automotive" | "tv";
+export type TraitFormFactor = "watch" | "automotive" | "tv" | "xr-headset" | "xr-glasses";
 
 /** Identifying build props of one Android device. A prop that could not be read is null. */
 export interface AndroidDeviceTraits {
@@ -45,7 +45,8 @@ export interface AndroidDeviceTraits {
    */
   skin: DeviceSkin | null;
   /**
-   * `ro.build.characteristics` containing `watch`, `automotive` or `tv`. Null for everything else,
+   * `ro.build.characteristics` containing `watch`, `automotive`, `tv`, `xr` (headset) or `glasses`
+   * (XR glasses). Null for everything else,
    * including a prop that could not be read: callers gate special behaviour on a positive
    * match and leave every other device on today's path.
    */
@@ -137,6 +138,13 @@ export function parseTraitFormFactor(raw: string | null): TraitFormFactor | null
   }
   if (characteristics.includes("watch")) {
     return "watch";
+  }
+  // XR tokens are provisional until an XR emulator confirms them (#16838).
+  if (characteristics.includes("glasses")) {
+    return "xr-glasses";
+  }
+  if (characteristics.includes("xr")) {
+    return "xr-headset";
   }
   return characteristics.includes("tv") ? "tv" : null;
 }

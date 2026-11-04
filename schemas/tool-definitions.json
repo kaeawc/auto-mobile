@@ -1390,10 +1390,6 @@
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
         },
-        "__lockNamespace": {
-          "description": "Internal plan-scoped lock namespace (injected)",
-          "type": "string"
-        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios", "tvos"]
@@ -2699,10 +2695,6 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
-        },
-        "__lockNamespace": {
-          "description": "Internal plan-scoped lock namespace (injected)",
-          "type": "string"
         },
         "platform": {
           "type": "string",
@@ -4871,7 +4863,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -5001,7 +5002,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -5017,7 +5018,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -7542,7 +7552,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -8326,7 +8345,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -8342,7 +8361,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -10230,7 +10258,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   },
                   "sizePx": {
                     "type": "object",
@@ -13461,7 +13498,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -13564,7 +13610,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -13580,7 +13626,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -16897,7 +16952,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -17069,7 +17133,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -17085,7 +17149,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -18284,7 +18357,17 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+                "enum": [
+                  "phone",
+                  "tablet",
+                  "foldable",
+                  "tv",
+                  "watch",
+                  "automotive",
+                  "xr-headset",
+                  "xr-glasses",
+                  "unknown"
+                ]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -18633,6 +18716,7 @@
                             "cover",
                             "rear",
                             "external",
+                            "cluster",
                             "overlay",
                             "virtual",
                             "unknown"
@@ -18952,7 +19036,17 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+                "enum": [
+                  "phone",
+                  "tablet",
+                  "foldable",
+                  "tv",
+                  "watch",
+                  "automotive",
+                  "xr-headset",
+                  "xr-glasses",
+                  "unknown"
+                ]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -19301,6 +19395,7 @@
                             "cover",
                             "rear",
                             "external",
+                            "cluster",
                             "overlay",
                             "virtual",
                             "unknown"
@@ -21546,7 +21641,7 @@
           "type": "boolean"
         },
         "display": {
-          "description": "Panel key, role (inner, cover, rear, external, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
+          "description": "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
           "type": "string"
         },
         "project": {
@@ -21724,7 +21819,16 @@
             },
             "role": {
               "type": "string",
-              "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+              "enum": [
+                "inner",
+                "cover",
+                "rear",
+                "external",
+                "cluster",
+                "overlay",
+                "virtual",
+                "unknown"
+              ]
             },
             "posture": {
               "type": "string",
@@ -22630,7 +22734,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -23011,6 +23124,516 @@
             "required": ["code", "message", "retryable"],
             "additionalProperties": false
           }
+        },
+        "carAppTemplates": {
+          "description": "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. This is what the app built, not what the car host rendered.",
+          "type": "object",
+          "properties": {
+            "packageName": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "const": "sdk"
+            },
+            "note": {
+              "type": "string"
+            },
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "screens": {
+                    "description": "Root screen first, top screen last.",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "screenClass": {
+                          "type": "string"
+                        },
+                        "top": {
+                          "type": "boolean"
+                        },
+                        "marker": {
+                          "type": "string"
+                        },
+                        "template": {
+                          "description": "Absent when the app has not recorded a template for this screen.",
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "loading": {
+                              "type": "boolean"
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "searchHint": {
+                              "type": "string"
+                            },
+                            "initialSearchText": {
+                              "type": "string"
+                            },
+                            "headerActions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "hasIcon": {
+                                    "type": "boolean"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["id", "type", "hasIcon", "enabled"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "section": {
+                                    "type": "string"
+                                  },
+                                  "texts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "hasImage": {
+                                    "type": "boolean"
+                                  },
+                                  "toggle": {
+                                    "description": "Checked state; absent when the row has no toggle.",
+                                    "type": "boolean"
+                                  },
+                                  "browsable": {
+                                    "type": "boolean"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean"
+                                  },
+                                  "actions": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        },
+                                        "title": {
+                                          "type": "string"
+                                        },
+                                        "hasIcon": {
+                                          "type": "boolean"
+                                        },
+                                        "enabled": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": ["id", "type", "hasIcon", "enabled"],
+                                      "additionalProperties": {}
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "kind",
+                                  "texts",
+                                  "hasImage",
+                                  "browsable",
+                                  "enabled",
+                                  "actions"
+                                ],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "actions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "hasIcon": {
+                                    "type": "boolean"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["id", "type", "hasIcon", "enabled"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "actionStrips": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "actions": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        },
+                                        "title": {
+                                          "type": "string"
+                                        },
+                                        "hasIcon": {
+                                          "type": "boolean"
+                                        },
+                                        "enabled": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": ["id", "type", "hasIcon", "enabled"],
+                                      "additionalProperties": {}
+                                    }
+                                  }
+                                },
+                                "required": ["id", "role", "actions"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "tabs": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "contentId": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "hasIcon": {
+                                    "type": "boolean"
+                                  },
+                                  "active": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["id", "contentId", "hasIcon", "active"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "tabContent": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "type": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "loading": {
+                                  "type": "boolean"
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "searchHint": {
+                                  "type": "string"
+                                },
+                                "initialSearchText": {
+                                  "type": "string"
+                                },
+                                "headerActions": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "hasIcon": {
+                                        "type": "boolean"
+                                      },
+                                      "enabled": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": ["id", "type", "hasIcon", "enabled"],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "section": {
+                                        "type": "string"
+                                      },
+                                      "texts": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "hasImage": {
+                                        "type": "boolean"
+                                      },
+                                      "toggle": {
+                                        "description": "Checked state; absent when the row has no toggle.",
+                                        "type": "boolean"
+                                      },
+                                      "browsable": {
+                                        "type": "boolean"
+                                      },
+                                      "enabled": {
+                                        "type": "boolean"
+                                      },
+                                      "actions": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "type": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "hasIcon": {
+                                              "type": "boolean"
+                                            },
+                                            "enabled": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": ["id", "type", "hasIcon", "enabled"],
+                                          "additionalProperties": {}
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "kind",
+                                      "texts",
+                                      "hasImage",
+                                      "browsable",
+                                      "enabled",
+                                      "actions"
+                                    ],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "actions": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "hasIcon": {
+                                        "type": "boolean"
+                                      },
+                                      "enabled": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": ["id", "type", "hasIcon", "enabled"],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "actionStrips": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "role": {
+                                        "type": "string"
+                                      },
+                                      "actions": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "type": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "hasIcon": {
+                                              "type": "boolean"
+                                            },
+                                            "enabled": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": ["id", "type", "hasIcon", "enabled"],
+                                          "additionalProperties": {}
+                                        }
+                                      }
+                                    },
+                                    "required": ["id", "role", "actions"],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "tabs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "contentId": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "hasIcon": {
+                                        "type": "boolean"
+                                      },
+                                      "active": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": ["id", "contentId", "hasIcon", "active"],
+                                    "additionalProperties": {}
+                                  }
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "type",
+                                "headerActions",
+                                "items",
+                                "actions",
+                                "actionStrips",
+                                "tabs"
+                              ],
+                              "additionalProperties": {}
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "headerActions",
+                            "items",
+                            "actions",
+                            "actionStrips",
+                            "tabs"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": ["id", "screenClass", "top"],
+                      "additionalProperties": {}
+                    }
+                  }
+                },
+                "required": ["id", "screens"],
+                "additionalProperties": {}
+              }
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": ["packageName", "source", "note", "sessions"],
+          "additionalProperties": {}
         },
         "layoutWarnings": {
           "type": "object",
@@ -25800,7 +26423,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -25949,7 +26581,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -25965,7 +26597,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -27978,7 +28619,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -28089,7 +28739,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -28105,7 +28755,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -39305,7 +39964,16 @@
                 },
                 "role": {
                   "type": "string",
-                  "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                  "enum": [
+                    "inner",
+                    "cover",
+                    "rear",
+                    "external",
+                    "cluster",
+                    "overlay",
+                    "virtual",
+                    "unknown"
+                  ]
                 }
               },
               "required": ["key", "role"],
@@ -41516,7 +42184,17 @@
             },
             "formFactor": {
               "type": "string",
-              "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+              "enum": [
+                "phone",
+                "tablet",
+                "foldable",
+                "tv",
+                "watch",
+                "automotive",
+                "xr-headset",
+                "xr-glasses",
+                "unknown"
+              ]
             },
             "deviceType": {
               "$ref": "#/$defs/__schema0"
@@ -41865,6 +42543,7 @@
                           "cover",
                           "rear",
                           "external",
+                          "cluster",
                           "overlay",
                           "virtual",
                           "unknown"
@@ -43395,7 +44074,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -43498,7 +44186,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -43514,7 +44202,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -46663,7 +47360,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -46762,7 +47468,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -46778,7 +47484,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -48711,7 +49426,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -48810,7 +49534,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -48826,7 +49550,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -50403,7 +51136,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -52598,7 +53340,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   },
                   "sizePx": {
                     "type": "object",
@@ -53683,7 +54434,16 @@
             },
             "role": {
               "type": "string",
-              "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+              "enum": [
+                "inner",
+                "cover",
+                "rear",
+                "external",
+                "cluster",
+                "overlay",
+                "virtual",
+                "unknown"
+              ]
             },
             "posture": {
               "$ref": "#/$defs/__schema0"
@@ -55537,7 +56297,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -55648,7 +56417,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -55664,7 +56433,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -57544,7 +58322,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -57560,7 +58338,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -60899,7 +61686,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -61210,7 +62006,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -61226,7 +62022,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -63790,7 +64595,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -64113,7 +64927,7 @@
         },
         "__schema10": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema11": {
           "type": "string",
@@ -64129,7 +64943,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",
@@ -65858,7 +66681,16 @@
                   },
                   "role": {
                     "type": "string",
-                    "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                    "enum": [
+                      "inner",
+                      "cover",
+                      "rear",
+                      "external",
+                      "cluster",
+                      "overlay",
+                      "virtual",
+                      "unknown"
+                    ]
                   }
                 },
                 "required": ["key", "role"],
@@ -65972,7 +66804,7 @@
         },
         "__schema4": {
           "type": "string",
-          "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema5": {
           "type": "string",
@@ -65988,7 +66820,16 @@
               },
               "role": {
                 "type": "string",
-                "enum": ["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]
+                "enum": [
+                  "inner",
+                  "cover",
+                  "rear",
+                  "external",
+                  "cluster",
+                  "overlay",
+                  "virtual",
+                  "unknown"
+                ]
               },
               "size": {
                 "type": "object",

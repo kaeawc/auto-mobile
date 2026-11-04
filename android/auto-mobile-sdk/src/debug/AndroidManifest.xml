@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
   <application>
     <receiver
       android:name="dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver"
@@ -35,5 +36,12 @@
       android:name="dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitiesProvider"
       android:authorities="${applicationId}.automobile.capabilities"
       android:exported="true" />
+
+    <!-- Read-only; every entry point enforces DebugInspectorAccess (shell, root, CtrlProxy). -->
+    <provider
+      android:name="dev.jasonpearson.automobile.sdk.carapp.CarAppTemplatesProvider"
+      android:authorities="${applicationId}.automobile.carapptemplates"
+      android:exported="true"
+      tools:ignore="ExportedContentProvider" />
   </application>
 </manifest>

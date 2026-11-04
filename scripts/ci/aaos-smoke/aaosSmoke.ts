@@ -4,48 +4,40 @@
  *
  * Drives one persistent MCP session through a fixed plan: create and boot an automotive AVD
  * with startDevice `createIfMissing`, then observe, launch, tap, scroll, back, home and the
- * driving/parked vehicle states. Every step carries an assertion over its tool payload; the
- * run writes each payload as JSON, copies observe screenshots, and renders a Markdown summary
- * whose failing rows name the step, the tool and the assertion that broke.
- *
- * All I/O goes through {@link AaosSmokeDeps}, so the unit tests drive it with a fake client.
+ * driving/parked vehicle states. The plan runs on the shared emulator smoke runner
+ * (`scripts/ci/emulator-smoke/smokeRunner.ts`), which records each payload and screenshot and
+ * renders the Markdown summary.
  */
 import { join } from "node:path";
-import { applySession, readEnvelope, type DriveClient } from "../../mcp-drive";
-import { isCliToolFailure } from "../../../src/cli/index";
-import { getDeviceSessionIdFromResult } from "../../../src/daemon/deviceSessionResult";
+import {
+  activeAppId,
+  assertHasHierarchy,
+  expectForeground,
+  expectNotForeground,
+  passes,
+  readObject,
+  renderSmokeSummary,
+  runSmoke,
+  runSmokeMain,
+  writeSmokeOutputs,
+  type Payload,
+  type SmokeDeps,
+  type SmokeOutputDeps,
+  type SmokeResult,
+  type SmokeStep,
+  type SmokeStepResult,
+  type SmokeStepStatus,
+} from "../emulator-smoke/smokeRunner";
 
-export type Payload = Record<string, unknown>;
+export { activeAppId, expectNotForeground, type Payload };
+export type AaosSmokeStep = SmokeStep;
+export type AaosSmokeStepStatus = SmokeStepStatus;
+export type AaosSmokeStepResult = SmokeStepResult;
+export type AaosSmokeResult = SmokeResult;
+export type AaosSmokeDeps = SmokeDeps;
+export type AaosSmokeOutputDeps = SmokeOutputDeps;
 
-/** One plan step: a tool call plus what its payload must show. */
-export interface AaosSmokeStep {
-  id: string;
-  tool: string;
-  args: Record<string, unknown>;
-  /** What the assertion checks, shown in the summary. */
-  expectation: string;
-  /** Returns why the payload fails the expectation, or undefined when it passes. */
-  assert(payload: Payload): string | undefined;
-  /** Run even after an earlier step failed (cleanup). */
-  always?: boolean;
-}
-
-export type AaosSmokeStepStatus = "passed" | "failed" | "skipped";
-
-export interface AaosSmokeStepResult {
-  id: string;
-  tool: string;
-  expectation: string;
-  status: AaosSmokeStepStatus;
-  detail?: string;
-  durationMs: number;
-}
-
-export interface AaosSmokeResult {
-  ok: boolean;
-  session?: string;
-  steps: AaosSmokeStepResult[];
-}
+export const AAOS_SMOKE_TITLE = "AAOS emulator smoke (advisory)";
 
 /** Car Settings ships on every `android-automotive` image and has a scrollable list. */
 export const AAOS_SETTINGS_APP_ID = "com.android.car.settings";
@@ -61,44 +53,11 @@ export interface AaosSmokePlanOptions {
   osVersion?: string;
 }
 
-function readObject(value: unknown): Payload | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Payload)
-    : undefined;
-}
-
-/** The foreground app id an observe payload reports. */
-export function activeAppId(payload: Payload): string | undefined {
-  const appId = readObject(payload.activeWindow)?.appId;
-  return typeof appId === "string" ? appId : undefined;
-}
-
-function expectForeground(appId: string) {
-  return (payload: Payload): string | undefined => {
-    const actual = activeAppId(payload);
-    return actual === appId
-      ? undefined
-      : `expected foreground app ${appId}, observed ${actual ?? "none"}`;
-  };
-}
-
-function expectNotForeground(appId: string) {
-  return (payload: Payload): string | undefined =>
-    activeAppId(payload) === appId ? `${appId} is still in the foreground` : undefined;
-}
-
-/**
- * An observe payload must carry a hierarchy and a landscape screen, as a car head unit has.
- * The default `skeleton` projection replaces `viewHierarchy`/`elements` with a `skeleton` list.
- */
+/** An observe payload must carry a hierarchy and a landscape screen, as a car head unit has. */
 export function assertLandscapeObservation(payload: Payload): string | undefined {
-  const skeleton = payload.skeleton;
-  if (Array.isArray(skeleton)) {
-    if (skeleton.length === 0) {
-      return "observe returned an empty skeleton";
-    }
-  } else if (payload.viewHierarchy === undefined && payload.elements === undefined) {
-    return "observe returned no skeleton or view hierarchy";
+  const missing = assertHasHierarchy(payload);
+  if (missing) {
+    return missing;
   }
   const size = readObject(payload.screenSize);
   const width = size?.width;
@@ -130,10 +89,6 @@ export function assertMotionApplied(motion: "driving" | "parked") {
       ? undefined
       : `vehicle.motion=${motion} reported ${String(status ?? "no change")}: ${String(motionChange?.detail ?? "")}`.trim();
   };
-}
-
-function passes(): string | undefined {
-  return undefined;
 }
 
 function observeStep(id: string, expectation: string, assert: AaosSmokeStep["assert"]) {
@@ -236,181 +191,35 @@ export function buildAaosSmokePlan(options: AaosSmokePlanOptions = {}): AaosSmok
   ];
 }
 
-/** I/O the runner needs; faked in tests. */
-export interface AaosSmokeDeps {
-  client: DriveClient;
-  outDir: string;
-  writeFile(path: string, contents: string): void;
-  /** Copy a host file into the artifact dir; returns false when it cannot. */
-  copyFile(from: string, to: string): boolean;
-  now(): number;
-  log(message: string): void;
-}
-
-function stepFileName(index: number, step: AaosSmokeStep, suffix: string): string {
-  return `${String(index + 1).padStart(2, "0")}-${step.id}${suffix}`;
-}
-
-async function callStep(
-  step: AaosSmokeStep,
-  session: string | undefined,
-  deps: AaosSmokeDeps,
-): Promise<{ envelope?: unknown; error?: string }> {
-  const call = applySession({ tool: step.tool, args: step.args }, session);
-  try {
-    return { envelope: await deps.client.callTool(call.tool, call.args) };
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-function judgeEnvelope(step: AaosSmokeStep, envelope: unknown): string | undefined {
-  const { payload, errorText } = readEnvelope(envelope);
-  if (errorText) {
-    return `tool error: ${errorText}`;
-  }
-  if (isCliToolFailure(envelope)) {
-    const message = payload && typeof payload.message === "string" ? payload.message : "";
-    return `tool reported success:false ${message}`.trim();
-  }
-  const failure = step.assert(payload ?? {});
-  return failure ? `assertion failed: ${failure}` : undefined;
-}
-
-function saveScreenshot(
-  index: number,
-  step: AaosSmokeStep,
-  envelope: unknown,
-  deps: AaosSmokeDeps,
-) {
-  const path = readEnvelope(envelope).payload?.screenshotPath;
-  if (typeof path === "string" && path.length > 0) {
-    const target = join(deps.outDir, "screenshots", stepFileName(index, step, ".png"));
-    if (!deps.copyFile(path, target)) {
-      deps.log(`### ${step.id}: could not copy screenshot ${path}`);
-    }
-  }
-}
-
-/** Run the plan over one session, recording payloads, screenshots and a verdict per step. */
-export async function runAaosSmoke(
+/** Run the plan over one session; see {@link runSmoke}. */
+export function runAaosSmoke(
   plan: readonly AaosSmokeStep[],
   deps: AaosSmokeDeps,
 ): Promise<AaosSmokeResult> {
-  const steps: AaosSmokeStepResult[] = [];
-  let session: string | undefined;
-  let failed = false;
-  try {
-    for (const [index, step] of plan.entries()) {
-      if (failed && !step.always) {
-        steps.push({ ...describeStep(step), status: "skipped", durationMs: 0 });
-        continue;
-      }
-      const started = deps.now();
-      const { envelope, error } = await callStep(step, session, deps);
-      if (envelope !== undefined) {
-        deps.writeFile(
-          join(deps.outDir, "steps", stepFileName(index, step, ".json")),
-          JSON.stringify(envelope, null, 2),
-        );
-        saveScreenshot(index, step, envelope, deps);
-        session ??= getDeviceSessionIdFromResult(envelope);
-      }
-      const detail = error !== undefined ? `call threw: ${error}` : judgeEnvelope(step, envelope);
-      const status: AaosSmokeStepStatus = detail === undefined ? "passed" : "failed";
-      failed ||= status === "failed";
-      steps.push({ ...describeStep(step), status, detail, durationMs: deps.now() - started });
-      deps.log(`### ${step.id} (${step.tool}): ${status}${detail ? ` — ${detail}` : ""}`);
-    }
-  } finally {
-    await deps.client.close();
-  }
-  return { ok: !failed, session, steps };
+  return runSmoke(plan, deps);
 }
 
-function describeStep(
-  step: AaosSmokeStep,
-): Pick<AaosSmokeStepResult, "id" | "tool" | "expectation"> {
-  return { id: step.id, tool: step.tool, expectation: step.expectation };
-}
-
-function escapeCell(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
-}
-
-const STATUS_ICON: Record<AaosSmokeStepStatus, string> = {
-  passed: "✅",
-  failed: "❌",
-  skipped: "⏭️",
-};
-
-/** Markdown for `$GITHUB_STEP_SUMMARY`: verdict first, the first failure called out, then every step. */
+/** Markdown for `$GITHUB_STEP_SUMMARY`. */
 export function renderAaosSmokeSummary(result: AaosSmokeResult): string {
-  const firstFailure = result.steps.find((step) => step.status === "failed");
-  const lines = [
-    "## AAOS emulator smoke (advisory)",
-    "",
-    result.ok
-      ? "**Passed**: every step met its expectation."
-      : `**Failed** at \`${firstFailure?.id ?? "unknown"}\` (\`${firstFailure?.tool ?? "?"}\`): ${escapeCell(firstFailure?.detail ?? "no detail")}`,
-    "",
-    "| Step | Tool | Expectation | Result | Detail | ms |",
-    "| --- | --- | --- | --- | --- | ---: |",
-    ...result.steps.map(
-      (step) =>
-        `| ${step.id} | ${step.tool} | ${escapeCell(step.expectation)} | ${STATUS_ICON[step.status]} ${step.status} | ${escapeCell(step.detail ?? "")} | ${step.durationMs} |`,
-    ),
-    "",
-  ];
-  return lines.join("\n");
+  return renderSmokeSummary(AAOS_SMOKE_TITLE, result);
 }
 
-async function main(): Promise<void> {
-  const { copyFileSync, mkdirSync, writeFileSync, appendFileSync } = await import("node:fs");
-  const { dirname } = await import("node:path");
-  const { createSdkClient, defaultServerPath, resolveTimeoutMs } = await import("../../mcp-drive");
-  const outDir = process.env.AAOS_SMOKE_OUT_DIR ?? join(process.cwd(), "scratch", "aaos-smoke");
-  const plan = buildAaosSmokePlan({
-    breakAssertion: process.env.AAOS_SMOKE_BREAK_ASSERTION === "1",
-    osVersion: process.env.AAOS_SMOKE_OS_VERSION,
-  });
-  const client = await createSdkClient(
-    defaultServerPath(),
-    resolveTimeoutMs(undefined, process.env),
-  );
-  const result = await runAaosSmoke(plan, {
-    client,
-    outDir,
-    writeFile: (path, contents) => {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, contents);
-    },
-    copyFile: (from, to) => {
-      try {
-        mkdirSync(dirname(to), { recursive: true });
-        copyFileSync(from, to);
-        return true;
-      } catch (error) {
-        console.warn(
-          `copy ${from} failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return false;
-      }
-    },
-    now: () => Date.now(),
-    log: (message) => console.log(message),
-  });
-  const summary = renderAaosSmokeSummary(result);
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, "summary.md"), summary);
-  writeFileSync(join(outDir, "result.json"), JSON.stringify(result, null, 2));
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
-  }
-  console.log(summary);
-  process.exit(result.ok ? 0 : 1);
+/** Write `summary.md`, `result.json` and the job step summary; see {@link writeSmokeOutputs}. */
+export function writeAaosSmokeOutputs(
+  result: AaosSmokeResult,
+  summary: string,
+  deps: AaosSmokeOutputDeps,
+): string[] {
+  return writeSmokeOutputs(result, summary, deps);
 }
 
 if (import.meta.main) {
-  void main();
+  void runSmokeMain({
+    title: AAOS_SMOKE_TITLE,
+    outDir: process.env.AAOS_SMOKE_OUT_DIR ?? join(process.cwd(), "scratch", "aaos-smoke"),
+    plan: buildAaosSmokePlan({
+      breakAssertion: process.env.AAOS_SMOKE_BREAK_ASSERTION === "1",
+      osVersion: process.env.AAOS_SMOKE_OS_VERSION,
+    }),
+  });
 }

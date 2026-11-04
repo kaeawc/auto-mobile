@@ -11,6 +11,8 @@ import { ActionableError } from "../../src/models/ActionableError";
 import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
 import { rememberDeviceLossAbort } from "../../src/utils/deviceLossAbortRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { z } from "zod/v4";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
 isolateToolRegistry();
 
@@ -260,11 +262,13 @@ describe("barrier tool", () => {
     const cleanup = spyOn(coordinator, "forceCleanup");
     try {
       const tool = ToolRegistry.getToolForPlan("barrier")!;
-      const error = await tool.deviceAwareHandler!(
-        makeDevice("emulator-5554"),
-        { lock: "loss-lock", deviceCount: 2, __lockNamespace: "loss-session" },
-        undefined,
-        new AbortController().signal,
+      const error = await runWithToolSelectionContext({ planLockNamespace: "loss-session" }, () =>
+        tool.deviceAwareHandler!(
+          makeDevice("emulator-5554"),
+          { lock: "loss-lock", deviceCount: 2 },
+          undefined,
+          new AbortController().signal,
+        ),
       ).then(
         () => undefined,
         (error: unknown) => error,
@@ -288,14 +292,24 @@ describe("barrier tool", () => {
     }
   });
 
-  test("schema preserves the injected __lockNamespace (not stripped by parse)", () => {
+  test("schema does not declare a lock namespace field (#15663)", () => {
     const tool = ToolRegistry.getToolForPlan("barrier");
-    const parsed = tool!.schema.parse({
-      lock: "sync",
-      deviceCount: 2,
-      __lockNamespace: "session-A",
-    });
-    expect(parsed.__lockNamespace).toBe("session-A");
+    const parsed = tool!.schema.parse({ lock: "sync", deviceCount: 2 });
+    expect(parsed).not.toHaveProperty("__lockNamespace");
+    expect(JSON.stringify(z.toJSONSchema(tool!.schema))).not.toContain("__lockNamespace");
+  });
+
+  test("a direct call outside a plan waits in the unscoped barrier (#15663)", async () => {
+    injectFakeCoordinator();
+    const coordinator = CriticalSectionCoordinator.getInstance();
+    const wait = spyOn(coordinator, "awaitBarrier").mockResolvedValue(undefined);
+    try {
+      const tool = ToolRegistry.getToolForPlan("barrier")!;
+      await tool.deviceAwareHandler!(makeDevice("direct"), { lock: "sync", deviceCount: 1 });
+      expect(wait.mock.calls[0]?.[3]?.namespace).toBeUndefined();
+    } finally {
+      wait.mockRestore();
+    }
   });
 
   test("executor rethrows barrier device loss instead of recording a step failure", async () => {
@@ -339,7 +353,7 @@ describe("barrier tool", () => {
     }
   });
 
-  test("__lockNamespace scopes the barrier: same lock name, different plans do not cross-satisfy", async () => {
+  test("the plan lock namespace scopes the barrier: same lock name, different plans do not cross-satisfy", async () => {
     const timer = injectFakeCoordinator();
     const tool = ToolRegistry.getToolForPlan("barrier");
 
@@ -347,21 +361,23 @@ describe("barrier tool", () => {
     // "sync" (deviceCount 2) but with different namespaces. If the namespace were
     // ignored the shared barrier would lift at 2 arrivals and both would pass;
     // with scoping each still waits for its own second device, so both time out.
-    const aTimedOut = tool!.deviceAwareHandler!(
-      makeDevice("planA-device-1"),
-      { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-A" },
-      undefined,
-      undefined,
+    const aTimedOut = runWithToolSelectionContext({ planLockNamespace: "session-A" }, () =>
+      tool!.deviceAwareHandler!(makeDevice("planA-device-1"), {
+        lock: "sync",
+        deviceCount: 2,
+        timeout: 50,
+      }),
     ).then(
       () => "passed",
       () => "timed-out",
     );
 
-    const bTimedOut = tool!.deviceAwareHandler!(
-      makeDevice("planB-device-1"),
-      { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-B" },
-      undefined,
-      undefined,
+    const bTimedOut = runWithToolSelectionContext({ planLockNamespace: "session-B" }, () =>
+      tool!.deviceAwareHandler!(makeDevice("planB-device-1"), {
+        lock: "sync",
+        deviceCount: 2,
+        timeout: 50,
+      }),
     ).then(
       () => "passed",
       () => "timed-out",
@@ -385,7 +401,6 @@ describe("barrier tool", () => {
       deviceCount: 2,
       sessionUuid: "base-uuid",
       platform: "android",
-      __lockNamespace: "base-uuid",
     });
     expect(parsed).toMatchObject({
       device: "B",
@@ -393,7 +408,6 @@ describe("barrier tool", () => {
       deviceCount: 2,
       sessionUuid: "base-uuid",
       platform: "android",
-      __lockNamespace: "base-uuid",
     });
   });
 
@@ -443,6 +457,7 @@ describe("barrier tool", () => {
       },
     });
 
+    const wait = spyOn(CriticalSectionCoordinator.getInstance(), "awaitBarrier");
     try {
       const plan: Plan = {
         name: "two-track barrier",
@@ -466,7 +481,10 @@ describe("barrier tool", () => {
       expect(result.perDeviceResults?.get("A")?.success).toBe(true);
       expect(result.perDeviceResults?.get("B")?.success).toBe(true);
       expect(new Set(resolvedDeviceIds)).toEqual(new Set(["device-a", "device-b"]));
+      // Both tracks wait in the plan's namespace, carried as call context (#15663).
+      expect(wait.mock.calls.map((call) => call[3]?.namespace)).toEqual(["base-uuid", "base-uuid"]);
     } finally {
+      wait.mockRestore();
       restore();
       ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
     }

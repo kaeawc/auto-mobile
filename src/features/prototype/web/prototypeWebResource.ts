@@ -1,6 +1,7 @@
 import { ActionableError } from "../../../models";
 import type { PrototypeSpecRevision, PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
+import { withActionableWebInput } from "./prototypeWebInputActionable";
 import { buildPrototypeWebPage, type PrototypeWebVariant } from "./webPage";
 
 /** Query parameters of `automobile:prototype/{id}/web`, the id already decoded. */
@@ -84,6 +85,14 @@ export function shownRevision(
  * default frame of the platform that showed that revision, else Android's.
  */
 export function readPrototypeWebResource(
+  source: PrototypeSpecRevisionSource,
+  query: PrototypeWebResourceQuery,
+  rendererVersion: string,
+): PrototypeWebResource {
+  return withActionableWebInput(() => buildWebResource(source, query, rendererVersion));
+}
+
+function buildWebResource(
   source: PrototypeSpecRevisionSource,
   query: PrototypeWebResourceQuery,
   rendererVersion: string,

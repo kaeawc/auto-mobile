@@ -375,6 +375,8 @@ const formFactorSchema = z.enum([
   "tv",
   "watch",
   "automotive",
+  "xr-headset",
+  "xr-glasses",
   "unknown",
 ]);
 const lifecycleSchema = z
@@ -492,7 +494,16 @@ export const deviceDescriptionSchema = z
           z
             .object({
               key: z.string(),
-              role: z.enum(["inner", "cover", "rear", "external", "overlay", "virtual", "unknown"]),
+              role: z.enum([
+                "inner",
+                "cover",
+                "rear",
+                "external",
+                "cluster",
+                "overlay",
+                "virtual",
+                "unknown",
+              ]),
               sizePx: z.object({ width: z.number(), height: z.number() }).strict(),
               scale: z.number().optional(),
             })

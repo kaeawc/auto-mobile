@@ -13,12 +13,13 @@ import org.gradle.work.DisableCachingByDefault
 /**
  * Writes the robolectric-deps.properties file that points Robolectric at the android-all jars
  * Gradle resolved, so it never downloads them itself. The file holds absolute paths into this
- * machine's Gradle cache, so it is never stored in the build cache.
+ * machine's Gradle cache, so the jars are tracked by absolute path (a moved Gradle user home must
+ * rewrite it) and the output is never stored in the build cache.
  */
 @DisableCachingByDefault(because = "The output holds machine-specific absolute paths")
 abstract class WriteRobolectricDepsTask : DefaultTask() {
   @get:InputFiles
-  @get:PathSensitive(PathSensitivity.NAME_ONLY)
+  @get:PathSensitive(PathSensitivity.ABSOLUTE)
   abstract val jars: ConfigurableFileCollection
 
   @get:OutputFile abstract val depsFile: RegularFileProperty

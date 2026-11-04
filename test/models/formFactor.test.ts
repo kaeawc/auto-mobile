@@ -34,6 +34,7 @@ describe("formFactorFrom non-handheld form factors", () => {
     ["android-tv", "tv"],
     ["google-tv", "tv"],
     ["google-tv-ps16k", "tv"],
+    ["android-wear-signed", "watch"],
     ["android-wear", "watch"],
     ["android-wear-cn", "watch"],
     ["android-automotive", "automotive"],
@@ -160,6 +161,18 @@ describe("non-handheld provisioning defaults", () => {
         defaultAndroidProfileIdFor(formFactor),
       );
     }
+  });
+
+  test("Wear tags are listed best first and each classifies as watch", () => {
+    expect(androidSystemImageTagsFor("watch")).toEqual([
+      "android-wear-signed",
+      "android-wear",
+      "android-wear-cn",
+    ]);
+    for (const tag of androidSystemImageTagsFor("watch")) {
+      expect(formFactorFrom({ systemImageTag: tag })).toBe("watch");
+    }
+    expect(defaultAndroidProfileIdFor("watch", false)).toBe("wearos_square");
   });
 
   test("TV image tags are listed best first and each classifies as tv", () => {

@@ -52,6 +52,18 @@ export class WatchRunnerLifecycle {
     sessions?: WatchRunnerSessions;
     signal?: AbortSignal;
   }): Promise<{ runnerUnavailable?: string; stop?: () => void }> {
+    const { deviceId, bundleId, sessions, signal } = request;
+    return this.launchEntry({ deviceId, bundleId, sessions, signal });
+  }
+
+  /** An inherited owner is set before launch so a release or unbind mid-startup aborts it. */
+  private async launchEntry(request: {
+    deviceId: string;
+    bundleId?: string;
+    sessions?: WatchRunnerSessions;
+    signal?: AbortSignal;
+    ownerSession?: string;
+  }): Promise<{ runnerUnavailable?: string; stop?: () => void }> {
     const { deviceId, sessions } = request;
     if (sessions) {
       this.observeSessions(sessions);
@@ -66,7 +78,11 @@ export class WatchRunnerLifecycle {
         runnerUnavailable: `The watch runner for ${deviceId} is disconnected and was not started by AutoMobile; restart it before trying again.`,
       };
     }
-    const entry: OwnedRunner = { controller: new AbortController(), bundleId: request.bundleId };
+    const entry: OwnedRunner = {
+      controller: new AbortController(),
+      bundleId: request.bundleId,
+      ownerSession: request.ownerSession,
+    };
     const signal = combineAbortSignals(request.signal, entry.controller.signal)!;
     this.runners.set(deviceId, entry);
     try {
@@ -117,15 +133,8 @@ export class WatchRunnerLifecycle {
     const ownerSession = entry.ownerSession;
     try {
       this.stop(request.deviceId);
-      const started = await this.start(request);
-      if (started.runnerUnavailable !== undefined) {
-        return started.runnerUnavailable;
-      }
-      const replacement = this.runners.get(request.deviceId);
-      if (replacement) {
-        replacement.ownerSession = ownerSession;
-      }
-      return undefined;
+      const started = await this.launchEntry({ ...request, ownerSession });
+      return started.runnerUnavailable;
     } catch (error) {
       const reason = errorMessage(error);
       logger.warn(

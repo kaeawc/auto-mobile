@@ -190,6 +190,46 @@ test("retarget returns the relaunch failure and releases the runner's ports", as
   expect(watchRunners.get(f.request.deviceId)).toBeUndefined();
 });
 
+test.each(["release", "unbind"])(
+  "retarget stops the replacement when its owner session ends mid-restart (%s)",
+  async (ending) => {
+    const first = new FakeWatchRunnerClient();
+    const second = new FakeWatchRunnerClient();
+    const f = fixture([first, second]);
+    await f.owner.start({ ...f.request, bundleId: "com.example.first" });
+    f.owner.attach(f.request);
+    const timer = new FakeTimer();
+    const launch = f.launcher.launch.bind(f.launcher);
+    f.launcher.launch = async (options) => {
+      await timer.sleep(1_000);
+      return launch(options);
+    };
+
+    const retargeting = f.owner.retarget({
+      deviceId: f.request.deviceId,
+      bundleId: "com.example.second",
+    });
+    await Promise.resolve();
+    expect(timer.getPendingSleepCount()).toBe(1);
+    if (ending === "release") {
+      f.sessions.releases[0]!(f.request.ownerSession);
+    } else {
+      f.sessions.unbindings[0]!(f.request.ownerSession, f.request.deviceId);
+    }
+    timer.advanceTime(1_000);
+
+    expect(await retargeting).toBe("the watch session ended during runner startup");
+    expect(f.launcher.launches.map((launch) => launch.bundleId)).toEqual([
+      "com.example.first",
+      "com.example.second",
+    ]);
+    expect(f.launcher.stops).toBe(2);
+    expect(second.closed).toBe(true);
+    expect(watchRunners.get(f.request.deviceId)).toBeUndefined();
+    expect(f.released).toEqual([f.request.deviceId, f.request.deviceId]);
+  },
+);
+
 test("relaunches an owned runner after its socket disconnects", async () => {
   const socket = new FakeWatchSocket();
   const oldClient = new WebSocketWatchRunnerClient("ws://127.0.0.1:8765/ws", {

@@ -75,6 +75,11 @@ describe("still renderer browser bundle (#16451)", () => {
     ).toEqual([]);
   });
 
+  test("tree-shakes the server-only Android wire tables (#16804)", () => {
+    const wireTypes = ["request_hierarchy_if_stale", "hierarchy_update"];
+    expect(wireTypes.filter((type) => bundle.code.includes(`"${type}"`))).toEqual([]);
+  });
+
   test("stays within the minified and gzip budgets", () => {
     const minified = new TextEncoder().encode(bundle.code).byteLength;
     const gzip = Bun.gzipSync(bundle.code).byteLength;

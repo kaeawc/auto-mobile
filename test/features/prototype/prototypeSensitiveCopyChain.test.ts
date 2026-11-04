@@ -42,8 +42,10 @@ describe("sensitive copy-taint propagation", () => {
     expect(prototypeSensitiveSinkErrors(chainSpec("data:/other"))).toEqual([]);
   });
 
-  test("many copies sharing one source segment bucket in linear time", () => {
-    const COMMON = 10_000;
+  // Sized to stay inside the 100 ms unit budget on the slowest CI runner
+  // (windows-latest took ~200 ms at 10,000 copies even with linear bucketing).
+  test("many copies sharing one source segment stay within the time budget", () => {
+    const COMMON = 3_000;
     const spec = {
       id: "common",
       requires: { platform: ["clipboard"] },

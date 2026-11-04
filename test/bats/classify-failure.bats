@@ -991,6 +991,27 @@ MAVEN_CENTRAL_403_LOG=$'2026-11-04T05:20:11.1234567Z A problem occurred configur
   [[ "$output" != *"Maven Central returned 403"* ]]
 }
 
+# Robolectric android-all download failure shape from #16802 (run 41789949312).
+ROBOLECTRIC_FETCH_LOG=$'2026-11-04T07:09:55.9539251Z AutoMobileSDKFirstActivityTapTrackingTest > classMethod FAILED\n2026-11-04T07:09:55.9669437Z     java.lang.AssertionError at MavenArtifactFetcher.java:130\n2026-11-04T07:09:55.9800000Z         Caused by: java.util.concurrent.ExecutionException at AbstractFuture.java:168\n2026-11-04T07:09:55.9962332Z             Caused by: java.io.IOException at HttpURLConnection.java:2034'
+
+@test "classifies a Robolectric MavenArtifactFetcher IOException as a rerun (#16802)" {
+  for job in "Kotlin Code Coverage" "Run CtrlProxy Unit Tests"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$ROBOLECTRIC_FETCH_LOG" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — Robolectric's own android-all jar download from Maven Central failed"* ]]
+    [[ "$output" != *"UNKNOWN"* ]]
+  done
+}
+
+@test "does not classify a MavenArtifactFetcher assertion without the IOException cause as the download flake" {
+  runner_shutdown_fixture "Kotlin Code Coverage"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="${ROBOLECTRIC_FETCH_LOG//java.io.IOException/java.lang.SecurityException}" bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"android-all jar download"* ]]
+}
+
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
 @test "reruns a calibrated contended unit timeout before the both-attempts signature" {
   for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage" "TypeScript Code Coverage (1/2)"; do

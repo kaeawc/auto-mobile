@@ -2453,9 +2453,6 @@ jobs:
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
-          # Restore the android-all jars merge.yml's coverage job saves, so
-          # Robolectric does not download them at test time (#16396).
-          robolectric-jar-cache: "restore"
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Generate Kotlin Coverage Badge"

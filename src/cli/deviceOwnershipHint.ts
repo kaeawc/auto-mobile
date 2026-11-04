@@ -49,19 +49,34 @@ function formatMinutes(ms: number): string {
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
-/**
- * A `--cli` session idle-released between invocations (#16882): name the default window and the
- * variable that lengthens it, since the refusal itself only says `cli-idle-timeout`. It does not
- * state the expired session's own window: that was set when the session was adopted, possibly
- * under another environment, and the daemon caps it.
- */
-const CLI_IDLE_TIMEOUT_HINT =
-  "Hint: this --cli session went longer than its idle timeout " +
-  `(${formatMinutes(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS)} by default) without a control call ` +
+/** The idle window an ownership-loss payload reports for a `cli-idle-timeout` release (#16908). */
+function ownershipLossIdleTimeoutMs(payload: unknown): number | undefined {
+  const idleTimeoutMs = payloadRecord(payloadRecord(payload)?.error)?.idleTimeoutMs;
+  return typeof idleTimeoutMs === "number" && Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0
+    ? idleTimeoutMs
+    : undefined;
+}
+
+const CLI_IDLE_TIMEOUT_REMEDY =
   "(reads do not count), so its session UUID cannot be used again. Acquire a new session with " +
   "getAndroid, getApple or startDevice. To keep a session across longer gaps, set " +
   `${ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name} (milliseconds, at most ` +
   `${formatMinutes(MAX_CLI_SESSION_IDLE_TIMEOUT_MS)}) in the environment of every --cli call.`;
+
+/**
+ * A `--cli` session idle-released between invocations (#16882): name its idle window and the
+ * variable that lengthens it. The window was set by the last --cli call that used the session,
+ * possibly under another environment, and capped by the daemon, so only the refusal can say what
+ * it was (#16908); an older daemon that does not report it gets the default instead.
+ */
+function cliIdleTimeoutHint(payload: unknown): string {
+  const idleTimeoutMs = ownershipLossIdleTimeoutMs(payload);
+  const window =
+    idleTimeoutMs === undefined
+      ? `its idle timeout (${formatMinutes(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS)} by default)`
+      : `its idle timeout of ${formatMinutes(idleTimeoutMs)} (${idleTimeoutMs} ms)`;
+  return `Hint: this --cli session went longer than ${window} without a control call ${CLI_IDLE_TIMEOUT_REMEDY}`;
+}
 
 /** Each candidate as `deviceId (platform)`, skipping malformed entries. */
 function candidateList(payload: unknown): string[] {
@@ -139,7 +154,7 @@ const FIXED_REFUSAL_HINTS: ReadonlyMap<string, string> = new Map([
 export function cliDeviceOwnershipHint(payload: unknown, toolName: string): string | undefined {
   const code = refusalCode(payload);
   if (code === SESSION_OWNERSHIP_LOST_CODE && ownershipLossReason(payload) === "cli-idle-timeout") {
-    return CLI_IDLE_TIMEOUT_HINT;
+    return cliIdleTimeoutHint(payload);
   }
   if (code === AMBIGUOUS_DEVICE_TARGET_CODE) {
     return ambiguousDeviceTargetHint(payload);

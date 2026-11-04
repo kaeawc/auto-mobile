@@ -13,7 +13,7 @@ import {
   McpTimeoutError,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
 } from "../wire/McpTimeoutError";
-import { idleReleaseField } from "../releaseReasons";
+import { cliIdleTimeoutField, idleReleaseField } from "../releaseReasons";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../sessionReleasedDuringCall";
 import {
   DAEMON_SESSION_NOT_ACTIVE_CODE,
@@ -106,6 +106,11 @@ function sessionAdmissionRefusalFields(error: unknown): RefusalFrameFields | und
   }
   const reason: unknown = Reflect.get(release, "releaseReason");
   const ownerPid: unknown = Reflect.get(release, "ownerPid");
+  const heartbeat: unknown = Reflect.get(release, "heartbeat");
+  const idleTimeoutMs: unknown =
+    heartbeat !== null && typeof heartbeat === "object"
+      ? Reflect.get(heartbeat, "timeoutMs")
+      : undefined;
   return {
     code: SESSION_OWNERSHIP_LOST_CODE,
     retryable: false,
@@ -114,6 +119,10 @@ function sessionAdmissionRefusalFields(error: unknown): RefusalFrameFields | und
       sessionUuid,
       ...(typeof reason === "string" ? { reason } : {}),
       ...idleReleaseField(typeof reason === "string" ? reason : undefined),
+      ...cliIdleTimeoutField(
+        typeof reason === "string" ? reason : undefined,
+        typeof idleTimeoutMs === "number" ? idleTimeoutMs : undefined,
+      ),
       ...(typeof ownerPid === "number" ? { ownerPid } : {}),
     },
   };

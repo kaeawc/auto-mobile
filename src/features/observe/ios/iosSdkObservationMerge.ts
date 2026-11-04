@@ -74,7 +74,7 @@ function convertNode(
     class: node.role,
     // Match the native/web text-field properties used by focus selection and field detection.
     role: editable ? "textfield" : node.role,
-    ...(editable ? { focusable: "true", "input-type": "text" } : {}),
+    ...(editable ? { focusable: "true", "input-type": "text", actions: ["set_text"] } : {}),
     bounds: { ...node.bounds },
     enabled: String(node.enabled),
     [SDK_ELEMENT_ID_ATTRIBUTE]: node.id,

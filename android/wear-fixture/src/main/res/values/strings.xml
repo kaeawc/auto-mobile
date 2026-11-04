@@ -1,0 +1,5 @@
+<resources>
+  <string name="app_name">AutoMobile Wear Fixture</string>
+  <string name="tile_label">AutoMobile Tile</string>
+  <string name="complication_label">AutoMobile Complication</string>
+</resources>

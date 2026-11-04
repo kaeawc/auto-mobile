@@ -112,6 +112,7 @@ not_in_nav: |
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/androidx-car-app-template-snapshots.md
+  /decisions/androidx-wear-fixture-libraries.md
   /decisions/fastlane-supply-play-publishing.md
   /decisions/ios-user-files-provider.md
   /decisions/material-icons-web-glyphs.md
@@ -168,6 +169,7 @@ nav:
       - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
       - "Session broker device reuse": design-docs/session-broker-device-reuse.md
       - "Session broker remote devices": design-docs/session-broker-remote-devices.md
+      - "Device farm": design-docs/device-farm.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md

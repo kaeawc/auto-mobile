@@ -20,6 +20,7 @@ import {
   DisplayRecordProvenance,
 } from "./collectors/DisplayBindingCollector";
 import { enforceHierarchyPlatform, HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
+import type { DeviceStateCollectorPort } from "./collectors/collectorPorts";
 
 /** Stage 2 of one single-display observation: reconcile window and activity attribution and bind the final display. */
 export interface SingleDisplayReconcileStageDependencies {
@@ -29,6 +30,7 @@ export interface SingleDisplayReconcileStageDependencies {
   staleRecovery: () => StaleHierarchyRecovery;
   displayBinding: () => DisplayBindingCollector;
   platformValidator: () => HierarchyPlatformValidator;
+  deviceStateCollector: () => Pick<DeviceStateCollectorPort, "refreshAutomotiveForegroundActivity">;
   reconcileActiveWindowAttribution: (
     result: ObserveResult,
     options?: { signal?: AbortSignal; readOnly?: boolean },
@@ -48,6 +50,8 @@ export class SingleDisplayReconcileStage {
     captured: SingleDisplayCaptured,
   ): Promise<SingleDisplayReconciled> {
     const { result, signal } = run;
+    // Automotive DO status was derived from the collected activity; reconciliation may change it.
+    const collectedActivity = activityKey(result);
     // A caller may omit back-stack collection for an intermediate capture.
     // Use the sampled display's activity when CtrlProxy's window event came
     // from another panel.
@@ -90,6 +94,9 @@ export class SingleDisplayReconcileStage {
 
     const postCaptureForeground = await this.resolvePostCaptureForeground(run);
     await this.verifyCachedHierarchyIfRequested(run, postCaptureForeground);
+    if (result.automotive && activityKey(result) !== collectedActivity) {
+      await this.d.deviceStateCollector().refreshAutomotiveForegroundActivity(result, signal);
+    }
     const recordProvenance = await this.bindFinalSingleDisplay(run);
     this.attachOtherDisplays(result);
     return {
@@ -279,4 +286,8 @@ export class SingleDisplayReconcileStage {
         .map((panel) => ({ key: panel.key, role: panel.role, size: panel.sizePx }));
     }
   }
+}
+
+function activityKey(result: ObserveResult): string {
+  return `${result.activeWindow?.appId ?? ""}/${result.activeWindow?.activityName ?? ""}`;
 }

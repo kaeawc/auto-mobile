@@ -51,6 +51,15 @@ const OTHER_DEVICE_STATE_FIELDS: readonly (keyof DeviceConditionCallFields)[] = 
   "power",
 ];
 
+/**
+ * The refusal for a deviceCondition call while the flag is off. It names both enable paths, so an
+ * agent without the IDE plugin can turn the flag on (#16882).
+ */
+export const DEVICE_CONDITION_FLAG_DISABLED_MESSAGE =
+  "deviceCondition is behind the 'device-condition' feature flag, which is disabled. " +
+  "Enable it with `auto-mobile --daemon set-feature-flag device-condition true` " +
+  "(or the IDE plugin's feature flag settings), then retry the call.";
+
 /** Fail closed until the composition root registers the process's feature flags. */
 const FLAGS_UNREGISTERED: FeatureFlagReader = { isEnabled: () => false };
 let registeredFeatureFlags: FeatureFlagReader = FLAGS_UNREGISTERED;
@@ -91,7 +100,7 @@ function deviceConditionRefusal(
   featureFlags: FeatureFlagReader,
 ): string | undefined {
   if (!featureFlags.isEnabled("device-condition")) {
-    return "deviceCondition is behind the 'device-condition' feature flag, which is disabled.";
+    return DEVICE_CONDITION_FLAG_DISABLED_MESSAGE;
   }
   if (OTHER_DEVICE_STATE_FIELDS.some((field) => args[field] !== undefined)) {
     return "deviceCondition cannot be combined with other setDeviceState fields; send it in its own call.";

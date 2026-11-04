@@ -138,8 +138,8 @@ export function sessionOwnershipLostPayload({
       sessionUuid,
       reason,
       ...idleReleaseField(reason),
-      // A cli-idle session's heartbeat timeout is its adopted idle window (#16908).
-      ...cliIdleTimeoutField(reason, idleTimeoutMs ?? release?.heartbeat.timeoutMs),
+      // Only a release of a session on the cli-idle policy records its window (#16908, #16940).
+      ...cliIdleTimeoutField(reason, idleTimeoutMs ?? release?.cliIdleTimeoutMs),
       ...terminalSessionRefusalFields(release?.ownerPid),
       ...(release ? { release } : {}),
     },

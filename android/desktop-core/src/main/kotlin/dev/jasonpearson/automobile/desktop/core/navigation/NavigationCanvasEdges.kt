@@ -55,7 +55,12 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNavigationEdge
           // Fade transitions reached only historically / by another build or device
           // (#4985), or outside the filtered build (#4987).
           val provenanceAlpha =
-            NavigationBuildLens.alphaFor(transition.provenance, activeContext, buildLens)
+            NavigationBuildLens.alphaFor(
+              transition.provenance,
+              activeContext,
+              buildLens,
+              clock.nowMs(),
+            )
           val edgeColor = baseEdgeColor.copy(alpha = baseEdgeColor.alpha * provenanceAlpha)
           val edgeStrokeWidth = if (isHighlighted) strokeWidth * 1.5f else strokeWidth
           // Edges reached only by another build are hints, not verified paths: draw them dashed.

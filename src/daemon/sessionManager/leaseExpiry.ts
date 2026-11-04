@@ -50,6 +50,7 @@ import {
   isReleaseVetoedByExecutions,
 } from "../unsettledExecutionVeto";
 import {
+  cliIdleWindowMs,
   type ReleaseReasonState,
   type SessionClockExecution,
   type SessionLifecycleSlots,
@@ -675,8 +676,12 @@ export class SessionLeaseExpiry {
     const session = this.host.sessions.get(sessionId) ?? this.host.getReleasingSession(sessionId);
     this.host.expiryReleaseExecutionCanceller(
       sessionId,
-      // A cli-idle session's heartbeat timeout is its adopted idle window (#16908).
-      new SessionReleasedDuringCallError(sessionId, releaseReason, session?.heartbeatTimeoutMs),
+      // Only a session on the cli-idle policy has an idle window to report (#16908, #16940).
+      new SessionReleasedDuringCallError(
+        sessionId,
+        releaseReason,
+        session ? cliIdleWindowMs(session) : undefined,
+      ),
       query,
       session?.assignedDevice,
     );

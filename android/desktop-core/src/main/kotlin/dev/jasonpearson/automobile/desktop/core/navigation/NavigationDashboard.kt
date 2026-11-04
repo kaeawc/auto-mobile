@@ -26,6 +26,8 @@ import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.time.Clock
+import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 
@@ -82,9 +84,12 @@ data class NavigationDashboardOptions(
   val readOnly: Boolean = false,
   // Provenance-weighted opacity context (nav (app,build) Phase 2, #4985): a node/edge reached in
   // this active context renders at 100% opacity, one reached only historically / by another build
-  // or device at 50%, with hover provenance on the faded ones. Null (the default, and the offline
-  // case) renders the union at full opacity — there is no active build to contrast against.
+  // or device fades to 50%-25% by how recently it was last seen (#16952), with hover provenance on
+  // the faded ones. Null (the default, and the offline case) renders the union at full opacity —
+  // there is no active build to contrast against.
   val activeContext: NavigationActiveContext? = null,
+  // Time source for the recency-graded fade (#16952); tests inject a FakeClock.
+  val clock: Clock = SystemClock,
 )
 
 internal class NavigationDashboardState(options: NavigationDashboardOptions) {
@@ -214,6 +219,7 @@ private fun NavigationFlowCanvas(
         fitToViewTrigger = state.fitToViewTrigger,
         activeContext = options.activeContext,
         buildLens = lens,
+        clock = options.clock,
       ),
     )
   }

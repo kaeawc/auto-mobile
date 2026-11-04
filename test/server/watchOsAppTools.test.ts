@@ -4,6 +4,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { InstallApp } from "../../src/features/action/InstallApp";
+import { LaunchApp } from "../../src/features/action/LaunchApp";
 import { WatchAppManager } from "../../src/features/action/watch/WatchAppManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import {
@@ -12,7 +13,7 @@ import {
   setInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
 import { listAppsResultSchema } from "../../src/server/appToolOutputSchemas";
-import { createPlatformInstallApp } from "../../src/server/appToolsWatch";
+import { createPlatformInstallApp, createPlatformLaunchApp } from "../../src/server/appToolsWatch";
 import { sessionlessDeviceReadFor } from "../../src/server/deviceObservationAccess";
 import { resolveSessionlessDeviceRead } from "../../src/server/pipeline/readTarget";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
@@ -93,11 +94,13 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       autolock = "0",
       pooledWatch = true,
       watchOwnership,
+      retargetReason,
     }: {
       untypedListing?: boolean;
       autolock?: "0" | "1";
       pooledWatch?: boolean;
       watchOwnership?: ForeignDeviceOwnership;
+      retargetReason?: string;
     } = {},
   ) {
     const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: autolock };
@@ -167,8 +170,14 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
         wiped.push(String(target));
       },
     };
+    const retargets: Array<{ deviceId: string; bundleId: string }> = [];
     registerAppTools({
       watchApps: (device) => new WatchAppManager(device, { simctl: watchSimctl, plist, dataWipe }),
+      retargetWatchRunner: async (deviceId, bundleId) => {
+        expect(watchSimctl.pidOf(deviceId, bundleId)).toBeDefined();
+        retargets.push({ deviceId, bundleId });
+        return retargetReason;
+      },
     });
     const resumed: string[] = [];
     ToolRegistry.register("setActiveDevice", "Set active device", setActiveDeviceSchema, {
@@ -182,7 +191,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       defaultEnabled: true,
       ...SELECTS_ACTIVE_DEVICE,
     });
-    return { pool, sessions, readiness, watchSimctl, resumed, wiped };
+    return { pool, sessions, readiness, watchSimctl, resumed, wiped, retargets };
   }
 
   /** One top-level call from CONNECTION, its ambient connection as at MCP ingress (#15663). */
@@ -300,7 +309,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
   });
 
   test("launch, relaunch with clearAppData, and terminate an app on the session-bound watch", async () => {
-    const { watchSimctl, wiped } = await arrange();
+    const { watchSimctl, wiped, retargets } = await arrange();
     await bindWatchSession();
     await call("installApp", { sessionUuid: WATCH_SESSION, artifactPath: APP });
     watchSimctl.commands.length = 0;
@@ -310,11 +319,13 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     );
     expect(launched).toMatchObject({ success: true, packageName: BUNDLE });
     expect(launched.pid).toBe(watchSimctl.pidOf(watch.deviceId, BUNDLE));
+    expect(retargets).toEqual([{ deviceId: watch.deviceId, bundleId: BUNDLE }]);
 
     const cleared = toolJson(
       await call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE, clearAppData: true }),
     );
     expect(cleared).toMatchObject({ success: true, packageName: BUNDLE });
+    expect(retargets).toHaveLength(2);
     expect(wiped.sort()).toEqual(
       ["Documents", "Library", "tmp"].map((folder) =>
         path.join(simulatorDataContainer(watch.deviceId), folder),
@@ -337,7 +348,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
   });
 
   test("launchApp refuses prototype and a not-installed app on the watch", async () => {
-    const { watchSimctl } = await arrange();
+    const { watchSimctl, retargets } = await arrange();
     await bindWatchSession();
 
     const prototype = await failure(
@@ -348,6 +359,77 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     expect(String(prototype)).toContain("prototype agent runs only in iOS simulator apps");
     expect(String(missing)).toContain("App is not installed");
     expect(watchSimctl.commands.some((command) => command.startsWith("launch"))).toBe(false);
+    expect(retargets).toEqual([]);
+  });
+
+  test("a failed simctl launch never retargets the watch runner", async () => {
+    const { watchSimctl, retargets } = await arrange();
+    await bindWatchSession();
+    await call("installApp", { sessionUuid: WATCH_SESSION, artifactPath: APP });
+    watchSimctl.launchError = "watch launch failed";
+
+    const error = await failure(call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
+
+    expect(String(error)).toContain("watch launch failed");
+    expect(retargets).toEqual([]);
+  });
+
+  test("a retarget failure explains that launchApp already started the app", async () => {
+    const { watchSimctl, retargets } = await arrange([iphone], {
+      retargetReason: "runner process exited",
+    });
+    await bindWatchSession();
+    await call("installApp", { sessionUuid: WATCH_SESSION, artifactPath: APP });
+
+    const error = await failure(call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain("launchApp started the app");
+    expect(String(error)).toContain("watch runner could not retarget");
+    expect(String(error)).toContain("runner process exited");
+    expect(retargets).toEqual([{ deviceId: watch.deviceId, bundleId: BUNDLE }]);
+    expect(watchSimctl.pidOf(watch.deviceId, BUNDLE)).toBeDefined();
+  });
+
+  test("the watch launch executor forwards the call's abort signal to the retarget", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const plist = new FakeWatchBundleIds();
+    const simctl = new FakeWatchAppsSimctl(plist);
+    simctl.seed(watch.deviceId, { CFBundleIdentifier: BUNDLE });
+    const factory = (device: BootedDevice) => new WatchAppManager(device, { simctl, plist });
+    const controller = new AbortController();
+
+    await createPlatformLaunchApp(watch, factory, async (_deviceId, _bundleId, signal) => {
+      signals.push(signal);
+      return undefined;
+    }).execute(BUNDLE, { clearAppData: false, coldBoot: false, signal: controller.signal });
+
+    expect(signals).toEqual([controller.signal]);
+  });
+
+  test("iPhone and tvOS launch executors never retarget the watch runner", async () => {
+    const retargets: string[] = [];
+    const retarget = async (deviceId: string, bundleId: string) => {
+      retargets.push(`${deviceId}:${bundleId}`);
+      return undefined;
+    };
+    const tv: BootedDevice = { name: "Apple TV", deviceId: "tv-launch", platform: "tvos" };
+    const plist = new FakeWatchBundleIds();
+    const simctl = new FakeWatchAppsSimctl(plist);
+    simctl.seed(tv.deviceId, { CFBundleIdentifier: BUNDLE });
+    const factory = (device: BootedDevice) => new WatchAppManager(device, { simctl, plist });
+
+    expect(createPlatformLaunchApp(iphone, factory, retarget)).toBeInstanceOf(LaunchApp);
+    expect(
+      await createPlatformLaunchApp(tv, factory, retarget).execute(BUNDLE, {
+        clearAppData: false,
+        coldBoot: false,
+      }),
+    ).toMatchObject({
+      success: true,
+      packageName: BUNDLE,
+    });
+    expect(retargets).toEqual([]);
   });
 
   test("sessionless listApps with platform watchos and the watch deviceId lists the watch", async () => {

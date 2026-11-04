@@ -13,7 +13,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { capturedFloatingCoverHierarchy, observationOf } from "../helpers/prototypeWindowCapture";
 
 function capturedNode(hierarchy: ViewHierarchyResult, resourceId: string): ViewHierarchyNode {
-  const pending: ViewHierarchyNode[] = [hierarchy.hierarchy];
+  const root = hierarchy.hierarchy?.node;
+  const pending: ViewHierarchyNode[] =
+    root === undefined ? [] : Array.isArray(root) ? [...root] : [root];
   while (pending.length > 0) {
     const node = pending.pop()!;
     if (nodeAttributes(node)["resource-id"] === resourceId) {

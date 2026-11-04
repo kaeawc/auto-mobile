@@ -13,7 +13,7 @@ import {
   McpTimeoutError,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
 } from "../wire/McpTimeoutError";
-import { idleReleaseField } from "../releaseReasons";
+import { cliIdleTimeoutField, idleReleaseField } from "../releaseReasons";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../sessionReleasedDuringCall";
 import {
   DAEMON_SESSION_NOT_ACTIVE_CODE,
@@ -104,18 +104,30 @@ function sessionAdmissionRefusalFields(error: unknown): RefusalFrameFields | und
   if (error.name !== "TerminalSessionError" || release === null || typeof release !== "object") {
     return undefined;
   }
-  const reason: unknown = Reflect.get(release, "releaseReason");
-  const ownerPid: unknown = Reflect.get(release, "ownerPid");
   return {
     code: SESSION_OWNERSHIP_LOST_CODE,
     retryable: false,
     nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
-    details: {
-      sessionUuid,
-      ...(typeof reason === "string" ? { reason } : {}),
-      ...idleReleaseField(typeof reason === "string" ? reason : undefined),
-      ...(typeof ownerPid === "number" ? { ownerPid } : {}),
-    },
+    details: { sessionUuid, ...terminalReleaseDetails(release) },
+  };
+}
+
+/** The evidence a terminal release snapshot adds to a `session_ownership_lost` frame. */
+function terminalReleaseDetails(release: object): Record<string, unknown> {
+  const rawReason: unknown = Reflect.get(release, "releaseReason");
+  const reason = typeof rawReason === "string" ? rawReason : undefined;
+  const ownerPid: unknown = Reflect.get(release, "ownerPid");
+  const heartbeat: unknown = Reflect.get(release, "heartbeat");
+  const timeoutMs: unknown =
+    heartbeat !== null && typeof heartbeat === "object"
+      ? Reflect.get(heartbeat, "timeoutMs")
+      : undefined;
+  return {
+    ...(reason === undefined ? {} : { reason }),
+    ...idleReleaseField(reason),
+    // A cli-idle session's heartbeat timeout is its adopted idle window (#16908).
+    ...cliIdleTimeoutField(reason, typeof timeoutMs === "number" ? timeoutMs : undefined),
+    ...(typeof ownerPid === "number" ? { ownerPid } : {}),
   };
 }
 

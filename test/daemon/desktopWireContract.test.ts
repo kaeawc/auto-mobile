@@ -9,6 +9,7 @@ import {
   PIXEL_FOLD,
   type WireFixture,
 } from "./helpers/desktopWireHarness";
+import { IDLE_WINDOW_MS } from "../helpers/livenessScenarioHarness";
 
 /*
  * Desktop/IDE <-> daemon wire contract (#10669).
@@ -48,6 +49,10 @@ const HIDDEN_GRACE_TICKS = 5;
 const IDLE_WINDOW_TICKS = 120; // > 2 min idle window + one cleanup sweep at 2 s per tick
 const TEN_MINUTES_TICKS = 300;
 const MINUTE_TICKS = 30;
+// A real daemon rehydrates persisted sessions, so a restart inside the idle window is invisible to
+// the client. One that outlasts it is the restart the client sees: the restarted daemon expires the
+// session it rehydrated, whose last tool activity is older than the window.
+const RESTART_DOWNTIME_MS = IDLE_WINDOW_MS;
 
 let harness: DesktopWireHarness | undefined;
 
@@ -567,17 +572,22 @@ describe("desktop wire contract (#10669, #10730)", () => {
     );
   });
 
-  test("a daemon restart drops back to watching under a fresh session; the next tap re-allocates", async () => {
+  test("a daemon restart that outlasts the idle window drops back to watching under a fresh session; the next tap re-allocates", async () => {
     const wire = await startHarness();
     await startWatching(wire, DESKTOP_1, 1);
     await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 2);
 
-    await wire.restartDaemon();
+    await wire.restartDaemon(RESTART_DOWNTIME_MS);
+    expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
     const lapse = await wire.send("desktop", "heartbeat-lapse", "daemon/heartbeat", {
       sessionId: DESKTOP_1,
     });
-    expect(lapse.success).toBe(false);
+    expect(lapse).toMatchObject({
+      success: false,
+      code: "daemon_session_not_found",
+      releaseReason: "expired",
+    });
     await wire.send("desktop", "release-lapsed", "daemon/releaseSession", {
       sessionId: DESKTOP_1,
     });
@@ -596,9 +606,10 @@ describe("desktop wire contract (#10669, #10730)", () => {
     checkFixture(
       wire.fixture(
         "daemon-restart",
-        "A restarted daemon has no record of the session: the heartbeat is not found, and the " +
-          "client drops back to watching under a fresh observer session instead of re-binding; " +
-          "the next tap allocates the device under it (#10730).",
+        "The daemon is down for longer than the idle window. The restarted daemon rehydrates the " +
+          "persisted session and expires it, so the heartbeat is not found (released as expired), " +
+          "and the client drops back to watching under a fresh observer session instead of " +
+          "re-binding; the next tap allocates the device under it (#10730).",
         { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
       ),
     );

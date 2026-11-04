@@ -6,7 +6,7 @@ import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import type { IosSdkBridgeClient } from "../observe/ios/IosSdkBridgeReader";
 import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
 import { iosSdkWebTarget } from "../observe/ios/iosSdkWebMerge";
-import type { IosSdkAction } from "../observe/ios/sdkObservationBridge";
+import { failOnIosSdkMultiScene, type IosSdkAction } from "../observe/ios/sdkObservationBridge";
 import type { CtrlProxySdkActionResult } from "../observe/ios/types";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import {
@@ -94,6 +94,7 @@ export function iosSdkBridgeActionOutcome(
   reply: CtrlProxySdkActionResult,
   verb: string,
 ): IosSdkTapOutcome {
+  failOnIosSdkMultiScene(reply);
   if (reply.result?.status === "accepted") {
     return { backend: "sdk", nextObservationIdentity: reply.result.nextObservationIdentity };
   }

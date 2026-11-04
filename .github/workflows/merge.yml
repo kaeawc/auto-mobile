@@ -37,7 +37,9 @@ jobs:
   # The full desktop-core suite stays off the merge path (consistently >1 minute, not required for
   # release/docs publishing), but the desktop wire-contract replay runs on every merge (#10983):
   # the daemon-side desktopWireContract test writes test/fixtures/desktop-wire/, and this replay
-  # is the only thing that proves the Kotlin client still composes against it.
+  # is the only thing that proves the Kotlin client still composes against it. The filter covers
+  # the whole desktop.core.daemon package plus RememberDeviceControlSessionUiTest, so the narrow
+  # allocation killers (mutants n/K2 and K3) run at merge alongside the replay (#11443).
   desktop-core-unit-tests:
     name: "Run Desktop Wire Replay"
     runs-on: ubuntu-latest
@@ -55,7 +57,7 @@ jobs:
       - uses: ./.github/actions/gradle-task-run
         with:
           gradle-tasks: ":desktop-core:test"
-          gradle-flags: '["--tests", "*DesktopWireFixtureCompositionTest"]'
+          gradle-flags: '["--tests", "dev.jasonpearson.automobile.desktop.core.daemon.*", "--tests", "*RememberDeviceControlSessionUiTest"]'
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

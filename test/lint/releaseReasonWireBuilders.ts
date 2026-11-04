@@ -17,7 +17,7 @@ export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails",
   "src/daemon/types.ts#releasedSessionNotFoundFields",
   "src/daemon/types.ts#sanitizeBoundSessionLoss",
-  "src/daemon/socketServer/errorFrames.ts#sessionAdmissionRefusalFields",
+  "src/daemon/socketServer/errorFrames.ts#terminalReleaseDetails",
   "src/daemon/socketServer/notificationFanOut.ts#broadcastSessionReleased",
   "src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession",
   "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",

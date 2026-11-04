@@ -1,7 +1,9 @@
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";
 import {
   createIosSdkBridgeReader,
+  mergeIosSdkBridgeInto,
   type IosSdkBridgeClient,
 } from "../../../../src/features/observe/ios/IosSdkBridgeReader";
 import type { IosObservationBridgeState } from "../../../../src/features/observe/ios/observationBridgeState";
@@ -120,4 +122,45 @@ test("bridge calls share the remaining search budget and observe keeps default t
     detail: "search budget exhausted",
   });
   expect(client.observeCalls).toBe(calls);
+});
+
+test("multi_scene throws an actionable scene selection error instead of returning unavailable", async () => {
+  const client = new FakeBridgeClient();
+  client.reply = {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    totalTimeMs: 0,
+  };
+  const reader = createIosSdkBridgeReader({
+    client: () => client,
+    enabled: () => true,
+    timer: new FakeTimer(),
+  });
+  await expect(reader.observe("com.example.app")).rejects.toBeInstanceOf(ActionableError);
+  await expect(reader.observe("com.example.app")).rejects.toThrow(
+    "2 connected scenes (scene-a, scene-b)",
+  );
+});
+
+test("multi_scene cannot merge or report the XCTest hierarchy as a successful fallback", async () => {
+  const client = new FakeBridgeClient();
+  client.reply = {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    totalTimeMs: 0,
+  };
+  const reader = createIosSdkBridgeReader({
+    client: () => client,
+    enabled: () => true,
+    timer: new FakeTimer(),
+  });
+  const hierarchy = { packageName: "com.example.app", hierarchy: {} };
+  await expect(mergeIosSdkBridgeInto(hierarchy, reader)).rejects.toThrow(
+    "SDK observation needs one scene; XCTest does not stand in for this result.",
+  );
+  expect(hierarchy).toEqual({ packageName: "com.example.app", hierarchy: {} });
 });

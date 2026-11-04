@@ -1,3 +1,15 @@
+import {
+  ALIGN_ITEMS,
+  ARIA_HIDDEN,
+  BORDER_RADIUS,
+  CENTER,
+  FLEX_SHRINK,
+  FONT_SIZE,
+  FONT_WEIGHT,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  LINE_HEIGHT,
+} from "./webCss";
 import { el, type WebElement } from "./webNodes";
 
 // Browser-safe: the still renderer bundles for the browser (#16451), so the Node-only Material
@@ -30,22 +42,22 @@ export function prototypeIconVariant(value: unknown): PrototypeIconVariant {
 
 /** An icon's 24 px box; the spec's own style still wins. */
 export const ICON_BOX: Readonly<Record<string, string>> = {
-  display: "inline-flex",
+  display: INLINE_FLEX,
   width: "24px",
   height: "24px",
-  "flex-shrink": "0",
+  [FLEX_SHRINK]: "0",
 };
 
 /** No glyph: a tinted ring around the name's initial, titled with the full name. */
 export const ICON_PLACEHOLDER: Readonly<Record<string, string>> = {
   ...ICON_BOX,
-  "align-items": "center",
-  "justify-content": "center",
+  [ALIGN_ITEMS]: CENTER,
+  [JUSTIFY_CONTENT]: CENTER,
   border: "2px solid currentColor",
-  "border-radius": "6px",
-  "font-size": "11px",
-  "font-weight": "700",
-  "line-height": "1",
+  [BORDER_RADIUS]: "6px",
+  [FONT_SIZE]: "11px",
+  [FONT_WEIGHT]: "700",
+  [LINE_HEIGHT]: "1",
 };
 
 /** The first letter of an icon's name, so a placeholder reads as that icon; none without a name. */
@@ -60,5 +72,5 @@ export function iconInitial(name: unknown): string {
  */
 export function glyphSvg(shapes: readonly WebElement[]): WebElement {
   const attrs = { viewbox: "0 0 24 24", width: "100%", height: "100%", fill: "currentColor" };
-  return el("svg", { attrs: { ...attrs, "aria-hidden": "true" } }, shapes);
+  return el("svg", { attrs: { ...attrs, [ARIA_HIDDEN]: "true" } }, shapes);
 }

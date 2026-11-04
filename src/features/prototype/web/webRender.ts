@@ -1,3 +1,34 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  ARIA_CHECKED,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  CENTER,
+  COLUMN,
+  DATA_TESTID,
+  FLEX,
+  FLEX_BASIS,
+  FLEX_DIRECTION,
+  FONT_SIZE,
+  FONT_WEIGHT,
+  GRID_AREA,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  JUSTIFY_SELF,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  PADDING_BOTTOM,
+  PADDING_INLINE,
+  POINTER_EVENTS,
+  RELATIVE,
+  STRETCH,
+  TEXT_ALIGN,
+  WHITE_SPACE,
+} from "./webCss";
+import { roleCss, toggleMark } from "./webToggleMark";
 import { bindPrototypeDataText, resolvePrototypeDataPointer } from "../prototypeData";
 import {
   projectPrototypeDerivedItem,
@@ -196,24 +227,24 @@ function shieldedInstance(instance: Instance): Instance {
 function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = {}) {
   const attrs: Record<string, string> = { "data-node": String(node.type) };
   if (typeof node.testTag === "string") {
-    attrs["data-testid"] = node.testTag;
+    attrs[DATA_TESTID] = node.testTag;
   }
   // As the native mapper resolves it: semantics.label, then the legacy contentDescription.
   const label = record(node.semantics)?.label ?? node.contentDescription;
   if (typeof label === "string") {
-    attrs["aria-label"] = bound(label, scope);
+    attrs[ARIA_LABEL] = bound(label, scope);
   }
   // Component defaults first, so the spec's own style wins, as on both devices.
   const style = {
     ...extra,
     ...nodeCss(node.style, scope.style),
     ...textCss(record(node.style), scope.style),
-    ...(scope.inBox ? { "grid-area": "cell" } : {}),
+    ...(scope.inBox ? { [GRID_AREA]: "cell" } : {}),
   };
   // Per-corner radii are longhands; a component's default shorthand would sort after some of them
   // and reset those corners, so it goes when the spec sets its own corners.
   if ("border-start-start-radius" in style) {
-    delete (style as Record<string, string>)["border-radius"];
+    delete (style as Record<string, string>)[BORDER_RADIUS];
   }
   return { attrs, style: safeAreaCss(node, scope, style) };
 }
@@ -381,7 +412,7 @@ const text: NodeRenderer = (node, scope) => {
           overflow: "hidden",
         }
       : {};
-  const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
+  const { attrs, style } = base(node, scope, { ...clamp, [WHITE_SPACE]: "pre-wrap" });
   return el(
     "span",
     { attrs, style },
@@ -393,11 +424,11 @@ const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
   const fade = fadeEdgesCss(node, scope.style);
   const { attrs, style } = base(node, scope, {
-    display: "flex",
+    display: FLEX,
     // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
-    "flex-direction": `${horizontal ? "row" : "column"}${node.reverse === true ? "-reverse" : ""}`,
+    [FLEX_DIRECTION]: `${horizontal ? "row" : "column"}${node.reverse === true ? "-reverse" : ""}`,
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
-    "align-items": "flex-start",
+    [ALIGN_ITEMS]: "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
@@ -421,13 +452,13 @@ const divider: NodeRenderer = (node, scope) => {
       node,
       scope,
       vertical
-        ? { width: "1px", "align-self": "stretch", "background-color": color }
+        ? { width: "1px", [ALIGN_SELF]: STRETCH, [BACKGROUND_COLOR]: color }
         : // Inside a box grid the line axis is horizontal, so it stretches there too.
           {
             height: "1px",
-            "align-self": "stretch",
-            "justify-self": "stretch",
-            "background-color": color,
+            [ALIGN_SELF]: STRETCH,
+            [JUSTIFY_SELF]: STRETCH,
+            [BACKGROUND_COLOR]: color,
           },
     ),
   );
@@ -454,29 +485,12 @@ const image: NodeRenderer = (node, scope, path) => {
     reason: "assetNotInlined",
   });
   const { attrs, style } = base(node, scope, {
-    "background-color": cssColor("surfaceVariant", scope.style) ?? "#e7e0ec",
-    "min-height": "48px",
-    "min-width": "48px",
+    [BACKGROUND_COLOR]: cssColor("surfaceVariant", scope.style) ?? "#e7e0ec",
+    [MIN_HEIGHT]: "48px",
+    [MIN_WIDTH]: "48px",
   });
   return el("div", { attrs: { ...attrs, role: "img" }, style });
 };
-
-function roleCss(
-  scope: WebRenderScope,
-  background: string,
-  foreground: string,
-): Record<string, string> {
-  const css: Record<string, string> = {};
-  const bg = cssColor(background, scope.style);
-  const fg = cssColor(foreground, scope.style);
-  if (bg) {
-    css["background-color"] = bg;
-  }
-  if (fg) {
-    css.color = fg;
-  }
-  return css;
-}
 
 const BUTTON_ROLES: Readonly<Record<string, [string, string]>> = {
   filled: ["primary", "onPrimary"],
@@ -508,13 +522,13 @@ const button: NodeRenderer = (node, scope) => {
       ? { border: `1px solid ${cssColor("outline", scope.style) ?? "currentColor"}` }
       : {};
   const { attrs, style } = base(node, scope, {
-    display: "inline-flex",
-    "align-items": "center",
-    "justify-content": "center",
-    "min-height": "40px",
+    display: INLINE_FLEX,
+    [ALIGN_ITEMS]: CENTER,
+    [JUSTIFY_CONTENT]: CENTER,
+    [MIN_HEIGHT]: "40px",
     padding: "0 24px",
-    "border-radius": "20px",
-    "font-weight": "500",
+    [BORDER_RADIUS]: "20px",
+    [FONT_WEIGHT]: "500",
     ...(roles ? roleCss(scope, roles[0], roles[1]) : roleCss(scope, "transparent", "primary")),
     gap: "8px",
     ...outline,
@@ -536,7 +550,7 @@ function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: str
     const glyph = icon({ type: "icon", name: action.icon }, scope, path);
     const label = typeof action.label === "string" ? bound(action.label, scope) : action.icon;
     return [
-      el("span", { attrs: { role: "button", "aria-label": label }, style: { padding: "12px" } }, [
+      el("span", { attrs: { role: "button", [ARIA_LABEL]: label }, style: { padding: "12px" } }, [
         glyph,
       ]),
     ];
@@ -560,15 +574,15 @@ const APP_BAR_VARIANTS: Readonly<Record<string, { height: number; title: number 
  */
 function appBarTitleStyle(variant: string, expanded: boolean): Record<string, string> {
   if (expanded) {
-    return { order: "1", "flex-basis": "100%", "padding-bottom": "16px" };
+    return { order: "1", [FLEX_BASIS]: "100%", [PADDING_BOTTOM]: "16px" };
   }
   return variant === "centerAligned"
     ? {
-        position: "absolute",
+        position: ABSOLUTE,
         left: "0",
         right: "0",
-        "text-align": "center",
-        "pointer-events": "none",
+        [TEXT_ALIGN]: CENTER,
+        [POINTER_EVENTS]: "none",
       }
     : { flex: "1 1 auto" };
 }
@@ -578,17 +592,17 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
   const size = APP_BAR_VARIANTS[variant] ?? APP_BAR_VARIANTS.small!;
   const expanded = variant === "medium" || variant === "large";
   const { attrs, style } = base(node, scope, {
-    display: "flex",
+    display: FLEX,
     "flex-wrap": expanded ? "wrap" : "nowrap",
-    "align-items": "center",
+    [ALIGN_ITEMS]: CENTER,
     "align-content": "space-between",
     // Like the native bar, it takes no window insets of its own: status-bar clearance comes only
     // from an authored safeAreaPadding.
-    "min-height": `${size.height}px`,
-    "padding-inline": "16px",
-    "font-size": fontPx(size.title, scope.style),
-    "align-self": "stretch",
-    position: "relative",
+    [MIN_HEIGHT]: `${size.height}px`,
+    [PADDING_INLINE]: "16px",
+    [FONT_SIZE]: fontPx(size.title, scope.style),
+    [ALIGN_SELF]: STRETCH,
+    position: RELATIVE,
     ...roleCss(scope, "surface", "onSurface"),
   });
   const actions = Array.isArray(node.actions) ? node.actions : [];
@@ -633,7 +647,7 @@ function floatingLabel(node: Raw, empty: boolean, scope: WebRenderScope): WebEle
       "span",
       {
         attrs: { "data-slot": "label" },
-        style: { "font-size": fontPx(12, scope.style), opacity: "0.8" },
+        style: { [FONT_SIZE]: fontPx(12, scope.style), opacity: "0.8" },
       },
       [bound(node.label, scope)],
     ),
@@ -677,7 +691,7 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
       {
         attrs: error ? { role: "alert" } : {},
         style: {
-          "font-size": fontPx(12, scope.style),
+          [FONT_SIZE]: fontPx(12, scope.style),
           padding: "0 16px",
           ...(color ? { color } : {}),
         },
@@ -693,9 +707,9 @@ const textField: NodeRenderer = (node, scope, path) => {
     node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
-    display: "flex",
-    "align-items": "center",
-    "min-height": "56px",
+    display: FLEX,
+    [ALIGN_ITEMS]: CENTER,
+    [MIN_HEIGHT]: "56px",
     padding: "0 16px",
     gap: "12px",
     ...fieldChrome(node, error, scope),
@@ -707,7 +721,7 @@ const textField: NodeRenderer = (node, scope, path) => {
   const [outer, inner] = caption.length === 0 ? [{}, style] : splitParentFacing(style);
   const box = el("div", { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner }, [
     ...namedIcon(node.leadingIcon, scope),
-    el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
+    el("span", { style: { display: FLEX, [FLEX_DIRECTION]: COLUMN, flex: "1 1 auto" } }, [
       ...floatingLabel(node, empty, scope),
       el("span", { style: multilineCss(node, scope.style) }, [shown]),
     ]),
@@ -717,7 +731,7 @@ const textField: NodeRenderer = (node, scope, path) => {
   const field = caption.length === 0 ? box : withOverContentLayers(box, node.style, scope.style);
   return caption.length === 0
     ? field
-    : el("div", { style: { ...outer, display: "flex", "flex-direction": "column", gap: "4px" } }, [
+    : el("div", { style: { ...outer, display: FLEX, [FLEX_DIRECTION]: COLUMN, gap: "4px" } }, [
         field,
         ...caption,
       ]);
@@ -730,67 +744,15 @@ const textField: NodeRenderer = (node, scope, path) => {
 function fieldChrome(node: Raw, error: boolean, scope: WebRenderScope): Record<string, string> {
   if (node.variant === "outlined") {
     const outline = cssColor(error ? "error" : "outline", scope.style) ?? "currentColor";
-    return { "border-radius": "4px", border: `1px solid ${outline}` };
+    return { [BORDER_RADIUS]: "4px", border: `1px solid ${outline}` };
   }
   const indicator = cssColor(error ? "error" : "onSurfaceVariant", scope.style) ?? "currentColor";
   const container = cssColor("surfaceContainerHighest", scope.style);
   return {
-    "border-radius": "4px 4px 0 0",
+    [BORDER_RADIUS]: "4px 4px 0 0",
     "border-bottom": `1px solid ${indicator}`,
-    ...(container ? { "background-color": container } : {}),
+    ...(container ? { [BACKGROUND_COLOR]: container } : {}),
   };
-}
-
-/**
- * A Material 3 switch: a 52x32 track with a thumb at the end when on (24 px, onPrimary on primary)
- * and at the start when off (16 px, outline on surfaceContainerHighest inside an outline border).
- */
-function switchMark(on: boolean, scope: WebRenderScope): WebElement {
-  const outline = cssColor("outline", scope.style) ?? "currentColor";
-  const thumb = el("span", {
-    attrs: { "data-part": "thumb" },
-    style: {
-      width: on ? "24px" : "16px",
-      height: on ? "24px" : "16px",
-      "border-radius": "50%",
-      "background-color": on ? (cssColor("onPrimary", scope.style) ?? "#fff") : outline,
-      ...(on ? { "margin-inline-start": "auto" } : {}),
-    },
-  });
-  return el(
-    "span",
-    {
-      style: {
-        display: "flex",
-        "align-items": "center",
-        "box-sizing": "border-box",
-        width: "52px",
-        height: "32px",
-        padding: on ? "0 4px" : "0 6px",
-        "border-radius": "16px",
-        "flex-shrink": "0",
-        border: `2px solid ${on ? "transparent" : outline}`,
-        ...roleCss(scope, on ? "primary" : "surfaceContainerHighest", "onPrimary"),
-      },
-    },
-    [thumb],
-  );
-}
-
-/** A switch track or checkbox box, drawn from whether its state is on. */
-function toggleMark(role: "switch" | "checkbox", on: boolean, scope: WebRenderScope): WebElement {
-  return role === "switch"
-    ? switchMark(on, scope)
-    : el("span", {
-        style: {
-          width: "18px",
-          height: "18px",
-          "border-radius": "2px",
-          "flex-shrink": "0",
-          border: `2px solid ${cssColor(on ? "primary" : "onSurfaceVariant", scope.style) ?? "currentColor"}`,
-          ...(on ? roleCss(scope, "primary", "onPrimary") : {}),
-        },
-      });
 }
 
 /** Whether a toggle's state key, with repeat placeholders bound first, holds `true`. */
@@ -805,13 +767,13 @@ const toggle =
     const on = isOn(node.stateKey, scope);
     const disabled = disabledState(node, scope);
     const { attrs, style } = base(node, scope, {
-      display: "flex",
-      "align-items": "center",
+      display: FLEX,
+      [ALIGN_ITEMS]: CENTER,
       gap: "12px",
-      "min-height": "48px",
+      [MIN_HEIGHT]: "48px",
       ...disabled.css,
     });
-    const semantics = { ...attrs, role, "aria-checked": String(on), ...disabled.attrs };
+    const semantics = { ...attrs, role, [ARIA_CHECKED]: String(on), ...disabled.attrs };
     const label = typeof node.label === "string" ? [bound(node.label, scope)] : [];
     const mark = toggleMark(role, on, scope);
     // As on both devices, a switch's label leads its track and a checkbox's box leads its label.
@@ -826,11 +788,11 @@ const card: NodeRenderer = (raw, scope, path) => {
   // A card hugs its content, but grows like a line around a child that fills.
   const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, {
-    display: "flex",
-    "flex-direction": "column",
+    display: FLEX,
+    [FLEX_DIRECTION]: COLUMN,
     // Material's ColumnScope keeps wrap-sized content at its own width.
-    "align-items": "flex-start",
-    "border-radius": "12px",
+    [ALIGN_ITEMS]: "flex-start",
+    [BORDER_RADIUS]: "12px",
     ...roleCss(
       scope,
       node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
@@ -860,8 +822,8 @@ function trailing(
         "span",
         {
           // A disabled list item disables its trailing control too.
-          attrs: { role: entry.type, "aria-checked": String(on), ...disabledAttrs },
-          style: { display: "flex" },
+          attrs: { role: entry.type, [ARIA_CHECKED]: String(on), ...disabledAttrs },
+          style: { display: FLEX },
         },
         [toggleMark(entry.type, on, scope)],
       ),
@@ -876,27 +838,27 @@ function trailing(
 const listItem: NodeRenderer = (node, scope) => {
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
-    display: "flex",
-    "align-items": "center",
+    display: FLEX,
+    [ALIGN_ITEMS]: CENTER,
     gap: "16px",
-    "min-height": "56px",
+    [MIN_HEIGHT]: "56px",
     padding: "8px 16px",
-    "align-self": "stretch",
+    [ALIGN_SELF]: STRETCH,
     ...disabled.css,
   });
   const supporting =
     node.supporting === undefined
       ? []
       : [
-          el("span", { style: { "font-size": fontPx(14, scope.style), opacity: "0.7" } }, [
+          el("span", { style: { [FONT_SIZE]: fontPx(14, scope.style), opacity: "0.7" } }, [
             bound(node.supporting, scope),
           ]),
         ];
   const texts = el(
     "div",
-    { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
+    { style: { display: FLEX, [FLEX_DIRECTION]: COLUMN, flex: "1 1 auto" } },
     [
-      el("span", { style: { "font-size": fontPx(16, scope.style) } }, [
+      el("span", { style: { [FONT_SIZE]: fontPx(16, scope.style) } }, [
         bound(node.headline, scope),
       ]),
       ...supporting,
@@ -955,7 +917,7 @@ function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement
   const { attrs, style } = base(node, scope, {
     border: "1px dashed currentColor",
     padding: "4px",
-    "font-size": "11px",
+    [FONT_SIZE]: "11px",
     opacity: "0.7",
   });
   return el("div", { attrs: { ...attrs, "data-unsupported": type }, style }, [

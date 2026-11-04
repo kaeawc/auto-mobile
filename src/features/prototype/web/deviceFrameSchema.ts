@@ -5,7 +5,9 @@ import type { PanelRole, Posture } from "../../../models/DisplayPanel";
 /**
  * The strict schema for `deviceFrames.json` (#16346). It lives apart from the registry so the
  * still renderer's browser bundle never carries zod (#16451); the registry is checked by its unit
- * test.
+ * test. Each frame's `source` provenance lives in `deviceFrameSources.json`, keyed by frame id,
+ * so the bundle never carries it either (#16809); the schema checks the two merged with
+ * `withDeviceFrameSources`.
  */
 const dp = () => z.number().finite().min(0).max(4096);
 const insets = () => z.object({ top: dp(), bottom: dp(), left: dp(), right: dp() }).strict();
@@ -152,14 +154,35 @@ const deviceFrameSchema = z
 
 const registrySchema = z.object({ frames: z.array(deviceFrameSchema).min(1) }).strict();
 
-export type DeviceFrame = z.output<typeof deviceFrameSchema>;
+type SourcedDeviceFrame = z.output<typeof deviceFrameSchema>;
+/** A frame as the renderer sees it: its `source` stays in `deviceFrameSources.json`. */
+export type DeviceFrame = Omit<SourcedDeviceFrame, "source">;
 /** A registry entry as written in JSON, before defaults and the `inner` panel are filled in. */
-export type DeviceFrameEntry = z.input<typeof deviceFrameSchema>;
+export type DeviceFrameEntry = Omit<z.input<typeof deviceFrameSchema>, "source">;
 export type DeviceFramePanel = DeviceFrame["panels"][number];
 type Insets = DeviceFramePanel["safeArea"]["portrait"];
 
 export function parseDeviceFrames(value: unknown) {
   return registrySchema.safeParse(value);
+}
+
+/** The registry with each frame's `source` from the sources file (keyed by frame id) merged in. */
+export function withDeviceFrameSources<F extends { readonly id: string }, S>(
+  registry: { readonly frames: readonly F[] },
+  sources: Readonly<Record<string, S>>,
+): { frames: (F & { source: S | undefined })[] } {
+  return { frames: registry.frames.map((frame) => ({ ...frame, source: sources[frame.id] })) };
+}
+
+/** Source entries whose id names no frame in the registry. */
+export function orphanDeviceFrameSources(
+  registry: { readonly frames: readonly { readonly id: string }[] },
+  sources: Readonly<Record<string, unknown>>,
+): string[] {
+  const ids = new Set(registry.frames.map((frame) => frame.id));
+  return Object.keys(sources)
+    .filter((id) => !ids.has(id))
+    .map((id) => `sources.${id}: names no frame`);
 }
 
 function cutoutOutsideScreen(panel: DeviceFramePanel): boolean {
@@ -242,7 +265,7 @@ function duplicatePanelProblems(frame: DeviceFrame, path: string): string[] {
   });
 }
 
-function frameProblems(frame: DeviceFrame, path: string): string[] {
+function frameProblems(frame: SourcedDeviceFrame, path: string): string[] {
   return [
     ...duplicatePanelProblems(frame, path),
     ...frame.panels.flatMap((panel, index) => panelProblems(panel, panelPath(path, index))),

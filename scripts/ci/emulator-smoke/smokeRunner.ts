@@ -46,6 +46,7 @@ export interface SmokeResult {
   steps: SmokeStepResult[];
 }
 
+/** `value` as a plain object, or undefined for arrays, null and primitives. */
 export function readObject(value: unknown): Payload | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Payload)
@@ -58,6 +59,7 @@ export function activeAppId(payload: Payload): string | undefined {
   return typeof appId === "string" ? appId : undefined;
 }
 
+/** The observed foreground app must be `appId`. */
 export function expectForeground(appId: string) {
   return (payload: Payload): string | undefined => {
     const actual = activeAppId(payload);
@@ -92,6 +94,7 @@ export function assertHasHierarchy(payload: Payload): string | undefined {
     : undefined;
 }
 
+/** For steps whose tool call succeeding is the whole expectation. */
 export function passes(): string | undefined {
   return undefined;
 }
@@ -108,10 +111,12 @@ export interface SmokeDeps {
   log(message: string): void;
 }
 
+/** `NN-<step id><suffix>`, so artifacts sort in plan order. */
 function stepFileName(index: number, step: SmokeStep, suffix: string): string {
   return `${String(index + 1).padStart(2, "0")}-${step.id}${suffix}`;
 }
 
+/** Call the step's tool with the session injected; a thrown call becomes `error`. */
 async function callStep(
   step: SmokeStep,
   session: string | undefined,
@@ -125,6 +130,7 @@ async function callStep(
   }
 }
 
+/** Why the envelope fails the step (tool error, success:false, or its assertion), or undefined. */
 function judgeEnvelope(step: SmokeStep, envelope: unknown): string | undefined {
   const { payload, errorText } = readEnvelope(envelope);
   if (errorText) {
@@ -138,6 +144,7 @@ function judgeEnvelope(step: SmokeStep, envelope: unknown): string | undefined {
   return failure ? `assertion failed: ${failure}` : undefined;
 }
 
+/** The message of a thrown value. */
 export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -160,6 +167,7 @@ function saveStepPayload(
   }
 }
 
+/** Copy the observe screenshot the payload names, if any, into the artifacts. */
 function saveScreenshot(index: number, step: SmokeStep, envelope: unknown, deps: SmokeDeps) {
   const path = readEnvelope(envelope).payload?.screenshotPath;
   if (typeof path === "string" && path.length > 0) {
@@ -170,6 +178,7 @@ function saveScreenshot(index: number, step: SmokeStep, envelope: unknown, deps:
   }
 }
 
+/** The fields every step result repeats from its plan step. */
 function describeStep(step: SmokeStep): Pick<SmokeStepResult, "id" | "tool" | "expectation"> {
   return { id: step.id, tool: step.tool, expectation: step.expectation };
 }
@@ -212,6 +221,7 @@ export async function runSmoke(plan: readonly SmokeStep[], deps: SmokeDeps): Pro
   return { ok: !failed, session, steps };
 }
 
+/** Make text safe inside a Markdown table cell. */
 function escapeCell(text: string): string {
   return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }

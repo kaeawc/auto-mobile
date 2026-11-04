@@ -76,6 +76,7 @@ export function payloadMentions(payload: Payload, text: string): boolean {
   return JSON.stringify(payload).includes(text);
 }
 
+/** The fixture must be foreground and show `text`. */
 export function expectText(appId: string, text: string) {
   const foreground = expectForeground(appId);
   return (payload: Payload): string | undefined =>
@@ -83,6 +84,7 @@ export function expectText(appId: string, text: string) {
     (payloadMentions(payload, text) ? undefined : `"${text}" is not on screen`);
 }
 
+/** The fixture must be foreground and no longer show `text`. */
 export function expectNoText(appId: string, text: string) {
   const foreground = expectForeground(appId);
   return (payload: Payload): string | undefined =>
@@ -90,6 +92,7 @@ export function expectNoText(appId: string, text: string) {
     (payloadMentions(payload, text) ? `"${text}" is still on screen` : undefined);
 }
 
+/** An observe step that keeps a settled screenshot for the artifacts. */
 function observeStep(id: string, expectation: string, assert: SmokeStep["assert"]): SmokeStep {
   return {
     id,
@@ -100,6 +103,7 @@ function observeStep(id: string, expectation: string, assert: SmokeStep["assert"
   };
 }
 
+/** An Android tool step that passes unless the call fails, unless `extra.assert` says more. */
 function step(
   id: string,
   tool: string,
@@ -117,6 +121,7 @@ function step(
   };
 }
 
+/** startDevice for the runner-created AVD, or with createIfMissing when there is none. */
 function startStep(options: WearSmokePlanOptions): SmokeStep {
   const target = options.avdName
     ? { avdName: options.avdName }
@@ -143,6 +148,7 @@ function startStep(options: WearSmokePlanOptions): SmokeStep {
 
 const BROKEN_APP_ID = "com.example.deliberately.broken";
 
+/** The fixture flow: install, launch, list row, detail, back, rotary picker, home. */
 function fixtureSteps(apkPath: string, breakAssertion: boolean): SmokeStep[] {
   const { appId, listRowText, detailText, pickerRowText, pickerInitialText } = WEAR_FIXTURE;
   return [
@@ -196,6 +202,7 @@ function fixtureSteps(apkPath: string, breakAssertion: boolean): SmokeStep[] {
   ];
 }
 
+/** The steps that need no fixture: home and back on the system UI. */
 function deviceOnlySteps(breakAssertion: boolean): SmokeStep[] {
   return [
     step("home", "homeScreen", {}, "home is delivered"),

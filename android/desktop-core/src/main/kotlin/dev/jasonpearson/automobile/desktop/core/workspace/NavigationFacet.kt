@@ -11,6 +11,7 @@ import androidx.compose.runtime.snapshotFlow
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.RealNavigationDataSource
@@ -85,6 +86,9 @@ internal sealed interface NavigationFacetState {
  * broadcast for one device can be misattributed to the other pane. Full disambiguation needs the
  * deviceId/build discriminator that lands in a later phase; we do not block on it here.
  *
+ * When the app provides a [LocalDaemonStreamHub], the stream is a lease on the hub's one shared
+ * observation connection for the device (#16967) and the hub owns its reconnection.
+ *
  * [observationStreamFactory], [backoffDelay], [socketAvailable], and [navigationDataSourceProvider]
  * are injected so reconnect and app-resolution behavior is testable with a
  * [dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream] and a fake data source,
@@ -98,13 +102,11 @@ fun NavigationFacet(
   val graph = LocalAutoMobileGraph.current
 
   val observation =
-    rememberReconnectingObservationState(
-      ReconnectingObservationOptions(
-        deviceId = column.deviceId,
-        streamFactory = { options.observationStreamFactory(column.deviceId) },
-        backoffDelay = options.backoffDelay,
-        socketAvailable = options.socketAvailable,
-      ),
+    rememberPaneObservationState(
+      column,
+      { options.observationStreamFactory(column.deviceId) },
+      options.backoffDelay,
+      options.socketAvailable,
     )
   val stream = observation.stream
 

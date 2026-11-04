@@ -26,12 +26,21 @@ import kotlinx.coroutines.launch
  *
  * [telemetryClientFactory] creates each connection (production: a [TelemetryPushSocketClient] with
  * a dedicated reader thread); [scope] runs the routing collectors (production:
- * [Dispatchers.Default], since routing never blocks).
+ * [Dispatchers.Default], since routing never blocks). Observation streams are shared the same way,
+ * one per device, opened and revived as [observation] describes.
  */
-class SharedDaemonStreamHub(
+class SharedDaemonStreamHub
+private constructor(
   private val telemetryClientFactory: () -> TelemetryPushClient,
-  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) : DaemonStreamHub {
+  private val scope: CoroutineScope,
+  private val observations: HubObservationStreams,
+) : DaemonStreamHub, ObservationStreamHub by observations {
+  constructor(
+    telemetryClientFactory: () -> TelemetryPushClient,
+    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    observation: ObservationHubConfig = ObservationHubConfig(),
+  ) : this(telemetryClientFactory, scope, HubObservationStreams(observation, scope))
+
   private class Subscriber(val key: DeviceStreamKey, val sink: (TelemetryDisplayEvent) -> Unit)
 
   private class DeviceTelemetry(val client: TelemetryPushClient, val routing: Job) {
@@ -88,6 +97,7 @@ class SharedDaemonStreamHub(
   }
 
   override fun close() {
+    observations.close()
     val open =
       synchronized(lock) {
         closed = true

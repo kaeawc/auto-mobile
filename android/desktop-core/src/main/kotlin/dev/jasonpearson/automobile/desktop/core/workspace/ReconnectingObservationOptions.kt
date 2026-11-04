@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.jitteredReconnectBackoffMs
 import kotlinx.coroutines.delay
 
 data class ReconnectingObservationOptions(

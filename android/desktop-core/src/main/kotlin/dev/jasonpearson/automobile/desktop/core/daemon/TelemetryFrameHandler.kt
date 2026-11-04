@@ -9,8 +9,8 @@ import kotlinx.serialization.serializer
 
 /**
  * Handles one frame from the multiplexed telemetry socket: routes pushes by `subscriptionId`,
- * records acknowledgements, and confines a refused `subscribe` to its own device ([onRejected])
- * unless the daemon refused the desktop session itself, which fails every device.
+ * records acknowledgements, and confines a refused or daemon-ended subscription to its own device
+ * ([onRejected]) unless the daemon refused the desktop session itself, which fails every device.
  */
 internal class TelemetryFrameHandler(
   private val table: TelemetrySubscriptionTable,
@@ -83,12 +83,15 @@ internal class TelemetryFrameHandler(
       all.publish(ConnectionState.Error(error ?: "Session registration required"))
       return
     }
-    val entry = synchronized(table.lock) { table.reject(response.id) }
+    // A refused subscribe names its request id; a subscription the daemon later ends on its own
+    // (a backfill overflow) names only its subscriptionId, and the socket stays open for the rest.
+    val entry =
+      synchronized(table.lock) { table.reject(response.id) ?: table.end(response.subscriptionId) }
     if (entry == null) {
       log.warn("Telemetry push error: $error")
       return
     }
-    log.info("Telemetry subscription for ${entry.key.deviceId} refused; will retry: $error")
+    log.info("Telemetry subscription for ${entry.key.deviceId} ended; will retry: $error")
     val deviceNotLive = error?.contains(DEVICE_NOT_LIVE_MARKER) == true
     entry.mutableState.value =
       ConnectionState.Error(

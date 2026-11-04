@@ -80,6 +80,13 @@ class MultiplexedTelemetrySocketClientTest {
       return Json.parseToJsonElement(line).jsonObject.mapValues { it.value.jsonPrimitive.content }
     }
 
+    /**
+     * The next [count] requests keyed by device epoch. A subscribe racing the connection open may
+     * be written before the connection's own batch, so tests never rely on request order.
+     */
+    fun nextSubscribes(count: Int): Map<String?, Map<String, String?>> =
+      List(count) { nextRequest() }.associateBy { it["deviceSessionUuid"] }
+
     fun send(line: String) = toClient.add(line)
 
     private fun <T> uninterruptibly(block: () -> T): T {
@@ -164,6 +171,7 @@ class MultiplexedTelemetrySocketClientTest {
     val socket = daemon.nextSocket()
     val subscribed = (0 until 40).map { socket.nextRequest() }
 
+    daemon.readerThreads.awaitFirst()
     assertEquals(1, daemon.openCount)
     assertEquals(1, daemon.readerThreads.created)
     assertEquals(
@@ -183,8 +191,9 @@ class MultiplexedTelemetrySocketClientTest {
     client.subscribe(phoneA) { logsA.events.add(it) }
     client.subscribe(phoneB) { logsB.events.add(it) }
     val socket = daemon.nextSocket()
-    val subA = socket.nextRequest()
-    val subB = socket.nextRequest()
+    val subscribes = socket.nextSubscribes(2)
+    val subA = subscribes.getValue("uuid-a")
+    val subB = subscribes.getValue("uuid-b")
 
     // A busy device and a quiet one: each subscription carries its own device-scoped history.
     socket.send(ack(subA["id"], "telemetry-1"))
@@ -208,8 +217,9 @@ class MultiplexedTelemetrySocketClientTest {
     val subscriptionB = client.subscribe(phoneB) {}
     client.subscribe(phoneA) { logsA.events.add(it) }
     val socket = daemon.nextSocket()
-    val subB = socket.nextRequest()
-    val subA = socket.nextRequest()
+    val subscribes = socket.nextSubscribes(2)
+    val subA = subscribes.getValue("uuid-a")
+    val subB = subscribes.getValue("uuid-b")
 
     socket.send(ack(subA["id"], "telemetry-1"))
     socket.send(
@@ -241,8 +251,9 @@ class MultiplexedTelemetrySocketClientTest {
       val a = client.subscribe(phoneA) {}
       val b = client.subscribe(phoneB) {}
       val socket = daemon.nextSocket()
-      val subA = socket.nextRequest()
-      val subB = socket.nextRequest()
+      val subscribes = socket.nextSubscribes(2)
+      val subA = subscribes.getValue("uuid-a")
+      val subB = subscribes.getValue("uuid-b")
       socket.send(ack(subA["id"], "telemetry-1"))
       socket.send(ack(subB["id"], "telemetry-2"))
       withTimeout(TIMEOUT_SECONDS * 1_000) { a.state.first { it is ConnectionState.Connected } }
@@ -273,10 +284,10 @@ class MultiplexedTelemetrySocketClientTest {
     first.send(ScriptedSocket.EOF)
     daemon.retryDelays.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)
     val second = daemon.nextSocket()
-    val resubscribed = listOf(second.nextRequest(), second.nextRequest())
+    val resubscribed = second.nextSubscribes(2)
 
-    assertEquals(listOf("uuid-a", "uuid-b"), resubscribed.map { it["deviceSessionUuid"] })
-    second.send(ack(resubscribed[1]["id"], "telemetry-9"))
+    assertEquals(setOf("uuid-a", "uuid-b"), resubscribed.keys)
+    second.send(ack(resubscribed.getValue("uuid-b")["id"], "telemetry-9"))
     second.send(log("telemetry-9", "b-after-reconnect", phoneB))
     assertEquals("b-after-reconnect", logsB.next())
     client.close()
@@ -359,6 +370,41 @@ class MultiplexedTelemetrySocketClientTest {
       assertEquals("b-after-cleanup", logsB.next())
       client.close()
     }
+
+  @Test
+  fun `a subscription the daemon ends alone subscribes again without disturbing others`() =
+    runBlocking {
+      val daemon = Daemon()
+      val client = client(daemon)
+      val logsA = Sink()
+      val logsB = Sink()
+      val a = client.subscribe(phoneA) { logsA.events.add(it) }
+      client.subscribe(phoneB) { logsB.events.add(it) }
+      val socket = daemon.nextSocket()
+      val subscribes = socket.nextSubscribes(2)
+      val subA = subscribes.getValue("uuid-a")
+      val subB = subscribes.getValue("uuid-b")
+      socket.send(ack(subA["id"], "telemetry-1"))
+      socket.send(ack(subB["id"], "telemetry-2"))
+
+      // The daemon drops only A's subscription; the frame carries its subscriptionId, no request
+      // id.
+      socket.send(
+        """{"type":"error","success":false,"code":"BACKFILL_QUEUE_OVERFLOW","subscriptionId":"telemetry-1","error":"Backfill live-event queue exceeded 1000 events"}""",
+      )
+      socket.send(log("telemetry-2", "b1", phoneB))
+
+      assertEquals("b1", logsB.next())
+      withTimeout(TIMEOUT_SECONDS * 1_000) { a.state.first { it is ConnectionState.Error } }
+      val again = socket.nextRequest()
+      assertEquals("subscribe", again["command"])
+      assertEquals("uuid-a", again["deviceSessionUuid"])
+      socket.send(ack(again["id"], "telemetry-3"))
+      socket.send(log("telemetry-3", "a-again", phoneA))
+      assertEquals("a-again", logsA.next())
+      assertEquals(1, daemon.openCount)
+      client.close()
+    }
 }
 
 private const val TIMEOUT_SECONDS = 5L
@@ -366,10 +412,17 @@ private const val CLIENT_THREADS = 4
 
 /** Counts reader threads created, handing out real single-thread dispatchers. */
 internal class CountingReaderThreads : StreamReaderDispatcherFactory {
+  private val createdSignals = LinkedBlockingQueue<Unit>()
   @Volatile var created = 0
 
   override fun create(name: String): ExecutorCoroutineDispatcher {
     created++
+    createdSignals.add(Unit)
     return DedicatedStreamReaderThreads.create(name)
+  }
+
+  /** Wait for the first reader thread: the client starts reading after writing its subscribes. */
+  fun awaitFirst() {
+    checkNotNull(createdSignals.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "no reader started" }
   }
 }

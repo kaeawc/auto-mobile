@@ -96,6 +96,13 @@ internal class TelemetrySubscriptionTable {
 
   fun target(subscriptionId: String?): MuxSubscription? = subscriptionId?.let(bySubscriptionId::get)
 
+  /**
+   * The device whose acknowledged [subscriptionId] the daemon ended on its own (e.g. a backfill
+   * overflow) while the socket stays open; its mapping is cleared so it can subscribe again.
+   */
+  fun end(subscriptionId: String?): MuxSubscription? =
+    subscriptionId?.let(bySubscriptionId::remove)?.also { it.subscriptionId = null }
+
   /** Forget every daemon-side subscription: the socket carrying them is gone. */
   fun resetSubscriptions() {
     bySubscriptionId.clear()

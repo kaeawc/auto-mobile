@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ActionableError } from "../../../../src/models/ActionableError";
+import { PrototypeWebInputError } from "../../../../src/features/prototype/web/prototypeWebInputError";
 import {
   DEFAULT_STILL_LOCALE,
   localeLayoutDirection,
@@ -14,8 +14,8 @@ describe("still locale (#16552)", () => {
   });
 
   test("refuses a tag that is not BCP 47", () => {
-    expect(() => stillLocale("not a locale")).toThrow(ActionableError);
-    expect(() => stillLocale("")).toThrow(ActionableError);
+    expect(() => stillLocale("not a locale")).toThrow(PrototypeWebInputError);
+    expect(() => stillLocale("")).toThrow(PrototypeWebInputError);
   });
 
   test("RTL languages and scripts lay out right to left", () => {

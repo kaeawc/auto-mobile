@@ -24184,7 +24184,8 @@
           "value": {
             "kind": "string",
             "max": 64
-          }
+          },
+          "sensitive": true
         }
       }
     },
@@ -24226,7 +24227,8 @@
           "value": {
             "kind": "json",
             "maxDepth": 1
-          }
+          },
+          "sensitive": true
         },
         "servicesEnabled": {
           "platforms": ["android", "ios"],

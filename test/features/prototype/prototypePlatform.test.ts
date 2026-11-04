@@ -9,15 +9,17 @@ import {
 import {
   PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
   PROTOTYPE_PLATFORM_EVENT_NAME,
-  PROTOTYPE_PLATFORM_MODULE_GATES,
   PROTOTYPE_PLATFORM_MODULES,
   prototypePlatformCall,
   prototypePlatformEventModule,
+  prototypePlatformPointerModule,
+} from "../../../src/features/prototype/prototypePlatform";
+import {
+  PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformModuleFields,
-  prototypePlatformPointerModule,
   prototypePlatformUnsupportedMessage,
-} from "../../../src/features/prototype/prototypePlatform";
+} from "../../../src/features/prototype/prototypePlatformGates";
 import {
   prototypePlatformCallEventOf,
   prototypePlatformDeliveredEventOf,

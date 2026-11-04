@@ -1,3 +1,16 @@
+import {
+  ABSOLUTE,
+  ALIGN_SELF,
+  ARIA_HIDDEN,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  DATA_PART,
+  RELATIVE,
+  STRETCH,
+} from "./webCss";
 import { resolvePrototypeDataPointer } from "../prototypeData";
 import { bindText, record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
@@ -572,12 +585,12 @@ function routeLayer(
         attrs: {
           viewBox: `${-fitted.width / 2} ${-fitted.height / 2} ${fitted.width} ${fitted.height}`,
           preserveAspectRatio: "xMidYMid meet",
-          "aria-hidden": "true",
+          [ARIA_HIDDEN]: "true",
         },
         // Sized in container units, the content box `fittedFromCentre` scales the pins by, and
         // centred where the pins' `50%` is, so padding cannot part the lines from the pins.
         style: {
-          position: "absolute",
+          position: ABSOLUTE,
           left: "50%",
           top: "50%",
           width: "100cqw",
@@ -587,8 +600,8 @@ function routeLayer(
         },
       }
     : {
-        attrs: { width: "1", height: "1", "aria-hidden": "true" },
-        style: { position: "absolute", left: "50%", top: "50%", overflow: "visible" },
+        attrs: { width: "1", height: "1", [ARIA_HIDDEN]: "true" },
+        style: { position: ABSOLUTE, left: "50%", top: "50%", overflow: "visible" },
       };
   return el(
     "svg",
@@ -618,19 +631,19 @@ function markerPin(
   place: (dp: number) => string,
 ): WebElement {
   return el("span", {
-    attrs: { role: "img", "aria-label": marker.title, title: marker.title, "data-part": "marker" },
+    attrs: { role: "img", [ARIA_LABEL]: marker.title, title: marker.title, [DATA_PART]: "marker" },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       left: place(at.x),
       top: place(at.y),
       width: "20px",
       height: "20px",
       transform: "translate(-50%,-100%) rotate(-45deg)",
       "transform-origin": "50% 100%",
-      "border-radius": "50% 50% 50% 0",
-      "background-color": color,
+      [BORDER_RADIUS]: "50% 50% 50% 0",
+      [BACKGROUND_COLOR]: color,
       border: "2px solid #fff",
-      "box-sizing": "border-box",
+      [BOX_SIZING]: BORDER_BOX,
     },
   });
 }
@@ -646,9 +659,9 @@ function groundLayer(background: string, orientation: MapOrientation, size: Size
   const reach = Math.ceil(groundReach(size, orientation.tilt)) + 1;
   const side = `max(${reach * 2}px,300cqmax)`;
   return el("div", {
-    attrs: { "aria-hidden": "true", "data-part": "ground" },
+    attrs: { [ARIA_HIDDEN]: "true", [DATA_PART]: "ground" },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       left: "50%",
       top: "50%",
       width: side,
@@ -697,21 +710,21 @@ const mapRenderer =
     const turned = orientation.bearing !== 0 || orientation.tilt !== 0;
     const background = MAP_BACKGROUNDS[String(node.mapStyle)] ?? MAP_BACKGROUNDS.streets!;
     const { attrs, style: css } = kit.base(node, scope, {
-      position: "relative",
+      position: RELATIVE,
       overflow: "hidden",
       background: turned ? MAP_BACKGROUNDS.plain! : background,
       // Lets the ground layer (`cqmax`) and a fit's pins (`cqw`/`cqh`) size themselves from the box
       // as rendered; the map's content is all absolutely placed, so size containment changes
       // nothing else.
       ...(turned || fitted ? { "container-type": "size" } : {}),
-      "align-self": "stretch",
+      [ALIGN_SELF]: STRETCH,
       height: `${DEFAULT_MAP_HEIGHT}px`,
     });
     const pin = cssColor("error", scope.style) ?? "#b3261e";
     // A fit chose its zoom for `size`, so its points scale with the box as rendered; a camera's
     // zoom is fixed, so its points stay in dp.
     const place = fitted ? (dp: number) => fittedFromCentre(dp, size) : fromCentre;
-    return el("div", { attrs: { "aria-label": "Map", ...attrs, role: "img" }, style: css }, [
+    return el("div", { attrs: { [ARIA_LABEL]: "Map", ...attrs, role: "img" }, style: css }, [
       ...(turned ? [groundLayer(background, orientation, size)] : []),
       ...(lines.length > 0
         ? [

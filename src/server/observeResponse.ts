@@ -61,6 +61,12 @@ import {
   defaultAudioInputDiagnostic,
   type AudioInputDiagnosticResolver,
 } from "../utils/audio/audioInputDiagnostic";
+import {
+  CarAppTemplateReader,
+  type CarAppTemplatesResolver,
+} from "../features/observe/android/CarAppTemplateReader";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 import { assertActiveWindowWaitForSupportedOnPlatform } from "../features/observe/wait/WaitForSchemas";
 
 export interface ObserveToolDependencies {
@@ -81,6 +87,8 @@ export interface ObserveToolDependencies {
   hidesPrototypeForScreenshot?: (device: BootedDevice) => Promise<boolean>;
   /** Device-level audio input condition (#13627); defaults to the host probe and AVD inventory. */
   audioInputDiagnostic?: AudioInputDiagnosticResolver;
+  /** Car App Library template stacks from the foreground app's SDK route (#16751). */
+  carAppTemplates?: CarAppTemplatesResolver;
   /** Screenshot-only observe on an Apple Watch simulator (#14910); tests pass a fake capture. */
   watch?: WatchObserveDependencies;
 }
@@ -96,6 +104,48 @@ export async function withDeviceDiagnostics(
 ): Promise<ObserveResult> {
   const diagnostic = await resolve(device);
   return diagnostic ? { ...result, diagnostics: [diagnostic] } : result;
+}
+
+let defaultCarAppTemplateReader: CarAppTemplateReader | undefined;
+
+/** Under `bun test` (NODE_ENV=test) the default never runs adb; tests inject a resolver. */
+const defaultCarAppTemplates: CarAppTemplatesResolver = async (device, result) => {
+  if (readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test") {
+    return undefined;
+  }
+  defaultCarAppTemplateReader ??= new CarAppTemplateReader((target) =>
+    defaultAdbClientFactory.create(target),
+  );
+  return defaultCarAppTemplateReader.resolve(device, result);
+};
+
+/**
+ * The served observe result with the foreground app's Car App Library template stacks (#16751). A
+ * copy, like {@link withDeviceDiagnostics}; unchanged, byte for byte, when the app does not answer.
+ */
+export async function withCarAppTemplates(
+  result: ObserveResult,
+  device: BootedDevice,
+  resolve: CarAppTemplatesResolver = defaultCarAppTemplates,
+): Promise<ObserveResult> {
+  const carAppTemplates = await resolve(device, result);
+  return carAppTemplates ? { ...result, carAppTemplates } : result;
+}
+
+/**
+ * The extras only the `observe` tool's own result carries: device diagnostics, then the foreground
+ * app's Car App Library templates. A non-owner read of a held device makes no app provider calls.
+ */
+export async function withServedObservationExtras(
+  result: ObserveResult,
+  device: BootedDevice,
+  deviceRead: boolean,
+  dependencies: Pick<ObserveToolDependencies, "audioInputDiagnostic" | "carAppTemplates">,
+): Promise<ObserveResult> {
+  const diagnosed = await withDeviceDiagnostics(result, device, dependencies.audioInputDiagnostic);
+  return deviceRead
+    ? diagnosed
+    : await withCarAppTemplates(diagnosed, device, dependencies.carAppTemplates);
 }
 
 /**

@@ -87,8 +87,8 @@ function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
  * `min-width: 0`. Android's `sizeIn` intersects the minimum with the width the row has left, so the
  * sibling still gets its minimum while width remains but gives it all up, down to zero, before the
  * capped aspect ratio does. A CSS `min-width` would hold against flex shrinking and reserve the
- * width ahead of the cap. A content or `fill` width has no px value, so it folds through
- * `calc-size()`.
+ * width ahead of the cap. A content or `fill` width has no px value, so rendering wraps the node
+ * around a strut instead (see laterMinStrut).
  */
 function laterMinWidth(css: Css, style: Raw, min: number, basis: unknown) {
   css["min-width"] = "0";
@@ -99,9 +99,27 @@ function laterMinWidth(css: Css, style: Raw, min: number, basis: unknown) {
     if (typeof basis === "number") {
       css["flex-basis"] = width;
     }
-    return;
   }
-  css.width = `calc-size(max-content, max(size, ${px(min)}))`;
+}
+
+/**
+ * The authored `minWidth` of a later sibling (see RowMeasure) whose width is content or `fill`, so
+ * it has no px value to fold the minimum into; undefined otherwise. Rendering wraps such a node in
+ * a cell whose content width is `max(content, minWidth)` and that still shrinks to zero
+ * (webLaterMin.ts), which `calc-size()` would express but not every browser supports.
+ */
+export function laterMinStrut(style: unknown, context: WebStyleContext): number | undefined {
+  const raw = record(style);
+  const measure = record(raw?.[ROW_MEASURE_KEY]);
+  if (
+    context.parentAxis !== "row" ||
+    measure?.later !== true ||
+    typeof raw?.minWidth !== "number"
+  ) {
+    return undefined;
+  }
+  const sized = typeof measure.basis === "number" || typeof record(raw.width)?.dp === "number";
+  return sized ? undefined : raw.minWidth;
 }
 
 /** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
@@ -128,7 +146,7 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
 }
 
-const px = (value: number): string => `${Number(value.toFixed(3))}px`;
+export const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
 /** A font size or line height in sp (points on iOS), scaled by the system text size. */
 export function fontPx(sp: number, context: Pick<WebStyleContext, "textScale">): string {

@@ -10,6 +10,7 @@ import {
   rowSequentialChildren,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
+  laterMinStrut,
   nodeCss,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
@@ -207,11 +208,12 @@ test("a later sibling's minWidth folds into its width instead of reserving width
     width: "40px",
     "min-width": "0",
   });
-  // A content width folds the minimum in through calc-size.
-  expect(nodeCss(later({ minWidth: 30 }), context)).toMatchObject({
-    width: "calc-size(max-content, max(size, 30px))",
-    "min-width": "0",
-  });
+  // A content width has no px value to fold into: rendering wraps it around a strut instead.
+  const content = nodeCss(later({ minWidth: 30 }), context);
+  expect(content["min-width"]).toBe("0");
+  expect(content).not.toHaveProperty("width");
+  expect(laterMinStrut(later({ minWidth: 30 }), context)).toBe(30);
+  expect(laterMinStrut(later({ width: "fill", minWidth: 30 }), context)).toBe(30);
   // A later capped ratio folds the minimum into its basis.
   expect(nodeCss(later({ aspectRatio: 1, maxWidth: 20, minWidth: 25 }, 20), context)).toMatchObject(
     { width: "25px", "flex-basis": "25px", "min-width": "0" },
@@ -221,6 +223,25 @@ test("a later sibling's minWidth folds into its width instead of reserving width
     width: "40px",
     "min-width": "0",
   });
+});
+
+test("only a later content- or fill-width sibling with a minWidth in a row needs a strut", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const measure = { [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK, later: true } };
+  expect(laterMinStrut({ minWidth: 30, ...measure }, context)).toBe(30);
+  // A px width or basis folds the minimum into its own width.
+  expect(laterMinStrut({ width: { dp: 10 }, minWidth: 30, ...measure }, context)).toBeUndefined();
+  const based = { [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK, later: true, basis: 20 } };
+  expect(laterMinStrut({ minWidth: 30, ...based }, context)).toBeUndefined();
+  // Not later, no minWidth, or not in a row: nothing to wrap.
+  expect(
+    laterMinStrut({ minWidth: 30, [ROW_MEASURE_KEY]: { shrink: CAPPED_SHRINK } }, context),
+  ).toBeUndefined();
+  expect(laterMinStrut(measure, context)).toBeUndefined();
+  expect(laterMinStrut({ minWidth: 30, ...measure }, { ...context, parentAxis: "column" })).toBe(
+    undefined,
+  );
+  expect(laterMinStrut(undefined, context)).toBeUndefined();
 });
 
 test("a later sibling in a capped row is marked so its minWidth folds", () => {

@@ -85,6 +85,8 @@ export interface PrototypePlatformArgument {
   /** The contract rule a literal `{value}` argument must satisfy. */
   value: Rule;
 }
+/** A capability a call or an event's handlers need on top of the module's. */
+type Cap = { capability?: string };
 export interface PrototypePlatformCall {
   args: Record<string, PrototypePlatformArgument>;
   permissions: string[];
@@ -120,8 +122,11 @@ export interface PrototypePlatformModule {
   /** Shared runtime call budget; the host validates metadata but does not count calls. */
   rateLimit?: { calls: number; windowMs: number };
   calls: Record<string, PrototypePlatformCall>;
-  /** `debounceMs` coalesces bursts of the event into one delivery. */
-  events: Record<string, { sensitive: boolean; debounceMs?: number; userInitiated?: boolean }>;
+  /** `debounceMs` coalesces bursts; `capability` gates the event's handlers beyond the module. */
+  events: Record<
+    string,
+    { sensitive: boolean; debounceMs?: number; userInitiated?: boolean } & Cap
+  >;
   /**
    * The keys `/platform/<module>/<key>` can read. A module without this table (the placeholder
    * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
@@ -917,29 +922,38 @@ export function prototypePlatformUnsupportedMessage(
   return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, "the platform vocabulary");
 }
 
-/** Authored paths of calls whose definition names `capability` on top of its module's. */
+/** Authored call and handler paths whose definition names `capability` beyond its module's. */
 export function prototypePlatformCallCapabilityFields(spec: unknown, capability: string): string[] {
   return unique(
     authoredUses(spec)
       .filter(
         (use) =>
-          use.kind === "call" &&
-          prototypePlatformCall(use.action.call)?.definition.capability === capability,
+          (use.kind === "call" &&
+            prototypePlatformCall(use.action.call)?.definition.capability === capability) ||
+          (use.kind === "handler" &&
+            prototypePlatformEvent(use.event)?.definition.capability === capability),
       )
       .map((use) => use.path),
   );
 }
 
-/** The per-call capabilities in module order, each with the calls that need it. */
+/** The per-call and per-event capabilities in module order, each with what needs it. */
 const callCapabilities = (): { capability: string; calls: string[] }[] => {
   const byCapability = new Map<string, string[]>();
   for (const [name, definition] of Object.entries(PROTOTYPE_PLATFORM_MODULES)) {
-    for (const [op, call] of Object.entries(definition.calls)) {
-      if (call.capability) {
-        byCapability.set(call.capability, [
-          ...(byCapability.get(call.capability) ?? []),
-          `${name}.${op}`,
-        ]);
+    const members: [string, Cap][] = [
+      ...Object.entries(definition.calls).map(([op, call]): [string, Cap] => [
+        `\`${name}.${op}\``,
+        call,
+      ]),
+      ...Object.entries(definition.events).map(([e, ev]): [string, Cap] => [
+        `a \`${name}.${e}\` handler`,
+        ev,
+      ]),
+    ];
+    for (const [member, { capability }] of members) {
+      if (capability) {
+        byCapability.set(capability, [...(byCapability.get(capability) ?? []), member]);
       }
     }
   }
@@ -970,7 +984,7 @@ const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, call
       platform,
       capability,
       [
-        ...calls.map((call) => `\`${call}\``),
+        ...calls,
         ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
       ].join(" or "),
     ),

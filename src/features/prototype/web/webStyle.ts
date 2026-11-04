@@ -11,6 +11,11 @@ export interface WebStyleContext {
   readonly palette: ReadonlyMap<string, Rgba>;
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
+  /**
+   * Inside a horizontal scroll, where Compose measures content against an unbounded width (and
+   * descendants inherit it), so a row is not bounded to its parent's width there.
+   */
+  readonly unboundedWidth?: boolean;
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
   /** The system text size (Android font scale, iOS Dynamic Type); absent at the default size. */
@@ -39,6 +44,89 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 }
 
 type Css = Record<string, string>;
+
+/**
+ * A style key the web renderer adds to a row's children, never authored (the style schema is
+ * strict), so a `styleWhen` cannot overwrite it: how CSS flex approximates Compose's sequential
+ * Row measure around an aspect ratio (see webRowAspect.ts).
+ */
+export const ROW_MEASURE_KEY = "webRowMeasure";
+
+/**
+ * A style key the web renderer adds to a row around a capped aspect ratio, never authored: the row
+ * is bounded to its parent's width, as a Compose Row's max is, and to any authored `maxWidth`.
+ */
+export const ROW_BOUND_KEY = "webRowBound";
+
+/**
+ * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
+ * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
+ * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
+ * remains.
+ */
+export interface RowMeasure {
+  readonly take?: true;
+  readonly zero?: true;
+  readonly shrink?: number;
+  readonly basis?: number;
+  readonly later?: true;
+}
+
+function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
+  if (typeof basis === "number") {
+    // The width also sets the item's max-content contribution, so a wrap row sizes around it.
+    css["flex-grow"] = "0";
+    css["flex-basis"] = px(basis);
+    css.width = px(basis);
+  }
+  css["flex-shrink"] = String(shrink);
+}
+
+/**
+ * A later sibling's authored `minWidth`, folded into its width (`max(width, minWidth)`) with
+ * `min-width: 0`. Android's `sizeIn` intersects the minimum with the width the row has left, so the
+ * sibling still gets its minimum while width remains but gives it all up, down to zero, before the
+ * capped aspect ratio does. A CSS `min-width` would hold against flex shrinking and reserve the
+ * width ahead of the cap. A content or `fill` width has no px value, so it folds through
+ * `calc-size()`.
+ */
+function laterMinWidth(css: Css, style: Raw, min: number, basis: unknown) {
+  css["min-width"] = "0";
+  const dp = record(style.width)?.dp;
+  if (typeof basis === "number" || typeof dp === "number") {
+    const width = px(Math.max(typeof basis === "number" ? basis : (dp as number), min));
+    css.width = width;
+    if (typeof basis === "number") {
+      css["flex-basis"] = width;
+    }
+    return;
+  }
+  css.width = `calc-size(max-content, max(size, ${px(min)}))`;
+}
+
+/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
+  const measure = record(style[ROW_MEASURE_KEY]);
+  if (context.parentAxis !== "row" || !measure) {
+    return;
+  }
+  if (measure.take === true) {
+    css.flex = "1 1 0";
+  }
+  if (typeof measure.shrink === "number") {
+    rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (measure.later === true && typeof style.minWidth === "number") {
+    laterMinWidth(css, style, style.minWidth, measure.basis);
+    return;
+  }
+  if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
+    css["min-width"] = "0";
+  }
+  if (measure.zero === true) {
+    css["max-width"] = "0px";
+  }
+}
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
@@ -176,6 +264,13 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
       css[property] = px(style[field] as number);
     }
   }
+  if (style[ROW_BOUND_KEY] === true && context.unboundedWidth !== true) {
+    // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
+    const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
+    css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
+  }
+  // After the bound: a nested row its parent row measures against no width stays at zero.
+  rowMeasureStyle(css, style, context);
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);
     aspectRatioFill(css, style, style.aspectRatio, context);
@@ -322,6 +417,38 @@ const MAIN_ALIGN: Readonly<Record<string, string>> = {
   spaceAround: "space-around",
   spaceEvenly: "space-evenly",
 };
+
+/** A container node and the style context it renders in. */
+interface ContainerScope {
+  readonly style: WebStyleContext;
+}
+
+/**
+ * What a container's children see: the axis it lays them out on, and an unbounded width only while
+ * the container leaves its width open. A dp `width` or a `maxWidth` bounds its children again, as
+ * Compose's `Modifier.width` and `widthIn` restore a finite max width inside a horizontal scroll.
+ */
+export function containerChildStyle(
+  scope: ContainerScope,
+  node: Raw,
+  parentAxis: "row" | "column" | undefined,
+): WebStyleContext {
+  const style = record(node.style);
+  const definite =
+    typeof record(style?.width)?.dp === "number" || typeof style?.maxWidth === "number";
+  return {
+    ...scope.style,
+    parentAxis,
+    unboundedWidth: scope.style.unboundedWidth === true && !definite,
+  };
+}
+
+/** What a scroll's child sees: the scroll's axis, and an unbounded width when it scrolls across. */
+export function scrollChildStyle(scope: ContainerScope, node: Raw): WebStyleContext {
+  const horizontal = node.axis === "horizontal";
+  const inner = containerChildStyle(scope, node, horizontal ? "row" : "column");
+  return horizontal ? { ...inner, unboundedWidth: true } : inner;
+}
 
 /** A row or column's flex layout: direction, arrangement, spacing and cross-axis alignment. */
 export function lineCss(axis: "row" | "column", style: unknown): Css {

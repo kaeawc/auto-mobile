@@ -32,11 +32,13 @@ import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
+  containerChildStyle,
   cssColor,
   fontPx,
   lineCss,
   multilineCss,
   nodeCss,
+  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
@@ -85,6 +87,8 @@ export interface WebRenderScope {
   readonly glyphs?: PrototypeIconGlyphSource;
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
+  /** The screen height in dp for the orientation: the most a map that fills its parent can take. */
+  readonly screenHeight: number;
   /**
    * A pager's `page` and `pageCount`: text placeholders and every condition (`visibleWhen`,
    * `styleWhen`, `enabledWhen`, `errorWhen`) read them, as Android's local pager state does; a
@@ -350,9 +354,9 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
-    const { attrs, style } = base(node, scope, lineCss(axis, node.style));
-    const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
+    const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, axis) });
     const rowed = rowMeasured(node, path, prepareIn(inner));
+    const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
@@ -360,7 +364,7 @@ const box: NodeRenderer = (raw, scope, path) => {
   // A wrap-sized box grows around a filling child, as a Compose Box does.
   const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
-  const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
+  const inner = child(scope, { inBox: true, style: containerChildStyle(scope, node, undefined) });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -395,10 +399,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, {
-    inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
-  });
+  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope, node) });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
@@ -834,7 +835,7 @@ const card: NodeRenderer = (raw, scope, path) => {
       "onSurface",
     ),
   });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
+  const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 

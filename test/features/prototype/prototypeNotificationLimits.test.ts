@@ -73,12 +73,23 @@ describe("notification contract limits (#14280)", () => {
     expect(notifications.state.active.value.max).toBe(MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE);
   });
 
-  test("the total size budget holds the largest title, body and data together", () => {
-    expect(
-      MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH +
-        MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH +
-        MAX_PROTOTYPE_NOTIFICATION_DATA_BYTES,
-    ).toBeLessThanOrEqual(MAX_PROTOTYPE_NOTIFICATION_BYTES);
+  // Title and body limits count characters; the total is UTF-8 bytes of the resolved record and is
+  // enforced on its own, so multibyte text at the per-field limits can still exceed it.
+  const utf8 = (text: string) => new TextEncoder().encode(text).length;
+  const dataBytes = MAX_PROTOTYPE_NOTIFICATION_DATA_BYTES;
+
+  test("ASCII content at every per-field limit fits the total byte budget", () => {
+    const title = "t".repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
+    const body = "b".repeat(MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH);
+    expect(utf8(title) + utf8(body) + dataBytes).toBeLessThanOrEqual(
+      MAX_PROTOTYPE_NOTIFICATION_BYTES,
+    );
+  });
+
+  test("multibyte content at the per-field limits can exceed the total byte budget", () => {
+    const title = "\u4e2d".repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
+    const body = "\u4e2d".repeat(MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH);
+    expect(utf8(title) + utf8(body) + dataBytes).toBeGreaterThan(MAX_PROTOTYPE_NOTIFICATION_BYTES);
   });
 
   test("each string limit accepts its boundary and rejects one past it", () => {

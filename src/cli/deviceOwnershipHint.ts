@@ -3,8 +3,8 @@ import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../daemon/ambiguousDeviceTargetRef
 import { SESSION_OWNERSHIP_LOST_CODE } from "../daemon/sessionReleasedDuringCall";
 import { ENV } from "../config/env";
 import {
+  DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
-  getCliSessionIdleTimeoutMs,
 } from "../daemon/wire/constants";
 import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
 import { staticToolDeclaresInput } from "../daemon/staticToolDefinitions";
@@ -50,18 +50,18 @@ function formatMinutes(ms: number): string {
 }
 
 /**
- * A `--cli` session idle-released between invocations (#16882): name the window it had and the
- * variable that lengthens it, since the refusal itself only says `cli-idle-timeout`.
+ * A `--cli` session idle-released between invocations (#16882): name the default window and the
+ * variable that lengthens it, since the refusal itself only says `cli-idle-timeout`. It does not
+ * state the expired session's own window: that was set when the session was adopted, possibly
+ * under another environment, and the daemon caps it.
  */
-function cliIdleTimeoutHint(idleTimeoutMs: number): string {
-  return (
-    `Hint: this --cli session was released after ${formatMinutes(idleTimeoutMs)} without a ` +
-    "control call (reads do not count), so its session UUID cannot be used again. Acquire a new " +
-    "session with getAndroid, getApple or startDevice. To keep a session across longer gaps, set " +
-    `${ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name} (milliseconds, at most ` +
-    `${formatMinutes(MAX_CLI_SESSION_IDLE_TIMEOUT_MS)}) in the environment of every --cli call.`
-  );
-}
+const CLI_IDLE_TIMEOUT_HINT =
+  "Hint: this --cli session went longer than its idle timeout " +
+  `(${formatMinutes(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS)} by default) without a control call ` +
+  "(reads do not count), so its session UUID cannot be used again. Acquire a new session with " +
+  "getAndroid, getApple or startDevice. To keep a session across longer gaps, set " +
+  `${ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name} (milliseconds, at most ` +
+  `${formatMinutes(MAX_CLI_SESSION_IDLE_TIMEOUT_MS)}) in the environment of every --cli call.`;
 
 /** Each candidate as `deviceId (platform)`, skipping malformed entries. */
 function candidateList(payload: unknown): string[] {
@@ -136,14 +136,10 @@ const FIXED_REFUSAL_HINTS: ReadonlyMap<string, string> = new Map([
  * refusal message names the rule; this adds the CLI-shaped remedy. Returns undefined for any
  * other failure.
  */
-export function cliDeviceOwnershipHint(
-  payload: unknown,
-  toolName: string,
-  cliIdleTimeoutMs: () => number = getCliSessionIdleTimeoutMs,
-): string | undefined {
+export function cliDeviceOwnershipHint(payload: unknown, toolName: string): string | undefined {
   const code = refusalCode(payload);
   if (code === SESSION_OWNERSHIP_LOST_CODE && ownershipLossReason(payload) === "cli-idle-timeout") {
-    return cliIdleTimeoutHint(cliIdleTimeoutMs());
+    return CLI_IDLE_TIMEOUT_HINT;
   }
   if (code === AMBIGUOUS_DEVICE_TARGET_CODE) {
     return ambiguousDeviceTargetHint(payload);

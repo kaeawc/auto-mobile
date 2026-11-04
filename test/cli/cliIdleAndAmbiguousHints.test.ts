@@ -8,23 +8,35 @@ describe("cliDeviceOwnershipHint for idle release and ambiguous targets (#16882)
     error: { code: "session_ownership_lost", reason: "cli-idle-timeout", idle: true },
   };
 
-  test("a cli-idle-timeout loss names the window and the variable that lengthens it", () => {
-    const hint = cliDeviceOwnershipHint(idleLoss, "observe", () => 120_000);
-    expect(hint).toContain("after 2 minutes");
+  test("a cli-idle-timeout loss names the default window and the variable that lengthens it", () => {
+    const hint = cliDeviceOwnershipHint(idleLoss, "observe");
+    expect(hint).toContain("2 minutes by default");
     expect(hint).toContain("AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS");
     expect(hint).toContain("at most 60 minutes");
     expect(hint).toContain("getAndroid");
   });
 
-  test("reports the configured window, not the default", () => {
-    expect(cliDeviceOwnershipHint(idleLoss, "observe", () => 600_000)).toContain(
-      "after 10 minutes",
-    );
+  // Review on #16904: the window was fixed when the session was adopted, maybe under another
+  // environment and under the daemon's cap, so the hint must not claim the current one.
+  test("does not report this invocation's configured window as the session's", () => {
+    const previous = process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS;
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "7200000";
+    try {
+      const hint = cliDeviceOwnershipHint(idleLoss, "observe");
+      expect(hint).not.toContain("120 minutes");
+      expect(hint).not.toContain("released after");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = previous;
+      }
+    }
   });
 
   test("other ownership-loss reasons get no idle hint", () => {
     const loss = { error: { code: "session_ownership_lost", reason: "device-killed" } };
-    expect(cliDeviceOwnershipHint(loss, "observe", () => 120_000)).toBeUndefined();
+    expect(cliDeviceOwnershipHint(loss, "observe")).toBeUndefined();
   });
 
   test("an ambiguous target lists every candidate device id", () => {

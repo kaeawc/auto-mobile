@@ -93,14 +93,14 @@ Without `appId`, the graph of the device's current foreground app is returned.
 Pass `appId` whenever you know it, so a system screen in the foreground does not
 redirect the read. This tool only reads and never touches the device.
 
-| Field                             | Meaning                                                                                                       |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `requestedAppId`, `observedAppId` | The app you asked for and the app seen in the foreground.                                                     |
-| `currentScreen`                   | The screen the graph believes the app is on, or `null`.                                                       |
-| `nodeCount`, `edgeCount`          | Screens and transitions in the graph.                                                                         |
-| `knownEdges`, `unknownEdges`      | Transitions with and without a recorded action. Only known edges can be replayed.                             |
-| `screens`                         | Each screen's `name`, `visitCount`, and `lastVisited`.                                                        |
-| `transitions`                     | Each transition's `from`, `to`, `type` (`tool`, `back`, `unknown`), and the `tool` and `args` that caused it. |
+| Field                             | Meaning                                                                                                                                                                                                        |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestedAppId`, `observedAppId` | The app you asked for and the app seen in the foreground.                                                                                                                                                      |
+| `currentScreen`                   | The screen the graph believes the app is on, or `null`.                                                                                                                                                        |
+| `nodeCount`, `edgeCount`          | Screens and transitions in the graph.                                                                                                                                                                          |
+| `knownEdges`, `unknownEdges`      | Transitions with and without a recorded action. A transition without one is replayed only as Back, when its destination was recorded at a shallower back-stack depth than its source; otherwise it is skipped. |
+| `screens`                         | Each screen's `name`, `visitCount`, and `lastVisited`.                                                                                                                                                         |
+| `transitions`                     | Each transition's `from`, `to`, `type` (`tool`, `back`, `unknown`), and the `tool` and `args` that caused it.                                                                                                  |
 
 Use the names in `screens` as `navigateTo` targets.
 

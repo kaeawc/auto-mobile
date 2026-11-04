@@ -109,7 +109,7 @@ sealed interface WorkspaceEffect {
 class WorkspaceViewModel(
   private val scope: CoroutineScope,
   private val controlExecutor: EmulatorControlExecutor = NoOpEmulatorControlExecutor,
-  private val screenshotLoaderRegistry: NavigationScreenshotLoaderRegistry =
+  internal val screenshotLoaderRegistry: NavigationScreenshotLoaderRegistry =
     DefaultNavigationScreenshotLoaderRegistry,
 ) {
   internal val _state = MutableStateFlow<WorkspaceUiState>(WorkspaceUiState.Empty)
@@ -120,7 +120,7 @@ class WorkspaceViewModel(
 
   // The in-flight locale request per device, so a newer selection can supersede an older one that
   // is still resolving the foreground app (see [setLocale]).
-  private val localeJobs = mutableMapOf<String, Job>()
+  internal val localeJobs = mutableMapOf<String, Job>()
 
   fun onAction(action: WorkspaceAction) {
     when (action) {
@@ -141,9 +141,9 @@ class WorkspaceViewModel(
       is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
       is WorkspaceAction.PressDeviceButton -> pressDeviceButton(action.deviceId, action.button)
       is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
-      is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
-      is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
-      is WorkspaceAction.EndDeviceSession -> endDeviceSession(action)
+      is WorkspaceAction.SetLockStates,
+      is WorkspaceAction.RefreshDeviceSessionUuids,
+      is WorkspaceAction.EndDeviceSession -> applyDeviceState(action)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }
@@ -184,7 +184,7 @@ class WorkspaceViewModel(
     }
   }
 
-  private fun columnFor(deviceId: String): DeviceColumn? =
+  internal fun columnFor(deviceId: String): DeviceColumn? =
     (_state.value as? WorkspaceUiState.Content)?.columns?.firstOrNull { it.deviceId == deviceId }
 
   /** Reflect an observed lock-state snapshot onto the columns; absent devices keep their state. */
@@ -235,43 +235,6 @@ class WorkspaceViewModel(
       } else {
         WorkspaceUiState.Content(columns + column, focusedDeviceId = column.deviceId)
       }
-    }
-  }
-
-  private fun endDeviceSession(action: WorkspaceAction.EndDeviceSession) {
-    val existing = columnFor(action.deviceId) ?: return
-    if (existing.deviceSessionUuid != action.retiredUuid) return
-    val successor =
-      DeviceColumn(
-        deviceId = existing.deviceId,
-        name = existing.name,
-        platform = existing.platform,
-        isVirtual = existing.isVirtual,
-        deviceSessionUuid = action.successorUuid,
-      )
-    replaceEpoch(existing, existing.nextEpoch(successor))
-  }
-
-  /**
-   * Swap [retired]'s column for [next] (a new epoch of the same device) and drop the retired
-   * epoch's per-device caches: the navigation screenshot loader and any locale request still in
-   * flight.
-   */
-  private fun replaceEpoch(retired: DeviceColumn, next: DeviceColumn) {
-    screenshotLoaderRegistry.forget(retired.deviceId)
-    localeJobs.remove(retired.deviceId)?.cancel()
-    _state.update { current ->
-      val content = current as? WorkspaceUiState.Content ?: return@update current
-      content.copy(
-        columns =
-          content.columns.map {
-            if (
-              it.deviceId == retired.deviceId && it.deviceSessionUuid == retired.deviceSessionUuid
-            )
-              next
-            else it
-          },
-      )
     }
   }
 

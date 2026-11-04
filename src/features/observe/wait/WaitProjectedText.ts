@@ -1,6 +1,7 @@
 import type { Element } from "../../../models/Element";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import { hasVisibleScreenPart } from "../../utility/ElementGeometry";
+import { SearchableHierarchy } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { projectSkeleton } from "../output/SkeletonProjection";
 import type { ObserveWaitForOptions } from "./WaitForSchemas";
@@ -13,11 +14,16 @@ import type { ObserveWaitForOptions } from "./WaitForSchemas";
  * This runs only after the hierarchy search found nothing, and only for a
  * positive wait whose sole element predicate is `text` / `textAny`: compound,
  * container-scoped, layer-scoped and `selectionStrategy` waits describe one
- * source node and stay on the hierarchy search.
+ * source node and stay on the hierarchy search. A text that any hierarchy node
+ * carries also stays there: that search already judged the node (for example
+ * off screen), and a row's hoisted label must not override it.
  */
 export function findProjectedTextRow(
   waitFor: ObserveWaitForOptions,
-  observation: Pick<ObserveResult, "elements" | "screenSize" | "skeleton" | "context">,
+  observation: Pick<
+    ObserveResult,
+    "elements" | "screenSize" | "skeleton" | "context" | "viewHierarchy"
+  >,
 ): Element | null {
   if (!isTextOnlyWait(waitFor)) {
     return null;
@@ -28,9 +34,15 @@ export function findProjectedTextRow(
   if (rows.length === 0) {
     return null;
   }
+  const sources = observation.viewHierarchy
+    ? new SearchableHierarchy().project(observation.viewHierarchy)
+    : [];
   const texts = waitFor.textAny ?? (waitFor.text === undefined ? [] : [waitFor.text]);
   for (const text of texts) {
-    const row = matchRow(rows, text, waitFor.textMatch);
+    if (findMatch(sources, (node) => Object.values(node.textSources), text, waitFor.textMatch)) {
+      continue;
+    }
+    const row = findMatch(rows, rowTexts, text, waitFor.textMatch);
     if (row) {
       return { bounds: toElementBounds(row.bounds), text: row.label };
     }
@@ -70,24 +82,25 @@ function rowTexts(row: SkeletonElement): string[] {
 }
 
 /** Mirror the hierarchy search: exact first, then contains, unless `textMatch` names a mode. */
-function matchRow(
-  rows: readonly SkeletonElement[],
+function findMatch<T>(
+  items: readonly T[],
+  textsOf: (item: T) => string[],
   text: string,
   textMatch: ObserveWaitForOptions["textMatch"],
-): SkeletonElement | undefined {
+): T | undefined {
   const query = normalize(text);
   if (!query.trim()) {
     return undefined;
   }
   if (textMatch === "regex") {
     const regex = new RegExp(normalizeQuotes(text), "i");
-    return rows.find((row) => rowTexts(row).some((value) => regex.test(normalizeQuotes(value))));
+    return items.find((item) => textsOf(item).some((value) => regex.test(normalizeQuotes(value))));
   }
-  const exact = rows.find((row) => rowTexts(row).some((value) => normalize(value) === query));
+  const exact = items.find((item) => textsOf(item).some((value) => normalize(value) === query));
   if (exact || textMatch === "exact") {
     return exact;
   }
-  return rows.find((row) => rowTexts(row).some((value) => normalize(value).includes(query)));
+  return items.find((item) => textsOf(item).some((value) => normalize(value).includes(query)));
 }
 
 function toElementBounds([left, top, right, bottom]: SkeletonElement["bounds"]): Element["bounds"] {

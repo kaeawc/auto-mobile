@@ -119,6 +119,32 @@ describe("findProjectedTextRow", () => {
 });
 
 describe("evaluateWaitForObservation text over projected rows", () => {
+  test("keeps the hierarchy's off-screen verdict over a hoisted row label", () => {
+    const hierarchy = hierarchyWith([
+      {
+        $: { clickable: "true", bounds: { left: 0, top: 0, right: 400, bottom: 900 } },
+        node: [{ $: { text: "Loaded", bounds: { left: 0, top: 850, right: 100, bottom: 890 } } }],
+      },
+    ]);
+    const result = evaluateWaitForObservation(
+      new ElementResolver(),
+      { text: "Loaded" },
+      createObserveResultForTest({
+        screenSize,
+        viewHierarchy: hierarchy,
+        elements: new ObserveElementsBuilder().build(hierarchy, "android"),
+      }),
+      {
+        devicePlatform: "android",
+        displayInventory: "single",
+        modes: new Map<string, MatchMode>(),
+        iosMultiPanel: false,
+      },
+    );
+
+    expect(result.matched).toBe(false);
+  });
+
   const evaluate = (context?: SkeletonElement[]) =>
     evaluateWaitForObservation(
       new ElementResolver(),

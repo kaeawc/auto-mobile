@@ -20,6 +20,12 @@ deviceCondition is behind the 'device-condition' feature flag, which is disabled
 
 Turn it on in the AutoMobile IDE plugin under **Settings > AutoMobile > Feature Flags**. The flag applies to the whole host, not one session.
 
+## Exporting key attestation
+
+On Android, call `setDeviceState` with `{ "deviceCondition": { "exportAttestation": true } }` to export a temporary key's public certificate chain for a test backend. Send this alone, without conditions, reset or a lease; no session is required. The temporary key is deleted before the response is sent. If the image cannot generate attestation or the installed automation service lacks this action, the call fails; update the service or use an image supporting key attestation.
+
+The `attestation` result contains `certificateChainBase64` (base64 DER, leaf first and root last), `rootCertificateBase64`, and `fields`: numeric `attestationSecurityLevel` and `keymasterSecurityLevel`, `deviceLocked`, `verifiedBootState`, and `attestationApplicationId` (raw base64, package names, decimal version strings and base64 signing-certificate digests). Missing optional fields are `null`. These are the certificate's reported fields, not a passing-integrity verdict or signature validation. The application ID describes the automation service that generated the key, not your app. Use the exported root only in your test backend's trust configuration; your backend still validates the app's own attestation chain and policy.
+
 ## Conditions
 
 Set a condition by passing its value. Pass `"unset"` to clear it, or `{ "reset": true }` to restore everything applied on the device.

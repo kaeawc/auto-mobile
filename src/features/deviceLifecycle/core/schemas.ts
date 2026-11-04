@@ -111,6 +111,11 @@ export const startDeviceParametersSchema = z.object({
         .describe(
           "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
         ),
+      /** Wear profile: round when true or omitted (default), square when false. */
+      screenRound: z
+        .boolean()
+        .optional()
+        .describe("Wear OS profile: round when true or omitted (default), square when false"),
       vehicle: z
         .object({
           motion: z

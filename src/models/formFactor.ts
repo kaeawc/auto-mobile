@@ -22,7 +22,7 @@ const NON_GEOMETRIC_FORM_FACTORS: Readonly<
     defaultProfileId: "tv_1080p",
   },
   watch: {
-    systemImageTags: ["android-wear", "android-wear-cn"],
+    systemImageTags: ["android-wear-signed", "android-wear", "android-wear-cn"],
     profileIdPattern: /^wear(?:os)?_/i,
     defaultProfileId: "wearos_small_round",
   },
@@ -62,8 +62,14 @@ export function androidSystemImageTagsFor(formFactor: NonGeometricFormFactor): r
   return NON_GEOMETRIC_FORM_FACTORS[formFactor].systemImageTags;
 }
 
-/** The avdmanager profile id created for a non-handheld form factor that names no profile. */
-export function defaultAndroidProfileIdFor(formFactor: NonGeometricFormFactor): string {
+/** Default avdmanager profile; screenRound=false selects the square Wear profile. */
+export function defaultAndroidProfileIdFor(
+  formFactor: NonGeometricFormFactor,
+  screenRound?: boolean,
+): string {
+  if (formFactor === "watch" && screenRound === false) {
+    return "wearos_square";
+  }
   return NON_GEOMETRIC_FORM_FACTORS[formFactor].defaultProfileId;
 }
 

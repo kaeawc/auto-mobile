@@ -27,6 +27,8 @@ export interface DeviceMatchCriteria {
     panels?: number;
     posture?: Posture;
     playStore?: boolean;
+    /** Wear profile: round when true or omitted (default), square when false. */
+    screenRound?: boolean;
     vehicle?: { motion?: "supported" };
   };
   screenSize?: { width: number; height: number };

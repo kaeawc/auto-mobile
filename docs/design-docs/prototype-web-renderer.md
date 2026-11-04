@@ -262,8 +262,9 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `bottomSheet`, `dialog`,
-  `snackbar`, `videoPlayer`, `map`, `cameraPreview` and `castButton`. Where the devices differ,
+  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `radioGroup`, `select`,
+  `segmentedButton`, `searchBar`, `datePicker`, `timePicker`, `pasteButton`, `bottomSheet`,
+  `dialog`, `snackbar`, `videoPlayer`, `map`, `cameraPreview` and `castButton`. Where the devices differ,
   the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
@@ -293,7 +294,7 @@ the host, so the page's script only switches between views it was given and neve
   slider draws its label above a 16 px track, `primary` up to the value and `secondaryContainer`
   after it with a stop dot at its end, and a 4x44 px `primary` thumb at the value: its numeric
   state, else 0, snapped to `step` and clamped to `min`..`max`. A pager fills both axes, and a grid,
-  carousel, slider, tab bar or bottom nav fills its width, unless sized; a row, column, box or card
+  carousel, slider, tab bar, bottom nav, radio group, select or search bar fills its width, unless sized; a row, column, box or card
   around such a child grows on that axis, as a Compose parent does around a `fillMax` child. A text field draws
   its leading and trailing icons. A top app bar draws its navigation icon
   and actions as icons labelled with their action, and its `variant` sets its height,
@@ -364,7 +365,22 @@ the host, so the page's script only switches between views it was given and neve
   `<testTag>.confirm`. A snackbar has no scrim and lets touches through around it; it sits at the
   window's bottom with 12 px around it, as wide as the window up to 600 px, at least 48 px tall,
   in `inverseSurface` with 4 px corners and `bodyMedium` `inverseOnSurface` text, then its
-  optional `inversePrimary` action tagged `<testTag>.action`. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  optional `inversePrimary` action tagged `<testTag>.action`. Choice controls select the option
+  whose `value` their `stateKey` holds and tag each option `<testTag>.<value>`. A radio group is a
+  column of 48 px rows, a 20 px radio ring (`primary` with a dot when selected) before each label. A
+  select draws only its closed field, since its list opens on tap: a 4 px-radius
+  `surfaceContainerLow` field with its `label` in `labelSmall` over the chosen label and an
+  `expand_more` icon. A segmented button is a row of equal-width 40 px outlined segments, the ends
+  rounded, the selected one `secondaryContainer` with a check. A search bar draws a 56 px
+  `surfaceContainerHigh` pill with its leading icon, its query (else the placeholder in
+  `onSurfaceVariant`) and its trailing actions; while its `activeKey` is `true` it draws its child
+  below, and the `bar` variant then fills its height too. A paste button is a filled button
+  labelled "Paste". A time picker draws its hour (selected, `primaryContainer`) and minute boxes, an
+  AM/PM selector unless it is 24-hour (`is24Hour`, else the still's `en-US` 12-hour clock), and a
+  256 px hour dial (a 24-hour dial adds an inner 12–23 ring) with the bound hour under a `primary`
+  selector. A date picker is 360 px of `surfaceContainerHigh`: "Select date", the bound date as its
+  headline, the month row with its arrows, and that month (else today's from the still's clock) in
+  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the

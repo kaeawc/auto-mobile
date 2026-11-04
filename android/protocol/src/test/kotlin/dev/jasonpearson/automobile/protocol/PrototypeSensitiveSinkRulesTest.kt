@@ -41,7 +41,7 @@ class PrototypeSensitiveSinkRulesTest {
               PrototypeSpecValidator.validate(spec, library = true),
             )
           } else {
-            // The spec's sensitive source is itself refused in a library (R1), so check R2 directly.
+            // R1 refuses this spec's sensitive source in a library, so check R2 directly.
             assertEquals(emptyList<PrototypeSpecError>(), sinkErrors(spec), file.name)
           }
         }

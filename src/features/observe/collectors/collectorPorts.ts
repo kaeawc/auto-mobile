@@ -11,6 +11,7 @@ export type HierarchyCollectorPort = Pick<
 export type DeviceStateCollectorPort = Pick<
   DeviceStateCollector,
   | "collectAutomotive"
+  | "refreshAutomotiveForegroundActivity"
   | "collectWakefulness"
   | "collectDeviceLock"
   | "collectBackStack"

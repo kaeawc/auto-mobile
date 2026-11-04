@@ -39,31 +39,50 @@ export class DeviceStateCollector {
     if (this.opts.device.formFactor !== "automotive") {
       return;
     }
-    const read = async (args: string[]): Promise<string> => {
-      try {
-        return await shell(this.opts.adb, args, signal);
-      } catch (error) {
-        // Automotive metadata is best-effort; preserve the rest of the observation.
-        logger.warn("Failed to read automotive observation state:", error);
-        return "";
-      }
-    };
     const [drivingDump, uxDump] = await Promise.all([
-      read(["dumpsys", "car_service", "--services", "CarDrivingStateService"]),
-      read(["dumpsys", "car_service", "--services", "CarUxRestrictionsManagerService"]),
+      this.readAutomotive(
+        ["dumpsys", "car_service", "--services", "CarDrivingStateService"],
+        signal,
+      ),
+      this.readAutomotive(
+        ["dumpsys", "car_service", "--services", "CarUxRestrictionsManagerService"],
+        signal,
+      ),
     ]);
     const drivingState = parseDrivingState(drivingDump);
     const uxRestrictions = parseUxRestrictions(uxDump, displayId);
+    result.automotive = {
+      ...(drivingState !== undefined ? { drivingState } : {}),
+      ...(uxRestrictions ? { uxRestrictions } : {}),
+      blocked: false,
+    };
+    await this.refreshAutomotiveForegroundActivity(result, signal);
+  }
+
+  /**
+   * Re-derive the foreground activity's DO status and `blocked` for the current
+   * `activeWindow`, keeping the sampled driving and UX-restriction state. Call it
+   * after any step that changes the attributed activity.
+   */
+  async refreshAutomotiveForegroundActivity(
+    result: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const automotive = result.automotive;
+    if (!automotive) {
+      return;
+    }
     const { appId, activityName } = result.activeWindow ?? {};
     let distractionOptimized: boolean | undefined;
     if (appId && activityName) {
       const activities = parseDoActivities(
-        await read(["cmd", "car_service", "get-do-activities", appId]),
+        await this.readAutomotive(["cmd", "car_service", "get-do-activities", appId], signal),
         appId,
       );
       const fullName = activityName.replace(/^\./, `${appId}.`);
       distractionOptimized = activities?.has(fullName);
     }
+    const { drivingState, uxRestrictions } = automotive;
     result.automotive = {
       ...(drivingState !== undefined ? { drivingState } : {}),
       ...(uxRestrictions ? { uxRestrictions } : {}),
@@ -73,6 +92,16 @@ export class DeviceStateCollector {
       blocked:
         uxRestrictions?.requiresDistractionOptimization === true && distractionOptimized === false,
     };
+  }
+
+  private async readAutomotive(args: string[], signal?: AbortSignal): Promise<string> {
+    try {
+      return await shell(this.opts.adb, args, signal);
+    } catch (error) {
+      // Automotive metadata is best-effort; preserve the rest of the observation.
+      logger.warn("Failed to read automotive observation state:", error);
+      return "";
+    }
   }
 
   async collectWakefulness(result: ObserveResult, signal?: AbortSignal): Promise<void> {

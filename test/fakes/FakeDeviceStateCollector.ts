@@ -41,6 +41,8 @@ export class FakeDeviceStateCollector implements ObservedState {
 
   async collectAutomotive(_result: ObserveResult): Promise<void> {}
 
+  async refreshAutomotiveForegroundActivity(_result: ObserveResult): Promise<void> {}
+
   async collectFocusedSystemUiSurface(): Promise<boolean> {
     return false;
   }

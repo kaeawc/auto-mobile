@@ -379,10 +379,14 @@ export class TapPointPlanner {
         // Default-layer selectors also resolve app rows kept under AutoMobile's own prototype
         // (#10691); layer "app" refuses those later with its own prototype-specific error.
         ownWindows: tapOwnPrototypeCoverRule(context.options.layer),
+        // A control drawn over the row in its own window takes the touch too (#17024).
+        views: true,
       });
       if (!safe.point) {
         throw new TapTargetUnavailableError(
-          `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,
+          safe.coveredByKind === "view"
+            ? `Target is covered by ${JSON.stringify(safe.coveredBy)} drawn over it at its only visible tap area; scroll the target clear of it with swipeOn, then retry tapOn.`
+            : `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,
           "no-visible-tap-area",
         );
       }

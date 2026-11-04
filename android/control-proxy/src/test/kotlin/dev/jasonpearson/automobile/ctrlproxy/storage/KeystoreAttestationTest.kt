@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.storage
 
+import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -28,7 +29,12 @@ class KeystoreAttestationTest {
   }
 
   private fun handler(store: FakeKeyStore) =
-    KeystoreAttestation(store, alias = { "throwaway" }, challenge = { ByteArray(32) })
+    KeystoreAttestation(
+      store,
+      alias = { "throwaway" },
+      challenge = { ByteArray(32) },
+      encode = { Base64.getEncoder().encodeToString(it) },
+    )
 
   @Test
   fun `exports public DER certificates leaf first and removes the key`() {

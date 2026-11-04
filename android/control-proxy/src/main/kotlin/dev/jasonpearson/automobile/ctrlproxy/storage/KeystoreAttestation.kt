@@ -2,11 +2,11 @@ package dev.jasonpearson.automobile.ctrlproxy.storage
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Base64
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.spec.ECGenParameterSpec
-import java.util.Base64
 import java.util.UUID
 
 /** Only the temporary alias and public certificates cross this boundary. */
@@ -46,6 +46,8 @@ internal class KeystoreAttestation(
   private val store: AttestationKeyStore,
   private val alias: () -> String = { "automobile-attestation-${UUID.randomUUID()}" },
   private val challenge: () -> ByteArray = { ByteArray(32).also { SecureRandom().nextBytes(it) } },
+  // android.util.Base64 rather than java.util.Base64, which needs API 26 (minSdk is 24).
+  private val encode: (ByteArray) -> String = { Base64.encodeToString(it, Base64.NO_WRAP) },
 ) {
   fun export(): List<String> {
     val temporaryAlias = alias()
@@ -53,7 +55,7 @@ internal class KeystoreAttestation(
       store.generate(temporaryAlias, challenge())
       val certificates = store.certificateChain(temporaryAlias)
       check(certificates.size >= 2) { "AndroidKeyStore returned an incomplete attestation chain" }
-      return certificates.map { Base64.getEncoder().encodeToString(it) }
+      return certificates.map(encode)
     } finally {
       store.delete(temporaryAlias)
     }

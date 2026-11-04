@@ -695,7 +695,7 @@ collects emulator diagnostics and adds a failure line to the job step summary.
 labelled `run-wear`; it is not a required check. `scripts/ci/wear-smoke/run-wear-smoke.sh` installs
 the x86_64 API 37 `android-wear-signed` image, creates a `wearos_small_round` AVD with avdmanager
 (`WEAR_SMOKE_CREATE_VIA=startDevice` hands creation to `startDevice` `createIfMissing` instead),
-builds the Wear fixture app from `android/wear-fixture` when that module exists, and runs
+builds the Wear fixture app (Gradle module `:wear-fixture`, #16828) when that module exists, and runs
 `scripts/ci/wear-smoke/wearSmoke.ts`. The plan observes the watch (hierarchy and
 `isScreenRound: true`), then with the fixture installs and launches it, scrolls to a list row,
 taps it, goes back, moves the rotary picker with `rotaryScroll`, goes home, and enters and exits

@@ -67,7 +67,7 @@ class RobolectricAndroidAllTest {
 
   @Test
   fun depsPropertiesLoadBackToTheJarPaths() {
-    val jar = File("/cache/a b=c/android-all-instrumented-15-robolectric-13954326-i7.jar")
+    val jar = File("/cache/a b=c:d\ne\rf/android-all-instrumented-15-robolectric-13954326-i7.jar")
     val text = RobolectricAndroidAll.depsProperties(mapOf("15-robolectric-13954326-i7" to jar))
     val loaded = Properties().apply { load(StringReader(text)) }
     assertEquals(

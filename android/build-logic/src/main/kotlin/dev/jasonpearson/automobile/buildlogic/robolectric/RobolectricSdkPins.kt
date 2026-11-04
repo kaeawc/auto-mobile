@@ -32,20 +32,24 @@ object RobolectricSdkPins {
   private fun sdkRefs(sourceText: String): Sequence<SdkRef> = sequence {
     val text = sourceText.replace(Regex("(?s)/\\*.*?\\*/|//[^\\n]*"), " ")
     val annotations = Regex("@(?:[\\w.]+\\.)?Config\\s*\\((.*?)\\)", RegexOption.DOT_MATCHES_ALL)
-    val sdkArgs = Regex("\\bsdk\\s*=\\s*(\\[[^]]*]|[A-Za-z0-9_.]+)", RegexOption.DOT_MATCHES_ALL)
+    // Kotlin `sdk = [a, b]`, Java `sdk = {a, b}`, or a single value.
+    val sdkArgs =
+      Regex("\\bsdk\\s*=\\s*(\\[[^]]*]|\\{[^}]*}|[A-Za-z0-9_.]+)", RegexOption.DOT_MATCHES_ALL)
     val entries = Regex("Build\\.VERSION_CODES\\.([A-Z][A-Z0-9_]*)|(?<![\\w.])(\\d+)")
     for (annotation in annotations.findAll(text)) {
       for (arg in sdkArgs.findAll(annotation.groupValues[1])) {
-        val value = arg.groupValues[1].trim().removePrefix("[").removeSuffix("]")
-        if (value.startsWith("Config.")) {
-          yield(SdkRef.ConfigConstant(value.removePrefix("Config.")))
-          continue
-        }
-        for (entry in entries.findAll(value)) {
-          val name = entry.groupValues[1]
-          val sdk =
-            if (name.isNotEmpty()) versionCodes[name] else entry.groupValues[2].toIntOrNull()
-          yield(if (sdk == null) SdkRef.UnknownVersionCode(name) else SdkRef.Level(sdk))
+        val items = arg.groupValues[1].trim().trim('[', ']', '{', '}').split(',')
+        for (item in items.map { it.trim() }.filter { it.isNotEmpty() }) {
+          if (item.startsWith("Config.")) {
+            yield(SdkRef.ConfigConstant(item.removePrefix("Config.")))
+            continue
+          }
+          for (entry in entries.findAll(item)) {
+            val name = entry.groupValues[1]
+            val sdk =
+              if (name.isNotEmpty()) versionCodes[name] else entry.groupValues[2].toIntOrNull()
+            yield(if (sdk == null) SdkRef.UnknownVersionCode(name) else SdkRef.Level(sdk))
+          }
         }
       }
     }

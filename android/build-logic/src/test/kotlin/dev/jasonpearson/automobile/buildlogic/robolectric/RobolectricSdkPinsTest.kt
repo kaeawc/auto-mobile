@@ -132,6 +132,31 @@ class RobolectricSdkPinsTest {
   }
 
   @Test
+  fun sourceSdksParsesEachEntryOfAMixedList() {
+    assertEquals(
+      setOf(23, 34),
+      RobolectricSdkPins.sourceSdks("@Config(sdk = [Config.OLDEST_SDK, 34])", oldestSdk = 23),
+    )
+  }
+
+  @Test
+  fun sourceSdksReadsJavaBraceArrays() {
+    assertEquals(
+      setOf(28, 29),
+      RobolectricSdkPins.sourceSdks("@Config(sdk = {28, Build.VERSION_CODES.Q})", oldestSdk = 23),
+    )
+  }
+
+  @Test
+  fun sourceViolationsFlagsAFloatingConstantInsideAList() {
+    assertEquals(
+      1,
+      RobolectricSdkPins.sourceViolations("@Config(sdk = [Config.NEWEST_SDK, 30])", "T.kt", 35)
+        .size,
+    )
+  }
+
+  @Test
   fun propertiesSdkReadsTheNumericPin() {
     assertEquals(24, RobolectricSdkPins.propertiesSdk("# c\nsdk=24\n"))
     assertEquals(null, RobolectricSdkPins.propertiesSdk("sdk=latest\n"))

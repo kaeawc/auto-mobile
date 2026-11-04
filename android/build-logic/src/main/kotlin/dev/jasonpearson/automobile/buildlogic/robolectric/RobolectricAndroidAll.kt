@@ -90,5 +90,11 @@ object RobolectricAndroidAll {
 
   // java.util.Properties escaping for the characters these keys and paths can contain.
   private fun escape(value: String): String =
-    value.replace("\\", "\\\\").replace(":", "\\:").replace("=", "\\=").replace(" ", "\\ ")
+    value
+      .replace("\\", "\\\\")
+      .replace("\n", "\\n")
+      .replace("\r", "\\r")
+      .replace(":", "\\:")
+      .replace("=", "\\=")
+      .replace(" ", "\\ ")
 }

@@ -64,7 +64,7 @@ export function hoistedScope(scope: WebRenderScope): WebRenderScope {
     ...scope,
     inBox: false,
     consumedInsets: [],
-    style: { ...scope.style, parentAxis: "column" },
+    style: { ...scope.style, parentAxis: "column", weightsChildren: false },
   };
 }
 
@@ -128,7 +128,9 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
   const style = base["background-color"]
     ? base
     : { ...base, "background-color": rgbaCss(roleColor("surface", scope.style)) };
-  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: "column" } });
+  const inner = kit.child(hoisted, {
+    style: { ...hoisted.style, parentAxis: "column", weightsChildren: false },
+  });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const scrim = el("div", {
     attrs: { "data-part": "scrim" },
@@ -151,6 +153,14 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
     scrim,
     sheet,
   ]);
+}
+
+/** Node types the renderer hoists into a window layer, leaving nothing in their parent's flow. */
+export const WEB_LAYER_TYPES: ReadonlySet<string> = new Set(["bottomSheet", "dialog", "snackbar"]);
+
+/** Whether a node is hoisted into a window layer (see WEB_LAYER_TYPES), open or closed. */
+export function isWebLayerNode(node: Raw | undefined): boolean {
+  return node !== undefined && WEB_LAYER_TYPES.has(String(node.type));
 }
 
 export function webSheetLayers(kit: WebRenderKit): Readonly<Record<string, WebLayerRenderer>> {

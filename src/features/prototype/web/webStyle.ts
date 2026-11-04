@@ -11,6 +11,11 @@ export interface WebStyleContext {
   readonly palette: ReadonlyMap<string, Rgba>;
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
+  /**
+   * Whether the parent shares its main axis by `weight`, as a native Row, Column or card does
+   * (Compose's `Modifier.weight`); a scroll, sheet or stack lays children out in a line without it.
+   */
+  readonly weightsChildren?: boolean;
   /** The spec's theme.typography, applied to every type-scale role as the native theme does. */
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
   /** The system text size (Android font scale, iOS Dynamic Type); absent at the default size. */
@@ -39,6 +44,82 @@ export function themeTypography(spec: unknown): WebStyleContext["typography"] {
 }
 
 type Css = Record<string, string>;
+
+/**
+ * A style key the web renderer adds to a row's children, never authored (the style schema is
+ * strict), so a `styleWhen` cannot overwrite it: how CSS flex approximates Compose's sequential
+ * Row measure around an aspect ratio (see webRowAspect.ts).
+ */
+export const ROW_MEASURE_KEY = "webRowMeasure";
+
+/**
+ * A style key the web renderer adds to a row around a capped aspect ratio, never authored: the row
+ * is bounded to its parent's width, as a Compose Row's max is, and to any authored `maxWidth`.
+ */
+export const ROW_BOUND_KEY = "webRowBound";
+
+/**
+ * A style key the web renderer adds to a row, column or box's children, never authored: the
+ * tallest that parent lets the child be (dp), as Compose's incoming max height. It is set only
+ * where that height is statically known (see webIncomingHeight.ts).
+ */
+export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
+
+/**
+ * A style key the web renderer adds to a column's weighted child, never authored: the child takes
+ * exactly its weight's share, as Compose's weight constraints and SwiftUI's weighted axis pin it,
+ * so its authored dp height and height bounds do not bound its children (see webIncomingHeight.ts).
+ */
+export const WEIGHTED_HEIGHT_KEY = "webWeightedHeight";
+
+/**
+ * A style key the web renderer adds to a row, column or box, never authored: the frame's safe-area
+ * inset (dp) its `safeAreaPadding` adds on its top and bottom edges, where no ancestor consumed
+ * them. CSS reads the inset from a variable, so the static height pass needs it in dp to take it
+ * out of the node's content height, as it takes out the authored padding (see webIncomingHeight.ts).
+ */
+export const SAFE_INSET_KEY = "webSafeInset";
+
+/**
+ * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
+ * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one.
+ */
+export interface RowMeasure {
+  readonly take?: true;
+  readonly zero?: true;
+  readonly shrink?: number;
+  readonly basis?: number;
+}
+
+function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
+  if (typeof basis === "number") {
+    // The width also sets the item's max-content contribution, so a wrap row sizes around it.
+    css["flex-grow"] = "0";
+    css["flex-basis"] = px(basis);
+    css.width = px(basis);
+  }
+  css["flex-shrink"] = String(shrink);
+}
+
+/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
+  const measure = record(style[ROW_MEASURE_KEY]);
+  if (context.parentAxis !== "row" || !measure) {
+    return;
+  }
+  if (measure.take === true) {
+    css.flex = "1 1 0";
+  }
+  if (typeof measure.shrink === "number") {
+    rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
+    css["min-width"] = "0";
+  }
+  if (measure.zero === true) {
+    css["max-width"] = "0px";
+  }
+}
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
@@ -159,23 +240,51 @@ function paintStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
 }
 
-function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
-  dimension(css, "width", style.width, context);
-  dimension(css, "height", style.height, context);
-  if (typeof style.weight === "number" && context.parentAxis) {
-    css.flex = `${style.weight} ${style.weight} 0`;
-    css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
-  }
-  for (const [field, property] of [
-    ["minWidth", "min-width"],
-    ["maxWidth", "max-width"],
-    ["minHeight", "min-height"],
-    ["maxHeight", "max-height"],
-  ] as const) {
-    if (typeof style[field] === "number") {
+const SIZE_BOUNDS = [
+  ["minWidth", "min-width", "row"],
+  ["maxWidth", "max-width", "row"],
+  ["minHeight", "min-height", "column"],
+  ["maxHeight", "max-height", "column"],
+] as const;
+
+/**
+ * The authored min/max bounds, except on the main axis of a weighted child whose parent shares by
+ * weight: both devices pin that axis to its share, so the bounds there do not apply.
+ */
+function boundsStyle(css: Css, style: Raw, pinnedAxis: WebStyleContext["parentAxis"]) {
+  for (const [field, property, axis] of SIZE_BOUNDS) {
+    if (typeof style[field] === "number" && axis !== pinnedAxis) {
       css[property] = px(style[field] as number);
     }
   }
+}
+
+/**
+ * A row bounded to its parent's width (ROW_BOUND_KEY), intersected with its authored maxWidth as
+ * Compose's sizeIn does, unless a weight pins its width to its share.
+ */
+function rowBoundStyle(css: Css, style: Raw, pinnedAxis: WebStyleContext["parentAxis"]) {
+  if (style[ROW_BOUND_KEY] !== true) {
+    return;
+  }
+  const authored =
+    typeof style.maxWidth === "number" && pinnedAxis !== "row" ? px(style.maxWidth) : undefined;
+  css["max-width"] = authored ? `min(100%, ${authored})` : "100%";
+}
+
+function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
+  dimension(css, "width", style.width, context);
+  dimension(css, "height", style.height, context);
+  const weighted = typeof style.weight === "number" && context.parentAxis !== undefined;
+  if (weighted) {
+    css.flex = `${style.weight} ${style.weight} 0`;
+    css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
+  }
+  // A weight pins its main axis to its share on both devices, where its parent shares by weight.
+  const pinnedAxis = weighted && context.weightsChildren === true ? context.parentAxis : undefined;
+  boundsStyle(css, style, pinnedAxis);
+  rowMeasureStyle(css, style, context);
+  rowBoundStyle(css, style, pinnedAxis);
   if (typeof style.aspectRatio === "number") {
     css["aspect-ratio"] = String(style.aspectRatio);
     aspectRatioFill(css, style, style.aspectRatio, context);

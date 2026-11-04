@@ -349,3 +349,84 @@ describeBrowser("scroll fade edges follow overflow in headless Chromium (#16606)
     );
   }
 });
+
+/** A ratio box in a 300 x 100 dp row; `row` adds to the row, `column` to the column around it. */
+function heightCapSpec(row: Record<string, unknown>, sheet: boolean): Record<string, unknown> {
+  const ratio = { type: "box", testTag: "ratio", style: { aspectRatio: 2, background: "primary" } };
+  const line = {
+    type: "row",
+    testTag: "row",
+    style: { width: { dp: 300 }, height: { dp: 100 } },
+    children: [ratio],
+    ...row,
+  };
+  const hoisted = {
+    type: "bottomSheet",
+    openWhen: { key: "open", equals: true },
+    detents: ["half"],
+    style: { height: { dp: 100 } },
+    child: { type: "text", text: "Details" },
+  };
+  return {
+    id: "height-cap",
+    state: { open: false },
+    root: {
+      type: "column",
+      style: { height: { dp: 100 } },
+      children: sheet ? [hoisted, { ...line, style: { width: { dp: 300 }, weight: 1 } }] : [line],
+    },
+  };
+}
+
+describeBrowser("a row's aspect-ratio height cap in headless Chromium (#16720)", () => {
+  let browser: Browser;
+
+  beforeAll(async () => {
+    browser = await chromium.launch();
+  });
+
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  /** The ratio box's and its row's rendered boxes, in the stage's scaled px. */
+  async function boxes(spec: Record<string, unknown>) {
+    const { page } = await openPage(browser, webSpecPage(spec, "height-cap"));
+    try {
+      return await page.evaluate(() => {
+        const rect = (tag: string) => {
+          const found = document.querySelector(`[data-view]:not([hidden]) [data-testid="${tag}"]`);
+          const { top, bottom, width, height } = found!.getBoundingClientRect();
+          return { top, bottom, width, height };
+        };
+        return { ratio: rect("ratio"), row: rect("row") };
+      });
+    } finally {
+      await page.close();
+    }
+  }
+
+  test(
+    "a weighted row keeps its whole share beside a closed sheet",
+    async () => {
+      const { ratio, row } = await boxes(heightCapSpec({}, true));
+      // The sheet takes no height, so the 100 dp row holds a 200 x 100 box.
+      expect(ratio.height / row.height).toBeCloseTo(1, 2);
+      expect(ratio.width / ratio.height).toBeCloseTo(2, 2);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  test(
+    "a row's safe-area padding leaves its aspect ratio the rest of its height",
+    async () => {
+      const safe = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
+      const { ratio, row } = await boxes(heightCapSpec(safe, false));
+      // Pixel 9's 48 dp top inset leaves 52 of the row's 100 dp: a 104 x 52 box inside the row.
+      expect(ratio.height / row.height).toBeCloseTo(0.52, 2);
+      expect(ratio.width / ratio.height).toBeCloseTo(2, 2);
+      expect(ratio.bottom).toBeLessThanOrEqual(row.bottom + 0.5);
+    },
+    CASE_TIMEOUT_MS,
+  );
+});

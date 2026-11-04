@@ -6,7 +6,12 @@ import {
   type WebChild,
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
-import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
+import { WEB_LAYER_RENDERED_TYPES } from "../../../../src/features/prototype/web/webRender";
+import { WEB_LAYER_TYPES } from "../../../../src/features/prototype/web/webSheet";
+import {
+  renderPrototypeStill,
+  type PrototypeStillOptions,
+} from "../../../../src/features/prototype/web/webStill";
 
 const reference = JSON.parse(
   readFileSync(
@@ -578,6 +583,170 @@ describe("prototype web still (#16346)", () => {
     expect(style("ratio")).toMatchObject({ "aspect-ratio": "2", flex: "1 1 0", "min-width": "0" });
     expect(style("before")).not.toHaveProperty("max-width");
     expect(style("after")["max-width"]).toBe("0px");
+  });
+
+  test("a row's capped aspect ratio takes its cap and the row stays within its parent (#16673)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2, maxHeight: 30 } },
+                { type: "text", text: "b", testTag: "after" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // The row wraps its children but never outgrows its parent, as a Compose Row's max does.
+    expect(row.style["max-width"]).toBe("100%");
+    expect(row.style).not.toHaveProperty("width");
+    const style = (tag: string) => byTag({ element: row }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({
+      "aspect-ratio": "2",
+      "flex-basis": "60px",
+      "flex-grow": "0",
+      "min-width": "0",
+      width: "60px",
+    });
+    // The later sibling keeps its width while the cap leaves room, and gives it up first.
+    expect(style("after")).toMatchObject({ "flex-shrink": "1000000000", "min-width": "0" });
+    expect(style("after")).not.toHaveProperty("max-width");
+  });
+
+  test("a row whose height comes from fill or a weight caps its aspect ratio by it (#16686)", () => {
+    const ratioIn = (row: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            style: { height: { dp: 100 } },
+            children: [
+              { type: "box", style: { height: { dp: 60 } } },
+              {
+                ...row,
+                type: "row",
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                  { type: "text", text: "b" },
+                ],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // 100 dp less the 60 dp sibling leaves 40 dp, so the ratio is at most 80 dp wide.
+    expect(ratioIn({ style: { height: "fill" } })).toMatchObject({ "flex-basis": "80px" });
+    expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
+    // A wrap row is bounded by what is left too.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
+  });
+
+  test("a column's hoisted sheet takes none of the height a weighted row gets (#16720)", () => {
+    const ratioOf = (state: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state,
+          root: {
+            type: "column",
+            style: { height: { dp: 100 } },
+            children: [
+              {
+                type: "bottomSheet",
+                openWhen: { key: "open", equals: true },
+                detents: ["half"],
+                style: { height: { dp: 100 } },
+                child: { type: "text", text: "Details" },
+              },
+              {
+                type: "row",
+                style: { weight: 1 },
+                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // The sheet draws in a window layer, open or closed, so the row's share is the whole 100 dp.
+    expect(ratioOf({ open: false })).toMatchObject({ "flex-basis": "200px", width: "200px" });
+    expect(ratioOf({ open: true })).toMatchObject({ "flex-basis": "200px", width: "200px" });
+  });
+
+  test("every hoisted layer type is out of a column's flow (#16720)", () => {
+    // The height pass's layer set must name every type renderWebNode hoists.
+    expect([...WEB_LAYER_TYPES].sort()).toEqual([...WEB_LAYER_RENDERED_TYPES].sort());
+    const layers: Record<string, Record<string, unknown>> = {
+      dialog: { type: "dialog", title: "Delete?", confirm: { label: "Delete" } },
+      snackbar: { type: "snackbar", text: "Saved" },
+    };
+    for (const [type, layer] of Object.entries(layers)) {
+      const ratio = byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { open: false },
+          root: {
+            type: "column",
+            style: { height: { dp: 100 }, spacing: 8 },
+            children: [
+              { ...layer, openWhen: { key: "open", equals: true }, style: { height: { dp: 100 } } },
+              {
+                type: "row",
+                style: { weight: 1 },
+                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+      expect([type, ratio["flex-basis"]]).toEqual([type, "200px"]);
+    }
+  });
+
+  test("a row's own safe-area padding comes out of its aspect ratio's height cap (#16720)", () => {
+    const ratioIn = (column: Record<string, unknown>, options: PrototypeStillOptions = {}) =>
+      byTag(
+        renderPrototypeStill(
+          {
+            ...reference,
+            root: {
+              type: "column",
+              ...column,
+              children: [
+                {
+                  type: "row",
+                  style: { width: { dp: 300 }, height: { dp: 100 } },
+                  safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+                  children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+                },
+              ],
+            },
+          },
+          options,
+        ),
+        "ratio",
+      )[0]!.style;
+    // Pixel 9's 48 dp top inset leaves the row 52 dp of content, so the box is 104 x 52.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "104px", width: "104px" });
+    // An ancestor that already applied the top inset consumed it, so the row adds none.
+    const consumed = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
+    expect(ratioIn(consumed)).toMatchObject({ "flex-basis": "200px" });
+    // The keyboard inset adds nothing in a still.
+    const ime = { safeAreaPadding: { edges: ["top"], types: ["ime"] } };
+    expect(ratioIn(ime)).toMatchObject({ "flex-basis": "104px" });
+    // The inset is the frame's: an iPhone 16 portrait top inset is 59 dp, leaving 41 dp.
+    expect(ratioIn({}, { frame: "iphone-16" })).toMatchObject({ "flex-basis": "82px" });
   });
 
   test("an explicit wrap-width root keeps its content width in its window", () => {
@@ -1389,5 +1558,43 @@ describe("prototype web still platform state (#16448)", () => {
     expect(label({ frame: "medium-tablet" })).toBe("android medium||{platform:/device/idiom}");
     expect(label({ frame: "iphone-16" })).toBe("ios compact||{platform:/device/idiom}");
     expect(label({ frame: "ipad-10" })).toBe("ios regular||{platform:/device/idiom}");
+  });
+});
+
+describe("a weighted child's main-axis bounds (#16698)", () => {
+  const bounded = (testTag: string) => ({
+    type: "box",
+    testTag,
+    style: { weight: 1, height: { dp: 100 }, maxHeight: 20 },
+  });
+  const still = renderPrototypeStill({
+    id: "weights",
+    window: { placement: { type: "fullscreen" } },
+    root: {
+      type: "column",
+      style: { height: { dp: 300 } },
+      children: [
+        bounded("in-column"),
+        { type: "card", children: [bounded("in-card")] },
+        { type: "scroll", style: { weight: 1 }, child: bounded("in-scroll") },
+        {
+          type: "row",
+          style: { weight: 1 },
+          children: [{ type: "scroll", child: bounded("in-nested-scroll") }],
+        },
+      ],
+    },
+  });
+  const maxHeight = (tag: string) => byTag(still, tag)[0]?.style["max-height"];
+
+  test("a column or card pins it to the share, dropping the bound", () => {
+    expect(byTag(still, "in-column")[0]?.style.flex).toBe("1 1 0");
+    expect(maxHeight("in-column")).toBeUndefined();
+    expect(maxHeight("in-card")).toBeUndefined();
+  });
+
+  test("scroll content keeps it, even inside a weighting row", () => {
+    expect(maxHeight("in-scroll")).toBe("20px");
+    expect(maxHeight("in-nested-scroll")).toBe("20px");
   });
 });

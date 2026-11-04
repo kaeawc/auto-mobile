@@ -16,6 +16,8 @@ import {
 import {
   defaultFillAxes,
   filling,
+  isUnsizedSpacer,
+  spacerFilled,
   webCollectionRenderers,
   withPagerLocals,
   type WebAxis,
@@ -44,6 +46,7 @@ import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
 import { rowFillAxes, rowMeasured } from "./webRowAspect";
+import { withChildHeights, withSafeInsets, type VerticalInsets } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -88,6 +91,8 @@ export interface WebRenderScope {
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
   readonly ownInsets?: readonly string[];
+  /** The frame's top and bottom safe-area insets (dp), which the static height pass subtracts. */
+  readonly safeInsets?: VerticalInsets;
 }
 
 export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -264,23 +269,6 @@ function renderOrSkip(
   return drawn ? [drawn] : [];
 }
 
-/** A spacer with no width, height or weight fills its parent, as the native spacer does. */
-function isUnsizedSpacer(node: unknown): boolean {
-  const raw = record(node);
-  const style = record(raw?.style) ?? {};
-  return (
-    raw?.type === "spacer" &&
-    style.width === undefined &&
-    style.height === undefined &&
-    style.weight === undefined
-  );
-}
-
-/** Missing width and height default to `fill`, without touching authored sizes. */
-function fillMissing(node: Raw): Raw {
-  return filling(node, ["width", "height"]);
-}
-
 /**
  * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
  * fills by default (a slider's width, say). Its repeat placeholders bind, its visibleWhen must keep
@@ -300,7 +288,9 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
-    ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
+    ? lineFillAxes(heightsIn(styled, child(local, {}), path), local, path).filter(
+        (axis) => style[axis] === undefined,
+      )
     : defaultFillAxes(styled);
   return [...authored, ...inferred];
 }
@@ -327,8 +317,16 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
-function spacerFilled(node: Raw): Raw {
-  return isUnsizedSpacer(node) ? fillMissing(node) : node;
+/**
+ * The node's children each carrying the height it hands them (see withChildHeights). `s` is the
+ * scope the node renders in, so its consumed insets are its ancestors'; the inset its own
+ * `safeAreaPadding` adds on an edge they left is taken out of its content height.
+ */
+function heightsIn(n: Raw, s: WebRenderScope, at: string): Raw {
+  const consumed = s.consumedInsets ?? [];
+  const edges = safeAreaEdges(n).filter((edge) => !consumed.includes(edge));
+  const inset = s.safeInsets ? withSafeInsets(n, edges, s.safeInsets) : n;
+  return withChildHeights(inset, at, prepareIn(s));
 }
 
 const line =
@@ -336,16 +334,20 @@ const line =
   (raw, scope, path) => {
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
-    const node = filling(raw, lineFillAxes(raw, scope, path));
-    const { attrs, style } = base(node, scope, lineCss(axis, node.style));
-    const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
+    const sized = heightsIn(raw, scope, path);
+    const node = filling(sized, lineFillAxes(sized, scope, path));
+    const lineStyle = { ...scope.style, parentAxis: axis, weightsChildren: true };
+    const inner = child(scope, { inBox: false, style: lineStyle });
     const rowed = rowMeasured(node, path, prepareIn(inner));
+    const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
-  // A wrap-sized box grows around a filling child, as a Compose Box does.
-  const node = filling(raw, lineFillAxes(raw, scope, path));
+  // A wrap-sized box grows around a filling child, as a Compose Box does; each child carries the
+  // height the box hands it.
+  const sized = heightsIn(raw, scope, path);
+  const node = filling(sized, lineFillAxes(sized, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
   const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
   return el("div", { attrs, style }, children(node, inner, path));
@@ -384,7 +386,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
   });
   const inner = child(scope, {
     inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
+    style: { ...scope.style, parentAxis: horizontal ? "row" : "column", weightsChildren: false },
   });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
@@ -835,7 +837,8 @@ const card: NodeRenderer = (raw, scope, path) => {
       "onSurface",
     ),
   });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
+  const cardStyle = { ...scope.style, parentAxis: "column" as const, weightsChildren: true };
+  const inner = child(scope, { inBox: false, style: cardStyle });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -944,6 +947,9 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 };
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
+
+/** The node types renderWebNode hoists into a window layer; WEB_LAYER_TYPES must match it. */
+export const WEB_LAYER_RENDERED_TYPES: readonly string[] = Object.keys(WEB_LAYER_RENDERERS);
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);

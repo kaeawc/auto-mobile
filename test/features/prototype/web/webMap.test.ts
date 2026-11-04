@@ -476,6 +476,20 @@ describe("prototype web map across the 180° line (#16593)", () => {
     expect(lefts.every((left) => left >= 0 && left <= 100)).toBe(true);
   });
 
+  test("fits and draws long routes in one pass per line (#16666)", () => {
+    // Eight 2,000-point lines, each walking 340° east through Greenwich in sub-degree hops.
+    const lines = Array.from({ length: 8 }, (_, line) =>
+      Array.from({ length: 2_000 }, (_, index) => mercator(line, -170 + (index * 340) / 1_999)),
+    );
+    const view = fitFraming([], size, lines)!;
+    expect(view.worldSize).toBeCloseTo((400 * 0.8) / (340 / 360), 6);
+    const placed = lines.map((line) => routePercents(line, view, size).map((point) => point.left));
+    expect(placed.every((lefts) => lefts.length === 2_000)).toBe(true);
+    expect(placed[0]![0]).toBeCloseTo(10, 2);
+    expect(placed[0]![1_999]).toBeCloseTo(90, 2);
+    expect(placed.flat().every((left) => left >= 0 && left <= 100)).toBe(true);
+  });
+
   test("a single fitted marker keeps the single-point zoom wherever it sits", () => {
     // Wrapping a lone longitude through whole-world shifts must not leave a sliver of width.
     for (const lng of [-122.42, -74, 0, 179.9]) {

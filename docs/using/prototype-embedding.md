@@ -231,7 +231,7 @@ To take a prototype's spec together with what it needs from a renderer, read
 server computed them. Keep the two together: a renderer that lacks a listed capability should
 refuse the spec rather than draw part of it. A `version` other than `1` is a newer format.
 
-`glyphs` is present when the spec names an icon. It maps `<variant>/<name>` to the Material Icons
+`glyphs` is present when the spec names an icon that has a glyph. It maps `<variant>/<name>` to the Material Icons
 glyph's shapes, as SVG markup for a `0 0 24 24` viewBox, so a renderer needs no icon set of its
 own. It covers every icon the spec's icon fields name, in the icon's `variant` (else `filled`), the check a filter chip draws when selected,
 and every icon name that appears as a string in `state` or `data`, in `filled` and in each variant

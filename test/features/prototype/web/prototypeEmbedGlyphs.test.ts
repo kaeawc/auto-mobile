@@ -148,6 +148,15 @@ describe("prototype embed glyph map (#16609)", () => {
       new FakeGlyphSource(new Set()),
     );
     expect(JSON.parse(embed.text).iconMissing).toEqual(["filled/eco"]);
+    expect(JSON.parse(embed.text)).not.toHaveProperty("glyphs");
+    const found = readPrototypeEmbedResource(
+      store,
+      { id: "i" },
+      "v",
+      new FakeGlyphSource(new Set(["eco"])),
+    );
+    expect(JSON.parse(found.text).glyphs).toEqual({ "filled/eco": '<path d="M0 0h3"></path>' });
+    expect(JSON.parse(found.text)).not.toHaveProperty("iconMissing");
   });
 
   test("the component-gallery envelope stays under 20 KB of Material glyph data", () => {

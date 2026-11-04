@@ -469,6 +469,11 @@ jobs:
         with:
           lfs: false
 
+      # validate_plugin.sh fails in CI without the Claude CLI (#16963).
+      - name: "Install pinned Claude Code"
+        shell: "bash"
+        run: scripts/ci/install-claude-code.sh
+
       - name: "Validate Claude Plugin"
         shell: "bash"
         run: |

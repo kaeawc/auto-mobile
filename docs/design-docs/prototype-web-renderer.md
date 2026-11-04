@@ -175,7 +175,8 @@ the host, so the page's script only switches between views it was given and neve
   `start` screen; the outermost stack (the first one drawn) shows `screen` instead when it has that
   screen. No action, timer or `request` runs.
 - **Text.** String-table translations resolve first, in the caller's `locale` (BCP 47, canonicalized;
-  default `en-US`; an invalid tag is an `ActionableError`). Then
+  default `en-US`; an invalid tag is a `PrototypeWebInputError`, surfaced to clients as an
+  `ActionableError` with the same message). Then
   `{data:/pointer}` placeholders bind (a missing or non-scalar value is empty),
   then repeat items, then a bare `{key}`, which reads spec state, and `{derived:name}`, which reads a
   top-level `derive` entry. Repeat placeholders

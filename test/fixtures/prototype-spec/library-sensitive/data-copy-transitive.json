@@ -1,0 +1,62 @@
+{
+  "spec": {
+    "id": "sensitive-flow",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "pasteButton",
+          "into": "/data/code"
+        },
+        {
+          "type": "button",
+          "label": "Copy",
+          "onTap": [
+            {
+              "type": "setData",
+              "path": "/data/second",
+              "value": {
+                "data": "/first"
+              }
+            },
+            {
+              "type": "setData",
+              "path": "/data/first",
+              "value": {
+                "data": "/code"
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/submit",
+              "via": "device"
+            }
+          ]
+        }
+      ]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["data:/second"]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "storage.keys[0]",
+  "expectedMessage": "Sensitive value cannot be persisted"
+}

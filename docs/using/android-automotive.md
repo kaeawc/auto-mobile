@@ -163,19 +163,10 @@ unverified.
 
 ## Car App Library templates in `observe`
 
-An app built on the Car App Library (`androidx.car.app`) that integrates the AutoMobile Android SDK can
-report its template stack to `observe`, on a phone emulator or on AAOS, without a head unit. Turn it on
-in a debug build and pass each template through `record` as `onGetTemplate` returns it:
-
-```kotlin
-// Once, e.g. in your CarAppService or Session.
-AutoMobileCarAppTemplates.enable(context)
-
-override fun onGetTemplate(): Template =
-  AutoMobileCarAppTemplates.record(this, ListTemplate.Builder() /* ... */.build())
-```
-
-`enable` returns `false` and does nothing in a non-debuggable build. While the foreground app has the
+An app built on the Car App Library (`androidx.car.app`) can report its template stack to `observe`, on a
+phone emulator or on AAOS, without a head unit. The block appears only for a debug build of an app that
+enabled the AutoMobile SDK template route; the app-side setup is in the
+[design doc](../design-docs/plat/android/car-app-templates.md#app-setup). While the foreground app has the
 route on, `observe` carries a `carAppTemplates` block:
 
 - `sessions[]`: one per screen stack, with `screens[]` listed root first; the top screen has `top: true`.

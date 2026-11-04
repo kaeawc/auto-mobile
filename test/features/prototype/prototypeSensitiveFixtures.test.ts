@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { prototypeSensitiveSinkErrors } from "../../../src/features/prototype/prototypeStrictPolicy";
+import {
+  prototypeSensitiveSinkErrors,
+  prototypeSensitiveWarnings,
+} from "../../../src/features/prototype/prototypeStrictPolicy";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 interface SensitiveFixture {
@@ -40,10 +43,15 @@ describe("shared sensitive library fixtures", () => {
         : [],
     );
     if (!fixture.sinkOnly) {
+      expect(prototypeSensitiveWarnings(fixture.spec)).toEqual([
+        `${fixture.expectedPath}: ${fixture.expectedMessage}; this is a warning only and does not block the show.`,
+      ]);
       expect(validatePrototypeSpec(fixture.spec, fixture.options)).toEqual({
         success: false,
         error: { path: fixture.expectedPath, message: fixture.expectedMessage },
       });
+    } else if (name.startsWith("platform-")) {
+      expect(validatePrototypeSpec(fixture.spec, { library: true }).success).toBe(true);
     }
   });
 });

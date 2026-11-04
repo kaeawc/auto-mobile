@@ -12,7 +12,7 @@ data class ReconnectingObservationOptions(
   val requireDeviceSessionUuid: Boolean = false,
   val streamFactory: () -> ObservationStream,
   val backoffDelay: suspend (attempt: Int) -> Unit = { attempt ->
-    delay(reconnectBackoffMs(attempt))
+    delay(jitteredReconnectBackoffMs(attempt))
   },
   val socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 )

@@ -10,7 +10,11 @@ import {
   type SessionReleaseSnapshot,
 } from "../sessionManager";
 import { SessionSlotShadowProbe } from "../sessionSlotShadowProbe";
-import { type SessionLifecycleSlots } from "./internalContracts";
+import {
+  cliIdleWindowMarker,
+  persistedInheritedCliIdleWindowMs,
+  type SessionLifecycleSlots,
+} from "./internalContracts";
 
 export interface SessionPlanLabelsHost {
   refuseLabelMintOutsidePlanAllocation(sessionId: string, deviceId: string): void;
@@ -42,6 +46,7 @@ export interface SessionPlanLabelsHost {
     persisted: DeviceSession,
     releaseReason: string,
   ): SessionReleaseSnapshot;
+  readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
   sessionNow(): number;
   peekSession(sessionId: string): Session | null;
   ownershipSessionUuid(sessionId: string): string;
@@ -103,10 +108,10 @@ export class SessionPlanLabels {
    * run that minted the label is still running, a row waiting out a recoverable handoff (a device
    * restart) is recovered as before.
    */
-  refusePlanLabelSessionOutsideItsRun(
+  async refusePlanLabelSessionOutsideItsRun(
     sessionId: string,
     persisted: DeviceSession | undefined,
-  ): void {
+  ): Promise<void> {
     if (persisted?.source !== PLAN_LABEL_SESSION_SOURCE) {
       return;
     }
@@ -117,12 +122,17 @@ export class SessionPlanLabels {
     if (recoverable && this.host.planLabels.isRunning(sessionId)) {
       return;
     }
+    // The label's row records only an inherited `cli-idle-timeout`; the window is its base's.
+    const inheritedWindowMs = await persistedInheritedCliIdleWindowMs(sessionId, persisted, (id) =>
+      this.host.readPersistedSession(id),
+    );
     throw new TerminalSessionError(sessionId, {
       ...this.host.releaseSnapshotFromPersisted(
         sessionId,
         persisted,
         persisted.release_reason ?? PLAN_AUTO_RELEASE_REASON,
       ),
+      ...cliIdleWindowMarker(inheritedWindowMs),
       terminal: true,
     });
   }

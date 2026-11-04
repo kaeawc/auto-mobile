@@ -37,6 +37,7 @@ const EXCLUDED_FILES = new Set([
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
   "decisions/fastlane-supply-play-publishing.md",
   "decisions/ios-user-files-provider.md",
+  "decisions/material-icons-web-glyphs.md",
   "decisions/mcp-sdk-v2-split-packages.md",
   "decisions/playwright-core-web-screenshots.md",
   "decisions/prototype-embedded-request-routing.md",

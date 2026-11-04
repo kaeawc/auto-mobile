@@ -5,6 +5,7 @@ import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContr
 import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
@@ -25,6 +26,12 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * Where icons find their glyphs (the server passes the Material Icons Android draws). Used only
+   * for an Android frame: an iOS frame keeps the placeholder until its glyph set is decided
+   * (#16526). Without one every icon draws the placeholder.
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
   /**
    * The host locale (BCP 47, default `en-US`): string tables, formatting, and the layout direction
    * of a window that sets no `layoutDirection`.
@@ -183,6 +190,13 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+function glyphScope(
+  options: PrototypeStillOptions,
+  frame: DeviceFrame,
+): { glyphs?: PrototypeIconGlyphSource } {
+  return options.glyphs && frame.platform === "android" ? { glyphs: options.glyphs } : {};
+}
+
 /** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
 function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderScope["format"] {
   return {
@@ -228,6 +242,7 @@ function stillScope(
     instances: [],
     inBox: false,
     unsupported: [],
+    ...glyphScope(options, frame),
     screenWidth: size.width,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],

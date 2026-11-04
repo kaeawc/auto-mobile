@@ -1,0 +1,51 @@
+{
+  "id": "settings-open-portable",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "page": "wifi"
+  },
+  "requires": {
+    "platform": ["settings"]
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "id": "notifications",
+        "label": "Notification settings",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "settings.open",
+            "args": {
+              "page": {
+                "value": "notifications"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "id": "bound",
+        "label": "Bound page",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "settings.open",
+            "args": {
+              "page": {
+                "state": "page"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

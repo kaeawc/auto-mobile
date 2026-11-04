@@ -1,6 +1,6 @@
 import type { Posture } from "../../../models/DisplayPanel";
 import { dataPlaceholderSpans } from "../prototypeData";
-import { PROTOTYPE_PLATFORM_MODULES } from "../prototypePlatform";
+import { PROTOTYPE_WIDTH_CLASS_BREAKPOINTS } from "../prototypeRenderContract.generated";
 
 /** The fold a still draws: its posture and which way the hinge runs across the active panel. */
 export interface StillFold {
@@ -24,9 +24,7 @@ export interface StillPlatformInput {
  */
 export type StillPlatformState = Readonly<Record<string, unknown>>;
 
-const WIDTH_BREAKPOINTS = PROTOTYPE_PLATFORM_MODULES.device?.state?.widthClass?.breakpoints ?? [
-  600, 840,
-];
+const WIDTH_BREAKPOINTS: readonly number[] = PROTOTYPE_WIDTH_CLASS_BREAKPOINTS;
 
 /** iPads are regular full screen; an iPhone is regular only in landscape on the widest models. */
 const IOS_TABLET_SMALLEST_DP = 600;

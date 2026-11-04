@@ -1,6 +1,8 @@
 import { prototypeSpecForDevice } from "../prototypeComponents";
+import type { PrototypeFormatLogger } from "../prototypeFormat";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
+import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
 import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
@@ -8,11 +10,10 @@ import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import { localeLayoutDirection, stillLocale } from "./webLocale";
 import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
-import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
-
-/** The still renders in one fixed locale, so the same spec renders the same bytes. */
-const STILL_LOCALE = "en-US";
+import { cssColor, fontPx, themeTypography, type WebStyleContext } from "./webStyle";
+import { stillTextScale, type StillTextSize } from "./webTextScale";
 
 export interface PrototypeStillOptions {
   /** A device frame id; defaults to the platform's default frame. */
@@ -24,6 +25,15 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * The host locale (BCP 47, default `en-US`): string tables, formatting, and the layout direction
+   * of a window that sets no `layoutDirection`.
+   */
+  readonly locale?: string;
+  /** The system text size: `fontScale` on an Android frame, `contentSize` on an iOS one. */
+  readonly textSize?: StillTextSize;
+  /** Traces rejected derived formats; the server passes its logger, a browser embed none. */
+  readonly logger?: PrototypeFormatLogger;
 }
 
 export interface PrototypeStill {
@@ -115,22 +125,29 @@ function sizedRoot(spec: unknown): unknown {
   };
 }
 
+/** The explicit `window.layoutDirection`, else `rtl` for an RTL locale, else none. */
+function windowDirection(spec: unknown, locale: string): "ltr" | "rtl" | undefined {
+  const authored = record(record(spec)?.window)?.layoutDirection;
+  if (authored === "rtl" || authored === "ltr") {
+    return authored;
+  }
+  return localeLayoutDirection(locale) === "rtl" ? "rtl" : undefined;
+}
+
 /**
- * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
- * a floating window sits at its `gravity`, moved by its `offset`.
- */
-/**
- * The window's content with the spec's explicit layout direction, so rows, start/end alignment and
- * logical padding follow it; the device chrome around it is never mirrored.
+ * The window's content with its layout direction, so rows, start/end alignment and logical padding
+ * follow it; the device chrome around it is never mirrored. An explicit `window.layoutDirection`
+ * wins; otherwise the host locale decides, and an LTR locale leaves the page's own direction.
  */
 function placed(
   spec: unknown,
   content: WebElement | undefined,
   layers: readonly WebElement[],
+  locale: string,
 ): WebElement {
   const window = placedWindow(spec, content, layers);
-  const direction = record(record(spec)?.window)?.layoutDirection;
-  if (direction !== "rtl" && direction !== "ltr") {
+  const direction = windowDirection(spec, locale);
+  if (direction === undefined) {
     return window;
   }
   // In RTL the logical start is the physical right, so the logical insets swap sides.
@@ -145,7 +162,11 @@ function placed(
   };
 }
 
-/** The window region holds the content, then its layers; a floating window's transform anchors them. */
+/**
+ * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
+ * a floating window sits at its `gravity`, moved by its `offset`. The window region holds the
+ * content, then its layers; a floating window's transform anchors them.
+ */
 function placedWindow(
   spec: unknown,
   content: WebElement | undefined,
@@ -162,10 +183,21 @@ function placedWindow(
   return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
 }
 
+/** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
+function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderScope["format"] {
+  return {
+    locale,
+    timeZone: "UTC",
+    nowMs: options.nowMs ?? 0,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  };
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
   frame: DeviceFrame,
+  locale: string,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
   // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
@@ -173,14 +205,16 @@ function stillScope(
   const size = screenSize(frame, options.orientation ?? "portrait");
   const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
+  const textScale = stillTextScale(frame.platform, options.textSize);
   return {
     style: {
       mode,
-      palette: prototypeRolePalette(expanded, mode),
+      palette: prototypeDrawnPalette(expanded, mode),
       parentAxis: "column",
       typography: themeTypography(expanded),
+      ...(textScale ? { textScale } : {}),
       platform: frame.platform,
-      ...(record(spec.window)?.layoutDirection === "rtl" ? { rtl: true } : {}),
+      ...(windowDirection(spec, locale) === "rtl" ? { rtl: true } : {}),
     },
     condition: {
       state: record(spec.state) ?? {},
@@ -190,7 +224,7 @@ function stillScope(
     },
     data: spec.data,
     spec,
-    format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
+    format: stillFormat(options, locale),
     instances: [],
     inBox: false,
     unsupported: [],
@@ -202,8 +236,8 @@ function stillScope(
 }
 
 /**
- * The theme's `background` role (else `surface`); a seed or device scheme leaves both unresolved,
- * so the Material 3 baseline background for the mode stands in.
+ * The theme's `background` role (else `surface`), from the baseline, seed or overrides; the
+ * Material 3 baseline background for the mode stands in should neither resolve.
  */
 function screenBackground(style: WebStyleContext): string {
   return (
@@ -241,14 +275,15 @@ export function renderPrototypeStill(
   const frame = deviceFrameOrThrow(
     options.frame ?? defaultDeviceFrameId(options.platform ?? "android"),
   );
-  // Components expand, then string tables resolve for the still's fixed locale, as on devices.
-  const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
-  const scope = stillScope(expanded, options, frame);
+  const locale = stillLocale(options.locale);
+  // Components expand, then string tables resolve for the host locale, as on devices.
+  const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [locale]);
+  const scope = stillScope(expanded, options, frame, locale);
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const content = placed(expanded, root, scope.layers);
+  const content = placed(expanded, root, scope.layers, locale);
   const element = renderDeviceFrame(
     frame,
     options.orientation ?? "portrait",
@@ -257,6 +292,7 @@ export function renderPrototypeStill(
       textColor,
       background,
       statusBarContent: stillStatusBarContent(expanded, content, background, dark),
+      ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
     },
     content,
   );

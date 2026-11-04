@@ -155,6 +155,7 @@
     "loop-spin-finite.json",
     "loop-spin-infinite.json",
     "loop-upper-bounds.json",
+    "map-marker-tap-emit-context.json",
     "map-node-limits.json",
     "map-node.json",
     "material-app-bar-dialog-pickers.json",
@@ -1079,6 +1080,7 @@
     "map-icon-url.json",
     "map-marker-animate-over.json",
     "map-marker-missing-as.json",
+    "map-marker-tap-context-marker-id.json",
     "map-marker-title-blank.json",
     "map-marker-unknown-field.json",
     "map-polyline-color-unknown.json",
@@ -3380,6 +3382,13 @@
     ],
     "map-node-limits.json": [
       "prototype_data_model_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-marker-tap-emit-context.json": [
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_platform_location_v1",
       "prototype_platform_map_v1",
       "prototype_platform_v1"
     ],

@@ -395,6 +395,12 @@ function sanitizeSessionReleaseSnapshot(
     ...(typeof record.ownerPid === "number" && Number.isInteger(record.ownerPid)
       ? { ownerPid: record.ownerPid }
       : {}),
+    // The CLI idle window a cli-idle-timeout refusal reports (#16940); dropped when unusable.
+    ...(typeof record.cliIdleTimeoutMs === "number" &&
+    Number.isSafeInteger(record.cliIdleTimeoutMs) &&
+    record.cliIdleTimeoutMs > 0
+      ? { cliIdleTimeoutMs: record.cliIdleTimeoutMs }
+      : {}),
     heartbeat: record.heartbeat,
   };
 }

@@ -141,7 +141,7 @@ function terminalSessionRegistrationRefusal(
       sessionUuid: sessionId,
       reason: releaseReason,
       ...idleReleaseField(releaseReason),
-      // Only a release of a session on the cli-idle policy records its window (#16937, #16940).
+      // Only a cli-idle release records a window: its own, or its plan base's (#16940, #16971).
       ...cliIdleTimeoutField(releaseReason, cliIdleTimeoutMs),
       ...(ownerPid === undefined ? {} : { ownerPid }),
     },

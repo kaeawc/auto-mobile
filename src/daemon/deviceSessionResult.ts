@@ -138,7 +138,7 @@ export function sessionOwnershipLostPayload({
       sessionUuid,
       reason,
       ...idleReleaseField(reason),
-      // Only a release of a session on the cli-idle policy records its window (#16908, #16940).
+      // Only a cli-idle release records a window: its own, or its plan base's (#16940, #16971).
       ...cliIdleTimeoutField(reason, idleTimeoutMs ?? release?.cliIdleTimeoutMs),
       ...terminalSessionRefusalFields(release?.ownerPid),
       ...(release ? { release } : {}),

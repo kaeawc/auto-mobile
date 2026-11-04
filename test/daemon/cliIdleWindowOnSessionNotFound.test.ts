@@ -17,11 +17,16 @@ import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
+import { registerDerivedLabelSessionReleaseCascade } from "../../src/daemon/derivedLabelSessionReleaseCascade";
+import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 
 // A cli-idle-timeout release reports the CLI idle window the session itself had (#16908) on every
 // answer about it: session-not-found from daemon/heartbeat and daemon/sessionInfo, and the
-// daemon/registerSession refusal (#16937), also after a restart. A plan label that only inherits
-// its base's cli-idle-timeout never adopted a window, so it reports none (#16940).
+// daemon/registerSession refusal (#16937), also after a restart. A plan label that inherits its
+// base's cli-idle-timeout never adopted a window of its own (#16940); it reports the base's, the
+// window that expired (#16971).
 
 const BASE = "16937000-0000-4000-8000-000000000001";
 const DEVICE = "emulator-5554";
@@ -176,57 +181,112 @@ describe("session-not-found answers carry the cli idle window (#16937)", () => {
   });
 });
 
-describe("a plan label inheriting its base's cli-idle-timeout reports no window (#16940)", () => {
-  async function baseWithLabel(manager: SessionManager): Promise<string> {
-    const labelId = `${BASE}:B`;
+describe("a plan label inheriting its base's cli-idle-timeout reports the base's window (#16971)", () => {
+  const LABEL = `${BASE}:B`;
+
+  /**
+   * The base on the cli-idle policy with a plan label `B` on its own 10 s heartbeat lease, whose
+   * own idle timeout outlasts the base's window.
+   */
+  async function baseWithLabel(manager: SessionManager): Promise<void> {
     await manager.createSession(BASE, DEVICE, "android", { timeoutMs: 60_000 });
     manager.adoptCliLivenessPolicy(BASE, WINDOW_MS);
-    await asPlanAllocation(manager, BASE, [labelId], () =>
-      manager.createSession(labelId, "emulator-5556", "android", {
-        timeoutMs: 60_000,
+    await asPlanAllocation(manager, BASE, [LABEL], () =>
+      manager.createSession(LABEL, "emulator-5556", "android", {
+        timeoutMs: 2 * WINDOW_MS,
         heartbeatTimeoutMs: 10_000,
       }),
     );
     manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
-    await manager.releaseSession(BASE, "cli-idle-timeout");
-    return labelId;
   }
 
-  test("the label's refusal omits idleTimeoutMs; the base's keeps its own window", async () => {
-    const manager = newManager();
-    const labelId = await baseWithLabel(manager);
+  /** The base ended by `reason`, with the daemon's cascade ending the label after it. */
+  async function cascadeEnd(manager: SessionManager, reason: SessionReleaseReason): Promise<void> {
+    const cascade = registerDerivedLabelSessionReleaseCascade(manager, DEVICE_POOL);
+    await manager.releaseSession(BASE, reason);
+    await cascade.settled();
+  }
 
-    const labelAnswer = manager.peekTerminalAnswerForEndedSession(labelId);
-    expect(labelAnswer?.release.releaseReason).toBe("cli-idle-timeout");
-    expect(labelAnswer?.release.heartbeat.timeoutMs).toBe(10_000);
-    const labelPayload = sessionOwnershipLostPayload({
+  function mcpError(release: SessionReleaseSnapshot | undefined): Record<string, unknown> {
+    return sessionOwnershipLostPayload({
       message: "gone",
-      sessionUuid: labelId,
-      reason: "cli-idle-timeout",
-      release: labelAnswer?.release,
+      sessionUuid: LABEL,
+      reason: release?.releaseReason ?? "",
+      release,
     }).error;
-    expect(labelPayload).toMatchObject({ reason: "cli-idle-timeout", idle: true });
-    expect("idleTimeoutMs" in labelPayload).toBe(false);
+  }
 
-    const baseRelease = manager.getTerminalReleaseSnapshot(BASE);
-    expect(baseRelease?.cliIdleTimeoutMs).toBe(WINDOW_MS);
-    expect(
-      sessionOwnershipLostPayload({
-        message: "gone",
-        sessionUuid: BASE,
-        reason: "cli-idle-timeout",
-        release: baseRelease,
-      }).error.idleTimeoutMs,
-    ).toBe(WINDOW_MS);
+  test("before the cascade, the label's refusal carries the base's window, not its lease", async () => {
+    const manager = newManager();
+    await baseWithLabel(manager);
+    await manager.releaseSession(BASE, "cli-idle-timeout");
+
+    const answer = manager.peekTerminalAnswerForEndedSession(LABEL);
+    expect(answer?.release).toMatchObject({
+      sessionId: LABEL,
+      releaseReason: "cli-idle-timeout",
+      cliIdleTimeoutMs: WINDOW_MS,
+      heartbeat: { timeoutMs: 10_000 },
+    });
+    expect(mcpError(answer?.release)).toMatchObject({
+      reason: "cli-idle-timeout",
+      idle: true,
+      idleTimeoutMs: WINDOW_MS,
+    });
+    expect(mcpRequestFailureDetails(answer, undefined)).toMatchObject({
+      code: "session_ownership_lost",
+      details: { sessionUuid: LABEL, reason: "cli-idle-timeout", idleTimeoutMs: WINDOW_MS },
+    });
+    expect(await manager.getReleasedSessionIdleTimeoutMs(LABEL)).toBe(WINDOW_MS);
   });
 
-  test("the label's session-not-found answer omits it too", async () => {
+  // daemon/registerSession takes a UUID, so it never names a `${base}:${label}` id.
+  test("after the cascade, its release and session-not-found answers carry it", async () => {
     const manager = newManager();
-    const labelId = await baseWithLabel(manager);
+    await baseWithLabel(manager);
+    await cascadeEnd(manager, "cli-idle-timeout");
 
-    expect(await manager.getReleasedSessionIdleTimeoutMs(labelId)).toBeUndefined();
-    const answer = await request(manager, "daemon/sessionInfo", { sessionId: labelId });
-    expect(answer.releaseReason).toBe("cli-idle-timeout");
-    expect("idleTimeoutMs" in answer).toBe(false);
+    expect(manager.getTerminalReleaseSnapshot(LABEL)?.cliIdleTimeoutMs).toBe(WINDOW_MS);
+    for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
+      const answer = await request(manager, method, { sessionId: LABEL });
+      expect(answer, method).toMatchObject({
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+        releaseReason: "cli-idle-timeout",
+        idleTimeoutMs: WINDOW_MS,
+      });
+    }
+  });
+
+  test("a restarted daemon reads the label's window from its base's row", async () => {
+    const first = newManager();
+    await baseWithLabel(first);
+    await cascadeEnd(first, "cli-idle-timeout");
+    const restarted = newManager();
+
+    expect(await restarted.getReleasedSessionIdleTimeoutMs(LABEL)).toBe(WINDOW_MS);
+    const answer = await request(restarted, "daemon/sessionInfo", { sessionId: LABEL });
+    expect(answer).toMatchObject({ releaseReason: "cli-idle-timeout", idleTimeoutMs: WINDOW_MS });
+  });
+
+  test("a label whose base ended for any other reason carries no window", async () => {
+    const manager = newManager();
+    await baseWithLabel(manager);
+    await manager.releaseSession(BASE, "explicit-release");
+
+    const before = manager.peekTerminalAnswerForEndedSession(LABEL)?.release;
+    expect(before?.releaseReason).toBe("explicit-release");
+    expect(before?.cliIdleTimeoutMs).toBeUndefined();
+    expect("idleTimeoutMs" in mcpError(before)).toBe(false);
+    expect(await manager.getReleasedSessionIdleTimeoutMs(LABEL)).toBeUndefined();
+  });
+
+  test("nor does its own release, before or after a restart", async () => {
+    const first = newManager();
+    await baseWithLabel(first);
+    await cascadeEnd(first, "explicit-release");
+
+    expect(first.getTerminalReleaseSnapshot(LABEL)?.releaseReason).toBe("explicit-release");
+    expect(first.getTerminalReleaseSnapshot(LABEL)?.cliIdleTimeoutMs).toBeUndefined();
+    expect(await newManager().getReleasedSessionIdleTimeoutMs(LABEL)).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import type { DeviceSession } from "../../db/types";
-import { PlanLabelRegistry } from "../planLabelRegistry";
+import { type EndedLabelBase, PlanLabelRegistry } from "../planLabelRegistry";
 import { isRecoverableDaemonReleaseReason, isTerminalReleaseReason } from "../releaseReasons";
 import { TerminalSessionError } from "../sessionErrors";
 import {
@@ -33,7 +33,10 @@ export interface SessionPlanLabelsHost {
     afterDelete?: () => void,
   ): void;
   readonly slotShadowProbe: SessionSlotShadowProbe<Session>;
-  readonly sessionSlots: Pick<SessionLifecycleSlots, "deleteTerminalReasonState" | "hasRecovery">;
+  readonly sessionSlots: Pick<
+    SessionLifecycleSlots,
+    "deleteTerminalReasonState" | "hasRecovery" | "getTerminalSnapshot"
+  >;
   releaseSnapshotFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -43,7 +46,7 @@ export interface SessionPlanLabelsHost {
   peekSession(sessionId: string): Session | null;
   ownershipSessionUuid(sessionId: string): string;
   readonly sessions: Pick<Map<string, Session>, "get">;
-  endedBaseOfLabel(label: Session): { baseSessionId: string; releaseReason: string } | undefined;
+  endedBaseOfLabel(label: Session): EndedLabelBase | undefined;
 }
 
 export class SessionPlanLabels {
@@ -178,10 +181,13 @@ export class SessionPlanLabels {
    * that are already gone; the caller checks each one.
    */
   takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[] {
+    // The base's terminal release is fenced before it is announced, so its snapshot holds the
+    // window that expired; each label's own release reports it (#16971).
     return this.host.planLabels.takeDerivedLabelSessions(
       baseSessionId,
       releaseReason,
       isTerminalReleaseReason,
+      this.host.sessionSlots.getTerminalSnapshot(baseSessionId)?.cliIdleTimeoutMs,
     );
   }
 }

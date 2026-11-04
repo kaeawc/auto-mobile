@@ -238,8 +238,8 @@ the windows with the variables in
   `idleTimeoutMs`, the idle window the session had: the
   `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` of the last `--cli` call that used it,
   capped at 1 hour. A plan's derived label session that ends with its base's
-  `cli-idle-timeout` omits `idleTimeoutMs`, since it had no idle window of its
-  own. A call still running when its session is released is cut with the same
+  `cli-idle-timeout` carries the base's `idleTimeoutMs`, the window that
+  expired. A call still running when its session is released is cut with the same
   refusal.
 - **Daemon restart.** A daemon restart is not terminal: the owner reclaims the
   session under the same UUID. While the daemon reclaims the binding, calls may

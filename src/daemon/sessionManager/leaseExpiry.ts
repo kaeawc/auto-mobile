@@ -1,3 +1,4 @@
+import type { EndedLabelBase } from "../planLabelRegistry";
 import { type DbWriteBarrier } from "../../db/dbWriteBarrier";
 import { resolveOwnershipSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
 import { ignoresManagedExecutionIdleDeadline } from "../../models/managedExecutionLiveness";
@@ -91,7 +92,11 @@ export interface SessionLeaseExpiryHost {
     excludeExecutionId?: string,
   ): boolean;
   getPersistedTerminalRelease(sessionId: string): Promise<SessionReleaseSnapshot | undefined>;
-  terminalReleaseAsOfNow(session: Session, releaseReason: string): SessionReleaseSnapshot;
+  terminalReleaseAsOfNow(
+    session: Session,
+    releaseReason: string,
+    endedBase?: EndedLabelBase,
+  ): SessionReleaseSnapshot;
   readonly sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup;
   readonly expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller;
 }

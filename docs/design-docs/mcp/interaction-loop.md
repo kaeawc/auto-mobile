@@ -55,8 +55,9 @@ counts hierarchy nodes, so those stay hierarchy-only.
 
 The hierarchy `appear` and `disappear` predicates ignore a match made only
 through a tappable row's hoisted label (descendant text folded onto the row) when
-any hoisted descendant has no visible part on screen; text the row carries itself
-still matches. Selector resolution for `tapOn` and other actions does not apply
+any hoisted descendant has no visible part on screen, and an unscoped wait then
+takes any other match. Text the row carries itself still matches, compared the
+way the resolver compared it. Selector resolution for `tapOn` and other actions does not apply
 this check.
 
 iOS simulator lock readings are shared per device: unlocked known readings use

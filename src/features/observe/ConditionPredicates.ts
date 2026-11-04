@@ -10,6 +10,7 @@ import {
   isWithin,
   matchedSourceNode,
 } from "../utility/ElementResolver";
+import { normalize as normalizeMatchText } from "../utility/ElementResolverMatching";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
@@ -289,15 +290,51 @@ function boundedChosenAncestor(result: ElementResolution, source: SearchableEntr
 function matchesOnlyThroughOffScreenHoist(
   source: SearchableEntry,
   selector: ConditionSelector,
-  screenSize: ObserveResult["screenSize"],
+  { matchMode, screenSize }: HoistCheck,
 ): boolean {
   return (
     source.hoistedSources !== undefined &&
-    !ownsSelectorText(source, selector.text) &&
+    !carriesSelectorTextItself(source, selector, matchMode) &&
     source.hoistedSources.some((part) => !hasVisibleScreenPart(part.bounds, screenSize))
   );
 }
 
+interface HoistCheck {
+  matchMode: MatchMode;
+  screenSize: ObserveResult["screenSize"];
+}
+
+/**
+ * Whether `source`'s own captured text (not a label hoisted onto it) satisfies the selector text
+ * the way the resolver compared it: whitespace-collapsed exact or contains, or the same regex.
+ */
+function carriesSelectorTextItself(
+  source: SearchableEntry,
+  { text, caseSensitive }: ConditionSelector,
+  matchMode: MatchMode,
+): boolean {
+  if (text === undefined) {
+    return true;
+  }
+  const own = Object.values(source.textSources);
+  if (matchMode === "regex") {
+    // The resolver already compiled this pattern for the same match, so it is valid here.
+    const regex = new RegExp(normalizeQuotes(text), caseSensitive ? "" : "i");
+    return own.some((value) => regex.test(normalizeQuotes(value)));
+  }
+  const query = normalizeMatchText(text, caseSensitive);
+  return own.some((value) => {
+    const actual = normalizeMatchText(value, caseSensitive);
+    return matchMode === "exact" ? actual === query : actual.includes(query);
+  });
+}
+
+/**
+ * The bounded source a positive wait accepts. A source that matched only through a hoisted label
+ * with an off-screen contributor is not one (#17007); an unscoped wait then takes any other
+ * matched source that is, so a second visible match still counts. A scoped wait (index or
+ * selection strategy) keeps the resolver's single choice.
+ */
 function boundedMatchedSource(
   result: ElementResolution | undefined,
   selector: ConditionSelector,
@@ -307,13 +344,25 @@ function boundedMatchedSource(
     return undefined;
   }
   const source = matchedSourceNode(result, selector);
-  if (!source || matchesOnlyThroughOffScreenHoist(source, selector, screenSize)) {
+  if (!source) {
     return undefined;
   }
-  if (source.bounds && source.element) {
-    return source;
+  const check = { matchMode: result.matchMode, screenSize };
+  if (!matchesOnlyThroughOffScreenHoist(source, selector, check)) {
+    return source.bounds && source.element ? source : boundedChosenAncestor(result, source);
   }
-  return boundedChosenAncestor(result, source);
+  if (usesScopedWait(selector)) {
+    return undefined;
+  }
+  return result.matches
+    .flatMap(({ sourceNodes, node }) => sourceNodes ?? [node])
+    .find(
+      (other) =>
+        other !== source &&
+        other.bounds !== undefined &&
+        other.element !== undefined &&
+        !matchesOnlyThroughOffScreenHoist(other, selector, check),
+    );
 }
 
 export function appear(

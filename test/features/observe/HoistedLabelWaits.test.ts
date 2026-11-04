@@ -87,3 +87,61 @@ describe("hierarchy waits on a hoisted label with an off-screen source (#17007)"
     expect(appear(new ElementResolver(), { text: "Alarm" })(offScreen).matched).toBe(true);
   });
 });
+
+/** An ObserveResult on a 400x800 screen whose root holds `rows`. */
+function screenWith(rows: object[]): ObserveResult {
+  return {
+    updatedAt: 1,
+    screenSize: { width: 400, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: {
+      hierarchy: { node: { bounds: { left: 0, top: 0, right: 400, bottom: 800 }, node: rows } },
+    },
+  } as ObserveResult;
+}
+
+/** A clickable row with `text` whose single child carries `childText` at `childTop`. */
+function rowWithChild(
+  text: string,
+  [top, bottom]: [number, number],
+  childText: string,
+  childTop: number,
+): object {
+  return {
+    text,
+    clickable: "true",
+    bounds: { left: 0, top, right: 400, bottom },
+    node: [
+      { text: childText, bounds: { left: 0, top: childTop, right: 100, bottom: childTop + 40 } },
+    ],
+  };
+}
+
+describe("hoisted-label waits judge every match the resolver found (#17007)", () => {
+  test("a second, fully visible composite label still satisfies the wait", () => {
+    const observation = screenWith([
+      rowWithChild(" Alarm", [700, 900], "7:00", 850),
+      rowWithChild(" Alarm", [0, 300], "7:00", 20),
+    ]);
+    const resolver = new ElementResolver();
+
+    const evaluation = appear(resolver, { text: "7:00 Alarm" })(observation);
+    expect(evaluation.matched).toBe(true);
+    expect(evaluation.matchedElement?.bounds).toEqual({ left: 0, top: 0, right: 400, bottom: 300 });
+    expect(disappear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(false);
+  });
+
+  test("text the row carries itself matches with the resolver's whitespace and regex rules", () => {
+    const observation = screenWith([rowWithChild("Alarm   Clock", [0, 900], "7:00", 850)]);
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "Alarm Clock" })(observation).matched).toBe(true);
+    expect(appear(resolver, { text: "alarm clock", match: "exact" })(observation).matched).toBe(
+      true,
+    );
+    expect(
+      appear(resolver, { text: "^Alarm\\s+Clock$", match: "regex" })(observation).matched,
+    ).toBe(true);
+    expect(disappear(resolver, { text: "Alarm Clock" })(observation).matched).toBe(false);
+  });
+});

@@ -71,7 +71,8 @@ fallback), instead of opening their own socket:
   never clears them while the stream is connected: a lease joining a live stream
   makes no new daemon subscription and gets no initial frames, so it arms from
   that replay, or requests a fresh observation when there is none. A stream that
-  is not connected drops its pre-outage layout for every lease.
+  is not connected, or that the hub reconnects, drops its pre-outage layout for
+  every lease.
 - Storage intent is per lease. The hub counts each `(package, file)` across a
   device's leases. The first lease that asks sends `subscribe_storage` on the
   shared stream, and the last one to let go sends `unsubscribe_storage`. Updates,

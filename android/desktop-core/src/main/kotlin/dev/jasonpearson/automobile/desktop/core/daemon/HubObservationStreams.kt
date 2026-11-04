@@ -75,6 +75,9 @@ internal class HubObservationStreams(
     fun connect(key: DeviceStreamKey, reconnect: Boolean) =
       synchronized(connectLock) {
         if (retired) return@synchronized
+        // The replay still holds the pre-outage layout, and the stream reports connected before
+        // the resubscribe's initial frames arrive: drop it so no lease re-arms from it (#17041).
+        if (reconnect) stream.resetLayoutReplayCache()
         stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
         if (reconnect) reconnects.update { it + 1 }
       }

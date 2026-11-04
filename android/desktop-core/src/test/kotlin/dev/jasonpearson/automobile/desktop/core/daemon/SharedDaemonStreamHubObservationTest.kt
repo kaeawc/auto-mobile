@@ -267,6 +267,28 @@ class SharedDaemonStreamHubObservationTest {
   }
 
   @Test
+  fun `a hub reconnect drops the pre-outage layout before the stream reports connected`() =
+    runTest {
+      val h = harness()
+      val layout = h.hub.observationStream(phoneA).also { it.connect() }
+      val shared = h.streamFor(phoneA)
+      shared.emitHierarchy(
+        HierarchyStreamUpdate(deviceId = "emulator-5554", timestamp = 1L, data = null),
+      )
+      shared.emitScreenshot(ScreenshotStreamUpdate("emulator-5554", 1L, "AA==", 1, 1))
+
+      shared.emitConnectionState(ConnectionState.Disconnected("Stream ended"))
+      h.backoffGates.send(Unit)
+      assertTrue(layout.isConnected())
+      // The reconnected facet resets before any replacement frame arrived.
+      layout.resetLayoutReplayCache()
+
+      assertTrue(layout.hierarchyUpdates.replayCache.isEmpty())
+      assertTrue(layout.screenshotUpdates.replayCache.isEmpty())
+      assertEquals(1, shared.observationRequestCount)
+    }
+
+  @Test
   fun `closing the hub disposes every shared stream`() = runTest {
     val h = harness()
     val view = h.hub.observationStream(phoneA).also { it.connect() }

@@ -58,6 +58,10 @@
 #   scripts/oxlint-baseline.sh                      # check mode (CI gate)
 #   scripts/oxlint-baseline.sh --update             # regenerate (refuses to grow)
 #   scripts/oxlint-baseline.sh --update --allow-grow  # regenerate, allow growth
+#
+# When the type-aware run emits no parseable JSON (a tsgolint crash, kill or truncated
+# pipe), the gate prints oxlint's exit status, the start of its stdout and the tail of its
+# stderr, and retries up to OXLINT_JSON_ATTEMPTS runs in total (default 2) before exiting 3.
 
 set -euo pipefail
 export LC_ALL=C
@@ -95,21 +99,51 @@ fi
 # so removing them would leave them unenforced.
 RATCHET_CODES="typescript(no-floating-promises) typescript(no-misused-promises)"
 
-# Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the
-# BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED
-# input only (never wire it from an untrusted source).
+# Run oxlint once: its JSON report to "$1", its own stderr to "$2", and its exit status
+# into OXLINT_STATUS. OXLINT_JSON_CMD overrides the invocation -- used by the BATS tests
+# to inject a canned report. It is `eval`ed, so treat it as TRUSTED input only (never
+# wire it from an untrusted source).
 run_oxlint_json() {
-  # oxlint exits non-zero whenever it reports an error-level diagnostic (including
-  # a parse error). That must not abort here under `set -e` with no message:
-  # extract_counts names the failing file, or reports unparseable output.
+  local out="$1" err="$2"
+  # oxlint exits non-zero whenever it reports an error-level diagnostic (including a
+  # parse error), so a non-zero status alone is not a failure: extract_counts decides
+  # from the report, and the status is only reported when that report is unusable.
+  # `set +e` instead of `|| true` keeps errexit from being disabled inside host_heavy_run.
+  set +e
   if [[ -n "${OXLINT_JSON_CMD:-}" ]]; then
-    eval "$OXLINT_JSON_CMD" || true
+    # A subshell, so a stubbed `exit N` stands in for oxlint exiting instead of ending this script.
+    (eval "$OXLINT_JSON_CMD") > "$out" 2> "$err"
   else
-    # The exit status is deliberately ignored (see above). `set +e` instead of `|| true` keeps
-    # errexit from being disabled inside host_heavy_run.
-    set +e
-    host_heavy_run host_heavy_oxlint_type_aware
-    set -e
+    OXLINT_STDERR_FILE="$err" host_heavy_run host_heavy_oxlint_type_aware > "$out"
+  fi
+  OXLINT_STATUS=$?
+  set -e
+}
+
+# Explain an unusable report: oxlint's exit status (and the signal behind it), how much
+# stdout arrived and how it starts, and the tail of oxlint's (tsgolint's) stderr. Without
+# this a tsgolint crash, kill or truncated pipe all collapse into one opaque line (#16816).
+describe_unparseable() {
+  local out="$1" err="$2" attempt="$3" attempts="$4" bytes
+  bytes="$(wc -c < "$out" | tr -d ' ')"
+  echo "oxlint --type-aware did not emit parseable JSON (attempt $attempt of $attempts)." >&2
+  if [[ "$OXLINT_STATUS" -gt 128 ]]; then
+    echo "  exit status: $OXLINT_STATUS (killed by signal $((OXLINT_STATUS - 128)); 137 is SIGKILL, often out of memory)" >&2
+  else
+    echo "  exit status: $OXLINT_STATUS" >&2
+  fi
+  if [[ "$bytes" -eq 0 ]]; then
+    echo "  stdout: empty" >&2
+  else
+    echo "  stdout: $bytes byte(s), truncated or not JSON; first 300 bytes:" >&2
+    head -c 300 "$out" | sed 's/^/    /' >&2
+    echo >&2
+  fi
+  if [[ -s "$err" ]]; then
+    echo "  stderr (last 40 lines):" >&2
+    tail -n 40 "$err" | sed 's/^/    /' >&2
+  else
+    echo "  stderr: empty" >&2
   fi
 }
 
@@ -124,7 +158,8 @@ extract_counts() {
     process.stdin.on("data", c => raw += c).on("end", () => {
       let report;
       try { report = JSON.parse(raw); }
-      catch { process.stderr.write("oxlint did not emit parseable JSON\n"); process.exit(3); }
+      // 65 (not 3) tells the caller to diagnose and retry; a parse error below stays 3.
+      catch { process.exit(65); }
       const counts = new Map();
       // A file oxlint could not parse yields an error diagnostic with no rule code.
       const parseErrors = (report.diagnostics || []).filter(d => !d.code);
@@ -223,8 +258,30 @@ scan_suppressions() {
   bun "$ROOT/scripts/lib/oxlintDisableScan.ts" "${OXLINT_SCAN_ROOT:-$ROOT}"
 }
 
-report_json="$(run_oxlint_json)"
-violations="$(printf '%s' "$report_json" | extract_counts)"
+# A tsgolint crash or kill leaves no (or truncated) JSON. That is retried, since it is
+# not a property of the tree; a source parse error (exit 3 from extract_counts) is not.
+OXLINT_JSON_ATTEMPTS="${OXLINT_JSON_ATTEMPTS:-2}"
+if ! [[ "$OXLINT_JSON_ATTEMPTS" =~ ^[1-9]$ ]]; then
+  echo "OXLINT_JSON_ATTEMPTS must be an integer from 1 to 9, got: $OXLINT_JSON_ATTEMPTS" >&2
+  exit 2
+fi
+report_dir="$(mktemp -d)"
+trap 'rm -rf "$report_dir"' EXIT
+attempt=1
+while true; do
+  run_oxlint_json "$report_dir/report.json" "$report_dir/stderr.txt"
+  extract_status=0
+  violations="$(extract_counts < "$report_dir/report.json")" || extract_status=$?
+  if [[ "$extract_status" -eq 0 ]]; then break; fi
+  if [[ "$extract_status" -ne 65 ]]; then exit "$extract_status"; fi
+  describe_unparseable "$report_dir/report.json" "$report_dir/stderr.txt" "$attempt" "$OXLINT_JSON_ATTEMPTS"
+  if [[ "$attempt" -ge "$OXLINT_JSON_ATTEMPTS" ]]; then
+    echo "oxlint ratchet: giving up after $attempt attempt(s); the cause is above, not a lint finding." >&2
+    exit 3
+  fi
+  attempt=$((attempt + 1))
+  echo "oxlint ratchet: retrying the type-aware run (attempt $attempt of $OXLINT_JSON_ATTEMPTS)." >&2
+done
 suppressions="$(scan_suppressions)"
 current="$(printf '%s\n%s\n' "$violations" "$suppressions" | grep -v '^$' | sort || true)"
 violation_total="$(printf '%s' "$violations" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"

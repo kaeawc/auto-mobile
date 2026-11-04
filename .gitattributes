@@ -95,6 +95,7 @@ test/fixtures/android-focus-multidisplay/*.txt text eol=lf
 test/fixtures/android-focus-multidisplay/*.json text eol=lf
 # Byte-exact `cmd locale` captures: pin to LF so a Windows checkout cannot rewrite them to CRLF.
 test/fixtures/android-locale/*.txt text eol=lf
+test/fixtures/automotive/** text eol=lf
 # Real `am start` / `monkey` failure captures from two emulators (#10192).
 test/fixtures/android-am-start/*.txt text eol=lf
 # Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).

@@ -139,11 +139,13 @@ later, separately gated stage.
   no device. Transitions and motion are not animated; the runtime switches to the end state.
 - **Size.** The interactive runtime ships as a separate entry
   (`@kaeawc/auto-mobile-prototype-web/interactive`), so a static embed never pays for it.
-- **Parity.** Action semantics are tested by shared trace fixtures: a spec, a sequence of
-  actions and the expected state, `/data` and stack after each step, in the style of
-  `test/fixtures/prototype-spec/list-writes/`. The TypeScript runtime, the Kotlin protocol tests
-  and the Swift agent tests each run every trace. A trace one platform cannot run yet is listed
-  in that platform's skip list with its issue, so a gap is visible rather than silent.
+- **Parity.** Action semantics are tested by shared trace fixtures
+  (`test/fixtures/prototype-spec/action-traces/`): a spec, then steps that each run one tap's
+  actions or advance a fake clock, with the expected state, `/data`, stack paths, pager pages
+  and shown flag after each step. The TypeScript tests, the Android runtime tests and the Swift
+  agent tests each run every trace. A trace one platform cannot run yet is listed under that
+  platform in `action-trace-skips.json` with its issue, and a skipped trace that passes fails
+  the run, so a gap is visible rather than silent and the list only shrinks.
 - **Go criterion.** Build it only after the static library has an embedder asking for taps;
   the trace fixtures are worth adding first regardless, because they also tighten Android and
   iOS parity.

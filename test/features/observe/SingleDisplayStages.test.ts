@@ -366,6 +366,7 @@ describe("SingleDisplayReconcileStage automotive refresh", () => {
       earlyResult: undefined,
       foregroundSnapshot: Promise.resolve({
         packageName: carSettings,
+        userId: 0,
         activityName: ".NotDistractionOptimizedActivity",
         displayCount: 2,
       }),

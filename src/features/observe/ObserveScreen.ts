@@ -402,6 +402,7 @@ export class RealObserveScreen implements ObserveScreen {
       staleRecovery: () => this.staleRecovery,
       displayBinding: () => this.displayBinding,
       platformValidator: () => this.platformValidator,
+      deviceStateCollector: () => this.deviceStateCollector,
       reconcileActiveWindowAttribution: (result, options) =>
         this.reconcileActiveWindowAttribution(result, options),
       isConfirmedFrameworkErrorDialog: (viewHierarchy, signal) =>

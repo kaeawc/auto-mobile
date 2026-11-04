@@ -12,6 +12,10 @@ import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyRe
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { isEditableElementProperties } from "../../../../src/features/utility/elementProperties";
 import { sdkTargetField } from "../../../../src/features/action/SendKeys";
+import {
+  getFocusedTextField,
+  hasFocusedTextInput,
+} from "../../../../src/features/action/ClearText";
 import capturedInputNodes from "../../../fixtures/ios-contract/observation-run4-input-nodes.json";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
@@ -142,6 +146,46 @@ describe("mergeIosSdkObservation (#5159)", () => {
     expect(sdkTargetField({ platform: "ios" }, selected.element ?? undefined)).toEqual({
       sdkTarget: { elementId: "contract-email", observationIdentity: 41 },
     });
+  });
+
+  test("a focused bridge textField is recognized as a focused text input for sendKeys", () => {
+    const hierarchy = xctestHierarchy();
+    mergeIosSdkObservation(
+      hierarchy,
+      observation(
+        node({
+          id: "contract-email",
+          role: "textField",
+          label: "Contract email",
+          value: "",
+          focused: true,
+          bounds: bounds(24, 280, 366, 324),
+        }),
+      ),
+    );
+    expect(hasFocusedTextInput(hierarchy)).toBe(true);
+    const field = getFocusedTextField(hierarchy, undefined, { includeIdentity: true });
+    expect(field).toBeDefined();
+    expect(field?.value).toBe("");
+    expect(field?.identity).toBe(JSON.stringify(["contract-email", "textField", 24, 280]));
+  });
+
+  test("an unfocused bridge textField is not a focused text input", () => {
+    const hierarchy = xctestHierarchy();
+    mergeIosSdkObservation(
+      hierarchy,
+      observation(
+        node({
+          id: "contract-email",
+          role: "textField",
+          label: "Contract email",
+          value: "",
+          focused: false,
+          bounds: bounds(24, 280, 366, 324),
+        }),
+      ),
+    );
+    expect(hasFocusedTextInput(hierarchy)).toBe(false);
   });
 
   test("attaches visible bridge nodes under the app node with mapped attributes", () => {

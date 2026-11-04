@@ -88,6 +88,7 @@ export type IosSdkWebAction =
 export const IOS_SDK_WEB_FAILURES = [
   "bridge_unavailable",
   "app_not_active",
+  "multi_scene",
   "invalid_action",
   "bad_reply",
   "disallowed_origin",

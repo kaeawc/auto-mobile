@@ -29,6 +29,9 @@ import {
 } from "../sessionManager";
 import { ForcedStuckRelease } from "../sessionManager/forcedStuckRelease";
 import {
+  cliIdleWindowMs,
+  cliIdleWindowReleaseMarker,
+  persistedCliIdleWindowMs,
   type GetOrCreateSessionOptions,
   type ResolvedSessionAcquisition,
   type SessionAcquisitionOptions,
@@ -334,6 +337,26 @@ export class SessionAdmission {
     );
   }
 
+  /**
+   * The CLI idle window a released UUID had (#16937), for a session-not-found answer naming a
+   * `cli-idle-timeout` release: from its terminal snapshot, its still-published session, or its
+   * persisted row (so a restarted daemon still knows it). Undefined unless that session was itself
+   * on the `cli-idle` policy: a plan label inheriting its base's end has no window (#16940).
+   */
+
+  async getReleasedSessionIdleTimeoutMs(sessionId: string): Promise<number | undefined> {
+    const fenced = this.host.sessionSlots.getTerminalSnapshot(sessionId);
+    if (fenced) {
+      return fenced.cliIdleTimeoutMs;
+    }
+    const published = this.host.sessions.get(sessionId);
+    if (published) {
+      return cliIdleWindowMs(published);
+    }
+    const persisted = await this.host.readPersistedSession(sessionId);
+    return persisted ? persistedCliIdleWindowMs(persisted) : undefined;
+  }
+
   preFenceIdleReleaseReason(
     sessionId: string,
     current: SessionReleaseOperation | undefined,
@@ -508,6 +531,8 @@ export class SessionAdmission {
       releaseReason,
       releasedAtMs: now,
       terminal: true,
+      // A plan label answered with its ended base's reason has no CLI window of its own (#16940).
+      ...cliIdleWindowReleaseMarker(session),
       heartbeat: {
         lastHeartbeatMs: session.lastHeartbeat,
         hasReceivedHeartbeat: session.hasReceivedHeartbeat,

@@ -24,6 +24,7 @@ import { releaseSuperseded, type ReleaseReasonState } from "../sessionManager/in
 import { type SessionRowWriter } from "../sessionRowWriter";
 import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import {
+  cliIdleWindowReleaseMarker,
   managedExecutionReleaseMarker,
   setReleaseStage,
   type SessionLifecycleSlots,
@@ -353,6 +354,7 @@ export class SessionReleaseCommit {
       releasedAtMs,
       terminal: isTerminalReleaseReason(releaseReason),
       ...managedExecutionReleaseMarker(session),
+      ...cliIdleWindowReleaseMarker(session),
       heartbeat: {
         lastHeartbeatMs: session.lastHeartbeat,
         hasReceivedHeartbeat: session.hasReceivedHeartbeat,

@@ -3,7 +3,8 @@ import { requiredPrototypeCapabilities } from "../prototypeCapabilityGates";
 import type { ShownSpecJson } from "../PrototypeShownSpecs";
 import type { PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
 import { prototypeEmbedGlyphs } from "./prototypeEmbedGlyphs";
-import { materialIconGlyphs, type PrototypeIconGlyphSource } from "./webIconGlyphs";
+import { materialIconGlyphs } from "./materialIconGlyphs";
+import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
 import { prototypeVariantIds, shownRevision } from "./prototypeWebResource";
 
 /** The envelope's `format`, so an embedder can tell it from a bare spec. */

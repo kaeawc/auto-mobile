@@ -10,8 +10,8 @@ import {
   prototypeEmbedEnvelope,
   readPrototypeEmbedResource,
 } from "../../../../src/features/prototype/web/prototypeEmbedResource";
+import { materialIconGlyphs } from "../../../../src/features/prototype/web/materialIconGlyphs";
 import {
-  materialIconGlyphs,
   type PrototypeIconGlyphSource,
   type PrototypeIconVariant,
 } from "../../../../src/features/prototype/web/webIconGlyphs";

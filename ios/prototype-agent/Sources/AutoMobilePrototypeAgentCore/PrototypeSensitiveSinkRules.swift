@@ -35,7 +35,7 @@ enum PrototypeSensitiveSinkRules {
         }
         guard !seeds.isEmpty || !platformTaints.isEmpty else { return [] }
         guard let taints = propagateCopies(seeds, platformTaints: platformTaints, actions: actions) else {
-            return [.invalidSpec(path: "$", message: "Secure binding scan exceeds 4194304 expanded UTF-8 bytes")]
+            return [.invalidSpec(path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks")]
         }
         let sinks = sinkFields(spec, actions: actions).sorted {
             $0.path.utf16.lexicographicallyPrecedes($1.path.utf16)

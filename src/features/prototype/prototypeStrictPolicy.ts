@@ -23,6 +23,8 @@ import {
   type FieldVisitor,
 } from "./prototypeTemplate";
 
+export const SECURE_COPY_CHECK_MESSAGE =
+  "Secure copy taint analysis exceeds 4000000 overlap checks";
 export const SECURE_SCAN_BUDGET_MESSAGE =
   "Secure binding scan exceeds 4194304 expanded UTF-8 bytes";
 
@@ -115,7 +117,7 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
   const { requests, fields, dataWrites } = libraryFields(spec, nodes, true);
   if (!propagateDataTaint(tainted, platformTainted, dataWrites)) {
-    return [{ path: "$", message: SECURE_SCAN_BUDGET_MESSAGE }];
+    return [{ path: "$", message: SECURE_COPY_CHECK_MESSAGE }];
   }
   const sinkFields = fields.filter(
     // Key fields name state entries, which a `/data` pointer cannot reach.
@@ -201,7 +203,9 @@ export function prototypeSensitiveWarnings(spec: unknown): string[] {
   return prototypeSensitiveSinkErrors(spec).map(({ path, message }) =>
     message === SECURE_SCAN_BUDGET_MESSAGE
       ? `${path}: sensitive sink analysis stopped at the 4194304 expanded-byte budget at this path, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.`
-      : `${path}: ${message}; this is a warning only and does not block the show.`,
+      : message === SECURE_COPY_CHECK_MESSAGE
+        ? `${path}: sensitive sink analysis stopped at the 4000000 copy-check limit, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.`
+        : `${path}: ${message}; this is a warning only and does not block the show.`,
   );
 }
 

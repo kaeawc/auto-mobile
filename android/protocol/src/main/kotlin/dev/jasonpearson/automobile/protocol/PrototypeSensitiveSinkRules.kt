@@ -34,7 +34,7 @@ internal object PrototypeSensitiveSinkRules {
     val dataTaints =
       PrototypeCopyTaint.propagate(seeds, platformTaints, context, ::overlaps)
         ?: return listOf(
-          PrototypeSpecError("$", "Secure binding scan exceeds 4194304 expanded UTF-8 bytes"),
+          PrototypeSpecError("$", "Secure copy taint analysis exceeds 4000000 overlap checks"),
         )
     val fields = sinkFields(spec, context).sortedBy { it.path }
     val validRepeats = PrototypeRepeatValidator.validate(spec) == null

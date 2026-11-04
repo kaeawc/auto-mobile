@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
@@ -45,6 +45,8 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let restorePipelineOverrides: () => void;
+  let sessionId: string;
+  let baselineAfterObserve: unknown;
 
   function sameScreenObserve(): ObserveResult {
     return {
@@ -87,7 +89,10 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     return (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
   }
 
-  beforeEach(() => {
+  // The arrange phase (real DevicePool autolock, the first wrapped-handler call, which pays the
+  // finalize pipeline's cold start) runs once in beforeAll so the measured test is only the plan
+  // step and its assertion, well inside the 100 ms unit budget (#16975). The suite has one test.
+  beforeAll(async () => {
     planExecutor = createDefaultPlanExecutor();
     ToolRegistry.clearTools();
     fakeDeviceReadiness = new FakeDeviceReadiness();
@@ -106,23 +111,9 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     // against a fake device. The shared test preload
     // (test/setup/testPreload.ts) installs a no-op readiness driver so that
     // setup cannot block on real `adb`/network.
-  });
 
-  afterEach(() => {
-    restorePipelineOverrides();
-    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
-    ToolRegistry.clearTools();
-    DaemonState.getInstance().reset();
-    daemonSessionManager?.stopCleanupTimer();
-    serverConfig.setActionsDiffObserveEnabled(originalDiff);
-    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-    delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
-    registerInteractionTools();
-  });
-
-  test("a plan tapOn step neither diffs its observation nor advances the agent baseline", async () => {
     serverConfig.setActionsDiffObserveEnabled(true);
-    const sessionId = await setupAutolockedSession();
+    sessionId = await setupAutolockedSession();
 
     ToolRegistry.registerDeviceAware("observe", "observe", baseSchema, async () =>
       createStructuredToolResponse(sameScreenObserve()),
@@ -141,7 +132,22 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
       },
       (args) => ToolRegistry.getTool("observe")!.handler(args),
     );
-    const baselineAfterObserve = daemonSessionManager!.getLastRenderedObservation(sessionId);
+    baselineAfterObserve = daemonSessionManager!.getLastRenderedObservation(sessionId);
+  });
+
+  afterAll(() => {
+    restorePipelineOverrides();
+    ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: originalDeviceReadiness });
+    ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+    daemonSessionManager?.stopCleanupTimer();
+    serverConfig.setActionsDiffObserveEnabled(originalDiff);
+    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+    registerInteractionTools();
+  });
+
+  test("a plan tapOn step neither diffs its observation nor advances the agent baseline", async () => {
     expect(baselineAfterObserve).toBeDefined();
 
     // Run a plan whose tapOn step routes to the same session.

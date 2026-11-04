@@ -95,6 +95,41 @@ function ambiguousDeviceTargetHint(payload: unknown): string {
   );
 }
 
+/** Refusals whose CLI remedy does not depend on the payload or the tool. */
+const FIXED_REFUSAL_HINTS: ReadonlyMap<string, string> = new Map([
+  [
+    DEVICE_CLEANUP_IN_PROGRESS_CODE,
+    "Hint: the device's previous session is still finishing its cleanup. Re-run the command " +
+      "after the retryAfterMs in the error has passed; nothing else needs to change.",
+  ],
+  [
+    DEVICE_SHUTTING_DOWN_CODE,
+    "Hint: the device is being shut down. Re-run the command after the retryAfterMs in the " +
+      "error has passed, once the shutdown has finished.",
+  ],
+  [
+    SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
+    "Hint: this session is being released because its device is being shut down, so its " +
+      "session UUID cannot be used again. Retrying with the same --session-uuid will not " +
+      "succeed; acquire the device again under a new session instead.",
+  ],
+  [
+    SESSION_REBINDING_CODE,
+    "Hint: the device's session is moving to another device. Re-run the command after the " +
+      "retryAfterMs in the error has passed, once the rebind has settled.",
+  ],
+  [
+    SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+    "Hint: the session no longer holds this device; it was rebound or released. Check who " +
+      "holds the device now with --daemon active-sessions before re-running the command.",
+  ],
+  [
+    DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+    "Hint: another AutoMobile daemon on this host is using the device. Re-run after it " +
+      "releases the device, or pass another deviceId.",
+  ],
+]);
+
 /**
  * A `--cli` invocation is a separate process, so a call without `--session-uuid` is sessionless
  * and the daemon refuses it on a device another session holds (#10743, #10783, #10785). The
@@ -113,42 +148,9 @@ export function cliDeviceOwnershipHint(
   if (code === AMBIGUOUS_DEVICE_TARGET_CODE) {
     return ambiguousDeviceTargetHint(payload);
   }
-  if (code === DEVICE_CLEANUP_IN_PROGRESS_CODE) {
-    return (
-      "Hint: the device's previous session is still finishing its cleanup. Re-run the command " +
-      "after the retryAfterMs in the error has passed; nothing else needs to change."
-    );
-  }
-  if (code === DEVICE_SHUTTING_DOWN_CODE) {
-    return (
-      "Hint: the device is being shut down. Re-run the command after the retryAfterMs in the " +
-      "error has passed, once the shutdown has finished."
-    );
-  }
-  if (code === SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE) {
-    return (
-      "Hint: this session is being released because its device is being shut down, so its " +
-      "session UUID cannot be used again. Retrying with the same --session-uuid will not " +
-      "succeed; acquire the device again under a new session instead."
-    );
-  }
-  if (code === SESSION_REBINDING_CODE) {
-    return (
-      "Hint: the device's session is moving to another device. Re-run the command after the " +
-      "retryAfterMs in the error has passed, once the rebind has settled."
-    );
-  }
-  if (code === SESSION_NO_LONGER_OWNS_DEVICE_CODE) {
-    return (
-      "Hint: the session no longer holds this device; it was rebound or released. Check who " +
-      "holds the device now with --daemon active-sessions before re-running the command."
-    );
-  }
-  if (code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE) {
-    return (
-      "Hint: another AutoMobile daemon on this host is using the device. Re-run after it " +
-      "releases the device, or pass another deviceId."
-    );
+  const fixedHint = typeof code === "string" ? FIXED_REFUSAL_HINTS.get(code) : undefined;
+  if (fixedHint !== undefined) {
+    return fixedHint;
   }
   if (code !== DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
     return undefined;

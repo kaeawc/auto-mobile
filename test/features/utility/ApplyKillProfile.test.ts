@@ -269,8 +269,37 @@ describe("kill profiles (#14051)", () => {
       "shell dumpsys deviceidle unforce",
       `shell am set-standby-bucket ${Q} active`,
       `shell appops set ${Q} RUN_ANY_IN_BACKGROUND default`,
+      `shell appops set ${Q} WAKE_LOCK default`,
     ]);
     expect(result.steps.at(-1)).toMatchObject({ status: "unsupported" });
+  });
+
+  test("a baseline reset after a daemon restart restores WAKE_LOCK from Samsung deep sleeping", async () => {
+    await applyKillProfile(emulator, APP, "samsung-deep-sleeping", deps());
+    expect(writes()).toContain(`shell appops set ${Q} WAKE_LOCK ignore`);
+
+    // A restarted daemon starts with an empty restore registry.
+    registry = new KillProfileRestoreRegistry();
+    adb.clearHistory();
+    const reset = await resetKillProfile(emulator, APP, { baseline: true }, deps());
+    expect(reset.source).toBe("baseline");
+    expect(writes()).toContain(`shell appops set ${Q} WAKE_LOCK default`);
+    expect(reset.steps).toContainEqual(
+      expect.objectContaining({ step: "appops WAKE_LOCK default", status: "applied" }),
+    );
+  });
+
+  test("a baseline reset below API 28 gates the WAKE_LOCK default", async () => {
+    adb.setAndroidApiLevel(27);
+    const reset = await resetKillProfile(emulator, APP, { baseline: true }, deps());
+    expect(writes()).not.toContain(`shell appops set ${Q} WAKE_LOCK default`);
+    expect(reset.steps).toContainEqual(
+      expect.objectContaining({
+        step: "appops WAKE_LOCK default",
+        status: "unsupported",
+        reason: "needs API 28+, device is API 27",
+      }),
+    );
   });
 
   test("a restore the device refuses stays recorded for a later reset or release", async () => {

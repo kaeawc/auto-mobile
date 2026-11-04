@@ -372,6 +372,7 @@ export async function applyKillProfile(
 /** AOSP defaults reset writes with `baseline: true` when nothing is recorded. */
 function baselinePlans(context: Context): StepPlan[] {
   const runAny = appOpCommand(context, "set", "RUN_ANY_IN_BACKGROUND");
+  const wakeLock = appOpCommand(context, "set", "WAKE_LOCK");
   const exactAlarm = appOpCommand(context, "set", "SCHEDULE_EXACT_ALARM");
   return [
     { label: "battery reset", command: "shell dumpsys battery reset" },
@@ -389,6 +390,12 @@ function baselinePlans(context: Context): StepPlan[] {
       label: "appops RUN_ANY_IN_BACKGROUND default",
       command: `${runAny} default`,
       minApi: API_RUN_ANY_IN_BACKGROUND,
+    },
+    {
+      label: "appops WAKE_LOCK default",
+      command: `${wakeLock} default`,
+      minApi: API_WAKE_LOCK,
+      unsupportedOutput: /Unknown operation string/i,
     },
     {
       label: "appops SCHEDULE_EXACT_ALARM default",

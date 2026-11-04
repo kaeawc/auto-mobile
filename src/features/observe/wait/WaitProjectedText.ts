@@ -96,7 +96,7 @@ function findRowForTexts(
     ? new SearchableHierarchy().project(observation.viewHierarchy)
     : [];
   for (const text of texts) {
-    if (findMatch(sources, (node) => Object.values(node.textSources), text, matcher)) {
+    if (findMatch(sources, sourceTexts, text, guardMatcher(matcher))) {
       continue;
     }
     const row = findMatch(rows, rowTexts, text, matcher);
@@ -134,6 +134,20 @@ function projectedRows(
 
 function rowTexts(row: SkeletonElement): string[] {
   return [row.label, row.sublabel].filter((value): value is string => Boolean(value));
+}
+
+/**
+ * The guard is deliberately looser than the row match: rows carry trimmed,
+ * hoisted labels, so a source whose raw text differs only in case or
+ * whitespace (or contains the text) still counts as carrying it, and the
+ * hierarchy's verdict on that node stands.
+ */
+function guardMatcher({ textMatch }: TextMatcher): TextMatcher {
+  return { textMatch: textMatch === "regex" ? "regex" : undefined };
+}
+
+function sourceTexts(node: { textSources: Readonly<Record<string, string>> }): string[] {
+  return Object.values(node.textSources).map((value) => value.replace(/\s+/g, " ").trim());
 }
 
 /** Mirror the hierarchy search: exact first, then contains, unless `textMatch` names a mode. */

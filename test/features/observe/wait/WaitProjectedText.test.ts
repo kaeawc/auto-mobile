@@ -237,6 +237,22 @@ describe("withProjectedTextFallback (for: appear / textEquals)", () => {
     ).toBe(false);
   });
 
+  test("an off-screen source differing only in whitespace keeps the hierarchy's verdict", () => {
+    const hierarchy = hierarchyWith([
+      {
+        $: { clickable: "true", bounds: { left: 0, top: 0, right: 400, bottom: 900 } },
+        node: [{ $: { text: "Loaded ", bounds: { left: 0, top: 850, right: 100, bottom: 890 } } }],
+      },
+    ]);
+    const observation = createObserveResultForTest({
+      screenSize,
+      viewHierarchy: hierarchy,
+      elements: new ObserveElementsBuilder().build(hierarchy, "android"),
+    });
+
+    expect(condition("textEquals", { text: "Loaded" })(observation).matched).toBe(false);
+  });
+
   test("clickable, disappear and scoped waits stay hierarchy-only", () => {
     const observation = observe([loadButton]);
 

@@ -37,12 +37,21 @@ import {
   lineCss,
   multilineCss,
   nodeCss,
+  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
+import {
+  glyphSvg,
+  ICON_BOX,
+  ICON_PLACEHOLDER,
+  iconInitial,
+  prototypeIconVariant,
+  type PrototypeIconGlyphSource,
+} from "./webIconGlyphs";
 import { rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
@@ -52,9 +61,9 @@ export interface UnsupportedWebNode {
   readonly path: string;
   /**
    * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
-   * shader does.
+   * shader does. `iconMissing`: an icon name with no glyph drew the placeholder.
    */
-  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback";
+  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback" | "iconMissing";
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -70,8 +79,15 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /**
+   * Where icons find their glyphs; without one every icon draws the placeholder and none is
+   * reported, since no glyph set was asked for.
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
+  /** The screen height in dp for the orientation: the most a map that fills its parent can take. */
+  readonly screenHeight: number;
   /**
    * A pager's `page` and `pageCount`: text placeholders and every condition (`visibleWhen`,
    * `styleWhen`, `enabledWhen`, `errorWhen`) read them, as Android's local pager state does; a
@@ -337,9 +353,9 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
-    const { attrs, style } = base(node, scope, lineCss(axis, node.style));
     const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
     const rowed = rowMeasured(node, path, prepareIn(inner));
+    const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
@@ -382,10 +398,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, {
-    inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
-  });
+  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope.style, horizontal) });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
@@ -417,30 +430,16 @@ const divider: NodeRenderer = (node, scope) => {
   );
 };
 
-/** The first letter of an icon's name, so a placeholder reads as that icon; none without a name. */
-function iconInitial(name: unknown): string {
-  const letter = typeof name === "string" ? /[a-z0-9]/i.exec(name)?.[0] : undefined;
-  return letter ? letter.toUpperCase() : "";
-}
-
-const icon: NodeRenderer = (node, scope) => {
-  // The Material glyph set is not inlined, so an icon draws as a tinted ring around its name's
-  // initial, titled with the full name.
-  const { attrs, style } = base(node, scope, {
-    display: "inline-flex",
-    "align-items": "center",
-    "justify-content": "center",
-    width: "24px",
-    height: "24px",
-    border: "2px solid currentColor",
-    "border-radius": "6px",
-    "font-size": "11px",
-    "font-weight": "700",
-    "line-height": "1",
-    "flex-shrink": "0",
-  });
-  return el("span", { attrs: { ...attrs, title: String(node.name ?? ""), role: "img" }, style }, [
-    iconInitial(node.name),
+const icon: NodeRenderer = (node, scope, path) => {
+  const name = typeof node.name === "string" ? node.name : undefined;
+  const glyph = name ? scope.glyphs?.glyph(name, prototypeIconVariant(node.variant)) : undefined;
+  if (!glyph && scope.glyphs) {
+    const id = typeof node.id === "string" ? { id: node.id } : {};
+    scope.unsupported.push({ type: "icon", ...id, path, reason: "iconMissing" });
+  }
+  const { attrs, style } = base(node, scope, glyph ? ICON_BOX : ICON_PLACEHOLDER);
+  return el("span", { attrs: { ...attrs, title: name ?? "", role: "img" }, style }, [
+    glyph ? glyphSvg(glyph) : iconInitial(node.name),
   ]);
 };
 

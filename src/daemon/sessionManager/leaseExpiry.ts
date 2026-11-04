@@ -672,12 +672,13 @@ export class SessionLeaseExpiry {
     if (!this.host.activeSessionExecutionChecker(sessionId, query)) {
       return false;
     }
+    const session = this.host.sessions.get(sessionId) ?? this.host.getReleasingSession(sessionId);
     this.host.expiryReleaseExecutionCanceller(
       sessionId,
-      new SessionReleasedDuringCallError(sessionId, releaseReason),
+      // A cli-idle session's heartbeat timeout is its adopted idle window (#16908).
+      new SessionReleasedDuringCallError(sessionId, releaseReason, session?.heartbeatTimeoutMs),
       query,
-      (this.host.sessions.get(sessionId) ?? this.host.getReleasingSession(sessionId))
-        ?.assignedDevice,
+      session?.assignedDevice,
     );
     return true;
   }

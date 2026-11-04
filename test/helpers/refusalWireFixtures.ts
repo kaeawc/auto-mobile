@@ -331,6 +331,12 @@ const RECOVERY_LOSSES: readonly (readonly [string, () => SessionRecoveryIdentity
   ],
 ];
 
+/**
+ * The idle window passed to every cut release; only `cli-idle-timeout` reports it (#16908). A
+ * non-default value, so the fixture shows the session's own window rather than the default.
+ */
+const CUT_RELEASE_IDLE_TIMEOUT_MS = 300_000;
+
 /** Releases that cut an in-flight call (#11322, #11381, #11429), one per reason family. */
 const CUT_RELEASE_REASONS: readonly (readonly [string, SessionReleaseReason])[] = [
   ["heartbeat_timeout", "heartbeat-timeout"],
@@ -661,7 +667,7 @@ const BUILDERS: readonly FixtureEntry[] = [
   ...CUT_RELEASE_REASONS.map(([name, reason]): FixtureEntry => [
     `session_ownership_lost.released_${name}`,
     "SessionReleasedDuringCallError via shapeToolCallError",
-    () => shaped(new SessionReleasedDuringCallError(SESSION, reason)),
+    () => shaped(new SessionReleasedDuringCallError(SESSION, reason, CUT_RELEASE_IDLE_TIMEOUT_MS)),
   ]),
   [
     "no_active_device_session",
@@ -1122,7 +1128,7 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
   ]),
   ...CUT_RELEASE_REASONS.map(([name, reason]): readonly [string, () => Error] => [
     `session_ownership_lost.released_${name}`,
-    () => new SessionReleasedDuringCallError(SESSION, reason),
+    () => new SessionReleasedDuringCallError(SESSION, reason, CUT_RELEASE_IDLE_TIMEOUT_MS),
   ]),
 ];
 

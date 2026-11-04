@@ -24,9 +24,12 @@ link to a running daemon are separate decisions with their own gates, below.
   device-frame provenance lives in `deviceFrameSources.json`, outside the closure. The closure
   reads only the contract values in the generated `prototypeRenderContract.generated.ts`, not the
   whole contract JSON; the string-table zod schema lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside
-  the closure; and the derived-format path takes an optional injected logger instead of
-  importing the server's. `stillBrowserBundle.test.ts` fails on any Node builtin, on the contract
-  JSON, zod or the server logger in the closure, and on the core budget below.
+  the closure; the derived-format path takes an optional injected logger instead of
+  importing the server's; and an invalid locale, text size or frame throws a plain
+  `PrototypeWebInputError`, which the server's page builder and resource readers rethrow as an
+  `ActionableError` with the same message. `stillBrowserBundle.test.ts` fails on any Node builtin,
+  on the contract JSON, zod, the server logger or `ActionableError` in the closure, and on the core
+  budget below.
 - Shared JSON fixtures already drive parity across the TypeScript host, the Kotlin protocol and
   the Swift agent (`test/fixtures/prototype-spec/list-writes/`, `derive/`).
 

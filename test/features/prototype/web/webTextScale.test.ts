@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ActionableError } from "../../../../src/models/ActionableError";
+import { PrototypeWebInputError } from "../../../../src/features/prototype/web/prototypeWebInputError";
 import {
   androidTextScale,
   iosTextScale,
@@ -48,10 +48,14 @@ describe("still text scale (#16552)", () => {
   });
 
   test("refuses the other platform's option, out-of-range scales and unknown sizes", () => {
-    expect(() => stillTextScale("android", { contentSize: "small" })).toThrow(ActionableError);
-    expect(() => stillTextScale("ios", { fontScale: 1.5 })).toThrow(ActionableError);
+    expect(() => stillTextScale("android", { contentSize: "small" })).toThrow(
+      PrototypeWebInputError,
+    );
+    expect(() => stillTextScale("ios", { fontScale: 1.5 })).toThrow(PrototypeWebInputError);
     expect(() => stillTextScale("android", { fontScale: 2.5 })).toThrow("outside Android's range");
-    expect(() => stillTextScale("android", { fontScale: Number.NaN })).toThrow(ActionableError);
+    expect(() => stillTextScale("android", { fontScale: Number.NaN })).toThrow(
+      PrototypeWebInputError,
+    );
     // A caller outside TypeScript (a library embed) can pass any string.
     const huge: string = "huge";
     expect(() => stillTextScale("ios", { contentSize: huge as PrototypeContentSize })).toThrow(

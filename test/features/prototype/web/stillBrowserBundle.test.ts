@@ -12,6 +12,8 @@ const FORBIDDEN_INPUTS = [
   "node_modules/zod/",
   "src/utils/logger.ts",
   "src/config/",
+  "src/models/ActionableError.ts",
+  "src/models/describeUnknownError.ts",
 ];
 
 const entry = fileURLToPath(

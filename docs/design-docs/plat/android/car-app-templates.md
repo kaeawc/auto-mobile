@@ -4,6 +4,21 @@
 the AutoMobile Android SDK. It is the Android counterpart of the CarPlay SDK route. The agent checks
 template content without a head unit or the Desktop Head Unit.
 
+## App setup
+
+The app turns the route on once in a debug build and passes each template through `record` as
+`onGetTemplate` returns it:
+
+```kotlin
+// Once, e.g. in your CarAppService or Session.
+AutoMobileCarAppTemplates.enable(context)
+
+override fun onGetTemplate(): Template =
+  AutoMobileCarAppTemplates.record(this, ListTemplate.Builder() /* ... */.build())
+```
+
+`enable` returns `false` and does nothing in a non-debuggable build.
+
 ## Pieces
 
 - **Recorder** (`AutoMobileCarAppTemplates`, SDK main source set). The library keeps the template a

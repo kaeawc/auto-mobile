@@ -275,12 +275,19 @@ function textWaitCandidates(
   );
 }
 
-function boundedChosenAncestor(result: ElementResolution, source: SearchableEntry) {
-  const chosen = result.chosen;
-  if (!chosen?.bounds || !chosen.element || !result.snapshotNodes) {
+/**
+ * The bounded node that stands in for an unbounded `source`: `target`, the match `source` belongs
+ * to, when it is bounded and `source` is `target` or sits within it.
+ */
+function boundedTargetAncestor(
+  result: ElementResolution,
+  source: SearchableEntry,
+  target: SearchableEntry | null | undefined,
+) {
+  if (!target?.bounds || !target.element || !result.snapshotNodes) {
     return undefined;
   }
-  return chosen === source || isWithin(source, chosen, result.snapshotNodes) ? chosen : undefined;
+  return target === source || isWithin(source, target, result.snapshotNodes) ? target : undefined;
 }
 
 /**
@@ -398,8 +405,12 @@ function matchesAnyText(
   });
 }
 
-function boundedSource(result: ElementResolution, source: SearchableEntry) {
-  return source.bounds && source.element ? source : boundedChosenAncestor(result, source);
+function boundedSource(
+  result: ElementResolution,
+  source: SearchableEntry,
+  target: SearchableEntry | null | undefined,
+) {
+  return source.bounds && source.element ? source : boundedTargetAncestor(result, source, target);
 }
 
 /**
@@ -435,21 +446,24 @@ function boundedMatchedSource(
     return undefined;
   }
   const check = { matchMode: result.matchMode, screenSize };
-  const accepted = (node: SearchableEntry) => {
+  const accepted = (node: SearchableEntry, target: SearchableEntry | null) => {
     if (matchesOnlyThroughOffScreenHoist(node, selector, check)) {
       return undefined;
     }
-    const bounded = boundedSource(result, node);
+    const bounded = boundedSource(result, node, target);
     return bounded && hasVisibleScreenPart(bounded.bounds, screenSize) ? bounded : undefined;
   };
-  const chosen = accepted(source);
+  const chosen = accepted(source, result.chosen);
   if (chosen || usesScopedWait(selector)) {
     return chosen;
   }
+  // Each alternative is judged against its own match's target, not the resolver's choice (#17042).
   return result.matches
-    .flatMap(({ sourceNodes, node }) => sourceNodes ?? [node])
-    .filter((other) => other !== source)
-    .map(accepted)
+    .flatMap(({ sourceNodes, node }) =>
+      (sourceNodes ?? [node]).map((other) => ({ other, target: node })),
+    )
+    .filter(({ other }) => other !== source)
+    .map(({ other, target }) => accepted(other, target))
     .find((other) => other !== undefined);
 }
 

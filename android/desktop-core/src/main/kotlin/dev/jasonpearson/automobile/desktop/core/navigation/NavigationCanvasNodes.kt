@@ -73,7 +73,12 @@ private fun CanvasNode(context: NavigationCanvasContext, pos: NodePosition) {
           isFogFocused = fogModeEnabled && screen.name == focusedScreenName,
           isDimmed = hasAnyHighlight && screen.name !in highlightedScreens,
           provenanceAlpha =
-            NavigationBuildLens.alphaFor(screen.provenance, activeContext, buildLens),
+            NavigationBuildLens.alphaFor(
+              screen.provenance,
+              activeContext,
+              buildLens,
+              clock.nowMs(),
+            ),
           provenanceDescription =
             NavigationBuildLens.contentDescription(
               screen.name,

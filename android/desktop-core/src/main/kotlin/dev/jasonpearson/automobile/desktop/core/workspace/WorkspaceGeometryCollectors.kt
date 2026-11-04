@@ -5,7 +5,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
@@ -34,15 +33,12 @@ internal fun WorkspaceHierarchyCollector(
     // fire BEFORE the async parse so a scale/context flip invalidates control immediately; the
     // frame
     // generation is captured before the parse so a frame decoded across an invalidation is dropped.
-    val reportForegroundApp by rememberUpdatedState(onForegroundApp)
+    ForegroundAppReporter(stream, column.deviceId, onForegroundApp)
     LaunchedEffect(stream, column.deviceId) {
       val active = stream ?: return@LaunchedEffect
       active.resetLayoutReplayCache()
       active.hierarchyUpdates.collect { update ->
         if (update.deviceId != column.deviceId) return@collect
-        update.packageName
-          ?.takeIf { it.isNotBlank() }
-          ?.let { reportForegroundApp(column.deviceId, it) }
         session.onObservationFrameContextDeclared(update.frameContext, update.captureSequence)
         session.onObservationSpaceDeclared(
           update.coordinateSpace,

@@ -360,6 +360,9 @@ internal fun DesktopWorkspaceShell(
                   column,
                   sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
                   streamingEnabled = streamingEnabled,
+                  // Inspect mode replaces the stream area, so the inspector keeps the title's
+                  // foreground app current from its own hierarchy frames.
+                  onForegroundApp = foregroundApps::report,
                 ),
               )
             },

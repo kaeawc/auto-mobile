@@ -60,13 +60,16 @@ export const ROW_BOUND_KEY = "webRowBound";
 
 /**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
- * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one.
+ * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
+ * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
+ * remains.
  */
 export interface RowMeasure {
   readonly take?: true;
   readonly zero?: true;
   readonly shrink?: number;
   readonly basis?: number;
+  readonly later?: true;
 }
 
 function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
@@ -77,6 +80,28 @@ function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
     css.width = px(basis);
   }
   css["flex-shrink"] = String(shrink);
+}
+
+/**
+ * A later sibling's authored `minWidth`, folded into its width (`max(width, minWidth)`) with
+ * `min-width: 0`. Android's `sizeIn` intersects the minimum with the width the row has left, so the
+ * sibling still gets its minimum while width remains but gives it all up, down to zero, before the
+ * capped aspect ratio does. A CSS `min-width` would hold against flex shrinking and reserve the
+ * width ahead of the cap. A content or `fill` width has no px value, so it folds through
+ * `calc-size()`.
+ */
+function laterMinWidth(css: Css, style: Raw, min: number, basis: unknown) {
+  css["min-width"] = "0";
+  const dp = record(style.width)?.dp;
+  if (typeof basis === "number" || typeof dp === "number") {
+    const width = px(Math.max(typeof basis === "number" ? basis : (dp as number), min));
+    css.width = width;
+    if (typeof basis === "number") {
+      css["flex-basis"] = width;
+    }
+    return;
+  }
+  css.width = `calc-size(max-content, max(size, ${px(min)}))`;
 }
 
 /** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
@@ -90,6 +115,10 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
   if (typeof measure.shrink === "number") {
     rowShrinkStyle(css, measure.shrink, measure.basis);
+  }
+  if (measure.later === true && typeof style.minWidth === "number") {
+    laterMinWidth(css, style, style.minWidth, measure.basis);
+    return;
   }
   if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
     css["min-width"] = "0";
@@ -389,10 +418,36 @@ const MAIN_ALIGN: Readonly<Record<string, string>> = {
   spaceEvenly: "space-evenly",
 };
 
+/** A container node and the style context it renders in. */
+interface ContainerScope {
+  readonly style: WebStyleContext;
+}
+
+/**
+ * What a container's children see: the axis it lays them out on, and an unbounded width only while
+ * the container leaves its width open. A dp `width` or a `maxWidth` bounds its children again, as
+ * Compose's `Modifier.width` and `widthIn` restore a finite max width inside a horizontal scroll.
+ */
+export function containerChildStyle(
+  scope: ContainerScope,
+  node: Raw,
+  parentAxis: "row" | "column" | undefined,
+): WebStyleContext {
+  const style = record(node.style);
+  const definite =
+    typeof record(style?.width)?.dp === "number" || typeof style?.maxWidth === "number";
+  return {
+    ...scope.style,
+    parentAxis,
+    unboundedWidth: scope.style.unboundedWidth === true && !definite,
+  };
+}
+
 /** What a scroll's child sees: the scroll's axis, and an unbounded width when it scrolls across. */
-export function scrollChildStyle(style: WebStyleContext, horizontal: boolean): WebStyleContext {
-  const unboundedWidth = horizontal || style.unboundedWidth === true;
-  return { ...style, parentAxis: horizontal ? "row" : "column", unboundedWidth };
+export function scrollChildStyle(scope: ContainerScope, node: Raw): WebStyleContext {
+  const horizontal = node.axis === "horizontal";
+  const inner = containerChildStyle(scope, node, horizontal ? "row" : "column");
+  return horizontal ? { ...inner, unboundedWidth: true } : inner;
 }
 
 /** A row or column's flex layout: direction, arrangement, spacing and cross-axis alignment. */

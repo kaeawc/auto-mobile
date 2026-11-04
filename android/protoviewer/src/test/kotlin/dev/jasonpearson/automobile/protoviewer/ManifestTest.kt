@@ -13,6 +13,17 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ManifestTest {
   @Test
+  fun debugBuildUsesTheDevAppIdWithStoreActionNames() {
+    // Unit tests run the debug variant; the store ID is reserved for release builds (#14144).
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    assertEquals("dev.jasonpearson.automobile.protoviewer.dev", context.packageName)
+    assertEquals("dev.jasonpearson.automobile.protoviewer.mcp.IMPORT", MCP_IMPORT_ACTION)
+    val mcp =
+      context.packageManager.getActivityInfo(ComponentName(context, McpActivity::class.java), 0)
+    assertEquals("dev.jasonpearson.automobile.protoviewer.McpActivity", mcp.name)
+  }
+
+  @Test
   fun mergedManifestIsUnprivileged() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val info =

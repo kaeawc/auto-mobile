@@ -179,6 +179,7 @@
     "notify-limits-at-boundary.json",
     "notify-post-messaging.json",
     "notify-post-styles.json",
+    "notify-push.json",
     "notify-schedule.json",
     "ns-accessory-chart.json",
     "ns-android-ignored-on-ios.json",
@@ -862,6 +863,7 @@
     "gesture-device.changed.json",
     "gesture-event-timer.json",
     "gesture-notifications.dismissed.json",
+    "gesture-notifications.push.json",
     "gesture-notifications.scheduledFired.json",
     "gesture-onAppear.json",
     "gesture-onEndReached.json",
@@ -2033,6 +2035,7 @@
     "strict-gate-prototype_platform_notifications_scheduled_v1.json",
     "strict-gate-prototype_platform_notifications_v1.json",
     "strict-gate-prototype_platform_power_v1.json",
+    "strict-gate-prototype_platform_push_v1.json",
     "strict-gate-prototype_platform_realtime_device_v1.json",
     "strict-gate-prototype_platform_realtime_v1.json",
     "strict-gate-prototype_platform_secureStorage_v1.json",
@@ -3409,6 +3412,14 @@
     "media-video-node-limit-repeat.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
     "media-video-poster-exact-image-limit.json": [
       "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "notify-push.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_push_v1",
+      "prototype_platform_realtime_v1",
       "prototype_platform_v1"
     ],
     "notify-schedule.json": [

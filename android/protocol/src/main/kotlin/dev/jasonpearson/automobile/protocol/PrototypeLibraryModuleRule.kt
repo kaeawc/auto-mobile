@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.flag
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonObject
 
@@ -21,7 +22,7 @@ internal object PrototypeLibraryModuleRule {
       }
       if (
         use is PrototypePlatformUses.Use.Handler &&
-          PrototypePlatformModules.sensitiveEvent(use.event)
+          PrototypePlatformModules.eventDefinition(use.event)?.flag("sensitive") == true
       )
         return PrototypeSpecError(
           use.path,

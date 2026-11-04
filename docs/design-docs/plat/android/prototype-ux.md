@@ -2378,7 +2378,10 @@ at most 1 KiB, a resolved notification of at most 4 KiB, and at most 4 updates p
 coalesced to the latest.
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
-apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283). On iOS, `min` and `low`
+apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
+A `notifications.push` handler receives a simulated push (`{type, data, notification?}`, at most
+4096 bytes of compact JSON, the APNs limit) and needs `prototype_platform_push_v1` on top of the
+module, gated per event rather than per call (#14285). On iOS, `min` and `low`
 map to the passive interruption level and `default` and `high` to active. No production runtime
 advertises the module yet.
 

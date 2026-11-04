@@ -114,7 +114,9 @@ Import needs identical accept/reject behaviour on all three platforms.
 ### 3.3 Android app
 
 - `minSdk` is 26: a new standalone app, and the bundle commit relies on `java.nio` NOFOLLOW checks and atomic same-volume moves.
-- Package `dev.jasonpearson.automobile.protoviewer`. `LibraryActivity` is the launcher list,
+- Application ID `dev.jasonpearson.automobile.protoviewer` for release builds; the debug build adds
+  `.dev`, so a dev build never shares an ID with a store build. The namespace (and every class and MCP
+  action name) stays `dev.jasonpearson.automobile.protoviewer` in both. `LibraryActivity` is the launcher list,
   `ViewerActivity` is a document task per prototype (not exported), and an exported `ImportActivity`
   handles VIEW and SEND for `content://` data only.
 - Storage reuses the `SavedPrototypeDirectoryStore` layout, keyed by an **app-generated library
@@ -154,6 +156,9 @@ Import needs identical accept/reject behaviour on all three platforms.
 - Data lives in Application Support (not Documents, no `UIFileSharingEnabled`) with
   `isExcludedFromBackup` set. Each prototype directory is `PrototypeSavedLayout` formatVersion 1,
   unchanged, plus the sibling `library.json` (section 4).
+- Bundle ID `dev.jasonpearson.automobile.protoviewer`. `scripts/ios/protoviewer-build.sh` adds `.dev`
+  when it compiles the cleartext opt-in (its default); release-style builds (`PROTOVIEWER_CLEARTEXT=0`)
+  keep the store ID, which the artifact policy gate checks.
 - Import uses `fileImporter` and `onOpenURL` (document UTI `dev.jasonpearson.automobile.prototype`).
   Image decode has a pixel budget and a PNG/JPEG/WebP magic-byte allowlist before `UIImage(data:)`.
   Fonts are unregistered when switching prototypes.
@@ -379,9 +384,12 @@ The shared request-policy and storage work is tracked in #13622.
 
 ## 7. MCP integration (first release: save routing and open)
 
+- The host drives whichever build is installed, store or `.dev` (`PROTOVIEWER_PACKAGES` in
+  `protoViewerContract.ts`). When both are, it drives the `.dev` build: only someone building
+  ProtoViewer has one.
 - Android uses adb, the existing device channel (#13621): the host pushes the bundle into
   ProtoViewer's app-scoped inbox, `getExternalFilesDir(null)/mcp/inbox/<request>.automobile-proto`,
-  then runs `am start -n dev.jasonpearson.automobile.protoviewer/.McpActivity` with action
+  then runs `am start -n <app id>/dev.jasonpearson.automobile.protoviewer.McpActivity` with action
   `….mcp.IMPORT` and the request id (plus an optional label). `McpActivity` is a separate component
   from the exported `ImportActivity` (section 5 step 1). It is exported only to callers holding
   `android.permission.DUMP` and has no intent filters: the adb shell holds DUMP and third-party apps
@@ -706,18 +714,21 @@ harnesses and a nightly CI job remain future work.
 
 ## 12. Decisions
 
-| Question                   | Decision (owner, 2026-10-19)                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------- |
-| iOS distribution           | Dev-signed builds on the owner's iPhones in the first release, alongside Android.                       |
-| Network for imported specs | One global switch, default off; per-host consent in Phase 2; MCP-direct `show` keeps today's behaviour. |
-| Stores                     | GitHub releases only.                                                                                   |
-| LAN egress                 | RFC1918 LAN is allowed; loopback, link-local, `10.0.2.2` and the daemon ports stay blocked.             |
-| iOS egress transport       | Network.framework (NWConnection) pinned transport (owner, 2026-10-21, #14540).                          |
-| Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                |
-| Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).          |
-| MCP-saved prototypes       | Follow the imported-prototype network policy.                                                           |
-| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                   |
-| Rollout gates              | Halt above 1.09% crash or 0.47% ANR (Android), 1.09% crash (iOS) (owner, 2026-11-03, #16516).           |
+| Question                   | Decision (owner, 2026-10-19)                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| iOS distribution           | Dev-signed builds on the owner's iPhones in the first release, alongside Android.                                               |
+| Network for imported specs | One global switch, default off; per-host consent in Phase 2; MCP-direct `show` keeps today's behaviour.                         |
+| Stores                     | GitHub releases only.                                                                                                           |
+| LAN egress                 | RFC1918 LAN is allowed; loopback, link-local, `10.0.2.2` and the daemon ports stay blocked.                                     |
+| iOS egress transport       | Network.framework (NWConnection) pinned transport (owner, 2026-10-21, #14540).                                                  |
+| Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                                        |
+| Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).                                  |
+| MCP-saved prototypes       | Follow the imported-prototype network policy.                                                                                   |
+| Store identity             | `dev.jasonpearson.automobile.protoviewer` on both stores, `.dev` for dev builds, title ProtoViewer (owner, 2026-10-31, #14144). |
+| Store accounts             | Personal enrollment on both stores; Play needs a 14-day closed test with 12 testers first (owner, 2026-10-31, #14144).          |
+| Store support and privacy  | Hosted on the docs site: `protoviewer/support.md` and `protoviewer/privacy.md` (owner, 2026-10-31, #14144).                     |
+| Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                                           |
+| Rollout gates              | Halt above 1.09% crash or 0.47% ANR (Android), 1.09% crash (iOS) (owner, 2026-11-03, #16516).                                   |
 
 ## Issues
 

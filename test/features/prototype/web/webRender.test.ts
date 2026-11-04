@@ -616,6 +616,60 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")).not.toHaveProperty("max-width");
   });
 
+  test("a later sibling's minWidth gives way to a capped aspect ratio (#16772)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 100 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "box", testTag: "after", style: { width: { dp: 40 }, minWidth: 40 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // Folded into its width, the minimum no longer holds against shrinking, as Android's sizeIn.
+    expect(byTag({ element: row }, "after")[0]!.style).toMatchObject({
+      width: "40px",
+      "min-width": "0",
+      "flex-shrink": "1000000000",
+    });
+  });
+
+  test("a dp-wide column in a horizontal scroll bounds its row to its own width (#16691)", () => {
+    const shown = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "scroll",
+        axis: "horizontal",
+        child: {
+          type: "row",
+          testTag: "strip",
+          children: [
+            {
+              type: "column",
+              style: { width: { dp: 100 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "inner",
+                  children: [{ type: "box", style: { aspectRatio: 1, maxWidth: 300 } }],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    // The scroll's own row stays unbounded; the row beneath the 100 dp column is bounded by it.
+    expect(byTag(shown, "strip")[0]!.style).not.toHaveProperty("max-width");
+    expect(byTag(shown, "inner")[0]!.style["max-width"]).toBe("100%");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

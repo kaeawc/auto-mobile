@@ -114,6 +114,8 @@ internal fun WorkspaceFacet(
         options =
           NavigationFacetOptions(
             sessionUuidProvider = sessionUuidProvider,
+            // Navigating along a transition drives the device, so it allocates it first (#16953).
+            inputAllocation = inputAllocation,
           ),
       )
     // Test reads the per-device test-runs daemon resource (automobile:test-runs?deviceId=<id>,

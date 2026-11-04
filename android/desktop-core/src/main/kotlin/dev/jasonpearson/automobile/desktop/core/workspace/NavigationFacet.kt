@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
@@ -18,6 +19,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
+import dev.jasonpearson.automobile.desktop.core.navigation.EdgeNavigator
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -236,7 +238,8 @@ fun NavigationFacet(
       val screenshotLoader =
         remember(column.deviceId, loaderProvider) { loaderProvider(column.deviceId) }
 
-      NavigationContent(memory, stream, clientProvider, screenshotLoader)
+      val navigator = rememberEdgeNavigator(options, clientProvider)
+      NavigationContent(memory, stream, clientProvider, screenshotLoader, navigator)
     }
   }
 }
@@ -272,6 +275,11 @@ data class NavigationFacetOptions(
   val connectionStateCollectorGate: suspend (ConnectionState) -> Unit = {},
   val screenshotLoaderProvider: ((String) -> ScreenshotLoader)? = null,
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+  // Allocates the pane's device before a navigate action drives it (#16953). Without it (and
+  // without [edgeNavigator]) the facet offers no navigate action.
+  val inputAllocation: DesktopInputAllocation? = null,
+  // Overrides the daemon-backed navigator; tests pass a fake.
+  val edgeNavigator: EdgeNavigator? = null,
 )
 
 internal data class NavigationMemory(

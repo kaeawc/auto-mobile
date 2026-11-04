@@ -251,7 +251,8 @@
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
 
-  # The version-bump and changelog steps write .claude-plugin/{marketplace,plugin}.json
+  # The version-bump and changelog steps write .claude-plugin/marketplace.json,
+  # plugins/auto-mobile/.claude-plugin/plugin.json
   # and CHANGELOG.md in a shape that must be oxfmt-clean, but the commit carries
   # [skip ci] so the format gate never runs on it. The durable fix (#5817) runs
   # oxfmt on the tree before committing so those files land clean on main.

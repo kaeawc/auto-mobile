@@ -9456,7 +9456,7 @@
           "maximum": 890000
         },
         "requires": {
-          "description": "Required display capabilities from device inventory, and Google Play",
+          "description": "Required display capabilities from device inventory, Google Play and vehicle states",
           "type": "object",
           "properties": {
             "panels": {
@@ -9481,6 +9481,18 @@
             "playStore": {
               "description": "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
               "type": "boolean"
+            },
+            "vehicle": {
+              "description": "Simulated vehicle states the automotive emulator must support",
+              "type": "object",
+              "properties": {
+                "motion": {
+                  "description": "Android Automotive only: the emulator can simulate driving state (deviceCondition vehicle.motion). Matches only a non-Play android-automotive image, and a new emulator is created from one; Play Store car images are user builds that refuse it",
+                  "type": "string",
+                  "const": "supported"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -18788,6 +18800,21 @@
                   }
                 ]
               },
+              "vehicle": {
+                "type": "object",
+                "properties": {
+                  "motion": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  },
+                  "nightMode": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  }
+                },
+                "required": ["motion", "nightMode"],
+                "additionalProperties": false
+              },
               "image": {
                 "type": "object",
                 "properties": {
@@ -19441,6 +19468,21 @@
                     "type": "null"
                   }
                 ]
+              },
+              "vehicle": {
+                "type": "object",
+                "properties": {
+                  "motion": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  },
+                  "nightMode": {
+                    "type": "string",
+                    "enum": ["supported", "unsupported", "unknown"]
+                  }
+                },
+                "required": ["motion", "nightMode"],
+                "additionalProperties": false
               },
               "image": {
                 "type": "object",
@@ -42054,6 +42096,21 @@
                   "type": "null"
                 }
               ]
+            },
+            "vehicle": {
+              "type": "object",
+              "properties": {
+                "motion": {
+                  "type": "string",
+                  "enum": ["supported", "unsupported", "unknown"]
+                },
+                "nightMode": {
+                  "type": "string",
+                  "enum": ["supported", "unsupported", "unknown"]
+                }
+              },
+              "required": ["motion", "nightMode"],
+              "additionalProperties": false
             },
             "image": {
               "type": "object",

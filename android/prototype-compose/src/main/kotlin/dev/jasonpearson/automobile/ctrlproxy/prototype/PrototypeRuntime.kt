@@ -1179,11 +1179,13 @@ class PrototypeRuntime(
             prototypeListMaxItemsFor(current.spec, action.path),
           )
         }
+      // `prependData` inserts one row, so the resolved value is wrapped as the page `[row]`, as on
+      // iOS and in the `change` event (#16715).
       is PrototypePrependDataAction ->
         value(action.value, action.path)?.let {
           PrototypeDataWrite.Prepend(
             action.path,
-            it,
+            JsonArray(listOf(it)),
             prototypeListMaxItemsFor(current.spec, action.path),
           )
         }

@@ -5,6 +5,7 @@ import {
   staticFactsFrom,
   displayFrom,
   capabilityInventory,
+  vehicleFrom,
 } from "../utils/deviceDescriptionProjection";
 import type {
   DeviceDescription,
@@ -212,6 +213,7 @@ function describeBooted(options: BootedDescriptionOptions): DeviceDescription {
     display: displayFrom(merged),
     ...(merged.displays?.panels.length ? { displays: merged.displays } : {}),
     capabilityInventory: capabilityInventory(merged, isVirtual),
+    ...vehicleFrom(merged, staticFacts.formFactor, isVirtual),
     image: imageLinkWithConfiguredFallback(admittedImage, configured),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
     runtime: describeBootedRuntime(options),
@@ -527,6 +529,13 @@ export const deviceDescriptionSchema = z
       })
       .strict()
       .nullable(),
+    vehicle: z
+      .object({
+        motion: z.enum(["supported", "unsupported", "unknown"]),
+        nightMode: z.enum(["supported", "unsupported", "unknown"]),
+      })
+      .strict()
+      .optional(),
     image: z
       .object({ path: nullableString, target: nullableString, basedOn: nullableString })
       .strict(),

@@ -79,6 +79,9 @@ enum class EdgeVerification {
 object NavigationBuildLens {
   const val UNVERIFIED_LABEL: String = "unverified for the active build"
 
+  /** Content hashes are 64 hex chars in production; labels show a short, still-distinct prefix. */
+  const val LABEL_HASH_CHARS: Int = 12
+
   /**
    * Distinct builds observed anywhere in [graph], newest first (by versionCode, then hash). Legacy
    * device records are excluded: they carry no real build identity.
@@ -96,9 +99,9 @@ object NavigationBuildLens {
       )
       .toList()
 
-  /** Short human label for a build, e.g. `v2 (hashB)`. */
+  /** Short human label for a build, e.g. `v2 (hashB)`; the hash is cut to [LABEL_HASH_CHARS]. */
   fun label(build: ProvenanceBuildKey): String =
-    "v${build.versionCode} (${build.contentHash.ifEmpty { "no hash" }})"
+    "v${build.versionCode} (${build.contentHash.take(LABEL_HASH_CHARS).ifEmpty { "no hash" }})"
 
   fun membership(provenance: List<ScreenProvenance>, build: ProvenanceBuildKey): BuildMembership {
     val classifiable = provenance.filter { it.isClassifiable() }

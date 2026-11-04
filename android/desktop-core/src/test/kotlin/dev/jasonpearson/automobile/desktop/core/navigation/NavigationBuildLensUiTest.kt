@@ -1,14 +1,23 @@
 package dev.jasonpearson.automobile.desktop.core.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -21,6 +30,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import dev.jasonpearson.automobile.desktop.domain.NavigationGraph
+import kotlin.test.assertEquals
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 
@@ -214,4 +224,31 @@ class NavigationBuildLensUiTest {
     }
     onNodeWithContentDescription("Home → Login — unverified for the active build").assertExists()
   }
+
+  @Test
+  fun `action controls stay reachable in a narrow pane with long build hashes`() =
+    runComposeUiTest {
+      // Production content hashes are 64 hex chars; several builds overflow a 400dp pane.
+      val builds =
+        (1L..6L).map { version ->
+          ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, version, "$version".repeat(64))
+        }
+      var lens: BuildLens by mutableStateOf(BuildLens.Union)
+      setContent {
+        MaterialTheme {
+          Box(Modifier.width(400.dp)) {
+            BuildLensBar(builds = builds, lens = lens, onLensChange = { lens = it })
+          }
+        }
+      }
+      onNodeWithContentDescription("Build lens: compare builds").assertIsDisplayed()
+
+      onNodeWithContentDescription("Build lens: filter v1 (111111111111)")
+        .performScrollTo()
+        .performClick()
+      onNodeWithContentDescription("Build lens: hide other builds").assertIsDisplayed()
+      onNodeWithContentDescription("Build lens: compare builds").assertIsDisplayed().performClick()
+      waitForIdle()
+      assertEquals(BuildLens.Compare(builds[0], builds[1]), lens)
+    }
 }

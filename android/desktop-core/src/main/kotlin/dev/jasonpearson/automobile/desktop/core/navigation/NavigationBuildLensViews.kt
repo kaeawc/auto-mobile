@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.navigation
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,19 +50,11 @@ internal fun BuildLensBar(
         .padding(6.dp),
     verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
+    // Action chips get their own fixed row so a long build history can never push them out of a
+    // narrow pane; the build chips below scroll horizontally instead.
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
       LensChip("All builds", "Build lens: all builds", lens is BuildLens.Union) {
         onLensChange(BuildLens.Union)
-      }
-      if (lens !is BuildLens.Compare) {
-        builds.forEach { build ->
-          val label = NavigationBuildLens.label(build)
-          val selected = lens is BuildLens.Filter && lens.build == build
-          LensChip(label, "Build lens: filter $label", selected) {
-            val hide = (lens as? BuildLens.Filter)?.hideOtherBuilds ?: false
-            onLensChange(BuildLens.Filter(build, hide))
-          }
-        }
       }
       if (lens is BuildLens.Filter) {
         LensChip("Hide others", "Build lens: hide other builds", lens.hideOtherBuilds) {
@@ -70,6 +63,21 @@ internal fun BuildLensBar(
       }
       LensChip("Compare", "Build lens: compare builds", lens is BuildLens.Compare) {
         onLensChange(defaultCompare(builds, lens))
+      }
+    }
+    if (lens !is BuildLens.Compare) {
+      Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+      ) {
+        builds.forEach { build ->
+          val label = NavigationBuildLens.label(build)
+          val selected = lens is BuildLens.Filter && lens.build == build
+          LensChip(label, "Build lens: filter $label", selected) {
+            val hide = (lens as? BuildLens.Filter)?.hideOtherBuilds ?: false
+            onLensChange(BuildLens.Filter(build, hide))
+          }
+        }
       }
     }
     if (lens is BuildLens.Compare) {
@@ -95,6 +103,7 @@ private fun CompareSidePicker(
   onPick: (ProvenanceBuildKey) -> Unit,
 ) {
   Row(
+    modifier = Modifier.horizontalScroll(rememberScrollState()),
     horizontalArrangement = Arrangement.spacedBy(4.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {

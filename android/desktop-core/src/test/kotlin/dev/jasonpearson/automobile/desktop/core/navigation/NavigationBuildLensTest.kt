@@ -214,4 +214,17 @@ class NavigationBuildLensTest {
     val compare = BuildLens.Compare(v1, v2)
     assertEquals(compare, effectiveBuildLens(compare, listOf(v1, v2)))
   }
+
+  @Test
+  fun `labels cut production-length hashes to a short prefix`() {
+    val hash = "0123456789abcdef".repeat(4)
+    assertEquals(
+      "v7 (0123456789ab)",
+      NavigationBuildLens.label(ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 7, hash)),
+    )
+    assertEquals(
+      "v0 (no hash)",
+      NavigationBuildLens.label(ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 0, "")),
+    )
+  }
 }

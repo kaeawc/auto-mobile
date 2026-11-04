@@ -1307,11 +1307,11 @@ export class LivenessScenario {
     let keptSession: string | undefined;
     let nextKeepAliveAt = Infinity;
     for (const exchange of fixture.exchanges) {
-      // The capture restarts its daemon after "heartbeat" and stays down until "heartbeat-lapse"
-      // (desktopWireContract.test.ts, "a daemon restart that outlasts the idle window"): the
-      // replay's daemon is down for the same fixture interval over the same kept database.
-      if (fixture.scenario === "daemon-restart" && exchange.label === "heartbeat-lapse") {
-        await this.daemonRestart({ downtimeMs: startedAt + exchange.atMs - this.timer.now() });
+      // The capture restarted its daemon right after the previous frame (DesktopWireHarness
+      // restartDaemon): the replay's daemon is down for the same downtime over the same kept
+      // database, then the frame is driven at its recorded time.
+      if (exchange.daemonRestartDowntimeMs !== undefined) {
+        await this.daemonRestart({ downtimeMs: exchange.daemonRestartDowntimeMs });
       }
       for (let beat = 0; beat < (exchange.repeat ?? 1); beat++) {
         const dueAt = startedAt + exchange.atMs + beat * (exchange.everyMs ?? 0);

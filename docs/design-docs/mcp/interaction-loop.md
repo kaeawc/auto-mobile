@@ -47,7 +47,11 @@ output can also be awaited. Compound, `container`- and `layer`-scoped waits,
 `selectionStrategy` and `absent` stay on the hierarchy search, which describes
 one source node. A text that any hierarchy node carries also stays there, so a
 row label hoisted from an off-screen child cannot override that search's
-visibility verdict.
+visibility verdict. The condition form follows the same rule for
+`for: "appear"` and `for: "textEquals"` with only `text` (`textEquals` keeps its
+exact, case-sensitive comparison against the row). `clickable` needs a tappable
+source node, `disappear` must not pass on a hierarchy miss, and `countStable`
+counts hierarchy nodes, so those stay hierarchy-only.
 
 iOS simulator lock readings are shared per device: unlocked known readings use
 `knownTtlMs` (30 seconds), locked readings use `lockedTtlMs` (2 seconds), and

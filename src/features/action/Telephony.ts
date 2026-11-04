@@ -94,15 +94,6 @@ export class Telephony {
 
   async phoneCall(options: PhoneCallOptions): Promise<PhoneCallResult> {
     if (this.device.platform === "ios") {
-      if (!isIosSimulatorDevice(this.device)) {
-        return {
-          success: false,
-          action: options.action,
-          phoneNumber: options.phoneNumber,
-          supported: false,
-          error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
-        };
-      }
       return this.phoneCallIos(options);
     }
     const platformError = this.requireAndroid<PhoneCallResult>(() => ({
@@ -175,15 +166,6 @@ export class Telephony {
 
   async sendSms(options: SendSmsOptions): Promise<SendSmsResult> {
     if (this.device.platform === "ios") {
-      if (!isIosSimulatorDevice(this.device)) {
-        return {
-          success: false,
-          phoneNumber: options.phoneNumber,
-          messageLength: options.message.length,
-          supported: false,
-          error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
-        };
-      }
       return this.sendSmsIos(options);
     }
     const platformError = this.requireAndroid<SendSmsResult>(() => ({
@@ -235,6 +217,15 @@ export class Telephony {
    * tool's actions one to one.
    */
   private async phoneCallIos(options: PhoneCallOptions): Promise<PhoneCallResult> {
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        success: false,
+        action: options.action,
+        phoneNumber: options.phoneNumber,
+        supported: false,
+        error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
+      };
+    }
     const base = { action: options.action, phoneNumber: options.phoneNumber };
     if (options.action !== "hold" && !options.phoneNumber) {
       return {
@@ -268,6 +259,15 @@ export class Telephony {
 
   /** iOS: the app's in-app SDK posts an SMS-style local notification (`messages` module). */
   private async sendSmsIos(options: SendSmsOptions): Promise<SendSmsResult> {
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        success: false,
+        phoneNumber: options.phoneNumber,
+        messageLength: options.message.length,
+        supported: false,
+        error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
+      };
+    }
     const base = { phoneNumber: options.phoneNumber, messageLength: options.message.length };
     try {
       // Same body constraints as the Android console path, so both platforms reject the same input.

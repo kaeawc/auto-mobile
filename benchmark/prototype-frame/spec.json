@@ -28,6 +28,14 @@
           "width": "fill",
           "height": "fill"
         },
+        "safeAreaPadding": {
+          "edges": [
+            "top"
+          ],
+          "types": [
+            "systemBars"
+          ]
+        },
         "children": [
           {
             "type": "tabBar",

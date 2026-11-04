@@ -112,6 +112,7 @@ internal fun LoadPerformanceRunEffect(
     options.dataSourceMode,
     options.clientProvider,
     options.deviceId,
+    options.deviceSessionUuid,
     options.connectionGeneration,
   ) {
     if (state.currentRun != null) {

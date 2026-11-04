@@ -47,7 +47,10 @@ output can also be awaited. Compound, `container`- and `layer`-scoped waits,
 `selectionStrategy` and `absent` stay on the hierarchy search, which describes
 one source node. A text that any hierarchy node carries also stays there, so a
 row label hoisted from an off-screen child cannot override that search's
-visibility verdict.
+visibility verdict. A row whose label is composed from several sources is
+skipped when any hierarchy text source inside its bounds that the label or
+sublabel contains has no visible part on screen; rows do not record their
+sources, so contribution is inferred from bounds and text.
 
 iOS simulator lock readings are shared per device: unlocked known readings use
 `knownTtlMs` (30 seconds), locked readings use `lockedTtlMs` (2 seconds), and

@@ -1,7 +1,7 @@
 import type { Element } from "../../../models/Element";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import { hasVisibleScreenPart } from "../../utility/ElementGeometry";
-import { SearchableHierarchy } from "../../utility/SearchableNode";
+import { SearchableHierarchy, type SearchableNode } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { projectSkeleton } from "../output/SkeletonProjection";
 import type { ObserveWaitForOptions } from "./WaitForSchemas";
@@ -17,6 +17,12 @@ import type { ObserveWaitForOptions } from "./WaitForSchemas";
  * source node and stay on the hierarchy search. A text that any hierarchy node
  * carries also stays there: that search already judged the node (for example
  * off screen), and a row's hoisted label must not override it.
+ *
+ * A hoisted label can also be a composite of several sources (" Alarm" on a
+ * visible row plus an off-screen "7:00" child read as "7:00 Alarm", #16987), so
+ * no single source carries the query and the guard above does not apply. A row
+ * is therefore skipped when any hierarchy text source inside its bounds whose
+ * text the row's label or sublabel contains has no visible part on screen.
  */
 export function findProjectedTextRow(
   waitFor: ObserveWaitForOptions,
@@ -38,16 +44,56 @@ export function findProjectedTextRow(
     ? new SearchableHierarchy().project(observation.viewHierarchy)
     : [];
   const texts = waitFor.textAny ?? (waitFor.text === undefined ? [] : [waitFor.text]);
+  const onScreenSources = (row: SkeletonElement) =>
+    !hasOffScreenContributor(row, sources, observation.screenSize);
   for (const text of texts) {
-    if (findMatch(sources, (node) => Object.values(node.textSources), text, waitFor.textMatch)) {
+    if (
+      findMatch(sources, (node) => Object.values(node.textSources), text, {
+        textMatch: waitFor.textMatch,
+      })
+    ) {
       continue;
     }
-    const row = findMatch(rows, rowTexts, text, waitFor.textMatch);
+    const row = findMatch(rows, rowTexts, text, {
+      textMatch: waitFor.textMatch,
+      accept: onScreenSources,
+    });
     if (row) {
       return { bounds: toElementBounds(row.bounds), text: row.label };
     }
   }
   return null;
+}
+
+/**
+ * Whether a hierarchy text source that could have contributed to `row`'s label
+ * (enclosed by the row, its text part of the row's label or sublabel) is off
+ * screen. Projected rows do not record their sources, so contribution is
+ * inferred from bounds and text, which errs toward skipping the row.
+ */
+function hasOffScreenContributor(
+  row: SkeletonElement,
+  sources: readonly SearchableNode[],
+  screenSize: ObserveResult["screenSize"],
+): boolean {
+  const rowText = rowTexts(row).map(normalize);
+  return sources.some(
+    (source) =>
+      source.bounds !== undefined &&
+      encloses(row.bounds, source.bounds) &&
+      !hasVisibleScreenPart(source.bounds, screenSize) &&
+      Object.values(source.textSources).some((value) => {
+        const part = normalize(value).trim();
+        return part.length > 0 && rowText.some((label) => label.includes(part));
+      }),
+  );
+}
+
+function encloses(
+  [left, top, right, bottom]: SkeletonElement["bounds"],
+  inner: NonNullable<SearchableNode["bounds"]>,
+): boolean {
+  return inner.left >= left && inner.top >= top && inner.right <= right && inner.bottom <= bottom;
 }
 
 function isTextOnlyWait(waitFor: ObserveWaitForOptions): boolean {
@@ -86,7 +132,10 @@ function findMatch<T>(
   items: readonly T[],
   textsOf: (item: T) => string[],
   text: string,
-  textMatch: ObserveWaitForOptions["textMatch"],
+  {
+    textMatch,
+    accept = () => true,
+  }: { textMatch: ObserveWaitForOptions["textMatch"]; accept?: (item: T) => boolean },
 ): T | undefined {
   const query = normalize(text);
   if (!query.trim()) {
@@ -94,13 +143,19 @@ function findMatch<T>(
   }
   if (textMatch === "regex") {
     const regex = new RegExp(normalizeQuotes(text), "i");
-    return items.find((item) => textsOf(item).some((value) => regex.test(normalizeQuotes(value))));
+    return items.find(
+      (item) => textsOf(item).some((value) => regex.test(normalizeQuotes(value))) && accept(item),
+    );
   }
-  const exact = items.find((item) => textsOf(item).some((value) => normalize(value) === query));
+  const exact = items.find(
+    (item) => textsOf(item).some((value) => normalize(value) === query) && accept(item),
+  );
   if (exact || textMatch === "exact") {
     return exact;
   }
-  return items.find((item) => textsOf(item).some((value) => normalize(value).includes(query)));
+  return items.find(
+    (item) => textsOf(item).some((value) => normalize(value).includes(query)) && accept(item),
+  );
 }
 
 function toElementBounds([left, top, right, bottom]: SkeletonElement["bounds"]): Element["bounds"] {

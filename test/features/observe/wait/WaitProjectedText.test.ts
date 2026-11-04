@@ -5,6 +5,7 @@ import { evaluateWaitForObservation } from "../../../../src/features/observe/wai
 import { ObserveElementsBuilder } from "../../../../src/features/observe/ObserveElementsBuilder";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import type { MatchMode } from "../../../../src/features/utility/ElementResolver";
+import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import { createObserveResultForTest } from "../flatHierarchyBuilders";
 
 const screenSize = { width: 400, height: 800 };
@@ -172,5 +173,104 @@ describe("evaluateWaitForObservation text over projected rows", () => {
 
   test("does not match when neither the hierarchy nor the rows carry the text", () => {
     expect(evaluate().matched).toBe(false);
+  });
+});
+
+describe("projected rows with a composite hoisted label (#16987)", () => {
+  // A visible alarm row whose own text is the template remainder " Alarm" and whose
+  // time child is hoisted into its label; the child sits below the 800px screen.
+  const alarmHierarchy = (timeTop: number) =>
+    hierarchyWith([
+      {
+        $: {
+          text: " Alarm",
+          clickable: "true",
+          bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        },
+        node: [
+          {
+            $: {
+              text: "7:00",
+              bounds: { left: 0, top: timeTop, right: 100, bottom: timeTop + 40 },
+            },
+          },
+        ],
+      },
+    ]);
+
+  const observationFor = (timeTop: number) => {
+    const viewHierarchy = alarmHierarchy(timeTop);
+    const elements = new ObserveElementsBuilder().build(viewHierarchy, "android");
+    if (!elements) {
+      throw new Error("the alarm fixture should yield observe elements");
+    }
+    const { skeleton, context } = projectSkeleton(elements, screenSize);
+    return { screenSize, viewHierarchy, elements, skeleton, context };
+  };
+
+  const settings = {
+    devicePlatform: "android" as const,
+    displayInventory: "single" as const,
+    modes: new Map<string, MatchMode>(),
+    iosMultiPanel: false,
+  };
+
+  test("the projection hoists both sources into one visible row label", () => {
+    expect(observationFor(850).skeleton.map((entry) => entry.label)).toEqual(["7:00 Alarm"]);
+  });
+
+  test("skips a row whose hoisted label includes an off-screen source", () => {
+    const observation = observationFor(850);
+
+    expect(findProjectedTextRow({ text: "7:00 Alarm" }, observation)).toBeNull();
+    expect(
+      findProjectedTextRow({ text: "7:00 Alarm", textMatch: "exact" }, observation),
+    ).toBeNull();
+    expect(
+      findProjectedTextRow({ text: "^7:00 alarm$", textMatch: "regex" }, observation),
+    ).toBeNull();
+  });
+
+  test("skips it when the rows are projected from elements during the wait", () => {
+    const { viewHierarchy, elements } = observationFor(850);
+
+    expect(
+      findProjectedTextRow({ text: "7:00 Alarm" }, { screenSize, viewHierarchy, elements }),
+    ).toBeNull();
+  });
+
+  test("plain and textEquals waits do not match the partly off-screen row", () => {
+    const observation = createObserveResultForTest(observationFor(850));
+
+    expect(
+      evaluateWaitForObservation(
+        new ElementResolver(),
+        { text: "7:00 Alarm" },
+        observation,
+        settings,
+      ).matched,
+    ).toBe(false);
+    expect(
+      evaluateWaitForObservation(
+        new ElementResolver(),
+        { text: "7:00 Alarm", textMatch: "exact" },
+        observation,
+        settings,
+      ).matched,
+    ).toBe(false);
+  });
+
+  test("still matches the composite row when every source is on screen", () => {
+    const observation = observationFor(700);
+
+    expect(findProjectedTextRow({ text: "7:00 Alarm" }, observation)?.text).toBe("7:00 Alarm");
+    expect(
+      evaluateWaitForObservation(
+        new ElementResolver(),
+        { text: "7:00 Alarm" },
+        createObserveResultForTest(observation),
+        settings,
+      ).matched,
+    ).toBe(true);
   });
 });

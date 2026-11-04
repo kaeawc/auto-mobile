@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonObject
 internal object PrototypeLibraryModuleRule {
   /** R2 sinks, then R1 modules: TypeScript's library order. */
   fun sensitiveError(spec: JsonObject, context: PrototypeStateChecks.Context): PrototypeSpecError? =
-    PrototypeSensitiveSinkRules.error(spec, context) ?: error(spec, context)
+    PrototypeSensitiveSinkRules.errors(spec, context).firstOrNull() ?: error(spec, context)
 
   fun error(spec: JsonObject, context: PrototypeStateChecks.Context): PrototypeSpecError? {
     for (use in PrototypePlatformUses.uses(spec, context)) {

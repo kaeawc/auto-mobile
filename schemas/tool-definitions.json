@@ -23074,6 +23074,47 @@
         "screenSize": {
           "$ref": "#/$defs/__schema1"
         },
+        "automotive": {
+          "description": "Automotive devices only. Unavailable CarService reads omit the corresponding fields.",
+          "type": "object",
+          "properties": {
+            "drivingState": {
+              "type": "string",
+              "enum": ["parked", "idling", "moving"]
+            },
+            "uxRestrictions": {
+              "type": "object",
+              "properties": {
+                "requiresDistractionOptimization": {
+                  "type": "boolean"
+                },
+                "activeRestrictions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["requiresDistractionOptimization", "activeRestrictions"],
+              "additionalProperties": false
+            },
+            "foregroundActivity": {
+              "type": "object",
+              "properties": {
+                "distractionOptimized": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["distractionOptimized"],
+              "additionalProperties": false
+            },
+            "blocked": {
+              "description": "True when DO is required and the known foreground activity is not distraction optimized.",
+              "type": "boolean"
+            }
+          },
+          "required": ["blocked"],
+          "additionalProperties": false
+        },
         "isScreenRound": {
           "description": "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
           "type": "boolean"

@@ -449,6 +449,26 @@ export const observeResultSchema = z
     ...observationScreenshotOutputFields,
     crop: observeCropResultSchema.optional(),
     screenSize: screenSizeSchema.optional(),
+    automotive: z
+      .object({
+        drivingState: z.enum(["parked", "idling", "moving"]).optional(),
+        uxRestrictions: z
+          .object({
+            requiresDistractionOptimization: z.boolean(),
+            activeRestrictions: z.number().int().nonnegative(),
+          })
+          .optional(),
+        foregroundActivity: z.object({ distractionOptimized: z.boolean() }).optional(),
+        blocked: z
+          .boolean()
+          .describe(
+            "True when DO is required and the known foreground activity is not distraction optimized.",
+          ),
+      })
+      .optional()
+      .describe(
+        "Automotive devices only. Unavailable CarService reads omit the corresponding fields.",
+      ),
     isScreenRound: z
       .boolean()
       .optional()

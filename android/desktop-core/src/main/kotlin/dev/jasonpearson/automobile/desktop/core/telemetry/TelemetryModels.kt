@@ -17,6 +17,8 @@ data class TelemetryPushRequest(
   val sessionId: String? = null,
   val sessionUuid: String? = null,
   val deviceSessionUuid: String? = null,
+  /** The daemon subscription an `unsubscribe` releases, on a socket carrying several. */
+  val subscriptionId: String? = null,
 )
 
 /** Response envelope from the telemetry push socket server. */
@@ -28,6 +30,8 @@ data class TelemetryPushResponse(
   val error: String? = null,
   val timestamp: Long? = null,
   val data: TelemetryEventEnvelope? = null,
+  /** Which subscription on the socket a push or acknowledgement belongs to. */
+  val subscriptionId: String? = null,
 )
 
 /** Telemetry event as pushed from the server: category + timestamp + opaque data object. */

@@ -34,11 +34,11 @@ export interface PostNotificationOptions {
   imagePath?: string;
   actions?: PostNotificationAction[];
   channelId?: string;
-  /** iOS: `aps.category`, naming a UNNotificationCategory the app registered (#14097). */
+  /** iOS/watchOS: `aps.category`, naming a UNNotificationCategory the app registered (#14097). */
   category?: string;
-  /** iOS: raw APNs JSON merged over the generated payload (#14097). */
+  /** iOS/watchOS: raw APNs JSON merged over the generated payload (#14097). */
   payload?: Record<string, unknown>;
-  /** Android package name or iOS bundle identifier to target; required on iOS. */
+  /** Android package name or iOS/watchOS bundle identifier to target; required on iOS/watchOS. */
   appId?: string;
 }
 
@@ -150,6 +150,7 @@ export class PostNotification {
         case "android":
           return await this.executeAndroid(options, signal);
         case "ios":
+        case "watchos":
           return await this.executeIos(options);
         default:
           return {
@@ -170,14 +171,15 @@ export class PostNotification {
     }
   }
 
-  /** iOS: deliver a simulated remote push via `simctl push` (simulator only). */
+  /** iOS/watchOS: deliver a simulated remote push via `simctl push` (simulator only). */
   private async executeIos(options: PostNotificationOptions): Promise<PostNotificationResult> {
+    const platformLabel = this.device.platform === "watchos" ? "watchOS" : "iOS";
     const bundleId = options.appId;
     if (!bundleId) {
       return {
         success: false,
         supported: false,
-        error: "appId (bundle identifier) is required to post a notification on iOS.",
+        error: `appId (bundle identifier) is required to post a notification on ${platformLabel}.`,
       };
     }
 
@@ -187,8 +189,7 @@ export class PostNotification {
         success: false,
         supported: false,
         appId: bundleId,
-        error:
-          "postNotification on iOS is only supported on simulators (simctl push); physical iOS devices are not supported.",
+        error: `postNotification on ${platformLabel} is only supported on simulators (simctl push); physical ${platformLabel} devices are not supported.`,
       };
     }
 

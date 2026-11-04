@@ -81,6 +81,8 @@ export function bootedSweepsFor(
     // Only the pool's own readers ask an "either" read for watches (#14908).
     watchos: platform === "watchos" || (either && options.includeWatchOs === true),
     tvos: platform === "tvos",
+    // No Vision Pro inventory exists yet (#16849), so nothing sweeps for one.
+    visionos: false,
   };
 }
 

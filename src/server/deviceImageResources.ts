@@ -19,6 +19,7 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { logger } from "../utils/logger";
 import { Platform } from "../models";
+import { NON_IOS_APPLE_PLATFORM_LABELS, type NonIosApplePlatform } from "../models/Platform";
 import {
   AvdInfo,
   type DeviceProfile,
@@ -432,12 +433,16 @@ async function buildIosResourceResult(
 }
 
 function buildSimulatorResourceResult(
-  platform: "ios" | "watchos" | "tvos",
+  platform: "ios" | NonIosApplePlatform,
   deviceManager: DeviceImageDiscoveryManager,
   { simctl, watchInventory, appleTvInventory }: ReturnType<typeof simulatorSources>,
 ): Promise<PlatformResourceResult> {
   if (platform === "ios") {
     return buildIosResourceResult(deviceManager, simctl);
+  }
+  if (platform === "visionos") {
+    // No Vision Pro inventory exists yet (#16849): report it unavailable rather than list iOS.
+    return Promise.resolve(unavailableAppleSimulatorResult(platform));
   }
   const inventory = platform === "watchos" ? watchInventory : appleTvInventory;
   const list =
@@ -445,6 +450,20 @@ function buildSimulatorResourceResult(
       ? watchInventory && (() => watchInventory.listWatchSimulators())
       : appleTvInventory && (() => appleTvInventory.listAppleTvSimulators());
   return buildAppleSimulatorResourceResult(platform, list, inventory);
+}
+
+function unavailableAppleSimulatorResult(platform: NonIosApplePlatform): PlatformResourceResult {
+  const error = {
+    code: "unavailable" as const,
+    message: `${NON_IOS_APPLE_PLATFORM_LABELS[platform]} inventory is unavailable.`,
+  };
+  return {
+    platform,
+    images: [],
+    provisioningCatalog: emptyProvisioningCatalog(),
+    catalogObservation: { catalogComplete: false, error },
+    inventoryObservation: { complete: false, error },
+  };
 }
 
 /** Non-iOS Apple simulators and their catalog are read only by explicit platform requests. */
@@ -455,14 +474,7 @@ async function buildAppleSimulatorResourceResult(
 ): Promise<PlatformResourceResult> {
   const label = platform === "watchos" ? "watchOS" : "tvOS";
   if (!list || !inventory) {
-    const error = { code: "unavailable" as const, message: `${label} inventory is unavailable.` };
-    return {
-      platform,
-      images: [],
-      provisioningCatalog: emptyProvisioningCatalog(),
-      catalogObservation: { catalogComplete: false, error },
-      inventoryObservation: { complete: false, error },
-    };
+    return unavailableAppleSimulatorResult(platform);
   }
   const [images, catalog] = await Promise.all([
     list().then(

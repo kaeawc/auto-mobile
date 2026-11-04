@@ -307,16 +307,21 @@ interface HoistCheck {
 
 /**
  * The texts `source` is searchable by that no off-screen hoisted descendant contributes to: its
- * own captured text, its composed label when every descendant folded into it is visible, and the
- * label of each visible hoisted descendant.
+ * own captured text (also trimmed), its composed label when a visible descendant supplies the
+ * folded part, and the label of each visible hoisted descendant.
  */
 function visibleBackedTexts(
   source: SearchableEntry,
   visible: (part: SearchableEntry) => boolean,
 ): string[] {
-  const labelBacked = (source.hoistedLabelSources ?? []).every(visible);
+  // Folded parts are deduplicated, so any visible descendant carrying the folded part supplies it.
+  const labelSources = source.hoistedLabelSources ?? [];
+  const labelBacked = labelSources.length === 0 || labelSources.some(visible);
+  const own = Object.values(source.textSources);
   return [
-    ...Object.values(source.textSources),
+    ...own,
+    // The resolver also searches the row's trimmed own text (" Alarm" as "Alarm").
+    ...own.map((value) => value.trim()),
     ...(labelBacked && source.displayedLabel !== undefined ? [source.displayedLabel] : []),
     ...(source.hoistedSources ?? []).flatMap((part) =>
       visible(part) && part.label !== undefined ? [part.label] : [],

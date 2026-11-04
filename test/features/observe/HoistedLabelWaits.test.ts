@@ -166,3 +166,30 @@ describe("only descendants that contribute the matched text are judged (#17007)"
     expect(disappear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(false);
   });
 });
+
+describe("visible equivalents of hoisted text still match (#17007)", () => {
+  test("the row's trimmed own text matches a regex while a hoisted child is off screen", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "^Alarm$", match: "regex" })(offScreen).matched).toBe(true);
+    expect(disappear(resolver, { text: "^Alarm$", match: "regex" })(offScreen).matched).toBe(false);
+  });
+
+  test("a visible duplicate of an off-screen label part supplies the composed label", () => {
+    const observation = screenWith([
+      {
+        text: " Alarm",
+        clickable: "true",
+        bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        node: [
+          { text: "7:00", bounds: { left: 0, top: 20, right: 100, bottom: 60 } },
+          { text: "7:00", bounds: { left: 0, top: 850, right: 100, bottom: 890 } },
+        ],
+      },
+    ]);
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(true);
+    expect(disappear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(false);
+  });
+});

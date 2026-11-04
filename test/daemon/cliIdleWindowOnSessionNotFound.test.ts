@@ -156,7 +156,7 @@ describe("session-not-found answers carry the cli idle window (#16937)", () => {
   test("the CLI states the window in its text and --json output", () => {
     const decoded = releaseReasonField({
       id: "r",
-      type: "daemon_response",
+      type: "mcp_response",
       success: false,
       releaseReason: "cli-idle-timeout",
       idleTimeoutMs: WINDOW_MS,

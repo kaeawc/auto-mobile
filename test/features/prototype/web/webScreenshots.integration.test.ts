@@ -481,6 +481,91 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
       await page.close();
     }
   });
+
+  test("row aspect ratios lay out at the widths Android's sizeIn-then-aspectRatio gives (#16795)", async () => {
+    const box = (testTag: string, style: Record<string, unknown>) => ({
+      type: "box",
+      testTag,
+      style: { background: "primary", ...style },
+    });
+    const text = (testTag: string, value: string) => ({ type: "text", testTag, text: value });
+    const row = (width: number, children: unknown[]) => ({
+      type: "row",
+      style: { width: { dp: width } },
+      children,
+    });
+    const square = (prefix: string) => box(`${prefix}-square`, { aspectRatio: 1, maxWidth: 100 });
+    const reference = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "../../../fixtures/prototype-web/reference-checkout.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    const { element } = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "column",
+        style: { width: "fill" },
+        children: [
+          // The capped square keeps its 100 and the later sibling gives up its minWidth (#16772).
+          row(100, [
+            square("narrow"),
+            box("narrow-later", { width: { dp: 40 }, minWidth: 40, height: { dp: 10 } }),
+          ]),
+          // With width to spare the later sibling still renders at least its minWidth.
+          row(200, [
+            square("wide"),
+            box("wide-later", { width: { dp: 20 }, minWidth: 40, height: { dp: 10 } }),
+          ]),
+          // A capped ratio between two texts grows to its cap (#16681).
+          row(200, [
+            text("between-start", "a"),
+            box("between-capped", { aspectRatio: 2, maxWidth: 100 }),
+            text("between-end", "b"),
+          ]),
+          // An unsized ratio after a capped one takes what the cap and the text leave (#16681).
+          row(300, [
+            box("after-capped", { aspectRatio: 2, maxWidth: 100 }),
+            text("after-text", "a"),
+            box("after-unsized", { aspectRatio: 1 }),
+            text("after-end", "b"),
+          ]),
+        ],
+      },
+    });
+    const page = await browser.newPage({ viewport: WEB_SCREENSHOT_VIEWPORT, deviceScaleFactor: 1 });
+    try {
+      await page.setContent(`<!doctype html><html><body>${toHtml(element)}</body></html>`);
+      const widths = await page.$$eval("[data-testid]", (nodes) =>
+        Object.fromEntries(
+          nodes.map((node) => [
+            node.getAttribute("data-testid") ?? "",
+            node.getBoundingClientRect().width,
+          ]),
+        ),
+      );
+      const width = (testTag: string) => {
+        expect(widths).toHaveProperty(testTag);
+        return widths[testTag]!;
+      };
+      expect(width("narrow-square")).toBeCloseTo(100, 0);
+      expect(width("narrow-later")).toBeCloseTo(0, 0);
+      expect(width("wide-square")).toBeCloseTo(100, 0);
+      expect(width("wide-later")).toBeCloseTo(40, 0);
+
+      expect(width("between-capped")).toBeCloseTo(100, 0);
+      expect(width("between-start")).toBeGreaterThan(0);
+      expect(width("between-end")).toBeGreaterThan(0);
+
+      const afterText = width("after-text");
+      expect(width("after-capped")).toBeCloseTo(100, 0);
+      expect(afterText).toBeGreaterThan(0);
+      expect(width("after-unsized")).toBeCloseTo(300 - 100 - afterText, 0);
+      expect(width("after-end")).toBeCloseTo(0, 0);
+    } finally {
+      await page.close();
+    }
+  });
 });
 
 const FADE_FIXTURE = join(

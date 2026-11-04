@@ -2139,8 +2139,10 @@ the capability yet.
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
-Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. CtrlProxy registers the module on Android and opens each page for its own package with
+Android only. The spec validators are platform-neutral, so the host's iOS show preflight refuses a literal
+Android-only `page` with the action's path; a bound page is left to the runtime. The Kotlin validator needs no
+such check because it runs only on Android, and the Swift agent validator has none yet because the iOS agent
+does not advertise the module, which the host's capability gate refuses. CtrlProxy registers the module on Android and opens each page for its own package with
 `FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
 the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
 handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do
@@ -2258,6 +2260,12 @@ it keeps `/platform/location/current` current while the prototype is shown and r
 write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
 `requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
+The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
+only when the spec emits them or writes them into `/data`. `prototypeLocationEventSummary`
+(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
+`test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
+the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
+names (never the values) of anything it dropped.
 
 **BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
 of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
@@ -3971,6 +3979,11 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   `width` (1 to 16) and `color`.
 - `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
   path that receives the settled camera.
+- Every `emit` a marker tap runs, including those in its nested `onSuccess`, `onError` and `startTimer`
+  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context after the authored
+  entries, under the same byte budget. The contract lists the name in
+  `platformModules.map.events.markerTap.emitContext`. All three validators refuse an authored
+  `context.markerId` inside `onMarkerTap`. Outside it, `markerId` is an ordinary context name.
 - `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
   and the `location` permission in `requires.permissions`.
 - The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a

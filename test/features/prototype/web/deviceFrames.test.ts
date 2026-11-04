@@ -3,9 +3,13 @@ import {
   DEVICE_FRAMES,
   deviceFrameOrThrow,
   defaultDeviceFrameId,
+  normalizeDeviceFrame,
+} from "../../../../src/features/prototype/web/deviceFrames";
+import {
   deviceFrameProblems,
   parseDeviceFrames,
-} from "../../../../src/features/prototype/web/deviceFrames";
+  type DeviceFrameEntry,
+} from "../../../../src/features/prototype/web/deviceFrameSchema";
 import registry from "../../../../src/features/prototype/web/deviceFrames.json";
 
 const frame = (overrides: Record<string, unknown> = {}) => ({
@@ -126,6 +130,16 @@ describe("device frame schema v2 (#16444)", () => {
     }
     expect(parsed.data.frames[0].panels.map((panel) => panel.role)).toEqual(["inner", "cover"]);
     expect(parsed.data.frames[0].hinge?.panel).toBe("inner");
+  });
+
+  test("the zod-free registry normalizes exactly as the schema parses (#16451)", () => {
+    const entries = [...registry.frames, foldable(), frame({ formFactor: "watch", mask: "round" })];
+    const parsed = parseDeviceFrames({ frames: entries });
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+    expect((entries as DeviceFrameEntry[]).map(normalizeDeviceFrame)).toEqual(parsed.data.frames);
+    expect(DEVICE_FRAMES).toEqual(parsed.data.frames.slice(0, registry.frames.length));
   });
 
   test("accepts a round rotary watch and a dpad TV", () => {

@@ -270,6 +270,11 @@ export interface SearchableEntry extends SearchableNode {
    * package is the IME's when the capture names it.
    */
   inputMethod?: { package?: string };
+  /**
+   * The descendant text nodes whose labels were hoisted onto this tappable row, in
+   * label order. Present only on a row that received hoisted labels.
+   */
+  hoistedSources?: readonly SearchableEntry[];
 }
 
 /** `AccessibilityWindowInfo.TYPE_INPUT_METHOD`. */
@@ -477,6 +482,7 @@ function hoistSearchableLabels(entries: SearchableEntry[]): void {
     const folded = foldSearchableLabels(row, parts);
     row.displayedLabel = displayedSearchableLabel(folded.label);
     row.label = row.displayedLabel;
+    row.hoistedSources = texts;
     row.textFields = [
       ...new Set(
         [row.displayedLabel, ...row.textFields, ...parts].filter(

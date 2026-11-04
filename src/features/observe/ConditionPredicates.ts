@@ -13,6 +13,7 @@ import {
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
+import { hasVisibleScreenPart } from "../utility/ElementGeometry";
 
 const waitHierarchyProjection = new SearchableHierarchy();
 
@@ -278,12 +279,35 @@ function boundedChosenAncestor(result: ElementResolution, source: SearchableEntr
   return chosen === source || isWithin(source, chosen, result.snapshotNodes) ? chosen : undefined;
 }
 
-function boundedMatchedSource(result: ElementResolution | undefined, selector: ConditionSelector) {
+/**
+ * Whether `source` matched the selector text only through a label hoisted from its
+ * descendants, and one of those descendants has no visible part on screen (#17007).
+ * Such a composite label ("7:00 Alarm" from a visible " Alarm" row and an off-screen
+ * "7:00" child) does not show the text, so a wait must not accept it. Text the node
+ * carries itself is unaffected. Selector resolution for actions is unchanged.
+ */
+function matchesOnlyThroughOffScreenHoist(
+  source: SearchableEntry,
+  selector: ConditionSelector,
+  screenSize: ObserveResult["screenSize"],
+): boolean {
+  return (
+    source.hoistedSources !== undefined &&
+    !ownsSelectorText(source, selector.text) &&
+    source.hoistedSources.some((part) => !hasVisibleScreenPart(part.bounds, screenSize))
+  );
+}
+
+function boundedMatchedSource(
+  result: ElementResolution | undefined,
+  selector: ConditionSelector,
+  screenSize: ObserveResult["screenSize"],
+) {
   if (!result) {
     return undefined;
   }
   const source = matchedSourceNode(result, selector);
-  if (!source) {
+  if (!source || matchesOnlyThroughOffScreenHoist(source, selector, screenSize)) {
     return undefined;
   }
   if (source.bounds && source.element) {
@@ -311,7 +335,7 @@ export function appear(
       result,
       fallback: sources.flatMap((node) => (node.element ? [node.element] : [])),
     });
-    const source = boundedMatchedSource(result, selector);
+    const source = boundedMatchedSource(result, selector, observation.screenSize);
     return {
       matched: Boolean(source),
       matchedElement: source?.element,
@@ -339,7 +363,10 @@ export function disappear(
     if (failure) {
       return failure;
     }
-    return { matched: !boundedMatchedSource(result, selector), candidates: elements(result) };
+    return {
+      matched: !boundedMatchedSource(result, selector, observation.screenSize),
+      candidates: elements(result),
+    };
   };
 }
 

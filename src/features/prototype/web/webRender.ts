@@ -33,6 +33,7 @@ import { withLaterMinStrut } from "./webLaterMin";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
+  containerChildStyle,
   cssColor,
   fontPx,
   lineCss,
@@ -354,7 +355,7 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
-    const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
+    const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, axis) });
     const rowed = rowMeasured(node, path, prepareIn(inner));
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
@@ -364,7 +365,7 @@ const box: NodeRenderer = (raw, scope, path) => {
   // A wrap-sized box grows around a filling child, as a Compose Box does.
   const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
-  const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
+  const inner = child(scope, { inBox: true, style: containerChildStyle(scope, node, undefined) });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -399,7 +400,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope.style, horizontal) });
+  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope, node) });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
@@ -835,7 +836,7 @@ const card: NodeRenderer = (raw, scope, path) => {
       "onSurface",
     ),
   });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
+  const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 

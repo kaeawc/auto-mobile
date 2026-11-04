@@ -5,10 +5,14 @@ import {
 } from "../../scripts/store-listing/validate-store-listing";
 import { validateIconSvg } from "../../scripts/store-listing/iconSourceCheck";
 import {
+  checkDocsSiteUrls,
+  docsPageCandidates,
   lengthOf,
   validateListing,
   type ListingFiles,
 } from "../../scripts/store-listing/storeListing";
+import { loadMkdocsConfig } from "../../scripts/validate-mkdocs-nav";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -168,6 +172,52 @@ describe("store listing validation", () => {
   });
 });
 
+describe("docs-site privacy and support URLs", () => {
+  const SITE = "https://docs.example/project/";
+  const site = (pages: string[]) => ({
+    url: SITE,
+    hasPage: (page: string) => pages.includes(page),
+  });
+  const tree = (privacy: string, support: string) =>
+    validTree({
+      "ios/en-US/privacy_url.txt": `${privacy}\n`,
+      "ios/en-US/support_url.txt": `${support}\n`,
+    });
+
+  test("maps directory URLs to the page or index they are built from", () => {
+    expect(docsPageCandidates(`${SITE}app/privacy/`, SITE)).toEqual([
+      "app/privacy.md",
+      "app/privacy/index.md",
+    ]);
+    expect(docsPageCandidates(`${SITE}app/support/#help`, SITE.slice(0, -1))).toEqual([
+      "app/support.md",
+      "app/support/index.md",
+    ]);
+    expect(docsPageCandidates(SITE, SITE)).toEqual(["index.md"]);
+    expect(docsPageCandidates("https://github.com/o/r/issues", SITE)).toBeUndefined();
+  });
+
+  test("accepts URLs whose docs pages exist", () => {
+    const files = tree(`${SITE}app/privacy/`, `${SITE}app/support/index`);
+    expect(checkDocsSiteUrls(files, site(["app/privacy.md", "app/support/index.md"]))).toEqual([]);
+  });
+
+  test("rejects an off-site URL and a URL with no page behind it", () => {
+    const files = tree(`${SITE}legal/privacy/`, "https://github.com/o/r/issues");
+    expect(checkDocsSiteUrls(files, site([]))).toEqual([
+      {
+        path: "ios/en-US/privacy_url.txt",
+        message:
+          "no docs page builds this URL; expected docs/legal/privacy.md or docs/legal/privacy/index.md",
+      },
+      {
+        path: "ios/en-US/support_url.txt",
+        message: `must be a page on the docs site (${SITE})`,
+      },
+    ]);
+  });
+});
+
 describe("the committed ProtoViewer listing", () => {
   const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -175,6 +225,18 @@ describe("the committed ProtoViewer listing", () => {
     const files = readListingTree(join(repoRoot, "fastlane/metadata"));
     expect(files.size).toBeGreaterThan(0);
     expect(validateListing(files)).toEqual([]);
+  });
+
+  test("points privacy and support at pages the docs site builds", async () => {
+    const siteUrl = (await loadMkdocsConfig(join(repoRoot, "mkdocs.yml"))).site_url;
+    expect(typeof siteUrl).toBe("string");
+    const files = readListingTree(join(repoRoot, "fastlane/metadata"));
+    expect(
+      checkDocsSiteUrls(files, {
+        url: String(siteUrl),
+        hasPage: (page) => existsSync(join(repoRoot, "docs", page)),
+      }),
+    ).toEqual([]);
   });
 });
 

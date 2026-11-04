@@ -417,6 +417,7 @@ const ROOT_LEVEL_GATES = [
   "prototype_reduced_motion_v1",
   "prototype_window_motion_v1",
   "prototype_platform_window_controls_v1",
+  "prototype_platform_push_v1",
 ];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {

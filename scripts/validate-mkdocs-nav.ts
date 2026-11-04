@@ -76,19 +76,23 @@ async function markdownFiles(docsDir: string): Promise<string[]> {
   return files.sort();
 }
 
-async function main(): Promise<void> {
-  const root = process.cwd();
-  const mkdocsPath = path.join(root, "mkdocs.yml");
-  const docsDir = path.join(root, "docs");
+/** Parses mkdocs.yml into its top-level keys (empty when it is not a mapping). */
+export async function loadMkdocsConfig(mkdocsPath: string): Promise<Record<string, unknown>> {
   // MkDocs accepts Python-specific tags in plugin configuration. They are not
   // nav data and js-yaml cannot construct them, so neutralize only the tag
   // annotation before structurally parsing the document.
   const yaml = (await readFile(mkdocsPath, "utf8")).replace(/!!python\/name:[^\s]+/g, "");
   const parsed = load(yaml, { filename: mkdocsPath });
-  const nav =
-    parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>).nav
-      : undefined;
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
+}
+
+async function main(): Promise<void> {
+  const root = process.cwd();
+  const mkdocsPath = path.join(root, "mkdocs.yml");
+  const docsDir = path.join(root, "docs");
+  const nav = (await loadMkdocsConfig(mkdocsPath)).nav;
   if (!nav) {
     throw new Error("mkdocs.yml has no nav section");
   }

@@ -15,6 +15,8 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
 /** Build filter, two-build diff and unverified-edge marking over the app-union graph (#4987). */
+private const val NOW = 1_000L
+
 class NavigationBuildLensTest {
 
   private suspend fun loadGraph(): NavigationGraph =
@@ -43,7 +45,7 @@ class NavigationBuildLensTest {
     val lens = BuildLens.Filter(v1)
     val alphas =
       graph.screens.associate {
-        it.name to NavigationBuildLens.alphaFor(it.provenance, activeContext, lens)
+        it.name to NavigationBuildLens.alphaFor(it.provenance, activeContext, lens, NOW)
       }
     assertEquals(
       mapOf(
@@ -57,7 +59,7 @@ class NavigationBuildLensTest {
     // A fade filter is a lens on the single union: nothing is removed.
     assertEquals(graph, NavigationBuildLens.visibleGraph(graph, lens))
     assertEquals(
-      "Search — not in build v1 (hashA)",
+      "Search — not in build v1 (hashA), last seen 1",
       NavigationBuildLens.contentDescription(
         "Search",
         graph.screens[2].provenance,
@@ -107,8 +109,8 @@ class NavigationBuildLensTest {
     val graph = loadGraph()
     val login = graph.screens.single { it.name == "Login" }
     assertEquals(
-      ProvenanceOpacity.alphaFor(login.provenance, activeContext),
-      NavigationBuildLens.alphaFor(login.provenance, activeContext, BuildLens.Union),
+      ProvenanceOpacity.alphaFor(login.provenance, activeContext, NOW),
+      NavigationBuildLens.alphaFor(login.provenance, activeContext, BuildLens.Union, NOW),
     )
     assertEquals(graph, NavigationBuildLens.visibleGraph(graph, BuildLens.Union))
   }

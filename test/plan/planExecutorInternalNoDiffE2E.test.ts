@@ -46,7 +46,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   let originalDiff: boolean;
   let restorePipelineOverrides: () => void;
   let sessionId: string;
-  let baselineAfterObserve: unknown;
+  let baselineAfterObserve: ReturnType<SessionManager["getLastRenderedObservation"]>;
 
   function sameScreenObserve(): ObserveResult {
     return {

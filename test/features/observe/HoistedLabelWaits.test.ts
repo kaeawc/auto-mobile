@@ -253,3 +253,24 @@ describe("whitespace-variant contributors to the folded label (#17026)", () => {
     expect(disappear(resolver, { text: "7:00 Alarm" })(alarmRow(850)).matched).toBe(true);
   });
 });
+
+describe("regex waits keep whitespace when judging the folded part (#17026)", () => {
+  test("a visible part that differs in whitespace does not back a whitespace-sensitive regex", () => {
+    const observation = screenWith([
+      {
+        text: " Alarm",
+        clickable: "true",
+        bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        node: [
+          { text: "7:00 ", bounds: { left: 0, top: -90, right: 100, bottom: -50 } },
+          { text: "7:00", bounds: { left: 0, top: 20, right: 100, bottom: 60 } },
+        ],
+      },
+    ]);
+    const selector = { text: "^7:00 {2}Alarm$", match: "regex" as const };
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(observation).matched).toBe(false);
+    expect(disappear(resolver, selector)(observation).matched).toBe(true);
+  });
+});

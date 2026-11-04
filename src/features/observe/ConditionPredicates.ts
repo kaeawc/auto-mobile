@@ -299,7 +299,8 @@ function matchesOnlyThroughOffScreenHoist(
   if (hoisted.every(visible)) {
     return false;
   }
-  return !matchesAnyText(visibleBackedTexts(source, visible, selector), selector, matchMode);
+  const texts = visibleBackedTexts(source, visible, { selector, matchMode });
+  return !matchesAnyText(texts, selector, matchMode);
 }
 
 interface HoistCheck {
@@ -315,9 +316,9 @@ interface HoistCheck {
 function visibleBackedTexts(
   source: SearchableEntry,
   visible: (part: SearchableEntry) => boolean,
-  selector: ConditionSelector,
+  comparison: { selector: ConditionSelector; matchMode: MatchMode },
 ): string[] {
-  const labelBacked = foldedPartIsVisible(source, visible, selector);
+  const labelBacked = foldedPartIsVisible(source, visible, comparison);
   const own = Object.values(source.textSources);
   return [
     ...own,
@@ -334,24 +335,38 @@ function visibleBackedTexts(
  * Whether a visible descendant supplies the part folded into `source`'s label. The fold keeps one
  * of the parts that differ only in whitespace (" 7:00" and "7:00 "), and the resolver normalizes
  * the composed label the same way for each (#17026), so any visible descendant whose label is
- * equivalent under the selector's normalization supplies it.
+ * equivalent under the selector's normalization supplies it. Regex and `elementId` text keep
+ * whitespace, so there only a label that differs at most in quotes and case is equivalent.
  */
 function foldedPartIsVisible(
   source: SearchableEntry,
   visible: (part: SearchableEntry) => boolean,
-  { caseSensitive }: ConditionSelector,
+  { selector, matchMode }: { selector: ConditionSelector; matchMode: MatchMode },
 ): boolean {
   const folded = source.hoistedLabelSources?.[0]?.label;
   if (folded === undefined) {
     return true;
   }
-  const part = normalizeMatchText(folded, caseSensitive);
+  const equivalent = labelEquivalence(selector, matchMode);
+  const part = equivalent(folded);
   return (source.hoistedSources ?? []).some(
-    (other) =>
-      visible(other) &&
-      other.label !== undefined &&
-      normalizeMatchText(other.label, caseSensitive) === part,
+    (other) => visible(other) && other.label !== undefined && equivalent(other.label) === part,
   );
+}
+
+/** How the wait normalizes a label before comparing it with the selector text. */
+function labelEquivalence(
+  { caseSensitive, elementId }: ConditionSelector,
+  matchMode: MatchMode,
+): (label: string) => string {
+  if (elementId !== undefined) {
+    return (label) => normalizeQuotes(label).toLowerCase();
+  }
+  if (matchMode === "regex") {
+    return (label) =>
+      caseSensitive ? normalizeQuotes(label) : normalizeQuotes(label).toLowerCase();
+  }
+  return (label) => normalizeMatchText(label, caseSensitive);
 }
 
 /**

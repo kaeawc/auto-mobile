@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AppLifecycle } from "../../../src/features/action/AppLifecycle";
+import { AppLifecycle, describeTrimFailure } from "../../../src/features/action/AppLifecycle";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import { wrapCommandError } from "../../../src/utils/CommandError";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -36,6 +37,27 @@ function harness(dump = running, platform: BootedDevice["platform"] = "android")
     { adb, timer, cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} } },
   );
   return { adb, action };
+}
+
+// What `am send-trim-memory COMPLETE` prints for a foreground app on API 37 (#16481): the reason
+// first, then a stack long enough that a 300-character tail excerpt holds only frames.
+const foregroundRefusalStderr = [
+  "Exception occurred while executing 'send-trim-memory':",
+  "java.lang.IllegalArgumentException: Unable to set a background trim level on a foreground process",
+  ...Array.from(
+    { length: 12 },
+    (_, i) =>
+      `\tat com.android.server.am.ActivityManagerService.frame${i}(ActivityManagerService.java:${i})`,
+  ),
+  "\tat android.app.IActivityManager$Stub.onTransact(IActivityManager.java:2959)",
+].join("\n");
+
+function wrappedAdbFailure(stderr: string): Error {
+  const raw = Object.assign(new Error(`Command failed: adb shell am send-trim-memory\n${stderr}`), {
+    code: 255,
+    stderr,
+  });
+  return wrapCommandError(raw, { command: "adb", args: ["shell", "am", "send-trim-memory"] });
 }
 
 const trimCommands = (adb: FakeAdbExecutor) =>
@@ -113,6 +135,44 @@ describe("AppLifecycle trimMemory (#14090)", () => {
     const response = await action.execute(appId, "trimMemory", { trimLevel: "COMPLETE" });
     expect(response).toMatchObject({ success: false, errorCode: "trim_failed" });
     expect(response.error).toContain("device offline");
+  });
+
+  test("a background level refused for a foreground app names the cause and the fix (#16481)", async () => {
+    const { adb, action } = harness();
+    const thrown = wrappedAdbFailure(foregroundRefusalStderr);
+    expect(thrown.message).not.toContain("foreground process");
+    adb.setCommandError("send-trim-memory", thrown);
+    const response = await action.execute(appId, "trimMemory", { trimLevel: "COMPLETE" });
+    expect(response).toMatchObject({ success: false, errorCode: "trim_failed" });
+    expect(response.error).toContain("Android refused COMPLETE");
+    expect(response.error).toContain(
+      "java.lang.IllegalArgumentException: Unable to set a background trim level on a foreground process",
+    );
+    expect(response.error).toContain("RUNNING_");
+    expect(response.error).toContain("action background");
+    expect(response.error).not.toContain("onTransact");
+  });
+
+  test("another thrown exception reports its sentence rather than the stack tail", async () => {
+    const { adb, action } = harness();
+    const stderr = foregroundRefusalStderr.replace(
+      "Unable to set a background trim level on a foreground process",
+      "Unknown level option: SOMETHING",
+    );
+    adb.setCommandError("send-trim-memory", wrappedAdbFailure(stderr));
+    const response = await action.execute(appId, "trimMemory", { trimLevel: "BACKGROUND" });
+    expect(response.error).toBe(
+      `am send-trim-memory BACKGROUND failed for ${appId}: java.lang.IllegalArgumentException: Unknown level option: SOMETHING`,
+    );
+  });
+
+  test("printed refusal output is described the same way", () => {
+    expect(describeTrimFailure(foregroundRefusalStderr, appId, "MODERATE", "fallback")).toStartWith(
+      `Android refused MODERATE for ${appId} because it is in the foreground`,
+    );
+    expect(describeTrimFailure("no exception here", appId, "COMPLETE", "fallback")).toBe(
+      "fallback",
+    );
   });
 
   test("iOS is unsupported", async () => {

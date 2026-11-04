@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { toHtml } from "../../../../src/features/prototype/web/webNodes";
+import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 import { diffPngs } from "../../../../src/features/visual/VisualDiff";
 import {
   WEB_SCREENSHOT_FONT_CSS,
@@ -380,6 +382,105 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
     },
     CASE_TIMEOUT_MS,
   );
+
+  test("a fitted map stretched in a narrow column keeps both pins inside the box (#16679)", async () => {
+    const markers = {
+      path: "/ends",
+      as: "end",
+      lat: "{end.lat}",
+      lng: "{end.lng}",
+      title: "{end.name}",
+    };
+    const map = (fit: string, extra: Record<string, unknown>) => ({
+      type: "map",
+      fit,
+      markers,
+      polylines: [{ path: "/ends", width: 4 }],
+      ...extra,
+    });
+    const reference = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "../../../fixtures/prototype-web/reference-checkout.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    const { element } = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "column",
+        style: { width: { dp: 200 } },
+        children: [
+          map("markers", {}),
+          map("route", { style: { height: { dp: 120 } } }),
+          // Padding shrinks the content box the pins scale by; the route must scale with them.
+          map("markers", { style: { padding: { start: 40, top: 10 } } }),
+        ],
+      },
+      data: {
+        ends: [
+          { name: "West", lat: 0, lng: -1 },
+          { name: "East", lat: 0.5, lng: 1 },
+        ],
+      },
+    });
+    const page = await browser.newPage({ viewport: WEB_SCREENSHOT_VIEWPORT, deviceScaleFactor: 1 });
+    try {
+      await page.setContent(`<!doctype html><html><body>${toHtml(element)}</body></html>`);
+      const boxes = await page.$$eval('[data-node="map"]', (maps) =>
+        maps.map((map) => {
+          const box = map.getBoundingClientRect();
+          // A pin's point is where it is placed (`left`/`top`), before its transform moves the drawing.
+          const tips = Array.from(map.querySelectorAll<HTMLElement>('[data-part="marker"]')).map(
+            (pin) => ({
+              x: box.left + map.clientLeft + pin.offsetLeft,
+              y: box.top + map.clientTop + pin.offsetTop,
+            }),
+          );
+          const polyline = map.querySelector("polyline");
+          const line = polyline?.getBoundingClientRect();
+          // The route's ends in page px, to meet the pin tips.
+          const matrix = polyline?.getScreenCTM();
+          const ends = Array.from(polyline?.points ?? [])
+            .filter((_, index, all) => index === 0 || index === all.length - 1)
+            .map((point) => point.matrixTransform(matrix ?? undefined))
+            .map(({ x, y }) => ({ x, y }));
+          return {
+            box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+            tips,
+            ends,
+            line: line && {
+              left: line.left,
+              right: line.right,
+              top: line.top,
+              bottom: line.bottom,
+            },
+          };
+        }),
+      );
+      expect(boxes).toHaveLength(3);
+      for (const { box, tips, line, ends } of boxes) {
+        expect(box.right - box.left).toBeCloseTo(200, 0);
+        expect(tips).toHaveLength(2);
+        for (const tip of tips) {
+          expect(tip.x).toBeGreaterThan(box.left);
+          expect(tip.x).toBeLessThan(box.right);
+          expect(tip.y).toBeGreaterThan(box.top);
+          expect(tip.y).toBeLessThan(box.bottom);
+        }
+        // The route runs between the pins, so it is inside the box too (its round caps aside).
+        expect(line!.left).toBeGreaterThan(box.left);
+        expect(line!.right).toBeLessThan(box.right);
+        // Each pin's tip sits on its end of the route.
+        for (const [index, end] of ends.entries()) {
+          expect(Math.abs(end.x - tips[index]!.x)).toBeLessThan(1);
+          expect(Math.abs(end.y - tips[index]!.y)).toBeLessThan(1);
+        }
+        expect(ends).toHaveLength(2);
+      }
+    } finally {
+      await page.close();
+    }
+  });
 });
 
 const FADE_FIXTURE = join(

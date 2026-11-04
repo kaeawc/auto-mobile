@@ -292,7 +292,7 @@ function framing(
   scope: WebRenderScope,
   points: { markers: MapPoint[]; lines: MapPoint[][] },
   size: { width: number; height: number },
-): { view: MapFraming; orientation: MapOrientation } {
+): { view: MapFraming; orientation: MapOrientation; fitted: boolean } {
   const fitted =
     node.fit === "markers"
       ? fitFraming(points.markers, size)
@@ -300,23 +300,29 @@ function framing(
         ? fitFraming([], size, points.lines)
         : undefined;
   if (fitted) {
-    return { view: fitted, orientation: NORTH_UP };
+    return { view: fitted, orientation: NORTH_UP, fitted: true };
   }
   const camera = cameraFraming(node, scope);
   if (camera) {
-    return { view: camera, orientation: cameraOrientation(cameraRecord(node, scope)) };
+    return {
+      view: camera,
+      orientation: cameraOrientation(cameraRecord(node, scope)),
+      fitted: false,
+    };
   }
-  const view = fitFraming(points.markers, size, points.lines) ?? {
-    center: { x: 0.5, y: 0.5 },
-    worldSize: TILE_SIZE,
+  const all = fitFraming(points.markers, size, points.lines);
+  return {
+    view: all ?? { center: { x: 0.5, y: 0.5 }, worldSize: TILE_SIZE },
+    orientation: NORTH_UP,
+    fitted: all !== undefined,
   };
-  return { view, orientation: NORTH_UP };
 }
 
 /**
  * Where a drawn point sits, in dp right of and below the box centre. The page places it from the
- * centre (`calc(50% + …px)`), so CSS resolves it against the box as rendered: a map that fills its
- * parent draws its points at their true zoom whatever size it takes.
+ * centre (`calc(50% + …px)`), so CSS resolves it against the box as rendered: a camera map that
+ * fills its parent draws its points at their true zoom whatever size it takes. A fit scales the
+ * offset with the box instead (`fittedFromCentre`).
  */
 export interface MapOffset {
   readonly x: number;
@@ -503,6 +509,21 @@ export function fromCentre(dp: number): string {
   return dp === 0 ? "50%" : `calc(50% ${dp < 0 ? "-" : "+"} ${Math.abs(dp)}px)`;
 }
 
+/**
+ * One offset from the box centre for a fitted framing, scaled by how the rendered box compares
+ * with the `size` it was fitted in: `min(100cqw / width, 100cqh / height)` per dp, the box being a
+ * size container. A box rendered at the fitted size places the point exactly as `fromCentre`; a
+ * box its parent renders narrower or shorter shrinks the fit uniformly, so the points stay inside
+ * it and keep their shape, as `routeLayer`'s `meet` viewBox scales the lines.
+ */
+export function fittedFromCentre(dp: number, size: Size): string {
+  if (dp === 0) {
+    return "50%";
+  }
+  const share = (side: number) => Number(((Math.abs(dp) / side) * 100).toFixed(4));
+  return `calc(50% ${dp < 0 ? "-" : "+"} min(${share(size.width)}cqw, ${share(size.height)}cqh))`;
+}
+
 /** A `{dp}` dimension, as the style maps it to CSS; undefined for anything else. */
 function dpSize(value: unknown): number | undefined {
   const dp = record(value)?.dp;
@@ -514,8 +535,9 @@ function dpSize(value: unknown): number | undefined {
  * (unsized, `wrap`) leaves the box at its 200 dp. An axis its parent sizes (`fill`, a `weight` on
  * the parent's main axis, or stretching across a column) cannot be known here, so it takes the
  * screen's, the most it can render at: the eye then sits far enough out that no horizon shows in
- * the box, and the ground's reach covers it. Points are placed from the centre in dp, so they land
- * true whatever size the box renders at.
+ * the box, and the ground's reach covers it. A camera's points are placed from the centre in dp,
+ * so they land true whatever size the box renders at; a fit's scale with the box (see
+ * `fittedFromCentre`).
  */
 export function mapSize(
   style: Raw | undefined,
@@ -534,21 +556,43 @@ export function mapSize(
 }
 
 /**
- * The route lines in an SVG whose origin is the box centre: one user unit is one dp, so the lines
- * keep their zoom at any rendered size. The SVG is a pixel square, as a zero-size one draws nothing.
+ * The route lines in an SVG whose origin is the box centre, one user unit a dp. Under a camera the
+ * SVG is a pixel square at the centre (a zero-size one draws nothing), so the lines keep their zoom
+ * at any rendered size. Under a fit (`fitted` is the size it was fitted in) the SVG is the box's
+ * content size (`100cqw` × `100cqh`) about the same centre, with that size as a `meet` viewBox, so a box rendered smaller shrinks the lines uniformly, as
+ * `fittedFromCentre` places the pins; the stroke keeps its dp width.
  */
-function routeLayer(lines: MapLine[], project: (points: MapPoint[]) => MapOffset[][]) {
+function routeLayer(
+  lines: MapLine[],
+  project: (points: MapPoint[]) => MapOffset[][],
+  fitted: Size | undefined,
+) {
+  const frame: { attrs: Record<string, string>; style: Record<string, string> } = fitted
+    ? {
+        attrs: {
+          viewBox: `${-fitted.width / 2} ${-fitted.height / 2} ${fitted.width} ${fitted.height}`,
+          preserveAspectRatio: "xMidYMid meet",
+          "aria-hidden": "true",
+        },
+        // Sized in container units, the content box `fittedFromCentre` scales the pins by, and
+        // centred where the pins' `50%` is, so padding cannot part the lines from the pins.
+        style: {
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          width: "100cqw",
+          height: "100cqh",
+          transform: "translate(-50%,-50%)",
+          overflow: "visible",
+        },
+      }
+    : {
+        attrs: { width: "1", height: "1", "aria-hidden": "true" },
+        style: { position: "absolute", left: "50%", top: "50%", overflow: "visible" },
+      };
   return el(
     "svg",
-    {
-      attrs: { width: "1", height: "1", "aria-hidden": "true" },
-      style: {
-        position: "absolute",
-        left: "50%",
-        top: "50%",
-        overflow: "visible",
-      },
-    },
+    frame,
     lines.flatMap((line) =>
       project(line.points).map((run) =>
         el("polyline", {
@@ -559,6 +603,7 @@ function routeLayer(lines: MapLine[], project: (points: MapPoint[]) => MapOffset
             "stroke-width": String(line.width),
             "stroke-linecap": "round",
             "stroke-linejoin": "round",
+            ...(fitted ? { "vector-effect": "non-scaling-stroke" } : {}),
           },
         }),
       ),
@@ -566,13 +611,18 @@ function routeLayer(lines: MapLine[], project: (points: MapPoint[]) => MapOffset
   );
 }
 
-function markerPin(marker: MapMarker, at: MapOffset, color: string): WebElement {
+function markerPin(
+  marker: MapMarker,
+  at: MapOffset,
+  color: string,
+  place: (dp: number) => string,
+): WebElement {
   return el("span", {
     attrs: { role: "img", "aria-label": marker.title, title: marker.title, "data-part": "marker" },
     style: {
       position: "absolute",
-      left: fromCentre(at.x),
-      top: fromCentre(at.y),
+      left: place(at.x),
+      top: place(at.y),
       width: "20px",
       height: "20px",
       transform: "translate(-50%,-100%) rotate(-45deg)",
@@ -635,7 +685,7 @@ const mapRenderer =
     const eye = eyeDistance(size.height);
     const markers = mapMarkers(node, scope);
     const lines = mapLines(node, scope);
-    const { view, orientation } = framing(
+    const { view, orientation, fitted } = framing(
       node,
       scope,
       {
@@ -650,21 +700,31 @@ const mapRenderer =
       position: "relative",
       overflow: "hidden",
       background: turned ? MAP_BACKGROUNDS.plain! : background,
-      // Lets the ground layer size itself from the box as rendered (`cqmax`); the map's content is
-      // all absolutely placed, so size containment changes nothing else.
-      ...(turned ? { "container-type": "size" } : {}),
+      // Lets the ground layer (`cqmax`) and a fit's pins (`cqw`/`cqh`) size themselves from the box
+      // as rendered; the map's content is all absolutely placed, so size containment changes
+      // nothing else.
+      ...(turned || fitted ? { "container-type": "size" } : {}),
       "align-self": "stretch",
       height: `${DEFAULT_MAP_HEIGHT}px`,
     });
     const pin = cssColor("error", scope.style) ?? "#b3261e";
+    // A fit chose its zoom for `size`, so its points scale with the box as rendered; a camera's
+    // zoom is fixed, so its points stay in dp.
+    const place = fitted ? (dp: number) => fittedFromCentre(dp, size) : fromCentre;
     return el("div", { attrs: { "aria-label": "Map", ...attrs, role: "img" }, style: css }, [
       ...(turned ? [groundLayer(background, orientation, size)] : []),
       ...(lines.length > 0
-        ? [routeLayer(lines, (points) => projectLine(points, view, eye, orientation))]
+        ? [
+            routeLayer(
+              lines,
+              (points) => projectLine(points, view, eye, orientation),
+              fitted ? size : undefined,
+            ),
+          ]
         : []),
       ...markers.flatMap((marker) => {
         const at = projectOffset(marker.point, view, eye, orientation);
-        return at ? [markerPin(marker, at, pin)] : [];
+        return at ? [markerPin(marker, at, pin, place)] : [];
       }),
     ]);
   };

@@ -5,6 +5,7 @@ import {
   cameraOrientation,
   eyeDistance,
   fitFraming,
+  fittedFromCentre,
   fromCentre,
   groundReach,
   groundTransform,
@@ -57,19 +58,26 @@ function still(map: Record<string, unknown>) {
   return { ...rendered, part, html: toHtml(rendered.element) };
 }
 
-/** A pin's offset from the box centre, read back from `fromCentre`'s CSS. */
-function offsetOf(value: unknown): number {
+/** The default still frame's portrait screen, which a root map fills. */
+const SCREEN = { width: 411, height: 923 };
+
+/**
+ * A pin's offset from the box centre in px, read back from `fromCentre`'s or
+ * `fittedFromCentre`'s CSS, the latter resolved for a box rendered at `box`.
+ */
+function offsetOf(value: unknown, box: { width: number; height: number } = SCREEN): number {
   const text = String(value);
   if (text === "50%") {
     return 0;
   }
-  const match = /^calc\(50% ([+-]) ([\d.]+)px\)$/.exec(text);
-  expect(match).not.toBeNull();
-  return (match![1] === "-" ? -1 : 1) * Number(match![2]);
+  const dp = /^calc\(50% ([+-]) ([\d.]+)px\)$/.exec(text);
+  const fit = /^calc\(50% ([+-]) min\(([\d.]+)cqw, ([\d.]+)cqh\)\)$/.exec(text);
+  expect(dp ?? fit).not.toBeNull();
+  const sign = (dp ?? fit)![1] === "-" ? -1 : 1;
+  return dp
+    ? sign * Number(dp[2])
+    : sign * Math.min((Number(fit![2]) * box.width) / 100, (Number(fit![3]) * box.height) / 100);
 }
-
-/** The default still frame's portrait screen, which a root map fills. */
-const SCREEN = { width: 411, height: 923 };
 
 const markers = {
   path: "/places",
@@ -109,14 +117,20 @@ describe("prototype web map (#16539)", () => {
     expect(map.unsupportedNodes).toEqual([]);
     const pins = map.part("marker");
     expect(pins.map((pin) => pin.attrs["aria-label"])).toEqual(["Ferry", "Pier"]);
-    const at = pins.map((pin) => [offsetOf(pin.style.left), offsetOf(pin.style.top)]);
+    const at = pins.map((pin) =>
+      [offsetOf(pin.style.left), offsetOf(pin.style.top)].map((dp) => Number(dp.toFixed(3)) + 0),
+    );
     // The root fills the screen: the fit spans 80% of its width (the tighter side), centred.
     expect(at[0]![0]).toBeCloseTo(-SCREEN.width * 0.4, 3);
     expect(at[1]).toEqual([-at[0]![0]!, -at[0]![1]!]);
     expect(map.html).toContain(
       `<polyline fill="none" points="${at[0]!.join(",")} ${at[1]!.join(",")}"`,
     );
-    expect(map.html).toContain('<svg aria-hidden="true" height="1"');
+    // A fit's lines scale with the box like its pins: the fitted size is a `meet` viewBox.
+    expect(map.html).toContain(
+      `preserveAspectRatio="xMidYMid meet" style="height:100cqh;left:50%;overflow:visible;position:absolute;top:50%;transform:translate(-50%,-50%);width:100cqw" viewBox="${-SCREEN.width / 2} ${-SCREEN.height / 2} ${SCREEN.width} ${SCREEN.height}"`,
+    );
+    expect(map.html).toContain('vector-effect="non-scaling-stroke"');
     expect(map.html).not.toMatch(/\b(src|href)=|url\(/);
   });
 
@@ -140,7 +154,8 @@ describe("prototype web map (#16539)", () => {
     });
     // The taller box fits the points by width, so they no longer reach the vertical margins.
     const pins = map.part("marker");
-    expect(pins.map((pin) => pin.style.left)).toEqual(["calc(50% - 80px)", "calc(50% + 80px)"]);
+    const box = { width: 200, height: 400 };
+    expect(pins.map((pin) => offsetOf(pin.style.left, box))).toEqual([-80, 80]);
     expect(map.html).toContain("height:400px");
   });
 
@@ -312,7 +327,9 @@ describe("prototype web map (#16539)", () => {
     // The box is a size container, so `cqmax` is its longer rendered side, however tall it fills.
     expect(map.html).toContain("container-type:size");
     expect(map.part("ground")[0]!.style.height).toMatch(/^max\(\d+px,300cqmax\)$/);
-    expect(still({ markers }).html).not.toContain("container-type");
+    expect(still({ markers, camera: { lat: 37.77, lng: -122.42, zoom: 12 } }).html).not.toContain(
+      "container-type",
+    );
   });
 
   test("a tilted fill map puts its eye far enough out that no horizon shows (#16656)", () => {
@@ -363,6 +380,68 @@ describe("prototype web map (#16539)", () => {
       left: fromCentre(pier.x),
       top: fromCentre(pier.y),
     });
+  });
+  test("a fit scales its offsets with the box; at the fitted size it is the dp placement (#16679)", () => {
+    const size = { width: 411, height: 200 };
+    expect(fittedFromCentre(0, size)).toBe("50%");
+    expect(fittedFromCentre(164.4, size)).toBe("calc(50% + min(40cqw, 82.2cqh))");
+    expect(fittedFromCentre(-164.4, size)).toBe("calc(50% - min(40cqw, 82.2cqh))");
+    expect(offsetOf(fittedFromCentre(-164.4, size), size)).toBeCloseTo(-164.4, 3);
+    // A 200 dp box: the narrower side scales the offset, both axes alike.
+    expect(offsetOf(fittedFromCentre(-164.4, size), { width: 200, height: 200 })).toBeCloseTo(
+      -80,
+      3,
+    );
+  });
+
+  test("a fitted map stretched in a narrow column keeps its pins inside the box (#16679)", () => {
+    const rendered = renderPrototypeStill({
+      ...reference,
+      data: {
+        ends: [
+          { name: "West", lat: 0, lng: -1 },
+          { name: "East", lat: 0, lng: 1 },
+        ],
+      },
+      root: {
+        type: "column",
+        style: { width: { dp: 200 } },
+        children: [
+          {
+            type: "map",
+            fit: "markers",
+            markers: {
+              path: "/ends",
+              as: "end",
+              lat: "{end.lat}",
+              lng: "{end.lng}",
+              title: "{end.name}",
+            },
+          },
+        ],
+      },
+    });
+    const [map] = find(rendered.element, (element) => element.attrs["data-node"] === "map");
+    expect(map!.style["container-type"]).toBe("size");
+    const box = { width: 200, height: 200 };
+    const left = find(map!, (element) => element.attrs["data-part"] === "marker").map((pin) =>
+      offsetOf(pin.style.left, box),
+    );
+    // Framed against the 411 dp screen they sat at ±164.4 dp, outside a 200 dp box; scaled to it
+    // they span its 80%, x = 20 and 180, as the fit would frame a 200 dp box.
+    expect(left[0]).toBeCloseTo(-80, 3);
+    expect(left[1]).toBeCloseTo(80, 3);
+  });
+
+  test("a camera map keeps dp placement and no size container", () => {
+    const map = still({
+      markers,
+      polylines: [{ path: "/route" }],
+      camera: { lat: 37.77, lng: -122.42, zoom: 12 },
+    });
+    expect(String(map.part("marker")[1]!.style.left)).toMatch(/^calc\(50% [+-] [\d.]+px\)$/);
+    expect(map.html).toContain('<svg aria-hidden="true" height="1"');
+    expect(map.html).not.toContain("vector-effect");
   });
 });
 
@@ -517,7 +596,9 @@ describe("prototype web map across the 180° line (#16593)", () => {
       },
     });
     const pins = find(rendered.element, (element) => element.attrs["data-part"] === "marker");
-    expect(pins.map((pin) => pin.style.left)).toEqual(["calc(50% - 160px)", "calc(50% + 160px)"]);
+    // A fit scales with the box (#16679); at its own 400 × 200 dp size that is ±160 dp.
+    const box = { width: 400, height: 200 };
+    expect(pins.map((pin) => offsetOf(pin.style.left, box))).toEqual([-160, 160]);
     expect(toHtml(rendered.element)).toContain('points="-160,0 160,0"');
   });
 });

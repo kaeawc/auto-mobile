@@ -551,5 +551,7 @@ class FakeDeviceLaunchProcess extends EventEmitter implements FakeDeviceLaunchPr
 }
 
 function platformLabel(platform: Platform): string {
-  return { android: "Android", ios: "iOS", watchos: "watchOS", tvos: "tvOS" }[platform];
+  return { android: "Android", ios: "iOS", watchos: "watchOS", tvos: "tvOS", visionos: "visionOS" }[
+    platform
+  ];
 }

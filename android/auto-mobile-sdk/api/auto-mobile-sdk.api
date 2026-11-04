@@ -678,6 +678,19 @@ public final class dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode 
   public dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode(int, java.lang.String, java.lang.String, java.util.List, kotlinx.serialization.internal.SerializationConstructorMarker);
   public static final kotlin.Lazy[] access$get$childSerializers$cp();
 }
+Compiled from "CarAppElementMapper.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper INSTANCE;
+  public static final int $stable;
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode> mapItems(androidx.car.app.model.ItemList, java.lang.String, java.lang.String);
+  public static java.util.List mapItems$default(dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper, androidx.car.app.model.ItemList, java.lang.String, java.lang.String, int, java.lang.Object);
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode mapItem(androidx.car.app.model.Item, java.lang.String, java.lang.String);
+  public final java.lang.String headerTitle(androidx.car.app.model.Header, androidx.car.app.model.CarText);
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> headerActions(androidx.car.app.model.Header, androidx.car.app.model.Action, java.lang.String);
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode mapStrip(androidx.car.app.model.ActionStrip, java.lang.String, java.lang.String);
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> mapActions(java.util.List<androidx.car.app.model.Action>, java.lang.String);
+  public final java.lang.String text(androidx.car.app.model.CarText);
+}
 Compiled from "CarAppTemplateDocument.kt"
 public final class dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode$Companion {
   public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode> serializer();

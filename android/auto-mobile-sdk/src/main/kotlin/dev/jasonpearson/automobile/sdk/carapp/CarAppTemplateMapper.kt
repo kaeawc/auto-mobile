@@ -2,23 +2,22 @@ package dev.jasonpearson.automobile.sdk.carapp
 
 import androidx.annotation.OptIn
 import androidx.car.app.annotations.ExperimentalCarApi
-import androidx.car.app.model.Action
-import androidx.car.app.model.ActionStrip
-import androidx.car.app.model.CarText
-import androidx.car.app.model.GridItem
 import androidx.car.app.model.GridTemplate
-import androidx.car.app.model.Header
-import androidx.car.app.model.Item
-import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.LongMessageTemplate
 import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.PaneTemplate
-import androidx.car.app.model.Row
 import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.TabTemplate
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.NavigationTemplate
+import dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper.headerActions
+import dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper.headerTitle
+import dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper.mapActions
+import dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper.mapItem
+import dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper.mapItems
+import dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper.mapStrip
+import dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper.text
 
 /**
  * Maps a Car App Library [Template] to its snapshot node (#16751). Pure: it reads only the
@@ -143,7 +142,7 @@ internal object CarAppTemplateMapper {
             id = "$id/tabs/$index",
             contentId = tab.contentId,
             title = text(tab.title),
-            hasIcon = tab.icon != null,
+            hasIcon = true, // Every Tab requires an icon.
             active = tab.contentId == activeId,
           )
         },
@@ -161,81 +160,4 @@ internal object CarAppTemplateMapper {
           mapStrip(template.mapActionStrip, "mapActionStrip", id),
         ),
     )
-
-  private fun mapItems(list: ItemList?, base: String, section: String? = null) =
-    list?.items.orEmpty().mapIndexed { index, item -> mapItem(item, "$base/$index", section) }
-
-  private fun mapItem(item: Item, id: String, section: String?): CarAppItemNode =
-    when (item) {
-      is Row ->
-        CarAppItemNode(
-          id = id,
-          kind = "row",
-          title = text(item.title),
-          section = section,
-          texts = item.texts.mapNotNull { text(it) },
-          hasImage = item.image != null,
-          toggle = item.toggle?.isChecked,
-          browsable = item.isBrowsable,
-          enabled = item.isEnabled,
-          actions = mapActions(item.actions, "$id/actions"),
-        )
-      is GridItem ->
-        CarAppItemNode(
-          id = id,
-          kind = "gridItem",
-          title = text(item.title),
-          section = section,
-          texts = listOfNotNull(text(item.text)),
-          hasImage = item.image != null,
-        )
-      else -> CarAppItemNode(id = id, kind = item.javaClass.simpleName, section = section)
-    }
-
-  private fun headerTitle(header: Header?, legacyTitle: CarText?): String? =
-    text(header?.title) ?: text(legacyTitle)
-
-  private fun headerActions(header: Header?, legacy: Action?, id: String): List<CarAppActionNode> {
-    val actions =
-      if (header != null) {
-        listOfNotNull(header.startHeaderAction) + header.endHeaderActions
-      } else {
-        listOfNotNull(legacy)
-      }
-    return mapActions(actions, "$id/header/actions")
-  }
-
-  private fun mapStrip(strip: ActionStrip?, role: String, id: String): CarAppActionStripNode? =
-    strip?.let {
-      CarAppActionStripNode(
-        id = "$id/$role",
-        role = role,
-        actions = mapActions(it.actions, "$id/$role/actions"),
-      )
-    }
-
-  private fun mapActions(actions: List<Action>, base: String): List<CarAppActionNode> =
-    actions.mapIndexed { index, action ->
-      CarAppActionNode(
-        id = "$base/$index",
-        type = actionType(action.type),
-        title = text(action.title),
-        hasIcon = action.icon != null,
-        enabled = action.isEnabled,
-      )
-    }
-
-  @OptIn(markerClass = [ExperimentalCarApi::class]) // TYPE_COMPOSE_MESSAGE is experimental.
-  private fun actionType(type: Int): String =
-    when (type) {
-      Action.TYPE_CUSTOM -> "custom"
-      Action.TYPE_APP_ICON -> "appIcon"
-      Action.TYPE_BACK -> "back"
-      Action.TYPE_PAN -> "pan"
-      Action.TYPE_COMPOSE_MESSAGE -> "composeMessage"
-      else -> "other"
-    }
-
-  private fun text(value: CarText?): String? =
-    value?.takeUnless { it.isEmpty }?.toCharSequence()?.toString()
 }

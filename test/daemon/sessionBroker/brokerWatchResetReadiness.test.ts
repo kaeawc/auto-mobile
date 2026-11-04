@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import type { ResetResult } from "../../../src/daemon/sessionBroker/devicePort";
 import { adaptWatchSessionDeviceCatalog } from "../../../src/devices/sessionCatalog";
@@ -38,12 +38,10 @@ describe("watch reset readiness", () => {
   let finishReset: ReturnType<typeof Promise.withResolvers<ResetResult>>;
   let resetStarted: ReturnType<typeof Promise.withResolvers<void>>;
 
+  // The suite has one test, so its harness, seed acquisition and release are built once in
+  // beforeAll: they are fixture, not the concurrent admission under test, and on a loaded
+  // runner they alone took most of the 100 ms unit budget.
   beforeAll(async () => {
-    const warm = await openExportHarness();
-    await warm.broker.close();
-    await warm.registry.close();
-  });
-  beforeEach(async () => {
     harness = await openExportHarness();
     harness.options.timer = harness.timer;
     harness.options.reuseCleanDevices = true;
@@ -74,7 +72,7 @@ describe("watch reset readiness", () => {
       return finishReset.promise;
     };
   });
-  afterEach(async () => {
+  afterAll(async () => {
     finishReset.resolve("clean");
     await broker.close();
     await harness.broker.close();

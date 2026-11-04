@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
@@ -32,6 +32,14 @@ describe("device acquisition ergonomics (#5870)", () => {
   }
 
   describe("advertised schema required-field ergonomics", () => {
+    // The first schema conversion pays a one-time JIT cost; pay it outside the timed tests.
+    beforeAll(() => {
+      registerInteractionTools();
+      registerUtilityTools();
+      ToolRegistry.getToolDefinitions();
+      ToolRegistry.clearTools();
+    });
+
     beforeEach(() => {
       ToolRegistry.clearTools();
       registerInteractionTools();

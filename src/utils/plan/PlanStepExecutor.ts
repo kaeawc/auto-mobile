@@ -164,6 +164,22 @@ function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResu
 }
 
 /**
+ * The tool's own payload when it reports a timed-out `waitFor` and no other failure.
+ * A direct call marks that envelope `isError` (#16889, #16902), which `classifyToolResult`
+ * turns into a generic `success: false`; reading the envelope's payload keeps the step on
+ * the timeout path with its diagnostics.
+ */
+function waitTimedOutPayload(response: unknown): Record<string, unknown> | undefined {
+  if (!response || typeof response !== "object") {
+    return undefined;
+  }
+  const payload = getStructuredPayload<Record<string, unknown>>(response);
+  return payload && payload.success !== false && waitForTimeoutError(payload, "") !== null
+    ? payload
+    : undefined;
+}
+
+/**
  * An optional step whose tool answered but failed. A critical section keeps the sub-step's own
  * warnings and timeout diagnostics next to its skip warning (#10024 parity); a top-level skip
  * reports only the skip itself.
@@ -625,7 +641,9 @@ export class DefaultPlanStepExecutor<
     toolResult: Record<string, unknown> | undefined,
   ): Promise<StepExecutionResult> {
     const checkResult = toolResult ?? response;
+    const timedOutPayload = waitTimedOutPayload(response);
     if (
+      !timedOutPayload &&
       checkResult &&
       typeof checkResult === "object" &&
       "success" in checkResult &&
@@ -634,7 +652,7 @@ export class DefaultPlanStepExecutor<
       const error = this.returnedFailureMessage(checkResult, context);
       return this.resultFromToolFailure(step, context, { response, toolResult, error });
     }
-    const payload = getStructuredPayload(toolResult) ?? toolResult;
+    const payload = timedOutPayload ?? getStructuredPayload(toolResult) ?? toolResult;
     const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
     if (error) {
       // A waitFor timeout or unsupported result is a failed step like any other: it gets the same

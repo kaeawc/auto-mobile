@@ -53,6 +53,14 @@ export function isCtrlProxyStorageUnavailableError(error: unknown): boolean {
   );
 }
 
+/** First CtrlProxy release that implements `export_attestation`. */
+export const EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION = "0.0.90";
+
+export const EXPORT_ATTESTATION_UNSUPPORTED_MESSAGE =
+  "The installed CtrlProxy is too old to export key attestation: export_attestation " +
+  `requires CtrlProxy ${EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION} or newer. ` +
+  `Install CtrlProxy ${EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION}+ and retry.`;
+
 /**
  * Delegate class for handling SharedPreferences operations.
  */
@@ -210,7 +218,7 @@ export class CtrlProxyStorage {
       }
       const commands = await this.context.getSupportedCommands?.();
       if (commands?.includes("export_attestation") !== true) {
-        throw new Error("CtrlProxy does not support export_attestation; update CtrlProxy");
+        throw new Error(EXPORT_ATTESTATION_UNSUPPORTED_MESSAGE);
       }
       const result = await this.sendStorageCommand<{
         certificateChainBase64: unknown;
@@ -224,7 +232,7 @@ export class CtrlProxyStorage {
           managerId: true,
           unsupportedCommandError: () => ({
             certificateChainBase64: undefined,
-            error: "CtrlProxy does not support export_attestation",
+            error: EXPORT_ATTESTATION_UNSUPPORTED_MESSAGE,
           }),
           timeoutError: () => ({
             certificateChainBase64: undefined,

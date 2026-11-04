@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION } from "../../../../src/features/observe/android/CtrlProxyStorage";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../../../fakes/FakeInstalledAppsRepository";
@@ -59,7 +60,14 @@ test("attestation command round-trips the correlated public chain", async () => 
 });
 test("old CtrlProxy is refused before sending", async () => {
   const { client, socket } = await harness(false);
-  await expect(client.exportAttestation()).rejects.toThrow("does not support");
+  const error = await client.exportAttestation().then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+  expect(error).toBeInstanceOf(Error);
+  const message = (error as Error).message;
+  expect(message).toContain("installed CtrlProxy is too old");
+  expect(message).toContain(`CtrlProxy ${EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION} or newer`);
   expect(socket.frames).toEqual([]);
 });
 test("deadline and Android errors reject without waiting in real time", async () => {

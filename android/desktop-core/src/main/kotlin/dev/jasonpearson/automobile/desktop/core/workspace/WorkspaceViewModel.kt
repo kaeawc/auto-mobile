@@ -70,6 +70,12 @@ sealed interface WorkspaceAction {
    */
   data class RefreshDeviceSessionUuids(val sessionUuids: Map<String, String>) : WorkspaceAction
 
+  /**
+   * The daemon ended [retiredUuid] for [deviceId] with no successor. Marks that column ended only
+   * while it still observes [retiredUuid]; a column on any other epoch is left alone.
+   */
+  data class EndDeviceSession(val deviceId: String, val retiredUuid: String) : WorkspaceAction
+
   /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */
   data class DiffTool(val tool: Tool) : WorkspaceAction
 }
@@ -131,7 +137,8 @@ class WorkspaceViewModel(
       is WorkspaceAction.PressDeviceButton -> pressDeviceButton(action.deviceId, action.button)
       is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
       is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
-      is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
+      is WorkspaceAction.RefreshDeviceSessionUuids,
+      is WorkspaceAction.EndDeviceSession -> applyEpochAction(action)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }

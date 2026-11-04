@@ -127,4 +127,10 @@ data class DeviceColumn(
   val isVirtual: Boolean = true,
   /** Daemon-minted identity for this live device epoch; nullable for older resource payloads. */
   val deviceSessionUuid: String? = null,
+  /**
+   * The daemon ended this column's epoch with no successor (the device disconnected for good). The
+   * pane shows a disconnected state instead of its stream and facets, so nothing stays attached to
+   * the dead epoch; observing the device again or a fresh epoch for it clears the flag.
+   */
+  val sessionEnded: Boolean = false,
 )

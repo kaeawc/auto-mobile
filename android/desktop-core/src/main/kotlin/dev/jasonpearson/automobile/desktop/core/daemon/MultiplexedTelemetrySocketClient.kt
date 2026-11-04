@@ -167,10 +167,8 @@ internal class MultiplexedTelemetrySocketClient(
 
   // Called under the table lock: hands the connection over to be shut down outside it.
   private fun detachConnection(): DetachedConnection {
-    val detached = DetachedConnection(table.connection, table.socket, wire)
-    table.connection = null
-    table.socket = null
-    return detached
+    val (connection, socket) = table.detach()
+    return DetachedConnection(connection, socket, wire)
   }
 
   private suspend fun connectWithRetry() {
@@ -178,8 +176,15 @@ internal class MultiplexedTelemetrySocketClient(
     while (true) {
       if (options.sessionUuidProvider != null && options.sessionUuidProvider.invoke() == null) {
         // Subscribing before the desktop session registers would be refused for good; a retry
-        // reconnects once it has.
-        synchronized(table.lock) { table.snapshot() }.publish(ConnectionState.Disconnected(null))
+        // reconnects once it has. Step aside before reporting, so a retry that sees the report
+        // starts a new connection instead of finding this one still active.
+        val self = currentCoroutineContext()[Job]
+        val waiting =
+          synchronized(table.lock) {
+            if (table.connection === self) table.connection = null
+            table.snapshot()
+          }
+        waiting.publish(ConnectionState.Disconnected(null))
         return
       }
       runConnection { attempt = 0 }

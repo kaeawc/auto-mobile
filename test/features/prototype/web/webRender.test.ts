@@ -640,6 +640,103 @@ describe("prototype web still (#16346)", () => {
     });
   });
 
+  test("a content-width later sibling's minWidth holds through a strut, not calc-size (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 100 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "text", testTag: "after", text: "Hi", style: { minWidth: 40 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    // The row's flex item is the wrapping cell, which gives its width up first.
+    expect(cell.style).toMatchObject({
+      display: "grid",
+      "grid-template-columns": "minmax(0, auto)",
+      "min-width": "0",
+      "flex-shrink": "1000000000",
+    });
+    const [node, strut] = cell.children as WebElement[];
+    expect(node!.attrs["data-testid"]).toBe("after");
+    // Stretched explicitly, since grid would not stretch an aspect-ratio or replaced node.
+    expect(node!.style).toMatchObject({
+      "grid-area": "1 / 1",
+      "min-width": "0",
+      "justify-self": "stretch",
+    });
+    expect(node!.style).not.toHaveProperty("flex-shrink");
+    expect(node!.style).not.toHaveProperty("width");
+    expect(strut!.attrs["aria-hidden"]).toBe("true");
+    expect(strut!.style).toEqual({
+      "grid-area": "1 / 1",
+      width: "40px",
+      "max-width": "100%",
+      height: "0",
+    });
+    expect(toHtml(row)).not.toContain("calc-size");
+  });
+
+  test("a wrapped later column keeps its own direction; its maxWidth bounds the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            {
+              type: "column",
+              testTag: "after",
+              style: { width: "fill", minWidth: 40, maxWidth: 100 },
+              children: [
+                { type: "text", text: "A" },
+                { type: "text", text: "B" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    const node = byTag({ element: cell }, "after")[0]!;
+    expect(node.style).toMatchObject({ display: "flex", "flex-direction": "column" });
+    expect(cell.style).not.toHaveProperty("flex-direction");
+    expect(cell.style).toMatchObject({ display: "grid", "max-width": "100px", flex: "1 1 auto" });
+    expect(node.style["max-width"]).toBe("100px");
+  });
+
+  test("a wrapped later sibling drops its component's default width to fill the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "iconButton", testTag: "after", icon: "add", style: { minWidth: 80 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    expect(cell.style.display).toBe("grid");
+    expect(byTag({ element: cell }, "after")[0]!.style).not.toHaveProperty("width");
+  });
+
   test("a dp-wide column in a horizontal scroll bounds its row to its own width (#16691)", () => {
     const shown = renderPrototypeStill({
       ...reference,

@@ -29,6 +29,7 @@ import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { webSheetLayers } from "./webSheet";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
+import { withLaterMinStrut } from "./webLaterMin";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
@@ -1045,7 +1046,9 @@ export function renderWebNode(
     own.unsupported.push(shaded);
   }
   // The layers belong to the node's own box; a wrapper (a captioned field) layers its box itself.
-  return element.attrs["data-node"] === undefined
-    ? element
-    : withOverContentLayers(element, styled.style, own.style);
+  const layered =
+    element.attrs["data-node"] === undefined
+      ? element
+      : withOverContentLayers(element, styled.style, own.style);
+  return withLaterMinStrut(layered, styled.style, own.style);
 }

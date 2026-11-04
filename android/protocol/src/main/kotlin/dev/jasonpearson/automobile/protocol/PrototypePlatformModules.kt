@@ -45,28 +45,21 @@ internal object PrototypePlatformModules {
     return owner.takeIf { module(owner)?.member("events")?.containsKey(member) == true }
   }
 
-  /** The capability an `event` handler needs beyond its module's, when its definition names one. */
-  fun eventCapability(event: String): String? {
+  /** An `event`'s contract definition, or null when its module does not declare it. */
+  fun eventDefinition(event: String): JsonObject? {
     val (owner, member) = qualified(event) ?: return null
-    return (module(owner)?.member("events")?.member(member)?.get("capability") as? JsonPrimitive)
+    return module(owner)?.member("events")?.member(member)
+  }
+
+  /** The capability an `event` handler needs beyond its module's, when its definition names one. */
+  fun eventCapability(event: String): String? =
+    (eventDefinition(event)?.get("capability") as? JsonPrimitive)
       ?.takeIf(JsonPrimitive::isString)
       ?.content
-  }
 
   /** Whether a call's contract definition is marked `sensitive` (R1). */
   fun sensitiveCall(call: String?): Boolean =
     callDefinition(call)?.second?.flag("sensitive") == true
-
-  /** Whether an event's contract definition is marked `sensitive` (R1). */
-  fun sensitiveEvent(event: String): Boolean {
-    val (owner, member) = qualified(event) ?: return false
-    return module(owner)?.member("events")?.member(member)?.flag("sensitive") == true
-  }
-
-  fun userInitiated(event: String): Boolean {
-    val (owner, member) = qualified(event) ?: return false
-    return module(owner)?.member("events")?.member(member)?.flag("userInitiated") == true
-  }
 
   /** The module a `/platform` pointer reads: its first segment. */
   fun pointerModule(pointer: String): String =

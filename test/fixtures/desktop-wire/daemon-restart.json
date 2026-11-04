@@ -128,6 +128,7 @@
     },
     {
       "atMs": 126000,
+      "daemonRestartDowntimeMs": 120000,
       "actor": "desktop",
       "label": "heartbeat-lapse",
       "request": {

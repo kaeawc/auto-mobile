@@ -30,6 +30,13 @@ export interface SessionReleaseSnapshot {
    * clearing the execution owner (#11177). Absent for every other policy.
    */
   livenessPolicy?: typeof MANAGED_EXECUTION_LIVENESS_POLICY;
+  /**
+   * The CLI idle window of a released session that was itself on the `cli-idle` liveness policy
+   * (#16940): the window a `cli-idle-timeout` refusal reports as `idleTimeoutMs`. Absent for any
+   * other policy, including a plan label that only inherits its base's `cli-idle-timeout`: the
+   * label never adopted a CLI window, so its heartbeat lease is not one.
+   */
+  cliIdleTimeoutMs?: number;
   heartbeat: {
     lastHeartbeatMs: number;
     hasReceivedHeartbeat: boolean;

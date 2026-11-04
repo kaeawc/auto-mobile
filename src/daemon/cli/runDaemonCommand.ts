@@ -34,6 +34,7 @@ import {
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
+  idleTimeoutMsFromError,
   releaseReasonFromError,
 } from "../types";
 import { parseDaemonArgs } from "./daemonArgs";
@@ -445,8 +446,14 @@ async function runDaemonDiagnosticsCommand(
 }
 
 /** " (released: <reason>[, idle])", or "" when the daemon gave neither. */
-function releasedLabel(reason: string | undefined, idle: boolean): string {
-  const label = [reason, idle ? "idle" : undefined].filter(Boolean).join(", ");
+function releasedLabel(reason: string | undefined, idle: boolean, idleTimeoutMs?: number): string {
+  const label = [
+    reason,
+    idle ? "idle" : undefined,
+    idleTimeoutMs === undefined ? undefined : `idle timeout ${idleTimeoutMs} ms`,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return label ? ` (released: ${label})` : "";
 }
 
@@ -468,6 +475,8 @@ export class DaemonCommandRefusal extends ActionableError {
   readonly releaseReason?: string;
   /** True when the daemon released the session at its idle window (#10832). */
   readonly idle?: true;
+  /** A `cli-idle-timeout` session's idle window, when the daemon reported it (#16937). */
+  readonly idleTimeoutMs?: number;
   readonly details?: Record<string, unknown>;
   readonly detail: string;
 
@@ -482,12 +491,13 @@ export class DaemonCommandRefusal extends ActionableError {
     const retryAfterMs = field("retryAfterMs");
     const releaseReason = releaseReasonFromError(error);
     const idle = field("idle") === true;
+    const idleTimeoutMs = idleTimeoutMsFromError(error);
     const detail = errorMessage(error);
     const typedCode =
       typeof code === "string" || typeof code === "number" ? String(code) : undefined;
     const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
     super(
-      `${context}: ${detail}${releasedLabel(releaseReason, idle)}` +
+      `${context}: ${detail}${releasedLabel(releaseReason, idle, idleTimeoutMs)}` +
         `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
       { cause: error },
     );
@@ -498,6 +508,7 @@ export class DaemonCommandRefusal extends ActionableError {
     this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
     this.releaseReason = releaseReason;
     this.idle = idle ? true : undefined;
+    this.idleTimeoutMs = idleTimeoutMs;
     this.details = recordOrUndefined(field("details"));
   }
 }
@@ -514,6 +525,7 @@ function daemonQueryFailureJson(error: unknown): Record<string, unknown> {
     retryAfterMs: error.retryAfterMs,
     releaseReason: error.releaseReason,
     idle: error.idle,
+    idleTimeoutMs: error.idleTimeoutMs,
     details: error.details,
   };
   return {
@@ -849,7 +861,7 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
 function releasedSuffix(error: unknown): string {
   const reason = releaseReasonFromError(error);
   const idle = recordOrUndefined(error)?.idle === true;
-  return reason ? releasedLabel(reason, idle) : "";
+  return reason ? releasedLabel(reason, idle, idleTimeoutMsFromError(error)) : "";
 }
 
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {

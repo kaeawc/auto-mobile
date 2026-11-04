@@ -354,10 +354,10 @@ function ownPrototypeCoversAbove(
 
 /**
  * Whether tapOn would find no exposed tap point on `target` because application windows ranked
- * above its window, plus the own windows `ownWindows` selects, cover all of `bounds`.
- * Observe uses this to mark skeleton rows `occluded` under exactly the condition
- * `applicationWindowSafeTapPoint` fails the tap path with; pass the same screen-clipped bounds the
- * tap path tests (`visibleTapBounds`).
+ * above its window, plus the own windows `ownWindows` selects and (with `views`) the same-window
+ * controls drawn over it, cover all of `bounds`. Observe uses this to mark skeleton rows
+ * `occluded` under exactly the condition `applicationWindowSafeTapPoint` fails the tap path with;
+ * pass the same options and screen-clipped bounds the tap path tests (`visibleTapBounds`).
  */
 export function isFullyCoveredByApplicationWindow(
   hierarchy: ViewHierarchyResult,
@@ -365,15 +365,21 @@ export function isFullyCoveredByApplicationWindow(
   bounds: ElementBounds,
   {
     ownWindows = "none",
+    views = false,
     index = applicationWindowCoverIndex(hierarchy),
-  }: { ownWindows?: OwnPrototypeCoverRule; index?: ApplicationWindowCoverIndex } = {},
+  }: {
+    ownWindows?: OwnPrototypeCoverRule;
+    views?: boolean;
+    index?: ApplicationWindowCoverIndex;
+  } = {},
 ): boolean {
   const center = {
     x: Math.floor((bounds.left + bounds.right) / 2),
     y: Math.floor((bounds.top + bounds.bottom) / 2),
   };
   return (
-    safeTapPoint({ hierarchy, target, bounds, point: center, ownWindows, index }).point === null
+    safeTapPoint({ hierarchy, target, bounds, point: center, ownWindows, views, index }).point ===
+    null
   );
 }
 

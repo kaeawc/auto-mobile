@@ -44,18 +44,18 @@ const defaultFormFactorRead = traitsFormFactorRead(defaultDeviceTraits, defaultA
 
 /**
  * KEYCODE_SLEEP puts a phone to sleep (#17051), so anything not confirmed to be a watch is
- * refused before any power-state command. Unreadable traits fall back to the session's
- * recorded form factor and otherwise refuse.
+ * refused before any power-state command. A null trait is not proof of a non-watch (a failed
+ * characteristics getprop also reads null), so a session recorded as a watch is trusted unless
+ * the build names another form factor.
  */
 async function requireWatch(device: BootedDevice, readFormFactor: FormFactorRead): Promise<void> {
   const announced = await readFormFactor(device);
-  if (announced === "watch" || (announced === undefined && device.formFactor === "watch")) {
+  if (announced === "watch" || (!announced && device.formFactor === "watch")) {
     return;
   }
-  const recorded = device.formFactor === "watch" ? undefined : device.formFactor;
   const formFactor =
     announced ??
-    recorded ??
+    device.formFactor ??
     (announced === null ? "phone or tablet (no watch build announced)" : "unknown");
   const unreadable =
     announced === undefined

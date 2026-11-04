@@ -132,12 +132,12 @@ Enable `ambient` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), 
 
 Use `action: "exit"` to wake the device. This tool runs only on a Wear OS watch: on any other
 form factor (phone, tablet, TV, automotive) it returns an error naming the form factor and
-changes nothing. If the device's traits cannot be read and the session does not record a watch,
-it is refused too; check the device with `listDevices` (`formFactor`). On a watch it sends
-`KEYCODE_SLEEP` for `enter` or `KEYCODE_WAKEUP` for `exit`, then reads wakefulness once.
-`success: true` means `Dozing` or `Asleep` for enter, or `Awake` for exit. A failed or unreadable
-state returns `success: false` with a `reason`; inspect `wakefulness` when present and use
-`observe` to check the current state.
+changes nothing. A session recorded as a watch is trusted when the device does not report its
+form factor; otherwise it is refused too, so check the device with `listDevices` (`formFactor`).
+On a watch it sends `KEYCODE_SLEEP` for `enter` or `KEYCODE_WAKEUP` for `exit`, then reads
+wakefulness once. `success: true` means `Dozing` or `Asleep` for enter, or `Awake` for exit. A
+failed or unreadable state returns `success: false` with a `reason`; inspect `wakefulness` when
+present and use `observe` to check the current state.
 
 This is a power-state change. Wear exposes no ambient readback, so the result does not prove
 ambient mode. Hardware wake by tilt or touch remains untested. Command failures return an

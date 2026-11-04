@@ -106,9 +106,12 @@ describe("ambient tool", () => {
     expect(calls).toEqual([]);
   });
 
-  test("a recorded watch is allowed when the traits cannot be read", async () => {
+  test.each<[string, TraitFormFactor | null | undefined]>([
+    ["unreadable traits", undefined],
+    ["a null form factor (characteristics getprop may have failed)", null],
+  ])("a recorded watch is allowed with %s", async (_label, announced) => {
     const calls: AmbientAction[] = [];
-    const response = await createAmbientHandler(() => recordingPort(calls), announces(undefined))(
+    const response = await createAmbientHandler(() => recordingPort(calls), announces(announced))(
       { ...android, formFactor: "watch" },
       { action: "enter" },
     );
@@ -116,13 +119,13 @@ describe("ambient tool", () => {
     expect(toolJson(response).success).toBe(true);
   });
 
-  test("a build announcing no watch is refused even when the session recorded one", async () => {
+  test("a recorded watch is refused when the build names another form factor", async () => {
     const calls: AmbientAction[] = [];
-    const call = createAmbientHandler(() => recordingPort(calls), announces(null))(
+    const call = createAmbientHandler(() => recordingPort(calls), announces("tv"))(
       { ...android, formFactor: "watch" },
       { action: "enter" },
     );
-    await expect(call).rejects.toThrow(/form factor is phone or tablet/);
+    await expect(call).rejects.toThrow(/form factor is tv,/);
     expect(calls).toEqual([]);
   });
 

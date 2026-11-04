@@ -18,6 +18,8 @@ interface TextMatcher {
   textMatch?: ObserveWaitForOptions["textMatch"];
   /** `textEquals` compares the exact value; every other wait ignores case. */
   caseSensitive?: boolean;
+  /** Collapse and trim whitespace on both the query and the compared values. */
+  collapseWhitespace?: boolean;
 }
 
 /**
@@ -143,11 +145,11 @@ function rowTexts(row: SkeletonElement): string[] {
  * hierarchy's verdict on that node stands.
  */
 function guardMatcher({ textMatch }: TextMatcher): TextMatcher {
-  return { textMatch: textMatch === "regex" ? "regex" : undefined };
+  return { textMatch: textMatch === "regex" ? "regex" : undefined, collapseWhitespace: true };
 }
 
 function sourceTexts(node: { textSources: Readonly<Record<string, string>> }): string[] {
-  return Object.values(node.textSources).map((value) => value.replace(/\s+/g, " ").trim());
+  return Object.values(node.textSources);
 }
 
 /** Mirror the hierarchy search: exact first, then contains, unless `textMatch` names a mode. */
@@ -155,10 +157,13 @@ function findMatch<T>(
   items: readonly T[],
   textsOf: (item: T) => string[],
   text: string,
-  { textMatch, caseSensitive = false }: TextMatcher,
+  { textMatch, caseSensitive = false, collapseWhitespace = false }: TextMatcher,
 ): T | undefined {
-  const normalize = (value: string) =>
-    caseSensitive ? normalizeQuotes(value) : normalizeQuotes(value).toLowerCase();
+  const normalize = (value: string) => {
+    const quoted = normalizeQuotes(value);
+    const spaced = collapseWhitespace ? quoted.replace(/\s+/g, " ").trim() : quoted;
+    return caseSensitive ? spaced : spaced.toLowerCase();
+  };
   const query = normalize(text);
   if (!query.trim()) {
     return undefined;

@@ -253,6 +253,31 @@ describe("withProjectedTextFallback (for: appear / textEquals)", () => {
     expect(condition("textEquals", { text: "Loaded" })(observation).matched).toBe(false);
   });
 
+  test("an exact text wait keeps the verdict of an off-screen source with repeated inner whitespace", () => {
+    const hierarchy = hierarchyWith([
+      {
+        $: { clickable: "true", bounds: { left: 0, top: 0, right: 400, bottom: 900 } },
+        node: [
+          {
+            $: {
+              text: "Loaded  95 bytes",
+              bounds: { left: 0, top: 850, right: 100, bottom: 890 },
+            },
+          },
+        ],
+      },
+    ]);
+    const observation = createObserveResultForTest({
+      screenSize,
+      viewHierarchy: hierarchy,
+      elements: new ObserveElementsBuilder().build(hierarchy, "android"),
+    });
+
+    expect(
+      findProjectedTextRow({ text: "Loaded  95 bytes", textMatch: "exact" }, observation),
+    ).toBeNull();
+  });
+
   test("clickable, disappear and scoped waits stay hierarchy-only", () => {
     const observation = observe([loadButton]);
 

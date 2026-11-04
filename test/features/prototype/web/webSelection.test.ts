@@ -164,6 +164,24 @@ describe("web still selection controls (#16537)", () => {
     expect(docked.style.flex).toBeUndefined();
   });
 
+  test("an expanded search bar start-aligns its results so a compact button keeps its width", () => {
+    const bar = draw(
+      {
+        type: "searchBar",
+        stateKey: "q",
+        activeKey: "open",
+        placeholder: "Search",
+        child: { type: "button", label: "Clear", testTag: "clear" },
+      },
+      { q: "", open: true },
+    );
+    expect(bar.style["align-items"]).toBe("flex-start");
+    expect(byPart(bar, "input")[0]!.style["align-self"]).toBe("stretch");
+    const clear = find(bar, (node) => node.attrs["data-testid"] === "clear")[0]!;
+    expect(clear.style.width).toBeUndefined();
+    expect(clear.style["align-self"]).toBeUndefined();
+  });
+
   test("a paste button draws as a filled button labelled Paste", () => {
     const paste = draw({ type: "pasteButton", into: "/note", testTag: "p" });
     expect(paste.attrs.role).toBe("button");

@@ -273,6 +273,8 @@ function searchField(node: Raw, scope: WebRenderScope, kit: WebRenderKit): WebEl
       style: {
         display: "flex",
         "align-items": "center",
+        // The bar's column start-aligns its results; the input alone fills its width.
+        "align-self": "stretch",
         gap: "16px",
         "box-sizing": "border-box",
         "min-height": "56px",
@@ -292,8 +294,8 @@ function searchField(node: Raw, scope: WebRenderScope, kit: WebRenderKit): WebEl
 
 /**
  * A search bar: the input on a `surface` container. While its `activeKey` holds `true` it is
- * expanded and draws its child (the results) below the input; the full-screen `bar` variant then
- * fills the window, while `docked` stays its own height.
+ * expanded and draws its child (the results) below the input, start-aligned as Android's results
+ * Column is; the full-screen `bar` variant then fills the window, while `docked` stays its own height.
  */
 const searchBarRenderer =
   (kit: WebRenderKit): NodeRenderer =>
@@ -306,6 +308,8 @@ const searchBarRenderer =
       {
         display: "flex",
         "flex-direction": "column",
+        // Android's results Column is start-aligned, so a compact child keeps its own width.
+        "align-items": "flex-start",
         ...kit.roleCss(scope, "surface", "onSurface"),
       },
     );

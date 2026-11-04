@@ -17,6 +17,7 @@ description: How to drive Android and iOS devices with AutoMobile MCP tools. Use
 
 - Call `observe` before the first action and again after each action that can change the screen. Coordinates and Android synthetic `s2-` element ids are valid only for the observation that returned them.
 - Act on what `observe` returned: `tapOn` takes a `selector` (`text`, `elementId`, `testTag`), `swipeOn` scrolls the screen or a container (`lookFor` scrolls until an element appears), `tapAt` takes coordinates, `sendKeys` types into the focused field. Do not guess coordinates.
+- `skeleton` lists only rows you can act on. Static text (a status label, a validation error, a result message) is in `context`; read it there to verify a result. `waitFor` with `text` or `textAny` matches text in either array.
 - Ask `observe` for a screenshot only when the hierarchy is not enough; images are the largest part of a result.
 
 ## 3. Resources versus tools

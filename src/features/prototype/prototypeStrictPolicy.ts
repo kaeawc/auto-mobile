@@ -116,7 +116,7 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
   const { requests, fields, dataWrites } = libraryFields(spec, nodes, true);
-  if (!propagateDataTaint(tainted, platformTainted, dataWrites)) {
+  if (propagateDataTaint(tainted, platformTainted, dataWrites) === undefined) {
     return [{ path: "$", message: SECURE_COPY_CHECK_MESSAGE }];
   }
   const sinkFields = fields.filter(
@@ -216,13 +216,14 @@ const MAX_COPY_TAINT_CHECKS = 4_000_000;
  * A data action that copies a tainted `/data` or sensitive `/platform` read into `/data` taints
  * its destination, transitively (a copy of a copy stays tainted). Mutates `tainted`; a worklist
  * over copies bucketed by the first segment of their source keeps long chains linear. Returns
- * false when the check cap is exceeded, so callers fail closed.
+ * the overlap checks spent, or undefined when the check cap is exceeded, so callers fail closed.
+ * Exported so tests can assert the linear scaling by counting work instead of wall-clock time.
  */
-function propagateDataTaint(
+export function propagateDataTaint(
   tainted: string[],
   platformTainted: readonly string[],
   writes: readonly DataWrite[],
-): boolean {
+): number | undefined {
   const known = new Set(tainted);
   const queue = [...tainted];
   const mark = (pointer: string) => {
@@ -269,10 +270,10 @@ function propagateDataTaint(
       );
     }
     if (checks > MAX_COPY_TAINT_CHECKS) {
-      return false;
+      return undefined;
     }
   }
-  return checks <= MAX_COPY_TAINT_CHECKS;
+  return checks <= MAX_COPY_TAINT_CHECKS ? checks : undefined;
 }
 
 function firstPointerSegment(pointer: string): string {
@@ -486,7 +487,7 @@ interface LibraryField {
   pointerSource?: "data" | "platform";
   itemBinding?: boolean;
 }
-interface DataWrite {
+export interface DataWrite {
   into: string;
   source: "data" | "platform";
   from: string;

@@ -152,6 +152,12 @@ Run the test target from Xcode or with `xcodebuild test` against a booted iOS
 Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
 checkpoints so failures explain which state was missing.
 
+By default `observe` lists actionable rows in `skeleton` and static text, such as
+a status label or a validation error, in `context`. Read `context` to verify a
+result. A `waitFor` with only `text` or `textAny` matches text from either array;
+add `elementId`, `className`, `contentDescription`, `container`, `layer` or
+`selectionStrategy` to match a single hierarchy node instead.
+
 </div>
 
 ### Plan parameters and special characters

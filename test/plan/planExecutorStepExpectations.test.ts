@@ -1,25 +1,36 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { UNEVALUATED_EXPECTATIONS_WARNING } from "../../src/utils/plan/PlanExecutor";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
+import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
- * Step-level `expectations` are accepted by the plan schema but nothing evaluates them (#9925).
- * A step carrying them must still run (they must not reach a strict tool schema as an unknown
- * key) and the plan result must say they were not checked.
+ * Step-level `expectations` (#16817): after the step's tool succeeds, each expectation is checked
+ * with a fresh internal `observe` carrying the matching `waitFor`. A waitFor timeout fails the
+ * step (or skips it when `optional`), naming the expectation and what the observation saw.
  */
 describe("PlanExecutor — step-level expectations", () => {
-  const yaml = (extra: string) => `name: expectations-demo
-steps:
-  - tool: expectationsStrictTool
-${extra}`;
+  let restoreTools: () => void;
+  let stepCalls: Array<Record<string, unknown>>;
+  let observeCalls: Array<Record<string, unknown>>;
+  /** Decides each fake observe answer from its waitFor; returns a timed-out observation by default. */
+  let observeAnswer: (waitFor: Record<string, unknown>) => Record<string, unknown>;
 
-  const registerStrictTool = (seen: Array<Record<string, unknown>>) => {
+  const timedOut = (texts: string[]) => ({
+    awaitTimeout: true,
+    awaitDuration: 5000,
+    elements: { text: texts.map((text) => ({ text })) },
+    candidates: [{ text: "Item 1", "resource-id": "list_row" }],
+  });
+
+  beforeEach(() => {
+    restoreTools = preserveToolRegistry();
+    stepCalls = [];
+    observeCalls = [];
+    observeAnswer = () => ({ awaitTimeout: false, awaitDuration: 40 });
     ToolRegistry.register(
       "expectationsStrictTool",
       "strict schema tool",
@@ -29,48 +40,177 @@ ${extra}`;
         sessionUuid: z.string().optional(),
       }),
       async (params) => {
-        seen.push(params);
+        stepCalls.push(params);
         return createStructuredToolResponse({ success: true });
       },
     );
-  };
-
-  afterEach(() => unregisterTemporaryTools("expectationsStrictTool"));
-
-  test("runs the step and warns that expectations are not evaluated", async () => {
-    const seen: Array<Record<string, unknown>> = [];
-    registerStrictTool(seen);
-    const plan = new YamlPlanSerializer().importPlanFromYaml(
-      yaml(`    expectations:
-      - type: elementVisible
-        selector: { testTag: bug_repro_content }
-`),
-    );
-
-    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(plan, 0);
-
-    expect(result.failedStep).toBeUndefined();
-    expect(result.success).toBe(true);
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).not.toHaveProperty("expectations");
-    expect(result.warnings).toEqual([
-      {
-        stepIndex: 0,
-        tool: "expectationsStrictTool",
-        warnings: [UNEVALUATED_EXPECTATIONS_WARNING],
+    ToolRegistry.register(
+      "observe",
+      "fake observe",
+      z.strictObject({
+        platform: z.string().optional(),
+        deviceId: z.string().optional(),
+        sessionUuid: z.string().optional(),
+        device: z.string().optional(),
+        waitFor: z.record(z.string(), z.unknown()).optional(),
+      }),
+      async (params) => {
+        observeCalls.push(params);
+        return createStructuredToolResponse(
+          observeAnswer((params.waitFor ?? {}) as Record<string, unknown>),
+        );
       },
-    ]);
-    expect(result.debug?.steps[0].details.warnings).toEqual([UNEVALUATED_EXPECTATIONS_WARNING]);
+    );
   });
 
-  test("a step without expectations reports no warnings", async () => {
-    const seen: Array<Record<string, unknown>> = [];
-    registerStrictTool(seen);
-    const plan = new YamlPlanSerializer().importPlanFromYaml(yaml(""));
+  afterEach(() => restoreTools());
 
-    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(plan, 0);
+  const planWith = (expectations: string, extra = "") =>
+    new YamlPlanSerializer().importPlanFromYaml(`name: expectations-demo
+steps:
+  - tool: expectationsStrictTool
+${extra}    expectations:
+${expectations}
+  - tool: expectationsStrictTool
+`);
+
+  const run = (
+    plan: ReturnType<typeof planWith>,
+    platform: "android" | "ios",
+    deviceId = platform === "android" ? "emulator-5554" : "SIM-UDID",
+  ) => createDefaultPlanExecutor(new FakeTimer()).executePlan(plan, 0, platform, deviceId);
+
+  for (const platform of ["android", "ios"] as const) {
+    describe(platform, () => {
+      test("a passing expectation is checked with a fresh observe and the plan continues", async () => {
+        const plan = planWith(`      - type: elementVisible
+        selector: { testTag: bug_repro_content }
+      - type: textEquals
+        selector: { resourceId: counter }
+        text: "3"
+`);
+
+        const result = await run(plan, platform);
+
+        expect(result.success).toBe(true);
+        expect(result.warnings).toBeUndefined();
+        expect(stepCalls).toHaveLength(2);
+        expect(stepCalls[0]).not.toHaveProperty("expectations");
+        expect(observeCalls.map((call) => call.waitFor)).toEqual([
+          { elementId: "bug_repro_content" },
+          { elementId: "counter", text: "3", textMatch: "exact" },
+        ]);
+        expect(observeCalls[0].platform).toBe(platform);
+      });
+
+      test("a failing expectation fails the step and names what was observed", async () => {
+        observeAnswer = (waitFor) =>
+          "absent" in waitFor ? { awaitTimeout: false } : timedOut(["Home", "Settings"]);
+        const plan = planWith(`      - type: elementAbsent
+        selector: { text: Loading }
+      - type: textContains
+        text: Welcome
+        timeoutMs: 1500
+`);
+
+        const result = await run(plan, platform);
+
+        expect(result.success).toBe(false);
+        expect(stepCalls).toHaveLength(1);
+        expect(observeCalls.map((call) => call.waitFor)).toEqual([
+          { absent: { text: "Loading" } },
+          { text: "Welcome", textMatch: "contains", timeout: 1500 },
+        ]);
+        expect(result.failedStep?.stepIndex).toBe(0);
+        expect(result.failedStep?.error).toBe(
+          'Expectation 2/2 (textContains text="Welcome") failed: not satisfied after 5000ms; ' +
+            '1 near match(es); observed texts: "Home", "Settings"',
+        );
+        expect(result.failedStep?.failureObservation?.visibleTextsSample).toEqual([
+          "Home",
+          "Settings",
+        ]);
+        const details = result.debug?.steps[0].details;
+        expect(details?.failedExpectation).toEqual({
+          index: 1,
+          expectation: { type: "textContains", text: "Welcome", timeoutMs: 1500 },
+        });
+        expect(details?.waitForTimeout).toMatchObject({ awaitDuration: 5000, candidateCount: 1 });
+      });
+
+      test("an optional step whose expectation fails is skipped and the plan continues", async () => {
+        observeAnswer = () => timedOut([]);
+        const plan = planWith(
+          `      - type: elementVisible
+        selector: { contentDescription: Dismiss }
+`,
+          "    optional: true\n",
+        );
+
+        const result = await run(plan, platform);
+
+        expect(result.success).toBe(true);
+        expect(stepCalls).toHaveLength(2);
+        expect(result.skippedSteps).toHaveLength(1);
+        expect(result.skippedSteps?.[0]).toMatchObject({
+          stepIndex: 0,
+          error:
+            'Expectation 1/1 (elementVisible contentDescription="Dismiss") failed: not satisfied after 5000ms; 1 near match(es)',
+        });
+      });
+    });
+  }
+
+  test("an unsupported expectation type is reported as a warning, not silently passed", async () => {
+    const plan = planWith(`      - type: hasAccessibilityIssues
+`);
+
+    const result = await run(plan, "android");
+
+    expect(result.success).toBe(true);
+    expect(observeCalls).toHaveLength(0);
+    expect(result.warnings?.[0].warnings).toEqual([
+      "Expectation `hasAccessibilityIssues` was not evaluated: type `hasAccessibilityIssues` is not supported (supported: elementVisible, elementAbsent, textEquals, textContains).",
+    ]);
+  });
+
+  test("an invalid expectation fails the step without observing", async () => {
+    const plan = planWith(`      - type: elementVisible
+`);
+
+    const result = await run(plan, "android");
+
+    expect(result.success).toBe(false);
+    expect(observeCalls).toHaveLength(0);
+    expect(result.failedStep?.error).toBe(
+      "Expectation 1/1 (elementVisible) failed: invalid expectation: elementVisible requires a selector",
+    );
+  });
+
+  test("an observe that reports failure fails the expectation with its error", async () => {
+    observeAnswer = () => ({ success: false, error: "device offline" });
+    const plan = planWith(`      - type: elementVisible
+        selector: { text: Done }
+`);
+
+    const result = await run(plan, "ios");
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toBe(
+      'Expectation 1/1 (elementVisible text="Done") failed: could not observe the screen: device offline',
+    );
+  });
+
+  test("a step without expectations never observes", async () => {
+    const plan = new YamlPlanSerializer().importPlanFromYaml(`name: plain
+steps:
+  - tool: expectationsStrictTool
+`);
+
+    const result = await run(plan, "android");
 
     expect(result.success).toBe(true);
     expect(result.warnings).toBeUndefined();
+    expect(observeCalls).toHaveLength(0);
   });
 });

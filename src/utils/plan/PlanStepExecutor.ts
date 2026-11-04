@@ -19,12 +19,7 @@ import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { redactTypedTextArguments } from "../redactTypedTextArguments";
 import { isDeviceLostError } from "../../models/DeviceLostError";
 import { isParticipantFailureAbort } from "./ParticipantFailureTracker";
-import {
-  UNEVALUATED_EXPECTATIONS_WARNING,
-  formatStepError,
-  parseStepParams,
-  stripUndeclaredDeviceLabel,
-} from "./planStepParams";
+import { formatStepError, parseStepParams, stripUndeclaredDeviceLabel } from "./planStepParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -32,6 +27,11 @@ import {
 } from "./summarizeFailureObservation";
 import { PlanStepError } from "./PlanStepError";
 import { redactToolSecrets } from "../redactToolSecrets";
+import {
+  evaluateStepExpectations,
+  type ExpectationObserve,
+  type StepExpectationOutcome,
+} from "./StepExpectationEvaluator";
 export { PlanStepError } from "./PlanStepError";
 
 /** Only the registry operations and tool metadata required to execute a step. */
@@ -78,19 +78,6 @@ export interface StepExecutionContext {
   captureObserveSteps?: NonNullable<PlanExecutionOptions["captureObserveSteps"]>;
   logPrefix: string;
   debugLog?: boolean;
-}
-
-function withUnevaluatedExpectationsWarning(
-  step: PlanStep,
-  toolWarnings: string[] | undefined,
-  details: Record<string, unknown>,
-): string[] | undefined {
-  if (!step.expectations || step.expectations.length === 0) {
-    return toolWarnings;
-  }
-  const warnings = [...(toolWarnings ?? []), UNEVALUATED_EXPECTATIONS_WARNING];
-  details.warnings = warnings;
-  return warnings;
 }
 
 /**
@@ -152,6 +139,28 @@ function completedStepPayload(
   }
   const { payload } = interpretation;
   return "content" in payload || "structuredContent" in payload ? undefined : payload;
+}
+
+/**
+ * A completed step after its expectations ran: still completed when they held, failed with the
+ * failing expectation's details otherwise. Unsupported-type warnings join the tool's warnings.
+ */
+function withExpectationOutcome(
+  completed: StepExecutionResult,
+  outcome: StepExpectationOutcome,
+): StepExecutionResult {
+  const warnings = [...(completed.warnings ?? []), ...(outcome.warnings ?? [])];
+  const warned = warnings.length > 0 ? { warnings } : {};
+  if (outcome.status === "passed") {
+    return { ...completed, details: { ...completed.details, ...warned }, ...warned };
+  }
+  return {
+    status: "failed",
+    error: outcome.error,
+    details: { ...completed.details, ...outcome.details, ...warned },
+    ...(outcome.failureObservation ? { failureObservation: outcome.failureObservation } : {}),
+    ...warned,
+  };
 }
 
 /** The optional-step skip record shared by every "tool answered but the step failed" branch. */
@@ -339,12 +348,12 @@ export class DefaultPlanStepExecutor<
   }
 
   private buildFailureObservationParams(
-    platform: string,
+    platform: string | undefined,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
     deviceLabel: string | undefined,
   ): Record<string, unknown> {
-    const enhancedParams: Record<string, unknown> = { platform };
+    const enhancedParams: Record<string, unknown> = platform ? { platform } : {};
     const shouldSuppressDeviceId = !!(sessionUuid && this.isDaemonInitialized());
     if (deviceId && !shouldSuppressDeviceId) {
       enhancedParams.deviceId = deviceId;
@@ -651,6 +660,59 @@ export class DefaultPlanStepExecutor<
   }
 
   /**
+   * One fresh internal `observe` with the expectation's `waitFor`, routed exactly like the
+   * failure observation: the step's device label, session and critical-section owner (#16817).
+   */
+  private expectationObserve(step: PlanStep, context: StepExecutionContext): ExpectationObserve {
+    const deviceLabel = typeof step.params?.device === "string" ? step.params.device : undefined;
+    return async (waitFor) => {
+      const observeTool = this.tools.getTool("observe");
+      if (!observeTool) {
+        throw new ActionableError("the observe tool is not available");
+      }
+      const params = {
+        ...this.buildFailureObservationParams(
+          context.platform,
+          context.deviceId,
+          context.sessionUuid,
+          deviceLabel,
+        ),
+        waitFor,
+      };
+      return this.tools.callInternal(observeTool, parseStepParams(observeTool.schema, params), {
+        signal: context.signal,
+        ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
+      });
+    };
+  }
+
+  /** Fail (or skip, when optional) a completed step whose expectations did not hold. */
+  private async checkExpectations(
+    step: PlanStep,
+    context: StepExecutionContext,
+    completed: StepExecutionResult,
+  ): Promise<StepExecutionResult> {
+    if (!step.expectations || step.expectations.length === 0) {
+      return completed;
+    }
+    const outcome = await evaluateStepExpectations(
+      step.expectations,
+      this.expectationObserve(step, context),
+    );
+    if (!context.targetDevice) {
+      throwIfAborted(context.signal);
+    }
+    if (outcome.status === "failed" && this.shouldSkipReturnedFailure(step, context)) {
+      const skipped = skippedOptionalResult(step, outcome.error);
+      return {
+        ...skipped,
+        details: { ...skipped.details, failedExpectation: outcome.details.failedExpectation },
+      };
+    }
+    return withExpectationOutcome(completed, outcome);
+  }
+
+  /**
    * A tool answered but the step failed (`success: false`, a `waitFor` timeout or an
    * unsupported result): capture the failure observation, copy the tool's diagnostics into the
    * step details, and return the tool's warnings so the caller can promote them.
@@ -704,12 +766,12 @@ export class DefaultPlanStepExecutor<
     };
   }
 
-  private resultFromSuccess(
+  private async resultFromSuccess(
     step: PlanStep,
     context: StepExecutionContext,
     response: unknown,
     toolResult: Record<string, unknown> | undefined,
-  ): StepExecutionResult {
+  ): Promise<StepExecutionResult> {
     const details: Record<string, unknown> = {
       params: redactToolSecrets(step.tool, step.params),
     };
@@ -722,15 +784,14 @@ export class DefaultPlanStepExecutor<
         details.stepObservation = stepObservation;
       }
     }
-    const toolWarnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
-    const warnings = withUnevaluatedExpectationsWarning(step, toolWarnings, details);
+    const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
 
-    return {
+    return this.checkExpectations(step, context, {
       status: "completed",
       details,
       toolPayload: completedStepPayload(response, step.tool),
       ...(warnings ? { warnings } : {}),
-    };
+    });
   }
 
   private async observationForThrownStep(

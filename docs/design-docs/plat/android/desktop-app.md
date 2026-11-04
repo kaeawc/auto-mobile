@@ -45,12 +45,22 @@ fallback), instead of opening their own socket:
   its serial never receives the old epoch's events. A device's connection opens
   with its first lease and closes with its last; a facet mounted on an open
   connection first receives its device's recent events.
-- Leases are ref-counted per device; `subscriptions` exposes the live counts.
+- Observation (Layout, Performance, Navigation) also uses one connection per
+  device, shared by every facet on it. The hub owns that connection's
+  reconnects, so a facet on a hub stream runs no reconnect loop of its own and
+  only refreshes when the shared connection comes back. Cadence requests are
+  merged per stream by taking the fastest interval any facet asked for, and
+  recomputed when a facet leaves. Storage keeps its own per-pane stream, because
+  its updates and subscription acknowledgements are unicast to one pane.
+- Leases are ref-counted per device and stream kind; `subscriptions` and
+  `observationSubscriptions` expose the live counts, and
+  `telemetryConnectionState`/`observationConnectionState` the per-device health.
 - Blocking `readLine()` calls for JSON streams run on a dedicated thread per
   connection, never on `Dispatchers.IO`, so many open streams cannot exhaust the
   shared pool.
 - Observation-stream reconnects back off exponentially with up to 20% random
-  jitter so panes that dropped together do not reconnect in lockstep. Tests
+  jitter so devices that dropped together do not reconnect in lockstep. Tests
   inject the delay and the random source.
 
-Observation, failures and video streams still connect per pane.
+Storage, failures and video streams still connect per pane, as do observation
+streams in hosts without a hub (the IDE plugin).

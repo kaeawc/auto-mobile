@@ -32,11 +32,11 @@ fun interface StreamLease : AutoCloseable {
 /**
  * The desktop's shared, per-process owner of daemon streams (#5262). Facets ask the hub for a
  * device's stream instead of opening their own socket: the hub keeps one long-lived connection per
- * observed device and stream kind, shared by every facet showing that device, and ref-counts
- * subscriptions per [DeviceStreamKey] as facets mount and unmount. A device's connection opens on
- * its first subscription and closes when its last one is released.
+ * observed device and stream kind (telemetry, observation), shared by every facet showing that
+ * device, and ref-counts subscriptions per [DeviceStreamKey] as facets mount and unmount. A
+ * device's connection opens on its first subscription and closes when its last one is released.
  */
-interface DaemonStreamHub {
+interface DaemonStreamHub : ObservationStreamHub {
   /**
    * Subscribe [sink] to [key]'s telemetry. Events already buffered on that device's shared
    * connection are delivered first. [sink] runs under the hub's routing lock and must not block.
@@ -64,4 +64,21 @@ interface DaemonStreamHub {
 
   /** Release every connection. The hub must not be used afterwards. */
   fun close()
+}
+
+/** The observation half of [DaemonStreamHub]: one shared stream per observed device. */
+interface ObservationStreamHub {
+  /**
+   * A facet's view of [key]'s shared observation stream (#16967): `connect` takes a lease,
+   * `disconnect`/`dispose` release it, and one connection serves every facet on the device. The hub
+   * reconnects a dropped connection itself, and runs it at the fastest cadence any lease requested.
+   * Storage traffic is not carried; the Storage facet keeps its own stream.
+   */
+  fun observationStream(key: DeviceStreamKey): HubManagedObservationStream
+
+  /** State of [key]'s shared observation connection; Disconnected while no lease holds it. */
+  fun observationConnectionState(key: DeviceStreamKey): StateFlow<ConnectionState>
+
+  /** Live observation lease count per device, like `subscriptions` for telemetry. */
+  val observationSubscriptions: StateFlow<Map<DeviceStreamKey, Int>>
 }

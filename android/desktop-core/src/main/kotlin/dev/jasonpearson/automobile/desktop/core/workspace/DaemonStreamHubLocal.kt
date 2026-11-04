@@ -3,10 +3,15 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
 
@@ -26,11 +31,55 @@ fun rememberDaemonStreamHub(sessionUuidProvider: () -> String?): DaemonStreamHub
   val latestSessionUuidProvider by rememberUpdatedState(sessionUuidProvider)
   val hub = remember {
     SharedDaemonStreamHub(
-      {
+      telemetryClientFactory = {
         TelemetryPushSocketClient(sessionUuidProvider = { latestSessionUuidProvider() })
       },
+      observation =
+        ObservationHubConfig(
+          streamFactory = {
+            ObservationStreamClient(sessionUuidProvider = { latestSessionUuidProvider() })
+          },
+        ),
     )
   }
   DisposableEffect(hub) { onDispose { hub.close() } }
   return hub
+}
+
+/**
+ * The observation-stream factory a pane's facet should use for [column]: a lease on [hub]'s shared
+ * per-device stream when the app has a hub, otherwise [fallback] (the facet's own per-pane stream).
+ */
+internal fun hubObservationFactory(
+  hub: DaemonStreamHub?,
+  column: DeviceColumn,
+  fallback: () -> ObservationStream,
+): () -> ObservationStream =
+  hub?.let { { it.observationStream(DeviceStreamKey(column.deviceId, column.deviceSessionUuid)) } }
+    ?: fallback
+
+/**
+ * A pane facet's observation stream for [column]: a lease on the app's [LocalDaemonStreamHub]
+ * per-device stream when there is one, otherwise [fallback]'s own per-pane stream, with the
+ * lifecycle of [rememberReconnectingObservationState]. A new device epoch takes a new lease, keyed
+ * by the column's deviceSessionUuid.
+ */
+@Composable
+internal fun rememberPaneObservationState(
+  column: DeviceColumn,
+  fallback: () -> ObservationStream,
+  backoffDelay: suspend (attempt: Int) -> Unit,
+  socketAvailable: () -> Boolean,
+): ReconnectingObservationState {
+  val hub = LocalDaemonStreamHub.current
+  return key(column.deviceSessionUuid) {
+    rememberReconnectingObservationState(
+      ReconnectingObservationOptions(
+        deviceId = column.deviceId,
+        streamFactory = hubObservationFactory(hub, column, fallback),
+        backoffDelay = backoffDelay,
+        socketAvailable = socketAvailable,
+      ),
+    )
+  }
 }

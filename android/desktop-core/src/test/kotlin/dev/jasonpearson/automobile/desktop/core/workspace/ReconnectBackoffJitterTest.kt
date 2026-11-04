@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.daemon.RECONNECT_JITTER_FRACTION
+import dev.jasonpearson.automobile.desktop.core.daemon.jitteredReconnectBackoffMs
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals

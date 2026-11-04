@@ -21,6 +21,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.runInterruptible
 
+/** A connection taken off the table, to be cancelled and closed outside its lock. */
+private class DetachedConnection(
+  private val job: Job?,
+  private val socket: TelemetrySocket?,
+  private val wire: TelemetryWire,
+) {
+  fun shutDown() {
+    job?.cancel()
+    wire.closeQuietly(socket)
+  }
+}
+
 /** How [MultiplexedTelemetrySocketClient] reaches the daemon; every member is a test seam. */
 internal class TelemetryTransport(
   val openSocket: (String) -> TelemetrySocket = ::ChannelTelemetrySocket,
@@ -71,26 +83,28 @@ internal class MultiplexedTelemetrySocketClient(
   }
 
   override fun close() {
-    val all =
+    val (all, detached) =
       synchronized(table.lock) {
         table.closed = true
-        table.snapshot().onEach { table.remove(it) }
+        table.snapshot().onEach { table.remove(it) } to detachConnection()
       }
     all.publish(ConnectionState.Disconnected(null))
-    stopConnection()
+    detached.shutDown()
     job.cancel()
   }
 
   private fun release(entry: MuxSubscription) {
-    val (open, released, last) =
+    val (open, released, detached) =
       synchronized(table.lock) {
         if (entry.released) return
         val id = table.remove(entry)
-        Triple(table.socket, id, table.snapshot().isEmpty())
+        // Decide and detach in one step: a device subscribing right after this release must start
+        // a fresh connection, not join the socket being shut down.
+        Triple(table.socket, id, if (table.snapshot().isEmpty()) detachConnection() else null)
       }
     entry.mutableState.value = ConnectionState.Disconnected(null)
     if (open != null && released != null) wire.write(open, wire.unsubscribe(released))
-    if (last) stopConnection()
+    detached?.shutDown()
   }
 
   private fun retryEntry(entry: MuxSubscription) {
@@ -140,15 +154,12 @@ internal class MultiplexedTelemetrySocketClient(
     table.connection = scope.launch { connectWithRetry() }
   }
 
-  private fun stopConnection() {
-    val (connection, open) =
-      synchronized(table.lock) {
-        val connection = table.connection
-        table.connection = null
-        connection to table.socket.also { table.socket = null }
-      }
-    connection?.cancel()
-    wire.closeQuietly(open)
+  // Called under the table lock: hands the connection over to be shut down outside it.
+  private fun detachConnection(): DetachedConnection {
+    val detached = DetachedConnection(table.connection, table.socket, wire)
+    table.connection = null
+    table.socket = null
+    return detached
   }
 
   private suspend fun connectWithRetry() {
@@ -200,8 +211,12 @@ internal class MultiplexedTelemetrySocketClient(
       log.warn("Telemetry push connection failed: ${e.message}")
     } finally {
       synchronized(table.lock) {
-        if (table.socket === current) table.socket = null
-        table.resetSubscriptions()
+        // Only the connection that still owns the table resets it: a replacement opened after this
+        // one was detached keeps its own subscriptions.
+        if (current != null && table.socket === current) {
+          table.socket = null
+          table.resetSubscriptions()
+        }
       }
       wire.closeQuietly(current)
     }

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -33,20 +34,42 @@ class MultiplexedTelemetrySocketClientTest {
   private val phoneA = DeviceStreamKey("emulator-5554", "uuid-a")
   private val phoneB = DeviceStreamKey("emulator-5556", "uuid-b")
 
-  /** One end of a socket: the client reads [toClient] and writes into [fromClient]. */
-  private class ScriptedSocket : TelemetrySocket {
+  /**
+   * One end of a socket: the client reads [toClient] and writes into [fromClient]. [onWrite] runs
+   * on the writing thread. A [heldOnClose] socket's reader ignores interrupts and, once closed,
+   * stays blocked until [releaseReader], so a test can hold a retired connection's cleanup back.
+   */
+  private class ScriptedSocket(private val heldOnClose: Boolean = false) : TelemetrySocket {
     val toClient = LinkedBlockingQueue<String>()
     val fromClient = LinkedBlockingQueue<String>()
+    val releaseReader = CountDownLatch(1)
+    @Volatile var onWrite: (String) -> Unit = {}
 
-    override fun readLine(): String? = toClient.take().takeUnless { it == EOF }
+    override fun readLine(): String? {
+      if (!heldOnClose) return toClient.take().takeUnless { it == EOF }
+      val line = uninterruptibly { toClient.take() }
+      if (line != EOF) return line
+      uninterruptibly { releaseReader.await() }
+      return null
+    }
 
     override fun writeLine(line: String) {
       fromClient.add(line)
+      onWrite(line)
     }
+
+    val closes = LinkedBlockingQueue<Unit>()
 
     override fun close() {
       toClient.add(EOF)
+      closes.add(Unit)
     }
+
+    /** Wait for the [n]th close: the connection's own cleanup closes the socket last. */
+    fun awaitCloses(n: Int) =
+      repeat(n) {
+        checkNotNull(closes.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "socket not closed" }
+      }
 
     /** The next frame the client sent, decoded. */
     fun nextRequest(): Map<String, String?> {
@@ -59,12 +82,27 @@ class MultiplexedTelemetrySocketClientTest {
 
     fun send(line: String) = toClient.add(line)
 
+    private fun <T> uninterruptibly(block: () -> T): T {
+      var interrupted = false
+      try {
+        while (true) {
+          try {
+            return block()
+          } catch (e: InterruptedException) {
+            interrupted = true
+          }
+        }
+      } finally {
+        if (interrupted) Thread.currentThread().interrupt()
+      }
+    }
+
     companion object {
       const val EOF = "\u0000EOF"
     }
   }
 
-  private class Daemon {
+  private class Daemon(private val holdFirstSocket: Boolean = false) {
     private val opened = LinkedBlockingQueue<ScriptedSocket>()
     @Volatile var openCount = 0
     val readerThreads = CountingReaderThreads()
@@ -74,7 +112,7 @@ class MultiplexedTelemetrySocketClientTest {
       TelemetryTransport(
         openSocket = {
           openCount++
-          ScriptedSocket().also(opened::add)
+          ScriptedSocket(heldOnClose = holdFirstSocket && openCount == 1).also(opened::add)
         },
         socketAvailable = { true },
         retryDelay = { retryDelays.add(it) },
@@ -271,6 +309,56 @@ class MultiplexedTelemetrySocketClientTest {
     assertEquals(1, daemon.readerThreads.created)
     hub.close()
   }
+
+  @Test
+  fun `a device subscribing as the last one leaves gets a fresh connection`() = runBlocking {
+    val daemon = Daemon()
+    val client = client(daemon)
+    val a = client.subscribe(phoneA) {}
+    val first = daemon.nextSocket()
+    first.send(ack(first.nextRequest()["id"], "telemetry-1"))
+    withTimeout(TIMEOUT_SECONDS * 1_000) { a.state.first { it is ConnectionState.Connected } }
+
+    // B subscribes in the window between A's release decision and the socket shutting down.
+    val logsB = Sink()
+    first.onWrite = { line ->
+      if ("unsubscribe" in line) client.subscribe(phoneB) { logsB.events.add(it) }
+    }
+    a.close()
+
+    val second = daemon.nextSocket()
+    val subB = second.nextRequest()
+    assertEquals("uuid-b", subB["deviceSessionUuid"])
+    second.send(ack(subB["id"], "telemetry-7"))
+    second.send(log("telemetry-7", "b1", phoneB))
+    assertEquals("b1", logsB.next())
+    client.close()
+  }
+
+  @Test
+  fun `a retired connection's cleanup leaves its replacement's subscriptions alone`() =
+    runBlocking {
+      val daemon = Daemon(holdFirstSocket = true)
+      val client = client(daemon)
+      val a = client.subscribe(phoneA) {}
+      val first = daemon.nextSocket()
+      first.nextRequest()
+      a.close()
+
+      // The first connection's reader is held, so its cleanup runs after the replacement is live.
+      val logsB = Sink()
+      val b = client.subscribe(phoneB) { logsB.events.add(it) }
+      val second = daemon.nextSocket()
+      val subB = second.nextRequest()
+      second.send(ack(subB["id"], "telemetry-2"))
+      withTimeout(TIMEOUT_SECONDS * 1_000) { b.state.first { it is ConnectionState.Connected } }
+      first.releaseReader.countDown()
+      // Closed once by the release and once more at the end of the retired connection's cleanup.
+      first.awaitCloses(2)
+      second.send(log("telemetry-2", "b-after-cleanup", phoneB))
+      assertEquals("b-after-cleanup", logsB.next())
+      client.close()
+    }
 }
 
 private const val TIMEOUT_SECONDS = 5L

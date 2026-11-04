@@ -15,6 +15,7 @@ type WatchRunnerSessions = Pick<
   "hasSession" | "onSessionRelease" | "onSessionDeviceUnbound"
 >;
 interface OwnedRunner {
+  bundleId?: string;
   ownerSession?: string;
   controller: AbortController;
   stop?: () => void;
@@ -47,6 +48,7 @@ export class WatchRunnerLifecycle {
   /** Launch without session ownership; only a newly launched runner supplies failure cleanup. */
   async start(request: {
     deviceId: string;
+    bundleId?: string;
     sessions?: WatchRunnerSessions;
     signal?: AbortSignal;
   }): Promise<{ runnerUnavailable?: string; stop?: () => void }> {
@@ -64,7 +66,7 @@ export class WatchRunnerLifecycle {
         runnerUnavailable: `The watch runner for ${deviceId} is disconnected and was not started by AutoMobile; restart it before trying again.`,
       };
     }
-    const entry: OwnedRunner = { controller: new AbortController() };
+    const entry: OwnedRunner = { controller: new AbortController(), bundleId: request.bundleId };
     const signal = combineAbortSignals(request.signal, entry.controller.signal)!;
     this.runners.set(deviceId, entry);
     try {
@@ -73,6 +75,7 @@ export class WatchRunnerLifecycle {
       entry.port = this.dependencies.ports.allocate(deviceId);
       const handle = await this.dependencies.launcher.launch({
         deviceId,
+        bundleId: request.bundleId,
         xctestrun,
         port: entry.port,
         signal,
@@ -98,6 +101,38 @@ export class WatchRunnerLifecycle {
       const reason = errorMessage(error);
       logger.warn(`[WatchRunner] Runner unavailable for ${deviceId}: ${reason}`, error);
       return { runnerUnavailable: reason };
+    }
+  }
+
+  /** Restart only a lifecycle-owned runner, keeping its session responsible for cleanup. */
+  async retarget(request: {
+    deviceId: string;
+    bundleId: string;
+    signal?: AbortSignal;
+  }): Promise<string | undefined> {
+    const entry = this.runners.get(request.deviceId);
+    if (!entry || entry.bundleId === request.bundleId) {
+      return undefined;
+    }
+    const ownerSession = entry.ownerSession;
+    try {
+      this.stop(request.deviceId);
+      const started = await this.start(request);
+      if (started.runnerUnavailable !== undefined) {
+        return started.runnerUnavailable;
+      }
+      const replacement = this.runners.get(request.deviceId);
+      if (replacement) {
+        replacement.ownerSession = ownerSession;
+      }
+      return undefined;
+    } catch (error) {
+      const reason = errorMessage(error);
+      logger.warn(
+        `[WatchRunner] Failed to retarget runner for ${request.deviceId}: ${reason}`,
+        error,
+      );
+      return reason;
     }
   }
 

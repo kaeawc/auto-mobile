@@ -13,6 +13,7 @@ export interface WatchRunnerLaunchOptions {
   deviceId: string;
   xctestrun: string;
   port: number;
+  bundleId?: string;
   /** Startup cancellation only; the resident process outlives a completed start request. */
   signal?: AbortSignal;
 }
@@ -81,7 +82,11 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
         "-only-testing:CtrlProxyWatchUITests/CtrlProxyWatchUITests/testRunService",
       ],
       {
-        env: { ...globalThis.process.env, TEST_RUNNER_AM_PORT: String(options.port) },
+        env: {
+          ...globalThis.process.env,
+          TEST_RUNNER_AM_PORT: String(options.port),
+          ...(options.bundleId !== undefined ? { TEST_RUNNER_AM_BUNDLE_ID: options.bundleId } : {}),
+        },
         stdio: "ignore",
         startupSignal: options.signal,
       },

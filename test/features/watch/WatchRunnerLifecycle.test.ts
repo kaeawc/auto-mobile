@@ -86,6 +86,7 @@ test("owns one launch and port per watch and reuses a registered runner", async 
   expect(f.launcher.launches).toEqual([
     {
       deviceId: "owned-watch",
+      bundleId: undefined,
       port: 9010,
       xctestrun: "/products/CtrlProxyWatch_watchsimulator.xctestrun",
       signal: expect.any(AbortSignal),
@@ -97,6 +98,96 @@ test("owns one launch and port per watch and reuses a registered runner", async 
   f.owner.stop("owned-watch");
   expect(f.released).toEqual(["owned-watch"]);
   expect(watchRunners.get("owned-watch")).toBeUndefined();
+});
+
+test("retarget restarts an owned runner with the new bundle and preserves session ownership", async () => {
+  const first = new FakeWatchRunnerClient();
+  const second = new FakeWatchRunnerClient();
+  const f = fixture([first, second]);
+  await f.owner.start({ ...f.request, bundleId: "com.example.first" });
+  f.owner.attach(f.request);
+  const controller = new AbortController();
+
+  expect(
+    await f.owner.retarget({
+      deviceId: f.request.deviceId,
+      bundleId: "com.example.second",
+      signal: controller.signal,
+    }),
+  ).toBeUndefined();
+  expect(f.launcher.launches.map((launch) => launch.bundleId)).toEqual([
+    "com.example.first",
+    "com.example.second",
+  ]);
+  expect(f.launcher.calls).toEqual(["launch", "stop", "launch"]);
+  expect(first.closed).toBe(true);
+  expect(watchRunners.get(f.request.deviceId)).toBe(second);
+  expect(second.closed).toBe(false);
+  expect(f.allocated).toEqual([f.request.deviceId, f.request.deviceId]);
+  expect(f.released).toEqual([f.request.deviceId]);
+
+  f.sessions.releases[0]!("other-session");
+  expect(f.launcher.stops).toBe(1);
+  f.sessions.releases[0]!(f.request.ownerSession);
+  expect(f.launcher.stops).toBe(2);
+  expect(second.closed).toBe(true);
+  expect(watchRunners.get(f.request.deviceId)).toBeUndefined();
+});
+
+test("retarget to the current bundle does not restart the runner", async () => {
+  const f = fixture();
+  const request = { deviceId: f.request.deviceId, bundleId: "com.example.workout" };
+  await f.owner.start(request);
+
+  expect(await f.owner.retarget(request)).toBeUndefined();
+  expect(f.launcher.launches).toHaveLength(1);
+  expect(f.launcher.stops).toBe(0);
+  expect(f.released).toEqual([]);
+  expect(f.client.closed).toBe(false);
+});
+
+test.each(["absent", "connected", "disconnected"])(
+  "retarget leaves a runner it does not own alone (%s)",
+  async (state) => {
+    const f = fixture();
+    const external = new FakeWatchRunnerClient();
+    if (state === "disconnected") {
+      external.failure = new Error("disconnected");
+    }
+    const unregister =
+      state === "absent" ? () => {} : watchRunners.register(f.request.deviceId, external);
+    try {
+      expect(
+        await f.owner.retarget({ deviceId: f.request.deviceId, bundleId: "com.example.workout" }),
+      ).toBeUndefined();
+      expect(f.launcher.launches).toEqual([]);
+      expect(f.launcher.stops).toBe(0);
+      expect(f.allocated).toEqual([]);
+      expect(f.released).toEqual([]);
+      expect(external.closed).toBe(false);
+      expect(watchRunners.get(f.request.deviceId)).toBe(state === "absent" ? undefined : external);
+    } finally {
+      unregister();
+    }
+  },
+);
+
+test("retarget returns the relaunch failure and releases the runner's ports", async () => {
+  const f = fixture();
+  await f.owner.ensure(f.request);
+  f.launcher.launch = async () => {
+    throw new Error("retargeted runner process exited");
+  };
+
+  const reason = await f.owner.retarget({
+    deviceId: f.request.deviceId,
+    bundleId: "com.example.workout",
+  });
+
+  expect(reason).toBe("retargeted runner process exited");
+  expect(f.launcher.stops).toBe(1);
+  expect(f.released).toEqual([f.request.deviceId, f.request.deviceId]);
+  expect(watchRunners.get(f.request.deviceId)).toBeUndefined();
 });
 
 test("relaunches an owned runner after its socket disconnects", async () => {

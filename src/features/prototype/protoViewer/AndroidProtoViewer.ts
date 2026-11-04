@@ -130,6 +130,13 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
           signal,
         );
       }
+    } catch (error) {
+      if (target.userId !== 0) {
+        // The write command removes the staging copy only when it runs; a cancelled or failed
+        // push/write would otherwise leave it in /data/local/tmp, outside the app's sweep.
+        await this.removeStagingQuietly(protoViewerStagingPath(request));
+      }
+      throw error;
     } finally {
       await temp.dispose();
     }
@@ -349,6 +356,18 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     } catch (error) {
       // Best effort: a leftover file only takes app-scoped space, and uninstalling removes it.
       logger.warn(`[protoviewer] cleanup of ${paths.join(", ")} failed: ${errorMessage(error)}`);
+    }
+  }
+
+  /** Runs without the caller's signal, so a cancelled save still removes its staging copy. */
+  private async removeStagingQuietly(staging: string): Promise<void> {
+    try {
+      await this.shell(`rm -f ${shellQuote(staging)}`, undefined, {
+        timeoutMs: PROTOVIEWER_CLEANUP_TIMEOUT_MS,
+      });
+    } catch (error) {
+      // Best effort: the import already failed, and that error is what the caller needs.
+      logger.warn(`[protoviewer] cleanup of ${staging} failed: ${errorMessage(error)}`);
     }
   }
 

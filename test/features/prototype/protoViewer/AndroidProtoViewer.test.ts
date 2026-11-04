@@ -293,6 +293,35 @@ describe("AndroidProtoViewer", () => {
     expect(adb.wasCommandExecuted("am start")).toBe(false);
   });
 
+  test("a refused provider write removes the device staging copy", async () => {
+    await selectSecondaryUser();
+    adb.setCommandResponse(
+      "content write",
+      exec("", "java.lang.SecurityException: Permission denied"),
+    );
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 5000)).rejects.toBeInstanceOf(
+      ProtoViewerStorageError,
+    );
+    expect(shellCommands().at(-1)).toBe(`shell rm -f '/data/local/tmp/${REQUEST}.automobile-proto'`);
+  });
+
+  test("secondary-user cancellation after the push removes the staging copy without the caller signal", async () => {
+    await selectSecondaryUser();
+    adb.setThrowOnAbortedSignal();
+    const controller = new AbortController();
+    adb.abortAfterCommand("push ", controller);
+    await expect(
+      viewer.importBundle(new Uint8Array([1]), undefined, 5000, controller.signal),
+    ).rejects.toBeDefined();
+    const cleanup = adb
+      .getCommandCalls()
+      .find((call) => call.command === `shell rm -f '/data/local/tmp/${REQUEST}.automobile-proto'`);
+    expect(cleanup?.signal).toBeUndefined();
+    expect(cleanup?.timeoutMs).toBe(5000);
+    expect(adb.files.has(`/data/local/tmp/${REQUEST}.automobile-proto`)).toBe(false);
+    expect(adb.wasCommandExecuted("am start")).toBe(false);
+  });
+
   test("a thrown provider transport failure remains a storage error", async () => {
     await selectSecondaryUser();
     adb.setCommandError("content write", new Error("transport closed"));

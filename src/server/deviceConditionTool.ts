@@ -1,11 +1,10 @@
-import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import {
   decodeAttestationCertificate,
   parseKeyAttestationCertificate,
   type AttestationChainSource,
 } from "../features/deviceCondition/keyAttestation";
 import { deviceConditionChanges } from "../features/deviceCondition/DeviceConditionTypes";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import type { FeatureFlagReader } from "../features/featureFlags/FeatureFlagService";
@@ -63,6 +62,7 @@ const OTHER_DEVICE_STATE_FIELDS: readonly (keyof DeviceConditionCallFields)[] = 
 /** Fail closed until the composition root registers the process's feature flags. */
 const FLAGS_UNREGISTERED: FeatureFlagReader = { isEnabled: () => false };
 let registeredFeatureFlags: FeatureFlagReader = FLAGS_UNREGISTERED;
+let registeredAttestationSource: ((device: BootedDevice) => AttestationChainSource) | undefined;
 
 /**
  * Composition-root seam (#11806): `createMcpServer` registers the process
@@ -71,6 +71,13 @@ let registeredFeatureFlags: FeatureFlagReader = FLAGS_UNREGISTERED;
  */
 export function registerDeviceConditionFeatureFlags(featureFlags: FeatureFlagReader): void {
   registeredFeatureFlags = featureFlags;
+}
+
+/** Composition-root seam (#16868): the Android CtrlProxy client that exports attestation chains. */
+export function registerDeviceConditionAttestationSource(
+  factory: (device: BootedDevice) => AttestationChainSource,
+): void {
+  registeredAttestationSource = factory;
 }
 
 function refuse(device: BootedDevice, error: string) {
@@ -137,7 +144,11 @@ async function handleAttestationExport(device: BootedDevice, deps: DeviceConditi
     return refuse(device, "Attestation export requires Android.");
   }
   try {
-    const source = deps.attestationSource?.(device) ?? AndroidCtrlProxyClient.getInstance(device);
+    const factory = deps.attestationSource ?? registeredAttestationSource;
+    if (factory === undefined) {
+      throw new ActionableError("Attestation source is not registered by the composition root");
+    }
+    const source = factory(device);
     const certificateChainBase64 = await source.exportAttestation();
     if (certificateChainBase64.length < 2 || certificateChainBase64.length > 16) {
       throw new Error("Attestation requires a leaf-to-root certificate chain");

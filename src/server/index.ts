@@ -103,7 +103,10 @@ import { registerToolCatalogResources } from "./toolCatalogResource";
 import { registerNetworkResources } from "./networkResources";
 import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import { registerDeviceConditionFeatureFlags } from "./deviceConditionTool";
+import {
+  registerDeviceConditionFeatureFlags,
+  registerDeviceConditionAttestationSource,
+} from "./deviceConditionTool";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import {
   type SessionToolSelectionService,
@@ -421,6 +424,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const toolSelectionProfileRegistry =
     options.toolSelectionProfileRegistry ?? defaultToolSelectionProfileRegistry;
   registerDeviceConditionFeatureFlags(FeatureFlagService.getInstance());
+  registerDeviceConditionAttestationSource((device) => AndroidCtrlProxyClient.getInstance(device));
   void FeatureFlagService.getInstance()
     .initialize()
     .catch((error) => {

@@ -270,8 +270,10 @@ trap 'rm -rf "$report_dir"' EXIT
 attempt=1
 while true; do
   run_oxlint_json "$report_dir/report.json" "$report_dir/stderr.txt"
-  extract_status=0
-  violations="$(extract_counts < "$report_dir/report.json")" || extract_status=$?
+  set +e
+  violations="$(extract_counts < "$report_dir/report.json")"
+  extract_status=$?
+  set -e
   if [[ "$extract_status" -eq 0 ]]; then break; fi
   if [[ "$extract_status" -ne 65 ]]; then exit "$extract_status"; fi
   describe_unparseable "$report_dir/report.json" "$report_dir/stderr.txt" "$attempt" "$OXLINT_JSON_ATTEMPTS"

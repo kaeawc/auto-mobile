@@ -185,14 +185,7 @@ FAKE
   grep -Fxq 'cmdline_tools_promoted=true' "$SUMMARY"
 }
 
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify foldable nightly wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "prepare prints versions and device diagnostics before updating cmdline-tools" {
   run bash "$SCRIPT" pixel_10_pro_fold
@@ -315,7 +308,7 @@ wiring_requires_yq() {
 }
 
 @test "nightly prepares the profile immediately before the emulator after Xvfb" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local prepare_index emulator_index xvfb_index prepare_run
   prepare_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.name == "Prepare foldable emulator SDK and libraries") | .key' "$NIGHTLY")"
   emulator_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.uses == "./.github/actions/android-emulator") | .key' "$NIGHTLY")"
@@ -328,7 +321,7 @@ wiring_requires_yq() {
 }
 
 @test "nightly always diagnoses libraries after the emulator and before artifact upload" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local diagnose_index emulator_index upload_index
   diagnose_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.name == "Diagnose foldable emulator shared libraries") | .key' "$NIGHTLY")"
   emulator_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.uses == "./.github/actions/android-emulator") | .key' "$NIGHTLY")"
@@ -341,12 +334,12 @@ wiring_requires_yq() {
 }
 
 @test "nightly foldable matrix requires a conscious change to re-add resizable" {
-  wiring_requires_yq
+  require_mikefarah_yq
   [ "$(yq -o=json -I=0 '.jobs.foldable-posture-tests.strategy.matrix.profile' "$NIGHTLY")" = '["pixel_10_pro_fold"]' ]
 }
 
 @test "nightly foldable lane remains advisory with Resizable windowed" {
-  wiring_requires_yq
+  require_mikefarah_yq
   [ "$(yq -r '.jobs.foldable-posture-tests.continue-on-error' "$NIGHTLY")" = true ]
   [ "$(yq -r '.jobs.foldable-posture-tests.steps[] | select(.uses == "./.github/actions/android-emulator") | .with.windowed' "$NIGHTLY")" = "\${{ matrix.profile == 'resizable' }}" ]
 }

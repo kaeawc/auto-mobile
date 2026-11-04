@@ -192,6 +192,38 @@ describe("web still selection controls (#16537)", () => {
     expect(nested({ q: "", open: true }, { style: { height: 80 } }).style.flex).toBeUndefined();
   });
 
+  test("an expanded search bar grows every unsized ancestor, and a repeat checks each row (#16803)", () => {
+    const outer = (inner: Spec, state: Spec): WebElement => {
+      const still = renderPrototypeStill({
+        id: "s",
+        state,
+        root: {
+          type: "column",
+          children: [{ type: "column", testTag: "outer", children: [inner] }],
+        },
+      });
+      expect(still.unsupportedNodes).toEqual([]);
+      return find(still.element, (node) => node.attrs["data-testid"] === "outer")[0]!;
+    };
+    const bar = (activeKey: string) => ({ type: "searchBar", stateKey: "q", activeKey });
+    // Two unsized columns between the sized root and the expanded bar both grow.
+    const nested = outer({ type: "column", children: [bar("open")] }, { open: true });
+    expect(nested.style.flex).toBe("1 1 auto");
+    expect(byNode(nested, "column")[0]!.style.flex).toBe("1 1 auto");
+    // A repeated column binds each row's placeholders before asking whether its bar is expanded.
+    const repeated = (open: Spec) =>
+      outer(
+        {
+          type: "column",
+          repeat: { as: "item", items: [{ id: "a" }, { id: "b" }] },
+          children: [bar("open_{item.id}")],
+        },
+        open,
+      );
+    expect(repeated({ open_b: true }).style.flex).toBe("1 1 auto");
+    expect(repeated({ open_a: false, open_b: false }).style.flex).toBeUndefined();
+  });
+
   test("an expanded search bar start-aligns its results so a compact button keeps its width", () => {
     const bar = draw(
       {

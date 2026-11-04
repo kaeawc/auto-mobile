@@ -54,6 +54,7 @@ import type {
   WaitForConditionKind,
 } from "./WaitForSchemas";
 import { hasElementPredicate } from "./WaitElement";
+import { withProjectedTextFallback } from "./WaitProjectedText";
 import {
   type ObserveConditionEvaluation,
   containerFailureMetadata,
@@ -185,16 +186,19 @@ const runWaitForConditionDsl = async (
   }
 
   const tracked = trackContainerFailure(new ElementResolver(), waitFor.container);
-  const evaluate = buildConditionPredicate(
-    tracked.finder,
+  const selector = {
+    elementId: waitFor.elementId,
+    text: waitFor.text,
+    container: waitFor.container,
+    selectionStrategy: waitFor.selectionStrategy,
+  };
+  const evaluate = withProjectedTextFallback(
     waitFor.for,
-    {
-      elementId: waitFor.elementId,
-      text: waitFor.text,
-      container: waitFor.container,
-      selectionStrategy: waitFor.selectionStrategy,
-    },
-    { stableReads: waitFor.stableReads },
+    selector,
+    buildConditionPredicate(tracked.finder, waitFor.for, selector, {
+      stableReads: waitFor.stableReads,
+    }),
+    { layer: (waitFor as WaitForWithSettled).layer },
   );
   const predicate: ConditionPredicate = (observation) => {
     tracked.reset();

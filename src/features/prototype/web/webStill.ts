@@ -244,6 +244,7 @@ function stillScope(
     unsupported: [],
     ...glyphScope(options, frame),
     screenWidth: size.width,
+    screenHeight: size.height,
     ...(options.screen === undefined ? {} : { screen: options.screen }),
     stacks: [],
     layers: [],

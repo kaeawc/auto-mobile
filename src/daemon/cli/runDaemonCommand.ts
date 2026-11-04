@@ -37,6 +37,7 @@ import {
   releaseReasonFromError,
 } from "../types";
 import { parseDaemonArgs } from "./daemonArgs";
+import { parseSetFeatureFlagArgs, setDaemonFeatureFlag } from "./featureFlagCommand";
 import { readBooleanFlag, splitFlagToken } from "../../utils/flagTokens";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
 import {
@@ -673,6 +674,30 @@ async function queryActiveSessions(args: string[], manager: DaemonManager): Prom
   }
 }
 
+/**
+ * Set a feature flag on the running daemon (#16882): the headless path for a flag the IDE
+ * plugin's settings page otherwise owns, such as `device-condition`.
+ */
+async function setFeatureFlagCommand(args: string[], manager: DaemonManager): Promise<void> {
+  const { json, rest } = takeJsonFlag(args);
+  try {
+    const parsed = parseSetFeatureFlagArgs(rest.filter((arg) => arg !== ""));
+    let result: unknown;
+    try {
+      result = await setDaemonFeatureFlag(parsed, manager.createClient());
+    } catch (error) {
+      throw new DaemonCommandRefusal(`Failed to set feature flag ${parsed.key}`, error);
+    }
+    if (json) {
+      console.log(JSON.stringify({ ok: true, flag: result }));
+      return;
+    }
+    console.log(`Feature flag ${parsed.key} is now ${parsed.enabled ? "enabled" : "disabled"}`);
+  } catch (error) {
+    exitWithDaemonQueryFailure(error, json);
+  }
+}
+
 async function queryDaemonCapabilities(args: string[], manager: DaemonManager): Promise<void> {
   try {
     const result = await queryExistingDaemonCapabilities(args, () => manager.createClient());
@@ -931,6 +956,7 @@ const NAMESPACE_GUARDED_DAEMON_COMMANDS = new Set([
   "restart-admitted",
   "restart-acceptance-session",
   "release-session",
+  "set-feature-flag",
   "abandon-session-request",
   "release-broker-session",
   "release-liveness-ownership",
@@ -981,6 +1007,7 @@ export async function runDaemonCommand(
     "active-sessions": () => queryActiveSessions(args, manager),
     "session-info": () => querySessionInfo(args, manager),
     "release-session": () => releaseDaemonSession(args, manager),
+    "set-feature-flag": () => setFeatureFlagCommand(args, manager),
     "session-request-status": () =>
       runSessionBrokerCommand("session-request-status", args, manager),
     "abandon-session-request": () =>

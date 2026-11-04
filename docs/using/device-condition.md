@@ -15,10 +15,16 @@
 `deviceCondition` is behind the `device-condition` feature flag, which is off by default. While it is off, every `deviceCondition` call fails with:
 
 ```text
-deviceCondition is behind the 'device-condition' feature flag, which is disabled.
+deviceCondition is behind the 'device-condition' feature flag, which is disabled. Enable it with `auto-mobile --daemon set-feature-flag device-condition true` (or the IDE plugin's feature flag settings), then retry the call.
 ```
 
-Turn it on in the AutoMobile IDE plugin under **Settings > AutoMobile > Feature Flags**. The flag applies to the whole host, not one session.
+Turn it on from a shell with:
+
+```bash
+auto-mobile --daemon set-feature-flag device-condition true
+```
+
+or in the AutoMobile IDE plugin under **Settings > AutoMobile > Feature Flags**. The flag applies to the whole host, not one session, and stays set across daemon restarts. Pass `false` to turn it off again.
 
 ## Exporting key attestation
 

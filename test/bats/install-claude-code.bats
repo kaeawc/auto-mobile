@@ -176,19 +176,52 @@ teardown() {
   [ ! -e "${CLAUDE_CODE_INSTALL_DIR}/.claude-code-pin" ]
 }
 
-@test "CI jobs install through the cached composite action, not the bare script" {
-  local repo action
+# The wiring assertions read the workflows and the action structurally with
+# mikefarah yq v4, so a commented-out or misplaced step does not count. Outside
+# CI a missing or other yq (python-yq reports 0.0.0) skips; in CI it fails.
+require_mikefarah_yq() {
+  local version_line=""
+  read -r version_line < <(yq --version 2>&1) || true
+  if [[ "${version_line}" == *mikefarah* && "${version_line}" =~ version\ v?4\. ]]; then
+    return 0
+  fi
+  if [[ -n "${CI:-}" ]]; then
+    echo "mikefarah yq v4 is required in CI (yq reports: ${version_line:-nothing})" >&2
+    return 1
+  fi
+  skip "requires mikefarah yq v4 (yq reports: ${version_line:-nothing})"
+}
+
+@test "the PR and merge jobs that validate the plugin install through the cached action" {
+  require_mikefarah_yq
+  local repo pr merge
   repo="$(pwd)"
-  action="${repo}/.github/actions/install-claude-code/action.yml"
+  pr="${repo}/.github/workflows/pull_request.yml"
+  merge="${repo}/.github/workflows/merge.yml"
+  local select='.jobs | to_entries[] | select(.value.steps[]? | .uses == "./.github/actions/install-claude-code") | .key'
 
-  [ "$(grep -c 'uses: "*./.github/actions/install-claude-code' "${repo}/.github/workflows/pull_request.yml")" -eq 2 ]
-  [ "$(grep -c 'uses: "*./.github/actions/install-claude-code' "${repo}/.github/workflows/merge.yml")" -eq 1 ]
-  ! grep -n 'run: scripts/ci/install-claude-code.sh' "${repo}"/.github/workflows/*.yml
+  [ "$(yq -r "$select" "$pr" | sort | tr '\n' ' ')" = "fast-validation shell-changed-gate " ]
+  [ "$(yq -r "$select" "$merge")" = "validate-claude-plugin" ]
+  # No job runs the installer outside the action, where it would skip the cache.
+  [ -z "$(yq -r '.jobs[].steps[]? | select(.run // "" | test("install-claude-code\\.sh")) | .name' "$pr" "$merge")" ]
+}
 
-  grep -Fq 'scripts/ci/install-claude-code.sh --cache-key' "$action"
-  grep -Fq 'uses: actions/cache/restore@' "$action"
-  grep -Fq 'uses: actions/cache/save@' "$action"
-  grep -Fq "if: steps.restore.outputs.cache-hit != 'true'" "$action"
-  [ "$(grep -c 'path: ${{ runner.temp }}/claude-code' "$action")" -eq 2 ]
-  grep -Fq 'CLAUDE_CODE_INSTALL_DIR: ${{ runner.temp }}/claude-code' "$action"
+@test "the action restores and saves one path under the installer's cache key" {
+  require_mikefarah_yq
+  local action
+  action="$(pwd)/.github/actions/install-claude-code/action.yml"
+
+  [ "$(yq -r '.runs.steps[] | select(.id == "key") | .run' "$action")" = \
+    'echo "key=$(scripts/ci/install-claude-code.sh --cache-key)" >> "$GITHUB_OUTPUT"' ]
+  # restore → install → save, in that order.
+  [ "$(yq -r '.runs.steps[] | .uses // .run' "$action" | sed 's/@.*//' | tr '\n' '|')" = \
+    'echo "key=$(scripts/ci/install-claude-code.sh --cache-key)" >> "$GITHUB_OUTPUT"|actions/cache/restore|scripts/ci/install-claude-code.sh|actions/cache/save|' ]
+  [ "$(yq -r '.runs.steps[] | select(.uses == "actions/cache/*") | .with.key' "$action" | sort -u)" = \
+    '${{ steps.key.outputs.key }}' ]
+  [ "$(yq -r '.runs.steps[] | select(.uses == "actions/cache/*") | .with.path' "$action" | sort -u)" = \
+    '${{ runner.temp }}/claude-code' ]
+  [ "$(yq -r '.runs.steps[] | select(.run == "scripts/ci/install-claude-code.sh") | .env.CLAUDE_CODE_INSTALL_DIR' "$action")" = \
+    '${{ runner.temp }}/claude-code' ]
+  [ "$(yq -r '.runs.steps[] | select(.uses == "actions/cache/save*") | .if' "$action")" = \
+    "steps.restore.outputs.cache-hit != 'true'" ]
 }

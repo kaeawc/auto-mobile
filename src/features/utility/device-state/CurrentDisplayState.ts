@@ -38,9 +38,7 @@ export async function readCurrentDisplayState(
     new ObservedAndroidDisplayCache(timer, true).posture(device, adb, signal, true),
     observedAndroidDisplay(device, adb, signal),
   ]);
-  const panel = device.displays?.panels.find(
-    (candidate) => candidate.key === observed.display.key,
-  );
+  const panel = device.displays?.panels.find((candidate) => candidate.key === observed.display.key);
   return {
     posture,
     ...(panel ? { activePanel: { key: panel.key, role: panel.role } } : {}),

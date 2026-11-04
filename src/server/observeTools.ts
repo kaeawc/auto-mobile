@@ -183,7 +183,9 @@ const observeBaseSchema = withJsonSchemaOverride(
         platform: watchAwarePlatformSchema(),
         waitFor: waitForSchema
           .optional()
-          .describe("Wait for element to appear before returning observation"),
+          .describe(
+            "Wait for element to appear before returning observation. On timeout the last observation is returned with awaitTimeout: true and isError: true.",
+          ),
         settled: settledSchema
           .optional()
           .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),

@@ -84,7 +84,7 @@ instance. Relative paths resolve from the daemon launch directory.
 `AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_DB_DIR` and `AUTOMOBILE_DB_PATH` relocate a
 daemon's state, but not its socket. With any of them set and neither
 `AUTOMOBILE_AUX_SOCKET_DIR` nor a non-default `AUTOMOBILE_DAEMON_SOCKET_PATH`,
-`--daemon start`, `stop`, `restart` and `release-session` refuse with
+`--daemon start`, `stop`, `restart`, `release-session` and `set-feature-flag` refuse with
 `[shared_daemon_namespace]`, because they would act on the default daemon, which
 runs on different state. MCP and `--cli` clients likewise refuse an automatic
 restart, though they still start a daemon when none is running.

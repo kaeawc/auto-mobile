@@ -125,6 +125,7 @@ class WorkspaceViewModelTest {
     val column = vm.onlyColumn()
     assertEquals("epoch-a", column.deviceSessionUuid)
     assertEquals(Orientation.Landscape, column.orientation)
+    assertEquals(0, column.epochGeneration)
     assertNotNull(registry.peek("a"))
   }
 
@@ -146,6 +147,7 @@ class WorkspaceViewModelTest {
     assertEquals(0.5f, a.firstPaneFractionOverride)
     assertEquals(Orientation.Portrait, a.orientation)
     assertEquals(false, a.locked)
+    assertEquals(1, a.epochGeneration)
     assertNull(registry.peek("a"))
     assertEquals("b", state.focusedDeviceId)
   }
@@ -208,6 +210,8 @@ class WorkspaceViewModelTest {
     assertEquals("epoch-b", state.columns.first { it.deviceId == "a" }.deviceSessionUuid)
     assertEquals(null, state.columns.first { it.deviceId == "b" }.deviceSessionUuid)
     assertEquals(Tool.Storage, state.columns.first { it.deviceId == "a" }.activeTool)
+    // A daemon restart is not a new device epoch: the pane keeps its remembered state.
+    assertEquals(0, state.columns.first { it.deviceId == "a" }.epochGeneration)
   }
 
   @Test

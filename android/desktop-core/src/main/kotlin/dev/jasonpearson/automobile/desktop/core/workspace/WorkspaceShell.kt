@@ -383,7 +383,7 @@ private fun WorkspaceShellOptions.WorkspaceColumns(
       // Key by device epoch so a surviving pane keeps its own remembered state + facet
       // connection when another pane closes (unkeyed = positional identity churns
       // survivors), and a new epoch of a reused serial starts with nothing remembered.
-      key(column.deviceId, column.deviceSessionUuid) {
+      key(column.deviceId, column.epochGeneration) {
         DeviceColumnView(
           column = column,
           onAction = onAction,

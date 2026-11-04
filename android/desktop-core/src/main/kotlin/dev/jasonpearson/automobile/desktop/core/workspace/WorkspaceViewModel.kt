@@ -227,6 +227,7 @@ class WorkspaceViewModel(
                 shrunk = existing.shrunk,
                 firstPaneFractionOverride = existing.firstPaneFractionOverride,
                 orientation = existing.orientation,
+                epochGeneration = existing.epochGeneration,
               )
             }
           },

@@ -131,6 +131,13 @@ data class DeviceColumn(
   val isVirtual: Boolean = true,
   /** Daemon-minted identity for this live device epoch; nullable for older resource payloads. */
   val deviceSessionUuid: String? = null,
+  /**
+   * How many times this column's device epoch has been replaced (a reboot, or reobserving it with a
+   * new epoch). The pane's composition is keyed on it, so a replaced epoch remembers nothing. A
+   * daemon restart re-mints [deviceSessionUuid] without bumping it: the device did not reboot, so
+   * the pane keeps its remembered state (e.g. an unsaved storage edit) while its streams reconnect.
+   */
+  val epochGeneration: Int = 0,
 )
 
 /**
@@ -145,6 +152,7 @@ internal fun DeviceColumn.nextEpoch(incoming: DeviceColumn): DeviceColumn =
     activeTool = activeTool,
     shrunk = shrunk,
     firstPaneFractionOverride = firstPaneFractionOverride,
+    epochGeneration = epochGeneration + 1,
   )
 
 /** Whether [incoming] is a different daemon-minted epoch of this column's device. */

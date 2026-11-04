@@ -14,25 +14,30 @@ import org.junit.Test
 @OptIn(ExperimentalTestApi::class)
 internal class WorkspaceShellEpochUiTest {
 
-  private fun column(id: String, epoch: String?) =
+  private fun column(id: String, epoch: String?, generation: Int = 0) =
     DeviceColumn(
       deviceId = id,
       name = "Device $id",
       platform = Platform.Android,
       deviceSessionUuid = epoch,
+      epochGeneration = generation,
     )
 
   @Test
-  fun `a new epoch of a reused serial drops only that pane's remembered state`() =
+  fun `a replaced epoch drops only that pane's remembered state and a UUID refresh keeps it`() =
     runComposeUiTest {
       var instances = 0
-      val epochA = mutableStateOf("epoch-1")
+      val epochA = mutableStateOf("epoch-1" to 0)
       setContent {
         MaterialTheme {
           WorkspaceShell(
             state =
               WorkspaceUiState.Content(
-                columns = listOf(column("a", epochA.value), column("b", "epoch-b")),
+                columns =
+                  listOf(
+                    column("a", epochA.value.first, epochA.value.second),
+                    column("b", "epoch-b"),
+                  ),
                 focusedDeviceId = "a",
               ),
             onAction = {},
@@ -50,7 +55,12 @@ internal class WorkspaceShellEpochUiTest {
       onNodeWithText("stream:a:1").assertIsDisplayed()
       onNodeWithText("stream:b:2").assertIsDisplayed()
 
-      runOnIdle { epochA.value = "epoch-2" }
+      // A daemon restart re-mints the UUID without replacing the epoch: nothing is forgotten.
+      runOnIdle { epochA.value = "epoch-1b" to 0 }
+      onNodeWithText("stream:a:1").assertIsDisplayed()
+
+      // A replaced epoch (reboot) starts the pane over.
+      runOnIdle { epochA.value = "epoch-2" to 1 }
 
       onNodeWithText("stream:a:3").assertIsDisplayed()
       onNodeWithText("stream:a:1").assertDoesNotExist()

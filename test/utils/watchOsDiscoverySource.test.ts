@@ -41,7 +41,7 @@ describe("watchOS discovery source", () => {
       isScanAuthoritativeFor(
         {
           devices: [],
-          scanned: { android: true, ios: true, watchos: false, tvos: false },
+          scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
           scannedSources: { android: true, "ios-simulator": true, "ios-physical": true },
         },
         watch,

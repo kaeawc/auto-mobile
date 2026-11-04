@@ -29,6 +29,25 @@ car image is installed in the range, the error names the `sdkmanager` command to
 reuses the car emulator instead of creating another. Creating and booting a car emulator this way works
 with an `android-automotive` image; with a Play Store car image it is unverified.
 
+If the test will drive the car, ask for that up front so you never get a Play image:
+
+```json
+{
+  "platform": "android",
+  "formFactor": "automotive",
+  "createIfMissing": true,
+  "requires": { "vehicle": { "motion": "supported" } }
+}
+```
+
+`requires.vehicle.motion: "supported"` (on `startDevice` and `getAndroid`) matches only an emulator
+built from an `android-automotive` image and creates one from such an image instead of the Play
+image. If none is installed in the range, the error names the `sdkmanager` package to install. It is
+refused for a non-automotive request. A booted car emulator's `traits.vehicle` in the booted-devices
+resource reports `motion` (`supported`, `unsupported`, or `unknown` when the build props could not be
+read) and `nightMode` (`supported`). A physical head unit reports both `unsupported`, because vehicle
+state is injected on emulators only. Other devices have no `vehicle` field.
+
 To choose the exact image and profile yourself, call `provisionDevice` with an `android-automotive`
 system image as `runtime` and an automotive profile as `deviceType`:
 
@@ -108,6 +127,12 @@ by default; see [Device condition fixtures](device-condition.md). The `vehicle` 
 
 `vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
 
+To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description. It is
+present only on automotive devices, as `{ "motion": ..., "nightMode": ... }` with each value
+`supported`, `unsupported` or `unknown`: an `android-automotive` image reports motion `supported`, an
+`android-automotive-playstore` image reports it `unsupported`, and motion is `unknown` when no car image
+tag is known. A physical head unit reports both `unsupported`.
+
 Motion uses gear and parking-brake events with continuous speed events that renew while driving is
 active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;
 parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/night override and checks
@@ -135,6 +160,26 @@ wide landscape layout that was not designed for it. A successful `show` on a car
 reports `pinned: "unsupported"` when the car launcher cannot pin shortcuts. Whether the dismiss button
 clears the car system bars and whether a prototype stays visible while driving restrictions are on is
 unverified.
+
+## Car App Library templates in `observe`
+
+An app built on the Car App Library (`androidx.car.app`) can report its template stack to `observe`, on a
+phone emulator or on AAOS, without a head unit. The block appears only for a debug build of an app that
+enabled the AutoMobile SDK template route; the app-side setup is in the
+[design doc](../design-docs/plat/android/car-app-templates.md#app-setup). While the foreground app has the
+route on, `observe` carries a `carAppTemplates` block:
+
+- `sessions[]`: one per screen stack, with `screens[]` listed root first; the top screen has `top: true`.
+- Each screen: `screenClass`, `marker`, and the `template` it last recorded (absent if it never did).
+- Each template: `type` (`ListTemplate`, `GridTemplate`, `PaneTemplate`, `MessageTemplate`,
+  `SearchTemplate`, `TabTemplate`, `NavigationTemplate`, ...), `title`, `headerActions`, `items` (title,
+  texts, `hasImage`, `toggle` checked state, `browsable`), `actions`, `actionStrips` and, for tabs,
+  `tabs` and `tabContent`.
+- Every element has a stable path `id`, such as `session0/screen1/template/items/2`.
+
+The block reports what the app built, not what the car host rendered; its `note` says so. If the app's
+main thread did not answer in time, the block has `error: "main_thread_timeout"` and no sessions. Apps
+that do not enable the route add nothing to `observe`.
 
 ## Not supported
 

@@ -93,7 +93,7 @@ class PrototypeListAnchorRenderTest {
       runtime,
       PrototypePrependDataAction(
         "/data/items",
-        Json.parseToJsonElement("""{"value":[{"id":-1,"title":"New"}]}""").jsonObject,
+        Json.parseToJsonElement("""{"value":{"id":-1,"title":"New"}}""").jsonObject,
       ),
     )
   }

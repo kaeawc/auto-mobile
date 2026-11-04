@@ -1,3 +1,4 @@
+import { ALIGN_SELF, COLUMN, FLEX, FLEX_DIRECTION, MIN_HEIGHT, STRETCH } from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import { el } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
@@ -31,10 +32,10 @@ export function webStackRenderers(kit: WebRenderKit): Readonly<Record<string, No
   const stack: NodeRenderer = (node, scope, path) => {
     const screens = record(node.screens) ?? {};
     const shown = shownScreen(node, scope);
-    const { attrs, style } = kit.base(node, scope, { display: "flex", "flex-direction": "column" });
+    const { attrs, style } = kit.base(node, scope, { display: FLEX, [FLEX_DIRECTION]: COLUMN });
     const inner = kit.child(scope, {
       inBox: false,
-      style: { ...scope.style, parentAxis: "column" },
+      style: { ...scope.style, parentAxis: COLUMN },
     });
     const screen = shown === undefined ? undefined : screens[shown];
     const content = kit.renderNode(screen, inner, `${path}.screens[${JSON.stringify(shown)}]`);
@@ -46,8 +47,8 @@ export function webStackRenderers(kit: WebRenderKit): Readonly<Record<string, No
             style: {
               ...content.style,
               flex: "1 1 auto",
-              "min-height": "0",
-              "align-self": "stretch",
+              [MIN_HEIGHT]: "0",
+              [ALIGN_SELF]: STRETCH,
             },
           },
         ]

@@ -95,7 +95,7 @@ export const startDeviceParametersSchema = z.object({
       "Generate a QR code PNG and use it as the Android emulator back camera wall poster; cold boot only. Mutually exclusive with cameraPosterPath.",
     ),
   formFactor: z
-    .enum(["phone", "tablet", "foldable", "tv", "watch", "automotive"])
+    .enum(["phone", "tablet", "foldable", "tv", "watch", "automotive", "xr-headset", "xr-glasses"])
     .optional()
     .describe("Device form factor"),
   requires: z
@@ -111,10 +111,24 @@ export const startDeviceParametersSchema = z.object({
         .describe(
           "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
         ),
+      vehicle: z
+        .object({
+          motion: z
+            .literal("supported")
+            .optional()
+            .describe(
+              "Android Automotive only: the emulator can simulate driving state (deviceCondition vehicle.motion). Matches only a non-Play android-automotive image, and a new emulator is created from one; Play Store car images are user builds that refuse it",
+            ),
+        })
+        .strict()
+        .optional()
+        .describe("Simulated vehicle states the automotive emulator must support"),
     })
     .strict()
     .optional()
-    .describe("Required display capabilities from device inventory, and Google Play"),
+    .describe(
+      "Required display capabilities from device inventory, Google Play and vehicle states",
+    ),
   screenSize: z
     .object({
       width: z.number().positive().finite().describe("Screen width in pixels"),

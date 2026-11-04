@@ -158,6 +158,7 @@
     "@jimp/plugin-threshold": "1.6.1",
     "@jimp/types": "1.6.1",
     "@jimp/utils": "1.6.1",
+    "@material-design-icons/svg": "0.14.15",
     "@tokenizer/inflate": "0.4.1",
     "@tokenizer/token": "0.3.0",
     "any-base": "1.1.0",

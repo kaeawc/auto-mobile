@@ -18,7 +18,14 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // and the startup sweep.
 
 const ROOT = join(import.meta.dir, "..", "..");
-// `oxlint --print-config` normally completes in milliseconds, but it can be
+// With no path operand, `oxlint --print-config` still walks the whole working
+// tree (thousands of directory reads across android/, ios/, test/fixtures/)
+// before printing. That walk is I/O-bound, so under CI disk contention it
+// stalled past the spawn timeout while a control `bun --version` launch took
+// 2 ms (#16415). Naming one file as the operand prints the same root config
+// without the walk.
+const PRINT_CONFIG_ARGS = ["--print-config", ".oxlintrc.json"];
+// The remaining startup normally takes well under a second, but it can be
 // delayed by concurrent test processes on a two-core CI host.
 const OXLINT_SPAWN_TIMEOUT_MS = process.platform === "win32" ? 8_000 : 5_000;
 // Two config attempts plus the 2 s control spawn take at most 18 s on Windows
@@ -168,7 +175,7 @@ beforeAll(async () => {
     (pattern) => pattern !== "scratch/**",
   );
   fixtureConfig = baseConfig;
-  const result = runOxlint(["--print-config"], true);
+  const result = runOxlint(PRINT_CONFIG_ARGS, true);
   if (result.exitCode !== 0) {
     throw new Error(
       `oxlint --print-config failed: ${spawnDiagnostics(result, result.elapsedMs)}\n${outputTails(result)}`,
@@ -377,6 +384,13 @@ test("fixture", async () => {
 });
 
 describe("bounded oxlint spawn results", () => {
+  test("print-config names a file operand so oxlint does not walk the tree", () => {
+    expect(PRINT_CONFIG_ARGS[0]).toBe("--print-config");
+    expect(PRINT_CONFIG_ARGS.slice(1).filter((arg) => !arg.startsWith("-"))).toEqual([
+      ".oxlintrc.json",
+    ]);
+  });
+
   const timeoutResult: OxlintSpawnResult = {
     exitCode: null,
     signalCode: "SIGKILL",

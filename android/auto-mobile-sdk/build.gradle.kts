@@ -67,6 +67,9 @@ dependencies {
   // Optional CircuitX support. Consumers provide CircuitX when using this integration.
   compileOnly(libs.circuitx.navigation)
 
+  // Optional Car App Library template snapshots (#16751). Car apps already depend on it.
+  compileOnly(libs.androidx.car.app)
+
   // Test dependencies
   testImplementation(libs.kotlin.test)
   testImplementation(libs.junit)
@@ -75,6 +78,8 @@ dependencies {
   testImplementation(libs.okhttp)
   testImplementation(libs.circuit.test)
   testImplementation(libs.circuitx.navigation)
+  testImplementation(libs.androidx.car.app)
+  testImplementation(libs.androidx.car.app.testing)
 }
 
 // Configure Kotlin compilation options

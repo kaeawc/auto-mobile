@@ -43,6 +43,17 @@ core-splashscreen = "1.2.0"
 kotlinx-coroutines-test = "1.11.0"
 media3 = "1.11.1"
 
+# Car App Library (AAOS templated fixture, automotive-fixture module)
+androidx-car-app = "1.7.0"
+
+# Wear OS fixture app (wear-fixture module)
+androidx-wear-compose = "1.7.1"
+androidx-wear-tiles = "1.6.2"
+androidx-wear-protolayout = "1.4.2"
+androidx-wear-complications = "1.3.0"
+androidx-wear-ongoing = "1.1.0"
+androidx-concurrent-futures = "1.3.0"
+
 # Library versions
 clikt = "5.1.0"
 junit-jupiter-api = "6.1.3"
@@ -147,6 +158,7 @@ androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-kt
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "androidx-lifecycle" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
 androidx-startup = { module = "androidx.startup:startup-runtime", version.ref = "androidx-startup" }
+androidx-car-app-testing = { module = "androidx.car.app:app-testing", version.ref = "androidx-car-app" }
 
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "androidx-compose-bom" }
 compose-ui-core = { group = "androidx.compose.ui", name = "ui" }
@@ -171,6 +183,15 @@ androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-
 # Media libraries
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
+androidx-car-app = { module = "androidx.car.app:app", version.ref = "androidx-car-app" }
+androidx-car-app-automotive = { module = "androidx.car.app:app-automotive", version.ref = "androidx-car-app" }
+wear-compose-foundation = { module = "androidx.wear.compose:compose-foundation", version.ref = "androidx-wear-compose" }
+wear-compose-material3 = { module = "androidx.wear.compose:compose-material3", version.ref = "androidx-wear-compose" }
+wear-tiles = { module = "androidx.wear.tiles:tiles", version.ref = "androidx-wear-tiles" }
+wear-protolayout = { module = "androidx.wear.protolayout:protolayout", version.ref = "androidx-wear-protolayout" }
+wear-complications-data-source = { module = "androidx.wear.watchface:watchface-complications-data-source", version.ref = "androidx-wear-complications" }
+androidx-concurrent-futures = { module = "androidx.concurrent:concurrent-futures", version.ref = "androidx-concurrent-futures" }
+wear-ongoing = { module = "androidx.wear:wear-ongoing", version.ref = "androidx-wear-ongoing" }
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 media3-ui-compose = { module = "androidx.media3:media3-ui-compose", version.ref = "media3" }

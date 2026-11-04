@@ -1,5 +1,25 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ARIA_HIDDEN,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  CENTER,
+  COLUMN,
+  DATA_CHROME,
+  FLEX,
+  FLEX_DIRECTION,
+  FONT_FAMILY,
+  FONT_SIZE,
+  JUSTIFY_CONTENT,
+  POINTER_EVENTS,
+  RELATIVE,
+  Z_INDEX,
+} from "./webCss";
 import type { DeviceFrame } from "./deviceFrames";
 import { el, type WebElement } from "./webNodes";
+import { renderStatusBar, type WebStatusBarContent } from "./webStatusBar";
 
 export type WebOrientation = "portrait" | "landscape";
 
@@ -34,63 +54,32 @@ function cutout(frame: DeviceFrame, orientation: WebOrientation): WebElement[] {
   const [width, height] = orientation === "portrait" ? [w, h] : [h, w];
   return [
     el("div", {
-      attrs: { "data-chrome": "cutout", "aria-hidden": "true" },
+      attrs: { [DATA_CHROME]: "cutout", [ARIA_HIDDEN]: "true" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         left: px(center.x - width / 2),
         top: px(center.y - height / 2),
         width: px(width),
         height: px(height),
-        "border-radius": shape.type === "notch" ? "0 0 16px 16px" : px(Math.min(width, height) / 2),
-        "background-color": "#000",
-        "z-index": "3",
+        [BORDER_RADIUS]: shape.type === "notch" ? "0 0 16px 16px" : px(Math.min(width, height) / 2),
+        [BACKGROUND_COLOR]: "#000",
+        [Z_INDEX]: "3",
       },
     }),
   ];
 }
 
-function statusBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean): WebElement[] {
+function statusBar(
+  frame: DeviceFrame,
+  orientation: WebOrientation,
+  content: WebStatusBarContent,
+): WebElement[] {
   // iPhones hide the status bar in landscape; a zero top inset there means no bar.
   if (orientation === "landscape" && frame.safeArea.landscape.top === 0) {
     return [];
   }
-  const color = dark ? "#ffffff" : "#000000";
-  return [
-    el(
-      "div",
-      {
-        attrs: { "data-chrome": "statusBar", "aria-hidden": "true" },
-        style: {
-          position: "absolute",
-          left: "0",
-          right: "0",
-          top: "0",
-          height: px(frame.statusBarDp),
-          display: "flex",
-          "align-items": "center",
-          "justify-content": "space-between",
-          padding: "0 24px",
-          "box-sizing": "border-box",
-          color,
-          "font-size": "14px",
-          "font-weight": "600",
-          "z-index": "2",
-          "pointer-events": "none",
-        },
-      },
-      [
-        "9:41",
-        el("span", {
-          style: {
-            width: "24px",
-            height: "11px",
-            border: `1px solid ${color}`,
-            "border-radius": "3px",
-          },
-        }),
-      ],
-    ),
-  ];
+  const { width } = screenSize(frame, orientation);
+  return [renderStatusBar({ frame, width, landscape: orientation === "landscape", content })];
 }
 
 /** Three-button navigation: generic back, home and recents marks, outlined in the bar colour. */
@@ -102,7 +91,7 @@ function buttonNavigation(color: string, side: boolean): WebElement {
         width: "14px",
         height: "14px",
         border: `2px solid ${color}`,
-        "border-radius": radius,
+        [BORDER_RADIUS]: radius,
         opacity: "0.6",
       },
     });
@@ -111,9 +100,9 @@ function buttonNavigation(color: string, side: boolean): WebElement {
     {
       attrs: { "data-nav": "buttons" },
       style: {
-        display: "flex",
+        display: FLEX,
         gap: "64px",
-        "flex-direction": side ? "column" : "row",
+        [FLEX_DIRECTION]: side ? "column" : "row",
       },
     },
     [mark("2px 50% 50% 2px"), mark("50%"), mark("2px")],
@@ -136,8 +125,26 @@ function navOnSide(frame: DeviceFrame, orientation: WebOrientation): boolean {
 function navPlacement(heightDp: number, side: boolean): Record<string, string> {
   const size = px(heightDp);
   return side
-    ? { top: "0", bottom: "0", right: "0", width: size, "flex-direction": "column" }
+    ? { top: "0", bottom: "0", right: "0", width: size, [FLEX_DIRECTION]: COLUMN }
     : { left: "0", right: "0", bottom: "0", height: size };
+}
+
+/**
+ * The gesture affordance: iOS's home indicator, or Android's navigation handle. `data-nav` names
+ * it so back (#16542) and home (#16550) gestures can attach to it.
+ */
+function gestureHandle(platform: DeviceFrame["platform"], dark: boolean): WebElement {
+  const ios = platform === "ios";
+  return el("span", {
+    attrs: { "data-nav": ios ? "homeIndicator" : "handle" },
+    style: {
+      width: ios ? "134px" : "108px",
+      height: ios ? "5px" : "4px",
+      [BORDER_RADIUS]: ios ? "2.5px" : "2px",
+      [BACKGROUND_COLOR]: dark ? "#ffffff" : "#000000",
+      opacity: ios ? "0.9" : "0.6",
+    },
+  });
 }
 
 function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean): WebElement[] {
@@ -146,29 +153,21 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
   }
   const handle =
     frame.navBar.type === "gesture"
-      ? el("span", {
-          style: {
-            width: "108px",
-            height: "4px",
-            "border-radius": "2px",
-            "background-color": dark ? "#ffffff" : "#000000",
-            opacity: "0.6",
-          },
-        })
+      ? gestureHandle(frame.platform, dark)
       : buttonNavigation(dark ? "#ffffff" : "#000000", navOnSide(frame, orientation));
   return [
     el(
       "div",
       {
-        attrs: { "data-chrome": "navBar", "aria-hidden": "true" },
+        attrs: { [DATA_CHROME]: "navBar", [ARIA_HIDDEN]: "true" },
         style: {
-          position: "absolute",
+          position: ABSOLUTE,
           ...navPlacement(frame.navBar.heightDp, navOnSide(frame, orientation)),
-          display: "flex",
-          "align-items": "center",
-          "justify-content": "center",
-          "z-index": "2",
-          "pointer-events": "none",
+          display: FLEX,
+          [ALIGN_ITEMS]: CENTER,
+          [JUSTIFY_CONTENT]: CENTER,
+          [Z_INDEX]: "2",
+          [POINTER_EVENTS]: "none",
         },
       },
       [handle],
@@ -176,11 +175,19 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
   ];
 }
 
-/** A device frame around the screen content, with status bar, cutout and navigation handle. */
+/** A device frame around the screen content, with status bar, cutout and navigation handle or home indicator. */
 export function renderDeviceFrame(
   frame: DeviceFrame,
   orientation: WebOrientation,
-  options: { dark: boolean; textColor: string; background: string },
+  options: {
+    dark: boolean;
+    textColor: string;
+    background: string;
+    /** The content's base font size; 14px unless the system text size scales it. */
+    fontSize?: string;
+    /** The status bar's content style; absent follows `dark`. */
+    statusBarContent?: WebStatusBarContent;
+  },
   content: WebElement,
 ): WebElement {
   const { width, height } = screenSize(frame, orientation);
@@ -188,19 +195,19 @@ export function renderDeviceFrame(
   const screen = el(
     "div",
     {
-      attrs: { "data-chrome": "screen" },
+      attrs: { [DATA_CHROME]: "screen" },
       style: {
-        position: "relative",
+        position: RELATIVE,
         width: px(width),
         height: px(height),
         overflow: "hidden",
-        "border-radius": px(frame.cornerRadiusDp),
+        [BORDER_RADIUS]: px(frame.cornerRadiusDp),
         // Both devices paint nothing behind a window, so the app below shows through; a still has no
         // app below, so the theme's background stands in for it.
-        "background-color": options.background,
+        [BACKGROUND_COLOR]: options.background,
         color: options.textColor,
-        "font-family": "system-ui, -apple-system, Roboto, sans-serif",
-        "font-size": "14px",
+        [FONT_FAMILY]: "system-ui, -apple-system, Roboto, sans-serif",
+        [FONT_SIZE]: options.fontSize ?? "14px",
         "--safe-top": px(insets.top),
         "--safe-bottom": px(insets.bottom),
         "--safe-left": px(insets.left),
@@ -211,7 +218,11 @@ export function renderDeviceFrame(
     },
     [
       content,
-      ...statusBar(frame, orientation, options.dark),
+      ...statusBar(
+        frame,
+        orientation,
+        options.statusBarContent ?? (options.dark ? "light" : "dark"),
+      ),
       ...cutout(frame, orientation),
       ...navBar(frame, orientation, options.dark),
     ],
@@ -220,16 +231,16 @@ export function renderDeviceFrame(
     "div",
     {
       attrs: {
-        "data-chrome": "frame",
+        [DATA_CHROME]: "frame",
         "data-frame": frame.id,
         "data-orientation": orientation,
-        "aria-label": `${frame.label} (${orientation})`,
+        [ARIA_LABEL]: `${frame.label} (${orientation})`,
       },
       style: {
         display: "inline-block",
         padding: px(frame.frame.bezelDp),
-        "background-color": frame.frame.color,
-        "border-radius": px(frame.cornerRadiusDp + frame.frame.bezelDp),
+        [BACKGROUND_COLOR]: frame.frame.color,
+        [BORDER_RADIUS]: px(frame.cornerRadiusDp + frame.frame.bezelDp),
       },
     },
     [screen],

@@ -335,8 +335,11 @@ export const ANDROID_FULL_COMMAND_SET_CAPABILITY = "full_command_set_v1";
 /** Requests carrying requestId receive responses echoing that ID, including hierarchy replies. */
 export const ANDROID_REQUEST_ID_ECHO_CAPABILITY = "request_id_echo_v1";
 
+// The browser still renderer imports this module for its prototype capability strings (#16804).
+// `@__PURE__` lets the bundler drop these server-only Set and Object.keys tables from that build.
+
 /** Result handlers that settle RequestManager waiters and therefore require an echoed ID. */
-export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
+export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = /* @__PURE__ */ new Set([
   "screenshot",
   "screenshot_error",
   "swipe_result",
@@ -385,7 +388,7 @@ export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /** Push/handshake handlers; hierarchy pushes and uncorrelatable protocol errors may omit IDs. */
-export const ANDROID_ID_LESS_MESSAGE_TYPES: ReadonlySet<string> = new Set([
+export const ANDROID_ID_LESS_MESSAGE_TYPES: ReadonlySet<string> = /* @__PURE__ */ new Set([
   "connected",
   "error",
   "hierarchy_update",
@@ -414,10 +417,13 @@ export function ctrlProxyMissingRequestIdError(type: string): CtrlProxyMissingRe
   return `Android service advertised request_id_echo_v1 but sent ${type} without a requestId`;
 }
 
-export const ANDROID_CAPABILITY_GATED_COMMANDS: ReadonlySet<string> = new Set([
-  ...ANDROID_CAPABILITY_REQUEST_TYPES,
-  ...ANDROID_CAPABILITY_FLAGS,
-]);
+export const ANDROID_CAPABILITY_GATED_COMMANDS: ReadonlySet<string> =
+  /* @__PURE__ */ new Set<string>(
+    /* @__PURE__ */ ([] as readonly string[]).concat(
+      ANDROID_CAPABILITY_REQUEST_TYPES,
+      ANDROID_CAPABILITY_FLAGS,
+    ),
+  );
 
 /**
  * Every request discriminator, exhaustively checked against the TS union.
@@ -502,7 +508,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
 };
 
 /** All request `type` discriminators known to this contract (mirrors `WebSocketRequest.kt`). */
-export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = Object.keys(
+export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = /* @__PURE__ */ Object.keys(
   REQUEST_TYPE_REGISTRY,
 ) as CtrlProxyRequestType[];
 

@@ -62,6 +62,7 @@ import {
 } from "../../features/prototype/protoViewer/protoViewerShare";
 import { readPrototypeSpecFile } from "../../features/prototype/prototypeSpecFile";
 import { requestedPrototypeWindowOptions } from "../../features/prototype/prototypeWindowOptions";
+import { prototypeSettingsPagePlatformError } from "../../features/prototype/prototypeSettings";
 import { TelemetryRecorder } from "../../features/telemetry/TelemetryRecorder";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../models";
@@ -176,6 +177,16 @@ function prototypePlatformError(
     // agent's window level is fixed, so one spec runs on both platforms.
     if (options.devicePersistence) {
       return new ActionableError('window.persistence "device" is Android only; omit it on iOS.');
+    }
+    // Only a spec that runs or is saved for the device needs the page; screenMap is host-only.
+    const settingsPage =
+      args.action === "show" || args.action === "save"
+        ? prototypeSettingsPagePlatformError(args.spec, "ios")
+        : undefined;
+    if (settingsPage) {
+      return new ActionableError(
+        `Invalid prototype at spec.${settingsPage.path}: ${settingsPage.message}. Nothing was shown.`,
+      );
     }
   }
   return undefined;

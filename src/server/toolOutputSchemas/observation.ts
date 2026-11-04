@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { carAppTemplatesSchema } from "../../models/CarAppTemplates";
 import { IMPORTED_PROTOTYPE_CONTENT } from "../../features/observe/importedPrototypeContent";
 import {
   observationIdSchema,
@@ -475,6 +476,13 @@ export const observeResultSchema = z
       .optional()
       .describe(
         "Device-level environment conditions. audio_input_unavailable: recordings on this device will contain no audio because the host or emulator has no audio input; do not retry.",
+      ),
+    carAppTemplates: carAppTemplatesSchema
+      .optional()
+      .describe(
+        "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: " +
+          "each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. " +
+          "This is what the app built, not what the car host rendered.",
       ),
     layoutWarnings: z
       .object({

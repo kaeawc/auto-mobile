@@ -402,10 +402,13 @@ The shared request-policy and storage work is tracked in #13622.
   exported `ImportActivity` keeps rejecting `file://` and its own authority. On API 30+ scoped
   storage a directory the adb shell creates under another app's `Android/data` is shell-owned and
   the app can neither traverse it nor create entries in it (#15174, seen on API 37), while the
-  shell can still write a file into a directory the app created. So the app owns `mcp/`,
-  `mcp/inbox/` and `mcp/results/`: it creates them on start, and the host never runs `mkdir`; when
-  they are missing it first starts `McpActivity` with action `….mcp.PREPARE`, which creates them
-  and answers `prepared`. The host's result poll treats "not there yet" as pending until its
+  user 0 shell can still write a file into a directory the app created. User 0 uses these
+  shared-storage files; secondary users use the exported, DUMP-guarded `McpProvider` at
+  `content://<app id>.mcp` for inbox writes, result reads and deletion because their shared
+  storage is inaccessible to the shell. A missing provider result reads as an empty stream.
+  The app owns `mcp/`, `mcp/inbox/` and `mcp/results/`: it creates them on start, and the host
+  never runs `mkdir`. When they are missing on user 0, the host first starts `McpActivity` with
+  action `….mcp.PREPARE`, which creates them and answers `prepared`. The host's result poll treats "not there yet" as pending until its
   deadline (a bare `cat` of a missing file exits 1, which adb turns into an error). When the
   folders cannot be prepared, the push is refused, or the app answers `rejected` at `inbox` (it
   cannot see the pushed file), nothing was imported and the host keeps the CtrlProxy save path

@@ -16,7 +16,7 @@ export const KILL_PROFILE_EVIDENCE_STATUSES = [
 export type KillProfileEvidenceStatus = (typeof KILL_PROFILE_EVIDENCE_STATUSES)[number];
 
 /** App ops a recipe may change. Package-mode ops are set per package, uid-mode per uid. */
-export type KillProfileAppOp = "RUN_ANY_IN_BACKGROUND" | "SCHEDULE_EXACT_ALARM";
+export type KillProfileAppOp = "RUN_ANY_IN_BACKGROUND" | "SCHEDULE_EXACT_ALARM" | "WAKE_LOCK";
 
 /** One device command of a recipe, in the order it runs. */
 export type KillProfileStep =
@@ -89,11 +89,14 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
   },
   "samsung-deep-sleeping": {
     id: "samsung-deep-sleeping",
-    version: 1,
+    version: 2,
     description: "Samsung 'Deep sleeping apps': stopped and never run in the background.",
-    steps: FORCE_STOP_AND_RESTRICT,
+    steps: [...FORCE_STOP_AND_RESTRICT, { kind: "appOp", op: "WAKE_LOCK", mode: "ignore" }],
     evidenceStatus: "inferred",
-    evidenceNote: FORCE_STOP_AND_RESTRICT_NOTE,
+    evidenceNote:
+      FORCE_STOP_AND_RESTRICT_NOTE +
+      " WAKE_LOCK ignore simulates Samsung's foreground-service wake-lock denial on Android 11; " +
+      "this is inferred, not a vendor-documented capture.",
     source: SAMSUNG_APP_MANAGEMENT,
   },
   "xiaomi-autostart-off": {

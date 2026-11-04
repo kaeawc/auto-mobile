@@ -36,11 +36,8 @@ class ShellReachabilityTest {
   private val knownDormant =
     setOf(
       "CenterTabStrip",
-      "HorizontalSplitPane",
       "NotificationRulesEditor",
-      "PlatformTheme",
       "ToastStack",
-      "WindowSubtitle",
     )
 
   private val declarations by lazy { shellDeclarations() }

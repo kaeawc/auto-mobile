@@ -47,7 +47,11 @@ output can also be awaited. Compound, `container`- and `layer`-scoped waits,
 `selectionStrategy` and `absent` stay on the hierarchy search, which describes
 one source node. A text that any hierarchy node carries also stays there, so a
 row label hoisted from an off-screen child cannot override that search's
-visibility verdict. The condition form follows the same rule for
+visibility verdict. A row whose label is composed from several sources is
+skipped when any hierarchy text source inside its bounds that the label or
+sublabel contains has no visible part on screen; rows do not record their
+sources, so contribution is inferred from bounds and text. The condition form
+follows the same rules for
 `for: "appear"` and `for: "textEquals"` with only `text` (`textEquals` keeps its
 exact, case-sensitive comparison against the row). `clickable` needs a tappable
 source node, `disappear` must not pass on a hierarchy miss, and `countStable`

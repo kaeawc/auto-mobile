@@ -9474,6 +9474,10 @@
               "description": "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
               "type": "boolean"
             },
+            "screenRound": {
+              "description": "Wear OS emulators only: true matches only a round Wear profile, false only a square one; a new watch is created round unless this is false",
+              "type": "boolean"
+            },
             "vehicle": {
               "description": "Simulated vehicle states the automotive emulator must support",
               "type": "object",
@@ -9635,7 +9639,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
+    "description": "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device. getApple does not create iOS simulators; use provisionDevice (opt-in via enableTools) to create and boot one from a runtime and device type, and deleteDevice to remove it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -53004,6 +53008,11 @@
           "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Every applied condition restores to a clean state on release, rebind or lease expiry. Send it in its own call, not combined with other setDeviceState fields.",
           "type": "object",
           "properties": {
+            "exportAttestation": {
+              "type": "boolean",
+              "const": true,
+              "description": "Export public Android KeyStore attestation certificates and parsed fields for a test backend. Send alone; temporary key is deleted. No trust verdict."
+            },
             "version": {
               "type": "number",
               "const": 1,

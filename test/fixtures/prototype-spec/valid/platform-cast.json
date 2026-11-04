@@ -29,7 +29,7 @@
     "children": [
       {
         "type": "text",
-        "text": "{platform:/cast/state} {platform:/cast/deviceName} {platform:/cast/protocol} {platform:/cast/volume}"
+        "text": "{platform:/cast/state} {platform:/cast/deviceName} {platform:/cast/protocol} {platform:/cast/protocols} {platform:/cast/volume}"
       },
       {
         "type": "button",

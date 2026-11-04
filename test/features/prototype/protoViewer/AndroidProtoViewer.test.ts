@@ -131,6 +131,24 @@ class ScriptedProtoViewerAdb extends FakeAdbExecutor {
       }
       return recorded;
     }
+    const providerRead =
+      /^shell content read --user 10 --uri 'content:\/\/[^/]+\.mcp\/results\/([^']+)'$/.exec(
+        command,
+      );
+    if (providerRead) {
+      return recorded.stdout || recorded.stderr
+        ? recorded
+        : exec(this.read(`${ROOT}/results/${providerRead[1]}`));
+    }
+    if (command.startsWith("shell content delete ")) {
+      for (const [, folder, name] of command.matchAll(
+        /content:\/\/[^/]+\.mcp\/(inbox|results)\/([^']+)/g,
+      )) {
+        this.files.delete(`${ROOT}/${folder}/${name}`);
+        this.pending.delete(`${ROOT}/${folder}/${name}`);
+      }
+      return recorded;
+    }
     const probe = /^shell if \[ -f '([^']+)' \]; then cat '([^']+)'; fi$/.exec(command);
     if (probe) {
       return exec(this.read(probe[1]));
@@ -156,7 +174,10 @@ class ScriptedProtoViewerAdb extends FakeAdbExecutor {
         // adb exits 1 when the device refuses, and the executor throws on a non-zero exit.
         throw new Error(this.pushRefusal);
       }
-      if (!this.folders.has(destination.slice(0, destination.lastIndexOf("/")))) {
+      if (
+        !destination.startsWith("/data/local/tmp/") &&
+        !this.folders.has(destination.slice(0, destination.lastIndexOf("/")))
+      ) {
         return exec(
           "",
           `adb: error: failed to copy to '${destination}': No such file or directory`,
@@ -211,6 +232,112 @@ describe("AndroidProtoViewer", () => {
     adb.setCommandResponse("pm list packages --user 0", exec(`package:${PACKAGE}\n`));
     expect(await viewer.installed()).toBe(true);
     adb.clearHistory();
+  });
+
+  async function selectSecondaryUser(appId = PACKAGE): Promise<void> {
+    adb.setCommandResponse("am get-current-user", exec("10\n"));
+    adb.setCommandResponse("pm list packages --user 10", exec(`package:${appId}\n`));
+    expect(await viewer.installed()).toBe(true);
+    adb.clearHistory();
+  }
+
+  test("secondary-user import stages via argv and uses the provider for storage", async () => {
+    await selectSecondaryUser(DEV_PACKAGE);
+    adb.whenLaunched(({ request }) => adb.appWritesResult(request, imported(), 1));
+    expect(await viewer.importBundle(new Uint8Array([1, 2]), "Demo", 5000)).toEqual(imported());
+    expect(adb.getExecutedArgv()).toEqual([
+      [
+        "push",
+        "C:\\Users\\O'Brien\\tmp\\bundle.automobile-proto",
+        `/data/local/tmp/${REQUEST}.automobile-proto`,
+      ],
+    ]);
+    const uri = `content://${DEV_PACKAGE}.mcp`;
+    expect(shellCommands()).toEqual([
+      `shell content write --user 10 --uri '${uri}/inbox/${REQUEST}.automobile-proto' < '/data/local/tmp/${REQUEST}.automobile-proto'; rm -f '/data/local/tmp/${REQUEST}.automobile-proto'`,
+      `shell am start -W --activity-multiple-task --user 10 -n ${DEV_PACKAGE}/${PACKAGE}.McpActivity -a ${PACKAGE}.mcp.IMPORT --es request ${REQUEST} --es label 'Demo'`,
+      `shell content read --user 10 --uri '${uri}/results/${REQUEST}.json'`,
+      `shell content read --user 10 --uri '${uri}/results/${REQUEST}.json'`,
+      `shell content delete --user 10 --uri '${uri}/results/${REQUEST}.json'; content delete --user 10 --uri '${uri}/inbox/${REQUEST}.automobile-proto'`,
+    ]);
+    expect(
+      adb.getExecutedCommands().some((command) => command.includes("/storage/emulated/10")),
+    ).toBe(false);
+    expect(timer.getSleepHistory()).toEqual([PROTOVIEWER_RESULT_POLL_MS]);
+    expect(temp.disposed).toBe(1);
+    expect(adb.files.has(`${ROOT}/results/${REQUEST}.json`)).toBe(false);
+  });
+
+  test("secondary-user open reads and removes the provider result", async () => {
+    await selectSecondaryUser();
+    const opened = { ...imported(), status: "opened" as const };
+    adb.whenLaunched(({ request }) => adb.appWritesResult(request, opened));
+    expect(await viewer.open(LIBRARY_ID, 5000)).toEqual(opened);
+    expect(shellCommands()).toEqual([
+      `shell am start -W --activity-multiple-task --user 10 -n ${PACKAGE}/${PACKAGE}.McpActivity -a ${PACKAGE}.mcp.OPEN --es request ${REQUEST} --es libraryId '${LIBRARY_ID}'`,
+      `shell content read --user 10 --uri 'content://${PACKAGE}.mcp/results/${REQUEST}.json'`,
+      `shell content delete --user 10 --uri 'content://${PACKAGE}.mcp/results/${REQUEST}.json'`,
+    ]);
+  });
+
+  test("a refused provider write is a storage error and disposes the temporary bundle", async () => {
+    await selectSecondaryUser();
+    adb.setCommandResponse(
+      "content write",
+      exec("", "java.lang.SecurityException: Permission denied"),
+    );
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 5000)).rejects.toBeInstanceOf(
+      ProtoViewerStorageError,
+    );
+    expect(temp.disposed).toBe(1);
+    expect(adb.wasCommandExecuted("am start")).toBe(false);
+  });
+
+  test("a thrown provider transport failure remains a storage error", async () => {
+    await selectSecondaryUser();
+    adb.setCommandError("content write", new Error("transport closed"));
+    await expect(viewer.importBundle(new Uint8Array([1]), undefined, 5000)).rejects.toBeInstanceOf(
+      ProtoViewerStorageError,
+    );
+  });
+
+  test("provider result JSON preserves labels that look like shell errors", async () => {
+    await selectSecondaryUser();
+    const opened = { ...imported("Error: demo"), status: "opened" as const };
+    adb.whenLaunched(({ request }) => adb.appWritesResult(request, opened));
+    expect(await viewer.open(LIBRARY_ID, 5000)).toEqual(opened);
+  });
+
+  test("a provider read denial is a storage error and still cleans up", async () => {
+    await selectSecondaryUser();
+    adb.setCommandResponse("content read", exec("Error: java.lang.SecurityException"));
+    await expect(viewer.open(LIBRARY_ID, 5000)).rejects.toBeInstanceOf(ProtoViewerStorageError);
+    expect(adb.wasCommandExecuted("content delete --user 10")).toBe(true);
+  });
+
+  test("a mismatched provider result is rejected and removed", async () => {
+    await selectSecondaryUser();
+    adb.whenLaunched(({ request }) =>
+      adb.appWritesResult(request, { ...imported(), request: "other" }),
+    );
+    await expect(viewer.open(LIBRARY_ID, 5000)).rejects.toThrow("not mcp-req1");
+    expect(adb.wasCommandExecuted("content delete --user 10")).toBe(true);
+  });
+
+  test("secondary-user cancellation removes inbox and result without the caller signal", async () => {
+    await selectSecondaryUser();
+    adb.setThrowOnAbortedSignal();
+    const controller = new AbortController();
+    adb.abortAfterCommand("content read", controller);
+    await expect(
+      viewer.importBundle(new Uint8Array([1]), undefined, 5000, controller.signal),
+    ).rejects.toBeDefined();
+    const cleanup = adb
+      .getCommandCalls()
+      .find((call) => call.command.startsWith("shell content delete"));
+    expect(cleanup?.command).toContain(`/inbox/${REQUEST}.automobile-proto`);
+    expect(cleanup?.signal).toBeUndefined();
+    expect(cleanup?.timeoutMs).toBe(5000);
   });
 
   test("reports whether ProtoViewer is installed for the current user", async () => {
@@ -512,21 +639,16 @@ describe("AndroidProtoViewer", () => {
     );
   });
 
-  test("open starts the guarded activity with the library id for the given user", async () => {
-    adb.setCommandResponse("am get-current-user", exec("10\n"));
-    adb.setCommandResponse("pm list packages --user 10", exec(`package:${PACKAGE}\n`));
-    expect(await viewer.installed()).toBe(true);
-    adb.clearHistory();
-    const root10 = `/storage/emulated/10/Android/data/${PACKAGE}/files/mcp`;
+  test("user 0 open keeps the shared-storage result commands unchanged", async () => {
     adb.whenLaunched(({ request }) =>
-      adb.appWritesResult(request, { ...imported("Demo"), status: "opened" }, 0, root10),
+      adb.appWritesResult(request, { ...imported("Demo"), status: "opened" }),
     );
     const result = await viewer.open(LIBRARY_ID, 5000);
     expect(result.status).toBe("opened");
     expect(adb.getExecutedCommands()).toEqual([
-      `shell am start -W --activity-multiple-task --user 10 -n ${PACKAGE}/${PACKAGE}.McpActivity -a ${PACKAGE}.mcp.OPEN --es request ${REQUEST} --es libraryId '${LIBRARY_ID}'`,
-      `shell if [ -f '${root10}/results/${REQUEST}.json' ]; then cat '${root10}/results/${REQUEST}.json'; fi`,
-      `shell rm -f '${root10}/results/${REQUEST}.json'`,
+      `${START} -a ${PACKAGE}.mcp.OPEN --es request ${REQUEST} --es libraryId '${LIBRARY_ID}'`,
+      resultProbe(REQUEST),
+      `shell rm -f '${ROOT}/results/${REQUEST}.json'`,
     ]);
   });
 });

@@ -20,6 +20,10 @@ import {
   PROTOVIEWER_MCP_PREPARE_ACTION,
   PROTOVIEWER_REQUEST_ID,
   preferredProtoViewerPackage,
+  protoViewerProviderUri,
+  protoViewerProviderCommand,
+  protoViewerProviderWriteCommand,
+  protoViewerStagingPath,
   protoViewerInboxDir,
   protoViewerInboxPath,
   protoViewerMcpComponent,
@@ -102,16 +106,28 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     const target = await this.requireTarget(signal);
     const started = this.deps.timer.now();
     const request = this.requestId();
-    const inbox = protoViewerInboxPath(target.userId, target.appId, request);
+    const inbox =
+      target.userId === 0
+        ? protoViewerInboxPath(target.userId, target.appId, request)
+        : protoViewerProviderUri(target.appId, "inbox", request);
     // The app creates the folders, never this shell: shell-owned ones are unusable to the app.
-    await this.ensureStorage(target, timeoutMs, signal);
+    if (target.userId === 0) {
+      await this.ensureStorage(target, timeoutMs, signal);
+    }
     const temp = await this.deps.tempFiles.write(bytes);
     try {
       // argv, not a command string: a host temp path must survive Windows argument parsing.
-      const pushed = await this.push(temp.path, inbox, signal);
+      const destination = target.userId === 0 ? inbox : protoViewerStagingPath(request);
+      const pushed = await this.push(temp.path, destination, signal);
       if (outputLooksLikeShellFailure(pushed.stdout, pushed.stderr ?? "")) {
         throw new ProtoViewerStorageError(
           `Could not copy the prototype into ProtoViewer's inbox (${inbox}): ${output(pushed)}.`,
+        );
+      }
+      if (target.userId !== 0) {
+        await this.providerShell(
+          protoViewerProviderWriteCommand(target.userId, inbox, destination),
+          signal,
         );
       }
     } finally {
@@ -282,7 +298,10 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     action: string,
     { extras, ...options }: ProtoViewerExchangeOptions,
   ): Promise<ProtoViewerWireResult> {
-    const resultPath = protoViewerResultPath(target.userId, target.appId, request);
+    const resultPath =
+      target.userId === 0
+        ? protoViewerResultPath(target.userId, target.appId, request)
+        : protoViewerProviderUri(target.appId, "results", request);
     try {
       // A new task per call: without it a second launch while one runs only brings the first
       // to the front (same component and intent filter), and that request is never handled.
@@ -293,10 +312,15 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       throwIfStartFailed(started);
       const result = await pollProtoViewerResult(
         () =>
-          this.shell(
-            `if [ -f ${shellQuote(resultPath)} ]; then cat ${shellQuote(resultPath)}; fi`,
-            options.signal,
-          ),
+          target.userId === 0
+            ? this.shell(
+                `if [ -f ${shellQuote(resultPath)} ]; then cat ${shellQuote(resultPath)}; fi`,
+                options.signal,
+              )
+            : this.providerShell(
+                protoViewerProviderCommand("read", target.userId, resultPath),
+                options.signal,
+              ),
         this.deps.timer,
         options.timeoutMs,
         { signal: options.signal },
@@ -308,19 +332,44 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       }
       return result;
     } finally {
-      await this.removeQuietly([resultPath, ...options.cleanup]);
+      await this.removeQuietly(target, [resultPath, ...options.cleanup]);
     }
   }
 
   /** Runs without the caller's signal, so a cancelled call still removes its own files. */
-  private async removeQuietly(paths: readonly string[]): Promise<void> {
+  private async removeQuietly(target: ProtoViewerTarget, paths: readonly string[]): Promise<void> {
     try {
-      await this.shell(`rm -f ${paths.map(shellQuote).join(" ")}`, undefined, {
+      const command =
+        target.userId === 0
+          ? `rm -f ${paths.map(shellQuote).join(" ")}`
+          : paths.map((uri) => protoViewerProviderCommand("delete", target.userId, uri)).join("; ");
+      await this.shell(command, undefined, {
         timeoutMs: PROTOVIEWER_CLEANUP_TIMEOUT_MS,
       });
     } catch (error) {
       // Best effort: a leftover file only takes app-scoped space, and uninstalling removes it.
       logger.warn(`[protoviewer] cleanup of ${paths.join(", ")} failed: ${errorMessage(error)}`);
+    }
+  }
+
+  private async providerShell(command: string, signal?: AbortSignal): Promise<string> {
+    try {
+      const result = await this.shell(command, signal);
+      // Result JSON can contain labels or rejection reasons such as "Error: ...".
+      if (!result.trimStart().startsWith("{") && outputLooksLikeShellFailure(result, "")) {
+        throw new ProtoViewerStorageError(
+          `Could not access ProtoViewer's MCP storage: ${result.trim()}.`,
+        );
+      }
+      return result;
+    } catch (error) {
+      if (signal?.aborted || error instanceof ProtoViewerStorageError) {
+        throw error;
+      }
+      throw new ProtoViewerStorageError(
+        `Could not access ProtoViewer's MCP storage: ${errorMessage(error)}.`,
+        { cause: error },
+      );
     }
   }
 

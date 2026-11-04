@@ -53,6 +53,9 @@ const MINUTE_TICKS = 30;
 // the client. One that outlasts it is the restart the client sees: the restarted daemon expires the
 // session it rehydrated, whose last tool activity is older than the window.
 const RESTART_DOWNTIME_MS = IDLE_WINDOW_MS;
+// A quick restart: the daemon is back before the client's next heartbeat is due, so no frame meets
+// a dead socket, and well inside the idle window, so the rehydrated session keeps its device.
+const QUICK_RESTART_DOWNTIME_MS = 1_000;
 
 let harness: DesktopWireHarness | undefined;
 
@@ -611,6 +614,37 @@ describe("desktop wire contract (#10669, #10730)", () => {
           "and the client drops back to watching under a fresh observer session instead of " +
           "re-binding; the next tap allocates the device under it (#10730).",
         { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
+      ),
+    );
+  });
+
+  test("a daemon restart inside the idle window keeps the session and its device; the next tap needs no re-bind", async () => {
+    const wire = await startHarness();
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
+    await wire.heartbeats("heartbeat", DESKTOP_1, 2);
+
+    await wire.restartDaemon(QUICK_RESTART_DOWNTIME_MS);
+    // The restarted daemon rehydrated the session: the next heartbeat is accepted.
+    const resumed = await wire.heartbeats("heartbeat-after-restart", DESKTOP_1, 3);
+    expect(resumed).toMatchObject({ success: true, result: { sessionId: DESKTOP_1 } });
+    expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_1);
+
+    // The client keeps its session and binding: the tap goes straight through, with no bind.
+    const tap = await wire.send("desktop", "tap-after-restart", "input/tap", tapParams(DESKTOP_1));
+    expect(tap).toMatchObject({ success: true });
+    await wire.heartbeats("heartbeat-after-tap", DESKTOP_1, 2);
+    await wire.send("probe", "still-held", "daemon/sessionInfo", { sessionId: DESKTOP_1 });
+
+    expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_1);
+    checkFixture(
+      wire.fixture(
+        "daemon-restart-rehydrates",
+        "The daemon restarts and is back before the client's next heartbeat, well inside the " +
+          "idle window. The restarted daemon rehydrates the persisted session, so the heartbeat " +
+          "succeeds and the device stays held; the client keeps its session and binding, and the " +
+          "next tap goes through with no setActiveDevice (#16973).",
+        { "desktop-1": DESKTOP_1 },
       ),
     );
   });

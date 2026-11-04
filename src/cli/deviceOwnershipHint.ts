@@ -1,4 +1,11 @@
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnership";
+import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../daemon/ambiguousDeviceTargetRefusal";
+import { SESSION_OWNERSHIP_LOST_CODE } from "../daemon/sessionReleasedDuringCall";
+import { ENV } from "../config/env";
+import {
+  MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
+  getCliSessionIdleTimeoutMs,
+} from "../daemon/wire/constants";
 import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
 import { staticToolDeclaresInput } from "../daemon/staticToolDefinitions";
 import {
@@ -28,14 +35,84 @@ function refusalCode(payload: unknown): unknown {
   );
 }
 
+function payloadRecord(payload: unknown): Record<string, unknown> | undefined {
+  return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : undefined;
+}
+
+/** The release reason of an ownership-loss payload, which nests it under `error`. */
+function ownershipLossReason(payload: unknown): unknown {
+  return payloadRecord(payloadRecord(payload)?.error)?.reason;
+}
+
+function formatMinutes(ms: number): string {
+  const minutes = Math.round((ms / 60_000) * 10) / 10;
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+}
+
+/**
+ * A `--cli` session idle-released between invocations (#16882): name the window it had and the
+ * variable that lengthens it, since the refusal itself only says `cli-idle-timeout`.
+ */
+function cliIdleTimeoutHint(idleTimeoutMs: number): string {
+  return (
+    `Hint: this --cli session was released after ${formatMinutes(idleTimeoutMs)} without a ` +
+    "control call (reads do not count), so its session UUID cannot be used again. Acquire a new " +
+    "session with getAndroid, getApple or startDevice. To keep a session across longer gaps, set " +
+    `${ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name} (milliseconds, at most ` +
+    `${formatMinutes(MAX_CLI_SESSION_IDLE_TIMEOUT_MS)}) in the environment of every --cli call.`
+  );
+}
+
+/** Each candidate as `deviceId (platform)`, skipping malformed entries. */
+function candidateList(payload: unknown): string[] {
+  const candidates = payloadRecord(payload)?.candidates;
+  if (!Array.isArray(candidates)) {
+    return [];
+  }
+  return candidates.flatMap((candidate) => {
+    const record = payloadRecord(candidate);
+    if (typeof record?.deviceId !== "string") {
+      return [];
+    }
+    return [
+      typeof record.platform === "string"
+        ? `${record.deviceId} (${record.platform})`
+        : record.deviceId,
+    ];
+  });
+}
+
+/**
+ * A sessionless call that matched several devices (#16882): `--platform` cannot pick between two
+ * devices of one platform, so name the device ids the caller can pass.
+ */
+function ambiguousDeviceTargetHint(payload: unknown): string {
+  const candidates = candidateList(payload);
+  const listed = candidates.length > 0 ? ` Candidates: ${candidates.join(", ")}.` : "";
+  return (
+    "Hint: more than one device matches this call. Re-run with --deviceId <id> to pick one, or " +
+    `with --session-uuid <uuid> to use a device your session holds.${listed}`
+  );
+}
+
 /**
  * A `--cli` invocation is a separate process, so a call without `--session-uuid` is sessionless
  * and the daemon refuses it on a device another session holds (#10743, #10783, #10785). The
  * refusal message names the rule; this adds the CLI-shaped remedy. Returns undefined for any
  * other failure.
  */
-export function cliDeviceOwnershipHint(payload: unknown, toolName: string): string | undefined {
+export function cliDeviceOwnershipHint(
+  payload: unknown,
+  toolName: string,
+  cliIdleTimeoutMs: () => number = getCliSessionIdleTimeoutMs,
+): string | undefined {
   const code = refusalCode(payload);
+  if (code === SESSION_OWNERSHIP_LOST_CODE && ownershipLossReason(payload) === "cli-idle-timeout") {
+    return cliIdleTimeoutHint(cliIdleTimeoutMs());
+  }
+  if (code === AMBIGUOUS_DEVICE_TARGET_CODE) {
+    return ambiguousDeviceTargetHint(payload);
+  }
   if (code === DEVICE_CLEANUP_IN_PROGRESS_CODE) {
     return (
       "Hint: the device's previous session is still finishing its cleanup. Re-run the command " +

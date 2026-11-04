@@ -176,8 +176,13 @@ export function rowSequentialChildren(
   });
 }
 
-/** The capped aspect ratio itself, or a later unweighted sibling, with its shrink tier. */
+/**
+ * The capped aspect ratio itself, or a later unweighted sibling, with its shrink tier. A later
+ * sibling is marked `later`, so its authored `minWidth` holds only while width remains.
+ */
 function cappedSibling(entry: unknown, basis: number | undefined, first: boolean): unknown {
-  const shrink = first ? CAPPED_SHRINK : LATER_SHRINK;
-  return measured(entry, basis === undefined ? { shrink } : { shrink, basis });
+  const tier: RowMeasure = first
+    ? { shrink: CAPPED_SHRINK }
+    : { shrink: LATER_SHRINK, later: true };
+  return measured(entry, basis === undefined ? tier : { ...tier, basis });
 }

@@ -22,7 +22,7 @@ export interface PrototypeEmbedEnvelope {
   readonly requires: readonly string[];
   readonly spec: ShownSpecJson;
   /**
-   * Additive within version 1 (#16609), present only when the spec names an icon: the glyph of
+   * Additive within version 1, present only when at least one glyph resolves: the glyph of
    * every `<variant>/<name>` its icon fields, `state` and `data` can name, as SVG markup for a
    * 24 x 24 viewBox, so an interactive renderer needs no icon set of its own.
    */

@@ -15,6 +15,7 @@ import {
   type SessionReleaseOptions,
 } from "../sessionManager";
 import type { SessionSlots } from "../sessionSlots";
+import { cliIdleWindowReleaseMarker } from "./internalContracts";
 import type { TerminalReleaseJournal } from "../terminalReleaseJournal";
 import type { SessionRowWriter } from "../sessionRowWriter";
 
@@ -166,6 +167,7 @@ export class ForcedStuckRelease {
       releaseReason,
       releasedAtMs,
       terminal: isTerminalReleaseReason(releaseReason),
+      ...cliIdleWindowReleaseMarker(session),
       heartbeat: {
         lastHeartbeatMs: session.lastHeartbeat,
         hasReceivedHeartbeat: session.hasReceivedHeartbeat,

@@ -10,6 +10,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import kotlin.random.Random
 import kotlinx.coroutines.delay
 
 /**
@@ -103,8 +104,8 @@ internal const val RECONNECT_MAX_DELAY_MS = 15_000L
 
 /**
  * Exponential backoff (base [initialMs], doubling per attempt, capped at [maxMs]) for reconnect
- * attempt [attempt] (1-based). Pure and overflow-safe so the delay is deterministic and the timer
- * stays injectable — no jitter, since the timing is driven by the injected seam in tests.
+ * attempt [attempt] (1-based). Pure and overflow-safe so the delay is deterministic; production
+ * adds jitter on top via [jitteredReconnectBackoffMs].
  */
 internal fun reconnectBackoffMs(
   attempt: Int,
@@ -116,4 +117,18 @@ internal fun reconnectBackoffMs(
   // Guard the multiply against overflow before comparing to the cap.
   val exp = if (factor > maxMs / initialMs) maxMs else initialMs * factor
   return minOf(exp, maxMs)
+}
+
+/** Upper bound of the random spread added to each reconnect delay, as a fraction of it. */
+internal const val RECONNECT_JITTER_FRACTION = 0.2
+
+/**
+ * [reconnectBackoffMs] plus up to [RECONNECT_JITTER_FRACTION] of it drawn from [random], so panes
+ * that dropped together on a daemon restart do not all reconnect in the same instant. [random] is
+ * the determinism seam: a test passes a seeded or fixed source.
+ */
+internal fun jitteredReconnectBackoffMs(attempt: Int, random: Random = Random.Default): Long {
+  val base = reconnectBackoffMs(attempt)
+  val spread = (base * RECONNECT_JITTER_FRACTION).toLong()
+  return base + if (spread > 0) random.nextLong(spread + 1) else 0L
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,6 +34,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.LocalDaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShellOptions
@@ -40,14 +42,28 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.isolatedBehindOverlay
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.BasicsChecklistOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerOptions
+import dev.jasonpearson.automobile.desktop.core.workspace.rememberDaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun DesktopAppSurface(presentation: DesktopAppPresentation, ui: DesktopAppUiState) {
+  // One shared stream hub per app (#5262): panes lease device streams from it instead of each
+  // opening its own connection.
+  val streamHub = rememberDaemonStreamHub {
+    presentation.desktopDaemonSession?.sessionUuidProvider?.invoke()
+  }
+  CompositionLocalProvider(LocalDaemonStreamHub provides streamHub) {
+    DesktopAppSurfaceContent(presentation, ui)
+  }
+}
+
+@Composable
+private fun DesktopAppSurfaceContent(presentation: DesktopAppPresentation, ui: DesktopAppUiState) {
   with(presentation) {
     with(ui) {
       AutoMobileTheme(themeMode = settings.themeMode) {
@@ -432,6 +448,19 @@ internal fun DesktopLaunchSurface(presentation: DesktopAppPresentation, ui: Desk
                 // (non-daemon) transport.
                 onRecoverDaemon = { recoveryLauncher.launch() },
                 sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                basicsChecklist =
+                  if (showBasicsChecklist) {
+                    BasicsChecklistOptions(
+                      // The picker is only up over an observed workspace once a device is observed.
+                      deviceObserved = workspaceState is WorkspaceUiState.Content,
+                      onDismiss = {
+                        settings.hasDismissedBasicsChecklist = true
+                        showBasicsChecklist = false
+                      },
+                    )
+                  } else {
+                    null
+                  },
               ),
           )
         else -> DesktopWorkspaceContent(presentation, ui)

@@ -650,7 +650,7 @@ load yq-helpers
   # It uses the same selector as the local pre-push gate against the PR base and
   # must never run the full BATS sweep.
   block="$(job_block shell-changed-gate)"
-  [[ "$block" == *'scripts/prepush-shell.sh --base "origin/${BASE_REF}"'* ]]
+  [[ "$block" == *'scripts/prepush-shell.sh --base "${base}"'* ]]
   [[ "$block" != *"run-bats.sh"* ]]
   [[ "$block" != *"bats test/bats"* ]]
 }
@@ -786,13 +786,31 @@ load yq-helpers
   [[ "$output" == *'git diff --no-renames --name-only "${BASE_SHA}...HEAD"'* ]]
 }
 
-@test "Android baseline guard fetches and compares the actual PR base through env" {
+@test "Android baseline guard compares the PR's base commit, resolved through env (#16972)" {
   require_mikefarah_yq
   local step='.jobs.detekt.steps[] | select(.name == "Check Android lint baselines only shrink")'
-  [ "$(yq -r "$step | .env.BASE_REF" "$WF")" = '${{ github.base_ref }}' ]
+  [ "$(yq -r "$step | .env.BASE_SHA" "$WF")" = '${{ github.event.pull_request.base.sha }}' ]
   run yq -r "$step | .run" "$WF"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'git fetch origin "${BASE_REF}"'* ]]
-  [[ "$output" == *'--base-ref "origin/${BASE_REF}"'* ]]
+  [[ "$output" == *'base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"'* ]]
+  [[ "$output" == *'--base-ref "${base}"'* ]]
   [[ "$output" != *'${{ github.'* ]]
+}
+
+@test "Shell Changed Files diffs against the PR's base commit, not origin/<base_ref> (#16972)" {
+  require_mikefarah_yq
+  local step='.jobs."shell-changed-gate".steps[] | select(.name == "Run changed-file shell checks")'
+  [ "$(yq -r "$step | .env.BASE_SHA" "$WF")" = '${{ github.event.pull_request.base.sha }}' ]
+  run yq -r "$step | .run" "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"'* ]]
+  [[ "$output" == *'scripts/prepush-shell.sh --base "${base}"'* ]]
+  [[ "$output" != *'origin/'* ]]
+  [[ "$output" != *'${{ github.'* ]]
+}
+
+@test "no PR workflow step diffs against origin/\${BASE_REF} (#16972)" {
+  # A stacked PR's base branch may be absent or deleted; use the base commit.
+  run grep -n 'origin/${BASE_REF}' "$WF"
+  [ "$status" -eq 1 ]
 }

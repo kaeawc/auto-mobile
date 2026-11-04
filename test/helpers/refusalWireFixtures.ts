@@ -1016,6 +1016,10 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
     releaseReason,
     releasedAtMs: 1_000,
     terminal: true,
+    // Only a session on the cli-idle policy records its window, never its heartbeat lease (#16940).
+    ...(releaseReason === "cli-idle-timeout"
+      ? { cliIdleTimeoutMs: CUT_RELEASE_IDLE_TIMEOUT_MS }
+      : {}),
     heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1_000, ageMs: 1_000 },
   });
 }

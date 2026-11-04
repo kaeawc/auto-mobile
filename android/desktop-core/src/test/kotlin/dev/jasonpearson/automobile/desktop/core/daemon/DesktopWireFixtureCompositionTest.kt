@@ -283,6 +283,34 @@ class DesktopWireFixtureCompositionTest {
   }
 
   @Test
+  fun `a daemon restart inside the idle window keeps the session and binding with no re-bind`() =
+    runComposeUiTest {
+      // #16973: the restarted daemon rehydrates the session, so the client must neither rotate
+      // its session nor re-send the bind; the next tap goes straight to the daemon.
+      val replay = Replay("daemon-restart-rehydrates", listOf(pixel))
+      replay.start(this)
+      repeat(replay.fixture.ticks("heartbeat-watching")) { tick() }
+      assertTrue(tap(replay, pixel.deviceId))
+      repeat(replay.fixture.ticks("heartbeat")) { tick() }
+      repeat(replay.fixture.ticks("heartbeat-after-restart")) { tick() }
+
+      replay.transport.assertReplayed(throughLabel = "heartbeat-after-restart")
+      assertEquals("emulator-5554", replay.state().boundDeviceId)
+      assertEquals(null, replay.state().idleReleasedDeviceId)
+      assertEquals(null, replay.state().releaseReason)
+
+      assertTrue(tap(replay, pixel.deviceId))
+      repeat(replay.fixture.ticks("heartbeat-after-tap")) { tick() }
+
+      replay.transport.assertReplayed()
+      assertEquals("emulator-5554", replay.state().boundDeviceId)
+      assertEquals(
+        replay.fixture.sessions.getValue("desktop-1"),
+        replay.state().sessionUuidProvider(),
+      )
+    }
+
+  @Test
   fun `a heartbeat-expired session watches under a fresh session instead of re-binding`() =
     runComposeUiTest {
       val replay = Replay("heartbeat-expiry", listOf(pixel))

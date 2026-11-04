@@ -36,6 +36,7 @@ internal class DesktopAppUiState(settings: SettingsProvider) {
 
   var captureRequest by mutableStateOf<Pair<String, Int>?>(null)
   var showOnboarding by mutableStateOf(!settings.hasSeenOnboarding)
+  var showBasicsChecklist by mutableStateOf(!settings.hasDismissedBasicsChecklist)
 }
 
 internal data class AppDaemonSession(

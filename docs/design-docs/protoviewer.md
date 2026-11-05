@@ -397,7 +397,8 @@ Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When 
   permitted only in the dev flavor.
 - Library prototypes use the device route only: `via: "host"` is rejected, and ProtoViewer never
   sets up `adb reverse`.
-- Remote `image` URLs (owner decision 2026-10-31, #14180; node contract in #14181) count as network.
+- Remote `image` URLs (owner decision, not implemented yet; `image` currently accepts only `asset`)
+  count as network.
   They load only while the switch is on, go through the same egress check and pinned transport as
   `request`, and must be https outside the dev flavor. They never send cookies or referrers, and the
   URL never appears in accessibility text. `via: "host"` image fetches are rejected like host requests.

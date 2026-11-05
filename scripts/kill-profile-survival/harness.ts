@@ -301,8 +301,10 @@ export async function runHarness(
       );
     }
     const api = await readAndroidDeviceApiLevel(deps.shell);
-    if (api === null || api < 31) {
-      throw new Error("Scoring every profile requires API 31+ (including exact-alarm revocation)");
+    if (api === null || api < 33) {
+      throw new Error(
+        "Scoring every profile requires API 33+ (exact-alarm revocation and POST_NOTIFICATION app-op)",
+      );
     }
     const idle = await checkedCommand(deps.shell, "shell dumpsys deviceidle");
     if (/mForceIdle=true/.test(idle)) {

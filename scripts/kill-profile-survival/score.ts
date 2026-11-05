@@ -86,6 +86,10 @@ function eventOutcome(
         return "delayed";
       }
     }
+    // A recurring source that stopped after its last observation missed every later callback.
+    if (window.deferralMs - primary[primary.length - 1] > timing.intervalMs + DISPATCH_GRACE_MS) {
+      return "delayed";
+    }
   }
   return "ran";
 }

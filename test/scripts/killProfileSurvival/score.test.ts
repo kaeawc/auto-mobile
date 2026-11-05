@@ -22,13 +22,41 @@ const window = scoringWindow(START, START, START + 17 * 60_000, START + 24 * 60_
 
 describe("survival scoring", () => {
   test("each event ran at its expected first interval, including the grace boundary", () => {
-    const events = SURVIVAL_EVENT_IDS.map((eventId) => ({
+    const firstEvents = SURVIVAL_EVENT_IDS.map((eventId) => ({
       eventId,
       epochMillis: window.timing[eventId].firstDueMs + DISPATCH_GRACE_MS,
     }));
-    for (const outcome of Object.values(scoreEvents(events, window))) {
+    // The heartbeat keeps beating on time until the deferral boundary.
+    const heartbeats = Array.from(
+      { length: Math.floor((window.deferralMs - START) / FOREGROUND_HEARTBEAT_MS) },
+      (_, index) => ({
+        eventId: "foreground-service" as const,
+        epochMillis: START + (index + 1) * FOREGROUND_HEARTBEAT_MS,
+      }),
+    );
+    for (const outcome of Object.values(scoreEvents([...firstEvents, ...heartbeats], window))) {
       expect(outcome).toBe("ran");
     }
+  });
+
+  test("a heartbeat that stops after its first on-time beat is delayed", () => {
+    const events = [
+      { eventId: "foreground-service" as const, epochMillis: START + FOREGROUND_HEARTBEAT_MS },
+    ];
+    expect(scoreEvents(events, window)["foreground-service"]).toBe("delayed");
+  });
+
+  test("a final beat within one interval plus grace of the deferral boundary still ran", () => {
+    const last = window.deferralMs - FOREGROUND_HEARTBEAT_MS - DISPATCH_GRACE_MS;
+    const beats = Array.from(
+      { length: Math.floor((last - START) / FOREGROUND_HEARTBEAT_MS) },
+      (_, index) => START + (index + 1) * FOREGROUND_HEARTBEAT_MS,
+    );
+    const events = [...beats, last].map((epochMillis) => ({
+      eventId: "foreground-service" as const,
+      epochMillis,
+    }));
+    expect(scoreEvents(events, window)["foreground-service"]).toBe("ran");
   });
 
   test("each event is delayed beyond its expected first interval", () => {
@@ -251,9 +279,21 @@ describe("survival host safeguards with fakes", () => {
       { serial: "emulator-5556", avd: "Survival", apk: "fixture.apk" },
       deps,
     );
-    expect(report.aborted).toContain("API 31+");
+    expect(report.aborted).toContain("API 33+");
     expect(baseClock.calls).toEqual([]);
     expect(shell.getExecutedCommands()).toHaveLength(1);
+  });
+
+  test("API 32 is refused before the matrix because notifications-off needs API 33", async () => {
+    const { deps, shell, baseClock } = harnessFakes();
+    shell.setAndroidApiLevel(32);
+    const report = await runHarness(
+      { serial: "emulator-5556", avd: "Survival", apk: "fixture.apk" },
+      deps,
+    );
+    expect(report.aborted).toContain("API 33+");
+    expect(report.results).toEqual([]);
+    expect(baseClock.calls).toEqual([]);
   });
 
   test("complete matrix scores every profile and restores between runs using only fake time", async () => {

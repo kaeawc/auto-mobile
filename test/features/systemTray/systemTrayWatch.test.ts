@@ -11,7 +11,9 @@ import { capturedLauncherHierarchy } from "../../helpers/capturedLauncherHierarc
 import { buildObserveResult, viewHierarchyFromFixture } from "../../helpers/observeFixture";
 import phoneCapture from "../../fixtures/observe/ctrlproxy-headerless-two-notification-group-collapsed.json";
 import {
+  watchClearAll,
   watchNodes,
+  watchNotifications,
   watchStreamRoot,
 } from "../../../src/features/systemTray/helpers/watchHierarchy";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -36,6 +38,8 @@ const watch: BootedDevice = {
   platform: "android",
   formFactor: "watch",
 };
+// Scrolls the stream toward its top (a downward finger swipe on the 384px fake screen).
+const REWIND_SWIPE = "shell input swipe 192 96 192 288 500";
 let hierarchy: ViewHierarchyResult;
 let stream: ObserveResult;
 let emptyStream: ObserveResult;
@@ -224,7 +228,7 @@ describe("Wear notification stream capture", () => {
     expect(
       await tray.execute({ action: "dismiss", notification: { title: "Wear" }, awaitTimeout: 500 }),
     ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
-    expect(timer.getSleepHistory()).toEqual([250]);
+    expect(timer.getSleepHistory()).toEqual([250, 250]);
   });
 
   test("confirms a removed card in a readable stream after the injected dismiss swipe", async () => {
@@ -239,7 +243,7 @@ describe("Wear notification stream capture", () => {
       }),
     ).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
     expect(adb.getExecutedCommands()).not.toContain("shell input tap 192 335");
-    expect(timer.getSleepHistory()).toEqual([250]);
+    expect(timer.getSleepHistory()).toEqual([250, 250]);
   });
 
   test("does not claim Clear all succeeded when the active inventory remains", async () => {
@@ -257,15 +261,71 @@ describe("Wear notification stream capture", () => {
     ).toMatchObject({ isError: true, payload: { success: false, dismissedCount: 0 } });
   });
 
-  test("preserves an already-open stream after find", async () => {
+  test("preserves an already-open stream after find, only rewinding it to the top", async () => {
     const { tray, adb, timer } = setup();
     await tray.execute({
       action: "find",
       notification: { appId: "com.android.shell" },
       awaitTimeout: 500,
     });
-    expect(adb.getExecutedCommands()).toEqual([]);
-    expect(timer.getSleepHistory()).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE]);
+    expect(timer.getSleepHistory()).toEqual([250]);
+  });
+
+  test("rewinds an already-open stream scrolled past its cards before listing", async () => {
+    const { tray, adb } = setup((commands) =>
+      commands.includes(REWIND_SWIPE) ? stream : emptyStream,
+    );
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 500,
+    });
+    expect(result.isError).toBe(false);
+    expect(result.payload.notifications).toMatchObject([{ title: "Wear", body: "-i" }]);
+    expect(adb.getExecutedCommands().filter((command) => command === REWIND_SWIPE)).toHaveLength(2);
+  });
+
+  test("never treats a notification titled Clear all as the stream footer", async () => {
+    const footerless = structuredClone(hierarchy);
+    const root = watchStreamRoot(footerless);
+    if (!root) {
+      throw new Error("Captured watch stream root is missing");
+    }
+    for (const node of watchNodes(root)) {
+      const children = Array.isArray(node.node) ? node.node : [];
+      node.node = children.filter(
+        (child) =>
+          !(Array.isArray(child.node) ? child.node : []).some((n) => n.$?.text === "Clear all"),
+      );
+      if (node.$?.text === "Wear") {
+        node.$.text = "Clear all";
+        node.$["content-desc"] = "Clear all";
+      }
+    }
+    const view = { ...closed, viewHierarchy: footerless };
+    expect(watchNotifications(footerless)).toMatchObject([{ title: "Clear all" }]);
+    expect(watchClearAll(footerless)).toBeUndefined();
+    expect(watchClearAll(hierarchy)?.bounds).toEqual({
+      left: 0,
+      top: 287,
+      right: 384,
+      bottom: 383,
+    });
+
+    const { tray, adb } = setup(() => view);
+    adb.setCommandResponse(
+      "shell dumpsys notification --noredact",
+      createExecResult(shellInventory, ""),
+    );
+    const result = await tray.execute({
+      action: "clearAll",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 500,
+    });
+    expect(adb.getExecutedCommands()).not.toContain("shell input tap 192 176");
+    expect(adb.getExecutedCommands()).toContain("shell input swipe 192 176 364 176 300");
+    expect(result.payload.code).toBe("dismissal_unconfirmed");
   });
 
   test("phone find payload stays byte-identical with absent or explicit phone form factor", async () => {

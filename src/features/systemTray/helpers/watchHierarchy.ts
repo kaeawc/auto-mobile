@@ -81,17 +81,29 @@ function readWatchCard(node: ViewHierarchyNode): WatchNotification | undefined {
   };
 }
 
+function isWatchCardCandidate(node: ViewHierarchyNode): boolean {
+  return isWearNode(node) && isClickableElementProperties(getNodeProperties(node) ?? {});
+}
+
 export function watchNotifications(hierarchy?: ViewHierarchyResult): WatchNotification[] {
   const root = watchStreamRoot(hierarchy);
   if (!root) {
     return [];
   }
   return watchNodes(root)
-    .filter(
-      (node) => isWearNode(node) && isClickableElementProperties(getNodeProperties(node) ?? {}),
-    )
+    .filter(isWatchCardCandidate)
     .map(readWatchCard)
     .filter((card): card is WatchNotification => card !== undefined);
+}
+
+/** A copy of the stream with every notification card subtree removed. */
+function withoutCards(node: ViewHierarchyNode, cards: Set<ViewHierarchyNode>): ViewHierarchyNode {
+  return {
+    ...node,
+    node: getDirectChildNodes(node)
+      .filter((child) => !cards.has(child))
+      .map((child) => withoutCards(child, cards)),
+  };
 }
 
 export function watchCardMatches(
@@ -120,9 +132,11 @@ export function watchClearAll(hierarchy?: ViewHierarchyResult): Element | undefi
   if (!root) {
     return undefined;
   }
+  // A card titled "Clear all" must never stand in for the stream footer.
+  const cards = new Set(watchNotifications(hierarchy).map((card) => card.node));
   return (
     new ResolverElementSelector().select(
-      createSubHierarchy(root),
+      createSubHierarchy(withoutCards(root, cards)),
       { text: "Clear all" },
       {
         ...ignoreCasePolicy(false),

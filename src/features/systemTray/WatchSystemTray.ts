@@ -49,6 +49,14 @@ const listedCard = (card: WatchNotification, appId?: string) => ({
 });
 const cardIdentity = (card: WatchNotification) =>
   JSON.stringify([card.appLabel, card.title, card.body]);
+const pageSignature = (observation: ObserveResult) =>
+  JSON.stringify([
+    watchNotifications(observation.viewHierarchy).map((card) => [
+      cardIdentity(card),
+      card.element.bounds,
+    ]),
+    watchClearAll(observation.viewHierarchy)?.bounds,
+  ]);
 
 interface WatchScope {
   criteria: SystemTrayNotificationArgs;
@@ -153,17 +161,13 @@ export class WatchSystemTray {
           "Could not open the watch notification stream from the current screen. Return to the watch face and retry.",
         );
       }
-      const observation = opened.observation ?? (await this.read());
-      result = await this.run(
-        args,
-        {
-          criteria,
-          label,
-          deadline: getSystemTrayDependencies().timer.now() + timeout,
-          dismissedCount: 0,
-        },
-        observation,
-      );
+      const deadline = getSystemTrayDependencies().timer.now() + timeout;
+      let observation = opened.observation ?? (await this.read());
+      if (initiallyOpen) {
+        // The scan only moves toward the end, so a stream left scrolled down must start at the top.
+        observation = await this.rewind(observation, deadline);
+      }
+      result = await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, observation);
       return result;
     } finally {
       const controller = new AbortController();
@@ -346,6 +350,31 @@ export class WatchSystemTray {
       },
       false,
     );
+  }
+
+  /** Scroll toward the top until the visible page stops changing. */
+  private async rewind(observation: ObserveResult, deadline: number): Promise<ObserveResult> {
+    let previous = pageSignature(observation);
+    for (let page = 0; page < MAX_STREAM_PAGES; page++) {
+      if (getSystemTrayDependencies().timer.now() >= deadline) {
+        break;
+      }
+      const { width, height } = observation.screenSize;
+      await this.command(
+        `shell input swipe ${Math.floor(width / 2)} ${Math.floor(height * 0.25)} ${Math.floor(width / 2)} ${Math.floor(height * 0.75)} 500`,
+      );
+      await sleep(
+        Math.min(POLL_MS, Math.max(0, deadline - getSystemTrayDependencies().timer.now())),
+        this.signal,
+      );
+      observation = await this.read();
+      const signature = pageSignature(observation);
+      if (signature === previous) {
+        break;
+      }
+      previous = signature;
+    }
+    return observation;
   }
 
   private async nextPage(

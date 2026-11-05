@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { AndroidDemoModeStatusBarController } from "../../src/features/utility/AndroidDemoModeStatusBarController";
+import { StatusBarRequestRejectedError } from "../../src/features/utility/StatusBarOverride";
 import { InMemoryDemoAllowedReceipts } from "../../src/features/utility/DemoAllowedReceipts";
 import { StatusBarOverrideRegistry } from "../../src/features/utility/StatusBarOverrideRegistry";
 import type { BootedDevice, ExecResult } from "../../src/models";
@@ -134,8 +135,9 @@ describe("statusBar tool (#14105)", () => {
     const result = await call(PHYSICAL_IOS, { action: "override", time: "9:41" });
     expect(result.structuredContent).toMatchObject({ success: false, status: "unsupported" });
   });
-  describe("a rejected override records nothing (#17054)", () => {
-    test("reject-then-get on a real demo-mode controller reports no override", async () => {
+  describe("rejected and partially applied overrides (#17054)", () => {
+    /** Routes the handler to a real demo-mode controller; returns its adb argv log. */
+    const useRealAndroidController = (): string[][] => {
       const adbCalls: string[][] = [];
       const android = new AndroidDemoModeStatusBarController(
         {
@@ -152,11 +154,16 @@ describe("statusBar tool (#14105)", () => {
         registry,
         sessionManager: () => manager,
       });
+      return adbCalls;
+    };
+
+    test("reject-then-get on a real demo-mode controller reports no override", async () => {
+      const adbCalls = useRealAndroidController();
       await manager.createSession("session-1", ANDROID.deviceId, "android");
       await expect(
         call(ANDROID, { action: "override", time: "1234", sessionUuid: "session-1" }),
       ).rejects.toThrow("H:MM");
-      adbCalls.length = 0;
+      expect(adbCalls).toEqual([]);
       const result = await call(ANDROID, { action: "get" });
       expect(result.structuredContent).toMatchObject({
         message: "No status bar override recorded",
@@ -167,16 +174,38 @@ describe("statusBar tool (#14105)", () => {
     });
 
     test("a sessionless rejection leaves the store empty", async () => {
-      controller.overrideError = new ActionableError("adb shell am broadcast failed: boom");
-      await expect(call(ANDROID, { action: "override", wifiBars: 3 })).rejects.toThrow("boom");
+      controller.overrideError = new StatusBarRequestRejectedError("refused");
+      await expect(call(ANDROID, { action: "override", wifiBars: 3 })).rejects.toThrow("refused");
       const result = await call(ANDROID, { action: "get" });
       expect(result.structuredContent).toMatchObject({ override: null, ownerSessionId: null });
+    });
+
+    test("a failure after device commands ran keeps the session's cleanup obligation", async () => {
+      await manager.createSession("session-1", ANDROID.deviceId, "android");
+      controller.overrideError = new ActionableError("adb shell am broadcast failed: boom");
+      await expect(
+        call(ANDROID, { action: "override", time: "9:41", sessionUuid: "session-1" }),
+      ).rejects.toThrow("boom");
+      expect(registry.get(ANDROID.deviceId)?.sessionId).toBe("session-1");
+    });
+
+    test("an unsupported-only Android request leaves the device and store untouched", async () => {
+      const adbCalls = useRealAndroidController();
+      const result = await call(ANDROID, { action: "override", operatorName: "X" });
+      expect(result.structuredContent).toMatchObject({
+        status: "partial",
+        applied: [],
+        unsupported: ["operatorName"],
+        override: null,
+      });
+      expect(adbCalls).toEqual([]);
+      expect(registry.get(ANDROID.deviceId)).toBeNull();
     });
 
     test("a rejection keeps the previously applied override, unmerged", async () => {
       await manager.createSession("session-1", ANDROID.deviceId, "android");
       await call(ANDROID, { action: "override", time: "9:41", sessionUuid: "session-1" });
-      controller.overrideError = new ActionableError("refused");
+      controller.overrideError = new StatusBarRequestRejectedError("refused");
       await expect(
         call(ANDROID, { action: "override", batteryLevel: 5, sessionUuid: "session-1" }),
       ).rejects.toThrow("refused");
@@ -188,7 +217,7 @@ describe("statusBar tool (#14105)", () => {
     test("a rejection by another caller keeps the earlier owner", async () => {
       await manager.createSession("session-1", ANDROID.deviceId, "android");
       await call(ANDROID, { action: "override", time: "9:41", sessionUuid: "session-1" });
-      controller.overrideError = new ActionableError("refused");
+      controller.overrideError = new StatusBarRequestRejectedError("refused");
       await expect(call(ANDROID, { action: "override", wifiBars: 1 })).rejects.toThrow("refused");
       expect(registry.get(ANDROID.deviceId)?.sessionId).toBe("session-1");
       expect(registry.get(ANDROID.deviceId)?.overrides).toEqual({ time: "9:41" });

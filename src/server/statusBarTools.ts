@@ -11,6 +11,7 @@ import {
   type StatusBarController,
   type StatusBarField,
   type StatusBarOverrides,
+  StatusBarRequestRejectedError,
 } from "../features/utility/StatusBarOverride";
 import {
   defaultStatusBarOverrideRegistry,
@@ -165,8 +166,10 @@ function appliedOverrides(
 
 async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverrides) {
   const { device, registry } = call;
-  // Recorded before the device command so a racing release still clears it (#14105); undone
-  // when the command rejects and narrowed to the applied fields when it succeeds (#17054).
+  // Recorded before the device command so a racing release still clears it (#14105). A request
+  // refused before any device command is undone; any other rejection may have left part of the
+  // override on the device, so the record stays as the release-time cleanup obligation. On
+  // success the record narrows to the fields the platform applied (#17054).
   let previous: StatusBarOverrideRecord | null = null;
   let owner: string | null = null;
   const outcome = await runSessionStatusBarMutation({
@@ -177,7 +180,11 @@ async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverri
       previous = registry.get(device.deviceId);
       owner = sessionId;
       registry.record(device, sessionId, requested);
-      return () => restoreRecord(registry, device, previous);
+      return (error) => {
+        if (error instanceof StatusBarRequestRejectedError) {
+          restoreRecord(registry, device, previous);
+        }
+      };
     },
     mutation: async () => {
       const result = await call.controller.override(requested, call.signal);

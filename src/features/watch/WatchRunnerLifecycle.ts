@@ -120,14 +120,23 @@ export class WatchRunnerLifecycle {
     }
   }
 
-  /** Restart only a lifecycle-owned runner, keeping its session responsible for cleanup. */
+  /**
+   * Restart only a lifecycle-owned runner, keeping its session responsible for cleanup. A runner
+   * already on the requested bundle is kept only while it is usable; a dead one is restarted.
+   */
   async retarget(request: {
     deviceId: string;
     bundleId: string;
     signal?: AbortSignal;
   }): Promise<string | undefined> {
     const entry = this.runners.get(request.deviceId);
-    if (!entry || entry.bundleId === request.bundleId) {
+    if (!entry) {
+      return undefined;
+    }
+    if (
+      entry.bundleId === request.bundleId &&
+      watchRunners.get(request.deviceId)?.isUsable() === true
+    ) {
       return undefined;
     }
     const ownerSession = entry.ownerSession;

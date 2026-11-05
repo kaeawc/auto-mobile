@@ -9,7 +9,11 @@ import {
   type CoreDeviceCapabilityResult,
 } from "./CoreDeviceCapabilityProbe";
 import { sharedCoreDeviceProbeHolder, type CoreDeviceProbeHolder } from "./CoreDeviceProbeHolder";
-import { parseDevicectlDisplayInfo } from "./DevicectlDisplayInfo";
+import {
+  type DevicectlDisplayInfo,
+  type DevicectlDisplayInfoSource,
+  parseDevicectlDisplayInfo,
+} from "./DevicectlDisplayInfo";
 import {
   chooseSimulatorPanelScreenshotTransport,
   DEVICECTL_DISPLAYS_COMMAND,
@@ -40,7 +44,9 @@ function capabilityDetail(capability: CoreDeviceCapabilityResult): string {
  * unique ID is never cached; anything short of a supported check with exactly one
  * matching display, or any devicectl failure, falls back to simctl.
  */
-export class DevicectlPanelScreenshotSource implements SimulatorPanelScreenshotSource {
+export class DevicectlPanelScreenshotSource
+  implements SimulatorPanelScreenshotSource, DevicectlDisplayInfoSource
+{
   constructor(
     private readonly options: {
       probes: CoreDeviceProbeHolder;
@@ -62,17 +68,7 @@ export class DevicectlPanelScreenshotSource implements SimulatorPanelScreenshotS
     }
     const { logger: log } = this.options;
     try {
-      const capability = await raceWithDeadline(
-        () =>
-          this.options.probes
-            .get()
-            .checkSimulatorCommand(
-              deviceId,
-              DEVICECTL_DISPLAYS_COMMAND,
-              REQUIRED_SIMULATOR_COREDEVICE_VERSION,
-            ),
-        { timer: this.options.timer, signal, label: "CoreDevice display check" },
-      );
+      const capability = await this.checkDisplays(deviceId, signal);
       const transport = chooseSimulatorPanelScreenshotTransport({
         panelCount,
         panelKey: panel.key,
@@ -98,6 +94,51 @@ export class DevicectlPanelScreenshotSource implements SimulatorPanelScreenshotS
       );
       return undefined;
     }
+  }
+
+  /** Read through the same boot-first probe used for panel screenshots. */
+  async readDisplays(request: {
+    deviceId: string;
+    signal?: AbortSignal;
+  }): Promise<DevicectlDisplayInfo[]> {
+    try {
+      const capability = await this.checkDisplays(request.deviceId, request.signal);
+      if (capability.kind !== "supported" || capability.output === undefined) {
+        if (capability.kind === "failed") {
+          this.options.logger.warn(
+            `Could not read CoreDevice active displays: ${capabilityDetail(capability)}`,
+          );
+        } else {
+          // Older hosts and unsupported devices cannot supply optional live panel evidence.
+          this.options.logger.debug(
+            `CoreDevice active displays unavailable: ${capabilityDetail(capability)}`,
+          );
+        }
+        return [];
+      }
+      const listing = parseDevicectlDisplayInfo(capability.output, this.options.logger);
+      return listing.kind === "ok" ? listing.displays : [];
+    } catch (error) {
+      this.options.logger.warn("Could not read CoreDevice active displays", error);
+      return [];
+    }
+  }
+
+  private checkDisplays(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<CoreDeviceCapabilityResult> {
+    return raceWithDeadline(
+      () =>
+        this.options.probes
+          .get()
+          .checkSimulatorCommand(
+            deviceId,
+            DEVICECTL_DISPLAYS_COMMAND,
+            REQUIRED_SIMULATOR_COREDEVICE_VERSION,
+          ),
+      { timer: this.options.timer, signal, label: "CoreDevice display check" },
+    );
   }
 
   private displayUniqueId(

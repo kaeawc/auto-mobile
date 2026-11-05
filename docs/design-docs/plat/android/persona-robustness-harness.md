@@ -44,6 +44,35 @@ Repeats aggregate into a verdict: a single outcome is the verdict, pass with rec
 `recovered` reflects only the executor's own tolerance (optional steps, warnings). It does not
 measure agent-driven recovery; that needs an agent in the loop, as in `scripts/agent-benchmark/`.
 
+## Background survival matrix
+
+The kill-profile survival harness (`scripts/kill-profile-survival/`) applies each kill profile on a
+rootable emulator, advances the device clock and Doze, and scores eight fixture events as `ran`,
+`delayed` or `never`. The expected scores live in `src/features/utility/KillProfileExpectedScores.ts`;
+the harness requires API 33+.
+
+| Profile                   | workmanager-periodic | workmanager-oneshot | jobscheduler | alarm-exact | alarm-inexact | foreground-service | boot-receiver | push-broadcast |
+| ------------------------- | -------------------- | ------------------- | ------------ | ----------- | ------------- | ------------------ | ------------- | -------------- |
+| samsung-sleeping          | ran                  | ran                 | delayed      | ran         | delayed       | ran                | ran           | ran            |
+| samsung-deep-sleeping     | never                | never               | never        | never       | never         | never              | never         | never          |
+| samsung-auto-disable      | never                | never               | never        | never       | never         | never              | never         | never          |
+| xiaomi-autostart-off      | never                | never               | never        | never       | never         | never              | never         | never          |
+| oneplus-deep-optimization | never                | never               | never        | never       | never         | never              | never         | never          |
+| recents-swipe-kill        | ran                  | ran                 | delayed      | ran         | delayed       | ran                | ran           | ran            |
+| recents-swipe-force-stop  | never                | never               | never        | never       | never         | never              | never         | never          |
+| oneplus-sleep-standby     | ran                  | ran                 | delayed      | ran         | delayed       | ran                | ran           | ran            |
+| motorola-adaptive         | ran                  | ran                 | delayed      | ran         | delayed       | ran                | ran           | ran            |
+| user-restricted           | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
+| exact-alarm-denied        | ran                  | delayed             | delayed      | never       | delayed       | never              | ran           | ran            |
+| notifications-off         | ran                  | ran                 | delayed      | ran         | delayed       | ran                | ran           | ran            |
+
+The measurements use an Android 15 (API 35) google_apis arm64 emulator. A real reboot is not
+exercised; `BOOT_COMPLETED` is delivered by adb broadcast. The standby bucket `restricted` and
+`SCHEDULE_EXACT_ALARM` deny did not read back on API 35 emulators, so scores of profiles that depend
+on them reflect emulator behavior, not confirmed profile effects. `user-restricted`'s
+workmanager-periodic is `ran` on API 35 and `never` on Android 14 (API 34), so OEM behavior is not
+established by this table.
+
 ## Attribution
 
 A perturbation that did not succeed is attributed against the baseline:

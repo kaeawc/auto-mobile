@@ -1,3 +1,4 @@
+import { stopVisionosRunner } from "../../visionos/VisionosRunnerLifecycle";
 import { logger } from "../../../utils/logger";
 import { deviceLifecycleServerHost } from "../deviceLifecycleServerHost";
 import { getToolSelectionContext } from "../../toolSelection/toolSelectionContext";
@@ -19,6 +20,9 @@ export function stopWatchRunnerBeforeShutdown(
   device: BootedDevice,
   dependencies: DeviceToolsDependencies,
 ): void {
+  if (device.platform === "visionos") {
+    stopVisionosRunner(device.deviceId);
+  }
   if (device.platform === "tvos") {
     (dependencies.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(device.deviceId);
   }
@@ -69,6 +73,8 @@ export async function evictTeardownManagers(
     (context.dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(
       runtimeId ?? stableId,
     );
+  } else if (platform === "visionos") {
+    stopVisionosRunner(runtimeId ?? stableId);
   } else if (platform === "tvos") {
     (context.dependencies.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(
       runtimeId ?? stableId,

@@ -713,6 +713,32 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_permissions_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["permissions"],
+        permissions: [{ name: "camera", purpose: "Take a photo" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "permissions.request",
+                args: { names: { value: ["camera"] } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_notifications_scheduled_v1: {
     minimalSpec: {
       ...base,
@@ -740,6 +766,17 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
             ],
           },
         ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
+  },
+  prototype_platform_push_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["notifications"] },
+      platform: {
+        on: { "notifications.push": [{ type: "setState", key: "active", value: true }] },
       },
     },
     ops: [],

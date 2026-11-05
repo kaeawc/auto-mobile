@@ -18,24 +18,17 @@
 
 WORKFLOW=".github/workflows/build-desktop-app-installers.yml"
 
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify desktop installer workflow wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "macOS packaging builds the app-image (createDistributable), not packageDmg directly" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs.build.strategy.matrix.include[] | select(.format == "dmg") | .["gradle-task"]' "$WORKFLOW"
   [ "$status" -eq 0 ]
   [[ "$output" == ":desktop-app:createDistributable" ]]
 }
 
 @test "the macOS app image verifies java.net.http before notarization" {
-  wiring_requires_yq
+  require_mikefarah_yq
 
   local module_check_idx notarize_idx run_block
   run_block="$(yq -r '.jobs.build.steps[] | select(.name == "Verify Java HTTP module in app image") | .run' "$WORKFLOW")"
@@ -51,7 +44,7 @@ wiring_requires_yq() {
 }
 
 @test "the app image is notarized and stapled before the DMG is assembled" {
-  wiring_requires_yq
+  require_mikefarah_yq
 
   run yq -r '.jobs.build.steps[] | select(.name == "Notarize and staple app image") | .run' "$WORKFLOW"
   [ "$status" -eq 0 ]
@@ -72,7 +65,7 @@ wiring_requires_yq() {
 }
 
 @test "the DMG is assembled with packageDmg from the already-stapled app image" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs.build.steps[] | select(.name == "Assemble DMG") | .with["gradle-tasks"]' "$WORKFLOW"
   [ "$status" -eq 0 ]
   [[ "$output" == *":desktop-app:packageDmg"* ]]
@@ -86,7 +79,7 @@ wiring_requires_yq() {
 }
 
 @test "the release verifies the app inside the shipped DMG is stapled (AC-1 enforcement)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   # A dedicated step mounts the built DMG and stapler-validates the app INSIDE it,
   # so a regression that ships an unstapled app fails the release rather than
   # silently regressing offline first-launch.
@@ -107,7 +100,7 @@ wiring_requires_yq() {
 }
 
 @test "the existing DMG notarize + staple is retained (AC-3: no regression)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs.build.steps[] | select(.name == "Notarize and staple DMG") | .run' "$WORKFLOW"
   [ "$status" -eq 0 ]
   [[ "$output" == *'stapler staple "$DMG"'* ]]

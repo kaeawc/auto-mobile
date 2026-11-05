@@ -48,12 +48,18 @@ import type { ScreenLockState, SetScreenLockInput } from "../screenLock/ScreenLo
 import type { ScreenLockDeviceStateDependencies } from "../screenLock/ScreenLockOperations";
 import type { PowerState, SetPowerInput } from "../power/PowerTypes";
 import type { PowerDeviceStateDependencies } from "../power/PowerOperations";
+import type { CurrentDisplayState } from "./CurrentDisplayState";
+
+/** Static panel inventory plus, on an Android foldable, the live posture and active panel. */
+export type DeviceStateDisplays = NonNullable<BootedDevice["displays"]> & {
+  current?: CurrentDisplayState;
+};
 
 export interface DeviceStateResult {
   success: boolean;
   deviceId: string;
   platform: "android" | "ios";
-  displays?: BootedDevice["displays"];
+  displays?: DeviceStateDisplays;
   doNotDisturb?: DoNotDisturbState;
   connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;

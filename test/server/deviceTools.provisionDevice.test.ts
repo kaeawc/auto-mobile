@@ -577,7 +577,8 @@ describe("provisionDevice handler", () => {
       const profile = { manufacturerProfile: "samsung-oneui", requires: ["knox"] };
       expect(provisionDeviceSchema.safeParse(profiled(profile)).success).toBe(true);
       expect(
-        provisionDeviceSchema.safeParse(profiled({ manufacturerProfile: "huawei-emui" })).success,
+        provisionDeviceSchema.safeParse(profiled({ manufacturerProfile: "unknown-oem-fixture" }))
+          .success,
       ).toBe(false);
       expect(provisionDeviceSchema.safeParse(profiled(profile, { boot: false })).success).toBe(
         false,

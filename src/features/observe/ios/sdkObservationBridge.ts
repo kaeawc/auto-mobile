@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ActionableError } from "../../../models/ActionableError";
 
 /**
  * Host-side model of the iOS SDK observation bridge's values (#5159). The Swift source of truth is
@@ -84,6 +85,7 @@ export type IosSdkAction =
 export const IOS_SDK_BRIDGE_FAILURES = [
   "bridge_unavailable",
   "app_not_active",
+  "multi_scene",
   "invalid_action",
   "bad_reply",
 ] as const;
@@ -95,4 +97,21 @@ export function iosSdkBridgeFailure(value: unknown): IosSdkBridgeFailure | undef
     return undefined;
   }
   return IOS_SDK_BRIDGE_FAILURES.find((known) => known === value) ?? "bad_reply";
+}
+
+/** A typed scene-selection failure, preserved through observe's degraded-result handlers. */
+export class IosSdkMultiSceneError extends ActionableError {
+  readonly failure = "multi_scene";
+  constructor(readonly scenes: readonly string[]) {
+    super(
+      `The app has ${scenes.length} connected scenes (${scenes.join(", ")}). SDK observation needs one scene; XCTest does not stand in for this result.`,
+    );
+  }
+}
+
+/** Scene ambiguity must survive every backend mapping without an XCTest fallback. */
+export function failOnIosSdkMultiScene(reply: { failure?: string; scenes?: string[] }): void {
+  if (reply.failure === "multi_scene") {
+    throw new IosSdkMultiSceneError(reply.scenes ?? []);
+  }
 }

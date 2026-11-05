@@ -1,7 +1,10 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.ComponentActivity
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
@@ -18,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 
 /** Per-process shared ownership: all document tasks use the same repository/storage locks. */
@@ -26,12 +30,15 @@ class ProtoViewerApplication : Application() {
     val storage = LibraryStorage(PrototypeStorage.fileBacked(app))
     val root = File(app.filesDir, "library")
     val ids = IdGenerator { UUID.randomUUID().toString() }
+    val blocklist =
+      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val repository =
       DirectoryLibraryRepository(
         SavedPrototypeDirectoryStore(File(root, "prototypes"), limits = libraryLimits),
         DirectoryLibraryFiles(File(root, "metadata")),
         storage,
         ids,
+        admission = blocklist.admission(),
       )
     val staging =
       File(app.cacheDir, "import").apply {
@@ -56,34 +63,73 @@ class ProtoViewerApplication : Application() {
             stagingRoot,
             PrototypeBundleDirectoryFileSystem(stagingRoot),
             ids,
+            blocklist,
           )
         },
       )
     ProtoViewerServices(
-      repository,
-      storage,
-      importer = importer,
-      mcpInbox =
-        app.getExternalFilesDir(null)?.let { McpInbox(File(it, "mcp"), importer, repository) },
-      sharer = sharer,
-      settings = SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
-    )
+        repository,
+        storage,
+        importer = importer,
+        mcpInbox =
+          app.getExternalFilesDir(null)?.let {
+            McpInbox(
+              File(it, "mcp"),
+              importer,
+              BlocklistLibraryRepository(repository, blocklist),
+              about = app.mcpAbout(),
+            )
+          },
+        sharer = sharer,
+        settings =
+          SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
+        blocklist = blocklist,
+      )
+      .also { services ->
+        services.shareImporter =
+          VerifiedShareLibraryImporter(
+            PolicyShareBundleClient(
+              ShareBundleResolver(Dns.SYSTEM::lookup),
+              OkHttpShareBundleConnection(),
+            ),
+            importer,
+          )
+      }
   }
   val services: ProtoViewerServices by lazy {
     servicesFactory(this).also { services ->
       services.flushScope.launch(services.io) { services.clearStaleExports() }
       // Own the MCP folders before any adb shell can create them (#15174).
       services.flushScope.launch(services.io) { services.mcpInbox?.ensureDirectories() }
+      // Finish deletes that failed after their metadata was removed (#16653).
+      services.flushScope.launch(services.io) { services.repository.sweepOrphans() }
       // Drop results and pushed bundles whose host request is long over (#13621).
       services.flushScope.launch(services.io) { services.mcpInbox?.sweepOrphans() }
+      // Free quota still held by content hidden before Hide and Block deleted it (#16631).
+      services.flushScope.launch(services.io) { services.repository.purgeBlocked() }
     }
   }
+}
+
+/** This build's version and the capabilities its importer accepts, for the MCP host (#14156). */
+private fun Application.mcpAbout(): McpAbout {
+  val info =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+    } else {
+      @Suppress("DEPRECATION") packageManager.getPackageInfo(packageName, 0)
+    }
+  return McpAbout(
+    PackageInfoCompat.getLongVersionCode(info),
+    info.versionName,
+    AutoMobilePrototype.capabilities,
+  )
 }
 
 // Application composition root: keep independent dependencies explicit for constructor injection.
 @Suppress("LongParameterList")
 class ProtoViewerServices(
-  val repository: LibraryRepository,
+  library: LibraryRepository,
   val storage: LibraryStorage,
   val io: CoroutineDispatcher = Dispatchers.IO,
   val clock: LibraryClock = LibraryClock(System::currentTimeMillis),
@@ -100,7 +146,11 @@ class ProtoViewerServices(
   val localNetworkPermission: (ComponentActivity, (Boolean) -> Unit) -> LocalNetworkPermission =
     ::AndroidLocalNetworkPermission,
   val localNetworkGrant: LocalNetworkGrant = AndroidLocalNetworkGrant,
+  val blocklist: ContentBlocklist,
 ) {
+  internal var shareImporter: ShareLibraryImporter? = null
+  /** Every reader sees the library with hidden and blocked received content removed. */
+  val repository: BlocklistLibraryRepository = BlocklistLibraryRepository(library, blocklist)
   val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
 
   // Outlives activities so a stop/destroy still finishes the renderer's pending disk flush.

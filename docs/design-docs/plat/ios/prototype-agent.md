@@ -373,8 +373,9 @@ the prototype as app UI.
 ## Entry point: `launchApp { prototype: true }`
 
 The intended entry point (#10567) on an iOS simulator: resolves the dylib, allocates port and token,
-launches with `SIMCTL_CHILD_*`, and records the agent against device and bundle id so `prototype` can
-connect. A normal `launchApp` injects nothing; an existing `DYLD_INSERT_LIBRARIES` is preserved. On a
+launches with `SIMCTL_CHILD_*`, connects (retrying refused connections every 200 ms for about 15 s,
+because a first launch on a freshly booted simulator can take seconds to bind the listener), and
+records the agent against device and bundle id so `prototype` can connect. A normal `launchApp` injects nothing; an existing `DYLD_INSERT_LIBRARIES` is preserved. On a
 physical device the option fails with a simulator-only error. If `prototype` targets an app not
 launched this way it fails with a relaunch hint instead of relaunching (that would lose state).
 
@@ -1208,6 +1209,16 @@ iOS uses its activity completion flag. `target` is the chosen package/activity r
 
 The contract has no system-sheet dispatcher or fake-mode behavior. `platformMode` and
 `prototype simulate` are not accepted by this vocabulary.
+
+## Runtime permissions (#14297)
+
+The injected agent never advertises `prototype_platform_permissions_v1`: a grant would go to the host app it
+is borrowing. Each canonical permission's Info.plist usage key and `simctl privacy` service come from
+`schemas/prototype-platform-permissions.json`, and a `requires.permissions[].purpose` is the usage string. On a
+simulator the host grants and denies with `simctl privacy grant|revoke` before launch. `notifications`,
+`bluetooth`, `nearbyWifi` and `speech` have no `simctl privacy` service, so the host reports them
+`notGrantableOnSimulator` with `verified: false` and leaves them to the system-alert policy. No Viewer
+advertises the module yet (#14299). See the permission table in `prototype-ux.md`.
 
 ## Platform namespaces (#15257)
 

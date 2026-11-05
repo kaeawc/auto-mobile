@@ -333,3 +333,42 @@ write_src() { # <name> <lines...>
   [ "$status" -eq 3 ]
   [[ "$output" == *"oxlint parse error in bad.ts:1:18: Unexpected token"* ]]
 }
+
+# --- unusable JSON report (#16816) -------------------------------------------
+
+@test "non-JSON output reports the exit status, stdout and stderr, then fails with 3" {
+  OXLINT_JSON_CMD='printf "{\"diagnostics\":[" ; echo "tsgolint: panic: runtime error" >&2; exit 2' \
+    run bash "$SCRIPT"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"did not emit parseable JSON (attempt 1 of 2)"* ]]
+  [[ "$output" == *"did not emit parseable JSON (attempt 2 of 2)"* ]]
+  [[ "$output" == *"exit status: 2"* ]]
+  [[ "$output" == *'stdout: 16 byte(s)'* ]]
+  [[ "$output" == *"tsgolint: panic: runtime error"* ]]
+  [[ "$output" == *"giving up after 2 attempt(s)"* ]]
+}
+
+@test "a run killed by a signal names the signal and reports empty stdout" {
+  OXLINT_JSON_CMD='exit 137' OXLINT_JSON_ATTEMPTS=1 run bash "$SCRIPT"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"exit status: 137 (killed by signal 9"* ]]
+  [[ "$output" == *"stdout: empty"* ]]
+  [[ "$output" == *"stderr: empty"* ]]
+  [[ "$output" != *"retrying"* ]]
+}
+
+@test "a transient non-JSON run is retried and the gate then passes" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  local marker="$TEST_DIR/ran-once"
+  OXLINT_JSON_CMD="if [ -e '$marker' ]; then $FIXTURE_JSON; else touch '$marker'; exit 1; fi" \
+    run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"retrying the type-aware run (attempt 2 of 2)"* ]]
+  [[ "$output" == *"no new violations"* ]]
+}
+
+@test "OXLINT_JSON_ATTEMPTS must be a small positive integer" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" OXLINT_JSON_ATTEMPTS=0 run bash "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"OXLINT_JSON_ATTEMPTS must be"* ]]
+}

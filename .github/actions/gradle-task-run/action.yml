@@ -57,15 +57,6 @@ inputs:
     description: "Optional suffix to add to file names"
     required: "true"
     default: ""
-  robolectric-jar-cache:
-    description: >-
-      Shared cache of the Robolectric android-all jars that Robolectric
-      downloads into ~/.m2 at test time (#16396). "" (default) skips it,
-      "restore" restores it for a job that runs Robolectric tests, and "save"
-      also saves it after a main push that downloaded new jars. Only the merge
-      Kotlin Code Coverage job, which runs every Robolectric module, saves.
-    required: false
-    default: ""
   release-keystore-base64:
     description: "Base64 encoded release keystore for signing"
     required: false
@@ -263,34 +254,6 @@ runs:
           ~/.config
         key: v4-${{ runner.os }}-android-sdk
 
-    - name: "Compute Robolectric jar cache key"
-      id: robolectric-jar-cache-key
-      if: ${{ inputs.robolectric-jar-cache != '' }}
-      shell: bash
-      env:
-        CATALOG: ${{ inputs.gradle-project-directory }}/gradle/libs.versions.toml
-      run: |
-        echo "prefix=${RUNNER_OS}-$(bash "${GITHUB_WORKSPACE}/scripts/ci/robolectric-jar-cache.sh" key "$CATALOG")" >> "$GITHUB_OUTPUT"
-
-    # One shared entry: the key ends in the run id and attempt so a save never
-    # collides and a re-run can save the fuller set its first attempt missed,
-    # and restore-keys picks the newest entry for this Robolectric version.
-    - name: "Restore Robolectric jar cache"
-      if: ${{ inputs.robolectric-jar-cache != '' }}
-      uses: actions/cache/restore@v5.1.0
-      with:
-        path: ~/.m2/repository/org/robolectric/android-all-instrumented
-        key: ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
-        restore-keys: |
-          ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-
-
-    - name: "Fingerprint restored Robolectric jars"
-      id: robolectric-jars-before
-      if: ${{ inputs.robolectric-jar-cache == 'save' }}
-      shell: bash
-      run: |
-        echo "digest=$(bash "${GITHUB_WORKSPACE}/scripts/ci/robolectric-jar-cache.sh" fingerprint "$HOME/.m2/repository/org/robolectric/android-all-instrumented")" >> "$GITHUB_OUTPUT"
-
     - name: "Setup Release Keystore"
       if: ${{ inputs.release-keystore-base64 != '' }}
       shell: ${{ inputs.shell }}
@@ -309,22 +272,6 @@ runs:
       run: |
         export GRADLE_FLAGS=$(cat "${GRADLE_STATE_DIR:-/tmp}/gradle_flags.txt")
         "${GITHUB_WORKSPACE}/scripts/ci/run-gradle-with-retry.sh" -- ./gradlew ${{ inputs.gradle-tasks }} $GRADLE_FLAGS
-
-    # Robolectric stages each download and moves it into place, so a failed
-    # test run still leaves only complete jars worth keeping.
-    - name: "Fingerprint Robolectric jars after tests"
-      id: robolectric-jars-after
-      if: ${{ !cancelled() && inputs.robolectric-jar-cache == 'save' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
-      shell: bash
-      run: |
-        echo "digest=$(bash "${GITHUB_WORKSPACE}/scripts/ci/robolectric-jar-cache.sh" fingerprint "$HOME/.m2/repository/org/robolectric/android-all-instrumented")" >> "$GITHUB_OUTPUT"
-
-    - name: "Save Robolectric jar cache"
-      if: ${{ !cancelled() && inputs.robolectric-jar-cache == 'save' && github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.robolectric-jars-after.outputs.digest != 'none' && steps.robolectric-jars-after.outputs.digest != steps.robolectric-jars-before.outputs.digest }}
-      uses: actions/cache/save@v5.1.0
-      with:
-        path: ~/.m2/repository/org/robolectric/android-all-instrumented
-        key: ${{ steps.robolectric-jar-cache-key.outputs.prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: "Check if any JUnit tests reports were created"
       id: junit-reports-exist

@@ -52,6 +52,8 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   deleteDevice: DEVICE_MANAGEMENT,
   provisionDevice: DEVICE_MANAGEMENT,
   setActiveDevice: DEVICE_MANAGEMENT,
+  // Host-to-device networking the session owns and releases, like device management.
+  portReverse: DEVICE_MANAGEMENT,
   deviceSnapshot: DEVICE_MANAGEMENT,
   installApp: DEVICE_MANAGEMENT,
   uninstallApp: DEVICE_MANAGEMENT,

@@ -37,7 +37,7 @@ class EmitContextResolverTest {
         if (index != null || root["type"] == JsonPrimitive("pager"))
           root.getValue("children").jsonArray[0].jsonObject
         else root
-      val emit = node.getValue("onTap").jsonArray[0].jsonObject
+      val emit = (node["onMarkerTap"] ?: node.getValue("onTap")).jsonArray[0].jsonObject
       var bindings = emit.getValue("context").jsonObject.mapValues { it.value.jsonObject }
       if (index != null) {
         val repeat = root.getValue("repeat").jsonObject
@@ -55,7 +55,8 @@ class EmitContextResolverTest {
             index,
           )
       }
-      val result = EmitContextResolver.resolve(bindings, FakeInputs(fixture))
+      val handlerContext = fixture["handlerContext"]?.jsonObject.orEmpty()
+      val result = EmitContextResolver.resolve(bindings, FakeInputs(fixture), handlerContext)
       val expected = fixture.getValue("expected").jsonObject
       assertEquals(expected.getValue("context"), result.context)
       assertEquals(expected["contextTruncated"]?.jsonPrimitive?.boolean, result.contextTruncated)

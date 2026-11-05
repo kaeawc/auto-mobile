@@ -162,6 +162,8 @@ const CLASSIFICATION: Classification = {
     "pinchOn",
     "multiTouch",
     "postNotification",
+    // ensure/remove change adb reverse; list and verify re-apply lost owned mappings.
+    "portReverse",
     "pressButton",
     "putAppFile",
     "recentApps",

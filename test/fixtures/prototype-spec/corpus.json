@@ -144,6 +144,7 @@
     "loading-states.json",
     "location-block-minimal.json",
     "location-block.json",
+    "map-marker-tap-emit-context.json",
     "map-node-limits.json",
     "map-node.json",
     "material-app-bar-dialog-pickers.json",
@@ -175,8 +176,10 @@
     "motion3-press.json",
     "notify-channel-blocked-read.json",
     "notify-channels-block.json",
+    "notify-limits-at-boundary.json",
     "notify-post-messaging.json",
     "notify-post-styles.json",
+    "notify-push.json",
     "notify-schedule.json",
     "ns-accessory-chart.json",
     "ns-android-ignored-on-ios.json",
@@ -217,6 +220,7 @@
     "platform-media-library-query-save.json",
     "platform-media-queue-combining-mark.json",
     "platform-media-queue.json",
+    "platform-permissions-request.json",
     "platform-reads.json",
     "platform-repeat.json",
     "platform-requires.json",
@@ -860,6 +864,7 @@
     "gesture-device.changed.json",
     "gesture-event-timer.json",
     "gesture-notifications.dismissed.json",
+    "gesture-notifications.push.json",
     "gesture-notifications.scheduledFired.json",
     "gesture-onAppear.json",
     "gesture-onEndReached.json",
@@ -1053,6 +1058,7 @@
     "map-icon-url.json",
     "map-marker-animate-over.json",
     "map-marker-missing-as.json",
+    "map-marker-tap-context-marker-id.json",
     "map-marker-title-blank.json",
     "map-marker-unknown-field.json",
     "map-polyline-color-unknown.json",
@@ -1168,6 +1174,7 @@
     "notify-bad-channel-id.json",
     "notify-badge-over-limit.json",
     "notify-big-picture-missing-image.json",
+    "notify-body-over-limit.json",
     "notify-cancel-no-target.json",
     "notify-cancel-two-targets.json",
     "notify-channel-blocked-flat-key.json",
@@ -1183,7 +1190,9 @@
     "notify-channels-too-many.json",
     "notify-channels-undeclared-module.json",
     "notify-channels-unknown-field.json",
+    "notify-data-one-past-limit.json",
     "notify-data-over-limit.json",
+    "notify-id-over-limit.json",
     "notify-inbox-too-many-lines.json",
     "notify-messaging-too-many.json",
     "notify-missing-permission.json",
@@ -1263,6 +1272,12 @@
     "path-bracket.json",
     "payload-depth.json",
     "payload-limit.json",
+    "permissions-request-duplicate.json",
+    "permissions-request-empty.json",
+    "permissions-request-undeclared.json",
+    "permissions-request-unknown-name.json",
+    "permissions-undeclared-module.json",
+    "permissions-unknown-state.json",
     "placement-offset-x-over-max.json",
     "placement-offset-y-below-min.json",
     "platform-argument-value.json",
@@ -2026,7 +2041,9 @@
     "strict-gate-prototype_platform_namespace_v1.json",
     "strict-gate-prototype_platform_notifications_scheduled_v1.json",
     "strict-gate-prototype_platform_notifications_v1.json",
+    "strict-gate-prototype_platform_permissions_v1.json",
     "strict-gate-prototype_platform_power_v1.json",
+    "strict-gate-prototype_platform_push_v1.json",
     "strict-gate-prototype_platform_realtime_device_v1.json",
     "strict-gate-prototype_platform_realtime_v1.json",
     "strict-gate-prototype_platform_secureStorage_v1.json",
@@ -2676,6 +2693,10 @@
     "motion3-expressive.json": ["prototype_motion_v3"],
     "motion3-layout.json": ["prototype_motion_v2", "prototype_motion_v3"],
     "motion3-press.json": ["prototype_motion_v3"],
+    "notify-limits-at-boundary.json": [
+      "prototype_platform_notifications_v1",
+      "prototype_platform_v1"
+    ],
     "ns-accessory-chart.json": ["prototype_data_model_v1", "prototype_platform_namespace_v1"],
     "ns-android-ignored-on-ios.json": ["prototype_platform_namespace_v1"],
     "ns-block-both.json": ["prototype_platform_namespace_v1"],
@@ -3356,6 +3377,13 @@
       "prototype_platform_map_v1",
       "prototype_platform_v1"
     ],
+    "map-marker-tap-emit-context.json": [
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_platform_location_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
     "sensors-block-rates.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
     "sensors-block-minimal.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
     "secure-storage-request-opt-in.json": [
@@ -3392,6 +3420,14 @@
     "media-video-node-limit-repeat.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
     "media-video-poster-exact-image-limit.json": [
       "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "notify-push.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_push_v1",
+      "prototype_platform_realtime_v1",
       "prototype_platform_v1"
     ],
     "notify-schedule.json": [
@@ -3474,6 +3510,10 @@
       "prototype_platform_clipboard_v1",
       "prototype_platform_v1",
       "prototype_timers_v1"
+    ],
+    "platform-permissions-request.json": [
+      "prototype_platform_permissions_v1",
+      "prototype_platform_v1"
     ]
   }
 }

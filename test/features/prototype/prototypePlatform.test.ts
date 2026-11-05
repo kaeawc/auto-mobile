@@ -2,19 +2,24 @@ import { describe, expect, test } from "bun:test";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { decodePrototypeEvent } from "../../../src/features/observe/android/CtrlProxyPrototypes";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../../../src/features/observe/android/ctrlProxyProtocol";
-import { requiredPrototypeCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
+import {
+  PROTOTYPE_SPEC_CAPABILITY_GATES,
+  requiredPrototypeCapabilities,
+} from "../../../src/features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
   PROTOTYPE_PLATFORM_EVENT_NAME,
-  PROTOTYPE_PLATFORM_MODULE_GATES,
   PROTOTYPE_PLATFORM_MODULES,
   prototypePlatformCall,
   prototypePlatformEventModule,
+  prototypePlatformPointerModule,
+} from "../../../src/features/prototype/prototypePlatform";
+import {
+  PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformModuleFields,
-  prototypePlatformPointerModule,
   prototypePlatformUnsupportedMessage,
-} from "../../../src/features/prototype/prototypePlatform";
+} from "../../../src/features/prototype/prototypePlatformGates";
 import {
   prototypePlatformCallEventOf,
   prototypePlatformDeliveredEventOf,
@@ -28,6 +33,65 @@ const spec = (extra: Record<string, unknown>, root: unknown = { type: "spacer" }
   window,
   ...extra,
   root,
+});
+
+describe("permissions module contract", () => {
+  const permissions = PROTOTYPE_PLATFORM_MODULES.permissions;
+
+  test("request takes a list of names and needs no permission itself", () => {
+    expect(Object.keys(permissions.calls)).toEqual(["request"]);
+    expect(permissions.calls.request.permissions).toEqual([]);
+    expect(permissions.calls.request.args.names.value).toMatchObject({
+      kind: "array",
+      min: 1,
+      max: 16,
+      unique: true,
+    });
+  });
+
+  test("changed is the only event, and every name has a state in the shared vocabulary", () => {
+    expect(permissions.events).toEqual({ changed: { sensitive: false } });
+    const states = Object.values(permissions.state ?? {});
+    expect(states).toHaveLength(13);
+    for (const state of states) {
+      expect(state.value.values).toEqual([
+        "granted",
+        "denied",
+        "blocked",
+        "notDetermined",
+        "limited",
+        "restricted",
+        "unavailable",
+      ]);
+    }
+  });
+
+  test("a literal request names only declared permissions; a bound list waits for the runtime", () => {
+    const request = (names: unknown) =>
+      spec(
+        {
+          data: { names: [] },
+          requires: {
+            platform: ["permissions"],
+            permissions: [{ name: "camera", purpose: "Scan a receipt." }],
+          },
+        },
+        {
+          type: "button",
+          label: "Allow",
+          onTap: [{ type: "platform", call: "permissions.request", args: { names } }],
+        },
+      );
+    expect(validatePrototypeSpec(request({ value: ["camera"] })).success).toBe(true);
+    expect(validatePrototypeSpec(request({ data: "/names" })).success).toBe(true);
+    expect(validatePrototypeSpec(request({ value: ["camera", "speech"] }))).toMatchObject({
+      success: false,
+      error: {
+        path: "root.onTap[0].args.names.value[1]",
+        message: "Permission speech is not declared in requires.permissions",
+      },
+    });
+  });
 });
 
 describe("notifications module contract", () => {
@@ -47,13 +111,14 @@ describe("notifications module contract", () => {
     expect(Object.values(notifications.calls.cancel.args).every((arg) => arg.optional)).toBe(true);
   });
 
-  test("events are opened, action, reply, dismissed and scheduledFired; only reply is sensitive", () => {
+  test("events are opened, action, reply, dismissed, scheduledFired and push; only reply is sensitive", () => {
     expect(notifications.events).toEqual({
       opened: { sensitive: false, userInitiated: true },
       action: { sensitive: false, userInitiated: true },
       reply: { sensitive: true, userInitiated: true },
       dismissed: { sensitive: false },
       scheduledFired: { sensitive: false },
+      push: { sensitive: false, capability: "prototype_platform_push_v1" },
     });
   });
 
@@ -87,6 +152,37 @@ describe("notifications module contract", () => {
     });
     expect(notifications.calls.schedule.capability).toBe(
       "prototype_platform_notifications_scheduled_v1",
+    );
+  });
+
+  test("a notifications.push handler needs prototype_platform_push_v1 on top of the module", () => {
+    const spec = {
+      id: "push",
+      window: { placement: { type: "fullscreen" } },
+      state: { last: "" },
+      requires: { platform: ["notifications"] },
+      platform: {
+        on: {
+          "notifications.push": [{ type: "setState", key: "last", value: { event: "/data/id" } }],
+        },
+      },
+      root: { type: "spacer" },
+    };
+    expect(requiredPrototypeCapabilities(spec)).toEqual(
+      expect.arrayContaining([
+        "prototype_platform_v1",
+        "prototype_platform_notifications_v1",
+        "prototype_platform_push_v1",
+      ]),
+    );
+    const scheduled = { ...spec, platform: { on: { "notifications.scheduledFired": [] } } };
+    expect(requiredPrototypeCapabilities(scheduled)).not.toContain("prototype_platform_push_v1");
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === "prototype_platform_push_v1",
+    )!;
+    expect(gate.fields(spec)).toEqual(['platform.on["notifications.push"]']);
+    expect(gate.unsupportedMessage(gate.fields(spec), "android")).toContain(
+      'cannot run a `notifications.push` handler at platform.on["notifications.push"]',
     );
   });
 });
@@ -124,13 +220,25 @@ describe("platform module table", () => {
             return capability;
           }),
     );
-    expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability)).toEqual([
-      ...Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
-        definition.capability,
-        ...(definition.deviceCapability ? [definition.deviceCapability] : []),
-      ]),
-      ...new Set(callCapabilities),
-    ]);
+    expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability).sort()).toEqual(
+      [
+        ...Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
+          definition.capability,
+          ...(definition.deviceCapability ? [definition.deviceCapability] : []),
+        ]),
+        ...new Set(callCapabilities),
+        ...Object.values(contract.platformModules).flatMap((definition) =>
+          Object.values(definition.events as Record<string, { capability?: string }>)
+            .map((event) => event.capability)
+            .filter((capability): capability is string => capability !== undefined)
+            .map((capability) => {
+              // An event capability names the feature it gates: prototype_platform_<feature>_vN.
+              expect(capability).toMatch(/^prototype_platform_[a-z]+_v[0-9]+$/);
+              return capability;
+            }),
+        ),
+      ].sort(),
+    );
   });
 });
 
@@ -1123,6 +1231,7 @@ describe("cast module contract", () => {
       "state",
       "deviceName",
       "protocol",
+      "protocols",
       "player",
       "volume",
     ]);
@@ -1134,5 +1243,32 @@ describe("cast module contract", () => {
       "connected",
     ]);
     expect(cast.state?.protocol.value.values).toEqual(["googleCast", "airplay"]);
+  });
+
+  test("protocols is a unique list of the protocols castButton.protocols accepts", () => {
+    const castButtonProtocols =
+      contract.definitions.node.variants.castButton.fields.protocols.rule.item;
+    expect(cast.state?.protocols.platforms).toEqual(["android", "ios"]);
+    expect(cast.state?.protocols.value).toEqual({
+      kind: "array",
+      item: castButtonProtocols,
+      min: 0,
+      max: 2,
+      unique: true,
+    });
+  });
+
+  test("a spec reads the whole protocols list and an unknown key is refused", () => {
+    const spec = (text: string) => ({
+      id: "c",
+      window: { placement: { type: "fullscreen" } },
+      requires: { platform: ["cast"] },
+      root: { type: "text", text },
+    });
+    expect(validatePrototypeSpec(spec("{platform:/cast/protocols}")).success).toBe(true);
+    expect(validatePrototypeSpec(spec("{platform:/cast/protocols/0}"))).toMatchObject({
+      success: false,
+      error: { path: "root.text", message: "Unknown platform state /cast/protocols/0" },
+    });
   });
 });

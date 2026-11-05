@@ -9,6 +9,8 @@ expressions, URLs, image bytes or migration instructions.
 
 ## Owner decisions
 
+- 2026-10-31 (#14180): `image` may take a `url`, including a data-bound one (`{item.avatarUrl}`). A URL image uses the same egress policy as `request` in its runtime: the overlay as `request` today, ProtoViewer behind its network switch and filter (image loads count as network), and the disposable app as decided in #14184 / #14289. Only https is allowed outside dev flavors; cleartext is allowed only on loopback through `adb reverse` for fixtures. An optional `via: "host"` lets the host fetch a static URL at show/patch time and upload it as a content-hash asset, so the device makes no network call. Image fetches never send cookies or referrers. The URL can be seen by the host but never appears in accessibility text, `observe` or events. Not implemented yet: `image` currently accepts only `asset`.
+
 - 2026-10-27: `style.surface: "glass"` requires real glass and `prototype_glass_v1`: iOS 26+ Liquid Glass, and Android API 31+ real backdrop blur when its renderer is implemented. iOS 17–25 and Android below API 31 refuse glass through missing capability advertisement. There is no simulated translucent fill, ultraThinMaterial substitute, or fallback capability. Android rendering and device verification remain owed by the Android renderer slice.
 
 - 2026-10-26: Android-only custom AGSL shaders require `prototype_custom_shaders_v1` and the host opt-in `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` (off by default). Source assets use `application/vnd.automobile.agsl`, valid UTF-8, at most 16 KiB (16384 bytes), and at most 16 scalar `uniform float name;` declarations. The only other permitted uniform is one optional `uniform shader content;`: only the node's own rendered content may be sampled. Comments (`//` and `/* */`) are stripped to separators before token scanning. Code tokens must be ASCII; no preprocessor directives, strings, escapes, qualifiers, arrays, initializers, comma declarations, duplicate names, or other uniform types/samplers are accepted. `content`, `main`, GLSL/AGSL reserved words and names starting with `sk_` or `gl_` are reserved uniform names. A leading UTF-8 BOM is rejected. `style.shader: {asset, uniforms?}` supplies at most 16 declared float names matching `[A-Za-z_][A-Za-z0-9_]*`, with finite values in [-1000000, 1000000]; the host cross-checks available source assets. The Android runtime must compile on `put_prototype_asset` before retaining source and cap returned errors at 2 KiB of UTF-8. Execution fails closed under the preset frame-budget guard. iOS agents and ProtoViewer bundle import/export explicitly refuse both this MIME type and `style.shader`.
@@ -1442,7 +1444,9 @@ uncapped path-key identifier grammar; bound state keys are checked by the runtim
 Push and replace accept up to 16 scalar literals or existing state/data/item/index value bindings
 in `params`. All declared params are required; unknown names and incorrectly typed literals are
 rejected at the action. `setStack {stack, path:[{screen,params?}]}` validates each entry the same way
-and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. A non-forced pop of the owning stack in
+and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. The device runtimes replace the whole path with
+the entries' screens and report one `screen_changed` when the top screen or depth changes; a path
+naming an unknown screen leaves the stack unchanged. A non-forced pop of the owning stack in
 its screen's onBack list, including nested timer and request follow-ups, is rejected; `force:true`
 bypasses that guard. Pops in dialog actions are independent. An onEnter list cannot push or replace
 its own screen, including through nested action lists. Cross-screen lifecycle cycles, including
@@ -2120,7 +2124,15 @@ window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) reque
 `statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
 prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
-best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+best effort, and the iOS Simulator ignores `brightness`. CtrlProxy advertises the capability and applies
+`FLAG_KEEP_SCREEN_ON`, window-local `screenBrightness` (`system` uses `BRIGHTNESS_OVERRIDE_NONE`) and
+`screenOrientation`; `unlocked` and omission use `SCREEN_ORIENTATION_UNSPECIFIED`. Replacement rebuilds
+these values from the new spec; removal releases them, and an animated exit resets them before waiting
+for removal. Failed replacements restore the previous params. Inspect entries add `orientation` for the
+requested orientation and `statusBar: "unsupported"` for an authored status bar style. Hierarchy window
+entries add the same values as `prototypeOrientation` and `prototypeStatusBar`; omitted controls omit
+these fields. Orientation reports a request, not proof that the device rotated. Embedded Android does
+not advertise these overlay controls.
 
 **Prototype layout direction.** Optional `window.layoutDirection: "ltr" | "rtl"` requires
 `prototype_layout_direction_v1`. Omission inherits the host direction. The iOS renderer overrides
@@ -2130,15 +2142,19 @@ Android does not advertise this capability, so the host refuses specs that set i
 **Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
 `prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
 prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`
-`hide(ime())`; iOS `endEditing(true)`). With no keyboard up it does nothing. No production runtime advertises
-the capability yet.
+`hide(ime())`; iOS `endEditing(true)`). CtrlProxy advertises the capability and dispatches the action to
+the owning surface's host on main, hiding the IME before clearing its view focus. Without a shown
+window it does nothing; navigation focusability is retained. The embedded Android renderer does not
+advertise it.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
-Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. CtrlProxy registers the module on Android and opens each page for its own package with
+Android only. The spec validators are platform-neutral, so the host's iOS show preflight refuses a literal
+Android-only `page` with the action's path; a bound page is left to the runtime. The Kotlin validator needs no
+such check because it runs only on Android, and the Swift agent validator has none yet because the iOS agent
+does not advertise the module, which the host's capability gate refuses. CtrlProxy registers the module on Android and opens each page for its own package with
 `FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
 the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
 handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do
@@ -2256,6 +2272,12 @@ it keeps `/platform/location/current` current while the prototype is shown and r
 write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
 `requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
+The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
+only when the spec emits them or writes them into `/data`. `prototypeLocationEventSummary`
+(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
+`test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
+the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
+names (never the values) of anything it dropped.
 
 **BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
 of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
@@ -2306,8 +2328,13 @@ and it may not also appear in `storage.keys`. The list needs the `secureStorage`
 in `requires.platform`. A secure key never leaves the device through an emit `context`: the validators refuse
 `{state: <secure key>}` there. A `request` may send one only with `allowSecureInRequest: true`; otherwise a
 `{state: <secure key>}` binding in a header, query value or body (whole, form entry or multipart value), or a
-`{<secure key>}` placeholder in the URL, a header or a query value, is refused. No production runtime advertises
-the module yet.
+`{<secure key>}` placeholder in the URL, a header or a query value, is refused. On a show, `restorePrototypeStorage`
+and its Kotlin and Swift twins apply the secure store's values under the same version and listing rules: a value restores only into a listed
+secure key, as a string of at most `MAX_PROTOTYPE_SECURE_VALUE_BYTES` (4096) UTF-8 bytes into a string state key,
+and a plaintext stored copy never fills one. A biometric-bound key that holds a value is not read: its state holds
+`""` and it is reported in `locked` until `biometric.authenticate` unlocks it. A key the store reports invalidated
+(biometric re-enrolment revoked its hardware key) is dropped and the spec's value stands. No production runtime
+advertises the module yet.
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
@@ -2334,6 +2361,45 @@ in `requires.permissions`. `audioRecorder.start` takes an optional `maxDurationM
 counts the current recording. A press-and-hold control uses the gesture action lists, and playback
 uses a `media` audio player. No production runtime advertises the module yet.
 
+**Runtime permissions (#14297).** Canonical names live in `requires.permissions[].name`, and each entry's
+`purpose` becomes the iOS usage string and the Android rationale text. `schemas/prototype-platform-permissions.json`
+maps each name to its Android manifest permissions and grant mechanism, and to its iOS Info.plist usage key and
+`simctl privacy` service:
+
+| Name                 | Android manifest                                 | Android grant     | iOS usage key                                  | `simctl privacy`        |
+| -------------------- | ------------------------------------------------ | ----------------- | ---------------------------------------------- | ----------------------- |
+| `camera`             | `CAMERA`                                         | `pm grant`        | `NSCameraUsageDescription`                     | `camera`                |
+| `microphone`         | `RECORD_AUDIO`                                   | `pm grant`        | `NSMicrophoneUsageDescription`                 | `microphone`            |
+| `location`           | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | `pm grant`        | `NSLocationWhenInUseUsageDescription`          | `location`              |
+| `locationBackground` | `ACCESS_BACKGROUND_LOCATION`                     | `pm grant`        | `NSLocationAlwaysAndWhenInUseUsageDescription` | `location-always`       |
+| `notifications`      | `POST_NOTIFICATIONS`                             | app setting       | none                                           | notGrantableOnSimulator |
+| `photos`             | `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`          | `pm grant`        | `NSPhotoLibraryUsageDescription`               | `photos`                |
+| `photosAdd`          | none                                             | none (MediaStore) | `NSPhotoLibraryAddUsageDescription`            | `photos-add`            |
+| `contacts`           | `READ_CONTACTS`                                  | `pm grant`        | `NSContactsUsageDescription`                   | `contacts`              |
+| `calendar`           | `READ_CALENDAR`, `WRITE_CALENDAR`                | `pm grant`        | `NSCalendarsFullAccessUsageDescription`        | `calendar`              |
+| `bluetooth`          | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`            | `pm grant`        | `NSBluetoothAlwaysUsageDescription`            | notGrantableOnSimulator |
+| `nearbyWifi`         | `NEARBY_WIFI_DEVICES`                            | `pm grant`        | `NSLocalNetworkUsageDescription`               | notGrantableOnSimulator |
+| `motion`             | `ACTIVITY_RECOGNITION`                           | `pm grant`        | `NSMotionUsageDescription`                     | `motion`                |
+| `speech`             | `RECORD_AUDIO`                                   | `pm grant`        | `NSSpeechRecognitionUsageDescription`          | notGrantableOnSimulator |
+
+The `permissions` module (`prototype_platform_permissions_v1`) has one call, `permissions.request` with
+`names` (1-16 unique canonical names). A literal list may only name permissions declared in
+`requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
+of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
+`permissions.changed` fires when the user changes a permission in Settings and the app resumes. A call that
+needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
+runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
+
+The host sets declared permissions after install and before launch, so the first frame shows the final
+state. The mode is `prompt` (the default for interactive shows: nothing is granted, so the first request
+shows the system dialog and plans rely on the system-alert policy, #14106), `grantDeclared`, or
+`{grant: [...], deny: [...]}` naming declared permissions only, each in one list. Tests and agent loops pass
+an explicit mode. An Android denial revokes with the `user-fixed` flag, so it reads `blocked` and no dialog
+appears; an iOS simulator denial is `simctl privacy revoke` and reads `denied`. Each declared permission is
+reported as `{name, state, verified}`; `verified` is false, with `reason`, for a simulator name that is
+notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`). No production runtime
+advertises the module, and `prototype show` does not yet accept the mode.
+
 **Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
 calls. `notifications.post` takes `id` (1-128 characters), `channel` (a key-shaped channel id) and `title`
 (non-blank, at most 128), plus optional `body` (at most 1024), `largeImage` (an asset id), `style`, `group`,
@@ -2356,10 +2422,19 @@ importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped id
 most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
 256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
 must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
-exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime. The bounds are named
+contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`, `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state
+and channel rules repeat. The runtime enforces the ones that apply after placeholders resolve: a reply of
+at most 1 KiB, a resolved notification of at most 4 KiB, and at most 4 updates per second per notification,
+coalesced to the latest. Title and body limits count characters, while the 4 KiB total counts UTF-8 bytes of
+the resolved record and is checked on its own: ASCII text at every per-field limit fits, but multibyte text
+at those limits can exceed it.
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
-apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283). On iOS, `min` and `low`
+apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
+A `notifications.push` handler receives a simulated push (`{type, data, notification?}`, at most
+4096 bytes of compact JSON, the APNs limit) and needs `prototype_platform_push_v1` on top of the
+module, gated per event rather than per call (#14285). On iOS, `min` and `low`
 map to the passive interruption level and `default` and `high` to active. No production runtime
 advertises the module yet.
 
@@ -2493,11 +2568,24 @@ Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote
 `cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
 app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
 `media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
-`unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
-`sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
-`receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
-`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+`unsupported`. Event data is a closed object (unknown keys are refused):
+
+| event             | data                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `routesChanged`   | `state` (as `/platform/cast/state`), `routeCount` (integer >= 0)                                                   |
+| `sessionStarting` | `player` (1-64 chars), `protocol`, `deviceName` (0-256 chars)                                                      |
+| `sessionStarted`  | as `sessionStarting`, plus `positionMs` (integer >= 0, the remote position)                                        |
+| `sessionEnded`    | as `sessionStarted`; `positionMs` is where local playback resumes                                                  |
+| `sessionFailed`   | `player`, `reason` (`media_not_castable`, `play_services_unavailable`, `network`, `receiver`), optional `protocol` |
+| `remoteVolume`    | `volume` (0-1)                                                                                                     |
+
+The host decodes them with `prototypeCastEventOf` (truncated data does not decode); Kotlin
+`PrototypeCastEvents` and Swift `PrototypeCastEvents` are the twins, and all three replay
+`test/fixtures/prototype-spec/cast/events.json`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
+`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
+(the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
+reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises
+the module.
 
 The `castButton` node is the system route picker that starts a session; there is no start call. Its
 required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
@@ -2978,7 +3066,9 @@ or appends; the incoming value must contain its valid, nonempty key pointer. A l
 refused statically when that pointer is missing or resolves to null. JSON identity uses
 numeric value, exact strings and member names, and structural array/object equality. maxItems
 is an integer 1..2000; oldest rows are dropped after replacement/append and before final data
-limits. Missing/non-array targets and invalid writes leave input unchanged.
+limits. Missing/non-array targets and invalid writes leave input unchanged. The device runtimes run
+an upsert from any action list through the shared writer and report it as a `change` event
+`{op:"upsert",key,value?,maxItems?,revision}`, which the host replays the same way.
 
 The daemon holds the upstream connection for `via: "host"` channels (see
 [Host channel transport](#host-channel-transport)).
@@ -3962,6 +4052,11 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   `width` (1 to 16) and `color`.
 - `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
   path that receives the settled camera.
+- Every `emit` a marker tap runs, including those in its nested `onSuccess`, `onError` and `startTimer`
+  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context after the authored
+  entries, under the same byte budget. The contract lists the name in
+  `platformModules.map.events.markerTap.emitContext`. All three validators refuse an authored
+  `context.markerId` inside `onMarkerTap`. Outside it, `markerId` is an ordinary context name.
 - `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
   and the `location` permission in `requires.permissions`.
 - The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a

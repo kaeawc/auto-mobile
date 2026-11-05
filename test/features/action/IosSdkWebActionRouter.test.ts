@@ -1,3 +1,4 @@
+import { createIosSdkWebTextRouter } from "../../../src/features/action/IosSdkWebTextRouter";
 import { describe, expect, test } from "bun:test";
 import { createIosSdkBridgeTapper } from "../../../src/features/action/IosSdkBridgeTapRouter";
 import {
@@ -141,4 +142,34 @@ describe("iosSdkWebActionOutcome (#5162)", () => {
       ),
     ).toThrow("(no_snapshot)");
   });
+});
+
+test("web tap and text routers fail closed on multi_scene with the same scene error", async () => {
+  const reply: CtrlProxySdkWebActionResult = {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    totalTimeMs: 0,
+  };
+  const message =
+    "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.";
+  // Even conflicting fallback flags cannot turn scene ambiguity into permission to use XCTest.
+  expect(() => iosSdkWebActionOutcome({ ...reply, unsupported: true }, "click")).toThrow(message);
+  await expect(tapper(reply).tapper.tap({ action: "tap", element: webElement })).rejects.toThrow(
+    message,
+  );
+  const text = createIosSdkWebTextRouter({
+    client: () => new FakeWebActionClient(reply),
+    enabled: () => true,
+  });
+  for (const action of ["setValue", "clear", "submit"] as const) {
+    await expect(
+      text.perform({
+        action,
+        target: { webViewId: "checkout", snapshotId: "s7", elementId: "e0" },
+        text: "x",
+      }),
+    ).rejects.toThrow(message);
+  }
 });

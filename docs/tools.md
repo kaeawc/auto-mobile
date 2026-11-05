@@ -36,9 +36,9 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🆚 <code>compareScreenshot</code>    | Record or compare a named screenshot baseline            |
 | 👁️ <code>observe</code>              | Read the current screen, hierarchy, and screenshot       |
 | 🎯 <code>hitTest</code>              | Preview what a tap at a point would hit, without tapping |
-| 🧭 <code>explore</code>              | Automatically explore app to build navigation graph      |
-| 🗺️ <code>navigateTo</code>           | Navigate to screen using navigation graph                |
-| 🕸️ <code>getNavigationGraph</code>   | Get navigation graph for debugging                       |
+| 🧭 <code>explore</code>              | Explore the app to learn screens and transitions         |
+| 🗺️ <code>navigateTo</code>           | Replay learned transitions to reach a screen             |
+| 🕸️ <code>getNavigationGraph</code>   | List learned screens and transitions                     |
 | 🔎 <code>identifyInteractions</code> | Suggest likely interactions                              |
 | 🧪 <code>prototype</code>            | Show agent-authored UI on the device                     |
 | 🔦 <code>highlight</code>            | Draw a red hand-drawn circle around a UI element         |
@@ -113,6 +113,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🗑️ <code>deleteDevice</code>                | Stop and permanently delete a device, with verified platform-inventory absence          |
 | 💾 <code>deviceSnapshot</code>              | Capture or restore device snapshot                                                      |
 | 🔃 <code>rotate</code>                      | Rotate device orientation                                                               |
+| 🔁 <code>portReverse</code>                 | Android: own `adb reverse` so the device reaches a host server at `localhost:<port>`    |
 | 📐 <code>setPosture</code>                  | Set foldable / Duo posture                                                              |
 | 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                          |
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                        |
@@ -246,8 +247,9 @@ It needs the `hover_input_v1` runner capability, or, for a `stylus` hover, an `a
 root with a writable `/dev/uinput` (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
 anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
 advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
-[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
-are the documented intent and still need on-device confirmation (#13082).
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)). The tool type, source
+and hover actions above are confirmed on API 31 to 37 emulators; the stylus `AXIS_DISTANCE` value and physical pen
+devices are unverified.
 
 ### prototype
 
@@ -318,4 +320,5 @@ of rows, a full-screen metric (one large number with a label and unit), a two-bu
 
 The mockup is a phone overlay sized like a watch. It does not simulate the Digital Crown, Always-On
 or wrist-down dimming, real watchOS or Wear OS fonts and controls, or the round Wear OS screen, and
-nothing runs on a watch. Check the final design on a real watch.
+nothing runs on a watch. Check the final design on a real watch. To drive a watch app itself, see
+[Apple Watch simulators](using/apple-watch.md).

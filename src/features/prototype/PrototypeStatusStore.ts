@@ -56,6 +56,10 @@ export interface PrototypeLastResult {
    */
   suspended?: true;
   hiddenReason?: PrototypeHiddenReason;
+  /** Adopted prototypes only: the orientation the spec requested, as the device reports it. */
+  orientation?: "portrait" | "landscape" | "unlocked";
+  /** Adopted prototypes only: `unsupported` when a requested `statusBar` style cannot be applied over an overlay. */
+  statusBar?: "unsupported";
   displayId?: number;
   /** Host-resolved chrome for a successful fullscreen show; absent for adopted prototypes. */
   chrome?: PrototypeWindowChrome;
@@ -98,12 +102,24 @@ function adoptedFeedbackLog(prototype: AdoptedPrototype): Pick<PrototypeLastResu
   return prototype.feedbackLog ? { feedbackLog: structuredClone(prototype.feedbackLog) } : {};
 }
 
+/** The window-control diagnostics an adopted prototype's device reported. */
+function adoptedWindowControls(
+  prototype: AdoptedPrototype,
+): Pick<PrototypeLastResult, "orientation" | "statusBar"> {
+  return {
+    ...(prototype.orientation ? { orientation: prototype.orientation } : {}),
+    ...(prototype.statusBar ? { statusBar: prototype.statusBar } : {}),
+  };
+}
+
 export interface AdoptedPrototype {
   data?: PrototypeData;
   id: string;
   persistent?: boolean;
   suspended?: boolean;
   hiddenReason?: PrototypeHiddenReason;
+  orientation?: PrototypeLastResult["orientation"];
+  statusBar?: PrototypeLastResult["statusBar"];
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
@@ -336,6 +352,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
       ...(prototype.suspended === true ? { suspended: true as const } : {}),
       ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
+      ...adoptedWindowControls(prototype),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
       ...prototypeDegradedEffectsField(prototype.degradedEffects),

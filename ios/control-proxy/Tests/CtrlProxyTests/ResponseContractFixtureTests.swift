@@ -6,6 +6,23 @@ import XCTest
 
 /// Capture with AUTOMOBILE_FIXTURE_OUT_DIR; otherwise compare against the committed oracle.
 final class ResponseContractFixtureTests: XCTestCase {
+    func testMultiSceneHttpContract() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(SdkMultiSceneError(scenes: ["scene-b", "scene-a"])) + Data("\n".utf8)
+        let committed = WireSnapshotFixture.fixtureURL(fromTestFilePath: #filePath)
+            .deletingLastPathComponent().appendingPathComponent("ios-contract/sdk-multi-scene-http.json")
+        if let directory = ProcessInfo.processInfo.environment["AUTOMOBILE_FIXTURE_OUT_DIR"] {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: directory),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("sdk-multi-scene-http.json"))
+        } else {
+            XCTAssertEqual(try Data(contentsOf: committed), data)
+        }
+    }
+
     func testRunnerResponseContract() throws {
         let requestId = "fixture-request-id"
         let timing = PerfTiming(name: "gesturePhases", durationMs: 7, children: [
@@ -145,6 +162,22 @@ final class ResponseContractFixtureTests: XCTestCase {
             SdkActionResponse(
                 requestId: requestId,
                 outcome: .success(AutoMobileActionResult(status: .rejected, reason: "stale_observation")),
+                totalTimeMs: 17
+            )
+        )
+        try append(
+            "sdk_observation_multi_scene",
+            SdkObservationResponse(
+                requestId: requestId,
+                outcome: .failure(.multiScene(["scene-a", "scene-b"])),
+                totalTimeMs: 17
+            )
+        )
+        try append(
+            "sdk_action_multi_scene",
+            SdkActionResponse(
+                requestId: requestId,
+                outcome: .failure(.multiScene(["scene-a", "scene-b"])),
                 totalTimeMs: 17
             )
         )

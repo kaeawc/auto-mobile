@@ -51,6 +51,7 @@
     "MAX_PROTOTYPE_DATA_WRITE_BYTES": 786432,
     "MAX_PROTOTYPE_STORAGE_BYTES": 262144,
     "MAX_PROTOTYPE_STORAGE_KEYS": 64,
+    "MAX_PROTOTYPE_SECURE_VALUE_BYTES": 4096,
     "DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS": 10000,
     "MAX_PROTOTYPE_REQUEST_TIMEOUT_MS": 30000,
     "MAX_PROTOTYPE_RESPONSE_BYTES": 262144,
@@ -90,7 +91,18 @@
     "MAX_PROTOTYPE_KEYFRAME_NODES": 16,
     "MAX_PROTOTYPE_MEDIA_PLAYERS": 4,
     "MAX_PROTOTYPE_VIDEO_NODES": 64,
-    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3
+    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3,
+    "MAX_PROTOTYPE_NOTIFICATION_CHANNELS": 8,
+    "MAX_PROTOTYPE_NOTIFICATION_ACTIONS": 3,
+    "MAX_PROTOTYPE_NOTIFICATION_ID_LENGTH": 128,
+    "MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH": 128,
+    "MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH": 1024,
+    "MAX_PROTOTYPE_NOTIFICATION_DATA_BYTES": 1024,
+    "MAX_PROTOTYPE_NOTIFICATION_REPLY_BYTES": 1024,
+    "MAX_PROTOTYPE_NOTIFICATION_BYTES": 4096,
+    "MAX_PROTOTYPE_NOTIFICATION_BADGE": 9999,
+    "MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE": 24,
+    "MAX_PROTOTYPE_NOTIFICATION_UPDATES_PER_SECOND": 4
   },
   "definitions": {
     "authAccount": {
@@ -24172,7 +24184,8 @@
           "value": {
             "kind": "string",
             "max": 64
-          }
+          },
+          "sensitive": true
         }
       }
     },
@@ -24214,7 +24227,8 @@
           "value": {
             "kind": "json",
             "maxDepth": 1
-          }
+          },
+          "sensitive": true
         },
         "servicesEnabled": {
           "platforms": ["android", "ios"],
@@ -24352,7 +24366,8 @@
       "events": {
         "markerTap": {
           "sensitive": false,
-          "userInitiated": true
+          "userInitiated": true,
+          "emitContext": ["markerId"]
         },
         "cameraIdle": {
           "sensitive": false
@@ -24953,7 +24968,8 @@
         "dismissed": {
           "sensitive": false
         },
-        "scheduledFired": { "sensitive": false }
+        "scheduledFired": { "sensitive": false },
+        "push": { "sensitive": false, "capability": "prototype_platform_push_v1" }
       },
       "state": {
         "badge": {
@@ -25545,6 +25561,19 @@
             "values": ["googleCast", "airplay"]
           }
         },
+        "protocols": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "array",
+            "item": {
+              "kind": "enum",
+              "values": ["googleCast", "airplay"]
+            },
+            "min": 0,
+            "max": 2,
+            "unique": true
+          }
+        },
         "player": {
           "platforms": ["android", "ios"],
           "value": {
@@ -25559,6 +25588,247 @@
             "kind": "number",
             "min": 0,
             "max": 1
+          }
+        }
+      }
+    },
+    "permissions": {
+      "capability": "prototype_platform_permissions_v1",
+      "calls": {
+        "request": {
+          "args": {
+            "names": {
+              "optional": false,
+              "value": {
+                "kind": "array",
+                "item": {
+                  "kind": "enum",
+                  "values": [
+                    "camera",
+                    "microphone",
+                    "location",
+                    "locationBackground",
+                    "notifications",
+                    "photos",
+                    "photosAdd",
+                    "contacts",
+                    "calendar",
+                    "bluetooth",
+                    "nearbyWifi",
+                    "motion",
+                    "speech"
+                  ]
+                },
+                "min": 1,
+                "max": 16,
+                "unique": true
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "changed": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "camera": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "microphone": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "location": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "locationBackground": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "notifications": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "photos": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "photosAdd": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "contacts": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "calendar": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "bluetooth": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "nearbyWifi": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "motion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "speech": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
           }
         }
       }

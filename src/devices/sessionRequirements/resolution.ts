@@ -28,7 +28,6 @@ import type {
   ResolvedSessionDeviceProfile,
   ResolutionProvenance,
   SessionDeviceCatalog,
-  SessionRequirementCapabilities,
   SessionRequirementDefaults,
 } from "./types";
 import {
@@ -337,13 +336,26 @@ function chooseIosRelease(
   selector: EffectiveOsSelector,
   preferredVersion: string,
   releases: readonly IosCatalogRelease[],
+  model: IosCatalogModel,
 ): RequirementResult<ResolvedIosOs> {
   const valid = validIosReleases(releases);
-  const satisfying = valid.filter((release) =>
-    osSelectorMatchesVersion(selector, release.osVersion),
-  );
+  let satisfying = valid.filter((release) => osSelectorMatchesVersion(selector, release.osVersion));
   if (satisfying.length === 0) {
     return noRuntimeResult(selector, releases, "ios");
+  }
+  if (selector.kind !== "exact") {
+    const minimum = compatibilityBound(model.minOsVersion, model, "minimum");
+    const maximum = compatibilityBound(model.maxOsVersion, model, "maximum");
+    // Invalid bounds and empty compatible sets retain the existing compatibility error path.
+    if (minimum.ok && maximum.ok) {
+      const compatible = satisfying.filter(
+        (release) =>
+          !outsideIosCompatibilityBounds(release.osVersion, minimum.value, maximum.value),
+      );
+      if (compatible.length > 0) {
+        satisfying = compatible;
+      }
+    }
   }
   const ordered = stableReleaseSort(
     satisfying,
@@ -588,22 +600,16 @@ function resolveIos(
   requirement: NormalizedIosSessionDeviceRequirement,
   defaults: IosSessionRequirementDefaults,
   catalog: Extract<SessionDeviceCatalog, { platform: "ios" }>,
-  capabilities: SessionRequirementCapabilities,
 ): RequirementResult<ResolvedSessionDeviceProfile> {
   const hardware = resolveIosHardware(requirement, defaults, catalog);
   if (!hardware.ok) {
     return hardware;
   }
-  if (hardware.value.model.archetype === "duo" && capabilities.iosDuo !== true) {
-    return failure(
-      "capability_disabled",
-      `Model '${hardware.value.model.name}' resolves to Duo, which is disabled by provider policy.`,
-    );
-  }
   const os = chooseIosRelease(
     requirement.effective.os,
     defaults.os.preferredVersion,
     catalog.releases,
+    hardware.value.model,
   );
   if (!os.ok) {
     return os;
@@ -689,10 +695,9 @@ export function resolveSessionDeviceProfile(
   requirement: NormalizedSessionDeviceRequirement,
   defaults: SessionRequirementDefaults,
   catalog: SessionDeviceCatalog,
-  capabilities: SessionRequirementCapabilities = {},
 ): RequirementResult<ResolvedSessionDeviceProfile> {
   if (requirement.platform === "ios" && defaults.platform === "ios" && catalog.platform === "ios") {
-    return resolveIos(requirement, defaults, catalog, capabilities);
+    return resolveIos(requirement, defaults, catalog);
   }
   if (
     requirement.platform === "android" &&

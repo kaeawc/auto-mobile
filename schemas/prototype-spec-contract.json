@@ -15896,7 +15896,7 @@
             },
             "id": {
               "rule": {
-                "kind": "string"
+                "kind": "key"
               },
               "optional": true
             },

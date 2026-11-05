@@ -551,6 +551,9 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
   // The url binds placeholders like a request url; navigation callbacks run actions (#14312).
   webView: (node, path, visit) => {
     mapField(node, "url", path, { kind: "text", visit });
+    for (const field of ["navigationStateKey", "titleKey", "canGoBackKey"]) {
+      mapField(node, field, path, { kind: "key", visit });
+    }
     for (const field of ["onNavigate", "onBlockedNavigation"]) {
       mapList(node, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
     }

@@ -4094,10 +4094,14 @@ The `webView` node (contract only: no renderer draws it and no runtime advertise
   URL parser reads as an IP address (a last label that is decimal or `0x` hexadecimal, or a bracketed IPv6
   literal) are refused. Refusing every IP literal, not only private ranges, keeps the three validators equal:
   JavaScript, the JVM and Swift disagree on numeric host spellings such as `2130706433`.
-- When the URL's authority is literal, `https://<authority>` (lowercased) must be one of `allowedOrigins`. A
-  templated authority is checked by the runtime once it resolves.
+- When the URL's authority is literal, `https://<authority>` (lowercased, an explicit `:443` dropped) must be
+  one of `allowedOrigins`. A templated authority is checked by the runtime once it resolves.
+- The `url` binds placeholders like any text field, so its `{platform:…}` reads must be declared, and in a
+  library spec it is a request sink: a secure text field's value cannot be bound into it.
 - `navigationStateKey` (`loading`, `loaded`, `error` or `blocked`) and `titleKey` name declared string state;
-  `canGoBackKey` names declared boolean state.
+  `canGoBackKey` names declared boolean state. All three bind component props like other node state keys, and
+  every state write re-checks their types.
+- A `webView` `id` uses the state-key pattern, the grammar of the `webview.*` `node` argument that names it.
 - `javaScript` defaults to `false`; `true` is accepted and never comes with a bridge. Page subresources cannot
   be checked at a resolved address the way `request` is, so an imported (ProtoViewer) prototype may show a
   `webView` only while network for imported prototypes is on; ProtoViewer does not enforce that yet, which is

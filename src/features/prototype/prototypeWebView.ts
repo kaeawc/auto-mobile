@@ -58,12 +58,14 @@ export function prototypeWebViewPrivateHost(host: string): boolean {
   return host === "localhost" || host.endsWith(".localhost") || IP_LIKE_LABEL.test(last);
 }
 
-/** The `https://authority` of a URL whose authority is literal, lowercased; otherwise undefined. */
+/** The `https://authority` of a URL whose authority is literal, lowercased, without `:443`. */
 function literalOrigin(url: string): string | undefined {
   const authority = /^https:\/\/([^/?#]*)/.exec(url)?.[1];
-  return authority === undefined || authority.includes("{")
-    ? undefined
-    : `https://${authority.toLowerCase()}`;
+  if (authority === undefined || authority.includes("{")) {
+    return undefined;
+  }
+  // An allowed origin never spells the default port, so `:443` is dropped before comparing.
+  return `https://${authority.toLowerCase().replace(/:443$/, "")}`;
 }
 
 function nodeError(

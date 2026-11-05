@@ -17,6 +17,8 @@ export function prototypeWebViewSchema<T extends z.ZodRawShape, A extends z.ZodT
     .object({
       ...common,
       type: z.enum(["webView"]),
+      // A `webview.*` call names this node through a `kind: "key"` argument, so the id is a state key.
+      id: keySchema.optional(),
       url: z.string().max(2048).regex(prototypeContractPatterns.webViewUrl),
       allowedOrigins: z
         .array(z.string().max(256).regex(prototypeContractPatterns.webOrigin))

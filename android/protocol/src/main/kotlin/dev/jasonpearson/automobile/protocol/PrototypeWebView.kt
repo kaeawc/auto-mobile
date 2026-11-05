@@ -71,7 +71,9 @@ internal object PrototypeWebView {
       )
     }
     val authority = node.text("url")?.let { literalAuthority.find(it)?.groupValues?.get(1) }
-    if (authority != null && '{' !in authority && "https://${authority.lowercase()}" !in origins) {
+    // An allowed origin never spells the default port, so `:443` is dropped before comparing.
+    val origin = authority?.let { "https://${it.lowercase().removeSuffix(":443")}" }
+    if (authority != null && '{' !in authority && origin !in origins) {
       return fail("$path.url", "webView url origin must be one of allowedOrigins")
     }
     return stateKeys.firstNotNullOfOrNull { (field, boolean) ->

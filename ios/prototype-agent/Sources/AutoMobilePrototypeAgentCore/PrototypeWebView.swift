@@ -65,7 +65,7 @@ enum PrototypeWebView {
             )
         }
         if let url = node["url"]?.stringValue, let authority = literalAuthority(url),
-           !origins.contains("https://\(authority.lowercased())")
+           !origins.contains(origin(authority))
         {
             throw PrototypeLimits.violation("\(path).url", "webView url origin must be one of allowedOrigins")
         }
@@ -77,6 +77,13 @@ enum PrototypeWebView {
                 )
             }
         }
+    }
+
+    /// The `https://authority` of a literal authority, lowercased; an allowed origin never spells the
+    /// default port, so `:443` is dropped before comparing.
+    private static func origin(_ authority: String) -> String {
+        let lowered = authority.lowercased()
+        return "https://" + (lowered.hasSuffix(":443") ? String(lowered.dropLast(4)) : lowered)
     }
 
     /// The host of an `https://host[:port]` origin the contract pattern already accepted.
@@ -97,6 +104,21 @@ enum PrototypeWebView {
         var authority = ""
         authority.unicodeScalars.append(contentsOf: scalars)
         return authority
+    }
+
+    /// The navigation, title and back key rule for a decoded `webView`, re-checked after every state
+    /// write the way Android's state-dependent node rules re-run `PrototypeWebView.error`.
+    static func stateKeyRejection(_ node: PrototypeNode, state: [String: JSONValue]) -> String? {
+        let keys: [(field: String, key: String?, boolean: Bool)] = [
+            ("navigationStateKey", node.navigationStateKey, false),
+            ("titleKey", node.titleKey, false),
+            ("canGoBackKey", node.canGoBackKey, true),
+        ]
+        for (field, key, boolean) in keys {
+            guard let key, !holds(state[key], boolean: boolean) else { continue }
+            return "\(field) must name a declared \(boolean ? "boolean" : "string") state key"
+        }
+        return nil
     }
 
     private static func holds(_ value: JSONValue?, boolean: Bool) -> Bool {

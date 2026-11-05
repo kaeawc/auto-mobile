@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { prototypeRequiredCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
 import { expandPrototypeComponents } from "../../../src/features/prototype/prototypeComponents";
+import { prototypeStrictPolicyError } from "../../../src/features/prototype/prototypeStrictPolicy";
 import {
   prototypeWebViewCallError,
   prototypeWebViewError,
@@ -67,6 +68,16 @@ test("a literal url authority must be an allowed origin", () => {
   }
 });
 
+test("an explicit default port matches the origin that omits it", () => {
+  const at = (url: string) => prototypeWebViewError(spec(webView({ url })));
+  expect(at("https://example.com:443/post")).toBeUndefined();
+  expect(at("https://EXAMPLE.com:443")).toBeUndefined();
+  expect(at("https://example.com:4443/post")).toEqual({
+    path: "root.children[0].url",
+    message: "webView url origin must be one of allowedOrigins",
+  });
+});
+
 test("navigation and title keys are string state, the back key is boolean state", () => {
   const state = { nav: "", title: "", back: false };
   const at = (fields: Record<string, unknown>) =>
@@ -131,4 +142,42 @@ test("a component prop used in the url binds like one in a request url", () => {
   expect(expansion.success && expansion.spec).toMatchObject({
     root: { type: "webView", url: "https://example.com/article" },
   });
+});
+
+test("a component prop used in a navigation state key binds like a node state key", () => {
+  const expansion = expandPrototypeComponents({
+    requires: { platform: ["webview"] },
+    state: { title: "", nav: "", back: false },
+    components: {
+      page: {
+        root: webView({
+          titleKey: "{props.titleKey}",
+          navigationStateKey: "{props.navKey}",
+          canGoBackKey: "{props.backKey}",
+        }),
+      },
+    },
+    root: {
+      type: "use",
+      component: "page",
+      props: { titleKey: "title", navKey: "nav", backKey: "back" },
+    },
+  });
+  expect(expansion.success && expansion.spec).toMatchObject({
+    root: { type: "webView", titleKey: "title", navigationStateKey: "nav", canGoBackKey: "back" },
+  });
+});
+
+test("a secure text field value cannot be bound into a library webView url", () => {
+  const field = { type: "textField", stateKey: "pw", secure: true };
+  const library = (url: string) => {
+    const value = { ...spec(webView({ url }), undefined, { pw: "" }) };
+    value.root.children.unshift(field);
+    return prototypeStrictPolicyError(value, { library: true }, []);
+  };
+  expect(library("https://example.com/{pw}")).toEqual({
+    path: "root.children[1].url",
+    message: "Secure value cannot be bound into a request",
+  });
+  expect(library("https://example.com/post")).toBeUndefined();
 });

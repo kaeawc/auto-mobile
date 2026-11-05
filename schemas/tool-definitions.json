@@ -36451,7 +36451,7 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
                     "id": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"

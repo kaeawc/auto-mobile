@@ -104,6 +104,16 @@ export class DevicectlPanelScreenshotSource
     try {
       const capability = await this.checkDisplays(request.deviceId, request.signal);
       if (capability.kind !== "supported" || capability.output === undefined) {
+        if (capability.kind === "failed") {
+          this.options.logger.warn(
+            `Could not read CoreDevice active displays: ${capabilityDetail(capability)}`,
+          );
+        } else {
+          // Older hosts and unsupported devices cannot supply optional live panel evidence.
+          this.options.logger.debug(
+            `CoreDevice active displays unavailable: ${capabilityDetail(capability)}`,
+          );
+        }
         return [];
       }
       const listing = parseDevicectlDisplayInfo(capability.output, this.options.logger);

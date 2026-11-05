@@ -132,18 +132,34 @@ async function readAndroidPosture(adb: AdbCommandRunner, signal?: AbortSignal): 
 /** Reuse the panel mapping across observe instances and settle polls. */
 export class ObservedAndroidDisplayCache {
   private static readonly TTL_MS = 5000;
+  private static readonly liveIosPanels = new Map<string, string>();
 
   static clear(deviceId: string): void {
+    ObservedAndroidDisplayCache.liveIosPanels.delete(deviceId);
     rememberedIosPostures.delete(deviceId);
     androidDisplayCache.delete(deviceId);
     androidPostureCache.delete(deviceId);
   }
 
   static release(deviceId: string): void {
+    ObservedAndroidDisplayCache.liveIosPanels.delete(deviceId);
     rememberedIosPostures.delete(deviceId);
     androidDisplayCache.delete(deviceId);
     lastKnownAndroidDisplay.delete(deviceId);
     androidPostureCache.delete(deviceId);
+  }
+
+  static rememberLiveIosPanel(deviceId: string, panel: DisplayPanel | undefined): void {
+    if (panel) {
+      ObservedAndroidDisplayCache.liveIosPanels.set(deviceId, panel.key);
+    } else {
+      ObservedAndroidDisplayCache.liveIosPanels.delete(deviceId);
+    }
+  }
+
+  static liveIosPanel(device: BootedDevice): DisplayPanel | undefined {
+    const key = ObservedAndroidDisplayCache.liveIosPanels.get(device.deviceId);
+    return device.displays?.panels.find((panel) => panel.key === key);
   }
 
   static rememberIosPosture(deviceId: string, display: DisplayRef): void {
@@ -413,7 +429,7 @@ function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
   return POSTURE_PANEL_ROLES.find(([, panelRole]) => panelRole === role)?.[0] ?? "unknown";
 }
 
-/** Match the runner's live pixel size against the enumerated physical panels. */
+/** Prefer the live CoreDevice panel, falling back to the runner pixel size. */
 export function observedIosDisplay(
   device: BootedDevice,
   hierarchy:
@@ -421,7 +437,7 @@ export function observedIosDisplay(
     | undefined,
 ): DisplayRef {
   const panels = device.displays?.panels ?? [];
-  const panel = liveIosPanel(panels, hierarchy);
+  const panel = ObservedAndroidDisplayCache.liveIosPanel(device) ?? liveIosPanel(panels, hierarchy);
   return {
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",

@@ -1,3 +1,4 @@
+import { createProductionDevicectlPanelScreenshotSource } from "../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { IosSdkMultiSceneError } from "./ios/sdkObservationBridge";
 import { AllDisplaysObservation } from "./AllDisplaysObservation";
 import { SingleDisplayCaptureStage } from "./SingleDisplayCaptureStage";
@@ -364,6 +365,7 @@ export class RealObserveScreen implements ObserveScreen {
         ? new IosDisplayBindingCollector(displayBindingDeps)
         : new AndroidDisplayBindingCollector(displayBindingDeps);
     this.iosCollector = new DefaultIosObservationCollector({
+      iosDisplayInfoSource: createProductionDevicectlPanelScreenshotSource(),
       hierarchyCollector: () => this.hierarchyCollector,
       sdkBridge: dependencies?.sdkBridge,
       viewHierarchy: () => this.viewHierarchy,

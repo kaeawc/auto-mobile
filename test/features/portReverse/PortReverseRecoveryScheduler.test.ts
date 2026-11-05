@@ -270,4 +270,49 @@ describe("PortReverseRecoveryScheduler", () => {
     expect([...adb.mappings]).toEqual([]);
     expect(report.restored).toEqual([]);
   });
+
+  test("an in-flight restore is not undone when the port now maps somewhere else", async () => {
+    const { adb, manager } = setup();
+    await manager.ensure({ deviceId: DEVICE, owner: "s1", adb }, [
+      { devicePort: 8080, hostPort: 8080 },
+    ]);
+    adb.dropAll();
+    const gate = Promise.withResolvers<void>();
+    adb.addGate = gate.promise;
+    const reconciling = manager.reconcile(DEVICE);
+    await drainMicrotasks(20);
+    manager.forgetDevice(DEVICE);
+    gate.resolve();
+    // The replacement device's own mapping takes the port before the undo reads --list.
+    const list = adb.list.bind(adb);
+    adb.list = async () => {
+      adb.mappings.set(8080, "tcp:7777");
+      return list();
+    };
+    await reconciling;
+    expect(adb.calls).not.toContain("remove 8080");
+    expect(adb.mappings.get(8080)).toBe("tcp:7777");
+  });
+
+  test("an undo that fails stays pending for the device's next call", async () => {
+    const { adb, manager } = setup();
+    await manager.ensure({ deviceId: DEVICE, owner: "s1", adb }, [
+      { devicePort: 8080, hostPort: 8080 },
+    ]);
+    adb.dropAll();
+    const gate = Promise.withResolvers<void>();
+    adb.addGate = gate.promise;
+    adb.failRemove.add(8080);
+    const reconciling = manager.reconcile(DEVICE);
+    await drainMicrotasks(20);
+    manager.forgetDevice(DEVICE);
+    gate.resolve();
+    await reconciling;
+    expect(manager.pendingRemovals(DEVICE)).toEqual([8080]);
+
+    adb.failRemove.clear();
+    await manager.list({ deviceId: DEVICE, owner: "s2", adb });
+    expect(adb.mappings.has(8080)).toBe(false);
+    expect(manager.pendingRemovals(DEVICE)).toEqual([]);
+  });
 });

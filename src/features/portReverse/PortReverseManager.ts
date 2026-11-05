@@ -596,11 +596,7 @@ export class PortReverseManager {
     if (state.owned.get(devicePort) !== mapping) {
       // The device was forgotten while this add was in flight: the mapping may now sit on a
       // replacement device that no cleanup would remove, so undo it here.
-      await state.adb.remove(devicePort).catch((error: unknown) => {
-        logger.warn(
-          `[portReverse] undoing ${tcp(devicePort)} restored on ${deviceId} after it was forgotten failed: ${errorMessage(error)}`,
-        );
-      });
+      await this.undoForgottenRestore(deviceId, state, devicePort, mapping.hostPort);
       return;
     }
     view.set(devicePort, entryFor({ devicePort, hostPort: mapping.hostPort }));
@@ -608,6 +604,33 @@ export class PortReverseManager {
     this.audit(
       `restore ${tcp(devicePort)} -> ${tcp(mapping.hostPort)} device=${deviceId} session=${mapping.owner}`,
     );
+  }
+
+  /**
+   * Removes a restore that landed after its device was forgotten, but only while `--list` still
+   * shows the port mapped where this restore pointed it: a different mapping there is someone
+   * else's and is left alone. A removal that cannot be confirmed is kept pending, so the device's
+   * next `--list` retries it under the same rule.
+   */
+  private async undoForgottenRestore(
+    deviceId: string,
+    state: DeviceState,
+    devicePort: number,
+    hostPort: number,
+  ): Promise<void> {
+    try {
+      const current = (await state.adb.list()).find((entry) => entry.devicePort === devicePort);
+      if (current?.hostPort !== hostPort) {
+        return;
+      }
+      await state.adb.remove(devicePort);
+      this.audit(`remove ${tcp(devicePort)} -> ${tcp(hostPort)} device=${deviceId} (forgotten)`);
+    } catch (error) {
+      logger.warn(
+        `[portReverse] undoing ${tcp(devicePort)} restored on ${deviceId} after it was forgotten failed; retrying on the next call: ${errorMessage(error)}`,
+      );
+      state.pendingRemoval.set(devicePort, hostPort);
+    }
   }
 
   private assertNoConflicts(

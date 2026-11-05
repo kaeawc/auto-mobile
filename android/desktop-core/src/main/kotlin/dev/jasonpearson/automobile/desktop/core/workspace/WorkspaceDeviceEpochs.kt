@@ -21,16 +21,21 @@ internal fun WorkspaceViewModel.endDeviceSession(action: WorkspaceAction.EndDevi
     action.successorUuid ?: return markDeviceSessionEnded(action.deviceId, action.retiredUuid)
   val existing = columnFor(action.deviceId) ?: return
   if (existing.deviceSessionUuid != action.retiredUuid) return
-  val successor =
-    DeviceColumn(
-      deviceId = existing.deviceId,
-      name = existing.name,
-      platform = existing.platform,
-      isVirtual = existing.isVirtual,
-      deviceSessionUuid = successorUuid,
-    )
-  replaceEpoch(existing, existing.nextEpoch(successor))
+  replaceEpoch(existing, existing.nextEpoch(existing.successorEpoch(successorUuid)))
 }
+
+/**
+ * A fresh column for [successorUuid], a new epoch of this column's device. It carries only the
+ * device's identity, so [nextEpoch] resets everything observed from the retired epoch.
+ */
+internal fun DeviceColumn.successorEpoch(successorUuid: String): DeviceColumn =
+  DeviceColumn(
+    deviceId = deviceId,
+    name = name,
+    platform = platform,
+    isVirtual = isVirtual,
+    deviceSessionUuid = successorUuid,
+  )
 
 /**
  * Swap [retired]'s column for [next] (a new epoch of the same device) and drop the retired epoch's

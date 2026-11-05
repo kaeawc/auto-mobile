@@ -85,6 +85,8 @@ class DeviceSessionEndedTest {
       val revived = vm.columns().single()
       assertFalse(revived.sessionEnded)
       assertEquals("successor", revived.deviceSessionUuid)
+      // The ended column dropped its epoch, so the daemon's UUID for it is a new epoch.
+      assertEquals(1, revived.epochGeneration)
     }
 
   @Test

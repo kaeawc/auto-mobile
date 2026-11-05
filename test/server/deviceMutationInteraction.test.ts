@@ -130,6 +130,11 @@ describe("Interaction journal intents (#14359)", () => {
       "right",
       "select",
       "playPause",
+      // Media transport keys act on the app's playback session only (#16734).
+      "fastForward",
+      "rewind",
+      "next",
+      "previous",
       "home",
       "back",
       "menu",

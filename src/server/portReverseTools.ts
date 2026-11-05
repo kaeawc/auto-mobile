@@ -12,11 +12,21 @@ import {
   portReversePolicyFromEnv,
   type PortReversePolicy,
 } from "../features/portReverse/PortReversePolicy";
+import { PortReverseRecoveryScheduler } from "../features/portReverse/PortReverseRecoveryScheduler";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../models";
 import { createAdbReverseCommands } from "../utils/android-cmdline-tools/adbReverse";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  adbTransportRecoveredSignal,
+  type AdbTransportRecoveredSignal,
+} from "../utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  registerDeviceIncarnationListener,
+  type DeviceIncarnationListener,
+} from "../utils/deviceIncarnation";
+import { defaultTimer } from "../utils/SystemTimer";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defineDeviceTool, type DeviceToolHandler } from "./defineTool";
 import { portReverseResultSchema } from "./portReverseToolOutputSchemas";
@@ -41,6 +51,13 @@ const portReverseInput = z.object({
     .max(32)
     .optional()
     .describe("Required for ensure and remove; verify defaults to this session's ports"),
+  probe: z
+    .boolean()
+    .optional()
+    .describe(
+      "verify only: also connect to each mapped port from the device (about 1 s each, run " +
+        "together) and report reachable, unreachable or probe_unsupported",
+    ),
 });
 
 type PortReverseAction = z.infer<typeof portReverseInput>["action"];
@@ -96,7 +113,11 @@ function message(action: PortReverseAction, result: PortReverseResult): string {
 async function run(
   manager: PortReverseManager,
   target: PortReverseTarget,
-  args: { action: PortReverseAction; ports?: { devicePort: number; hostPort?: number }[] },
+  args: {
+    action: PortReverseAction;
+    ports?: { devicePort: number; hostPort?: number }[];
+    probe?: boolean;
+  },
   policy: PortReversePolicy,
 ): Promise<PortReverseResult> {
   const requests = (args.ports ?? []).map((p) => ({
@@ -110,6 +131,7 @@ async function run(
     return manager.verify(
       target,
       args.ports?.map((p) => p.devicePort),
+      { probe: args.probe === true },
     );
   }
   if (requests.length === 0) {
@@ -189,7 +211,9 @@ const portReverseTool = defineDeviceTool({
   description:
     "Android: manage adb reverse mappings so the app or browser on the device reaches a host " +
     "server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove " +
-    "manage them. Owned mappings lost to an adb or device restart are restored on the next call " +
+    "manage them. verify with probe:true also connects from the device to each mapped port: " +
+    "reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the " +
+    "host; refused; timeout) or probe_unsupported. Owned mappings lost to an adb or device restart are restored on the next call " +
     "and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
   input: portReverseInput,
   options: { defaultEnabled: false, outputSchema: portReverseResultSchema },
@@ -197,13 +221,49 @@ const portReverseTool = defineDeviceTool({
 
 export const portReverseSchema = portReverseTool.schema;
 
-let deviceRemovalSubscribed = false;
+/**
+ * Re-applies a device's owned mappings when its adb transport recovers (an `adb reconnect`, a
+ * refused command that later succeeded, a CtrlProxy reconnect), without waiting for a client call.
+ */
+export function subscribePortReverseTransportRecovery(
+  signal: Pick<AdbTransportRecoveredSignal, "subscribe">,
+  scheduler: Pick<PortReverseRecoveryScheduler, "deviceRecovered" | "cancel" | "dispose">,
+  manager: Pick<PortReverseManager, "forgetDevice">,
+  registerIdentityListener: (
+    listener: DeviceIncarnationListener,
+  ) => () => void = registerDeviceIncarnationListener,
+): () => void {
+  const unsubscribe = signal.subscribe((deviceId, reason) =>
+    scheduler.deviceRecovered(deviceId, reason),
+  );
+  // Another device on the serial: its mappings are not ours, so nothing may be restored there.
+  const unregister = registerIdentityListener({
+    name: "port-reverse-recovery",
+    onDeviceIdentityReplaced: (deviceId) => {
+      scheduler.cancel(deviceId);
+      manager.forgetDevice(deviceId);
+    },
+    onDeviceIncarnationChanged: () => undefined,
+  });
+  return () => {
+    unsubscribe();
+    unregister();
+    scheduler.dispose();
+  };
+}
+
+let daemonSubscribed = false;
 
 function daemonManager(): PortReverseManager {
-  if (!deviceRemovalSubscribed) {
-    deviceRemovalSubscribed = true;
+  if (!daemonSubscribed) {
+    daemonSubscribed = true;
     subscribePortReverseCleanup(
       { subscribeDeviceRemoval: (l) => getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(l) },
+      defaultPortReverseManager,
+    );
+    subscribePortReverseTransportRecovery(
+      adbTransportRecoveredSignal,
+      new PortReverseRecoveryScheduler({ manager: defaultPortReverseManager, timer: defaultTimer }),
       defaultPortReverseManager,
     );
   }

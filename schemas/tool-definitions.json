@@ -21212,7 +21212,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot and the window-app runner hierarchy with focusedElement (project: 'full' includes viewHierarchy); the runner starts on demand, and advanced observe options are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot and the window-app runner hierarchy with focusedElement (project: 'full' includes viewHierarchy); the runner starts on demand, except that a deviceId read of a device another session holds only connects to an already-running runner; when it cannot start or be reached, observe returns screenshot-only with hierarchyUnavailable unless project is set, which then is refused. Advanced observe options are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -23206,7 +23206,7 @@
           "type": "boolean"
         },
         "hierarchyUnavailable": {
-          "description": "Apple Watch and Apple TV simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS or tvOS runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen.",
+          "description": "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen.",
           "type": "object",
           "properties": {
             "platform": {
@@ -27610,7 +27610,7 @@
       "destructiveHint": false,
       "idempotentHint": true
     },
-    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
+    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. verify with probe:true also connects from the device to each mapped port: reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the host; refused; timeout) or probe_unsupported. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27644,6 +27644,10 @@
             "required": ["devicePort"],
             "additionalProperties": false
           }
+        },
+        "probe": {
+          "description": "verify only: also connect to each mapped port from the device (about 1 s each, run together) and report reachable, unreachable or probe_unsupported",
+          "type": "boolean"
         },
         "platform": {
           "type": "string",
@@ -27708,7 +27712,25 @@
               },
               "status": {
                 "type": "string",
-                "enum": ["added", "present", "restored", "missing", "removed", "gone", "foreign"]
+                "enum": [
+                  "added",
+                  "present",
+                  "restored",
+                  "missing",
+                  "removed",
+                  "gone",
+                  "foreign",
+                  "reachable",
+                  "unreachable",
+                  "probe_unsupported"
+                ]
+              },
+              "probeReason": {
+                "type": "string",
+                "enum": ["closed", "refused", "timeout", "unsupported"]
+              },
+              "probeDetail": {
+                "type": "string"
               }
             },
             "required": ["devicePort", "host", "owned", "status"],
@@ -27897,7 +27919,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; long press and steps are unsupported. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    "description": "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; long press and steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27911,6 +27933,10 @@
             "right",
             "select",
             "playPause",
+            "fastForward",
+            "rewind",
+            "next",
+            "previous",
             "home",
             "back",
             "menu",
@@ -27940,6 +27966,12 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 50
+        },
+        "durationMs": {
+          "description": "Hold select (D-pad center) down this long in ms (100-10000) for a long press; Android API 35+ only.",
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 10000
         },
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
@@ -32449,6 +32481,35 @@
                       "required": ["key", "as"],
                       "additionalProperties": false
                     },
+                    "attentionLoop": {
+                      "type": "object",
+                      "properties": {
+                        "effect": {
+                          "type": "string",
+                          "enum": ["pulse", "spin"]
+                        },
+                        "periodMs": {
+                          "type": "integer",
+                          "minimum": 400,
+                          "maximum": 4000
+                        },
+                        "iterations": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "infinite"
+                            },
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 20
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["effect", "periodMs"],
+                      "additionalProperties": false
+                    },
                     "keyframes": {
                       "type": "object",
                       "properties": {
@@ -33047,6 +33108,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33189,6 +33253,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33285,6 +33352,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33375,6 +33445,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33483,6 +33556,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33583,6 +33659,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33706,6 +33785,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33868,6 +33950,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34014,6 +34099,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34164,6 +34252,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34240,6 +34331,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34515,6 +34609,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34622,6 +34719,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34715,6 +34815,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34805,6 +34908,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34884,6 +34990,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34975,6 +35084,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35085,6 +35197,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35188,6 +35303,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35329,6 +35447,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35431,6 +35552,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35521,6 +35645,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35616,6 +35743,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35702,6 +35832,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35793,6 +35926,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35893,6 +36029,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35998,6 +36137,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -36079,6 +36221,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -36159,6 +36304,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36247,6 +36395,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -36269,6 +36420,10 @@
                     "mapStyle": {
                       "type": "string",
                       "enum": ["plain", "streets"]
+                    },
+                    "backend": {
+                      "type": "string",
+                      "enum": ["auto", "google", "maplibre"]
                     },
                     "camera": {
                       "anyOf": [
@@ -36453,6 +36608,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36679,6 +36837,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -36767,6 +36928,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36871,6 +37035,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37000,6 +37167,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37121,6 +37291,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37237,6 +37410,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37329,6 +37505,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37453,6 +37632,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37544,6 +37726,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37640,6 +37825,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37728,6 +37916,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37892,6 +38083,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -38022,6 +38216,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -38158,6 +38355,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -38278,6 +38478,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -38395,6 +38598,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -38494,6 +38700,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -51386,14 +51595,17 @@
             "type": "string"
           }
         },
-        "pinnedDisplay": {
+        "errorCode": {
           "$ref": "#/$defs/__schema0"
         },
-        "displayInventory": {
+        "pinnedDisplay": {
           "$ref": "#/$defs/__schema1"
         },
-        "staleDisplay": {
+        "displayInventory": {
           "$ref": "#/$defs/__schema2"
+        },
+        "staleDisplay": {
+          "$ref": "#/$defs/__schema3"
         },
         "commands": {
           "type": "array",
@@ -51401,13 +51613,16 @@
             "type": "object",
             "properties": {
               "pinnedDisplay": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "displayInventory": {
                 "$ref": "#/$defs/__schema1"
               },
-              "staleDisplay": {
+              "displayInventory": {
                 "$ref": "#/$defs/__schema2"
+              },
+              "staleDisplay": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "errorCode": {
+                "$ref": "#/$defs/__schema0"
               },
               "imeFailure": {
                 "type": "object",
@@ -51518,6 +51733,10 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+          "type": "string"
+        },
+        "__schema1": {
           "type": "object",
           "properties": {
             "pin": {
@@ -51553,7 +51772,7 @@
           "required": ["pin", "availablePanels"],
           "additionalProperties": false
         },
-        "__schema1": {
+        "__schema2": {
           "type": "object",
           "properties": {
             "pin": {
@@ -51567,7 +51786,7 @@
           "required": ["retryable"],
           "additionalProperties": false
         },
-        "__schema2": {
+        "__schema3": {
           "type": "object",
           "properties": {
             "observedGeneration": {
@@ -53443,6 +53662,122 @@
                 }
               ],
               "description": "Integrity signals (Android): maximally-detectable enables su-binary, superuser-apk and selinux-permissive; minimally-detectable disables them. Or { preset?, signals?: { <signal-id>: 'on' | 'off' } }, with at least one field and signals overriding the preset. Needs root and writable /system for files. Image-fixed signals and missing-otacerts report unsupported. Results include per-signal status and post-apply active readings. 'unset' restores prior state; existing image/rootState files are never removed."
+            },
+            "statusBar": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "time": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "batteryLevel": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "batteryState": {
+                      "type": "string",
+                      "enum": ["charging", "charged", "discharging"]
+                    },
+                    "cellularBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4
+                    },
+                    "wifiBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "dataNetwork": {
+                      "type": "string",
+                      "enum": ["wifi", "5g", "lte", "4g", "3g", "hide"]
+                    },
+                    "operatorName": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Override the status bar ({ time?, batteryLevel?, batteryState?, cellularBars?, wifiBars?, dataNetwork?, operatorName? }, at least one). iOS Simulator only so far; reset clears every override. Or unset."
+            },
+            "privacy": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "appId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9._-]+$",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "calendar",
+                        "contacts-limited",
+                        "contacts",
+                        "location",
+                        "location-always",
+                        "photos-add",
+                        "photos",
+                        "media-library",
+                        "microphone",
+                        "motion",
+                        "reminders",
+                        "siri"
+                      ]
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": ["grant", "revoke"]
+                    }
+                  },
+                  "required": ["appId", "service", "action"],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Grant or revoke one privacy service for an installed app ({ appId, service, action }). iOS Simulator only so far; reset restores the app's earlier decisions for that service and its pair (photos/photos-add, location/location-always, contacts/contacts-limited): granted, denied, or not yet asked. Refused when that decision cannot be restored, such as limited Photos access. Or unset."
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "latitude": {
+                      "type": "number",
+                      "minimum": -90,
+                      "maximum": 90
+                    },
+                    "longitude": {
+                      "type": "number",
+                      "minimum": -180,
+                      "maximum": 180
+                    }
+                  },
+                  "required": ["latitude", "longitude"],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Simulate the device location ({ latitude, longitude }). iOS Simulator only so far; reset clears the simulated location. Or unset."
             },
             "faults": {
               "type": "object",

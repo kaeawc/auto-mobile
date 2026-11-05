@@ -92,6 +92,7 @@
     "MAX_PROTOTYPE_MEDIA_PLAYERS": 4,
     "MAX_PROTOTYPE_VIDEO_NODES": 64,
     "MAX_PROTOTYPE_ACTIVE_DECODERS": 3,
+    "MAX_PROTOTYPE_LOOPS": 8,
     "MAX_PROTOTYPE_NOTIFICATION_CHANNELS": 8,
     "MAX_PROTOTYPE_NOTIFICATION_ACTIONS": 3,
     "MAX_PROTOTYPE_NOTIFICATION_ID_LENGTH": 128,
@@ -3591,6 +3592,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -3874,6 +3882,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4150,6 +4165,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4399,6 +4421,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -4671,6 +4700,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4935,6 +4971,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -5221,6 +5264,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]
@@ -5500,6 +5550,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -5771,6 +5828,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -5993,6 +6057,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -6371,6 +6442,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "dependents": {
@@ -6636,6 +6714,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -6898,6 +6983,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -7147,6 +7239,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -7418,6 +7517,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -7665,6 +7771,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -7929,6 +8042,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -8214,6 +8334,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -8462,6 +8589,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -8733,6 +8867,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -8976,6 +9117,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -9229,6 +9377,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -9470,6 +9625,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -9742,6 +9904,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -9973,6 +10142,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -10201,6 +10377,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -10445,6 +10628,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -10718,6 +10908,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -10960,6 +11157,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -11213,6 +11417,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -11483,6 +11694,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -11737,6 +11955,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -12026,6 +12251,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -12327,6 +12559,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -12595,6 +12834,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -12856,6 +13102,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13127,6 +13380,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13419,6 +13679,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -13626,6 +13893,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13891,6 +14165,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -14165,6 +14446,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -14421,6 +14709,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -14741,6 +15036,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -14956,6 +15258,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -15180,6 +15489,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -15477,6 +15793,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -15799,10 +16122,24 @@
               },
               "optional": true
             },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
+            },
             "mapStyle": {
               "rule": {
                 "kind": "enum",
                 "values": ["plain", "streets"]
+              },
+              "optional": true
+            },
+            "backend": {
+              "rule": {
+                "kind": "enum",
+                "values": ["auto", "google", "maplibre"]
               },
               "optional": true
             },
@@ -16097,6 +16434,13 @@
               },
               "optional": true
             },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
+            },
             "player": {
               "rule": {
                 "kind": "key"
@@ -16337,6 +16681,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -23174,6 +23525,34 @@
           "optional": false
         }
       }
+    },
+    "loop": {
+      "kind": "object",
+      "fields": {
+        "effect": {
+          "rule": {
+            "kind": "enum",
+            "values": ["pulse", "spin"]
+          },
+          "optional": false
+        },
+        "periodMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 400,
+            "max": 4000
+          },
+          "optional": false
+        },
+        "iterations": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconEffectRepeat"
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [
@@ -24362,6 +24741,14 @@
     },
     "map": {
       "capability": "prototype_platform_map_v1",
+      "backends": {
+        "google": {
+          "capability": "prototype_platform_map_google_v1"
+        },
+        "maplibre": {
+          "capability": "prototype_platform_map_maplibre_v1"
+        }
+      },
       "calls": {},
       "events": {
         "markerTap": {

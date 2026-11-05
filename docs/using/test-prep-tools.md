@@ -83,14 +83,24 @@ mock backend), use `portReverse` instead of running `adb reverse` yourself:
   (`hostPort` defaults to `devicePort`). Calling it again is a no-op.
 - `list` returns every reverse on the device; `owned: true` marks the ones
   your session created.
-- `verify` reports whether ports (default: all of yours) are mapped now.
+- `verify` reports whether ports (default: all of yours) are mapped now. With
+  `probe: true` it also connects to each mapped port from the device (about a
+  second, all ports at once) and reports `reachable` (your host server accepted
+  and kept the connection open), `unreachable` or `probe_unsupported`. Ports
+  that are not mapped stay `missing` and are not probed. `unreachable` carries a
+  `probeReason`: `closed` (the mapping exists but nothing is listening on the
+  host port), `refused` (nothing is listening on the device port) or `timeout`
+  (the device did not answer). `probe_unsupported` means the device shell has no
+  usable connect command; `probeDetail` holds what it printed. A host server
+  that closes idle connections within a second reads as `closed`.
 - `remove` deletes mappings your session created.
 
 AutoMobile owns the mappings it creates for your session. If one disappears
 (an adb server restart, `adb reconnect`, `adb root`/`unroot`, an emulator
-restart), the next `ensure`, `list` or `verify` call re-adds it and lists it in
-`restored`; a mapping it could not re-add is listed in `restoreFailures` and
-retried on the next call. Your mappings are removed when your session is
+restart), AutoMobile re-adds it on its own once it sees the device's adb
+connection recover, and otherwise the next `ensure`, `list` or `verify` call
+re-adds it. Either way, that next call lists it in `restored`; a mapping it
+could not re-add is listed in `restoreFailures` and retried on the next call. Your mappings are removed when your session is
 released or leaves the device. Mappings made without a session stay until the
 device disconnects; AutoMobile stops tracking them then, and a device that stays
 connected keeps them until you run `adb reverse --remove`.

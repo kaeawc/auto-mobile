@@ -1259,6 +1259,28 @@ reporter (`scripts/test-ts.sh`, `scripts/validate-bun-test-timings.sh`). It does
 Robolectric tests, so the Compose and host tests for this feature are not held to it. iOS accepts the structural contract but does not
 advertise this capability, so host preflight refuses either authored field.
 
+### Attention loops (`prototype_loops_v1`)
+
+(Android only, requires `prototype_loops_v1`) Any node accepts
+`attentionLoop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}`.
+The period and finite count are integers; omitted iterations means infinite. Pulse scales
+1 → 1.08 → 1 per period; spin turns 0 → 360 degrees. Drawing changes without changing
+layout, reported bounds or touch targets. A pulse node must omit `style.scale`; a spin node
+must omit `style.rotation`, including every `styleWhen` style. At most eight expanded nodes
+may carry loops, including repeat instances; shimmer does not consume that limit.
+Finite loops settle at identity and contribute to settling motion while running. Infinite
+loops and shimmer contribute only to the intentional loop count. Reduced motion, motion
+none and animator scale 0 leave loops at rest. On Android each observe metadata read renews
+a 1500 ms capture hold: attention loops draw identity and shimmer draws no band during it,
+so captures within the hold are identical when the rest of the scene is unchanged.
+
+The runtime renews its capture hold in the controller’s window-metadata read path, alongside
+`prototypeMotion`. The hold uses an injected monotonic clock and a 1500 ms deadline; repeated
+reads extend it. Compose reads the deadline during drawing and invalidates the loop layer on
+renewal. Animation time continues through a hold, so a finite loop still completes on schedule.
+The first expanded node beyond `MAX_PROTOTYPE_LOOPS = 8` fails at `<node path>.attentionLoop` with
+`Loop node limit exceeded`. Conflicting rest transforms fail at the same path.
+
 ### One-shot keyframes
 
 Every node may carry `keyframes: {trigger, durationMs, tracks}`, gated by
@@ -3903,7 +3925,8 @@ against the current `/data`, so a request response or data action flips it.
 Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
 over its background and inside its clip; any other node type is rejected at
 `<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
-animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
+animator scale 0 no band is drawn. Android also hides the band during the bounded capture hold
+renewed by each window-metadata read, so screenshots see the plain placeholder. A `repeat` of literal
 placeholder rows makes a skeleton list. The iOS agent advertises the capability too (#14689): it
 sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over the node, reads
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
@@ -4043,6 +4066,10 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
 - `camera` is a literal `{lat, lng, zoom, bearing?, tilt?}` (lat -90 to 90, lng -180 to 180, zoom 0 to
   22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. `fit` is `none`,
   `markers` or `route`; `mapStyle` is `plain` (default) or `streets`.
+- `backend` is `auto` (default), `google` or `maplibre`. `auto` needs only `prototype_platform_map_v1`; any
+  other value also needs `prototype_platform_map_<backend>_v1`, which the `map` module's `backends` table
+  lists. `show`, `patch` and `replaceNode` refuse a backend whose capability the runtime does not advertise,
+  at `<node>.backend`.
 - `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
   `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
   templates resolved per item. `icon` is a Material icon name. `animateMs` (0 to 2000) eases a moved marker.

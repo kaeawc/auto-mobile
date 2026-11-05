@@ -298,7 +298,9 @@ export class SystemTray {
     try {
       throwIfAborted(signal);
       if (this.device.platform === "android" && this.device.formFactor === "watch") {
-        return await new WatchSystemTray(this.device, signal).execute(args);
+        const watch = await new WatchSystemTray(this.device, signal).execute(args);
+        await captureSystemTrayTerminalEvidence(this.device, watch.observation, signal);
+        return watch.outcome;
       }
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
       switch (args.action) {

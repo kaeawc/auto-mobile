@@ -131,7 +131,7 @@ describe("IME failure diagnostics", () => {
       checkAbort: () => {},
       lacksRequiredFocus: () => false,
       focusedText: () => "other",
-      focusError: "unfocused",
+      focusError: { error: "unfocused" },
       passwordField: true,
     });
 
@@ -156,7 +156,7 @@ describe("IME failure diagnostics", () => {
       checkAbort: () => {},
       lacksRequiredFocus: () => false,
       focusedText: () => "other",
-      focusError: "unfocused",
+      focusError: { error: "unfocused" },
       isPasswordField: () => true,
     });
 
@@ -342,7 +342,7 @@ describe("IME failure diagnostics", () => {
         checkAbort: () => {},
         lacksRequiredFocus: () => false,
         focusedText: () => "hunter2",
-        focusError: "unfocused",
+        focusError: { error: "unfocused" },
         isPasswordField: () => true,
       });
       expect(result).toBe(syncLost);
@@ -360,7 +360,7 @@ describe("IME failure diagnostics", () => {
         checkAbort: () => {},
         lacksRequiredFocus: () => false,
         focusedText: () => "abc",
-        focusError: "unfocused",
+        focusError: { error: "unfocused" },
       });
       expect(result).toBe(failure);
     });
@@ -375,7 +375,7 @@ describe("IME failure diagnostics", () => {
         checkAbort: () => {},
         lacksRequiredFocus: () => false,
         focusedText: () => "abc",
-        focusError: "unfocused",
+        focusError: { error: "unfocused" },
       });
       expect(result).toBe(syncLost);
     });
@@ -954,7 +954,8 @@ describe("IME inserted delta verification", () => {
     h.client.commitViaIme = async () => ({ success: true, insertedText: "" });
     const result = await h.executor.type({ action: "type", text, mode: "ime" });
     expect(result.success).toBe(false);
-    expect(result.error).toContain("focused");
+    expect(result.error).toContain("No editable field has focus");
+    expect(result.errorCode).toBe("NO_FOCUSED_EDITABLE");
     expect(result.error).not.toContain("IME partial commit");
     expect(result.imeFailure?.stage).toBe("verification");
     expect(h.observationReads).toBe(1);
@@ -974,7 +975,7 @@ describe("IME inserted delta verification", () => {
         checkAbort: () => {},
         lacksRequiredFocus: () => false,
         focusedText: () => "other",
-        focusError: "unfocused",
+        focusError: { error: "unfocused" },
         passwordField: true,
       },
     );
@@ -1003,7 +1004,7 @@ describe("IME inserted delta verification", () => {
       checkAbort: () => {},
       lacksRequiredFocus: () => false,
       focusedText: () => "",
-      focusError: "unfocused",
+      focusError: { error: "unfocused" },
     });
     expect(result).toBe(deviceResult);
     expect(observations).toBe(1);

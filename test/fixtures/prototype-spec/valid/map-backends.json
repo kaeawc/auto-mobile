@@ -1,0 +1,55 @@
+{
+  "id": "map-backends",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["map"]
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "map",
+        "id": "map0",
+        "camera": {
+          "lat": 37.7749,
+          "lng": -122.4194,
+          "zoom": 13
+        }
+      },
+      {
+        "type": "map",
+        "id": "map1",
+        "camera": {
+          "lat": 37.7749,
+          "lng": -122.4194,
+          "zoom": 13
+        },
+        "backend": "auto"
+      },
+      {
+        "type": "map",
+        "id": "map2",
+        "camera": {
+          "lat": 37.7749,
+          "lng": -122.4194,
+          "zoom": 13
+        },
+        "backend": "google"
+      },
+      {
+        "type": "map",
+        "id": "map3",
+        "camera": {
+          "lat": 37.7749,
+          "lng": -122.4194,
+          "zoom": 13
+        },
+        "backend": "maplibre"
+      }
+    ]
+  }
+}

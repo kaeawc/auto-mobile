@@ -1,12 +1,21 @@
 import type {
   AdbReverseCommands,
   AdbReverseEntry,
+  PortProbeOutcome,
 } from "../../utils/android-cmdline-tools/adbReverse";
 import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { DeviceLostError } from "../../models/DeviceLostError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { PortReverseError } from "./PortReverseError";
+
+/** Per-port bound on a verify probe; ports are probed concurrently, so this bounds the whole call. */
+export const PORT_PROBE_TIMEOUT_MS = 2500;
+/** A peer that closes at once is asked again once: the first connect after a host restart can race. */
+const PORT_PROBE_ATTEMPTS = 2;
 
 /** One device port to reverse to a host loopback port. */
 export interface PortReverseRequest {
@@ -18,7 +27,10 @@ export interface PortReverseRequest {
  * `added`/`present`/`restored`: the mapping is on the device. `missing`: an owned mapping is gone
  * and could not be restored, or a mapping that was asked about does not exist. `removed`: this call
  * removed it. `gone`: it had already disappeared. `foreign`: the device port now maps somewhere this
- * session did not create, so it was left in place.
+ * session did not create, so it was left in place. Only `verify` with `probe` reports the last three
+ * for a mapping that is on the device: `reachable` (a device-side connect reached a host server
+ * that kept it open), `unreachable` (see `probeReason`), `probe_unsupported` (the device shell
+ * cannot run the connect, so nothing is guessed).
  */
 export type PortReverseStatus =
   | "added"
@@ -27,7 +39,17 @@ export type PortReverseStatus =
   | "missing"
   | "removed"
   | "gone"
-  | "foreign";
+  | "foreign"
+  | "reachable"
+  | "unreachable"
+  | "probe_unsupported";
+
+/**
+ * Why a probe was `unreachable` or `probe_unsupported`. `closed`: the reverse accepted the connect
+ * but the host side is not listening. `refused`: nothing listens on the device port. `timeout`: the
+ * device did not answer the probe in time.
+ */
+export type PortProbeReason = "closed" | "refused" | "timeout" | "unsupported";
 
 export interface PortReverseMapping {
   devicePort: number;
@@ -38,6 +60,10 @@ export interface PortReverseMapping {
   /** This session created the mapping and will remove it on release. */
   owned: boolean;
   status: PortReverseStatus;
+  /** Set with `unreachable` and `probe_unsupported`. */
+  probeReason?: PortProbeReason;
+  /** Device output that made the probe unsupported. */
+  probeDetail?: string;
 }
 
 export interface PortReverseRestoreFailure {
@@ -83,6 +109,11 @@ interface DeviceState {
    * and queues its removal behind them (#17104).
    */
   ensuring: Map<string, number>;
+  /**
+   * Owner -> owned device ports a background {@link PortReverseManager.reconcile} re-applied since
+   * that owner's last ensure/list/verify, which reports them as `restored` once and clears them.
+   */
+  backgroundRestored: Map<string, Set<number>>;
   /** Serialises operations on one device so list-then-add/remove cannot interleave. */
   tail: Promise<unknown>;
   pending: number;
@@ -109,7 +140,10 @@ const defaultAudit: PortReverseAudit = (event) => logger.info(`[portReverse] ${e
 export class PortReverseManager {
   private readonly devices = new Map<string, DeviceState>();
 
-  constructor(private readonly audit: PortReverseAudit = defaultAudit) {}
+  constructor(
+    private readonly audit: PortReverseAudit = defaultAudit,
+    private readonly timer: Timer = defaultTimer,
+  ) {}
 
   /** Idempotently adds each mapping; throws `port_reverse_conflict` and changes nothing on a clash. */
   ensure(target: PortReverseTarget, requests: readonly PortReverseRequest[]) {
@@ -134,7 +168,7 @@ export class PortReverseManager {
         await this.add(target, state, request, added);
         mappings.push(ownedMapping(request, "added"));
       }
-      return { mappings, ...report };
+      return this.acknowledge(state, target.owner, { mappings, ...report });
     });
     return run.finally(() => {
       const left = (state.ensuring.get(owner) ?? 1) - 1;
@@ -159,12 +193,19 @@ export class PortReverseManager {
           mappings.push(ownedMapping({ devicePort, hostPort: mapping.hostPort }, "missing"));
         }
       }
-      return { mappings: mappings.sort((a, b) => a.devicePort - b.devicePort), ...report };
+      return this.acknowledge(state, target.owner, {
+        mappings: mappings.sort((a, b) => a.devicePort - b.devicePort),
+        ...report,
+      });
     });
   }
 
-  /** Whether each port (default: every port this session owns) is mapped on the device now. */
-  verify(target: PortReverseTarget, ports?: readonly number[]) {
+  /**
+   * Whether each port (default: every port this session owns) is mapped on the device now. With
+   * `probe`, each mapping that is on the device is then connected to from the device, so it
+   * reports `reachable`, `unreachable` or `probe_unsupported`; `missing` ports are not probed.
+   */
+  verify(target: PortReverseTarget, ports?: readonly number[], options?: { probe?: boolean }) {
     const state = this.stateFor(target);
     return this.enqueue(state, async (): Promise<PortReverseResult> => {
       const { view, report } = await this.reconciled(target, state);
@@ -183,8 +224,65 @@ export class PortReverseManager {
           status: "missing" as const,
         };
       });
-      return { mappings, ...report };
+      if (options?.probe === true) {
+        const probed = await Promise.all(
+          mappings.map((mapping) => this.probeMapping(target, mapping)),
+        );
+        return this.acknowledge(state, target.owner, { mappings: probed, ...report });
+      }
+      return this.acknowledge(state, target.owner, { mappings, ...report });
     });
+  }
+
+  /** One mapping's probe result; a mapping that is not on the device is returned as it is. */
+  private async probeMapping(
+    target: PortReverseTarget,
+    mapping: PortReverseMapping,
+  ): Promise<PortReverseMapping> {
+    if (mapping.status === "missing") {
+      return mapping;
+    }
+    const verdict = (
+      status: PortReverseStatus,
+      probeReason?: PortProbeReason,
+      probeDetail?: string,
+    ) => ({
+      ...mapping,
+      status,
+      ...(probeReason === undefined ? {} : { probeReason }),
+      ...(probeDetail === undefined ? {} : { probeDetail }),
+    });
+    for (let attempt = 1; attempt <= PORT_PROBE_ATTEMPTS; attempt++) {
+      let outcome: PortProbeOutcome;
+      try {
+        outcome = await raceWithDeadline(() => target.adb.probe(mapping.devicePort), {
+          timer: this.timer,
+          timeoutMs: PORT_PROBE_TIMEOUT_MS,
+          label: `portReverse probe tcp:${mapping.devicePort}`,
+          unref: true,
+        });
+      } catch (error) {
+        if (error instanceof DeviceLostError) {
+          throw error;
+        }
+        rethrowDeviceTransportUnavailable(error);
+        // A probe that hangs or fails says nothing about the mapping beyond "no answer".
+        logger.warn(
+          `[portReverse] probe of ${tcp(mapping.devicePort)} on ${target.deviceId} failed: ${errorMessage(error)}`,
+        );
+        return verdict("unreachable", "timeout");
+      }
+      if (outcome.kind === "held") {
+        return verdict("reachable");
+      }
+      if (outcome.kind === "refused") {
+        return verdict("unreachable", "refused");
+      }
+      if (outcome.kind === "unsupported") {
+        return verdict("probe_unsupported", "unsupported", outcome.detail);
+      }
+    }
+    return verdict("unreachable", "closed");
   }
 
   /** Removes mappings this session owns; throws `port_reverse_not_owned` and changes nothing otherwise. */
@@ -212,7 +310,9 @@ export class PortReverseManager {
 
   /**
    * Re-applies every owned mapping the device lost, for every session on it. A transport-recovery
-   * path calls this after the device is back; failures are logged and retried on the next call.
+   * path calls this after the device is back (`PortReverseRecoveryScheduler`). What it restores is
+   * reported to each owning session as `restored` in its next ensure/list/verify result; a failure
+   * is logged, stays owned, and is retried (and reported in `restoreFailures`) by that next call.
    */
   async reconcile(deviceId: string): Promise<PortReverseRestoreReport> {
     const state = this.devices.get(deviceId);
@@ -221,7 +321,16 @@ export class PortReverseManager {
     }
     return this.enqueue(state, async () => {
       const view = await this.view(deviceId, state);
-      return this.restoreMissing(deviceId, state, view);
+      const report = await this.restoreMissing(deviceId, state, view);
+      for (const devicePort of report.restored) {
+        const owner = state.owned.get(devicePort)?.owner;
+        if (owner !== undefined) {
+          const ports = state.backgroundRestored.get(owner) ?? new Set<number>();
+          ports.add(devicePort);
+          state.backgroundRestored.set(owner, ports);
+        }
+      }
+      return report;
     });
   }
 
@@ -244,7 +353,7 @@ export class PortReverseManager {
       return;
     }
     await this.enqueue(state, () =>
-      this.releaseWhere(deviceId, state, (mapping) => mapping.owner === owner),
+      this.releaseWhere(deviceId, state, (holder) => holder === owner),
     );
   }
 
@@ -264,7 +373,23 @@ export class PortReverseManager {
         }
       }
       state.pendingRemoval.clear();
+      state.backgroundRestored.delete(owner);
     });
+  }
+
+  /**
+   * The pool has evidence another device now answers on this serial: forget every owned mapping and
+   * pending removal there, synchronously and without a command, so no reconcile queued or scheduled
+   * afterwards re-adds the old device's mappings to the replacement.
+   */
+  forgetDevice(deviceId: string): void {
+    const state = this.devices.get(deviceId);
+    if (state === undefined) {
+      return;
+    }
+    state.owned.clear();
+    state.pendingRemoval.clear();
+    state.backgroundRestored.clear();
   }
 
   /** Released mappings on the device whose removal is still pending, ascending. */
@@ -276,9 +401,7 @@ export class PortReverseManager {
   async releaseOwner(owner: string): Promise<void> {
     await Promise.all(
       [...this.devices].map(([deviceId, state]) =>
-        this.enqueue(state, () =>
-          this.releaseWhere(deviceId, state, (mapping) => mapping.owner === owner),
-        ),
+        this.enqueue(state, () => this.releaseWhere(deviceId, state, (holder) => holder === owner)),
       ),
     );
   }
@@ -319,6 +442,7 @@ export class PortReverseManager {
         owned: new Map(),
         pendingRemoval: new Map(),
         ensuring: new Map(),
+        backgroundRestored: new Map(),
         tail: Promise.resolve(),
         pending: 0,
       };
@@ -378,6 +502,20 @@ export class PortReverseManager {
     }
   }
 
+  /** A call returned these background restores to the owner: stop reporting them. */
+  private acknowledge(
+    state: DeviceState,
+    owner: string,
+    result: PortReverseResult,
+  ): PortReverseResult {
+    const pending = state.backgroundRestored.get(owner);
+    result.restored.forEach((port) => pending?.delete(port));
+    if (pending?.size === 0) {
+      state.backgroundRestored.delete(owner);
+    }
+    return result;
+  }
+
   /** The device's current reverses after re-applying the owned ones it lost. */
   private async reconciled(target: PortReverseTarget, state: DeviceState) {
     const view = await this.view(target.deviceId, state);
@@ -392,8 +530,13 @@ export class PortReverseManager {
   ): Promise<PortReverseRestoreReport> {
     const all = await this.restoreMissing(target.deviceId, state, view);
     const mine = (port: number) => state.owned.get(port)?.owner === target.owner;
+    // Ports a background reconcile restored since this owner's last call, still owned and mapped;
+    // cleared by `acknowledge` once the call returns them, so a call that throws keeps them.
+    const earlier = [...(state.backgroundRestored.get(target.owner) ?? [])].filter(
+      (port) => mine(port) && view.has(port),
+    );
     const report: PortReverseRestoreReport = {
-      restored: all.restored.filter(mine),
+      restored: [...new Set([...earlier, ...all.restored.filter(mine)])].sort((a, b) => a - b),
       restoreFailures: all.restoreFailures.filter((failure) => mine(failure.devicePort)),
     };
     return report;
@@ -419,22 +562,75 @@ export class PortReverseManager {
         }
         continue;
       }
-      try {
-        await state.adb.add(devicePort, mapping.hostPort, { noRebind: true });
-        view.set(devicePort, entryFor({ devicePort, hostPort: mapping.hostPort }));
-        report.restored.push(devicePort);
-        this.audit(
-          `restore ${tcp(devicePort)} -> ${tcp(mapping.hostPort)} device=${deviceId} session=${mapping.owner}`,
-        );
-      } catch (error) {
-        // Kept owned so the next call retries; the failure is reported in that call's result.
-        logger.warn(
-          `[portReverse] restoring ${tcp(devicePort)} on ${deviceId} failed: ${errorMessage(error)}`,
-        );
-        report.restoreFailures.push({ devicePort, error: errorMessage(error) });
+      // Fence: forgetDevice (another device now on this serial) may have run while an earlier add
+      // of this loop was in flight; never restore a mapping that is no longer owned.
+      if (state.owned.get(devicePort) === mapping) {
+        await this.restoreOne({ deviceId, state, view, report }, devicePort, mapping);
       }
     }
     return report;
+  }
+
+  /** Re-adds one lost owned mapping, recording the outcome in `report`. */
+  private async restoreOne(
+    pass: {
+      deviceId: string;
+      state: DeviceState;
+      view: DeviceView;
+      report: PortReverseRestoreReport;
+    },
+    devicePort: number,
+    mapping: OwnedMapping,
+  ): Promise<void> {
+    const { deviceId, state, view, report } = pass;
+    try {
+      await state.adb.add(devicePort, mapping.hostPort, { noRebind: true });
+    } catch (error) {
+      // Kept owned so the next call retries; the failure is reported in that call's result.
+      logger.warn(
+        `[portReverse] restoring ${tcp(devicePort)} on ${deviceId} failed: ${errorMessage(error)}`,
+      );
+      report.restoreFailures.push({ devicePort, error: errorMessage(error) });
+      return;
+    }
+    if (state.owned.get(devicePort) !== mapping) {
+      // The device was forgotten while this add was in flight: the mapping may now sit on a
+      // replacement device that no cleanup would remove, so undo it here.
+      await this.undoForgottenRestore(deviceId, state, devicePort, mapping.hostPort);
+      return;
+    }
+    view.set(devicePort, entryFor({ devicePort, hostPort: mapping.hostPort }));
+    report.restored.push(devicePort);
+    this.audit(
+      `restore ${tcp(devicePort)} -> ${tcp(mapping.hostPort)} device=${deviceId} session=${mapping.owner}`,
+    );
+  }
+
+  /**
+   * Removes a restore that landed after its device was forgotten, but only while `--list` still
+   * shows the port mapped where this restore pointed it: a different mapping there is someone
+   * else's and is left alone. A removal that cannot be confirmed is kept pending, so the device's
+   * next `--list` retries it under the same rule.
+   */
+  private async undoForgottenRestore(
+    deviceId: string,
+    state: DeviceState,
+    devicePort: number,
+    hostPort: number,
+  ): Promise<void> {
+    try {
+      const current = (await state.adb.list()).find((entry) => entry.devicePort === devicePort);
+      if (current?.hostPort !== hostPort) {
+        return;
+      }
+      await state.adb.remove(devicePort);
+      this.audit(`remove ${tcp(devicePort)} -> ${tcp(hostPort)} device=${deviceId} (forgotten)`);
+    } catch (error) {
+      logger.warn(
+        `[portReverse] undoing ${tcp(devicePort)} restored on ${deviceId} after it was forgotten failed; retrying on the next call: ${errorMessage(error)}`,
+      );
+      state.pendingRemoval.set(devicePort, hostPort);
+    }
   }
 
   private assertNoConflicts(
@@ -583,9 +779,17 @@ export class PortReverseManager {
   private async releaseWhere(
     deviceId: string,
     state: DeviceState,
-    matches: (mapping: OwnedMapping) => boolean,
+    matchesOwner: (owner: string) => boolean,
   ): Promise<void> {
-    const ports = [...state.owned].filter(([, mapping]) => matches(mapping)).map(([port]) => port);
+    const ports = [...state.owned]
+      .filter(([, mapping]) => matchesOwner(mapping.owner))
+      .map(([port]) => port);
+    // A released owner's pending restore notices die with it; no later call of theirs reads them.
+    for (const owner of state.backgroundRestored.keys()) {
+      if (matchesOwner(owner)) {
+        state.backgroundRestored.delete(owner);
+      }
+    }
     if (ports.length === 0) {
       return;
     }

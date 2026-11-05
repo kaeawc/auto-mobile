@@ -56,6 +56,116 @@ describe("kill profiles (#14051)", () => {
           ),
       );
 
+  test.each([
+    [
+      "huawei-powergenie",
+      [
+        "shell am set-standby-bucket 'com.example.app' restricted",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set 'com.example.app' WAKE_LOCK ignore",
+      ],
+      [
+        "shell am set-standby-bucket 'com.example.app' 10",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set 'com.example.app' WAKE_LOCK default",
+      ],
+    ],
+    [
+      "vivo-autostart",
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell am set-standby-bucket 'com.example.app' restricted",
+      ],
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell am set-standby-bucket 'com.example.app' 10",
+      ],
+    ],
+    [
+      "realme-power-saver",
+      [
+        "shell dumpsys battery unplug",
+        "shell am set-standby-bucket 'com.example.app' restricted",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+      ],
+      [
+        "shell dumpsys battery reset",
+        "shell am set-standby-bucket 'com.example.app' 10",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+      ],
+    ],
+    [
+      "meizu-flyme-background",
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set 'com.example.app' WAKE_LOCK ignore",
+      ],
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set 'com.example.app' WAKE_LOCK default",
+      ],
+    ],
+    [
+      "asus-power-master",
+      [
+        "shell am set-standby-bucket 'com.example.app' restricted",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+      ],
+      [
+        "shell am set-standby-bucket 'com.example.app' 10",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+      ],
+    ],
+    [
+      "sony-stamina",
+      [
+        "shell dumpsys battery unplug",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM deny",
+      ],
+      [
+        "shell dumpsys battery reset",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM default",
+      ],
+    ],
+    [
+      "tecno-app-halt",
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set 'com.example.app' WAKE_LOCK ignore",
+      ],
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set 'com.example.app' WAKE_LOCK default",
+      ],
+    ],
+  ] as const)(
+    "%s applies only restorable restrictions and resets every step",
+    async (id, applied, restored) => {
+      const profile = KILL_PROFILES[id];
+      expect(profile.steps.some((step) => step.kind === "kill")).toBe(false);
+      expect(
+        profile.steps.every((step) =>
+          ["batteryUnplug", "standbyBucket", "appOp"].includes(step.kind),
+        ),
+      ).toBe(true);
+      expect(profile.version).toBe(1);
+      expect(profile.evidenceStatus).toBe("inferred");
+      expect(profile.evidenceNote).toContain("Not modelled yet (#16869):");
+      const result = await applyKillProfile(emulator, APP, id, deps());
+      expect(result.status).toBe("applied");
+      expect(writes()).toEqual([...applied]);
+      expect(result.restore?.commands).toEqual([...restored]);
+      expect(result.restore?.commands).toHaveLength(profile.steps.length);
+      adb.clearHistory();
+      const reset = await resetKillProfile(emulator, APP, {}, deps());
+      expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+      expect(writes()).toEqual([...restored]);
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    },
+  );
+
   test("every catalog entry is versioned and evidenced", () => {
     for (const id of KILL_PROFILE_IDS) {
       const profile = KILL_PROFILES[id];

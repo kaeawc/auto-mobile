@@ -29,9 +29,14 @@ const ok = (stdout = ""): ExecResult => ({
 class RecordingSimctl implements SimctlConditionRunner {
   readonly calls: string[][] = [];
   failOn?: string;
+  /** Holds a command containing `verb` until `until` settles, to interleave work with it. */
+  hold?: { verb: string; until: Promise<void> };
 
-  executeCommandArgs(args: string[]): Promise<ExecResult> {
+  async executeCommandArgs(args: string[]): Promise<ExecResult> {
     this.calls.push(args);
+    if (this.hold !== undefined && args.includes(this.hold.verb)) {
+      await this.hold.until;
+    }
     if (this.failOn !== undefined && args.includes(this.failOn)) {
       return Promise.resolve({ ...ok(), error: `${this.failOn} refused` });
     }
@@ -63,6 +68,8 @@ const TCC_SERVICE: Record<string, string> = {
   camera: "kTCCServiceCamera",
   photos: "kTCCServicePhotos",
   "photos-add": "kTCCServicePhotosAdd",
+  contacts: "kTCCServiceAddressBook",
+  "contacts-limited": "kTCCServiceAddressBook",
   microphone: "kTCCServiceMicrophone",
 };
 
@@ -311,6 +318,62 @@ describe("privacy on the iOS Simulator", () => {
     });
     const restore = await h.controller.restore();
     expect(restore.verifiedClean).toBe(true);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value).toBe(0);
+  });
+});
+
+describe("privacy baseline ownership", () => {
+  test("contacts and contacts-limited share one original decision", async () => {
+    const h = harness();
+    h.tcc.set("com.example.app", "kTCCServiceAddressBook", 2);
+    await h.controller.apply({
+      privacy: { appId: "com.example.app", service: "contacts", action: "revoke" },
+    });
+    await h.controller.apply({
+      privacy: { appId: "com.example.app", service: "contacts-limited", action: "grant" },
+    });
+    const read = h.tcc.readPermissions.bind(h.tcc);
+    let failNext = true;
+    h.tcc.readPermissions = (deviceId, appId) => {
+      if (failNext) {
+        failNext = false;
+        return Promise.reject(new Error("TCC read failed"));
+      }
+      return read(deviceId, appId);
+    };
+    await h.controller.restore();
+    const second = await h.controller.restore();
+    expect(second.verifiedClean).toBe(true);
+    expect(h.tcc.rows.get("com.example.app|kTCCServiceAddressBook")?.auth_value).toBe(2);
+  });
+
+  test("an apply waits for a running reset of the same device", async () => {
+    const h = harness();
+    h.tcc.set("com.example.app", "kTCCServicePhotos", 0);
+    h.tcc.set("com.example.app", "kTCCServicePhotosAdd", 0);
+    const grant = {
+      privacy: { appId: "com.example.app", service: "photos", action: "grant" },
+    } as const;
+    await h.controller.apply(grant);
+    let release = () => {};
+    h.simctl.hold = { verb: "revoke", until: new Promise<void>((resolve) => (release = resolve)) };
+    const restoring = h.controller.restore();
+    // Let the reset reach its held revoke, then start a second apply.
+    while (!h.simctl.calls.some((call) => call.includes("revoke"))) {
+      await Promise.resolve();
+    }
+    const readsBefore = h.tcc.reads.length;
+    const applying = h.controller.apply(grant);
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    expect(h.tcc.reads.length).toBe(readsBefore);
+
+    release();
+    await Promise.all([restoring, applying]);
+    h.simctl.hold = undefined;
+    const final = await h.controller.restore();
+    expect(final.verifiedClean).toBe(true);
     expect(h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value).toBe(0);
   });
 });

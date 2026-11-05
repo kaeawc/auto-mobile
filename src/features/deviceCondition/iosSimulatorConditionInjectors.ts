@@ -22,7 +22,7 @@ import {
   type DeviceConditionKey,
   type DeviceConditionPrivacyTarget,
 } from "./DeviceConditionTypes";
-import { rejectValue } from "./injectorSupport";
+import { createSerializer, rejectValue } from "./injectorSupport";
 
 /**
  * Platform-neutral `statusBar`, `privacy` and `location` conditions (#14073), implemented on the
@@ -148,13 +148,15 @@ type PrivacyDecision = "grant" | "revoke" | "reset";
 type PrivacyService = DeviceConditionPrivacyTarget["service"];
 
 /**
- * Services whose stored decisions move together, in restore order. Revoking `photos` also denies
- * `photos-add` (iOS 26.5 captures), and granting `photos` back leaves `photos-add` denied, so a
- * change to either is restored as the whole group.
+ * Services whose stored decisions move together, in restore order, sharing one baseline. Revoking
+ * `photos` also denies `photos-add` (iOS 26.5 captures), and granting `photos` back leaves
+ * `photos-add` denied, so a change to either is restored as the whole group. `contacts` and
+ * `contacts-limited` are two names for one TCC row.
  */
 const PRIVACY_SERVICE_GROUPS: readonly (readonly PrivacyService[])[] = [
   ["photos", "photos-add"],
   ["location", "location-always"],
+  ["contacts", "contacts-limited"],
 ];
 
 function privacyGroup(service: PrivacyService): readonly PrivacyService[] {
@@ -203,8 +205,19 @@ interface PrivacyBaseline {
   retired?: true;
 }
 
-/** Original privacy baselines still owed, per app and service group. */
-export type PrivacyBaselineStore = Map<string, PrivacyBaseline>;
+/**
+ * One device's owed privacy baselines, per app and service group, and the queue every privacy apply
+ * and reset on that device runs through. A lease-expiry reset runs outside the controller's apply,
+ * so without the queue an apply could land after a reset read the baseline back and retired it.
+ */
+export interface PrivacyBaselineStore {
+  baselines: Map<string, PrivacyBaseline>;
+  serialize: <T>(task: () => Promise<T>) => Promise<T>;
+}
+
+export function createPrivacyBaselineStore(): PrivacyBaselineStore {
+  return { baselines: new Map(), serialize: createSerializer() };
+}
 
 /**
  * `privacy`: `simctl privacy grant|revoke` for one app and service. The original stored decisions
@@ -216,8 +229,9 @@ export function createSimulatorPrivacyInjector(
   device: BootedDevice,
   simctl: SimctlConditionRunner,
   reader: TccPermissionReader,
-  baselines: PrivacyBaselineStore = new Map(),
+  store: PrivacyBaselineStore = createPrivacyBaselineStore(),
 ): DeviceConditionInjector {
+  const { baselines, serialize } = store;
   const readPrivacySnapshot = privacySnapshotReader(reader, device);
   /**
    * Restore in group order, re-reading before each step because one service's change can move
@@ -250,58 +264,65 @@ export function createSimulatorPrivacyInjector(
   };
   return {
     key: "privacy",
-    async apply(value, signal, params): Promise<DeviceConditionApplyOutcome> {
+    apply(value, signal, params): Promise<DeviceConditionApplyOutcome> {
       requireApply("privacy", value);
       const target = parseParams("privacy", privacyParamsSchema(), params);
-      const group = privacyGroup(target.service);
-      const storeKey = `${target.appId}\u0000${group[0]}`;
-      const current = await readPrivacySnapshot(target.appId, group, signal);
-      const owed = baselines.get(storeKey);
-      const baseline: PrivacyBaseline = owed ?? { decisions: current };
-      const unrestorable = group.filter((service) => baseline.decisions.get(service) === undefined);
-      if (unrestorable.length > 0) {
-        throw new ActionableError(
-          `The existing '${unrestorable.join("', '")}' decision for ${target.appId} cannot be restored by simctl (for example limited access), so it was left unchanged. Reset the app's privacy settings first.`,
-        );
-      }
-      if (current.get(target.service) === target.action) {
-        return {
-          status: "unchanged",
-          detail: `'${target.service}' for ${target.appId} already has the '${target.action}' decision`,
-        };
-      }
-      baselines.set(storeKey, baseline);
-      try {
-        await runSimctl(
-          simctl,
-          ["privacy", device.deviceId, target.action, target.service, target.appId],
-          signal,
-        );
-      } catch (error) {
-        // No reset owns a baseline this failed apply created; an earlier apply's baseline stays.
-        if (owed === undefined) {
-          baselines.delete(storeKey);
-        }
-        throw error;
-      }
-      const original = group.map((service) => `${service}=${baseline.decisions.get(service)}`);
+      return serialize(() => applyPrivacy(target, signal));
+    },
+    isClean: () => Promise.resolve(true),
+  };
+  async function applyPrivacy(
+    target: DeviceConditionPrivacyTarget,
+    signal?: AbortSignal,
+  ): Promise<DeviceConditionApplyOutcome> {
+    const group = privacyGroup(target.service);
+    const storeKey = `${target.appId}\u0000${group[0]}`;
+    const current = await readPrivacySnapshot(target.appId, group, signal);
+    const owed = baselines.get(storeKey);
+    const baseline: PrivacyBaseline = owed ?? { decisions: current };
+    const unrestorable = group.filter((service) => baseline.decisions.get(service) === undefined);
+    if (unrestorable.length > 0) {
+      throw new ActionableError(
+        `The existing '${unrestorable.join("', '")}' decision for ${target.appId} cannot be restored by simctl (for example limited access), so it was left unchanged. Reset the app's privacy settings first.`,
+      );
+    }
+    if (current.get(target.service) === target.action) {
       return {
-        status: "applied",
-        detail: `${target.action} '${target.service}' for ${target.appId}; reset restores ${original.join(", ")}`,
-        reset: async (s) => {
+        status: "unchanged",
+        detail: `'${target.service}' for ${target.appId} already has the '${target.action}' decision`,
+      };
+    }
+    baselines.set(storeKey, baseline);
+    try {
+      await runSimctl(
+        simctl,
+        ["privacy", device.deviceId, target.action, target.service, target.appId],
+        signal,
+      );
+    } catch (error) {
+      // No reset owns a baseline this failed apply created; an earlier apply's baseline stays.
+      if (owed === undefined) {
+        baselines.delete(storeKey);
+      }
+      throw error;
+    }
+    const original = group.map((service) => `${service}=${baseline.decisions.get(service)}`);
+    return {
+      status: "applied",
+      detail: `${target.action} '${target.service}' for ${target.appId}; reset restores ${original.join(", ")}`,
+      reset: (s) =>
+        serialize(async () => {
           if (baseline.retired !== true) {
             await restore(target.appId, group, baseline, s);
           }
           if (baselines.get(storeKey) === baseline) {
             baselines.delete(storeKey);
           }
-        },
-        // restore() read the group back before retiring the baseline, for this reset or another.
-        isClean: () => Promise.resolve(baseline.retired === true),
-      };
-    },
-    isClean: () => Promise.resolve(true),
-  };
+        }),
+      // restore() read the group back before retiring the baseline, for this reset or another.
+      isClean: () => Promise.resolve(baseline.retired === true),
+    };
+  }
 }
 
 /** Baselines shared across resolves without injected state, per device id. */
@@ -314,7 +335,7 @@ function privacyBaselinesFor(
   const perDevice = deps.privacyBaselines ?? defaultPrivacyBaselines;
   let store = perDevice.get(device.deviceId);
   if (store === undefined) {
-    store = new Map();
+    store = createPrivacyBaselineStore();
     perDevice.set(device.deviceId, store);
   }
   return store;

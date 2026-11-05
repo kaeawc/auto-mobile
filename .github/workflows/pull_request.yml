@@ -777,6 +777,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # ShellReachabilityTest (desktop-core) treats desktop-app and ide-plugin main sources as its
+  # reachability roots, so an app- or plugin-only change can strand a shell/ component without
+  # touching desktop-core (#16964). The full desktop-core suite already runs it when
+  # desktop_core_changed, so this narrow run covers only the plugin-only and app-only cases.
+  desktop-core-shell-reachability:
+    timeout-minutes: 20
+    name: "Run Desktop Shell Reachability Test"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: (needs.detect-changes.outputs.desktop_app_changed == 'true' || needs.detect-changes.outputs.ide_plugin_changed == 'true') && needs.detect-changes.outputs.desktop_core_changed != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":desktop-core:test"
+          gradle-flags: '["--tests", "*ShellReachabilityTest"]'
+          # Same task list as desktop-core-unit-tests, so namespace the config-cache report.
+          artifact-name-suffix: "shell-reachability"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   build-ide-plugin:
     timeout-minutes: 20
     name: "Build IDE Plugin"

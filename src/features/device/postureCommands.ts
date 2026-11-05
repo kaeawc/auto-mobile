@@ -110,7 +110,7 @@ export interface PostureOperation {
 
 type IosPanelMatch = "expected" | "old" | "indeterminate";
 
-function sizeMatchesPanel(
+export function sizeMatchesPanel(
   size: { width: number; height: number },
   panel: DisplayPanel,
   observedScale?: number,

@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
-import androidx.compose.runtime.staticCompositionLocalOf
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 
 /** Forwards a replacement epoch only while the workspace still observes the retired epoch. */
@@ -23,9 +22,3 @@ class DeviceSessionSupersededForwarder(
     dispatch(WorkspaceAction.EndDeviceSession(event.deviceId, event.retiredUuid))
   }
 }
-
-val LocalDeviceSessionSupersededHandler =
-  staticCompositionLocalOf<(DeviceStreamEvent.DeviceSessionSuperseded) -> Unit> { {} }
-
-val LocalDeviceSessionEndedHandler =
-  staticCompositionLocalOf<(DeviceStreamEvent.DeviceSessionEnded) -> Unit> { {} }

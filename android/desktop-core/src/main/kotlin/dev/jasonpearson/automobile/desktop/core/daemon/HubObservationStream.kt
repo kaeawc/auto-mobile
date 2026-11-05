@@ -49,10 +49,13 @@ internal suspend fun countHubReconnects(
  * Storage is not shared: its updates and acknowledgements are unicast per pane, so the Storage
  * facet keeps its own stream. This view carries no storage traffic and rejects storage
  * subscriptions.
+ *
+ * A [lifecycleOnly] view takes a lease that asks for no frames: its cadence requests are ignored.
  */
 internal class HubObservationStream(
   private val streams: HubObservationStreams,
   private val key: DeviceStreamKey,
+  private val lifecycleOnly: Boolean = false,
 ) : HubManagedObservationStream {
   private val lock = Any()
   private var lease: HubObservationStreams.Lease? = null
@@ -97,7 +100,7 @@ internal class HubObservationStream(
     val acquired =
       synchronized(lock) {
         if (lease != null) return@synchronized false
-        val newLease = streams.acquire(key)
+        val newLease = streams.acquire(key, lifecycleOnly)
         lease = newLease
         shared = newLease.stream
         reconnectBaseline = newLease.reconnects.value

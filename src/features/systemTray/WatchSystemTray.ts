@@ -61,6 +61,20 @@ const cardPositions = (observation: ObserveResult) =>
   visibleCards(observation, (card) => [card.appLabel, card.title]);
 const identityCount = (cards: WatchNotification[], card: WatchNotification) =>
   cards.filter((other) => cardIdentity(other) === cardIdentity(card)).length;
+/** Fallback dismissal check from visible cards alone, when no active inventory is readable. */
+const visiblyRemoved = (card: WatchNotification, before: ObserveResult, after: ObserveResult) => {
+  const sameCard = (other: WatchNotification) =>
+    other.appLabel === card.appLabel && other.title === card.title;
+  const visibleBefore = watchNotifications(before.viewHierarchy);
+  const visibleAfter = watchNotifications(after.viewHierarchy);
+  return (
+    // Identical duplicates are legal: one identical card must disappear, not all of them.
+    identityCount(visibleAfter, card) < identityCount(visibleBefore, card) &&
+    // An ongoing card that refuses the swipe may still rewrite its body (progress, position),
+    // so a surviving same-app/title card is not a removal.
+    visibleAfter.filter(sameCard).length < visibleBefore.filter(sameCard).length
+  );
+};
 
 /** A watch action's outcome plus the observation terminal evidence is captured from. */
 export interface WatchSystemTrayResult {
@@ -477,23 +491,27 @@ export class WatchSystemTray {
     scope: WatchScope,
   ): Promise<SystemTrayOutcome> {
     const { left, top, right, bottom } = card.element.bounds;
+    const appId = args.notification?.appId;
+    const keysBefore = appId
+      ? await readActiveNotificationKeysForApp(this.device, appId, this.signal)
+      : undefined;
     // Wear dismisses a card with a horizontal swipe. This gesture still needs device verification.
     await this.command(
       `shell input swipe ${Math.floor((left + right) / 2)} ${Math.floor((top + bottom) / 2)} ${right - 1} ${Math.floor((top + bottom) / 2)} 300`,
     );
     await sleep(POLL_MS, this.signal);
     const next = await this.read();
-    const sameCard = (other: WatchNotification) =>
-      other.appLabel === card.appLabel && other.title === card.title;
-    const visibleBefore = watchNotifications(observation.viewHierarchy);
-    const visibleAfter = watchNotifications(next.viewHierarchy);
+    const keysAfter =
+      appId && keysBefore
+        ? await readActiveNotificationKeysForApp(this.device, appId, this.signal)
+        : undefined;
     if (
       !watchStreamRoot(next.viewHierarchy) ||
-      // Identical duplicates are legal: one identical card must disappear, not all of them.
-      identityCount(visibleAfter, card) >= identityCount(visibleBefore, card) ||
-      // An ongoing card that refuses the swipe may still rewrite its body (progress, position),
-      // so a surviving same-app/title card is not a removal.
-      visibleAfter.filter(sameCard).length >= visibleBefore.filter(sameCard).length
+      !(keysBefore && keysAfter
+        ? // The app's active inventory is the title-independent signal: an identical card
+          // scrolling into view or a refused card rewriting its title cannot fake a removed key.
+          keysBefore.some((key) => !keysAfter.includes(key))
+        : visiblyRemoved(card, observation, next))
     ) {
       return outcome(
         {

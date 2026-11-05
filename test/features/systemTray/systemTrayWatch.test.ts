@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type {
   BootedDevice,
+  ExecResult,
   ObserveResult,
   ViewHierarchyNode,
   ViewHierarchyResult,
@@ -25,6 +26,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createExecResult } from "../../../src/utils/execResult";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { systemTrayResultSchema } from "../../../src/server/interactionToolOutputSchemas";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 
@@ -75,8 +77,43 @@ beforeAll(async () => {
 });
 afterEach(resetSystemTrayDependencies);
 
-function setup(read: (commands: string[]) => ObserveResult = () => stream) {
-  const adb = new FakeAdbExecutor();
+const DUMPSYS = "shell dumpsys notification --noredact";
+
+// Serves the active notification inventory from the commands run so far, so it can follow dismissals.
+class InventoryAdb extends FakeAdbExecutor {
+  constructor(private readonly inventoryFor: (commands: string[]) => string) {
+    super();
+  }
+
+  override executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
+    if (command === DUMPSYS) {
+      this.setCommandResponse(
+        DUMPSYS,
+        createExecResult(this.inventoryFor(this.getExecutedCommands()), ""),
+      );
+    }
+    return super.executeCommand(command, options);
+  }
+}
+
+// Fake service inventories, not captured dumps.
+const record = (pkg: string, id: number) =>
+  `    NotificationRecord(0x${id}: pkg=${pkg} user=UserHandle{0} id=${id} tag=null key=0|${pkg}|${id}|null|${2000 + id}: Notification(channel=c flags=0))`;
+const inventory = (...records: string[]) =>
+  [
+    "Current Notification Manager state:",
+    "  Notification List:",
+    ...records,
+    "  Snoozed notifications:",
+  ].join("\n");
+const shell = (id: number) => record("com.android.shell", id);
+const otherApp = record("com.other", 9);
+
+function setup(
+  read: (commands: string[]) => ObserveResult = () => stream,
+  inventoryFor?: (commands: string[]) => string,
+) {
+  const adb = inventoryFor ? new InventoryAdb(inventoryFor) : new FakeAdbExecutor();
   const observer = new FakeObserveScreen();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -277,18 +314,15 @@ describe("Wear notification stream capture", () => {
 
   test("counts individually dismissed cards together with the footer clear", async () => {
     const other = withText("Wear", "Other");
-    const { tray, adb } = setup((commands) =>
-      commands.includes("shell input swipe 192 176 364 176 300") ? other : stream,
+    const { tray } = setup(
+      (commands) => (commands.includes("shell input swipe 192 176 364 176 300") ? other : stream),
+      (commands) =>
+        commands.includes("shell input tap 192 335")
+          ? inventory()
+          : commands.includes("shell input swipe 192 176 364 176 300")
+            ? inventory(shell(2))
+            : inventory(shell(1), shell(2), otherApp),
     );
-    const mixed = shellInventory.replace(
-      "  Snoozed notifications:",
-      "    NotificationRecord(0x2: pkg=com.other user=UserHandle{0} id=2 tag=null key=0|com.other|2|null|2001: Notification(channel=other flags=0))\n  Snoozed notifications:",
-    );
-    adb.setCommandResponseSequence("shell dumpsys notification --noredact", [
-      createExecResult(mixed, ""),
-      createExecResult(shellInventory, ""),
-      createExecResult(emptyInventory, ""),
-    ]);
     const result = await tray.execute({
       action: "clearAll",
       notification: { appId: "com.android.shell" },
@@ -407,10 +441,6 @@ describe("Wear notification stream capture", () => {
 // Scrolls a dismissed first card off the fake stream (a horizontal swipe across its centre).
 const DISMISS_SWIPE = "shell input swipe 192 176 364 176 300";
 const CAPTURED_CARD_BOUNDS = "[19,92][365,260]";
-const mixedInventory = shellInventory.replace(
-  "  Snoozed notifications:",
-  "    NotificationRecord(0x2: pkg=com.other user=UserHandle{0} id=2 tag=null key=0|com.other|2|null|2001: Notification(channel=other flags=0))\n  Snoozed notifications:",
-);
 
 function streamNodes(view: ViewHierarchyResult | undefined): ViewHierarchyNode[] {
   const root = watchStreamRoot(view);
@@ -536,10 +566,10 @@ describe("Wear duplicate-card dismissal", () => {
     const duplicates = withDuplicateCard();
     const { tray, adb } = setup(
       (commands) => [duplicates, stream][dismissSwipes(commands)] ?? emptyStream,
-    );
-    adb.setCommandResponse(
-      "shell dumpsys notification --noredact",
-      createExecResult(mixedInventory, ""),
+      (commands) =>
+        [inventory(shell(1), shell(2), otherApp), inventory(shell(2), otherApp)][
+          dismissSwipes(commands)
+        ] ?? inventory(otherApp),
     );
     const result = await tray.execute({
       action: "clearAll",
@@ -549,6 +579,39 @@ describe("Wear duplicate-card dismissal", () => {
     expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 2, success: true } });
     expect(dismissSwipes(adb.getExecutedCommands())).toBe(2);
     expect(adb.getExecutedCommands()).not.toContain("shell input tap 192 335");
+  });
+
+  test("confirms a dismissal by the app's inventory when an identical card scrolls into view", async () => {
+    const duplicates = withDuplicateCard();
+    const { tray } = setup(
+      () => duplicates,
+      (commands) =>
+        dismissSwipes(commands) === 0
+          ? inventory(shell(1), shell(2), shell(3))
+          : inventory(shell(2), shell(3)),
+    );
+    expect(
+      await tray.execute({
+        action: "dismiss",
+        notification: { appId: "com.android.shell", title: "Wear" },
+        awaitTimeout: 500,
+      }),
+    ).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+  });
+
+  test("does not confirm a refused card that rewrote its title while the inventory kept it", async () => {
+    const renamed = retitled("Renamed");
+    const { tray } = setup(
+      (commands) => (dismissSwipes(commands) === 0 ? stream : renamed),
+      () => inventory(shell(1)),
+    );
+    expect(
+      await tray.execute({
+        action: "dismiss",
+        notification: { appId: "com.android.shell", title: "Wear" },
+        awaitTimeout: 500,
+      }),
+    ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
   });
 });
 

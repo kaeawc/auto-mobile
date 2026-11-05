@@ -28,6 +28,11 @@ class FakeTelemetryMultiplexer : TelemetryMultiplexer {
     var closed = false
       private set
 
+    /** True when its owner closed it before the multiplexer itself was closed. */
+    @Volatile
+    var released = false
+      private set
+
     /** Deliver [event] as the daemon would on this subscription; dropped once it is closed. */
     fun emit(event: TelemetryDisplayEvent) {
       if (!closed) sink(event)
@@ -37,13 +42,16 @@ class FakeTelemetryMultiplexer : TelemetryMultiplexer {
       mutableState.value = state
     }
 
+    /** A no-op once closed, as the real subscription ignores a retry after its release. */
     override fun retry() {
+      if (closed) return
       retryCount++
       mutableState.value = ConnectionState.Connected(subscribed = true)
     }
 
     override fun close() {
       if (closed) return
+      released = !this@FakeTelemetryMultiplexer.closed
       closed = true
       mutableState.value = ConnectionState.Disconnected(null)
     }
@@ -70,7 +78,9 @@ class FakeTelemetryMultiplexer : TelemetryMultiplexer {
   ): TelemetrySubscription =
     Subscription(key, sink).also { synchronized(recorded) { recorded += it } }
 
+  /** Closes the multiplexer and, as the real one does, every subscription still open. */
   override fun close() {
     closed = true
+    subscriptions.forEach { it.close() }
   }
 }

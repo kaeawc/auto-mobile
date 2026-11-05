@@ -2,7 +2,10 @@ import { buildObserveResult } from "../../helpers/observeFixture";
 import { createExecResult } from "../../../src/utils/execResult";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { logger } from "../../../src/utils/logger";
-import { RecentApps } from "../../../src/features/action/RecentApps";
+import {
+  POST_NAVIGATION_VERIFY_WINDOW_MS,
+  RecentApps,
+} from "../../../src/features/action/RecentApps";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 
 const testDevice: BootedDevice = {
@@ -166,6 +169,58 @@ describe("RecentApps", () => {
       };
     };
     const pressed = () => fakeAdb.getExecutedCommands().includes("shell input keyevent 187");
+
+    test("polls until overview appears on a later post-navigation read", async () => {
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
+      let postNavigationReads = 0;
+      fakeObserveScreen.setObserveResult(() => {
+        if (!pressed()) {
+          return createObserveResult(createAppHierarchy());
+        }
+        postNavigationReads += 1;
+        return postNavigationReads >= 4
+          ? overview(true)
+          : createObserveResult(createAppHierarchy());
+      });
+
+      const result = await recentApps.execute();
+
+      expect(result.success).toBe(true);
+      expect(postNavigationReads).toBe(4);
+      expect(
+        fakeAdb.getExecutedCommands().filter((cmd) => cmd === "shell input keyevent 187"),
+      ).toHaveLength(1);
+      expect(fakeTimer.getSleepHistory()).toEqual([250, 250, 250]);
+    });
+
+    test("bounds polling when overview never appears without pressing Recents again", async () => {
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
+      fakeObserveScreen.setObserveResult(() => createObserveResult(createAppHierarchy()));
+
+      const result = await recentApps.execute();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "Android recent apps overview could not be verified after navigation",
+      );
+      expect(fakeTimer.getSleepHistory().reduce((total, ms) => total + ms, 0)).toBeLessThanOrEqual(
+        POST_NAVIGATION_VERIFY_WINDOW_MS,
+      );
+      expect(
+        fakeAdb.getExecutedCommands().filter((cmd) => cmd === "shell input keyevent 187"),
+      ).toHaveLength(1);
+    });
+
+    test("returns without polling when the overview is visible on the first observation", async () => {
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
+      fakeObserveScreen.setObserveResult(() => overview(true));
+
+      const result = await recentApps.execute();
+
+      expect(result.success).toBe(true);
+      expect(pressed()).toBe(false);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+    });
 
     test("does not press Recents again when the overview is already open", async () => {
       fakeAdb.setDefaultResponse(createExecResult("", ""));

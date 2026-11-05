@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,7 +69,8 @@ fun AutoMobileDesktopApp(
   val runtime = rememberDesktopRuntime(windowVisible)
   val ui = remember { DesktopAppUiState(runtime.settings) }
   val presentation = desktopPresentation(runtime, daemonConnectionState)
-  val title = windowTitle(presentation.workspaceState)
+  val foregroundApps by ui.foregroundApps.apps.collectAsState()
+  val title = windowTitle(presentation.workspaceState, foregroundApps)
   val currentOnWindowTitleChange by rememberUpdatedState(onWindowTitleChange)
   LaunchedEffect(title) { currentOnWindowTitleChange(title) }
   DesktopMenuEffects(presentation, ui, menuBarActions, openPaletteRequest)

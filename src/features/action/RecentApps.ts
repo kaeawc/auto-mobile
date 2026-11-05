@@ -27,8 +27,9 @@ import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 // Two reads preserve the existing recent-app verification bound.
 export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
 
-const POST_NAVIGATION_VERIFY_READS = 2;
 const POST_NAVIGATION_VERIFY_DELAY_MS = 250;
+/** Covers the overview animation duration observed in the failing launcher capture. */
+export const POST_NAVIGATION_VERIFY_WINDOW_MS = 3000;
 
 /**
  * Opens the recent apps screen.
@@ -169,8 +170,15 @@ export class RecentApps extends BaseVisualChange {
     if (await this.isAndroidOverview(observation, signal)) {
       return true;
     }
-    for (let attempt = 0; attempt < POST_NAVIGATION_VERIFY_READS; attempt++) {
-      await this.timer.sleep(POST_NAVIGATION_VERIFY_DELAY_MS);
+    let elapsedMs = 0;
+    // #17056 Poll through the overview transition, bounded by injected timer sleeps.
+    while (elapsedMs < POST_NAVIGATION_VERIFY_WINDOW_MS) {
+      const delayMs = Math.min(
+        POST_NAVIGATION_VERIFY_DELAY_MS,
+        POST_NAVIGATION_VERIFY_WINDOW_MS - elapsedMs,
+      );
+      await this.timer.sleep(delayMs);
+      elapsedMs += delayMs;
       const fresh = await this.readFreshObservation(3000, signal);
       if (await this.isAndroidOverview(fresh, signal)) {
         return true;

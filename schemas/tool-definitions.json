@@ -9231,7 +9231,7 @@
       "type": "object",
       "properties": {
         "recordingId": {
-          "description": "Recording ID",
+          "description": "recordDeviceGestures recordingId; defaults to the active recording. For recordToolCalls plans use recordToolCalls action=end",
           "type": "string"
         },
         "planName": {
@@ -21295,6 +21295,10 @@
             "elementId": {
               "type": "string"
             },
+            "testTag": {
+              "type": "string",
+              "description": "Android test tag, matched like tapOn testTag"
+            },
             "text": {
               "type": "string"
             },
@@ -21376,6 +21380,9 @@
                 "elementId": {
                   "type": "string"
                 },
+                "testTag": {
+                  "type": "string"
+                },
                 "text": {
                   "type": "string"
                 },
@@ -21389,6 +21396,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -21461,6 +21471,9 @@
                   "required": ["elementId"]
                 },
                 {
+                  "required": ["testTag"]
+                },
+                {
                   "required": ["text"]
                 },
                 {
@@ -21482,6 +21495,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -24781,6 +24797,10 @@
             "elementId": {
               "type": "string"
             },
+            "testTag": {
+              "type": "string",
+              "description": "Android test tag, matched like tapOn testTag"
+            },
             "text": {
               "type": "string"
             },
@@ -24862,6 +24882,9 @@
                 "elementId": {
                   "type": "string"
                 },
+                "testTag": {
+                  "type": "string"
+                },
                 "text": {
                   "type": "string"
                 },
@@ -24875,6 +24898,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -24947,6 +24973,9 @@
                   "required": ["elementId"]
                 },
                 {
+                  "required": ["testTag"]
+                },
+                {
                   "required": ["text"]
                 },
                 {
@@ -24968,6 +24997,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -27732,7 +27764,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Post notification via Android SDK hooks or iOS Simulator simctl push.",
+    "description": "Post notification via Android SDK hooks or iOS/watchOS simulator simctl push.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27753,11 +27785,11 @@
           "enum": ["normal", "bigPicture"]
         },
         "imagePath": {
-          "description": "Android: host image path for bigPicture. iOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
+          "description": "Android: host image path for bigPicture. iOS/watchOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
           "type": "string"
         },
         "actions": {
-          "description": "Android action buttons; iOS buttons come from the registered category",
+          "description": "Android action buttons; iOS/watchOS buttons come from the registered category",
           "type": "array",
           "items": {
             "type": "object",
@@ -27778,16 +27810,16 @@
           }
         },
         "channelId": {
-          "description": "Android channel ID; iOS APNs category when category is omitted",
+          "description": "Android channel ID; iOS/watchOS APNs category when category is omitted",
           "type": "string"
         },
         "category": {
-          "description": "iOS: aps.category naming a UNNotificationCategory the app registered",
+          "description": "iOS/watchOS: aps.category naming a UNNotificationCategory the app registered",
           "type": "string",
           "minLength": 1
         },
         "payload": {
-          "description": "iOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
+          "description": "iOS/watchOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -27795,15 +27827,16 @@
           "additionalProperties": {}
         },
         "appId": {
-          "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted",
+          "description": "Android target package name or iOS/watchOS target bundle ID (required on iOS/watchOS); Android defaults to the live foreground app when omitted",
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -46066,12 +46099,13 @@
       "destructiveHint": false,
       "openWorldHint": false
     },
-    "description": "Record MCP tool calls to YAML. begin/end require tool-call-recording; status always works.",
+    "description": "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
+          "description": "begin starts recording this connection's tool calls; end stops and returns the YAML plan; status reports state",
           "type": "string",
           "enum": ["begin", "end", "status"]
         },

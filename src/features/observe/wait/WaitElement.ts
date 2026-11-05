@@ -148,6 +148,9 @@ function waitElementSelectors(waitFor: ObserveWaitForOptions): ResolverSelector[
   if (waitFor.elementId !== undefined) {
     predicates.push({ elementId: waitFor.elementId });
   }
+  if (waitFor.testTag !== undefined) {
+    predicates.push({ testTag: waitFor.testTag });
+  }
   if (waitFor.text !== undefined) {
     predicates.push({ text: waitFor.text, match: waitFor.textMatch });
   }
@@ -322,10 +325,11 @@ export const findWaitForElement = (
 export const hasElementPredicate = (
   waitFor: Pick<
     ObserveWaitForOptions,
-    "elementId" | "text" | "textAny" | "className" | "contentDescription"
+    "elementId" | "testTag" | "text" | "textAny" | "className" | "contentDescription"
   >,
 ): boolean =>
   waitFor.elementId !== undefined ||
+  waitFor.testTag !== undefined ||
   waitFor.text !== undefined ||
   waitFor.textAny !== undefined ||
   waitFor.className !== undefined ||

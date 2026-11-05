@@ -2122,7 +2122,15 @@ window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) reque
 `statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
 prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
-best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+best effort, and the iOS Simulator ignores `brightness`. CtrlProxy advertises the capability and applies
+`FLAG_KEEP_SCREEN_ON`, window-local `screenBrightness` (`system` uses `BRIGHTNESS_OVERRIDE_NONE`) and
+`screenOrientation`; `unlocked` and omission use `SCREEN_ORIENTATION_UNSPECIFIED`. Replacement rebuilds
+these values from the new spec; removal releases them, and an animated exit resets them before waiting
+for removal. Failed replacements restore the previous params. Inspect entries add `orientation` for the
+requested orientation and `statusBar: "unsupported"` for an authored status bar style. Hierarchy window
+entries add the same values as `prototypeOrientation` and `prototypeStatusBar`; omitted controls omit
+these fields. Orientation reports a request, not proof that the device rotated. Embedded Android does
+not advertise these overlay controls.
 
 **Prototype layout direction.** Optional `window.layoutDirection: "ltr" | "rtl"` requires
 `prototype_layout_direction_v1`. Omission inherits the host direction. The iOS renderer overrides
@@ -2132,8 +2140,10 @@ Android does not advertise this capability, so the host refuses specs that set i
 **Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
 `prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
 prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`
-`hide(ime())`; iOS `endEditing(true)`). With no keyboard up it does nothing. No production runtime advertises
-the capability yet.
+`hide(ime())`; iOS `endEditing(true)`). CtrlProxy advertises the capability and dispatches the action to
+the owning surface's host on main, hiding the IME before clearing its view focus. Without a shown
+window it does nothing; navigation focusability is retained. The embedded Android renderer does not
+advertise it.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
@@ -2556,9 +2566,20 @@ Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote
 `cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
 app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
 `media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
-`unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
-`sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
-`receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
+`unsupported`. Event data is a closed object (unknown keys are refused):
+
+| event             | data                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `routesChanged`   | `state` (as `/platform/cast/state`), `routeCount` (integer >= 0)                                                   |
+| `sessionStarting` | `player` (1-64 chars), `protocol`, `deviceName` (0-256 chars)                                                      |
+| `sessionStarted`  | as `sessionStarting`, plus `positionMs` (integer >= 0, the remote position)                                        |
+| `sessionEnded`    | as `sessionStarted`; `positionMs` is where local playback resumes                                                  |
+| `sessionFailed`   | `player`, `reason` (`media_not_castable`, `play_services_unavailable`, `network`, `receiver`), optional `protocol` |
+| `remoteVolume`    | `volume` (0-1)                                                                                                     |
+
+The host decodes them with `prototypeCastEventOf` (truncated data does not decode); Kotlin
+`PrototypeCastEvents` and Swift `PrototypeCastEvents` are the twins, and all three replay
+`test/fixtures/prototype-spec/cast/events.json`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
 `connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
 (the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
 reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises

@@ -60,11 +60,13 @@ function iosRotationScreenSizeUnchanged(
 ): boolean {
   const beforeSize = previousObservation?.screenSize;
   const afterSize = result.observation?.screenSize;
-  return Boolean(
-    beforeSize &&
-    afterSize &&
-    beforeSize.width === afterSize.width &&
-    beforeSize.height === afterSize.height,
+  return (
+    Boolean(
+      beforeSize &&
+      afterSize &&
+      beforeSize.width === afterSize.width &&
+      beforeSize.height === afterSize.height,
+    ) === true
   );
 }
 
@@ -79,12 +81,12 @@ function isUnverifiedIosRotationSize(
   previousObservation: ObserveResult | undefined,
 ): boolean {
   return (
-    result.success &&
-    result.rotationPerformed &&
-    (current === requested || current === "unknown") &&
-    knownPositiveSize(previousObservation) &&
-    knownPositiveSize(result.observation) &&
-    iosRotationScreenSizeUnchanged(previousObservation, result)
+    (result.success &&
+      result.rotationPerformed &&
+      (current === requested || current === "unknown") &&
+      knownPositiveSize(previousObservation) &&
+      knownPositiveSize(result.observation) &&
+      iosRotationScreenSizeUnchanged(previousObservation, result)) === true
   );
 }
 

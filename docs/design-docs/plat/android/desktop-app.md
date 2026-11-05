@@ -118,8 +118,9 @@ observation subscription for that epoch (`lifecycleOnly: true` on `subscribe`).
 The daemon sends such a subscription only `device_session_started` and
 `device_session_ended` frames, and never counts it when deciding whether or how
 fast to poll a device or whether the device is in use, so an idle pane neither
-starts polling nor changes another client's cadence. The daemon sends an
-epoch's lifecycle frames to that epoch's subscribers, so each frame is handled
-once, whatever facets are open and whichever pane has focus. Ending the focused
-pane's epoch leaves focus where it is: moving it would arm input on a device the
-user did not pick.
+starts polling nor changes another client's cadence. Opening or closing one
+sends no cadence-change notification either, so it cannot reconnect a stopped
+iOS CtrlProxy runner. The daemon sends an epoch's lifecycle frames to that
+epoch's subscribers, so each frame is handled once, whatever facets are open and
+whichever pane has focus. Ending the focused pane's epoch leaves focus where it
+is: moving it would arm input on a device the user did not pick.

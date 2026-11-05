@@ -156,6 +156,10 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
   errorConnectionForTest(socket: FakeSocket): void {
     this.onConnectionError(socket, new Error("socket error"));
   }
+
+  checkKeepaliveForTest(): void {
+    this.checkKeepalive();
+  }
 }
 
 describe("DeviceDataStreamSocketServer", () => {
@@ -3423,6 +3427,90 @@ describe("DeviceDataStreamSocketServer", () => {
           });
           expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(1000);
           expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(3000);
+        });
+
+        describe("cadence notifications (#17085)", () => {
+          let screenshotChanges: Array<string | null>;
+          let hierarchyChanges: Array<string | null>;
+
+          beforeEach(() => {
+            screenshotChanges = [];
+            hierarchyChanges = [];
+            server.setOnScreenshotCadenceChanged((deviceId) => screenshotChanges.push(deviceId));
+            server.setOnHierarchyCadenceChanged((deviceId) => hierarchyChanges.push(deviceId));
+            server.sessionResolver.bind("device-a", "session-device-a");
+          });
+
+          const lifecycleSubscriptionId = (socket: FakeSocket): string => {
+            const response = frames(socket).find((f) => f.type === "subscription_response");
+            const id = (response as { subscriptionId?: unknown } | undefined)?.subscriptionId;
+            if (typeof id !== "string") {
+              throw new Error("lifecycle-only subscribe returned no subscriptionId");
+            }
+            return id;
+          };
+
+          it("subscribe and unsubscribe fire neither cadence callback", async () => {
+            const socket = await subscribeLifecycleOnly(true);
+            await server.processLineForTest(
+              socket,
+              JSON.stringify({
+                id: "unsub-lifecycle",
+                command: "unsubscribe",
+                subscriptionId: lifecycleSubscriptionId(socket),
+              }),
+            );
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("connection close and error fire neither cadence callback", async () => {
+            const closed = await subscribeLifecycleOnly(true);
+            const errored = await subscribeLifecycleOnly(true);
+
+            server.closeConnectionForTest(closed);
+            server.errorConnectionForTest(errored);
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("keepalive removal fires neither cadence callback", async () => {
+            const socket = await subscribeLifecycleOnly(true);
+            socket.destroy();
+
+            server.checkKeepaliveForTest();
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("a rejected non-boolean lifecycleOnly fires neither cadence callback", async () => {
+            await subscribeLifecycleOnly("yes");
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("a normal subscription still notifies on subscribe and unsubscribe", async () => {
+            const socket = await subscribeLifecycleOnly(false);
+            await server.processLineForTest(
+              socket,
+              JSON.stringify({
+                id: "unsub-normal",
+                command: "unsubscribe",
+                subscriptionId: lifecycleSubscriptionId(socket),
+              }),
+            );
+
+            expect(screenshotChanges).toEqual(["device-a", "device-a"]);
+            expect(hierarchyChanges).toEqual(["device-a", "device-a"]);
+          });
         });
 
         it("rejects a non-boolean lifecycleOnly without subscribing", async () => {

@@ -314,7 +314,12 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
             if [ "${DESTINATION}" = "generic/platform=visionOS Simulator" ]; then
                 capture_run_cmd merge xcodebuild -project "${xcodeproj}" -scheme "${scheme}" -showdestinations
                 if [ "${CAPTURED_STATUS}" -ne 0 ] || ! printf '%s\n' "${CAPTURED_OUTPUT}" | grep -q "platform:visionOS Simulator"; then
-                    echo -e "    ${YELLOW}⚠${NC} Skipping ${scheme}: no visionOS Simulator destination available (install the visionOS platform in Xcode to build it)"
+                    if [ "${CAPTURED_STATUS}" -ne 0 ]; then
+                        echo -e "    ${YELLOW}⚠${NC} Skipping ${scheme}: -showdestinations exited ${CAPTURED_STATUS}"
+                        printf '%s\n' "${CAPTURED_OUTPUT}"
+                    else
+                        echo -e "    ${YELLOW}⚠${NC} Skipping ${scheme}: no visionOS Simulator destination available (install the visionOS platform in Xcode to build it)"
+                    fi
                     continue
                 fi
             fi

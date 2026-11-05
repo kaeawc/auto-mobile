@@ -389,7 +389,11 @@ export class DevicePoolTargetDiscovery {
       const androidPresence = await this.callbacks.takeFreshPresenceDiscovery("android");
       return { capturedEntry, androidPresence, bootedDevices: androidPresence.devices };
     }
-    if (targetPlatform === "watchos" || targetPlatform === "tvos") {
+    if (
+      targetPlatform === "watchos" ||
+      targetPlatform === "tvos" ||
+      targetPlatform === "visionos"
+    ) {
       // Non-iOS Apple simulators need their own fresh listing, for a pooled entry and
       // a new one alike, before binding; an iOS snapshot cannot confirm either platform.
       const discovery = await this.callbacks.takeFreshPresenceDiscovery(targetPlatform);
@@ -403,7 +407,7 @@ export class DevicePoolTargetDiscovery {
         capturedEntry,
         bootedDevices: discovery.devices,
         iosLiveness:
-          targetPlatform === "tvos"
+          targetPlatform === "tvos" || targetPlatform === "visionos"
             ? await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery })
             : undefined,
       };

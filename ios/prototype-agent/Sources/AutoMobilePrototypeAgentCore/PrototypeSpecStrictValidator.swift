@@ -58,6 +58,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeMedia.validateCastButtons(fields, nodes: context.locatedNodes)
             try PrototypeCameraPreview.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeTimerValidator.validate(context.actions)
+            try PrototypeLoops.validate(nodes: context.locatedNodes)
             try PrototypeStrictSemantics.vocabulary(context, data: modelData)
             try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)
             try PrototypeStrictSemantics.targets(context)

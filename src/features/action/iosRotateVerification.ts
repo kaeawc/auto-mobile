@@ -157,3 +157,12 @@ export function verifyIosRotation(
       : `Device is already in ${normalized.currentOrientation} orientation`,
   };
 }
+
+export function restoreTargetIosOrientation(observation: ObserveResult | undefined): Orientation {
+  const { width, height } = observation?.screenSize ?? { width: 0, height: 0 };
+  // Duo inner panels can report a stale portrait rotation while drawn landscape (#17101).
+  if (width > 0 && height > 0 && width !== height) {
+    return width > height ? "landscape" : "portrait";
+  }
+  return observedIosOrientation(observation);
+}

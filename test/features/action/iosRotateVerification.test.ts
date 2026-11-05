@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   normalizeIosOrientation,
   observedIosOrientation,
+  restoreTargetIosOrientation,
   verifyIosRotation,
 } from "../../../src/features/action/iosRotateVerification";
 import type { ObserveResult, RotateResult } from "../../../src/models";
@@ -217,5 +218,19 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(result.error).toContain(
       "Rotation is not supported on this display (the screen size did not change). The display is still portrait",
     );
+  });
+});
+
+describe("iOS restore prior from drawn size (#17101)", () => {
+  test("uses non-square drawn size over a stale rotation field", () => {
+    expect(restoreTargetIosOrientation(observation(0, 951, 669))).toBe("landscape");
+    expect(restoreTargetIosOrientation(observation(1, 874, 402))).toBe("landscape");
+    expect(restoreTargetIosOrientation(observation(0, 402, 874))).toBe("portrait");
+  });
+
+  test("falls back to observed rotation for unknown or square drawn size", () => {
+    expect(restoreTargetIosOrientation(observation(undefined, 402, 874))).toBe("portrait");
+    expect(restoreTargetIosOrientation(observation(1, 0, 0))).toBe("landscape");
+    expect(restoreTargetIosOrientation(observation(1, 500, 500))).toBe("landscape");
   });
 });

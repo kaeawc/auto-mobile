@@ -90,12 +90,14 @@ export async function startAppleVisionDevice(
             assertVisionUnclaimed(headset.deviceId, deps, lease, reusableSessionId);
             lifecycleSignal.throwIfAborted();
             stage.current = "booting the Apple Vision Pro simulator";
-            const boot = await (
-              deps.appleVisionSimulatorBootFactory ?? defaultAppleVisionBoot
-            )().boot(fresh, {
-              timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
-              signal: lifecycleSignal,
-            });
+            const lifecycle = (deps.appleVisionSimulatorBootFactory ?? defaultAppleVisionBoot)();
+            // The simctl readiness wait reads the ambient signal, so a teardown must abort it too.
+            const boot = await runWithAbortSignal(lifecycleSignal, () =>
+              lifecycle.boot(fresh, {
+                timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
+                signal: lifecycleSignal,
+              }),
+            );
             lifecycleSignal.throwIfAborted();
             stage.current = "binding the device session";
             const sessionId = await bindBootedSimulatorSession(

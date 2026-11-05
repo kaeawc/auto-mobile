@@ -158,6 +158,16 @@ function harnessFakes() {
   shell.setCommandResponse("shell dumpsys battery", createExecResult("AC powered: true", ""));
   shell.setCommandResponse("shell am get-standby-bucket", createExecResult("10", ""));
   shell.setCommandResponse("shell appops get", createExecResult("No operations.", ""));
+  // notifications-off reads POST_NOTIFICATIONS back from the package dump on API 33+ (#17106).
+  shell.setCommandResponse(
+    "shell dumpsys package",
+    createExecResult(
+      `Packages:\n  Package [${FIXTURE_PACKAGE}] (test):\n    User 0: installed=true\n` +
+        "      runtime permissions:\n" +
+        "        android.permission.POST_NOTIFICATIONS: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]\n",
+      "",
+    ),
+  );
   shell.setCommandResponse("sh -c", createExecResult(String(START + 3_000), ""));
   return { deps: { shell, clock, timer }, shell, baseClock, fakeTimer };
 }

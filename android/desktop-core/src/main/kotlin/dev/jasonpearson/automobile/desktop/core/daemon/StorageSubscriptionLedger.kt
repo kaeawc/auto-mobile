@@ -43,16 +43,7 @@ internal class StorageSubscriptionLedger {
     connectionGeneration: Long,
   ): PendingStorageSubscription? {
     if (pending.values.any { it.key == key }) return null
-    val wanted = key in desired
-    val held = key in confirmed
-    val forced = key in forcedReconciliations
-    val subscribe =
-      when {
-        forced -> wanted
-        wanted && !held -> true
-        !wanted && held -> false
-        else -> return null
-      }
+    val subscribe = direction(key) ?: return null
     return PendingStorageSubscription(
         requestId = requestId(),
         key = key,
@@ -62,6 +53,22 @@ internal class StorageSubscriptionLedger {
         connectionGeneration = connectionGeneration,
       )
       .also { pending[it.requestId] = it }
+  }
+
+  /** Whether [next] would issue a command for [key] now, without recording one. */
+  fun needsCommand(key: StorageSubscriptionKey): Boolean =
+    pending.values.none { it.key == key } && direction(key) != null
+
+  // The command [key] needs: true to subscribe, false to unsubscribe, null when none.
+  private fun direction(key: StorageSubscriptionKey): Boolean? {
+    val wanted = key in desired
+    val held = key in confirmed
+    return when {
+      key in forcedReconciliations -> wanted
+      wanted && !held -> true
+      !wanted && held -> false
+      else -> null
+    }
   }
 
   /** [command] reached the wire (or did not, when [sent] is false). */

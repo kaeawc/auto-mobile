@@ -92,8 +92,10 @@ fallback), instead of opening their own socket:
   storage command that cannot be written closes the socket, so every device
   reconnects and re-registers its files. The daemon owns an observer per
   socket, so a device that leaves a socket other devices keep open sends
-  `unsubscribe_storage` for its files, written after any storage command it
-  decided before leaving.
+  `unsubscribe_storage` for its files, ordered on the wire with every other
+  storage command: one decided before it leaves is written first, one decided
+  after (another epoch of the serial subscribing the same file) is written
+  after.
 - One-shot captures (a saved screenshot, the foreground-app lookup) lease the
   device's shared stream and take the first frame captured after their request.
   A lease joined onto a live subscription replays the stream's latest frame,

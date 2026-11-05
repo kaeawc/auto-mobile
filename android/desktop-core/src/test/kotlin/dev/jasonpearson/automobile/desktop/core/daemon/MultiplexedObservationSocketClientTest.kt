@@ -626,9 +626,14 @@ class MultiplexedObservationSocketClientTest {
         thread(name = STORAGE_WRITER) { a.subscribeStorage("com.example", "prefs.xml") }
       assertTrue(decided.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
       val releaser = thread { a.dispose() }
-      // The release has either written its frames or is waiting to write them.
+      // The release has either written its frames or is waiting for the write order to decide
+      // them; a release blocked on any other monitor has not reached the ordering point yet.
+      val waitingForWriteOrder = {
+        releaser.state == Thread.State.BLOCKED &&
+          releaser.stackTrace.firstOrNull()?.methodName == "releaseInOrder"
+      }
       val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS)
-      while (releaser.state != Thread.State.BLOCKED && releaser.state != Thread.State.TERMINATED) {
+      while (!waitingForWriteOrder() && releaser.state != Thread.State.TERMINATED) {
         check(System.nanoTime() < deadline) { "release never reached the socket" }
         Thread.onSpinWait()
       }
@@ -669,6 +674,29 @@ class MultiplexedObservationSocketClientTest {
       val again = second.nextRequest()
       assertEquals("subscribe_storage", again["command"])
       assertEquals("prefs.xml", again["fileName"])
+      mux.close()
+    }
+
+  @Test
+  fun `a failed owed unsubscribe closes the socket so the daemon drops the observer`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a, b) = connectDevices(mux, 2)
+      val socket = daemon.nextSocket()
+      subscribeAll(socket, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+      a.subscribeStorage("com.example", "prefs.xml")
+      val command = socket.nextRequest()
+      socket.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+      a.storageSubscriptionResponses.awaitFirst()
+      socket.failingCommand = "unsubscribe_storage"
+
+      // B keeps the socket open, so A owes an explicit unsubscribe_storage, and it cannot be sent.
+      a.dispose()
+
+      socket.awaitClosed()
+      b.connectionState.awaitFirst { it is ConnectionState.Disconnected }
       mux.close()
     }
 

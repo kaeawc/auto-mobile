@@ -118,24 +118,30 @@ internal class MultiplexedObservationSocketClient(
 
   fun disconnect(channel: MuxObservationChannel, dispose: Boolean) {
     val release =
-      synchronized(table.lock) {
-        if (dispose) channel.disposed = true
-        if (!channel.live) return@synchronized null
-        val released = table.leave(channel)
-        // Decide and detach in one step: a device connecting right after this release must open
-        // a fresh connection, not join the socket being shut down.
-        val detached = if (table.channels.isEmpty()) table.detach() else null
-        // A closing socket releases its observers on the daemon by itself; an open one is told.
-        val owed = if (detached == null) storage.release(channel) else emptyList()
-        channel.storage.connectionReset()
-        Release(table.socket ?: detached?.socket, released, owed, detached)
-      }
+      storage.releaseInOrder(
+        decide = {
+          synchronized(table.lock) {
+            if (dispose) channel.disposed = true
+            if (!channel.live) return@synchronized null
+            val released = table.leave(channel)
+            // Decide and detach in one step: a device connecting right after this release must
+            // open a fresh connection, not join the socket being shut down.
+            val detached = if (table.channels.isEmpty()) table.detach() else null
+            // A closing socket releases its observers on the daemon by itself; an open one is told.
+            val owed = if (detached == null) storage.release(channel) else emptyList()
+            channel.storage.connectionReset()
+            Release(table.socket ?: detached?.socket, released, owed, detached)
+          }
+        },
+        owed = { released ->
+          released?.socket?.let { ObservationMuxStorage.Owed(it, released.storage) }
+        },
+      )
     if (dispose) channel.flows.closeStorage()
     channel.mutableState.value = ConnectionState.Disconnected()
     release ?: return
     release.socket?.let { open ->
       release.subscriptionId?.let { wire.write(open, wire.unsubscribe(it)) }
-      storage.writeOwed(open, release.storage)
     }
     release.detached?.let(connection::shutDown)
   }

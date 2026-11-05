@@ -17,10 +17,13 @@ internal class ObservationMuxStorage(
   private val wire: ObservationMuxWire,
   private val log: Logger,
 ) {
-  // Orders storage commands on the wire: held from deciding a command to writing it, and around a
-  // released device's owed unsubscribes, so a subscribe decided before a release cannot reach the
-  // socket after that release's unsubscribe (#17117). Taken before [ObservationMuxTable.lock].
+  // Orders storage commands on the wire: held from deciding a command to writing it, and from
+  // deciding a device's release to writing the unsubscribes it owes, so neither side can overtake
+  // the other on the socket (#17117). Taken before [ObservationMuxTable.lock], never under it.
   private val writeOrder = Any()
+
+  /** The `unsubscribe_storage` [requests] a released device owes on [socket]. */
+  data class Owed(val socket: TelemetrySocket, val requests: List<StreamRequest>)
 
   fun subscribe(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
     if (synchronized(table.lock) { channel.storage.want(key) }) drive(channel, key)
@@ -53,11 +56,21 @@ internal class ObservationMuxStorage(
     return owed
   }
 
-  /** Write the `unsubscribe_storage` commands a released device owes, after any decided command. */
-  fun writeOwed(open: TelemetrySocket, owed: List<StreamRequest>) {
-    if (owed.isEmpty()) return
-    synchronized(writeOrder) { owed.forEach { wire.write(open, it) } }
-  }
+  /**
+   * Release a device: [decide] (which takes the table lock) and the writes of what it [owed] both
+   * hold the write order. A storage command decided before the release is written before its
+   * unsubscribes, and one decided after it (e.g. another epoch of the serial subscribing the same
+   * file) is written after them. A failed write closes the socket, as in [drive], so the reconnect
+   * settles what the daemon holds.
+   */
+  fun <T> releaseInOrder(decide: () -> T, owed: (T) -> Owed?): T =
+    synchronized(writeOrder) {
+      val released = decide()
+      owed(released)?.let { (socket, requests) ->
+        if (requests.any { !wire.write(socket, it) }) wire.closeQuietly(socket)
+      }
+      released
+    }
 
   /**
    * False once [channel]'s storage connection has reset since [connection]: its answer is stale.
@@ -101,6 +114,9 @@ internal class ObservationMuxStorage(
 
   /** Send the one command that moves [key]'s daemon-side observer toward [channel]'s intent. */
   private fun drive(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
+    // Most acknowledgements need no follow-up: settle those without queueing the shared reader
+    // behind another thread's socket write. driveInOrder re-checks under the write order.
+    if (synchronized(table.lock) { !channel.storage.needsCommand(key) }) return
     synchronized(writeOrder) { driveInOrder(channel, key) }
   }
 

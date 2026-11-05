@@ -15808,6 +15808,13 @@
               },
               "optional": true
             },
+            "backend": {
+              "rule": {
+                "kind": "enum",
+                "values": ["auto", "google", "maplibre"]
+              },
+              "optional": true
+            },
             "camera": {
               "rule": {
                 "kind": "ref",
@@ -24660,6 +24667,14 @@
     },
     "map": {
       "capability": "prototype_platform_map_v1",
+      "backends": {
+        "google": {
+          "capability": "prototype_platform_map_google_v1"
+        },
+        "maplibre": {
+          "capability": "prototype_platform_map_maplibre_v1"
+        }
+      },
       "calls": {},
       "events": {
         "markerTap": {

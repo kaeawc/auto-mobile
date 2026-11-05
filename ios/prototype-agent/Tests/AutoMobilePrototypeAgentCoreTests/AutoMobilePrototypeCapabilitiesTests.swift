@@ -75,6 +75,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_sensors_v1",
             // Contract only; the map renderers are owed (#14310, #14311).
             "prototype_platform_map_v1",
+            // Contract only; map backends are advertised once their renderers can serve them (#14302).
+            "prototype_platform_map_google_v1",
+            "prototype_platform_map_maplibre_v1",
             // Contract only; the web view runtimes and the ProtoViewer import rule are owed (#14312).
             "prototype_platform_webview_v1",
             // Contract only; the location runtimes are owed (#14325, #14326).

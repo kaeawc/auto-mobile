@@ -12847,6 +12847,12 @@
         "hasDefault": true
       },
       {
+        "name": "backend",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "camera",
         "type": "json",
         "nullable": true,

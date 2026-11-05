@@ -144,6 +144,8 @@
     "loading-states.json",
     "location-block-minimal.json",
     "location-block.json",
+    "map-backend-channel-literal.json",
+    "map-backends.json",
     "map-marker-tap-emit-context.json",
     "map-node-limits.json",
     "map-node.json",
@@ -1049,6 +1051,7 @@
     "long-press-dangling-pager.json",
     "long-press-empty-list.json",
     "long-press-on-button.json",
+    "map-backend-unknown.json",
     "map-camera-bearing-over.json",
     "map-camera-idle-into-not-data.json",
     "map-camera-lat-over.json",
@@ -2034,6 +2037,8 @@
     "strict-gate-prototype_platform_haptics_v1.json",
     "strict-gate-prototype_platform_links_v1.json",
     "strict-gate-prototype_platform_location_v1.json",
+    "strict-gate-prototype_platform_map_google_v1.json",
+    "strict-gate-prototype_platform_map_maplibre_v1.json",
     "strict-gate-prototype_platform_map_v1.json",
     "strict-gate-prototype_platform_mediaLibrary_query_v1.json",
     "strict-gate-prototype_platform_mediaLibrary_save_v1.json",
@@ -3553,6 +3558,13 @@
       "prototype_platform_v1",
       "prototype_platform_webview_v1"
     ],
+    "map-backends.json": [
+      "prototype_platform_map_google_v1",
+      "prototype_platform_map_maplibre_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"],
     "platform-permissions-request.json": [
       "prototype_platform_permissions_v1",
       "prototype_platform_v1"

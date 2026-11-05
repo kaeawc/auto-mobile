@@ -36270,6 +36270,10 @@
                       "type": "string",
                       "enum": ["plain", "streets"]
                     },
+                    "backend": {
+                      "type": "string",
+                      "enum": ["auto", "google", "maplibre"]
+                    },
                     "camera": {
                       "anyOf": [
                         {

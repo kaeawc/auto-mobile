@@ -14,7 +14,7 @@ export const SURVIVAL_EVENT_IDS = [
 
 export type SurvivalEventId = (typeof SURVIVAL_EVENT_IDS)[number];
 export type SurvivalOutcome = "ran" | "delayed" | "never";
-/** Values are measured on an API 35 emulator; TODO_MEASURE is no longer used by the catalog. */
+/** The twelve original profiles are measured on an API 35 emulator; OEM profiles from #17126 are TODO_MEASURE until measured. */
 export type ExpectedSurvivalScore = Record<SurvivalEventId, SurvivalOutcome | "TODO_MEASURE">;
 
 export const KILL_PROFILE_EXPECTED_SCORES: Record<KillProfileId, ExpectedSurvivalScore> = {
@@ -137,5 +137,75 @@ export const KILL_PROFILE_EXPECTED_SCORES: Record<KillProfileId, ExpectedSurviva
     "foreground-service": "ran",
     "boot-receiver": "ran",
     "push-broadcast": "ran",
+  },
+  "huawei-powergenie": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
+  "vivo-autostart": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
+  "realme-power-saver": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
+  "meizu-flyme-background": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
+  "asus-power-master": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
+  "sony-stamina": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
+  "tecno-app-halt": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
   },
 };

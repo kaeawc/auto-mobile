@@ -453,6 +453,8 @@ class WebSocketServer(
     // show_prototype honours window.backdrop (#15126): API 31+ blur-behind, else a tonal fill; the
     // show result reports backdrop blur or fallback.
     add("prototype_backdrop_v1")
+    add("prototype_platform_window_controls_v1")
+    add("prototype_hide_keyboard_v1")
     // A device-persistent prototype buffers its events while no host is connected and replays them,
     // and inspect_prototypes reports what it is showing. Older hosts never send inspect_prototypes.
     add("prototype_persistence_replay_v1")

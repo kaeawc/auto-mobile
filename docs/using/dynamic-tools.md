@@ -88,8 +88,12 @@ ignored with a startup log message because they have no configurable
 enable/disable state. Persisted session choices take precedence over CLI values,
 which take precedence over environment values and built-in defaults.
 
-Some tools also require a process option such as `--debug`, `--embedded-sdk`,
-or `--tool-call-recording`. Plan-only tools are never shown in public discovery.
+Some tools also require a process option such as `--debug` or `--embedded-sdk`.
+`recordToolCalls` needs no process option: `setToolEnabled` lists it, and its
+`tool-call-recording` feature flag is on by default. If that flag was turned off,
+`begin` and `end` fail until it is re-enabled with `--tool-call-recording` or in
+the IDE plugin's feature flags.
+Plan-only tools are never shown in public discovery.
 
 If a tool is missing, check its exact name and required process options, then
 refresh discovery after the `notifications/tools/list_changed` notification.

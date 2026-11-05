@@ -367,11 +367,16 @@ describe("survival host safeguards with fakes", () => {
     expect(report.results.map((result) => result.profileId)).toEqual([...KILL_PROFILE_IDS]);
     for (const result of report.results) {
       expect(Object.values(result.score)).toEqual(SURVIVAL_EVENT_IDS.map(() => "never"));
-      expect(result.pendingMeasurement).toEqual([]);
-      expect(result.mismatches).toEqual(
+      expect(result.pendingMeasurement).toEqual(
         SURVIVAL_EVENT_IDS.filter(
-          (id) => KILL_PROFILE_EXPECTED_SCORES[result.profileId][id] !== "never",
+          (id) => KILL_PROFILE_EXPECTED_SCORES[result.profileId][id] === "TODO_MEASURE",
         ),
+      );
+      expect(result.mismatches).toEqual(
+        SURVIVAL_EVENT_IDS.filter((id) => {
+          const expected = KILL_PROFILE_EXPECTED_SCORES[result.profileId][id];
+          return expected !== "TODO_MEASURE" && expected !== "never";
+        }),
       );
     }
     expect(

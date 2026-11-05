@@ -18,8 +18,13 @@ function host() {
   simctl.listing = structuredClone(fixture);
   const manager = new MultiPlatformDeviceManager(
     new FakeAdbClient(),
-    fakeDeviceManagerSimctl(),
+    fakeDeviceManagerSimctl({
+      isAvailable: async () => true,
+      getBootedSimulatorsChecked: async () => [],
+    }),
     createFakeAndroidEmulator(),
+    // Fake the physical-device lister so resolution never spawns the real devicectl.
+    { physicalIosDevices: { listConnectedDevices: async () => ({ devices: [], complete: true }) } },
   ).withAppleVisionSimulators(new AppleVisionSimulatorInventory(simctl, "arm64"));
   return { simctl, manager };
 }

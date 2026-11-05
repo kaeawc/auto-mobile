@@ -334,6 +334,16 @@ the device really should be stopped out from under its holder.
 Listing, provisioning, starting, deleting and driving Apple TV simulators are covered in
 [Apple TV simulators](apple-tv.md).
 
+## Apple Vision Pro simulators
+
+Name `platform: "visionos"` or a Vision Pro session to use `installApp`,
+`uninstallApp`, `launchApp`, `terminateApp` and `listApps` on an Apple Vision Pro
+simulator. Install a `.app` bundle built for the visionOS simulator;
+`launchApp` refuses `prototype: true`. `observe` returns a screenshot-only
+observation with `hierarchyUnavailable`. No visionOS runner exists yet: absent
+hierarchy fields do not mean the screen is empty; read the screenshot.
+Gesture and input tools are not supported.
+
 ## Apple Watch simulators
 
 A watch is reached only by naming it: `platform: "watchos"`, or the

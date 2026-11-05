@@ -51,6 +51,7 @@ class DeniedNetworkTest {
         LibraryClock { 42 },
         settings = settings,
         allowedClient = { client },
+        blocklist = FakeContentBlocklist(),
       )
     }
     val context: Context = app

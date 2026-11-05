@@ -75,6 +75,16 @@ internal class HubObservationStreams(
     fun connect(key: DeviceStreamKey, reconnect: Boolean) =
       synchronized(connectLock) {
         if (retired) return@synchronized
+        if (reconnect) {
+          // A racing reconnect (the supervisor's and a manual retry both saw the drop) already
+          // revived the stream; resetting now would drop its fresh confirmations for good.
+          if (stream.isConnected()) return@synchronized
+          // The drop may never be collected (StateFlow conflates): forget confirmations here too.
+          storage.connectionReset()
+          // The replay still holds the pre-outage layout, and the stream reports connected before
+          // the resubscribe's initial frames arrive: drop it so no lease re-arms from it (#17041).
+          stream.resetLayoutReplayCache()
+        }
         stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
         if (reconnect) reconnects.update { it + 1 }
       }

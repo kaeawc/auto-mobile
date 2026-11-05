@@ -162,6 +162,13 @@ Import needs identical accept/reject behaviour on all three platforms.
 - Import uses `fileImporter` and `onOpenURL` (document UTI `dev.jasonpearson.automobile.prototype`).
   Image decode has a pixel budget and a PNG/JPEG/WebP magic-byte allowlist before `UIImage(data:)`.
   Fonts are unregistered when switching prototypes.
+- **Copy diagnostics** in the viewer actions menu copies plain text with fixed, unlocalized keys:
+  app version, iOS version, sorted renderer capabilities, the last fixed failure code and whether
+  the render watchdog tripped. `ViewerDiagnostics` in Core has no field for spec text, validator
+  paths or messages, labels, library ids, saved state or requests. Library load failures use
+  `library-corrupt`, storage opening uses `storage-load`, metadata/reset failures use `library-storage`,
+  renderer validation uses `validation`, and watchdog expiry uses `watchdog`. The watchdog flag stays
+  true for the open screen even after relaunch. Core tests cover formatting and content exclusion.
 - Network: requests go through a pin-capable transport, not `URLSession`; App Transport Security is
   relaxed only in the simulator and dev build; see section 6.
 
@@ -213,11 +220,12 @@ directory or one index file):
   "source": "mcp|file|share|paste",
   "specSha256": "...",
   "requires": ["prototype_data_model_v1"],
-  "pinned": false
+  "pinned": false,
+  "sourceHost": "proto.example.com"
 }
 ```
 
-`source` and trust are app-owned: the importing code path writes them from how the bytes arrived,
+`source`, `sourceHost` and trust are app-owned: the importing code path writes them from how the bytes arrived,
 and they are never read from bundle bytes. The file is never part of an export. A corrupt or
 unreadable `library.json` entry is skipped, not fatal.
 
@@ -257,6 +265,30 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   fetch with the egress check, and refuse a mismatch before the strict import path, with
   `source: "share"`. Links do not expire. Android only; iOS distribution beyond dev-signed builds is
   out of scope.
+
+**Report, hide and block** (App Store 1.2, Play UGC). They apply only to received content
+(`source` `file` or `share`); the user's own `mcp` and `paste` prototypes are never hidden.
+Android implements them; the iOS viewer does not yet (#16437).
+
+- Identity: Block uses the link-origin host, the lowercase DNS host a link import (#14128) fetched
+  the bundle from, recorded in `library.json` as `sourceHost` (null for every other source). The
+  bundle carries no author field, because a self-asserted author would be spoofable. A file or
+  share-sheet import has no sender identity, so it offers Hide and Report but not Block.
+- Hide stores the entry's `specSha256` locally. It hides that content, including identical copies
+  received later, and blocks no one.
+- The blocklist (hidden spec hashes, blocked hosts) is local app state, never exported. A repository
+  decorator applies it to every reader, so a hidden entry is absent from the list, MCP `open` and
+  the viewer.
+- Hiding deletes. Confirming Hide or Block deletes every matching received entry (bundle, metadata
+  and viewer storage); only the hash or host stays, in the blocklist. The confirmation says so. App
+  start repeats the sweep, so an entry whose delete failed before its metadata was removed is
+  retried. A later file or share import of hidden content, or of content from a blocked host, is
+  rejected as `Hidden` ("hidden on this device") before anything is staged or stored, so hidden
+  content does not hold library quota. There is no unhide.
+- Report opens the user's mail app addressed to the published contact
+  (`automobile+coc@jasonpearson.dev`, the project's code-of-conduct enforcement address) with the
+  label, spec SHA-256, source and host. The app sends nothing itself and attaches no bundle bytes.
+  The library shows the same contact in a "Report a problem" row.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 

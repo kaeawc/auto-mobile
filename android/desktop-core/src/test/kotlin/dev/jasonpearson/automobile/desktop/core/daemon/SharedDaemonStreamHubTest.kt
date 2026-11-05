@@ -183,7 +183,8 @@ class SharedDaemonStreamHubTest {
 
     h.hub.close()
 
-    assertTrue(h.telemetry.subscriptions.all { it.closed })
+    // Released by the hub itself, not swept up when the multiplexer closed.
+    assertTrue(h.telemetry.subscriptions.all { it.released })
     assertTrue(h.telemetry.closed)
   }
 

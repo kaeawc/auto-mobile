@@ -14,6 +14,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   Record<NonIosApplePlatform, ReadonlySet<string>>
 > = {
   watchos: new Set<string>([
+    "postNotification",
     "rotateCrown",
     "tapOn",
     "tapAt",
@@ -44,8 +45,14 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "setActiveDevice",
     "killDevice",
   ]),
-  // simctl lifecycle only; every other tool joins once verified on a Vision Pro.
+  // simctl lifecycle, app management and screenshot-only observation.
   visionos: new Set<string>([
+    "installApp",
+    "uninstallApp",
+    "launchApp",
+    "terminateApp",
+    "listApps",
+    "observe",
     "listDevices",
     "listDeviceImages",
     "provisionDevice",

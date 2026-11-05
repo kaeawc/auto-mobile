@@ -777,6 +777,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # ShellReachabilityTest (desktop-core) treats desktop-app and ide-plugin main sources as its
+  # reachability roots, so an app- or plugin-only change can strand a shell/ component without
+  # touching desktop-core (#16964). The full desktop-core suite already runs it when
+  # desktop_core_changed, so this narrow run covers only the plugin-only and app-only cases.
+  desktop-core-shell-reachability:
+    timeout-minutes: 20
+    name: "Run Desktop Shell Reachability Test"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: (needs.detect-changes.outputs.desktop_app_changed == 'true' || needs.detect-changes.outputs.ide_plugin_changed == 'true') && needs.detect-changes.outputs.desktop_core_changed != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":desktop-core:test"
+          gradle-flags: '["--tests", "*ShellReachabilityTest"]'
+          # Same task list as desktop-core-unit-tests, so namespace the config-cache report.
+          artifact-name-suffix: "shell-reachability"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   build-ide-plugin:
     timeout-minutes: 20
     name: "Build IDE Plugin"
@@ -1033,6 +1063,11 @@ jobs:
 
       - wait: [setup-python-lock, setup-uv-lock]
 
+      # The claude-plugin check fails in CI without the Claude CLI (#16963).
+      - name: "Install pinned Claude Code"
+        timeout-minutes: 10
+        uses: ./.github/actions/install-claude-code
+
       - name: "Run fast validation checks"
         shell: bash
         env:
@@ -1043,7 +1078,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1136,6 +1171,12 @@ jobs:
       - name: "Install Bun dependencies"
         shell: bash
         run: scripts/ci/install-bun-deps.sh
+
+      # The selector adds `claude-plugin` for plugin changes, and that check fails
+      # in CI without the Claude CLI (#16963). Foreground: it appends to $GITHUB_PATH.
+      - name: "Install pinned Claude Code"
+        timeout-minutes: 10
+        uses: ./.github/actions/install-claude-code
 
       - wait: [install-bats, install-uv]
 

@@ -96,15 +96,31 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
   });
 
-  test("visionOS starts with only the device lifecycle tools (#16848)", () => {
+  test("visionOS allows lifecycle, app tools and screenshot observation", () => {
     expect([...APPLE_PLATFORM_SUPPORTED_TOOLS.visionos].sort()).toEqual(
-      [...DEVICE_LIFECYCLE_TOOLS].sort(),
+      [
+        ...DEVICE_LIFECYCLE_TOOLS,
+        "installApp",
+        "uninstallApp",
+        "launchApp",
+        "terminateApp",
+        "listApps",
+        "observe",
+      ].sort(),
     );
-    for (const tool of DEVICE_LIFECYCLE_TOOLS) {
+    for (const tool of [
+      ...DEVICE_LIFECYCLE_TOOLS,
+      "installApp",
+      "uninstallApp",
+      "launchApp",
+      "terminateApp",
+      "listApps",
+      "observe",
+    ]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
       expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
     }
-    for (const tool of ["observe", "tapOn", "installApp", "launchApp", "sendKeys", "pressButton"]) {
+    for (const tool of ["tapOn", "tapAt", "swipeOn", "sendKeys", "pressButton", "tapAny"]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
         new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
       );
@@ -117,6 +133,19 @@ describe("assertToolSupportsDevicePlatform", () => {
       expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).not.toThrow();
       expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has(tool)).toBe(false);
     }
+  });
+
+  test("admits postNotification on watchOS while refusing tvOS", () => {
+    expect(() => assertToolSupportsDevicePlatform("postNotification", watch)).not.toThrow();
+    expect(() =>
+      assertRequestedPlatformSupported("postNotification", { platform: "watchos" }),
+    ).not.toThrow();
+    expect(() => assertToolSupportsDevicePlatform("postNotification", appleTv)).toThrow(
+      "does not support tvOS yet",
+    );
+    expect(() =>
+      assertRequestedPlatformSupported("postNotification", { platform: "tvos" }),
+    ).toThrow("does not support tvOS yet");
   });
 
   test("never rejects an Android or iOS device", () => {
@@ -202,8 +231,8 @@ describe("assertRequestedPlatformSupported", () => {
     expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),
     );
-    expect(() => assertRequestedPlatformSupported("observe", { platform: "visionos" })).toThrow(
-      new ActionableError(unsupportedPlatformToolMessage("observe", "visionos")),
+    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "visionos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("tapOn", "visionos")),
     );
   });
 

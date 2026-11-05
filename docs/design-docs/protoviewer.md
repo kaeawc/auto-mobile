@@ -402,6 +402,11 @@ Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When 
   permitted only in the dev flavor.
 - Library prototypes use the device route only: `via: "host"` is rejected, and ProtoViewer never
   sets up `adb reverse`.
+- Remote `image` URLs (owner decision, not implemented yet; `image` currently accepts only `asset`)
+  count as network.
+  They load only while the switch is on, go through the same egress check and pinned transport as
+  `request`, and must be https outside the dev flavor. They never send cookies or referrers, and the
+  URL never appears in accessibility text. `via: "host"` image fetches are rejected like host requests.
 - A provenance indicator lives in an app-reserved region outside the spec's drawable bounds and
   stays visible while network is enabled.
 - Storage is keyed by library id; a new entry starts empty. The bundle carries `spec.id` inside
@@ -785,6 +790,7 @@ harnesses and a nightly CI job remain future work.
 | Missing referenced assets  | Reject the import on every platform with the offending path (owner, 2026-10-21, #14542).                                        |
 | Android LAN permission     | Declare `ACCESS_LOCAL_NETWORK` + `INTERNET`, request on switch-on (owner, 2026-10-21, #14539).                                  |
 | MCP-saved prototypes       | Follow the imported-prototype network policy.                                                                                   |
+| Remote image URLs          | Count as network, same policy as `request`; https only outside dev (owner, 2026-10-31, #14180).                                 |
 | Store identity             | `dev.jasonpearson.automobile.protoviewer` on both stores, `.dev` for dev builds, title ProtoViewer (owner, 2026-10-31, #14144). |
 | Store accounts             | Personal enrollment on both stores; Play needs a 14-day closed test with 12 testers first (owner, 2026-10-31, #14144).          |
 | Store support and privacy  | Hosted on the docs site: `protoviewer/support.md` and `protoviewer/privacy.md` (owner, 2026-10-31, #14144).                     |

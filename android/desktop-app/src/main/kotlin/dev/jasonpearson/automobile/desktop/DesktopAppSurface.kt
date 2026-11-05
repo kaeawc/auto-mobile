@@ -306,6 +306,7 @@ internal fun DesktopWorkspaceShell(
         options =
           WorkspaceShellOptions(
             onDeviceSessionSuperseded = supersededForwarder::onSuperseded,
+            onDeviceSessionEnded = supersededForwarder::onEnded,
             onOpenPicker = workspaceViewModel::openPicker,
             onOpenPalette = { paletteOpen = true },
             externalCaptureRequest = captureRequest,

@@ -297,23 +297,44 @@ export async function bootAndBindHeadset(
 
 /**
  * A cold boot no session holds yet is stopped; a headset another request bound, or another
- * daemon claims, is left alone.
+ * daemon claims, is left alone. The stop runs under the pool's shutdown reservation, which
+ * re-checks the holder under the assignment mutex and keeps a concurrent bind (setActiveDevice)
+ * off the headset until the stop ends, as killDevice does.
  */
 async function stopUnboundColdBoot(
   lifecycle: Pick<AppleVisionSimulatorBoot, "stopColdBooted">,
   boot: AppleVisionBootResult | undefined,
   udid: string,
 ): Promise<void> {
-  if (boot?.acquisition !== "cold-boot" || holderOf(initializedDevicePool()?.getDevice(udid))) {
+  if (boot?.acquisition !== "cold-boot") {
     return;
   }
+  const pool = initializedDevicePool();
+  const assertUnheld = () => {
+    const holder = holderOf(pool?.getDevice(udid));
+    if (holder) {
+      throw new ActionableError(`session ${holder} holds it now`);
+    }
+  };
   try {
+    assertUnheld();
     // A bind refused for another daemon's claim leaves no local holder: the headset is theirs.
     await assertVisionNotClaimedByForeignDaemon(udid);
-    await lifecycle.stopColdBooted(boot);
+    const reservation = await pool?.reserveDeviceForShutdown(udid, undefined, undefined, {
+      assertHolder: assertUnheld,
+      fenceUnpooled: true,
+    });
+    try {
+      await lifecycle.stopColdBooted(boot);
+    } finally {
+      await reservation?.release();
+      if (!reservation) {
+        pool?.settleUnpooledShutdown(udid);
+      }
+    }
   } catch (error) {
     logger.warn(
-      `[visionOS] Could not stop Apple Vision Pro simulator ${udid} after its start failed: ${errorMessage(error)}`,
+      `[visionOS] Leaving Apple Vision Pro simulator ${udid} running after its start failed: ${errorMessage(error)}`,
       error,
     );
   }

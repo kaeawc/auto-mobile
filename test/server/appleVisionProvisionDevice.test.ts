@@ -1100,6 +1100,37 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(sessions.getAllSessions()).toEqual([]);
   });
 
+  test("a session bound while cleanup reads foreign claims keeps its headset running", async () => {
+    const existing = visionDevice({ name: NAME });
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl; pool?: DevicePool } = {};
+    const claims = new FakeVisionClaims(() => false);
+    const read = claims.refresh.bind(claims);
+    claims.refresh = async (ids) => {
+      await read(ids);
+      // Cleanup's foreign-claim read follows the boot; a concurrent bind lands while it is pending.
+      if (ref.simctl?.commands.some((command) => command.startsWith("boot ")) && ref.pool) {
+        await ref.pool.addDevice({ name: NAME, platform: "visionos", deviceId: existing.udid });
+        patchDeviceBinding(ref.pool.getDevice(existing.udid)!, {
+          sessionId: "concurrent-session",
+          status: "busy",
+        });
+      }
+    };
+    const { simctl, pool } = await arrange([existing], { ownership: claims });
+    ref.simctl = simctl;
+    ref.pool = pool;
+
+    const error = await failure(
+      provisionVisionDirect({ __mcpSessionId: "client-a", device: headset }, async () => {
+        throw new Error("session bind failed");
+      }),
+    );
+
+    expect(String(error)).toContain("session bind failed");
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 480000`]);
+    expect(pool.getDevice(existing.udid)?.sessionId).toBe("concurrent-session");
+  });
+
   test("startDevice cancelled between boot and bind stops the headset it cold-booted", async () => {
     const existing = visionDevice({ name: NAME });
     const { simctl, sessions, pool } = await arrange([existing]);

@@ -102,7 +102,7 @@ export async function captureObserverHierarchy(
   try {
     return (await hierarchyCapture.capture(request)).hierarchy;
   } catch (error) {
-    if (request.signal?.aborted) {
+    if (request.signal?.aborted || error instanceof AndroidDisplayReadError) {
       throw error;
     }
     const queued = findRunnerLaunchQueuedError(error);

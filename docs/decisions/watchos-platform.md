@@ -12,7 +12,8 @@ non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platfo
 everything below that says "watch" applies to it unless a section names watchOS specifically.
 `tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
 `startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
-`terminateApp`, `listApps`, `observe`, `tapOn` and `pressButton`. Discovery and selection require an explicit
+`terminateApp`, `listApps`, `observe`, `tapOn`, `pressButton`, `videoRecording` and
+`compareScreenshot`. Discovery and selection require an explicit
 tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
 readiness after best-effort tvOS runner startup, without iOS keyboard, biometric or prototype setup.
 The tvOS runner uses `request_hierarchy` through the iOS hierarchy converter, preserving focus
@@ -27,7 +28,11 @@ long press and text input are unsupported. A tvOS handshake is required before r
 xctestrun is discovered or the `AutoMobileTVTest` scheme is built with a 120-second limit.
 Startup uses the tvOS destination and an isolated xctestrun with `AM_PORT`; runner ownership,
 release, shutdown and deletion follow the watch lifecycle. Connected observations use runner
-screenshots, while observations without a runner retain the simctl screenshot-only fallback. A broker binding
+screenshots, while observations without a runner retain the simctl screenshot-only fallback.
+`videoRecording` captures through the iOS simulator `simctl io recordVideo` path on simctl's
+default display (`VideoRecordingPlatform`; rows store `tvos`); audio is refused. `compareScreenshot`
+uses the same screenshot source; without a runner it has no point geometry, so it compares only
+the full screenshot and refuses regions, and a tvOS profile is keyed by screenshot size alone. A broker binding
 never reuses a TV. Unlike watchOS,
 `tvos` is advertised in tool input schemas ahead of support (see the schema rule below).
 

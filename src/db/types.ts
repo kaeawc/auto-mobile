@@ -1,5 +1,6 @@
 import type { InstalledAppsTable } from "../models/InstalledAppsStore";
 import type { Platform } from "../models/Platform";
+import type { VideoRecordingPlatform } from "../models/VideoRecordingPlatform";
 import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 
 /**
@@ -656,7 +657,7 @@ export interface DeviceSnapshotConfigsTable {
 export interface VideoRecordingsTable {
   recording_id: string;
   device_id: string;
-  platform: "android" | "ios";
+  platform: VideoRecordingPlatform;
   status: string;
   output_name: string | null;
   file_name: string;

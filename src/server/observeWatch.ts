@@ -4,6 +4,7 @@ import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecy
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
+import { captureTvosRunnerScreenshot } from "../features/tvos/TvosScreenshot";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
 import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
@@ -351,13 +352,5 @@ function defaultWatchScreenshotSource(device: BootedDevice): WatchScreenshotSour
 }
 
 const runnerTvosScreenshotSource: WatchScreenshotSource = {
-  capture: async (device, _display, signal) => {
-    const data = await tvosRunners
-      .require(device.deviceId)
-      .request({ type: "request_screenshot" }, signal);
-    if (typeof data !== "string") {
-      throw new ActionableError("Invalid tvOS screenshot; reconnect the runner.");
-    }
-    return Buffer.from(data, "base64");
-  },
+  capture: (device, _display, signal) => captureTvosRunnerScreenshot(device, signal),
 };

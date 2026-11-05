@@ -2197,7 +2197,7 @@
               "minLength": 1
             },
             "rect": {
-              "description": "Platform-native screen rectangle: Android pixels, iOS points",
+              "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points",
               "type": "object",
               "properties": {
                 "left": {
@@ -2232,7 +2232,7 @@
                 "minLength": 1
               },
               "rect": {
-                "description": "Platform-native screen rectangle: Android pixels, iOS points",
+                "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points",
                 "type": "object",
                 "properties": {
                   "left": {

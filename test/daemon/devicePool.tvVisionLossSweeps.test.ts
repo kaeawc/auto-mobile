@@ -10,6 +10,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/deviceLossMisses";
+import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 
 // The pool's own refresh and loss reads sweep the Apple TV and Vision Pro simulator families it
 // tracks, so a pooled headset that shuts down is released; a family it does not track is never
@@ -113,5 +114,27 @@ describe("pool sweeps of tracked Apple TV and Vision Pro simulators", () => {
     expect(
       reads.every(({ options }) => options.includeAppleSimulatorPlatforms?.includes("visionos")),
     ).toBe(true);
+  });
+
+  test("the refreshed inventory lists a live pooled headset; totals stay Android and iOS", async () => {
+    const pool = await poolOver(hostWithHeadset(), [IPHONE, HEADSET]);
+
+    const { stats, deviceIds } = await pool.getRefreshedInventory();
+
+    expect([...deviceIds].toSorted()).toEqual([IPHONE.deviceId, HEADSET.deviceId].toSorted());
+    expect(stats.total).toBe(1);
+  });
+
+  test("a failed visionOS listing makes the refreshed inventory unknown, not short", async () => {
+    const utils = hostWithHeadset();
+    const pool = await poolOver(utils, [IPHONE, HEADSET]);
+    utils.failedPlatforms.add("visionos");
+
+    const error = await pool.getRefreshedInventory().then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
   });
 });

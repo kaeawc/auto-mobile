@@ -338,7 +338,8 @@ export class DevicePoolAssignment {
   /**
    * The pooled device ids the booted-devices resource and listDevices would list: what discovery
    * reports now plus held Android devices adb still lists offline and held simulators `simctl` lists
-   * Booting / Shutting Down (#11573). A pooled entry outside this set
+   * Booting / Shutting Down (#11573), for every platform with pooled entries, watchOS, tvOS and
+   * visionOS included. A pooled entry outside this set
    * is a phantom (shut down since the last refresh) and must not be counted (#11568). Only
    * platforms with pooled entries are read, through the manager's own discovery path (adb's
    * device-list cache applies), so a stats read adds one listing per such platform and no
@@ -351,7 +352,8 @@ export class DevicePoolAssignment {
   async readLiveInventoryDeviceIds(signal: AbortSignal | undefined): Promise<Set<string>> {
     const live = new Set<string>();
     const read = new Map<Platform, BootedDeviceDiscovery>();
-    for (const platform of ["android", "ios"] as const) {
+    // Pooled watches, TVs and headsets are listed too; pool totals still count Android and iOS.
+    for (const platform of ["android", "ios", "watchos", "tvos", "visionos"] as const) {
       if (this.callbacks.getDevicesByPlatform(platform).length === 0) {
         continue;
       }

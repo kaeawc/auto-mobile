@@ -53480,6 +53480,122 @@
               ],
               "description": "Integrity signals (Android): maximally-detectable enables su-binary, superuser-apk and selinux-permissive; minimally-detectable disables them. Or { preset?, signals?: { <signal-id>: 'on' | 'off' } }, with at least one field and signals overriding the preset. Needs root and writable /system for files. Image-fixed signals and missing-otacerts report unsupported. Results include per-signal status and post-apply active readings. 'unset' restores prior state; existing image/rootState files are never removed."
             },
+            "statusBar": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "time": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "batteryLevel": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "batteryState": {
+                      "type": "string",
+                      "enum": ["charging", "charged", "discharging"]
+                    },
+                    "cellularBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4
+                    },
+                    "wifiBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "dataNetwork": {
+                      "type": "string",
+                      "enum": ["wifi", "5g", "lte", "4g", "3g", "hide"]
+                    },
+                    "operatorName": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Override the status bar ({ time?, batteryLevel?, batteryState?, cellularBars?, wifiBars?, dataNetwork?, operatorName? }, at least one). iOS Simulator only so far; reset clears every override. Or unset."
+            },
+            "privacy": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "appId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9._-]+$",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "calendar",
+                        "contacts-limited",
+                        "contacts",
+                        "location",
+                        "location-always",
+                        "photos-add",
+                        "photos",
+                        "media-library",
+                        "microphone",
+                        "motion",
+                        "reminders",
+                        "siri"
+                      ]
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": ["grant", "revoke"]
+                    }
+                  },
+                  "required": ["appId", "service", "action"],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Grant or revoke one privacy service for an installed app ({ appId, service, action }). iOS Simulator only so far; reset restores the app's earlier decision for that service (granted, denied, or not yet asked). Refused when that decision cannot be restored, such as limited Photos access. Or unset."
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "latitude": {
+                      "type": "number",
+                      "minimum": -90,
+                      "maximum": 90
+                    },
+                    "longitude": {
+                      "type": "number",
+                      "minimum": -180,
+                      "maximum": 180
+                    }
+                  },
+                  "required": ["latitude", "longitude"],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Simulate the device location ({ latitude, longitude }). iOS Simulator only so far; reset clears the simulated location. Or unset."
+            },
             "faults": {
               "type": "object",
               "properties": {

@@ -25,7 +25,7 @@ final class PrototypeSettingsRuntimeTests: XCTestCase {
         XCTAssertEqual(module.capability, "prototype_platform_settings_v1")
         for page in ["app", "notifications"] {
             let result = await open(module, page: page)
-            XCTAssertEqual(result, .success(.object([:])))
+            XCTAssertEqual(result, .success(.object(["outcome": .string("opened"), "page": .string(page)])))
         }
         XCTAssertEqual(opener.opened, try [XCTUnwrap(opener.appSettingsURL), XCTUnwrap(opener.notificationSettingsURL)])
     }

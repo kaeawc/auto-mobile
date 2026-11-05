@@ -12,6 +12,20 @@ final class PrototypeViewCommandsTests: XCTestCase {
         }
     }
 
+    func testQueueHoldsCommandsUntilAWindowIsAttachedThenRunsOnce() {
+        var queue = PrototypeViewCommandQueue()
+        queue.run([.hideKeyboard], in: nil)
+        XCTAssertFalse(queue.isEmpty)
+        let window = Window()
+        queue.run([], in: window)
+        XCTAssertEqual(window.forced, [true])
+        XCTAssertTrue(queue.isEmpty)
+        queue.run([], in: window)
+        XCTAssertEqual(window.forced, [true])
+        queue.run([.hideKeyboard], in: window)
+        XCTAssertEqual(window.forced, [true, true])
+    }
+
     func testHideKeyboardActionEndsEditingOnThePrototypeWindowAndDrainsOnce() throws {
         let spec = try JSONDecoder().decode(
             PrototypeSpec.self,

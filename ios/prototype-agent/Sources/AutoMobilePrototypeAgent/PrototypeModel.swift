@@ -154,7 +154,12 @@
 
         var safeInsets = UIEdgeInsets.zero
         /// The content's actual window, including the embedded ProtoViewer host.
-        @ObservationIgnored weak var prototypeWindow: UIWindow?
+        @ObservationIgnored weak var prototypeWindow: UIWindow? {
+            // Commands drained before the window existed run as soon as it is attached.
+            didSet { viewCommandQueue.run([], in: prototypeWindow) }
+        }
+
+        @ObservationIgnored private var viewCommandQueue = PrototypeViewCommandQueue()
         @ObservationIgnored private var windowControls: PrototypeWindowControlsRuntime?
         @ObservationIgnored private weak var controlledWindow: UIWindow?
 
@@ -477,7 +482,7 @@
             // An accepted show, including a same-id replace, is activity.
             if mode.expiresWhenIdle { idleTimer.arm() }
             onVisibilityChange?(true)
-            PrototypeViewCommands.perform(viewCommands, in: prototypeWindow)
+            viewCommandQueue.run(viewCommands, in: prototypeWindow)
             apply(activity: false) { _ in [] }
         }
 
@@ -742,7 +747,7 @@
                 hitRects.removeAll()
                 onVisibilityChange?(false)
             }
-            PrototypeViewCommands.perform(viewCommands, in: prototypeWindow)
+            viewCommandQueue.run(viewCommands, in: prototypeWindow)
             timers.perform(timerCommands)
             platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)

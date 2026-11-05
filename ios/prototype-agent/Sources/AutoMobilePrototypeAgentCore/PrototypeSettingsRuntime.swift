@@ -33,6 +33,6 @@ final class PrototypeSettingsModule: PrototypePlatformModule {
         guard let url, await opener.open(url) else {
             return .failure(.unavailable, "Unable to open settings page: \(page)")
         }
-        return .success(.object([:]))
+        return .success(.object(["outcome": .string("opened"), "page": .string(page)]))
     }
 }

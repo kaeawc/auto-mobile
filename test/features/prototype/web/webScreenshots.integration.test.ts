@@ -592,6 +592,21 @@ describeBrowser("scroll fade edges follow overflow in headless Chromium (#16606)
         const window = { ...(base.window as Record<string, unknown>), layoutDirection: direction };
         const { page } = await openPage(browser, webSpecPage({ ...base, window }, "fade-edges"));
         try {
+          // The mask comes from a scroll-driven animation whose `scroll(self)` timeline resolves on
+          // a frame after load (#17143), so wait until every overflowing scroll draws it.
+          await page.waitForFunction(() => {
+            const overflowing = Array.from(
+              document.querySelectorAll<HTMLElement>("[data-view]:not([hidden]) [data-fade]"),
+            ).filter((scroll) =>
+              scroll.dataset.fade === "x"
+                ? scroll.scrollWidth > scroll.clientWidth
+                : scroll.scrollHeight > scroll.clientHeight,
+            );
+            return (
+              overflowing.length > 0 &&
+              overflowing.every((scroll) => getComputedStyle(scroll).maskImage !== "none")
+            );
+          });
           const masks = await page.evaluate(() =>
             Object.fromEntries(
               Array.from(

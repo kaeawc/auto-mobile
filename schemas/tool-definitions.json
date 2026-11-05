@@ -51390,14 +51390,17 @@
             "type": "string"
           }
         },
-        "pinnedDisplay": {
+        "errorCode": {
           "$ref": "#/$defs/__schema0"
         },
-        "displayInventory": {
+        "pinnedDisplay": {
           "$ref": "#/$defs/__schema1"
         },
-        "staleDisplay": {
+        "displayInventory": {
           "$ref": "#/$defs/__schema2"
+        },
+        "staleDisplay": {
+          "$ref": "#/$defs/__schema3"
         },
         "commands": {
           "type": "array",
@@ -51405,13 +51408,16 @@
             "type": "object",
             "properties": {
               "pinnedDisplay": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "displayInventory": {
                 "$ref": "#/$defs/__schema1"
               },
-              "staleDisplay": {
+              "displayInventory": {
                 "$ref": "#/$defs/__schema2"
+              },
+              "staleDisplay": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "errorCode": {
+                "$ref": "#/$defs/__schema0"
               },
               "imeFailure": {
                 "type": "object",
@@ -51522,6 +51528,10 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+          "type": "string"
+        },
+        "__schema1": {
           "type": "object",
           "properties": {
             "pin": {
@@ -51557,7 +51567,7 @@
           "required": ["pin", "availablePanels"],
           "additionalProperties": false
         },
-        "__schema1": {
+        "__schema2": {
           "type": "object",
           "properties": {
             "pin": {
@@ -51571,7 +51581,7 @@
           "required": ["retryable"],
           "additionalProperties": false
         },
-        "__schema2": {
+        "__schema3": {
           "type": "object",
           "properties": {
             "observedGeneration": {

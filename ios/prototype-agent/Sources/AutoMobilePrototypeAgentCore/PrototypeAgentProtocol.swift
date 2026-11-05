@@ -43,7 +43,6 @@ enum PrototypeAgentProtocol {
         windowChromeCapability,
         windowControlsCapability,
         hideKeyboardCapability,
-        settingsCapability,
         iconSfSymbolsCapability,
         dataModelCapability,
         dataActionsCapability,
@@ -109,6 +108,7 @@ enum PrototypeAgentProtocol {
     /// `reset` on an agent that does not advertise it.
     static let windowControlsCapability = "prototype_platform_window_controls_v1"
     static let hideKeyboardCapability = "prototype_hide_keyboard_v1"
+    /// Advertised only through the registered `PrototypeSettingsModule`, never the static list.
     static let settingsCapability = "prototype_platform_settings_v1"
     static let showInPlaceCapability = "prototype_show_in_place_v1"
     static let scrollMotionCapability = "prototype_scroll_motion_v1"

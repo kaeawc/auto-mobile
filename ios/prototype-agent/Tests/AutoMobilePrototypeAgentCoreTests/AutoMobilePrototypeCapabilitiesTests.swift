@@ -3,17 +3,27 @@ import Foundation
 import XCTest
 
 final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
-    func testWindowKeyboardAndSettingsAreAdvertisedAtTheMinimumOS() {
+    func testWindowAndKeyboardAreAdvertisedAtTheMinimumOS() {
         struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
         let capabilities = Set(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()))
         for capability in [
             "prototype_platform_window_controls_v1",
             "prototype_hide_keyboard_v1",
-            "prototype_platform_settings_v1",
         ] {
             XCTAssertTrue(capabilities.contains(capability))
             XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains(capability))
         }
+    }
+
+    func testSettingsIsAdvertisedOnlyThroughItsRegisteredModule() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let settings = "prototype_platform_settings_v1"
+        XCTAssertFalse(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(settings))
+        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(settings))
+        XCTAssertTrue(
+            PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS(), registryCapabilities: [settings])
+                .contains(settings)
+        )
     }
 
     func testLayoutDirectionIsAdvertisedAtTheMinimumOS() {
@@ -57,6 +67,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_biometric_v1",
             // Registered by the agent and Viewer registries (#14238), not the static list.
             "prototype_platform_links_v1",
+            // Registered by the agent and Viewer registries, not the static list.
+            "prototype_platform_settings_v1",
             // Contract only; the system picker runtimes are owed (#14318).
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
             // Contract only; the motion and sensor runtimes are owed (#14327).

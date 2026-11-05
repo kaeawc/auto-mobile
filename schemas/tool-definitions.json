@@ -15623,7 +15623,14 @@
             "motorola-adaptive",
             "user-restricted",
             "exact-alarm-denied",
-            "notifications-off"
+            "notifications-off",
+            "huawei-powergenie",
+            "vivo-autostart",
+            "realme-power-saver",
+            "meizu-flyme-background",
+            "asus-power-master",
+            "sony-stamina",
+            "tecno-app-halt"
           ]
         },
         "baseline": {
@@ -15695,7 +15702,14 @@
                 "motorola-adaptive",
                 "user-restricted",
                 "exact-alarm-denied",
-                "notifications-off"
+                "notifications-off",
+                "huawei-powergenie",
+                "vivo-autostart",
+                "realme-power-saver",
+                "meizu-flyme-background",
+                "asus-power-master",
+                "sony-stamina",
+                "tecno-app-halt"
               ]
             },
             "version": {
@@ -15773,7 +15787,14 @@
                   "motorola-adaptive",
                   "user-restricted",
                   "exact-alarm-denied",
-                  "notifications-off"
+                  "notifications-off",
+                  "huawei-powergenie",
+                  "vivo-autostart",
+                  "realme-power-saver",
+                  "meizu-flyme-background",
+                  "asus-power-master",
+                  "sony-stamina",
+                  "tecno-app-halt"
                 ]
               }
             },
@@ -19779,7 +19800,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates effects, not firmware.",
+    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola, huawei-emui, vivo-funtouch, realme-ui, meizu-flyme, asus-zenui, sony-xperia, tecno-hios) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates effects, not firmware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -19798,7 +19819,14 @@
             "xiaomi-hyperos",
             "oneplus-oxygenos",
             "oppo-coloros",
-            "motorola"
+            "motorola",
+            "huawei-emui",
+            "vivo-funtouch",
+            "realme-ui",
+            "meizu-flyme",
+            "asus-zenui",
+            "sony-xperia",
+            "tecno-hios"
           ]
         },
         "appId": {
@@ -19879,7 +19907,14 @@
             "xiaomi-hyperos",
             "oneplus-oxygenos",
             "oppo-coloros",
-            "motorola"
+            "motorola",
+            "huawei-emui",
+            "vivo-funtouch",
+            "realme-ui",
+            "meizu-flyme",
+            "asus-zenui",
+            "sony-xperia",
+            "tecno-hios"
           ]
         },
         "replaced": {
@@ -19890,7 +19925,14 @@
             "xiaomi-hyperos",
             "oneplus-oxygenos",
             "oppo-coloros",
-            "motorola"
+            "motorola",
+            "huawei-emui",
+            "vivo-funtouch",
+            "realme-ui",
+            "meizu-flyme",
+            "asus-zenui",
+            "sony-xperia",
+            "tecno-hios"
           ]
         },
         "manufacturerProfiles": {
@@ -19988,7 +20030,14 @@
                 "xiaomi-hyperos",
                 "oneplus-oxygenos",
                 "oppo-coloros",
-                "motorola"
+                "motorola",
+                "huawei-emui",
+                "vivo-funtouch",
+                "realme-ui",
+                "meizu-flyme",
+                "asus-zenui",
+                "sony-xperia",
+                "tecno-hios"
               ]
             },
             "version": {
@@ -42049,7 +42098,14 @@
                             "xiaomi-hyperos",
                             "oneplus-oxygenos",
                             "oppo-coloros",
-                            "motorola"
+                            "motorola",
+                            "huawei-emui",
+                            "vivo-funtouch",
+                            "realme-ui",
+                            "meizu-flyme",
+                            "asus-zenui",
+                            "sony-xperia",
+                            "tecno-hios"
                           ]
                         },
                         "requires": {

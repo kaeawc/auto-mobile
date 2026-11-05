@@ -1,7 +1,9 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../../utils/android-cmdline-tools/AndroidUserTargetResolver";
-import { isPackageInstalledForUser } from "../../../utils/android-cmdline-tools/isPackageInstalledForUser";
-import { outputLooksLikeShellFailure } from "../../../utils/android-cmdline-tools/shellOutputHeuristics";
+import {
+  outputLooksLikeShellFailure,
+  packageListingContains,
+} from "../../../utils/android-cmdline-tools/shellOutputHeuristics";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import type { Timer } from "../../../utils/SystemTimer";
 import { shellQuote } from "../../../utils/shellQuote";
@@ -13,17 +15,22 @@ import {
   PROTOVIEWER_EXTRA_LIBRARY_ID,
   PROTOVIEWER_EXTRA_REQUEST,
   PROTOVIEWER_INBOX_PATH,
-  PROTOVIEWER_MCP_COMPONENT,
   PROTOVIEWER_MCP_IMPORT_ACTION,
   PROTOVIEWER_MCP_OPEN_ACTION,
   PROTOVIEWER_MCP_PREPARE_ACTION,
-  PROTOVIEWER_PACKAGE,
   PROTOVIEWER_REQUEST_ID,
+  preferredProtoViewerPackage,
+  protoViewerProviderUri,
+  protoViewerProviderCommand,
+  protoViewerProviderWriteCommand,
+  protoViewerStagingPath,
   protoViewerInboxDir,
   protoViewerInboxPath,
+  protoViewerMcpComponent,
   protoViewerMcpRoot,
   protoViewerResultPath,
   protoViewerResultsDir,
+  type ProtoViewerPackage,
   type ProtoViewerResult,
   type ProtoViewerWireResult,
 } from "./protoViewerContract";
@@ -45,6 +52,14 @@ interface AndroidProtoViewerDependencies {
   timer: Timer;
   ids: IdGenerator;
   tempFiles: ProtoViewerTempFiles;
+  /** App IDs to drive, in preference order; defaults to the `.dev` build, then the store build. */
+  appIds?: readonly ProtoViewerPackage[];
+}
+
+/** The Android user and the installed ProtoViewer build (store or `.dev`) this host drives. */
+interface ProtoViewerTarget {
+  readonly userId: number;
+  readonly appId: ProtoViewerPackage;
 }
 
 /** One ProtoViewer intent: its extras, how long to wait for the result, and files to remove after. */
@@ -60,7 +75,7 @@ interface ProtoViewerExchangeOptions {
  * MCP activity, and read back the one result file it writes atomically (no socket, no broadcast).
  */
 export class AndroidProtoViewer implements ProtoViewerDevice {
-  private userId: number | undefined;
+  private target: ProtoViewerTarget | undefined;
 
   constructor(private readonly deps: AndroidProtoViewerDependencies) {}
 
@@ -69,11 +84,17 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       currentUser: true,
       signal,
     });
-    const installed = await isPackageInstalledForUser(this.deps.adb, PROTOVIEWER_PACKAGE, userId, {
+    // One listing for both app IDs; it excludes retained (uninstalled) packages.
+    const listing = await this.deps.adb.executeCommand(`shell pm list packages --user ${userId}`, {
+      noRetry: true,
       signal,
     });
-    this.userId = installed ? userId : undefined;
-    return installed;
+    const appId = preferredProtoViewerPackage(
+      (id) => packageListingContains(listing.stdout, id),
+      this.deps.appIds,
+    );
+    this.target = appId === undefined ? undefined : { userId, appId };
+    return this.target !== undefined;
   }
 
   async importBundle(
@@ -82,21 +103,40 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<ProtoViewerResult> {
-    const userId = await this.requireUser(signal);
+    const target = await this.requireTarget(signal);
     const started = this.deps.timer.now();
     const request = this.requestId();
-    const inbox = protoViewerInboxPath(userId, request);
+    const inbox =
+      target.userId === 0
+        ? protoViewerInboxPath(target.userId, target.appId, request)
+        : protoViewerProviderUri(target.appId, "inbox", request);
     // The app creates the folders, never this shell: shell-owned ones are unusable to the app.
-    await this.ensureStorage(userId, timeoutMs, signal);
+    if (target.userId === 0) {
+      await this.ensureStorage(target, timeoutMs, signal);
+    }
     const temp = await this.deps.tempFiles.write(bytes);
     try {
       // argv, not a command string: a host temp path must survive Windows argument parsing.
-      const pushed = await this.push(temp.path, inbox, signal);
+      const destination = target.userId === 0 ? inbox : protoViewerStagingPath(request);
+      const pushed = await this.push(temp.path, destination, signal);
       if (outputLooksLikeShellFailure(pushed.stdout, pushed.stderr ?? "")) {
         throw new ProtoViewerStorageError(
           `Could not copy the prototype into ProtoViewer's inbox (${inbox}): ${output(pushed)}.`,
         );
       }
+      if (target.userId !== 0) {
+        await this.providerShell(
+          protoViewerProviderWriteCommand(target.userId, inbox, destination),
+          signal,
+        );
+      }
+    } catch (error) {
+      if (target.userId !== 0) {
+        // The write command removes the staging copy only when it runs; a cancelled or failed
+        // push/write would otherwise leave it in /data/local/tmp, outside the app's sweep.
+        await this.removeStagingQuietly(protoViewerStagingPath(request));
+      }
+      throw error;
     } finally {
       await temp.dispose();
     }
@@ -109,7 +149,7 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       timeoutMs - (this.deps.timer.now() - started),
       Math.min(timeoutMs, PROTOVIEWER_MIN_IMPORT_WAIT_MS),
     );
-    const result = await this.work(userId, request, PROTOVIEWER_MCP_IMPORT_ACTION, {
+    const result = await this.work(target, request, PROTOVIEWER_MCP_IMPORT_ACTION, {
       extras,
       timeoutMs: remainingMs,
       signal,
@@ -129,13 +169,13 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<ProtoViewerResult> {
-    const userId = await this.requireUser(signal);
+    const target = await this.requireTarget(signal);
     const request = this.requestId();
     const extras = [
       `--es ${PROTOVIEWER_EXTRA_REQUEST} ${request}`,
       `--es ${PROTOVIEWER_EXTRA_LIBRARY_ID} ${shellQuote(libraryId)}`,
     ];
-    return await this.work(userId, request, PROTOVIEWER_MCP_OPEN_ACTION, {
+    return await this.work(target, request, PROTOVIEWER_MCP_OPEN_ACTION, {
       extras,
       timeoutMs,
       signal,
@@ -143,11 +183,11 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     });
   }
 
-  private async requireUser(signal?: AbortSignal): Promise<number> {
-    if (this.userId === undefined && !(await this.installed(signal))) {
+  private async requireTarget(signal?: AbortSignal): Promise<ProtoViewerTarget> {
+    if (this.target === undefined && !(await this.installed(signal))) {
       throw new ActionableError("ProtoViewer is not installed for the current Android user.");
     }
-    return this.userId!;
+    return this.target!;
   }
 
   /** adb exits non-zero when the device refuses the push, which the executor throws. */
@@ -170,19 +210,19 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
    * within a second or two; no answer means it cannot create them, so the push would be unreadable.
    */
   private async ensureStorage(
-    userId: number,
+    target: ProtoViewerTarget,
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (await this.storageReady(userId, signal)) {
+    if (await this.storageReady(target, signal)) {
       return;
     }
     // A folder an earlier adb session made is shell-owned and unusable to the app; the shell can
     // remove what it owns, after which the app creates it.
-    await this.removeShellOwnedFolders(userId, signal);
+    await this.removeShellOwnedFolders(target, signal);
     const request = this.requestId();
     try {
-      const prepared = await this.exchange(userId, request, PROTOVIEWER_MCP_PREPARE_ACTION, {
+      const prepared = await this.exchange(target, request, PROTOVIEWER_MCP_PREPARE_ACTION, {
         extras: [`--es ${PROTOVIEWER_EXTRA_REQUEST} ${request}`],
         timeoutMs: Math.min(timeoutMs, PROTOVIEWER_PREPARE_TIMEOUT_MS),
         signal,
@@ -202,17 +242,17 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
         { cause: error },
       );
     }
-    if (!(await this.storageReady(userId, signal))) {
+    if (!(await this.storageReady(target, signal))) {
       throw new ProtoViewerStorageError(
         "ProtoViewer reported its inbox ready, but the folders are not there.",
       );
     }
   }
 
-  private async storageReady(userId: number, signal?: AbortSignal): Promise<boolean> {
-    const root = shellQuote(protoViewerMcpRoot(userId));
-    const inbox = shellQuote(protoViewerInboxDir(userId));
-    const results = shellQuote(protoViewerResultsDir(userId));
+  private async storageReady(target: ProtoViewerTarget, signal?: AbortSignal): Promise<boolean> {
+    const root = shellQuote(protoViewerMcpRoot(target.userId, target.appId));
+    const inbox = shellQuote(protoViewerInboxDir(target.userId, target.appId));
+    const results = shellQuote(protoViewerResultsDir(target.userId, target.appId));
     // Ready means present and not owned by the shell (`-O`: owned by the caller, here the shell).
     // `if` keeps the exit status 0 either way: adb reports a failing remote command as an error.
     const probe = await this.shell(
@@ -222,11 +262,14 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     return probe.includes("ready");
   }
 
-  private async removeShellOwnedFolders(userId: number, signal?: AbortSignal): Promise<void> {
+  private async removeShellOwnedFolders(
+    target: ProtoViewerTarget,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const folders = [
-      protoViewerMcpRoot(userId),
-      protoViewerInboxDir(userId),
-      protoViewerResultsDir(userId),
+      protoViewerMcpRoot(target.userId, target.appId),
+      protoViewerInboxDir(target.userId, target.appId),
+      protoViewerResultsDir(target.userId, target.appId),
     ].map(shellQuote);
     await this.shell(
       `for d in ${folders.join(" ")}; do if [ -O "$d" ]; then rm -rf "$d"; fi; done`,
@@ -235,12 +278,12 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
   }
 
   private async work(
-    userId: number,
+    target: ProtoViewerTarget,
     request: string,
     action: string,
     options: ProtoViewerExchangeOptions,
   ): Promise<ProtoViewerResult> {
-    const result = await this.exchange(userId, request, action, options);
+    const result = await this.exchange(target, request, action, options);
     if (result.status === "prepared") {
       throw new ActionableError("ProtoViewer answered a request with a prepare result; retry.");
     }
@@ -257,26 +300,34 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
   }
 
   private async exchange(
-    userId: number,
+    target: ProtoViewerTarget,
     request: string,
     action: string,
     { extras, ...options }: ProtoViewerExchangeOptions,
   ): Promise<ProtoViewerWireResult> {
-    const resultPath = protoViewerResultPath(userId, request);
+    const resultPath =
+      target.userId === 0
+        ? protoViewerResultPath(target.userId, target.appId, request)
+        : protoViewerProviderUri(target.appId, "results", request);
     try {
       // A new task per call: without it a second launch while one runs only brings the first
       // to the front (same component and intent filter), and that request is never handled.
       const started = await this.shell(
-        `am start -W --activity-multiple-task --user ${userId} -n ${PROTOVIEWER_MCP_COMPONENT} -a ${action} ${extras.join(" ")}`,
+        `am start -W --activity-multiple-task --user ${target.userId} -n ${protoViewerMcpComponent(target.appId)} -a ${action} ${extras.join(" ")}`,
         options.signal,
       );
       throwIfStartFailed(started);
       const result = await pollProtoViewerResult(
         () =>
-          this.shell(
-            `if [ -f ${shellQuote(resultPath)} ]; then cat ${shellQuote(resultPath)}; fi`,
-            options.signal,
-          ),
+          target.userId === 0
+            ? this.shell(
+                `if [ -f ${shellQuote(resultPath)} ]; then cat ${shellQuote(resultPath)}; fi`,
+                options.signal,
+              )
+            : this.providerShell(
+                protoViewerProviderCommand("read", target.userId, resultPath),
+                options.signal,
+              ),
         this.deps.timer,
         options.timeoutMs,
         { signal: options.signal },
@@ -288,19 +339,56 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       }
       return result;
     } finally {
-      await this.removeQuietly([resultPath, ...options.cleanup]);
+      await this.removeQuietly(target, [resultPath, ...options.cleanup]);
     }
   }
 
   /** Runs without the caller's signal, so a cancelled call still removes its own files. */
-  private async removeQuietly(paths: readonly string[]): Promise<void> {
+  private async removeQuietly(target: ProtoViewerTarget, paths: readonly string[]): Promise<void> {
     try {
-      await this.shell(`rm -f ${paths.map(shellQuote).join(" ")}`, undefined, {
+      const command =
+        target.userId === 0
+          ? `rm -f ${paths.map(shellQuote).join(" ")}`
+          : paths.map((uri) => protoViewerProviderCommand("delete", target.userId, uri)).join("; ");
+      await this.shell(command, undefined, {
         timeoutMs: PROTOVIEWER_CLEANUP_TIMEOUT_MS,
       });
     } catch (error) {
       // Best effort: a leftover file only takes app-scoped space, and uninstalling removes it.
       logger.warn(`[protoviewer] cleanup of ${paths.join(", ")} failed: ${errorMessage(error)}`);
+    }
+  }
+
+  /** Runs without the caller's signal, so a cancelled save still removes its staging copy. */
+  private async removeStagingQuietly(staging: string): Promise<void> {
+    try {
+      await this.shell(`rm -f ${shellQuote(staging)}`, undefined, {
+        timeoutMs: PROTOVIEWER_CLEANUP_TIMEOUT_MS,
+      });
+    } catch (error) {
+      // Best effort: the import already failed, and that error is what the caller needs.
+      logger.warn(`[protoviewer] cleanup of ${staging} failed: ${errorMessage(error)}`);
+    }
+  }
+
+  private async providerShell(command: string, signal?: AbortSignal): Promise<string> {
+    try {
+      const result = await this.shell(command, signal);
+      // Result JSON can contain labels or rejection reasons such as "Error: ...".
+      if (!result.trimStart().startsWith("{") && outputLooksLikeShellFailure(result, "")) {
+        throw new ProtoViewerStorageError(
+          `Could not access ProtoViewer's MCP storage: ${result.trim()}.`,
+        );
+      }
+      return result;
+    } catch (error) {
+      if (signal?.aborted || error instanceof ProtoViewerStorageError) {
+        throw error;
+      }
+      throw new ProtoViewerStorageError(
+        `Could not access ProtoViewer's MCP storage: ${errorMessage(error)}.`,
+        { cause: error },
+      );
     }
   }
 

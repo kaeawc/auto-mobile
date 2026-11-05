@@ -148,7 +148,11 @@ export function collectSchemaShapes(schema: any): Record<string, any>[] {
 
 export function getDeclaredParamTypes(toolName: string): Record<string, DeclaredType> | null {
   initializeCliTools();
-  const tool = ToolRegistry.getTool(toolName);
+  // Coercion only reads the input schema, so it must not apply the call-time
+  // availability gates (embedded SDK, debug, plan-only): the CLI process does not
+  // share the daemon's flags, and a gated tool would otherwise lose every declared
+  // type and JSON-parse its string parameters (#17052). The daemon still gates the call.
+  const tool = ToolRegistry.getRegisteredTool(toolName);
   if (!tool) {
     return null;
   }

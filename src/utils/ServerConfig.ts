@@ -46,7 +46,8 @@ class ServerConfig {
   private _skipCtrlProxyDownload: boolean = false;
   private _embeddedSdkEnabled: boolean = false;
   private _networkMockableEnabled: boolean = false;
-  private _toolCallRecordingEnabled: boolean = false;
+  // Mirrors the tool-call-recording flag default (#16891).
+  private _toolCallRecordingEnabled: boolean = true;
   private _dismissKeyboardAfterInputEnabled: boolean = false;
   private _eventAllMarkers: string[] = [];
   private _navigationScreenshotsEnabled: boolean = true;

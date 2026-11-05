@@ -47,6 +47,19 @@ function isRuntimeRequire(node: ts.CallExpression): boolean {
   );
 }
 
+/** `import.meta.resolve("pkg/file")`: a package read from disk at runtime, not imported. */
+function isImportMetaResolve(node: ts.CallExpression): boolean {
+  const callee = node.expression;
+  return (
+    ts.isPropertyAccessExpression(callee) &&
+    callee.name.text === "resolve" &&
+    ts.isMetaProperty(callee.expression) &&
+    callee.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+    node.arguments.length === 1 &&
+    ts.isStringLiteralLike(node.arguments[0])
+  );
+}
+
 function addStringSpecifier(roots: Set<string>, expression: ts.Expression | undefined): void {
   if (expression && ts.isStringLiteralLike(expression)) {
     addRootFromSpec(roots, expression.text);
@@ -72,7 +85,10 @@ export function runtimeRootsInSource(
   );
 
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+    if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword || isImportMetaResolve(node))
+    ) {
       addStringSpecifier(roots, node.arguments[0]);
     }
     if (!dynamicImportsOnly) {
@@ -98,7 +114,7 @@ export function runtimeRootsInSource(
 
 /**
  * Derive runtime roots from the built package. The bundle contributes only its
- * external dynamic imports, while copied runtime sources contribute all runtime
+ * external dynamic imports and `import.meta.resolve` specifiers, while copied runtime sources contribute all runtime
  * module forms.
  */
 export function deriveRootsFromDist(distDir: string): string[] {

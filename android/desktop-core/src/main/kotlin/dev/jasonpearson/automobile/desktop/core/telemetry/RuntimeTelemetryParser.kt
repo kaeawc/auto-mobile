@@ -15,6 +15,8 @@ internal fun TelemetryEventReader.parseStorage(): TelemetryDisplayEvent {
   }
   return TelemetryDisplayEvent.Storage(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     fileName = d.stringOrDefault("fileName", d.stringOrDefault("file_name", "unknown")),
     key = d.stringOrNull("key"),
     value = d["value"]?.takeIf { it !is JsonNull }?.displayString(),
@@ -27,6 +29,8 @@ internal fun TelemetryEventReader.parseStorage(): TelemetryDisplayEvent {
 internal fun TelemetryEventReader.parseLayout(): TelemetryDisplayEvent {
   return TelemetryDisplayEvent.Layout(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     subType = d.stringOrDefault("subType", d.stringOrDefault("sub_type", "unknown")),
     composableName = d.stringOrNull("composableName") ?: d.stringOrNull("composable_name"),
     recompositionCount =
@@ -43,6 +47,8 @@ internal fun TelemetryEventReader.parseLayout(): TelemetryDisplayEvent {
 internal fun TelemetryEventReader.parseToolcall(): TelemetryDisplayEvent {
   return TelemetryDisplayEvent.ToolCall(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     toolName = d.stringOrDefault("toolName", "unknown"),
     durationMs = d.primitiveOrNull("durationMs")?.longOrNull ?: 0,
     success = d.primitiveOrNull("success")?.booleanOrNull ?: true,
@@ -68,6 +74,8 @@ internal fun TelemetryEventReader.parseAccessibility(): TelemetryDisplayEvent {
     }
   return TelemetryDisplayEvent.Accessibility(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     packageName = d.stringOrDefault("packageName", "unknown"),
     screenId = d.stringOrDefault("screenId", ""),
     totalViolations = d.primitiveOrNull("totalViolations")?.intOrNull ?: 0,
@@ -87,6 +95,8 @@ internal fun TelemetryEventReader.parseMemory(): TelemetryDisplayEvent {
     }
   return TelemetryDisplayEvent.Memory(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     packageName = d.stringOrDefault("packageName", "unknown"),
     passed = d.primitiveOrNull("passed")?.booleanOrNull ?: true,
     javaHeapGrowthMb = d.primitiveOrNull("javaHeapGrowthMb")?.doubleOrNull,
@@ -108,6 +118,8 @@ internal fun TelemetryEventReader.parsePerformance(): TelemetryDisplayEvent {
     }
   return TelemetryDisplayEvent.Performance(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     fps = d.primitiveOrNull("fps")?.doubleOrNull,
     frameTimeMs = d.primitiveOrNull("frameTimeMs")?.doubleOrNull,
     jankFrames = d.primitiveOrNull("jankFrames")?.intOrNull,

@@ -275,6 +275,14 @@ assert_no_rerun() {
   grep -q 'run rerun 123 --failed' "$GH_CALLS"
 }
 
+@test "a coverage part job qualifies for the same fresh-runner rerun (#16377)" {
+  jq '.jobs[0].name = "TypeScript Code Coverage (2/2)"' "$FIXTURE" > "$FIXTURE.tmp"
+  mv "$FIXTURE.tmp" "$FIXTURE"
+  run bash "$SCRIPT" rerun 123 1
+  [ "$status" -eq 0 ]
+  grep -q 'run rerun 123 --failed' "$GH_CALLS"
+}
+
 @test "ordinary coverage failures never qualify for a fresh-runner rerun" {
   jq '.jobs[0].name = "TypeScript Code Coverage"' "$FIXTURE" > "$FIXTURE.tmp"
   mv "$FIXTURE.tmp" "$FIXTURE"

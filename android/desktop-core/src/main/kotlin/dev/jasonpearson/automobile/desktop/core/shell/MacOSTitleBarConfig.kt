@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -24,12 +25,21 @@ object MacOSTitleBarConfig {
 }
 
 /**
+ * Height the native title bar overlays when [MacOSTitleBarConfig.configure] made it transparent.
+ */
+internal fun titleBarInset(platform: DesktopPlatform): Dp =
+  if (platform == DesktopPlatform.MacOS) 28.dp else 0.dp
+
+/**
  * Adds top padding so content doesn't render behind the native macOS title bar traffic-light
  * buttons (28 dp). No-op on other platforms.
  */
 @Composable
-fun MacOSTitleBarSpacer(modifier: Modifier = Modifier) {
-  val height = if (MacOSTitleBarConfig.isMacOS) 28.dp else 0.dp
+fun MacOSTitleBarSpacer(
+  modifier: Modifier = Modifier,
+  platform: DesktopPlatform = DesktopPlatform.current,
+) {
+  val height = titleBarInset(platform)
   if (height > 0.dp) {
     Spacer(modifier = modifier.height(height))
   }

@@ -9,13 +9,18 @@ import {
 export const ANDROID_PROTOVIEWER_PACKAGE = "dev.jasonpearson.automobile.protoviewer";
 // CFBundleIdentifier in ios/prototype-agent/ProtoViewer/Info.plist (not the saved-app Viewer template).
 export const IOS_PROTOVIEWER_BUNDLE_ID = "dev.jasonpearson.automobile.protoviewer";
+/** Dev builds on both platforms append `.dev` to the store ID (#14144). */
+const PROTOVIEWER_DEV_ID_SUFFIX = ".dev";
+const IMPORTED_PROTOTYPE_HOSTS: ReadonlySet<string> = new Set(
+  [ANDROID_PROTOVIEWER_PACKAGE, IOS_PROTOVIEWER_BUNDLE_ID].flatMap((id) => [
+    id,
+    `${id}${PROTOVIEWER_DEV_ID_SUFFIX}`,
+  ]),
+);
 
 /** Exact host identity, never a prefix match against unrelated apps or saved-app clones. */
 export function isImportedPrototypeHost(packageOrBundleId: string | undefined): boolean {
-  return (
-    packageOrBundleId === ANDROID_PROTOVIEWER_PACKAGE ||
-    packageOrBundleId === IOS_PROTOVIEWER_BUNDLE_ID
-  );
+  return packageOrBundleId !== undefined && IMPORTED_PROTOTYPE_HOSTS.has(packageOrBundleId);
 }
 
 export const IMPORTED_PROTOTYPE_CONTENT = {

@@ -1,0 +1,349 @@
+{
+  "_meta": {
+    "automobile/routedSessionUuid": "e2323d60-f6d1-4b79-b4c4-cabb9d8c5ff2"
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"observation\":{\"observationId\":\"d10e094d-fe08-41cb-b2c2-6d0fe4bf867f\",\"deviceId\":\"B4DFE298-981A-42C5-B218-949840BEEBA9\",\"display\":{\"key\":\"primary-1\",\"role\":\"inner\",\"posture\":\"opened\",\"generation\":3},\"updatedAt\":1793865737700,\"screenSize\":{\"width\":951,\"height\":669,\"units\":\"points\"},\"rotation\":0,\"activeWindow\":{\"appId\":\"dev.jasonpearson.automobile.Playground\",\"activityName\":\"\",\"layoutSeqSum\":0},\"screenIdentity\":{\"platform\":\"ios\",\"source\":\"sdk\",\"confidence\":\"high\",\"key\":\"[[\\\"bundle\\\",\\\"dev.jasonpearson.automobile.Playground\\\"],[\\\"route\\\",\\\"discover\\\"]]\",\"components\":{\"bundleId\":\"dev.jasonpearson.automobile.Playground\",\"navigationRoute\":\"discover\"}},\"otherDisplays\":[{\"key\":\"primary\",\"role\":\"cover\",\"size\":{\"width\":1398,\"height\":2034}}],\"freshness\":{\"requestedAfter\":1793865735099,\"actualTimestamp\":1793865737700,\"ageMs\":109,\"verified\":true,\"isFresh\":true},\"settled\":false,\"skeleton\":[{\"bounds\":[627,26,867,70],\"affordances\":[\"tap\",\"input\"],\"elementId\":\"s2-03144510d78b1e13\",\"label\":\"Search videos\"},{\"bounds\":[639,38,659,57],\"affordances\":[\"tap\"],\"elementId\":\"magnifyingglass\",\"label\":\"Search\"},{\"bounds\":[20,82,867,162],\"affordances\":[\"tap\"],\"elementId\":\"s2-c3bdcd6a59715e61\"},{\"bounds\":[20,82,867,162],\"affordances\":[\"tap\"],\"elementId\":\"s2-00e13a56259db7ea\",\"label\":\"Getting Started with SwiftUI, 10:23\",\"sublabel\":\"Getting Started with SwiftUI, 10:23\"},{\"bounds\":[56,112,85,131],\"affordances\":[\"tap\"],\"elementId\":\"video.fill\",\"label\":\"Facetime Video Call\"},{\"bounds\":[20,162,867,242],\"affordances\":[\"tap\"],\"elementId\":\"s2-258690f178b9e41f\"},{\"bounds\":[20,162,867,242],\"affordances\":[\"tap\"],\"elementId\":\"s2-caa672df8852c93c\",\"label\":\"Advanced Animations, 15:45\",\"sublabel\":\"Advanced Animations, 15:45\"},{\"bounds\":[57,190,81,213],\"affordances\":[\"tap\"],\"elementId\":\"wand.and.stars\",\"label\":\"Magic Wand With Stars\"},{\"bounds\":[20,242,867,322],\"affordances\":[\"tap\"],\"elementId\":\"s2-81800f2f562e373b\"},{\"bounds\":[20,242,867,322],\"affordances\":[\"tap\"],\"elementId\":\"s2-773f8504cc96e493\",\"label\":\"Building Custom Components, 22:10\",\"sublabel\":\"Building Custom Components, 22:10\"},{\"bounds\":[58,269,81,295],\"affordances\":[\"tap\"],\"elementId\":\"cube.fill\",\"label\":\"Cube\"},{\"bounds\":[20,322,867,402],\"affordances\":[\"tap\"],\"elementId\":\"s2-899aaa17d394ad63\"},{\"bounds\":[20,322,867,402],\"affordances\":[\"tap\"],\"elementId\":\"s2-09be14575b71b0aa\",\"label\":\"State Management Deep Dive, 18:30\",\"sublabel\":\"State Management Deep Dive, 18:30\"},{\"bounds\":[55,350,84,374],\"affordances\":[\"tap\"],\"elementId\":\"arrow.triangle.2.circlepath\",\"label\":\"Syncing\"},{\"bounds\":[20,402,867,482],\"affordances\":[\"tap\"],\"elementId\":\"s2-283ba983fbe83997\"},{\"bounds\":[20,402,867,482],\"affordances\":[\"tap\"],\"elementId\":\"s2-f5415ff41170aed8\",\"label\":\"Networking Best Practices, 12:55\",\"sublabel\":\"Networking Best Practices, 12:55\"},{\"bounds\":[58,430,82,454],\"affordances\":[\"tap\"],\"elementId\":\"network\",\"label\":\"Network Nodes Connected By Lines\"},{\"bounds\":[0,0,951,669],\"affordances\":[\"scroll\"],\"elementId\":\"s2-cc91fd4aa83e883d\",\"label\":\"Playground\"}],\"context\":[{\"bounds\":[0,0,669,951],\"affordances\":[],\"elementId\":\"s2-47fb9d5b538fa955\",\"label\":\"Playground\"},{\"bounds\":[20,31,134,65],\"affordances\":[],\"elementId\":\"s2-eda8cdaefaf8e047\",\"label\":\"Discover\"},{\"bounds\":[0,0,951,669],\"affordances\":[],\"elementId\":\"Toolbar\",\"label\":\"Toolbar\"}]},\"success\":true,\"orientation\":\"portrait\",\"value\":0,\"currentOrientation\":\"portrait\",\"previousOrientation\":\"landscape\",\"rotationPerformed\":true,\"warning\":\"The runner reported \\\"Rotation is not supported on this display (the screen size did not change)\\\" although the observed display changed from landscape to portrait.\",\"message\":\"Successfully rotated from landscape to portrait\",\"observationDiff\":{\"mode\":\"full\",\"reason\":\"disabled\",\"hint\":\"Set --actions-diff-observe to receive diffs.\"}}"
+    }
+  ],
+  "structuredContent": {
+    "observation": {
+      "observationId": "d10e094d-fe08-41cb-b2c2-6d0fe4bf867f",
+      "deviceId": "B4DFE298-981A-42C5-B218-949840BEEBA9",
+      "display": {
+        "key": "primary-1",
+        "role": "inner",
+        "posture": "opened",
+        "generation": 3
+      },
+      "updatedAt": 1793865737700,
+      "screenSize": {
+        "width": 951,
+        "height": 669,
+        "units": "points"
+      },
+      "rotation": 0,
+      "activeWindow": {
+        "appId": "dev.jasonpearson.automobile.Playground",
+        "activityName": "",
+        "layoutSeqSum": 0
+      },
+      "screenIdentity": {
+        "platform": "ios",
+        "source": "sdk",
+        "confidence": "high",
+        "key": "[[\"bundle\",\"dev.jasonpearson.automobile.Playground\"],[\"route\",\"discover\"]]",
+        "components": {
+          "bundleId": "dev.jasonpearson.automobile.Playground",
+          "navigationRoute": "discover"
+        }
+      },
+      "otherDisplays": [
+        {
+          "key": "primary",
+          "role": "cover",
+          "size": {
+            "width": 1398,
+            "height": 2034
+          }
+        }
+      ],
+      "freshness": {
+        "requestedAfter": 1793865735099,
+        "actualTimestamp": 1793865737700,
+        "ageMs": 109,
+        "verified": true,
+        "isFresh": true
+      },
+      "settled": false,
+      "skeleton": [
+        {
+          "bounds": [
+            627,
+            26,
+            867,
+            70
+          ],
+          "affordances": [
+            "tap",
+            "input"
+          ],
+          "elementId": "s2-03144510d78b1e13",
+          "label": "Search videos"
+        },
+        {
+          "bounds": [
+            639,
+            38,
+            659,
+            57
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "magnifyingglass",
+          "label": "Search"
+        },
+        {
+          "bounds": [
+            20,
+            82,
+            867,
+            162
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-c3bdcd6a59715e61"
+        },
+        {
+          "bounds": [
+            20,
+            82,
+            867,
+            162
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-00e13a56259db7ea",
+          "label": "Getting Started with SwiftUI, 10:23",
+          "sublabel": "Getting Started with SwiftUI, 10:23"
+        },
+        {
+          "bounds": [
+            56,
+            112,
+            85,
+            131
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "video.fill",
+          "label": "Facetime Video Call"
+        },
+        {
+          "bounds": [
+            20,
+            162,
+            867,
+            242
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-258690f178b9e41f"
+        },
+        {
+          "bounds": [
+            20,
+            162,
+            867,
+            242
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-caa672df8852c93c",
+          "label": "Advanced Animations, 15:45",
+          "sublabel": "Advanced Animations, 15:45"
+        },
+        {
+          "bounds": [
+            57,
+            190,
+            81,
+            213
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "wand.and.stars",
+          "label": "Magic Wand With Stars"
+        },
+        {
+          "bounds": [
+            20,
+            242,
+            867,
+            322
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-81800f2f562e373b"
+        },
+        {
+          "bounds": [
+            20,
+            242,
+            867,
+            322
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-773f8504cc96e493",
+          "label": "Building Custom Components, 22:10",
+          "sublabel": "Building Custom Components, 22:10"
+        },
+        {
+          "bounds": [
+            58,
+            269,
+            81,
+            295
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "cube.fill",
+          "label": "Cube"
+        },
+        {
+          "bounds": [
+            20,
+            322,
+            867,
+            402
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-899aaa17d394ad63"
+        },
+        {
+          "bounds": [
+            20,
+            322,
+            867,
+            402
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-09be14575b71b0aa",
+          "label": "State Management Deep Dive, 18:30",
+          "sublabel": "State Management Deep Dive, 18:30"
+        },
+        {
+          "bounds": [
+            55,
+            350,
+            84,
+            374
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "arrow.triangle.2.circlepath",
+          "label": "Syncing"
+        },
+        {
+          "bounds": [
+            20,
+            402,
+            867,
+            482
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-283ba983fbe83997"
+        },
+        {
+          "bounds": [
+            20,
+            402,
+            867,
+            482
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-f5415ff41170aed8",
+          "label": "Networking Best Practices, 12:55",
+          "sublabel": "Networking Best Practices, 12:55"
+        },
+        {
+          "bounds": [
+            58,
+            430,
+            82,
+            454
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "network",
+          "label": "Network Nodes Connected By Lines"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            951,
+            669
+          ],
+          "affordances": [
+            "scroll"
+          ],
+          "elementId": "s2-cc91fd4aa83e883d",
+          "label": "Playground"
+        }
+      ],
+      "context": [
+        {
+          "bounds": [
+            0,
+            0,
+            669,
+            951
+          ],
+          "affordances": [],
+          "elementId": "s2-47fb9d5b538fa955",
+          "label": "Playground"
+        },
+        {
+          "bounds": [
+            20,
+            31,
+            134,
+            65
+          ],
+          "affordances": [],
+          "elementId": "s2-eda8cdaefaf8e047",
+          "label": "Discover"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            951,
+            669
+          ],
+          "affordances": [],
+          "elementId": "Toolbar",
+          "label": "Toolbar"
+        }
+      ]
+    },
+    "success": true,
+    "orientation": "portrait",
+    "value": 0,
+    "currentOrientation": "portrait",
+    "previousOrientation": "landscape",
+    "rotationPerformed": true,
+    "warning": "The runner reported \"Rotation is not supported on this display (the screen size did not change)\" although the observed display changed from landscape to portrait.",
+    "message": "Successfully rotated from landscape to portrait",
+    "observationDiff": {
+      "mode": "full",
+      "reason": "disabled",
+      "hint": "Set --actions-diff-observe to receive diffs."
+    }
+  },
+  "success": true
+}

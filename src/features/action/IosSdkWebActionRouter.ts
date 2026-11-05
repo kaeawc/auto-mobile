@@ -1,3 +1,4 @@
+import { failOnIosSdkMultiScene } from "../observe/ios/sdkObservationBridge";
 import { ActionableError } from "../../models/ActionableError";
 import type { SdkBridgeRequestOptions } from "../observe/ios/CtrlProxySdkObservation";
 import type { IosSdkWebTarget } from "../observe/ios/iosSdkWebMerge";
@@ -41,6 +42,7 @@ export function iosSdkWebActionOutcome(
   reply: CtrlProxySdkWebActionResult,
   verb: string,
 ): IosSdkTapOutcome {
+  failOnIosSdkMultiScene(reply);
   if (reply.result?.status === "accepted") {
     return { backend: "sdk" };
   }

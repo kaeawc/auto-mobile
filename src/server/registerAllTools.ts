@@ -49,6 +49,7 @@ import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { focusNavigateTool } from "./focusNavigateTool";
 import { registerNetworkTools } from "./networkTools";
+import { registerPortReverseTools } from "./portReverseTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
 import { registerSensorTools } from "./sensorTools";
@@ -142,6 +143,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerAccessibilityFocusTools();
   focusNavigateTool.register();
   registerNetworkTools();
+  registerPortReverseTools();
   registerKillProfileTools();
   registerSystemAlertTools();
   registerSensorTools();

@@ -17,7 +17,7 @@ Add the JUnit runner to the module that owns the tests:
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.89")
+    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.90")
 }
 ```
 
@@ -34,7 +34,7 @@ Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), 
 For a Swift package manifest, use the released package:
 
 ```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.89")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.90")
 ```
 
 `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
@@ -152,7 +152,59 @@ Run the test target from Xcode or with `xcodebuild test` against a booted iOS
 Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
 checkpoints so failures explain which state was missing.
 
+By default `observe` lists actionable rows in `skeleton` and static text, such as
+a status label or a validation error, in `context`. Read `context` to verify a
+result. A `waitFor` with only `text` or `textAny`, or `for: "appear"` or
+`for: "textEquals"` with only `text`, also matches text from either array when no
+hierarchy node carries that text (`textEquals` requires the exact, case-sensitive
+value). `for: "clickable"`, `"disappear"` and `"countStable"` check hierarchy nodes
+only. Add `elementId`, `container` or `selectionStrategy` to match a single
+hierarchy node instead; `className` and `contentDescription` do the same for waits
+without `for`. The top-level `layer` argument limits the wait to the `app` or
+`prototype` layer of the hierarchy and also turns off the row match.
+
 </div>
+
+### Step expectations
+
+A step can check its own result. After the step's tool succeeds, each entry in
+its `expectations` is checked in order against a fresh observation of the same
+device. Elements are matched the same way `tapOn` matches them. The first
+expectation that does not hold fails the step, and therefore the plan. If the
+step is `optional`, the step is skipped instead and the plan continues.
+
+```yaml
+- tool: tapOn
+  id: counter_add
+  expectations:
+    - type: textEquals
+      selector: { testTag: counter_value }
+      text: "1"
+    - type: elementAbsent
+      selector: { text: Loading }
+      timeoutMs: 2000
+```
+
+| `type`           | Passes when                                                             | Needs      |
+| ---------------- | ----------------------------------------------------------------------- | ---------- |
+| `elementVisible` | an element matching `selector` is on screen                             | `selector` |
+| `elementAbsent`  | no element matches `selector`                                           | `selector` |
+| `textEquals`     | an element (matching `selector`, if given) shows exactly `text`         | `text`     |
+| `textContains`   | an element (matching `selector`, if given) shows text containing `text` | `text`     |
+
+`selector` accepts `testTag` (matched like the `tapOn` `testTag` selector),
+one id (`resourceId` or `elementId`), `text`, `contentDescription` and
+`className`; every field given must match the same element. For `textEquals` and
+`textContains`, put the expected value in `text`, not in `selector.text`. Each
+expectation waits up to `timeoutMs` for the condition (the `observe.waitFor`
+default when you omit it), so it tolerates a screen that is still settling.
+
+A failed expectation's error names it and lists what was on screen, for example
+`Expectation 1/2 (textEquals testTag="counter_value" text="1") failed: not
+satisfied after 5000ms; 1 near match(es); observed texts: "0"`. The step's
+`failureObservation` holds the full observation. An expectation with a missing
+or contradictory field fails the step without observing. An expectation `type`
+not in the table is not checked: the plan result carries a warning naming it.
 
 ### Plan parameters and special characters
 
@@ -265,12 +317,12 @@ Use one release version for the test runner and the AutoMobile CLI. Restart a
 shared daemon so it receives the pin, then check the environment before tests:
 
 ```bash
-export AUTOMOBILE_VERSION=0.0.89
-bunx @kaeawc/auto-mobile@0.0.89 --daemon restart
-bunx @kaeawc/auto-mobile@0.0.89 --cli doctor
+export AUTOMOBILE_VERSION=0.0.90
+bunx @kaeawc/auto-mobile@0.0.90 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.90 --cli doctor
 ```
 
-Replace `0.0.89` with the version used by your test runner dependency.
+Replace `0.0.90` with the version used by your test runner dependency.
 
 `--cli doctor` reports the status of AutoMobile on each booted Android device,
 including whether the accessibility service is installed and up to date. It is

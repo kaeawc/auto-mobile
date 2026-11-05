@@ -39,6 +39,8 @@ class ProtoViewerApplication : Application() {
         // A crash mid-commit leaves staging directories behind; nothing else cleans them.
         listFiles()?.forEach { it.deleteRecursively() }
       }
+    val blocklist =
+      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val sharer =
       CanonicalLibrarySharer(repository, DirectoryLibraryExports(File(app.cacheDir, "export")), ids)
     val importer =
@@ -56,6 +58,7 @@ class ProtoViewerApplication : Application() {
             stagingRoot,
             PrototypeBundleDirectoryFileSystem(stagingRoot),
             ids,
+            blocklist,
           )
         },
       )
@@ -64,9 +67,12 @@ class ProtoViewerApplication : Application() {
       storage,
       importer = importer,
       mcpInbox =
-        app.getExternalFilesDir(null)?.let { McpInbox(File(it, "mcp"), importer, repository) },
+        app.getExternalFilesDir(null)?.let {
+          McpInbox(File(it, "mcp"), importer, BlocklistLibraryRepository(repository, blocklist))
+        },
       sharer = sharer,
       settings = SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
+      blocklist = blocklist,
     )
   }
   val services: ProtoViewerServices by lazy {
@@ -74,8 +80,12 @@ class ProtoViewerApplication : Application() {
       services.flushScope.launch(services.io) { services.clearStaleExports() }
       // Own the MCP folders before any adb shell can create them (#15174).
       services.flushScope.launch(services.io) { services.mcpInbox?.ensureDirectories() }
+      // Finish deletes that failed after their metadata was removed (#16653).
+      services.flushScope.launch(services.io) { services.repository.sweepOrphans() }
       // Drop results and pushed bundles whose host request is long over (#13621).
       services.flushScope.launch(services.io) { services.mcpInbox?.sweepOrphans() }
+      // Free quota still held by content hidden before Hide and Block deleted it (#16631).
+      services.flushScope.launch(services.io) { services.repository.purgeBlocked() }
     }
   }
 }
@@ -83,7 +93,7 @@ class ProtoViewerApplication : Application() {
 // Application composition root: keep independent dependencies explicit for constructor injection.
 @Suppress("LongParameterList")
 class ProtoViewerServices(
-  val repository: LibraryRepository,
+  library: LibraryRepository,
   val storage: LibraryStorage,
   val io: CoroutineDispatcher = Dispatchers.IO,
   val clock: LibraryClock = LibraryClock(System::currentTimeMillis),
@@ -100,7 +110,10 @@ class ProtoViewerServices(
   val localNetworkPermission: (ComponentActivity, (Boolean) -> Unit) -> LocalNetworkPermission =
     ::AndroidLocalNetworkPermission,
   val localNetworkGrant: LocalNetworkGrant = AndroidLocalNetworkGrant,
+  val blocklist: ContentBlocklist,
 ) {
+  /** Every reader sees the library with hidden and blocked received content removed. */
+  val repository: BlocklistLibraryRepository = BlocklistLibraryRepository(library, blocklist)
   val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
 
   // Outlives activities so a stop/destroy still finishes the renderer's pending disk flush.

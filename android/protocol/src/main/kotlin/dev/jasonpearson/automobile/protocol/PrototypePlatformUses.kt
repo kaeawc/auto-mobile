@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.eventDefinition
 import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.member
-import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.userInitiated
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Context
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.flag
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
@@ -41,7 +41,15 @@ internal object PrototypePlatformUses {
     for ((event, handler) in handlers.entries.sortedBy { it.key }) {
       val at = "platform.on[${PrototypeSpecInput.canonicalString(event)}]"
       found.add(Use.Handler(at, event))
-      scan(handler, at, ScanContext(inHandler = true, userGesture = userInitiated(event)), found)
+      scan(
+        handler,
+        at,
+        ScanContext(
+          inHandler = true,
+          userGesture = eventDefinition(event)?.flag("userInitiated") == true,
+        ),
+        found,
+      )
     }
     for ((handler, path) in PrototypeChannels.handlers(root)) {
       scan(handler, path, ScanContext(inHandler = true), found)

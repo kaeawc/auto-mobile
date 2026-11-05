@@ -1,3 +1,4 @@
+import { PADDING_BOTTOM, PADDING_TOP } from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import type { WebRenderScope } from "./webRender";
 
@@ -34,9 +35,9 @@ function paddingLonghands(css: Record<string, string>): Record<string, string> {
   const [top, end = top, bottom = top, start = end] = parts;
   const rest = Object.fromEntries(Object.entries(css).filter(([key]) => key !== "padding"));
   return {
-    "padding-top": top!,
+    [PADDING_TOP]: top!,
     "padding-inline-end": end!,
-    "padding-bottom": bottom!,
+    [PADDING_BOTTOM]: bottom!,
     "padding-inline-start": start!,
     ...rest,
   };

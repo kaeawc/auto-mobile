@@ -37,6 +37,7 @@ class ViewerActivityTest {
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
         settings = settings,
+        blocklist = FakeContentBlocklist(),
       )
     }
   }

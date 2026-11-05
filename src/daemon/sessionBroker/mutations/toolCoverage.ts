@@ -191,6 +191,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
+    ["portReverse"],
+    "adb reverse mappings live in adbd until it restarts; session release and device removal remove every mapping the session created, and mappings it did not create are never touched.",
+    "notJournaled",
+  ),
+  ...tools(
     ["injectAudioInput", "stopAudioInput"],
     "Streams audio into the emulator microphone over its gRPC API; nothing persists on the device, and session release stops a stream still playing.",
     "notJournaled",

@@ -1,9 +1,17 @@
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
-import { fixedBackoff } from "../Backoff";
 import { DefaultRetryExecutor } from "../retry/RetryExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import {
+  ADB_TRANSPORT_RECOVERY_BACKOFF,
+  ADB_TRANSPORT_RECOVERY_WINDOW_MS,
+  isReadOnlyDumpTransportLoss,
+} from "./adbTransportRecovery";
+import {
+  AdbDeviceTransportUnavailableError,
+  findDeviceTransportUnavailable,
+} from "./AdbDeviceTransportUnavailableError";
 
 const PROCESS_RECORD_PATTERN =
   /(?:^|\s)(\d+):([A-Za-z0-9_.:]+)\/(u(\d+)(?:a\d+(?:i\d+)?|i\d+)|\d+)(?=[\s}]|$)/gm;
@@ -14,32 +22,76 @@ export interface AndroidPackageProcess {
   userId: number;
 }
 
-/** Read the process table with one retry for a transient offline device. */
+const OFFLINE_RETRY_DELAY_MS = 200;
+
+/**
+ * The read is read-only, so a post-dispatch loss is safe to replay. An exhausted transport
+ * refusal (`dispatched: false`) already spent the adb layer's bounded replay window.
+ */
+function isPostDispatchProcessTableLoss(error: Error, deviceId?: string): boolean {
+  const transport = findDeviceTransportUnavailable(error);
+  return transport ? transport.dispatched !== false : isReadOnlyDumpTransportLoss(error, deviceId);
+}
+
+/**
+ * Read the process table. An offline device gets one short retry; a post-dispatch transport
+ * loss is replayed under the bounded adb transport recovery policy. With `deviceId`, a dump cut off mid-stream (bare exit 255 after partial
+ * stdout) is retried and, once the budget runs out, typed as a transport loss instead of
+ * being parsed as a valid process table.
+ */
 export async function readAndroidPackageProcesses(
   adb: AdbExecutor,
   packageName: string,
-  options: { userId?: number; signal?: AbortSignal; timer?: Timer } = {},
+  options: { userId?: number; signal?: AbortSignal; timer?: Timer; deviceId?: string } = {},
 ): Promise<{ processes: AndroidPackageProcess[]; isRunning: boolean; stdout: string }> {
-  const output = await new DefaultRetryExecutor(options.timer ?? defaultTimer).executeOrThrow(
-    () =>
-      adb.executeCommand("shell dumpsys activity processes", {
-        timeoutMs: 5_000,
-        maxBuffer: DUMPSYS_MAX_BUFFER,
-        noRetry: true,
-        signal: options.signal,
-      }),
-    {
-      maxAttempts: 2,
-      expectedFailure: {
-        reason: "Process-table reads propagate caller cancellation without a failure warning",
-        matches: (error) =>
-          error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE,
+  const { signal, deviceId } = options;
+  const timer = options.timer ?? defaultTimer;
+  const startedAt = timer.now();
+  const remainingMs = () =>
+    Math.max(0, ADB_TRANSPORT_RECOVERY_WINDOW_MS - (timer.now() - startedAt));
+  let nextDelayMs = OFFLINE_RETRY_DELAY_MS;
+  let output: Awaited<ReturnType<AdbExecutor["executeCommand"]>>;
+  try {
+    output = await new DefaultRetryExecutor(timer).executeOrThrow(
+      () =>
+        adb.executeCommand("shell dumpsys activity processes", {
+          timeoutMs: 5_000,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          noRetry: true,
+          signal,
+        }),
+      {
+        maxAttempts: 5,
+        expectedFailure: {
+          reason: "Process-table reads propagate caller cancellation without a failure warning",
+          matches: (error) =>
+            error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE,
+        },
+        delays: () => nextDelayMs,
+        signal,
+        shouldRetry: (error, attempt) => {
+          // An offline device gets exactly one short retry.
+          if (/device offline/i.test(error.message)) {
+            nextDelayMs = OFFLINE_RETRY_DELAY_MS;
+            return attempt === 1;
+          }
+          if (!isPostDispatchProcessTableLoss(error, deviceId)) {
+            return false;
+          }
+          nextDelayMs = Math.min(
+            ADB_TRANSPORT_RECOVERY_BACKOFF.delayForAttempt(attempt),
+            remainingMs(),
+          );
+          return nextDelayMs > 0;
+        },
       },
-      delays: fixedBackoff(200),
-      signal: options.signal,
-      shouldRetry: (error) => /device offline/i.test(error.message),
-    },
-  );
+    );
+  } catch (error) {
+    if (deviceId && !signal?.aborted && isReadOnlyDumpTransportLoss(error, deviceId)) {
+      throw new AdbDeviceTransportUnavailableError(deviceId, error, 1000, "unknown");
+    }
+    throw error;
+  }
   const processes = findAndroidPackageProcesses(output.stdout, packageName);
   return {
     stdout: output.stdout,

@@ -28,11 +28,20 @@ class KeystoreStateProvider : ContentProvider() {
     // Re-contribute after SDK shutdown clears the registry.
     registerCapability()
     val response =
-      KeystoreStateHandler(AndroidKeystoreBackend(), AndroidDeviceLockProbe(context)) {
+      KeystoreStateHandler(
+          FaultingKeystoreBackend(AndroidKeystoreBackend()),
+          AndroidDeviceLockProbe(context),
+        ) {
           AutoMobileSDK.capabilities.policy.allowMutations &&
             AutoMobileSDK.isCapabilitySupported("storage.mutation")
         }
-        .handle(method, extras?.getString("scope"), extras?.getString("alias"))
+        .handle(
+          method,
+          extras?.getString("scope"),
+          extras?.getString("alias"),
+          extras?.getString("kind"),
+          extras?.takeIf { it.containsKey("delayMs") }?.getLong("delayMs"),
+        )
     return Bundle().apply { putString("result", response.toString()) }
   }
 

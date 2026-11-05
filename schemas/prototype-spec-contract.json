@@ -51,6 +51,7 @@
     "MAX_PROTOTYPE_DATA_WRITE_BYTES": 786432,
     "MAX_PROTOTYPE_STORAGE_BYTES": 262144,
     "MAX_PROTOTYPE_STORAGE_KEYS": 64,
+    "MAX_PROTOTYPE_SECURE_VALUE_BYTES": 4096,
     "DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS": 10000,
     "MAX_PROTOTYPE_REQUEST_TIMEOUT_MS": 30000,
     "MAX_PROTOTYPE_RESPONSE_BYTES": 262144,
@@ -24172,7 +24173,8 @@
           "value": {
             "kind": "string",
             "max": 64
-          }
+          },
+          "sensitive": true
         }
       }
     },
@@ -24214,7 +24216,8 @@
           "value": {
             "kind": "json",
             "maxDepth": 1
-          }
+          },
+          "sensitive": true
         },
         "servicesEnabled": {
           "platforms": ["android", "ios"],
@@ -24352,7 +24355,8 @@
       "events": {
         "markerTap": {
           "sensitive": false,
-          "userInitiated": true
+          "userInitiated": true,
+          "emitContext": ["markerId"]
         },
         "cameraIdle": {
           "sensitive": false
@@ -24953,7 +24957,8 @@
         "dismissed": {
           "sensitive": false
         },
-        "scheduledFired": { "sensitive": false }
+        "scheduledFired": { "sensitive": false },
+        "push": { "sensitive": false, "capability": "prototype_platform_push_v1" }
       },
       "state": {
         "badge": {
@@ -25543,6 +25548,19 @@
           "value": {
             "kind": "enum",
             "values": ["googleCast", "airplay"]
+          }
+        },
+        "protocols": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "array",
+            "item": {
+              "kind": "enum",
+              "values": ["googleCast", "airplay"]
+            },
+            "min": 0,
+            "max": 2,
+            "unique": true
           }
         },
         "player": {

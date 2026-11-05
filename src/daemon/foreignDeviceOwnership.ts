@@ -353,6 +353,36 @@ export const tvDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   claimPath: (udid) => tvDeviceAllocationClaimPath(udid),
 };
 
+/**
+ * The scope Apple Vision Pro simulator claims live under. Like an iOS simulator, a headset
+ * belongs to the user's CoreSimulator set, so every daemon on the host contends for one claim per
+ * UDID; headsets keep their own namespace so a headset claim is never read as an iOS one.
+ */
+export const VISION_SIMULATOR_CLAIM_SCOPE = "vision-simulators";
+
+/** Where an Apple Vision Pro simulator's allocation claim lives, keyed by its UDID. */
+export function visionDeviceAllocationClaimPath(
+  udid: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(
+      VISION_SIMULATOR_CLAIM_SCOPE,
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
+    ctrlProxyForwardLeaseFileName(udid),
+  );
+}
+
+/** The headset file source: only the allocation claim, as for iOS simulators. */
+export const visionDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
+  ...iosDeviceOwnershipFileSource,
+  claimPath: (udid) => visionDeviceAllocationClaimPath(udid),
+};
+
 /** The clock a foreign-ownership reader runs on, and its CtrlProxy forward evidence. */
 export interface ForeignOwnershipOptions {
   /** This daemon's own control socket path (defaults to the CtrlProxy forward-lease socket). */

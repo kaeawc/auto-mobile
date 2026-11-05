@@ -308,4 +308,20 @@ describe("provisionDevice on an Apple Watch simulator", () => {
     expect(watch).toMatchObject({ boot: true });
     expect(watch.readiness).toBeUndefined();
   });
+
+  test("a created watch notifies resource subscribers; adopting it does not", async () => {
+    await arrange();
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    await provision({ device: WATCH });
+    expect(notified).toBe(1);
+
+    await provision({ device: WATCH, boot: false });
+    expect(notified).toBe(1);
+  });
 });

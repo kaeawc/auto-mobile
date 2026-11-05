@@ -142,4 +142,45 @@ class WorkspaceStatusDerivationTest {
     assertEquals(WorkspaceStatus.Yellow, result.status)
     assertEquals("1 device offline", result.detail)
   }
+
+  @Test
+  fun `failing diagnostic checks turn a healthy workspace yellow`() {
+    val one = deriveWorkspaceStatus(connected, listOf(connected), failingDiagnosticChecks = 1)
+    assertEquals(WorkspaceStatus.Yellow, one.status)
+    assertEquals("1 diagnostic check failing", one.detail)
+
+    val two = deriveWorkspaceStatus(connected, emptyList(), failingDiagnosticChecks = 2)
+    assertEquals("2 diagnostic checks failing", two.detail)
+  }
+
+  @Test
+  fun `device stream problems outrank failing diagnostic checks`() {
+    val result =
+      deriveWorkspaceStatus(
+        connected,
+        listOf(ConnectionState.Error("closed")),
+        failingDiagnosticChecks = 3,
+      )
+    assertEquals(WorkspaceStatus.Yellow, result.status)
+    assertEquals("1 device offline", result.detail)
+  }
+
+  @Test
+  fun `a down daemon outranks failing diagnostic checks`() {
+    val result =
+      deriveWorkspaceStatus(
+        ConnectionState.Disconnected(),
+        emptyList(),
+        failingDiagnosticChecks = 3,
+      )
+    assertEquals(WorkspaceStatus.Red, result.status)
+    assertEquals("Daemon disconnected", result.detail)
+  }
+
+  @Test
+  fun `no failing checks leaves a healthy workspace green`() {
+    val result = deriveWorkspaceStatus(connected, listOf(connected), failingDiagnosticChecks = 0)
+    assertEquals(WorkspaceStatus.Green, result.status)
+    assertNull(result.detail)
+  }
 }

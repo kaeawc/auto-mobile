@@ -22,14 +22,7 @@ OWN_HOME='~/.gradle/${{ github.job }}'
 # shellcheck disable=SC2016,SC2088 # GitHub expressions, compared literally.
 BORROWED_HOME='~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}'
 
-donors_require_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify the Gradle home donor wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 # Gradle home directories a job passes to the repository's Gradle actions, one
 # per line.
@@ -51,14 +44,14 @@ borrowers() {
 }
 
 @test "the cold pull-request Android jobs borrow a Gradle home" {
-  donors_require_yq
+  require_mikefarah_yq
   run borrowers
   [ "$status" -eq 0 ]
   [ "$output" = $'android-emulator-tests kotlin-code-coverage\njvm-consumer-checks sdk-debug-inspector-consumer\nbuild-playground-app kotlin-code-coverage' ]
 }
 
 @test "every borrower uses its donor's Gradle home path for each Gradle step" {
-  donors_require_yq
+  require_mikefarah_yq
   local job donor homes home
   while read -r job donor; do
     homes="$(gradle_homes "$PR_WF" "$job")"
@@ -70,7 +63,7 @@ borrowers() {
 }
 
 @test "every donor is an enabled main job that saves its own Gradle home" {
-  donors_require_yq
+  require_mikefarah_yq
   local job donor homes home
   while read -r job donor; do
     [ "$(yq -r ".jobs | has(\"$donor\")" "$MAIN_WF")" = "true" ]
@@ -90,7 +83,7 @@ borrowers() {
 }
 
 @test "a pull-request job with a same-id main job keeps its own Gradle home" {
-  donors_require_yq
+  require_mikefarah_yq
   local job
   for job in build-android-control-proxy junit-runner-unit-tests kotlin-code-coverage detekt; do
     [ "$(yq -r ".jobs.\"$job\".env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB" "$PR_WF")" = "null" ]

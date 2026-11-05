@@ -1,0 +1,30 @@
+{
+  "pixel-9": {
+    "screen": "Public spec: 1080 x 2424 px at 420 dpi (density 2.625)",
+    "insets": "Estimated; not yet measured on an emulator"
+  },
+  "small-phone": {
+    "screen": "Android Studio small_phone device definition: 720 x 1280 px at 320 dpi",
+    "insets": "AOSP defaults: 24 dp status bar, 48 dp three-button navigation bar"
+  },
+  "medium-tablet": {
+    "screen": "Android Studio medium_tablet device definition: 1600 x 2560 px at 320 dpi",
+    "insets": "Estimated; not yet measured on an emulator"
+  },
+  "iphone-16": {
+    "screen": "Public spec: 393 x 852 pt at @3x",
+    "insets": "UIKit safe area insets for this model; cutout geometry estimated"
+  },
+  "iphone-16-pro-max": {
+    "screen": "Public spec: 440 x 956 pt at @3x",
+    "insets": "UIKit safe area insets for this model; cutout geometry estimated"
+  },
+  "iphone-se-3": {
+    "screen": "Public spec: 375 x 667 pt at @2x",
+    "insets": "UIKit safe area insets for this model"
+  },
+  "ipad-10": {
+    "screen": "Public spec: 820 x 1180 pt at @2x",
+    "insets": "UIKit safe area insets for this model; corner radius estimated"
+  }
+}

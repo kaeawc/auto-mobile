@@ -191,6 +191,27 @@ describe("waitForObservation DSL branch", () => {
     expect(outcome.matchedElement?.text).toBe("Account settings");
   });
 
+  test("for:'appear' matches text that only a context row carries", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const withStatusRow = (updatedAt: number): ObserveResult => ({
+      ...makeObservation([node({ "resource-id": "load", text: "Load" })], updatedAt),
+      skeleton: [],
+      context: [{ label: "Loaded 95 bytes", bounds: [20, 40, 180, 60], affordances: [] }],
+    });
+    observeScreen.setObserveSequence([withStatusRow(10), withStatusRow(20)]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { for: "appear", text: "Loaded", timeout: 500 } satisfies WaitForWithSettled,
+      { skipBackStack: false, timer },
+    );
+
+    expect(outcome.matched).toBe(true);
+    expect(outcome.matchedElement?.text).toBe("Loaded 95 bytes");
+  });
+
   test("appear settled recheck rejects matching nodes with unavailable freshness", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

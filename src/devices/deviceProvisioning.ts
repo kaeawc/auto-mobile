@@ -39,8 +39,14 @@ import {
   hasRuntimeRangeMetadata,
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
-import { compareStrictNumericVersions } from "../utils/deviceMatcher";
+import { compareStrictNumericVersions, isMotionCapableAutomotiveTag } from "../utils/deviceMatcher";
+import {
+  XR_IMAGE_FAMILIES,
+  xrMissingImageMessage,
+  type XrFormFactor,
+} from "./androidXrImageFamilies";
 import { androidSystemImageTagsFor, defaultAndroidProfileIdFor } from "../models/formFactor";
+import { watchImageFamily, watchMissingImageMessage } from "./androidWearImageFamily";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
@@ -151,6 +157,8 @@ function iosProvisioningFormFactor(formFactor: FormFactor | undefined): IosProvi
     case "tv":
     case "watch":
     case "automotive":
+    case "xr-headset":
+    case "xr-glasses":
     case "unknown":
       throw new ActionableError(
         `iOS provisioning supports only phone or tablet form factors, not '${formFactor}'.`,
@@ -359,7 +367,7 @@ function tagRank(tag: string): number {
 
 /** Which installed images a requested form factor may create an AVD from. */
 export interface AndroidImageFamily {
-  kind: "handheld" | "tv" | "automotive";
+  kind: "handheld" | "watch" | "tv" | "automotive" | "xr-headset" | "xr-glasses";
   accepts(tag: string): boolean;
   /** Lower is better; only compared between images of equal API level and ABI. */
   rank(tag: string): number;
@@ -410,22 +418,24 @@ const AUTOMOTIVE_IMAGE_FAMILY: AndroidImageFamily = {
 
 /**
  * The image family a request may be created from. Phone, tablet, foldable and an omitted form
- * factor stay handheld-only (#14900); `tv` and `automotive` select only their own images. Watch is
- * refused: picking a handheld image would silently satisfy it with a phone.
+ * factor stay handheld-only (#14900); watch, TV, automotive and XR select only their own images.
  */
-export function androidImageFamilyFor(formFactor: FormFactor | undefined): AndroidImageFamily {
+export function androidImageFamilyFor(
+  formFactor: FormFactor | undefined,
+  requires?: DeviceMatchCriteria["requires"],
+  profileName?: string,
+): AndroidImageFamily {
   if (formFactor === "tv") {
     return TV_IMAGE_FAMILY;
   }
   if (formFactor === "automotive") {
     return AUTOMOTIVE_IMAGE_FAMILY;
   }
+  if (formFactor === "xr-headset" || formFactor === "xr-glasses") {
+    return XR_IMAGE_FAMILIES[formFactor];
+  }
   if (formFactor === "watch") {
-    throw new ActionableError(
-      `Creating a '${formFactor}' AVD is not supported yet; AutoMobile only creates ` +
-        "phone, tablet, foldable, TV and automotive AVDs. Create the AVD with avdmanager and the " +
-        "matching system image, or use provisionDevice with an explicit runtime and deviceType.",
-    );
+    return watchImageFamily(requires?.screenRound, profileName);
   }
   return HANDHELD_IMAGE_FAMILY;
 }
@@ -564,7 +574,7 @@ function handheldImagesOrThrow(
     throw new ActionableError(
       "No installed handheld (phone) Android system image matches the requested API range " +
         `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
-        "Only non-handheld images (Wear OS, TV, Automotive or similar) are installed in that range: " +
+        "Only non-handheld images (Wear OS, TV, Automotive, XR or similar) are installed in that range: " +
         `${describeInstalled(inRange)}. ` +
         "Default provisioning never creates an AVD from them. " +
         "Install a phone image with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
@@ -573,11 +583,15 @@ function handheldImagesOrThrow(
   return handheld;
 }
 
-/** The Play image to install for each family: the phone, Google TV and Play car images. */
-const PLAY_STORE_TAG_BY_FAMILY: Record<AndroidImageFamily["kind"], string> = {
+/**
+ * The Play image to install for each family: the phone, Google TV, Play car and Play XR headset
+ * images. Glasses have no known Play image, so a Play request for them names none.
+ */
+const PLAY_STORE_TAG_BY_FAMILY: Partial<Record<AndroidImageFamily["kind"], string>> = {
   handheld: "google_apis_playstore",
   tv: "google-tv",
   automotive: "android-automotive-playstore",
+  "xr-headset": "android-xr-v3-playstore",
 };
 
 /** `requires.playStore` (#14302): only Play Store images, or a refusal naming the image to install. */
@@ -585,14 +599,47 @@ function playStoreImagesOrThrow(images: SystemImage[], family: AndroidImageFamil
   const play = images.filter((image) => isPlayStoreSystemImageTag(image.tag));
   if (play.length === 0) {
     const tag = PLAY_STORE_TAG_BY_FAMILY[family.kind];
+    const install =
+      tag === undefined
+        ? `No Google Play ${family.kind} image is known; remove requires.playStore for this form factor. `
+        : `Install one with 'sdkmanager "system-images;android-<api>;${tag};<abi>"'. `;
     throw new ActionableError(
       "requires.playStore needs a Google Play system image, and none is installed for this request: " +
         `${describeInstalled(images)}. ` +
-        `Install one with 'sdkmanager "system-images;android-<api>;${tag};<abi>"'. ` +
+        install +
         "Play Store images refuse adb root, so root-dependent features will report that they need a non-Play image.",
     );
   }
   return play;
+}
+
+/**
+ * `requires.vehicle.motion` (#16742): only non-Play car images, whose `userdebug` builds accept
+ * driving-state injection, or a refusal naming the image to install. This overrides the Play-first
+ * automotive default.
+ */
+function motionCapableImagesOrThrow(
+  candidates: SystemImage[],
+  images: SystemImage[],
+  bounds: ApiBounds,
+  architecture: string,
+): SystemImage[] {
+  const capable = candidates.filter((image) => isMotionCapableAutomotiveTag(image.tag));
+  if (capable.length > 0) {
+    return capable;
+  }
+  const api = Math.min(
+    Math.max(bounds.min, SUGGESTED_AUTOMOTIVE_API_LEVEL),
+    bounds.max ?? Number.POSITIVE_INFINITY,
+  );
+  const abis = preferredAbis(architecture);
+  throw new ActionableError(
+    "requires.vehicle.motion needs a non-Play Android Automotive system image (android-automotive), " +
+      `and none is installed in the requested API range ${describeRange(bounds)}: ` +
+      `${describeInstalled(images)}. Play Store car images are user builds that refuse driving-state ` +
+      "simulation. AutoMobile does not download system images. Install one with " +
+      `'sdkmanager "system-images;android-${api};android-automotive;${abis[0]}"', then retry.`,
+  );
 }
 
 /** Shared installation wording for selected and exact Android TV provisioning. */
@@ -652,19 +699,68 @@ function automotiveImagesOrThrow(
   );
 }
 
+/** The installed images, those in the requested API range, the bounds and the host architecture. */
+interface ImageSelection {
+  images: SystemImage[];
+  inRange: SystemImage[];
+  bounds: ApiBounds;
+  architecture: string;
+}
+
+/** XR images in range, or an error naming the sdkmanager package shape that installs one. */
+function xrImagesOrThrow(
+  kind: XrFormFactor,
+  { images, inRange, bounds, architecture }: ImageSelection,
+): SystemImage[] {
+  const xr = inRange.filter((image) => XR_IMAGE_FAMILIES[kind].accepts(image.tag));
+  if (xr.length > 0) {
+    return xr;
+  }
+  const [abi] = preferredAbis(architecture);
+  throw new ActionableError(
+    xrMissingImageMessage(kind, describeRange(bounds), describeInstalled(images), abi),
+  );
+}
+
+/** Images of the requested family in range, or that family's install guidance. */
+function familyImagesOrThrow(family: AndroidImageFamily, selection: ImageSelection): SystemImage[] {
+  const { images, inRange, bounds, architecture } = selection;
+  switch (family.kind) {
+    case "watch": {
+      const abis = preferredAbis(architecture);
+      const wear = inRange.filter((image) => family.accepts(image.tag) && abis.includes(image.abi));
+      if (wear.length > 0) {
+        return wear;
+      }
+      throw new ActionableError(
+        watchMissingImageMessage(describeRange(bounds), describeInstalled(images), abis),
+      );
+    }
+    case "tv":
+      return tvImagesOrThrow(images, inRange, bounds, architecture);
+    case "automotive":
+      return automotiveImagesOrThrow(images, inRange, bounds, architecture);
+    case "xr-headset":
+    case "xr-glasses":
+      return xrImagesOrThrow(family.kind, selection);
+    case "handheld":
+      return handheldImagesOrThrow(images, inRange, bounds);
+  }
+}
+
 /**
  * Choose an installed system image: newest exact API identifier within the
  * requested major-API range, preferring a host-runnable ABI and the family's best tag.
  * The form factor picks the family ({@link androidImageFamilyFor}): handheld requests never
- * select Wear OS, TV or Automotive images (#14900), and a TV or automotive request selects only
- * its own images.
+ * select Wear OS, TV, Automotive or XR images (#14900), and a TV, automotive or XR request selects
+ * only its own images.
  */
 export function pickAndroidSystemImage(
   images: SystemImage[],
   criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion" | "formFactor" | "requires">,
   architecture: string,
 ): SystemImage {
-  const family = androidImageFamilyFor(criteria.formFactor);
+  const family = androidImageFamilyFor(criteria.formFactor, criteria.requires);
   const requestedMin = resolveApiLevelBound(criteria.minOsVersion, "min");
   const max = resolveApiLevelBound(criteria.maxOsVersion, "max");
 
@@ -696,17 +792,16 @@ export function pickAndroidSystemImage(
   });
 
   const bounds: ApiBounds = { criteria, requestedMin, min, max };
-  const familyImages =
-    family.kind === "tv"
-      ? tvImagesOrThrow(images, inRange, bounds, architecture)
-      : family.kind === "automotive"
-        ? automotiveImagesOrThrow(images, inRange, bounds, architecture)
-        : handheldImagesOrThrow(images, inRange, bounds);
+  const familyImages = familyImagesOrThrow(family, { images, inRange, bounds, architecture });
 
   const preferences = preferredAbis(architecture);
-  const allowed = criteria.requires?.playStore
+  const playStoreAllowed = criteria.requires?.playStore
     ? playStoreImagesOrThrow(familyImages, family)
     : familyImages;
+  const allowed =
+    criteria.requires?.vehicle?.motion === "supported"
+      ? motionCapableImagesOrThrow(playStoreAllowed, images, bounds, architecture)
+      : playStoreAllowed;
   const runnable = allowed.filter((image) => preferences.includes(image.abi));
   const candidates = runnable.length > 0 ? runnable : allowed;
 
@@ -878,8 +973,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     signal?: AbortSignal,
     identityHooks?: DeviceProvisioningIdentityHooks,
   ): Promise<ProvisionedDevice> {
-    // Refuses watch before listing images.
-    const family = androidImageFamilyFor(criteria.formFactor);
+    const family = androidImageFamilyFor(criteria.formFactor, criteria.requires, criteria.name);
     const avdManager = this.dependencies.androidCreator();
 
     let installed: SystemImage[];

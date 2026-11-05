@@ -56,6 +56,7 @@ class ViewerWatchdogTest {
         settings = settings,
         renderWatchdog = DeadlineRenderWatchdog { timer },
         renderer = renderer,
+        blocklist = FakeContentBlocklist(),
       )
     }
   }

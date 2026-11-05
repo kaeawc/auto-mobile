@@ -233,6 +233,23 @@ describe("chart", () => {
     expect(ring.attrs["aria-label"]).toBe("Steps today, 6500 of 10000");
   });
 
+  test("a ring's SVG fills an authored size instead of its default 120 px", () => {
+    const spec = rootOf(
+      {
+        type: "chart",
+        variant: "ring",
+        series: [{ path: "/today", y: "count", label: "Steps" }],
+        goal: 10,
+        style: { width: { dp: 60 }, height: { dp: 60 } },
+      },
+      { data: { today: [{ count: 5 }] } },
+    );
+    const ring = nodes(spec, "chart").found[0]!;
+    expect(ring.style).toMatchObject({ width: "60px", height: "60px" });
+    const svg = byAttr(ring, "viewbox")[0]!;
+    expect(svg.attrs).toMatchObject({ width: "100%", height: "100%", viewbox: "0 0 120 120" });
+  });
+
   test("the summary matches the device wording", () => {
     expect(chartSummary("ring", [{ label: "Steps", points: [{ y: 6500 }] }], 10000)).toBe(
       "Ring chart, Steps, 6500 of 10000",

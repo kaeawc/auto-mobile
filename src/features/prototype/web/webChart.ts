@@ -319,7 +319,11 @@ const chartRenderer =
     if (isRing) {
       const svg = el(
         "svg",
-        { attrs: { viewbox: `0 0 ${RING} ${RING}`, width: String(RING), height: String(RING) } },
+        {
+          // The view box keeps the ring's geometry; the SVG fills the node's (possibly authored) box.
+          attrs: { viewbox: `0 0 ${RING} ${RING}`, width: "100%", height: "100%" },
+          style: { display: "block" },
+        },
         ring(model, scope),
       );
       return el("div", { attrs: { ...attrs, ...labelled }, style }, [svg]);

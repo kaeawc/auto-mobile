@@ -580,6 +580,61 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  test("a provision preempted while its boot waits for admission neither boots nor binds", async () => {
+    const existing = visionDevice({ name: NAME, state: "Shutdown" });
+    const reachedAdmission = Promise.withResolvers<AbortSignal | undefined>();
+    const releaseAdmission = Promise.withResolvers<void>();
+    const { simctl, pool, sessions, timer, lifecycleCoordinator } = await arrange([existing], {
+      admission: {
+        run: async (request, boot) => {
+          reachedAdmission.resolve(request.signal);
+          await releaseAdmission.promise;
+          request.signal?.throwIfAborted();
+          return await boot(request.timeoutMs);
+        },
+      },
+    });
+    const pending = failure(
+      call("provisionDevice", { __mcpSessionId: "client-a", device: headset }),
+    );
+    const admissionSignal = await reachedAdmission.promise;
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "visionos", stableId: existing.udid },
+      { operation: "teardown", deadlineMs: timer.now() + 60_000 },
+    );
+    releaseAdmission.resolve();
+    const error = await pending;
+    const lease = await teardown;
+    lease.release();
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain("preempted by teardown");
+    expect(admissionSignal?.aborted).toBe(true);
+    expect(simctl.commands).toEqual([]);
+    expect(sessions.getAllSessions()).toEqual([]);
+    expect(pool.getDevice(existing.udid)).toBeNull();
+  });
+
+  test("one-shot CLI provisionDevice reuses the anonymous acquisition session for the same headset", async () => {
+    const existing = visionDevice({ name: NAME, state: "Booted" });
+    const { sessions, simctl } = await arrange([existing]);
+    const provision = () => call("provisionDevice", { device: headset, __oneShotCli: true });
+    const sessionOf = () => {
+      const all = sessions.getAllSessions();
+      expect(all).toHaveLength(1);
+      return all[0]!.sessionId;
+    };
+
+    await provision();
+    const sessionId = sessionOf();
+    const session = sessions.getSession(sessionId);
+    expect(session && isAnonymousAcquisitionSession(session)).toBe(true);
+
+    await provision();
+    expect(sessionOf()).toBe(sessionId);
+    expect(simctl.commands).toEqual([]);
+  });
+
   test("boot false adopts the existing headset and binds nothing", async () => {
     const existing = visionDevice({ name: NAME });
     const { simctl, pool } = await arrange([existing]);

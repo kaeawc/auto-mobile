@@ -62,19 +62,40 @@ async function resolveNonIosSimulatorKillTarget(
   inventories: Parameters<typeof resolveSimulatorKillTarget>[2],
   signal?: AbortSignal,
 ): Promise<BootedDevice> {
-  if (inventories.vision) {
-    const headsets = await inventories.vision.listAppleVisionSimulators(signal);
-    signal?.throwIfAborted();
-    if (headsets.some((headset) => headset.deviceId === device.deviceId)) {
-      return { ...device, platform: "visionos" };
-    }
-  }
   if (!inventories.tv && !inventories.vision) {
     throw new ActionableError("Apple simulator inventory is unavailable on this host.");
   }
+  // A failed Vision read must not refuse a confirmable Apple TV; it is rethrown only when the
+  // tvOS inventory does not confirm the device either.
+  const vision = await readVisionMatch(device.deviceId, inventories.vision, signal);
+  if (vision.matched) {
+    return { ...device, platform: "visionos" };
+  }
   const tvs = (await inventories.tv?.listAppleTvSimulators(signal)) ?? [];
   signal?.throwIfAborted();
-  return tvs.some((tv) => tv.deviceId === device.deviceId)
-    ? { ...device, platform: "tvos" }
-    : device;
+  if (tvs.some((tv) => tv.deviceId === device.deviceId)) {
+    return { ...device, platform: "tvos" };
+  }
+  if (vision.error !== undefined) {
+    throw vision.error;
+  }
+  return device;
+}
+
+async function readVisionMatch(
+  deviceId: string,
+  vision: Pick<AppleVisionSimulatorInventory, "listAppleVisionSimulators"> | undefined,
+  signal?: AbortSignal,
+): Promise<{ matched: boolean; error?: unknown }> {
+  if (!vision) {
+    return { matched: false };
+  }
+  try {
+    const headsets = await vision.listAppleVisionSimulators(signal);
+    signal?.throwIfAborted();
+    return { matched: headsets.some((headset) => headset.deviceId === deviceId) };
+  } catch (error) {
+    signal?.throwIfAborted();
+    return { matched: false, error };
+  }
 }

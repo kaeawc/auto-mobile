@@ -1,25 +1,21 @@
-import {
-  currentAutolockMcpSessionId,
-  currentOneShotCli,
-} from "../features/toolSelection/toolSelectionContext";
 import { ActionableError, type DeviceInfo } from "../models";
 import {
   getDeviceToolsDependencies,
-  initializedDevicePool,
   mergeLegacyStartDevicePayload,
   reserveStableDeviceLifecycle,
   watchStartDeviceParametersSchema,
-  type DeviceToolsDependencies,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
-import { holderOf } from "../daemon/deviceBinding";
-import { isAnonymousAcquisitionSession } from "../daemon/sessionManager";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
-import { assertVisionUnclaimed, defaultAppleVisionBoot } from "./deviceToolsAppleVisionProvision";
+import {
+  assertVisionUnclaimed,
+  defaultAppleVisionBoot,
+  reusableVisionSessionId,
+} from "./deviceToolsAppleVisionProvision";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 import { stripInternalToolParams } from "./internalToolParams";
 import { z } from "zod/v4";
@@ -150,28 +146,4 @@ function selectAppleVisionSimulator(images: DeviceInfo[], args: z.infer<typeof p
     );
   }
   return { ...headset, deviceId: headset.deviceId };
-}
-
-function reusableVisionSessionId(
-  deviceId: string,
-  deps: DeviceToolsDependencies,
-): string | undefined {
-  return currentOneShotCli()
-    ? reusableAnonymousSessionId(deviceId, deps)
-    : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
-        currentAutolockMcpSessionId(),
-        deviceId,
-      );
-}
-
-function reusableAnonymousSessionId(
-  deviceId: string,
-  deps: DeviceToolsDependencies,
-): string | undefined {
-  if (!deps.daemonState.isInitialized()) {
-    return undefined;
-  }
-  const holder = holderOf(deps.daemonState.getDevicePool().getDevice(deviceId));
-  const session = holder ? deps.daemonState.getSessionManager().getSession(holder) : null;
-  return holder && session && isAnonymousAcquisitionSession(session) ? holder : undefined;
 }

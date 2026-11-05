@@ -180,6 +180,20 @@ describe("AppleVisionSimulatorProvisioner", () => {
     expect(simctl.commands).toEqual([]);
   });
 
+  test("a template-reserved name is refused before simctl create", async () => {
+    const { simctl, provisioner } = arrange([]);
+
+    const error = await rejection(
+      provisioner.provision(request({ name: "automobile-template-0123abcd" }), {
+        allowCreate: true,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain("reserved for AutoMobile simulator templates");
+    expect(simctl.commands).toEqual([]);
+  });
+
   test("a UDID that names no headset is refused, never created under a new UDID", async () => {
     const { simctl, provisioner } = arrange([]);
 

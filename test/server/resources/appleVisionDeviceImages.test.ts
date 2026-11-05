@@ -107,7 +107,14 @@ describe("Apple Vision Pro device images", () => {
       images: [],
       configuredInventory: {
         complete: false,
-        observations: { visionos: { error: { code: "failed" } } },
+        observations: {
+          visionos: {
+            error: {
+              code: "failed",
+              message: "visionOS configured-device inventory failed: listing failed",
+            },
+          },
+        },
       },
     });
   });
@@ -116,7 +123,14 @@ describe("Apple Vision Pro device images", () => {
     simctl.catalogError = new Error("catalog failed");
     expect(await handler.getDeviceImagesForPlatforms(["visionos"])).toMatchObject({
       catalogComplete: false,
-      catalogObservations: { visionos: { error: { code: "failed" } } },
+      catalogObservations: {
+        visionos: {
+          error: {
+            code: "failed",
+            message: "visionOS provisioning catalog failed: catalog failed",
+          },
+        },
+      },
     });
   });
   test("all images remain Android and iOS without touching Apple Vision Pro inventory", async () => {

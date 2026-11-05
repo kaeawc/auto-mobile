@@ -4,6 +4,7 @@ import {
   currentOneShotCli,
 } from "../features/toolSelection/toolSelectionContext";
 import { holderOf } from "../daemon/deviceBinding";
+import { isAnonymousAcquisitionSession } from "../daemon/sessionManager";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -16,7 +17,7 @@ import {
   type AppleVisionProvisionDeviceRequest,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { ActionableError, toActionableError } from "../models";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
@@ -186,26 +187,29 @@ async function bootAndBind(
   deadlineMs: number,
   { signal, stage }: { signal: AbortSignal; stage: { current: string } },
 ): Promise<{ boot: AppleVisionBootResult; sessionId: string }> {
+  // A teardown that preempts this lease aborts boot admission and binding, as in startDevice.
+  const lifecycleSignal = combineAbortSignals(signal, lease.signal) ?? lease.signal;
   try {
-    const reusableSessionId = currentOneShotCli()
-      ? undefined
-      : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
-          currentAutolockMcpSessionId(),
-          headset.deviceId,
-        );
+    const reusableSessionId = reusableVisionSessionId(headset.deviceId, deps);
     assertVisionUnclaimed(headset.deviceId, deps, lease, reusableSessionId);
+    lifecycleSignal.throwIfAborted();
     stage.current = "booting the Apple Vision Pro simulator";
     const lifecycle = (deps.appleVisionSimulatorBootFactory ?? defaultAppleVisionBoot)();
-    const boot = await lifecycle.boot(headset, {
-      timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
-    });
+    const boot = await runWithAbortSignal(lifecycleSignal, () =>
+      lifecycle.boot(headset, {
+        timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
+        signal: lifecycleSignal,
+      }),
+    );
+    lifecycleSignal.throwIfAborted();
     stage.current = "binding the device session";
     const sessionId = await bindBootedSimulatorSession(
       { device: headset, boot, rawArgs, operation: "provisionDevice" },
       bindSession,
       deps.timer,
-      { deadlineMs, signal },
+      { deadlineMs, signal: lifecycleSignal },
     );
+    lifecycleSignal.throwIfAborted();
     return { boot, sessionId };
   } catch (error) {
     if (!created) {
@@ -221,6 +225,34 @@ async function bootAndBind(
       { cause: error },
     );
   }
+}
+
+/**
+ * The pool holder a boot may reuse: the caller's own MCP session, or under one-shot CLI an
+ * anonymous acquisition session an earlier one-shot call left on the headset.
+ */
+export function reusableVisionSessionId(
+  deviceId: string,
+  deps: DeviceToolsDependencies,
+): string | undefined {
+  return currentOneShotCli()
+    ? reusableAnonymousSessionId(deviceId, deps)
+    : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
+        currentAutolockMcpSessionId(),
+        deviceId,
+      );
+}
+
+function reusableAnonymousSessionId(
+  deviceId: string,
+  deps: DeviceToolsDependencies,
+): string | undefined {
+  if (!deps.daemonState.isInitialized()) {
+    return undefined;
+  }
+  const holder = holderOf(deps.daemonState.getDevicePool().getDevice(deviceId));
+  const session = holder ? deps.daemonState.getSessionManager().getSession(holder) : null;
+  return holder && session && isAnonymousAcquisitionSession(session) ? holder : undefined;
 }
 
 /** The canonical lease owns the UDID; only boot may reuse the caller's own pool holder. */

@@ -493,7 +493,7 @@ async function buildAppleSimulatorResourceResult(
   list: (() => ReturnType<WatchSimulatorInventory["listWatchSimulators"]>) | undefined,
   inventory: Pick<WatchSimulatorInventory, "readCatalog"> | undefined,
 ): Promise<PlatformResourceResult> {
-  const label = platform === "watchos" ? "watchOS" : "tvOS";
+  const label = platform === "watchos" ? "watchOS" : platform === "visionos" ? "visionOS" : "tvOS";
   if (!list || !inventory) {
     return unavailableAppleSimulatorResult(platform);
   }
@@ -822,7 +822,7 @@ async function buildIosProvisioningCatalog(
 }
 
 function failedCatalogObservation(
-  platform: "Android" | "iOS" | "watchOS" | "tvOS",
+  platform: "Android" | "iOS" | "watchOS" | "tvOS" | "visionOS",
   error: unknown,
 ): ProvisioningCatalogObservation {
   return {

@@ -7,6 +7,7 @@ import type {
   AppleVisionSimulatorInventory,
 } from "./AppleVisionSimulatorInventory";
 import { evaluateRuntimeCompatibility } from "./runtimeCompatibility";
+import { isTemplateSimName } from "./SimulatorTemplateKey";
 import type { ListedAppleVision } from "./AppleVisionSimulatorBoot";
 
 /** `simctl create` and `simctl delete`; `SimCtlClient` implements them. */
@@ -72,6 +73,12 @@ export class AppleVisionSimulatorProvisioner {
       throw new ActionableError(
         `No Apple Vision Pro simulator has UDID ${request.deviceId}. Omit deviceId to create ` +
           `'${request.name}', or pass the UDID of an existing headset.`,
+      );
+    }
+    if (isTemplateSimName(request.name)) {
+      // The inventory hides template-format names, so a created headset could never be confirmed.
+      throw new ActionableError(
+        `'${request.name}' is reserved for AutoMobile simulator templates; choose another Apple Vision Pro simulator name.`,
       );
     }
     if (!options.allowCreate) {

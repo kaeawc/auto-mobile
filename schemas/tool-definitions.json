@@ -51390,7 +51390,7 @@
           ]
         },
         "platform": {
-          "description": "Inferred from the device; \"watchos\" is required to select an Apple Watch simulator",
+          "description": "Inferred from the device; \"watchos\", \"tvos\" or \"visionos\" is required to select an Apple Watch, Apple TV or Apple Vision Pro simulator",
           "type": "string",
           "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },

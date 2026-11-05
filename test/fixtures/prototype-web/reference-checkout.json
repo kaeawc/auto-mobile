@@ -55,7 +55,17 @@
             "text": "Total {derived:totalText}",
             "style": { "textSize": 20, "fontWeight": 600, "color": "primary" }
           },
-          { "type": "progress", "id": "spend" },
+          {
+            "type": "menu",
+            "id": "spend",
+            "openWhen": { "key": "showPromo", "equals": true },
+            "items": [
+              {
+                "label": "Split",
+                "onTap": [{ "type": "setState", "key": "agree", "value": false }]
+              }
+            ]
+          },
           {
             "type": "button",
             "label": "Pay",

@@ -362,7 +362,7 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
       .union([z.literal(DEVICE_CONDITION_UNSET), privacyParamsSchema()])
       .optional()
       .describe(
-        "Grant or revoke one privacy service for an installed app ({ appId, service, action }). iOS Simulator only so far; reset restores the app's earlier decision for that service (granted, denied, or not yet asked). Refused when that decision cannot be restored, such as limited Photos access. Or unset.",
+        "Grant or revoke one privacy service for an installed app ({ appId, service, action }). iOS Simulator only so far; reset restores the app's earlier decisions for that service and its pair (photos/photos-add, location/location-always): granted, denied, or not yet asked. Refused when that decision cannot be restored, such as limited Photos access. Or unset.",
       ),
     location: z
       .union([z.literal(DEVICE_CONDITION_UNSET), deviceLocationParamsSchema()])

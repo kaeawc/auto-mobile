@@ -62,6 +62,7 @@ class FakeTccStore implements TccPermissionReader {
 const TCC_SERVICE: Record<string, string> = {
   camera: "kTCCServiceCamera",
   photos: "kTCCServicePhotos",
+  "photos-add": "kTCCServicePhotosAdd",
   microphone: "kTCCServiceMicrophone",
 };
 
@@ -80,16 +81,22 @@ function harness(device: BootedDevice = simulator) {
           reset: undefined,
         };
         tcc.set(appId, TCC_SERVICE[service], values[action]);
+        // iOS 26.5 captures: revoking Photos also denies PhotosAdd.
+        if (service === "photos" && action === "revoke") {
+          tcc.set(appId, TCC_SERVICE["photos-add"], 0);
+        }
       }
       void timeout;
       void signal;
       return result;
     },
   };
+  const privacyBaselines = new Map();
   const controller = new DeviceConditionController((key) =>
     resolveIosSimulatorConditionInjector(device, key, {
       simctlFactory: () => runner,
       privacyReader: tcc,
+      privacyBaselines,
     }),
   );
   return { simctl, tcc, controller };
@@ -160,8 +167,56 @@ describe("privacy on the iOS Simulator", () => {
 
     const restore = await h.controller.restore();
     expect(restore.verifiedClean).toBe(true);
-    expect(h.simctl.calls.at(-1)).toEqual(["privacy", UDID, "grant", "photos", "com.example.app"]);
+    // The revoke also denied PhotosAdd, which had no decision before, so it is reset too.
+    expect(h.simctl.calls.slice(1)).toEqual([
+      ["privacy", UDID, "grant", "photos", "com.example.app"],
+      ["privacy", UDID, "reset", "photos-add", "com.example.app"],
+    ]);
     expect(h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value).toBe(2);
+    expect(h.tcc.rows.has("com.example.app|kTCCServicePhotosAdd")).toBe(false);
+  });
+
+  test("a sibling PhotosAdd grant the revoke removed is granted back", async () => {
+    const h = harness();
+    h.tcc.set("com.example.app", "kTCCServicePhotos", 2);
+    h.tcc.set("com.example.app", "kTCCServicePhotosAdd", 2);
+    await h.controller.apply(revokePhotos);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotosAdd")?.auth_value).toBe(0);
+
+    const restore = await h.controller.restore();
+    expect(restore.verifiedClean).toBe(true);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value).toBe(2);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotosAdd")?.auth_value).toBe(2);
+  });
+
+  test("a retried older reset cannot reinstate a fixture after the original was restored", async () => {
+    const h = harness();
+    h.tcc.set("com.example.app", "kTCCServicePhotos", 2);
+    h.tcc.set("com.example.app", "kTCCServicePhotosAdd", 2);
+    await h.controller.apply(revokePhotos);
+    await h.controller.apply({
+      privacy: { appId: "com.example.app", service: "photos", action: "grant" },
+    });
+    // The newest reset fails once; the older one then restores the shared original.
+    const read = h.tcc.readPermissions.bind(h.tcc);
+    let failNext = true;
+    h.tcc.readPermissions = (deviceId, appId) => {
+      if (failNext) {
+        failNext = false;
+        return Promise.reject(new Error("TCC read failed"));
+      }
+      return read(deviceId, appId);
+    };
+    const first = await h.controller.restore();
+    expect(first.verifiedClean).toBe(false);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotosAdd")?.auth_value).toBe(2);
+
+    const callsBefore = h.simctl.calls.length;
+    const second = await h.controller.restore();
+    expect(second.verifiedClean).toBe(true);
+    expect(h.simctl.calls.length).toBe(callsBefore);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value).toBe(2);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotosAdd")?.auth_value).toBe(2);
   });
 
   test("with no earlier decision, reset returns the service to not yet asked", async () => {

@@ -42,6 +42,8 @@ export interface IosSimulatorConditionDeps {
   simctlFactory?: (device: BootedDevice) => SimctlConditionRunner;
   privacyReader?: TccPermissionReader;
   isSimulator?: (device: BootedDevice) => boolean;
+  /** Owed privacy baselines per device id; the resolver runs on every apply, so they live here. */
+  privacyBaselines?: Map<string, PrivacyBaselineStore>;
 }
 
 function isSharedConditionKey(key: DeviceConditionKey): key is SharedConditionKey {
@@ -143,6 +145,21 @@ export function createSimulatorLocationInjector(
 
 /** The stored decision for one privacy service, as the simctl action that recreates it. */
 type PrivacyDecision = "grant" | "revoke" | "reset";
+type PrivacyService = DeviceConditionPrivacyTarget["service"];
+
+/**
+ * Services whose stored decisions move together, in restore order. Revoking `photos` also denies
+ * `photos-add` (iOS 26.5 captures), and granting `photos` back leaves `photos-add` denied, so a
+ * change to either is restored as the whole group.
+ */
+const PRIVACY_SERVICE_GROUPS: readonly (readonly PrivacyService[])[] = [
+  ["photos", "photos-add"],
+  ["location", "location-always"],
+];
+
+function privacyGroup(service: PrivacyService): readonly PrivacyService[] {
+  return PRIVACY_SERVICE_GROUPS.find((group) => group.includes(service)) ?? [service];
+}
 
 function decisionFromRow(row: TccPermissionRow | undefined): PrivacyDecision | undefined {
   if (row === undefined) {
@@ -156,69 +173,138 @@ function decisionFromRow(row: TccPermissionRow | undefined): PrivacyDecision | u
   return row.allowed === 1 ? "grant" : row.allowed === 0 ? "revoke" : undefined;
 }
 
-async function readPrivacyDecision(
-  reader: TccPermissionReader,
-  device: BootedDevice,
-  target: DeviceConditionPrivacyTarget,
-  signal?: AbortSignal,
-): Promise<PrivacyDecision | undefined> {
-  const service = tccServiceForPermission(target.service);
-  const rows = await reader.readPermissions(
-    device.deviceId,
-    target.appId,
-    [target.service],
-    signal,
-  );
-  return decisionFromRow(rows.find((row) => row.service === service));
+type PrivacySnapshot = Map<PrivacyService, PrivacyDecision | undefined>;
+
+/** Reads one app's decisions for a set of services; a decision simctl cannot recreate is undefined. */
+function privacySnapshotReader(reader: TccPermissionReader, device: BootedDevice) {
+  return async (
+    appId: string,
+    services: readonly PrivacyService[],
+    signal?: AbortSignal,
+  ): Promise<PrivacySnapshot> => {
+    const rows = await reader.readPermissions(device.deviceId, appId, [...services], signal);
+    return new Map(
+      services.map((service) => {
+        const tccService = tccServiceForPermission(service);
+        return [service, decisionFromRow(rows.find((row) => row.service === tccService))];
+      }),
+    );
+  };
 }
 
 /**
- * `privacy`: `simctl privacy grant|revoke` for one app and service. The prior stored decision is
- * read first so reset puts back exactly that decision (grant, revoke, or no decision); a prior
- * decision simctl cannot recreate, such as limited Photos access, is refused before any change.
+ * The original decisions of one app's service group, shared by every apply that changed the group
+ * until one reset restores it. Later applies reuse it instead of capturing their own intermediate
+ * state, so retrying an older reset can never reinstate a fixture.
+ */
+interface PrivacyBaseline {
+  decisions: PrivacySnapshot;
+  /** The reset that restored the baseline; set once, after which every other reset is a no-op. */
+  restoredBy?: object;
+}
+
+/** Original privacy baselines still owed, per app and service group. */
+export type PrivacyBaselineStore = Map<string, PrivacyBaseline>;
+
+/**
+ * `privacy`: `simctl privacy grant|revoke` for one app and service. The original stored decisions
+ * of the service's group are read first so reset puts back exactly those decisions (grant, revoke,
+ * or no decision); an original decision simctl cannot recreate, such as limited Photos access, is
+ * refused before any change.
  */
 export function createSimulatorPrivacyInjector(
   device: BootedDevice,
   simctl: SimctlConditionRunner,
   reader: TccPermissionReader,
+  baselines: PrivacyBaselineStore = new Map(),
 ): DeviceConditionInjector {
+  const readPrivacySnapshot = privacySnapshotReader(reader, device);
+  const restore = async (
+    appId: string,
+    group: readonly PrivacyService[],
+    baseline: PrivacyBaseline,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    // Restore in group order, re-reading before each step: one service's change can move another.
+    for (const service of group) {
+      const wanted = baseline.decisions.get(service);
+      const current = await readPrivacySnapshot(appId, [service], signal);
+      if (wanted !== undefined && current.get(service) !== wanted) {
+        await runSimctl(simctl, ["privacy", device.deviceId, wanted, service, appId], signal);
+      }
+    }
+  };
   return {
     key: "privacy",
     async apply(value, signal, params): Promise<DeviceConditionApplyOutcome> {
       requireApply("privacy", value);
       const target = parseParams("privacy", privacyParamsSchema(), params);
-      const prior = await readPrivacyDecision(reader, device, target, signal);
-      if (prior === undefined) {
+      const group = privacyGroup(target.service);
+      const storeKey = `${target.appId}\u0000${group[0]}`;
+      const current = await readPrivacySnapshot(target.appId, group, signal);
+      const owed = baselines.get(storeKey);
+      const baseline: PrivacyBaseline = owed ?? { decisions: current };
+      const unrestorable = group.filter((service) => baseline.decisions.get(service) === undefined);
+      if (unrestorable.length > 0) {
         throw new ActionableError(
-          `The existing '${target.service}' decision for ${target.appId} cannot be restored by simctl (for example limited access), so it was left unchanged. Reset the app's privacy settings first.`,
+          `The existing '${unrestorable.join("', '")}' decision for ${target.appId} cannot be restored by simctl (for example limited access), so it was left unchanged. Reset the app's privacy settings first.`,
         );
       }
-      if (prior === target.action) {
+      if (current.get(target.service) === target.action) {
         return {
           status: "unchanged",
-          detail: `'${target.service}' for ${target.appId} already has the '${prior}' decision`,
+          detail: `'${target.service}' for ${target.appId} already has the '${target.action}' decision`,
         };
       }
+      baselines.set(storeKey, baseline);
       await runSimctl(
         simctl,
         ["privacy", device.deviceId, target.action, target.service, target.appId],
         signal,
       );
+      const token = {};
+      const original = group.map((service) => `${service}=${baseline.decisions.get(service)}`);
       return {
         status: "applied",
-        detail: `${target.action} '${target.service}' for ${target.appId}; reset restores '${prior}'`,
+        detail: `${target.action} '${target.service}' for ${target.appId}; reset restores ${original.join(", ")}`,
         reset: async (s) => {
-          await runSimctl(
-            simctl,
-            ["privacy", device.deviceId, prior, target.service, target.appId],
-            s,
-          );
+          if (baseline.restoredBy !== undefined) {
+            return;
+          }
+          await restore(target.appId, group, baseline, s);
+          baseline.restoredBy = token;
+          if (baselines.get(storeKey) === baseline) {
+            baselines.delete(storeKey);
+          }
         },
-        isClean: async (s) => (await readPrivacyDecision(reader, device, target, s)) === prior,
+        isClean: async (s) => {
+          if (baseline.restoredBy !== token) {
+            // Another reset restored this baseline and verified it; this one is superseded.
+            return baseline.restoredBy !== undefined;
+          }
+          const now = await readPrivacySnapshot(target.appId, group, s);
+          return group.every((service) => now.get(service) === baseline.decisions.get(service));
+        },
       };
     },
     isClean: () => Promise.resolve(true),
   };
+}
+
+/** Baselines shared across resolves without injected state, per device id. */
+const defaultPrivacyBaselines = new Map<string, PrivacyBaselineStore>();
+
+function privacyBaselinesFor(
+  deps: IosSimulatorConditionDeps,
+  device: BootedDevice,
+): PrivacyBaselineStore {
+  const perDevice = deps.privacyBaselines ?? defaultPrivacyBaselines;
+  let store = perDevice.get(device.deviceId);
+  if (store === undefined) {
+    store = new Map();
+    perDevice.set(device.deviceId, store);
+  }
+  return store;
 }
 
 /**
@@ -259,6 +345,7 @@ export function resolveIosSimulatorConditionInjector(
         device,
         simctl,
         deps.privacyReader ?? new SimulatorTccSqliteClient(),
+        privacyBaselinesFor(deps, device),
       );
   }
 }

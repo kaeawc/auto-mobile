@@ -200,17 +200,22 @@ export function livenessOwnerHoldFromResponse(
 
 /**
  * The daemon's `releaseReason` on a session-not-found answer (#10730), as an error field, with its
- * `idle: true` for an idle-window release (#10832, #10972).
+ * `idle: true` for an idle-window release (#10832, #10972) and a `cli-idle-timeout` release's
+ * `idleTimeoutMs` when the daemon sent one (#16937).
  */
 export function releaseReasonField(response: DaemonResponse): {
   releaseReason?: string;
   idle?: true;
+  idleTimeoutMs?: number;
 } {
   if (typeof response.releaseReason !== "string" || response.releaseReason.length === 0) {
     return {};
   }
   // Daemon and proxy versions always match, so the shared reason table reproduces daemon idle.
-  return releasedSessionNotFoundFields(response.releaseReason);
+  return releasedSessionNotFoundFields(
+    response.releaseReason,
+    typeof response.idleTimeoutMs === "number" ? response.idleTimeoutMs : undefined,
+  );
 }
 
 /** A typed refusal's retry intent from a failed response (#11244), as error fields. */

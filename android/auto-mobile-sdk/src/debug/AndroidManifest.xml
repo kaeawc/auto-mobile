@@ -4,7 +4,8 @@
   <application>
     <receiver
       android:name="dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver"
-      android:exported="false">
+      android:exported="true"
+      android:permission="android.permission.DUMP">
       <intent-filter>
         <action android:name="dev.jasonpearson.automobile.sdk.NOTIFICATION_POST" />
       </intent-filter>

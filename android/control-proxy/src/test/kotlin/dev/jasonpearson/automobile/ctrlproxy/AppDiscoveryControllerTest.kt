@@ -27,6 +27,12 @@ class AppDiscoveryControllerTest {
     var failWith: RuntimeException? = null
     val reads = mutableListOf<String>()
 
+    override fun exportAttestation(): List<String> {
+      reads += "attestation"
+      failWith?.let { throw it }
+      return listOf("leaf", "root")
+    }
+
     override fun resetKeystore(
       packageName: String,
       scope: String?,
@@ -83,6 +89,17 @@ class AppDiscoveryControllerTest {
     )
 
   @Test
+  fun `attestation export returns a correlated certificate chain`() = runTest {
+    controller(this).exportAttestation("att1")
+    val result =
+      transport.sentResponses.single()
+        as dev.jasonpearson.automobile.protocol.AttestationChainResult
+    assertEquals("att1", result.requestId)
+    assertEquals(listOf("leaf", "root"), result.certificateChainBase64)
+    assertEquals(0, transport.perfFlushes)
+  }
+
+  @Test
   fun `reset forwards selectors and returns correlated result`() = runTest {
     controller(this).resetKeystore("kr1", "com.example", "login", "token")
     assertEquals(listOf("reset:com.example:login:token"), bridge.reads)
@@ -128,10 +145,11 @@ class AppDiscoveryControllerTest {
     bridge.failWith = IllegalStateException("provider crashed")
     val controller = controller(this)
 
+    controller.exportAttestation("att2")
     controller.discoverKeystore("ks2", "com.example")
     controller.discoverSdkCapabilities("sc3", "com.example", userId = null)
 
     assertTrue(transport.sentResponses.isEmpty())
-    assertEquals(listOf("ks2", "sc3"), errors.map { it.requestId })
+    assertEquals(listOf("att2", "ks2", "sc3"), errors.map { it.requestId })
   }
 }

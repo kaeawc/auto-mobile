@@ -46,6 +46,7 @@ import {
   type XrFormFactor,
 } from "./androidXrImageFamilies";
 import { androidSystemImageTagsFor, defaultAndroidProfileIdFor } from "../models/formFactor";
+import { watchImageFamily, watchMissingImageMessage } from "./androidWearImageFamily";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
@@ -366,7 +367,7 @@ function tagRank(tag: string): number {
 
 /** Which installed images a requested form factor may create an AVD from. */
 export interface AndroidImageFamily {
-  kind: "handheld" | "tv" | "automotive" | "xr-headset" | "xr-glasses";
+  kind: "handheld" | "watch" | "tv" | "automotive" | "xr-headset" | "xr-glasses";
   accepts(tag: string): boolean;
   /** Lower is better; only compared between images of equal API level and ABI. */
   rank(tag: string): number;
@@ -417,11 +418,13 @@ const AUTOMOTIVE_IMAGE_FAMILY: AndroidImageFamily = {
 
 /**
  * The image family a request may be created from. Phone, tablet, foldable and an omitted form
- * factor stay handheld-only (#14900); `tv`, `automotive`, `xr-headset` and `xr-glasses` select
- * only their own images. Watch is refused: picking a handheld image would silently satisfy it
- * with a phone.
+ * factor stay handheld-only (#14900); watch, TV, automotive and XR select only their own images.
  */
-export function androidImageFamilyFor(formFactor: FormFactor | undefined): AndroidImageFamily {
+export function androidImageFamilyFor(
+  formFactor: FormFactor | undefined,
+  requires?: DeviceMatchCriteria["requires"],
+  profileName?: string,
+): AndroidImageFamily {
   if (formFactor === "tv") {
     return TV_IMAGE_FAMILY;
   }
@@ -432,11 +435,7 @@ export function androidImageFamilyFor(formFactor: FormFactor | undefined): Andro
     return XR_IMAGE_FAMILIES[formFactor];
   }
   if (formFactor === "watch") {
-    throw new ActionableError(
-      `Creating a '${formFactor}' AVD is not supported yet; AutoMobile only creates ` +
-        "phone, tablet, foldable, TV, automotive and XR AVDs. Create the AVD with avdmanager and the " +
-        "matching system image, or use provisionDevice with an explicit runtime and deviceType.",
-    );
+    return watchImageFamily(requires?.screenRound, profileName);
   }
   return HANDHELD_IMAGE_FAMILY;
 }
@@ -727,6 +726,16 @@ function xrImagesOrThrow(
 function familyImagesOrThrow(family: AndroidImageFamily, selection: ImageSelection): SystemImage[] {
   const { images, inRange, bounds, architecture } = selection;
   switch (family.kind) {
+    case "watch": {
+      const abis = preferredAbis(architecture);
+      const wear = inRange.filter((image) => family.accepts(image.tag) && abis.includes(image.abi));
+      if (wear.length > 0) {
+        return wear;
+      }
+      throw new ActionableError(
+        watchMissingImageMessage(describeRange(bounds), describeInstalled(images), abis),
+      );
+    }
     case "tv":
       return tvImagesOrThrow(images, inRange, bounds, architecture);
     case "automotive":
@@ -751,7 +760,7 @@ export function pickAndroidSystemImage(
   criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion" | "formFactor" | "requires">,
   architecture: string,
 ): SystemImage {
-  const family = androidImageFamilyFor(criteria.formFactor);
+  const family = androidImageFamilyFor(criteria.formFactor, criteria.requires);
   const requestedMin = resolveApiLevelBound(criteria.minOsVersion, "min");
   const max = resolveApiLevelBound(criteria.maxOsVersion, "max");
 
@@ -964,8 +973,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     signal?: AbortSignal,
     identityHooks?: DeviceProvisioningIdentityHooks,
   ): Promise<ProvisionedDevice> {
-    // Refuses watch before listing images.
-    const family = androidImageFamilyFor(criteria.formFactor);
+    const family = androidImageFamilyFor(criteria.formFactor, criteria.requires, criteria.name);
     const avdManager = this.dependencies.androidCreator();
 
     let installed: SystemImage[];

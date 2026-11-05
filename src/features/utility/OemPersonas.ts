@@ -15,7 +15,7 @@ import {
 } from "../../models/ManufacturerProfileIds";
 
 /** Increment when the catalog response shape or its shared semantics change. */
-export const OEM_PERSONA_CATALOG_VERSION = 1;
+export const OEM_PERSONA_CATALOG_VERSION = 2;
 
 /** How well a facet is grounded, from strongest to weakest. */
 export const PERSONA_EVIDENCE_STATUSES = [
@@ -220,6 +220,69 @@ export const OEM_PERSONAS: Readonly<Record<OemPersonaId, OemPersona>> = {
       keyboard: gboardDefault("Motorola"),
       kill: killEvidence("motorola-adaptive"),
     },
+  },
+  "huawei-emui": {
+    id: "huawei-emui",
+    version: 1,
+    displayName: "Huawei EMUI",
+    keyboardProfileId: "gboard",
+    killProfile: "huawei-powergenie",
+    nonEmulatable: ["oem-systemui"],
+    evidence: { keyboard: gboardDefault("Huawei"), kill: killEvidence("huawei-powergenie") },
+  },
+  "vivo-funtouch": {
+    id: "vivo-funtouch",
+    version: 1,
+    displayName: "Vivo Funtouch OS",
+    keyboardProfileId: "gboard",
+    killProfile: "vivo-autostart",
+    nonEmulatable: ["oem-systemui"],
+    evidence: { keyboard: gboardDefault("Vivo"), kill: killEvidence("vivo-autostart") },
+  },
+  "realme-ui": {
+    id: "realme-ui",
+    version: 1,
+    displayName: "realme UI",
+    keyboardProfileId: "gboard",
+    killProfile: "realme-power-saver",
+    nonEmulatable: ["oem-systemui"],
+    evidence: { keyboard: gboardDefault("realme"), kill: killEvidence("realme-power-saver") },
+  },
+  "meizu-flyme": {
+    id: "meizu-flyme",
+    version: 1,
+    displayName: "Meizu Flyme",
+    keyboardProfileId: "gboard",
+    killProfile: "meizu-flyme-background",
+    nonEmulatable: ["oem-systemui"],
+    evidence: { keyboard: gboardDefault("Meizu"), kill: killEvidence("meizu-flyme-background") },
+  },
+  "asus-zenui": {
+    id: "asus-zenui",
+    version: 1,
+    displayName: "Asus ZenUI",
+    keyboardProfileId: "gboard",
+    killProfile: "asus-power-master",
+    nonEmulatable: ["oem-systemui"],
+    evidence: { keyboard: gboardDefault("Asus"), kill: killEvidence("asus-power-master") },
+  },
+  "sony-xperia": {
+    id: "sony-xperia",
+    version: 1,
+    displayName: "Sony Xperia",
+    keyboardProfileId: "gboard",
+    killProfile: "sony-stamina",
+    nonEmulatable: ["oem-systemui"],
+    evidence: { keyboard: gboardDefault("Sony"), kill: killEvidence("sony-stamina") },
+  },
+  "tecno-hios": {
+    id: "tecno-hios",
+    version: 1,
+    displayName: "Tecno HiOS",
+    keyboardProfileId: "gboard",
+    killProfile: "tecno-app-halt",
+    nonEmulatable: ["oem-systemui"],
+    evidence: { keyboard: gboardDefault("Tecno"), kill: killEvidence("tecno-app-halt") },
   },
 };
 

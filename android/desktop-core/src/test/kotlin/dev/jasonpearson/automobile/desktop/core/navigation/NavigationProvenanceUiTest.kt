@@ -18,6 +18,7 @@ import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.time.FakeClock
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import dev.jasonpearson.automobile.desktop.domain.NavigationGraph
 import org.junit.Test
@@ -90,6 +91,7 @@ class NavigationProvenanceUiTest {
               NavigationDashboardOptions(
                 providedGraph = graph,
                 providedCurrentScreen = "Home",
+                clock = FakeClock(1_000L),
                 activeContext = activeContext,
               ),
           )
@@ -133,6 +135,7 @@ class NavigationProvenanceUiTest {
               NavigationDashboardOptions(
                 providedGraph = graph,
                 providedCurrentScreen = "Legacy",
+                clock = FakeClock(1_000L),
                 activeContext = activeContext,
               ),
           )
@@ -184,6 +187,7 @@ class NavigationProvenanceUiTest {
               NavigationDashboardOptions(
                 providedGraph = graph,
                 providedCurrentScreen = "Shared",
+                clock = FakeClock(1_000L),
                 activeContext = activeContext,
               ),
           )
@@ -215,6 +219,7 @@ class NavigationProvenanceUiTest {
               NavigationDashboardOptions(
                 providedGraph = graph,
                 providedCurrentScreen = "Home",
+                clock = FakeClock(1_000L),
                 readOnly = true,
               ),
           )

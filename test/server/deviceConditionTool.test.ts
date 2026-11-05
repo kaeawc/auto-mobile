@@ -32,6 +32,8 @@ describe("handleDeviceConditionCall (#14050)", () => {
     );
     expect(toolStructured(response).success).toBe(false);
     expect(toolText(response)).toMatch(/feature flag/);
+    // #16882: the refusal names a headless way to turn the flag on.
+    expect(toolText(response)).toContain("--daemon set-feature-flag device-condition true");
   });
 
   test("refuses mixing deviceCondition with other setDeviceState fields", async () => {

@@ -340,6 +340,36 @@ function topLevelSchemaKeys(schema: unknown, depth = 0): ReadonlySet<string> {
   return new Set(wrapped.flatMap((inner) => [...topLevelSchemaKeys(inner, depth + 1)]));
 }
 
+// Command fields an agent commonly sends at the top level of `sendKeys`
+// (`{ text: "Hi" }`) instead of inside a `commands` entry (#16893).
+const SEND_KEYS_COMMAND_FIELDS: ReadonlySet<string> = new Set([
+  "action",
+  "text",
+  "key",
+  "modifiers",
+  "mode",
+]);
+
+const SEND_KEYS_SHAPE =
+  'sendKeys takes commands: [{ "action": "type", "text": "<text>" }]; other entries are { "action": "key", "key": "<key>" } and { "action": "clear" }';
+
+// Bare "Unrecognized key" or "commands expected array" leaves an agent to dig the
+// command shape out of the schema. Name it whenever the failure is about the
+// command list itself or a command field sent at the top level (#16893).
+function sendKeysShapeHint(flattenedIssues: ReadonlyArray<FlattenedIssue>): string | undefined {
+  const needsShape = flattenedIssues.some(({ issue }) => {
+    if (issue.path[0] === "commands") {
+      return true;
+    }
+    return (
+      issue.path.length === 0 &&
+      isUnrecognizedKeys(issue) &&
+      issue.keys.some((name) => SEND_KEYS_COMMAND_FIELDS.has(String(name)))
+    );
+  });
+  return needsShape ? SEND_KEYS_SHAPE : undefined;
+}
+
 function formatSelectorIssue(
   issue: ZodIssue,
   toolName: string,
@@ -685,6 +715,11 @@ export function formatToolParamError(
         'container must be an object like { "elementId": "<id>" } or { "text": "<text>" }',
       );
     }
+  }
+
+  const sendKeysHint = toolName === "sendKeys" ? sendKeysShapeHint(flattenedIssues) : undefined;
+  if (sendKeysHint) {
+    hints.push(sendKeysHint);
   }
 
   const issueSummary = issues.join("; ");

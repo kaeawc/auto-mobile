@@ -27,6 +27,8 @@ export interface DeviceMatchCriteria {
     panels?: number;
     posture?: Posture;
     playStore?: boolean;
+    /** Wear profile shape: matches only that shape; a new watch is round unless false. */
+    screenRound?: boolean;
     vehicle?: { motion?: "supported" };
   };
   screenSize?: { width: number; height: number };

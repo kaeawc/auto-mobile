@@ -226,9 +226,13 @@ class DirectoryLibraryRepository(
     requires: List<String> = emptyList(),
   ): LibraryResult<LibraryEntry> {
     val specSha256 = sha256Hex(request.specJson.toByteArray())
-    rejectAdd(request, source, specSha256, requires)?.let {
-      return it
+    rejectedEntry(request, source, specSha256, requires, admission)?.let {
+      return LibraryResult.Failure(it)
     }
+    val listed = list()
+    if (listed is LibraryResult.Failure) return listed
+    if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
+      return LibraryResult.Failure(LibraryError.Limit)
     val result = storageResult {
       val incomingBytes =
         request.specJson.toByteArray(Charsets.UTF_8).size.toLong() +
@@ -281,28 +285,6 @@ class DirectoryLibraryRepository(
     }
   }
 
-  /** Validity, admission and count checks that run under the lock before any save. */
-  private fun rejectAdd(
-    request: SavedPrototypeSaveRequest,
-    source: LibrarySource,
-    specSha256: String,
-    requires: List<String>,
-  ): LibraryResult.Failure? {
-    if (
-      !validLibrarySpec(request.specJson) || !AutoMobilePrototype.capabilities.containsAll(requires)
-    )
-      return LibraryResult.Failure(LibraryError.Invalid)
-    // Repeat the importer's early check under this lock: purgeBlocked() lists through it.
-    if (!admission.admits(source, specSha256, null))
-      return LibraryResult.Failure(LibraryError.Hidden)
-    return when (val listed = list()) {
-      is LibraryResult.Failure -> listed
-      is LibraryResult.Success ->
-        if (listed.value.size >= MAX_LIBRARY_PROTOTYPES) LibraryResult.Failure(LibraryError.Limit)
-        else null
-    }
-  }
-
   @Suppress(
     "TooGenericExceptionCaught",
   ) // Corrupt metadata and arbitrary injected file failures skip this entry.
@@ -351,3 +333,21 @@ internal fun <T> storageResult(block: () -> T): LibraryResult<T> =
 private fun validLibrarySpec(spec: String): Boolean =
   PrototypeSpecValidator.validate(spec, AutoMobilePrototype.capabilities, library = true) is
     PrototypeSpecValidation.Success
+
+/**
+ * Validity and admission checks for a new entry. [DirectoryLibraryRepository.add] repeats the
+ * importer's early admission check under its lock, because purgeBlocked() lists through that lock.
+ */
+private fun rejectedEntry(
+  request: SavedPrototypeSaveRequest,
+  source: LibrarySource,
+  specSha256: String,
+  requires: List<String>,
+  admission: LibraryAdmission,
+): LibraryError? =
+  when {
+    !validLibrarySpec(request.specJson) ||
+      !AutoMobilePrototype.capabilities.containsAll(requires) -> LibraryError.Invalid
+    !admission.admits(source, specSha256, null) -> LibraryError.Hidden
+    else -> null
+  }

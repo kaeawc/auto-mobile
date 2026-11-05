@@ -83,7 +83,16 @@ mock backend), use `portReverse` instead of running `adb reverse` yourself:
   (`hostPort` defaults to `devicePort`). Calling it again is a no-op.
 - `list` returns every reverse on the device; `owned: true` marks the ones
   your session created.
-- `verify` reports whether ports (default: all of yours) are mapped now.
+- `verify` reports whether ports (default: all of yours) are mapped now. With
+  `probe: true` it also connects to each mapped port from the device (about a
+  second, all ports at once) and reports `reachable` (your host server accepted
+  and kept the connection open), `unreachable` or `probe_unsupported`. Ports
+  that are not mapped stay `missing` and are not probed. `unreachable` carries a
+  `probeReason`: `closed` (the mapping exists but nothing is listening on the
+  host port), `refused` (nothing is listening on the device port) or `timeout`
+  (the device did not answer). `probe_unsupported` means the device shell has no
+  usable connect command; `probeDetail` holds what it printed. A host server
+  that closes idle connections within a second reads as `closed`.
 - `remove` deletes mappings your session created.
 
 AutoMobile owns the mappings it creates for your session. If one disappears

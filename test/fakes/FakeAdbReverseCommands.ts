@@ -1,6 +1,7 @@
 import type {
   AdbReverseCommands,
   AdbReverseEntry,
+  PortProbeOutcome,
 } from "../../src/utils/android-cmdline-tools/adbReverse";
 
 /** An in-memory device: `mappings` is what `adb reverse --list` would print, keyed by device port. */
@@ -14,6 +15,25 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
   beforeAdd?: (devicePort: number) => void;
   /** While set, an add is recorded in `calls` but waits for this promise before it is applied. */
   addGate?: Promise<void>;
+
+  /** Scripted probe outcomes per device port, consumed in order (the last one repeats). */
+  readonly probeOutcomes = new Map<number, (PortProbeOutcome | "hang")[]>();
+
+  /** When set, every probe rejects with it. */
+  probeError: Error | undefined;
+
+  async probe(devicePort: number): Promise<PortProbeOutcome> {
+    this.calls.push(`probe ${devicePort}`);
+    if (this.probeError !== undefined) {
+      throw this.probeError;
+    }
+    const queue = this.probeOutcomes.get(devicePort) ?? [{ kind: "refused" }];
+    const next = queue.length > 1 ? queue.shift() : queue[0];
+    if (next === "hang") {
+      return new Promise<PortProbeOutcome>(() => {});
+    }
+    return next ?? { kind: "refused" };
+  }
 
   async list(): Promise<AdbReverseEntry[]> {
     this.calls.push("list");

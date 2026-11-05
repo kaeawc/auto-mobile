@@ -4066,6 +4066,10 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
 - `camera` is a literal `{lat, lng, zoom, bearing?, tilt?}` (lat -90 to 90, lng -180 to 180, zoom 0 to
   22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. `fit` is `none`,
   `markers` or `route`; `mapStyle` is `plain` (default) or `streets`.
+- `backend` is `auto` (default), `google` or `maplibre`. `auto` needs only `prototype_platform_map_v1`; any
+  other value also needs `prototype_platform_map_<backend>_v1`, which the `map` module's `backends` table
+  lists. `show`, `patch` and `replaceNode` refuse a backend whose capability the runtime does not advertise,
+  at `<node>.backend`.
 - `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
   `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
   templates resolved per item. `icon` is a Material icon name. `animateMs` (0 to 2000) eases a moved marker.

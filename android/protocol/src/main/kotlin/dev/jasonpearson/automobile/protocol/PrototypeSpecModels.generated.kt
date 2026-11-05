@@ -1970,6 +1970,7 @@ data class PrototypeMapNode(
   override val keyframes: JsonObject? = null,
   override val attentionLoop: PrototypeLoop? = null,
   val mapStyle: String? = null,
+  val backend: String? = null,
   val camera: JsonObject? = null,
   val fit: String? = null,
   val markers: JsonObject? = null,

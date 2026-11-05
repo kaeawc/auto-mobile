@@ -112,6 +112,11 @@ export interface PrototypePlatformStateEntry {
 export interface PrototypePlatformModule {
   capability: string;
   deviceCapability?: string;
+  /**
+   * Non-default SDK backends a node of this module may name in `backend` (#14302), each with the
+   * capability a runtime advertises only while that backend works on the device.
+   */
+  backends?: Record<string, { capability: string }>;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   /** Shared runtime call budget; the host validates metadata but does not count calls. */
@@ -244,7 +249,7 @@ const sortedKeys = (value: Raw): string[] =>
 export type PrototypePlatformUse =
   | { kind: "requires"; path: string }
   | { kind: "declared"; path: string; module: string }
-  | { kind: "node"; path: string; module: string }
+  | { kind: "node"; path: string; module: string; backend?: unknown }
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string; userGesture: boolean }
   | { kind: "call"; path: string; action: Raw; userGesture: boolean }
@@ -431,7 +436,7 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   // positions count: a map-shaped value in a request field or payload is data.
   walkPrototypeNodes(root, (node, path) => {
     if (node.type === "map") {
-      uses.push({ kind: "node", path, module: "map" });
+      uses.push({ kind: "node", path, module: "map", backend: node.backend });
     }
   });
   return uses;

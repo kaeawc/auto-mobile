@@ -155,6 +155,8 @@
     "loop-spin-finite.json",
     "loop-spin-infinite.json",
     "loop-upper-bounds.json",
+    "map-backend-channel-literal.json",
+    "map-backends.json",
     "map-marker-tap-emit-context.json",
     "map-node-limits.json",
     "map-node.json",
@@ -1072,6 +1074,7 @@
     "loop-spin-style.json",
     "loop-spin-styleWhen.json",
     "loop-unknown-field.json",
+    "map-backend-unknown.json",
     "map-camera-bearing-over.json",
     "map-camera-idle-into-not-data.json",
     "map-camera-lat-over.json",
@@ -2058,6 +2061,8 @@
     "strict-gate-prototype_platform_haptics_v1.json",
     "strict-gate-prototype_platform_links_v1.json",
     "strict-gate-prototype_platform_location_v1.json",
+    "strict-gate-prototype_platform_map_google_v1.json",
+    "strict-gate-prototype_platform_map_maplibre_v1.json",
     "strict-gate-prototype_platform_map_v1.json",
     "strict-gate-prototype_platform_mediaLibrary_query_v1.json",
     "strict-gate-prototype_platform_mediaLibrary_save_v1.json",
@@ -3549,6 +3554,13 @@
     "loop-spin-finite.json": ["prototype_loops_v1"],
     "loop-spin-infinite.json": ["prototype_loops_v1"],
     "loop-upper-bounds.json": ["prototype_loops_v1"],
+    "map-backends.json": [
+      "prototype_platform_map_google_v1",
+      "prototype_platform_map_maplibre_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"],
     "platform-permissions-request.json": [
       "prototype_platform_permissions_v1",
       "prototype_platform_v1"

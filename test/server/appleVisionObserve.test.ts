@@ -220,12 +220,20 @@ test("visionOS observe refuses project without a runner instead of dropping the 
 test("visionOS observe propagates cancellation during runner startup without capturing", async () => {
   const controller = new AbortController();
   const screenshots = new FakeVisionScreenshots();
-  const { dependencies } = visionDependencies(screenshots, async () => {
-    controller.abort(new Error("cancelled"));
-    throw new Error("startup aborted");
-  });
-  await expect(observeWatch(device, {}, controller.signal, dependencies)).rejects.toThrow(
-    "startup aborted",
+  let startupBegan!: () => void;
+  const began = new Promise<void>((resolve) => (startupBegan = resolve));
+  const { dependencies } = visionDependencies(
+    screenshots,
+    (_deviceId, signal) =>
+      new Promise<FakeVisionosRunnerClient>((_resolve, reject) => {
+        // Startup only ends through the signal observeWatch forwards.
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        startupBegan();
+      }),
   );
+  const observed = observeWatch(device, {}, controller.signal, dependencies);
+  await began;
+  controller.abort(new Error("cancelled"));
+  await expect(observed).rejects.toThrow("cancelled");
   expect(screenshots.calls).toEqual([]);
 });

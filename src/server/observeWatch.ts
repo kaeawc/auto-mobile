@@ -187,7 +187,7 @@ async function visionosHierarchyForObserve(
     }
     const reason = errorMessage(error);
     logger.warn(
-      `[VisionosRunner] observe on ${device.deviceId} falls back to a screenshot: ${reason}`,
+      `[VisionosRunner] observe on ${device.deviceId} could not retrieve the runner hierarchy: ${reason}`,
       error,
     );
     // Without a runner the hierarchy-only options (project) cannot be honoured either.

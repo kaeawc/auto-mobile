@@ -122,8 +122,15 @@ fi
 
 # Get Xcode version info
 XCODE_VERSION_FULL=$(xcodebuild -version)
-XCODE_VERSION=$(echo "$XCODE_VERSION_FULL" | head -1 | sed 's/Xcode //')
-XCODE_BUILD=$(echo "$XCODE_VERSION_FULL" | tail -1 | sed 's/Build version //')
+# Split with parameter expansion, not `echo | head -1`: bash line-buffers the
+# builtin echo, so a multi-line value is written one line at a time and an early
+# exiting `head` can SIGPIPE the writer, which pipefail turns into exit 141
+# (#17131). For the same reason, pipes below read with `sed -n` (which drains
+# its input) rather than `head`.
+XCODE_VERSION_LINE="${XCODE_VERSION_FULL%%$'\n'*}"
+XCODE_VERSION="${XCODE_VERSION_LINE#Xcode }"
+XCODE_BUILD_LINE="${XCODE_VERSION_FULL##*$'\n'}"
+XCODE_BUILD="${XCODE_BUILD_LINE#Build version }"
 XCODE_PATH=$(xcode-select -p)
 
 log_info "Xcode version: ${XCODE_VERSION} (${XCODE_BUILD})"
@@ -177,7 +184,7 @@ RUNTIMES_OUTPUT=$(xcrun simctl list runtimes 2>/dev/null || echo "")
 if [ -z "$RUNTIMES_OUTPUT" ]; then
     log_warn "No simulator runtimes found"
 else
-    echo "$RUNTIMES_OUTPUT" | grep -E "iOS|watchOS|tvOS|visionOS" | head -10 | while read -r line; do
+    echo "$RUNTIMES_OUTPUT" | grep -E "iOS|watchOS|tvOS|visionOS" | sed -n '1,10p' | while read -r line; do
         echo "  $line" >&2
     done
 fi
@@ -205,7 +212,7 @@ RUN_STATUS="${run_rc}"
 version_gte() {
     local version=$1
     local min=$2
-    [ "$(printf '%s\n' "$min" "$version" | sort -V | head -1)" = "$min" ]
+    [ "$(printf '%s\n' "$min" "$version" | sort -V | sed -n '1p')" = "$min" ]
 }
 # Static reference for indirect callers; this branch never executes.
 if false; then version_gte "$@"; fi
@@ -252,7 +259,7 @@ find_simulator_device() {
 
     # Get devices for this iOS version
     local devices
-    devices=$(xcrun simctl list devices "iOS ${ios_version}" 2>/dev/null | grep -E "iPhone|iPad" | grep -v "unavailable" | head -5 || echo "")
+    devices=$(xcrun simctl list devices "iOS ${ios_version}" 2>/dev/null | grep -E "iPhone|iPad" | grep -v "unavailable" | sed -n '1,5p' || echo "")
 
     if [ -z "$devices" ]; then
         log_debug "No devices found for iOS ${ios_version}"
@@ -269,11 +276,11 @@ find_simulator_device() {
     # the 'e' and could select the 16e, defeating the preference order (#3652).
     local device_name=""
     if grep -qE "iPhone 16([^0-9A-Za-z]|$)" <<<"${devices}"; then
-        device_name=$(echo "$devices" | grep -E "iPhone 16([^0-9A-Za-z]|$)" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
+        device_name=$(echo "$devices" | grep -E "iPhone 16([^0-9A-Za-z]|$)" | sed -n '1p' | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
     elif grep -qE "iPhone 15([^0-9A-Za-z]|$)" <<<"${devices}"; then
-        device_name=$(echo "$devices" | grep -E "iPhone 15([^0-9A-Za-z]|$)" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
+        device_name=$(echo "$devices" | grep -E "iPhone 15([^0-9A-Za-z]|$)" | sed -n '1p' | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
     elif [[ "${devices}" == *"iPhone"* ]]; then
-        device_name=$(echo "$devices" | grep "iPhone" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
+        device_name=$(echo "$devices" | grep "iPhone" | sed -n '1p' | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
     fi
 
     echo "$device_name"

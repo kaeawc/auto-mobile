@@ -403,11 +403,13 @@ struct WindowSpec: Decodable {
     let deadTaps: Bool?
     let backdrop: BackdropSpec?
     let layoutDirection: PrototypeLayoutDirection?
+    let controls: PrototypeWindowControls
 
     private enum CodingKeys: String, CodingKey { case placement, opacity, chrome, deadTaps, backdrop, layoutDirection }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        controls = try PrototypeWindowControls(from: decoder)
         placement = try container.decode(Placement.self, forKey: .placement)
         opacity = try container.decodeIfPresent(Int.self, forKey: .opacity)
         deadTaps = try container.decodeIfPresent(Bool.self, forKey: .deadTaps)
@@ -957,7 +959,9 @@ final class PrototypeNode: Decodable {
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              routes,
              linkify, contentTransition,
-             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, indicatorPlacement, itemWidth, itemSpacing,
+             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, indicatorPlacement,
+             itemWidth,
+             itemSpacing,
              dismissOnSwipe, supportingText, errorWhen, errorText, keyboardType, secure, multiline, minLines, maxLength,
              trailingIcon,
              imeAction, yRange, xLabels, goal

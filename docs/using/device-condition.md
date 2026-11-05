@@ -15,10 +15,22 @@
 `deviceCondition` is behind the `device-condition` feature flag, which is off by default. While it is off, every `deviceCondition` call fails with:
 
 ```text
-deviceCondition is behind the 'device-condition' feature flag, which is disabled.
+deviceCondition is behind the 'device-condition' feature flag, which is disabled. Enable it with `auto-mobile --daemon set-feature-flag device-condition true` (or the IDE plugin's feature flag settings), then retry the call.
 ```
 
-Turn it on in the AutoMobile IDE plugin under **Settings > AutoMobile > Feature Flags**. The flag applies to the whole host, not one session.
+Turn it on from a shell with:
+
+```bash
+auto-mobile --daemon set-feature-flag device-condition true
+```
+
+or in the AutoMobile IDE plugin under **Settings > AutoMobile > Feature Flags**. The flag applies to the whole host, not one session, and stays set across daemon restarts. Pass `false` to turn it off again.
+
+## Exporting key attestation
+
+On Android, call `setDeviceState` with `{ "deviceCondition": { "exportAttestation": true } }` to export a temporary key's public certificate chain for a test backend. Send this alone, without conditions, reset or a lease; no session is required. The temporary key is deleted before the response is sent. If the image cannot generate attestation, the call fails; use an image supporting key attestation. If the installed automation service predates this action (it requires CtrlProxy 0.0.90 or newer), the call fails with an error naming that version; install CtrlProxy 0.0.90 or newer.
+
+The `attestation` result contains `certificateChainBase64` (base64 DER, leaf first and root last), `rootCertificateBase64`, and `fields`: numeric `attestationSecurityLevel` and `keymasterSecurityLevel`, `deviceLocked`, `verifiedBootState`, and `attestationApplicationId` (raw base64, package names, decimal version strings and base64 signing-certificate digests). Missing optional fields are `null`. These are the certificate's reported fields, not a passing-integrity verdict or signature validation. The application ID describes the automation service that generated the key, not your app. Use the exported root only in your test backend's trust configuration; your backend still validates the app's own attestation chain and policy.
 
 ## Conditions
 
@@ -37,6 +49,7 @@ Set a condition by passing its value. Pass `"unset"` to clear it, or `{ "reset":
 | `faults.readOnlyFilesystem: "on"`     | Makes shared storage `/sdcard` read-only for every app; writes fail with "Read-only file system" (EROFS). Rootable emulators only                                                                                                                                                     | Yes                                                                    |
 | `faults.corruptAppFile`               | Damages one file in a debuggable app's data directory                                                                                                                                                                                                                                 | Yes, from a saved copy                                                 |
 | `faults.revokePermission`             | Revokes one runtime permission                                                                                                                                                                                                                                                        | Yes, re-granted                                                        |
+| `faults.lockScreen`                   | Sets an AutoMobile test PIN or removes the PIN; removal invalidates lock-screen-bound keys. `unset` restores no lock screen                                                                                                                                                           | Yes, restores no lock screen                                           |
 | `faults.disablePackage`               | Disables an app for the current user                                                                                                                                                                                                                                                  | Yes, re-enabled                                                        |
 | `faults.clockSkew`                    | Moves the device clock `offsetSeconds` from real time, with automatic time off                                                                                                                                                                                                        | Yes, to real time and the original automatic-time setting              |
 | `faults.killApp`                      | Ends an app's process once (`background` or `forceStop`)                                                                                                                                                                                                                              | No: one-shot                                                           |

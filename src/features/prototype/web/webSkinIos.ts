@@ -1,7 +1,7 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
-import { cssColor } from "./webStyle";
+import { cssColor, fontPx } from "./webStyle";
 
 type Css = Record<string, string>;
 
@@ -20,10 +20,14 @@ const IOS_TEXT_STYLES = {
 
 export type IosTextStyle = keyof typeof IOS_TEXT_STYLES;
 
-/** A SwiftUI text style as CSS, at a weight (regular unless given). */
-export function iosText(textStyle: IosTextStyle, weight = 400): Css {
+/** A SwiftUI text style as CSS, scaled by the frame's Dynamic Type size, at a weight (regular unless given). */
+export function iosText(textStyle: IosTextStyle, scope: WebRenderScope, weight = 400): Css {
   const [size, line] = IOS_TEXT_STYLES[textStyle];
-  return { "font-size": `${size}px`, "line-height": `${line}px`, "font-weight": String(weight) };
+  return {
+    "font-size": fontPx(size, scope.style),
+    "line-height": fontPx(line, scope.style),
+    "font-weight": String(weight),
+  };
 }
 
 /** A theme role as CSS, else the system colour the iOS renderer falls back to. */
@@ -113,7 +117,7 @@ export const iosToggleRenderer =
       "align-items": "center",
       gap: "8px",
       "min-height": "44px",
-      ...iosText("body"),
+      ...iosText("body", scope),
       ...disabled.css,
     });
     const semantics = { ...attrs, role: kind, "aria-checked": String(on), ...disabled.attrs };
@@ -184,14 +188,17 @@ export const iosListItemRenderer =
       node.supporting === undefined
         ? []
         : [
-            el("span", { style: { ...iosText("subheadline"), ...secondary } }, [
+            el("span", { style: { ...iosText("subheadline", scope), ...secondary } }, [
               kit.bound(node.supporting, scope),
             ]),
           ];
     const texts = el(
       "div",
       { style: { display: "flex", "flex-direction": "column", gap: "2px", flex: "1 1 auto" } },
-      [el("span", { style: iosText("body") }, [kit.bound(node.headline, scope)]), ...supporting],
+      [
+        el("span", { style: iosText("body", scope) }, [kit.bound(node.headline, scope)]),
+        ...supporting,
+      ],
     );
     return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
       ...leading,
@@ -230,7 +237,7 @@ export const iosChipRenderer =
           height: "32px",
           "padding-inline": "12px",
           "border-radius": "8px",
-          ...iosText("subheadline", 500),
+          ...iosText("subheadline", scope, 500),
           border: `1px solid ${selected ? "transparent" : role("outlineVariant", "rgba(60,60,67,0.29)", scope)}`,
           ...(selected
             ? { "background-color": role("secondaryContainer", "transparent", scope) }
@@ -280,8 +287,9 @@ function barButtons(
 const ONE_LINE: Css = { "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" };
 
 /** The title in the icon row: small bars lead with it, center-aligned bars centre it on the row. */
-function rowTitle(node: Raw, variant: string, text: string): WebElement[] {
-  const style = { ...iosText("title3", 600), ...ONE_LINE };
+function rowTitle(node: Raw, scope: WebRenderScope, text: string): WebElement[] {
+  const variant = typeof node.variant === "string" ? node.variant : "small";
+  const style = { ...iosText("title3", scope, 600), ...ONE_LINE };
   if (variant === "small") {
     const lead = node.navigationIcon === undefined ? "12px" : "4px";
     return [
@@ -310,7 +318,8 @@ const FRAMED_ON_SCROLL: ReadonlySet<unknown> = new Set(["enterAlways", "exitUnti
  * 16 pt across and 20 or 28 pt below. With an `enterAlways` or `exitUntilCollapsed` scroll
  * behaviour the iOS renderer frames that padded line at 48 or 88 pt, bottom-aligned.
  */
-function expandedTitle(node: Raw, variant: string, text: string): WebElement[] {
+function expandedTitle(node: Raw, scope: WebRenderScope, text: string): WebElement[] {
+  const variant = typeof node.variant === "string" ? node.variant : "small";
   if (variant !== "medium" && variant !== "large") {
     return [];
   }
@@ -319,7 +328,7 @@ function expandedTitle(node: Raw, variant: string, text: string): WebElement[] {
     "span",
     {
       style: {
-        ...iosText(large ? "largeTitle" : "title"),
+        ...iosText(large ? "largeTitle" : "title", scope),
         ...ONE_LINE,
         padding: `0 16px ${large ? 28 : 20}px`,
       },
@@ -369,7 +378,7 @@ export const iosTopAppBarRenderer =
       },
       [
         ...barButtons([node.navigationIcon], scope, kit),
-        ...rowTitle(node, variant, text),
+        ...rowTitle(node, scope, text),
         // Outside a small bar the title leaves the row, so a spacer keeps the actions at the end.
         ...(variant === "small" ? [] : [el("span", { style: { flex: "1 1 auto" } })]),
         ...barButtons(actions, scope, kit),
@@ -377,7 +386,7 @@ export const iosTopAppBarRenderer =
     );
     return el("div", { attrs: { ...attrs, role: "heading" }, style }, [
       row,
-      ...expandedTitle(node, variant, text),
+      ...expandedTitle(node, scope, text),
     ]);
   };
 

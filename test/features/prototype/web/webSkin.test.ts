@@ -79,6 +79,20 @@ describe("platform skins (#16531)", () => {
     expect(ios.attrs.role).toBe("button");
   });
 
+  test("the iOS body style follows the frame's Dynamic Type size", () => {
+    const large = { frame: "iphone-16", textSize: { contentSize: "large" } } as const;
+    const largest = {
+      frame: "iphone-16",
+      textSize: { contentSize: "accessibility-extra-extra-extra-large" },
+    } as const;
+    expect(rendered([button()], large, "b").style["font-size"]).toBe("17px");
+    const scaled = rendered([button()], largest, "b").style;
+    expect(Number.parseFloat(scaled["font-size"]!)).toBeGreaterThan(17);
+    expect(Number.parseFloat(scaled["line-height"]!)).toBeGreaterThan(22);
+    const label = find(rendered([slider()], largest, "s"), (el) => el.children[0] === "Volume")[0]!;
+    expect(label.style["font-size"]).toBe(scaled["font-size"]);
+  });
+
   test("each iOS button variant takes its SwiftUI style", () => {
     const styleOf = (variant: string) =>
       rendered([button({ variant })], { skin: "ios" }, "b").style;
@@ -323,6 +337,18 @@ describe("iOS skin defaults for the Material components (#16599)", () => {
     expect(find(pinned, (candidate) => candidate.attrs["data-part"] === "expanded-title")).toEqual(
       [],
     );
+  });
+
+  test("the iOS text styles scale with the frame's Dynamic Type size", () => {
+    const row = (options: PrototypeStillOptions) =>
+      rendered([{ type: "listItem", headline: "Inbox", testTag: "l" }], options, "l");
+    const headline = (element: WebElement) =>
+      ((element.children[0] as WebElement).children[0] as WebElement).style["font-size"];
+    expect(headline(row({ frame: "iphone-16" }))).toBe("17px");
+    const larger = headline(
+      row({ frame: "iphone-16", textSize: { contentSize: "accessibility-large" } }),
+    );
+    expect(Number.parseFloat(larger!)).toBeGreaterThan(17);
   });
 
   test("a card takes the iOS renderer's container: surfaceContainerHigh, outline and shadow", () => {

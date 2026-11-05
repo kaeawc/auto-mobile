@@ -11,6 +11,8 @@ import {
 } from "../../../src/utils/android-cmdline-tools/androidProcessState";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { ADB_TRANSPORT_RECOVERY_WINDOW_MS } from "../../../src/utils/android-cmdline-tools/adbTransportRecovery";
 
 afterEach(() => {
   mock.restore();
@@ -167,6 +169,121 @@ describe("readAndroidPackageProcesses", () => {
     );
     expect(attempts).toBe(1);
     expect(timer.now()).toBe(0);
+  });
+
+  describe("post-dispatch transport loss (#17096)", () => {
+    const SERIAL = "emulator-5556";
+
+    /** #17096 shape 1: the dump stream closes mid-dump with exit 255 and partial stdout. */
+    function cutMidDump(): Error {
+      return Object.assign(new Error(`Command failed: adb -s ${SERIAL} ${COMMAND}`), {
+        code: 255,
+        stdout: PROCESS_LIST,
+        stderr: "",
+      });
+    }
+
+    /** Fails the first `failuresBeforeSuccess` dumps, then serves the complete table. */
+    class FlakyDumpAdb extends FakeAdbExecutor {
+      attempts = 0;
+
+      constructor(
+        private readonly failure: () => Error,
+        private readonly failuresBeforeSuccess = Infinity,
+      ) {
+        super();
+        this.setCommandResponse(COMMAND, result(PROCESS_LIST));
+      }
+
+      override async executeCommand(
+        ...args: Parameters<FakeAdbExecutor["executeCommand"]>
+      ): ReturnType<FakeAdbExecutor["executeCommand"]> {
+        this.attempts += 1;
+        if (this.attempts <= this.failuresBeforeSuccess) {
+          throw this.failure();
+        }
+        return super.executeCommand(...args);
+      }
+    }
+
+    function failingReads(failure: () => Error, failuresBeforeSuccess = Infinity) {
+      const adb = new FlakyDumpAdb(failure, failuresBeforeSuccess);
+      return { adb, attempts: () => adb.attempts };
+    }
+
+    test("types a partial-stdout exit 255 once the bounded replay is spent", async () => {
+      const { adb, attempts } = failingReads(cutMidDump);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+
+      const outcome = readAndroidPackageProcesses(adb, "com.example.app", {
+        timer,
+        deviceId: SERIAL,
+      });
+
+      await expect(outcome).rejects.toBeInstanceOf(AdbDeviceTransportUnavailableError);
+      await expect(outcome).rejects.toMatchObject({
+        code: "device_transport_unavailable",
+        retryable: true,
+        dispatched: "unknown",
+        deviceId: SERIAL,
+      });
+      expect(attempts()).toBe(5);
+      expect(timer.now()).toBe(ADB_TRANSPORT_RECOVERY_WINDOW_MS);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("replays a cut dump and parses only the complete one", async () => {
+      const { adb, attempts } = failingReads(cutMidDump, 1);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+
+      const state = await readAndroidPackageProcesses(adb, "com.example.app", {
+        timer,
+        deviceId: SERIAL,
+      });
+
+      expect(state.isRunning).toBe(true);
+      expect(attempts()).toBe(2);
+      expect(timer.now()).toBe(250);
+    });
+
+    test("replays a typed post-dispatch loss from the adb layer", async () => {
+      const { adb, attempts } = failingReads(
+        () => new AdbDeviceTransportUnavailableError(SERIAL, cutMidDump(), 1000, "unknown"),
+        2,
+      );
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+
+      const state = await readAndroidPackageProcesses(adb, "com.example.app", { timer });
+
+      expect(state.isRunning).toBe(true);
+      expect(attempts()).toBe(3);
+      expect(timer.now()).toBe(750);
+    });
+
+    test("does not replay a refusal the adb layer already exhausted", async () => {
+      const refusal = new AdbDeviceTransportUnavailableError(SERIAL, new Error("closed"));
+      const { adb, attempts } = failingReads(() => refusal);
+      const timer = new FakeTimer();
+
+      await expect(
+        readAndroidPackageProcesses(adb, "com.example.app", { timer, deviceId: SERIAL }),
+      ).rejects.toBe(refusal);
+      expect(attempts()).toBe(1);
+      expect(timer.now()).toBe(0);
+    });
+
+    test("leaves a partial-stdout exit 255 untyped without a device id", async () => {
+      const { adb, attempts } = failingReads(cutMidDump);
+      const timer = new FakeTimer();
+
+      await expect(readAndroidPackageProcesses(adb, "com.example.app", { timer })).rejects.toThrow(
+        "Command failed",
+      );
+      expect(attempts()).toBe(1);
+    });
   });
 });
 

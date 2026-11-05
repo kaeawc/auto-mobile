@@ -111,8 +111,11 @@ not_in_nav: |
   /release/ios-simulator-continuity.md
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
+  /decisions/androidx-car-app-template-snapshots.md
+  /decisions/androidx-wear-fixture-libraries.md
   /decisions/fastlane-supply-play-publishing.md
   /decisions/ios-user-files-provider.md
+  /decisions/material-icons-web-glyphs.md
   /decisions/mcp-sdk-v2-split-packages.md
   /decisions/playwright-core-web-screenshots.md
   /decisions/prototype-embedded-request-routing.md
@@ -140,14 +143,17 @@ nav:
       - "Installing ProtoViewer (Android)": using/protoviewer-install.md
       - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
+      - "Navigation graph": using/navigation-graph.md
       - "Device condition fixtures": using/device-condition.md
       - "Android Automotive OS": using/android-automotive.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
+      - "Apple TV": using/apple-tv.md
       - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
+      - "Performance traces": using/performance-trace.md
       - "Emulator and simulator audio": using/emulator-audio.md
       - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md
@@ -165,11 +171,13 @@ nav:
       - "Session broker device mutation journal": design-docs/session-broker-device-mutation-journal.md
       - "Session broker device reuse": design-docs/session-broker-device-reuse.md
       - "Session broker remote devices": design-docs/session-broker-remote-devices.md
+      - "Device farm": design-docs/device-farm.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
       - "tvOS XCUITest spike": design-docs/plat/tvos/xcuitest-spike.md
       - "watchOS XCUITest spike": design-docs/plat/watchos/xcuitest-spike.md
+      - "visionOS XCUITest capability boundary": design-docs/plat/visionos/xcuitest-capabilities.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS WKWebView bridge actions": design-docs/plat/ios/webview-bridge-actions.md
@@ -183,6 +191,7 @@ nav:
       - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android emulator host cost": design-docs/android-emulator-host-cost.md
+      - "Android port reverse ownership": design-docs/plat/android/port-reverse.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
@@ -192,6 +201,7 @@ nav:
       - "ProtoViewer localization": design-docs/protoviewer-localization.md
       - "ProtoViewer agent": design-docs/protoviewer-agent.md
       - "ProtoViewer privacy": protoviewer/privacy.md
+      - "ProtoViewer support": protoviewer/support.md
       - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
       - "Native prototype embedding": design-docs/prototype-embedding.md
       - "Prototype platform security": design-docs/prototype-platform-security.md
@@ -222,12 +232,14 @@ nav:
       - "Live observe App shell": design-docs/mcp/observe-app-shell.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
+      - "Robolectric runtime jars": design-docs/plat/android/robolectric-android-all.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
       - "Persona robustness harness": design-docs/plat/android/persona-robustness-harness.md
       - "OEM identity lane": design-docs/plat/android/oem-identity-lane.md
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
       - "Android windowing": design-docs/plat/android/windowing.md
       - "Android form factors": design-docs/plat/android/form-factors.md
+      - "Car App Library template snapshots": design-docs/plat/android/car-app-templates.md
       - "Emulator gRPC audio": design-docs/plat/android/emulator-grpc-audio.md
       - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
       - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md

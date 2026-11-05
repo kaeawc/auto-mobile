@@ -37,7 +37,7 @@ internal object PrototypeStrictPolicy {
     return hostRequestError(context)
       ?: hostChannelError(spec)
       ?: secureLibraryError(spec, context)
-      ?: PrototypeSensitiveSinkRules.error(spec, context)
+      ?: PrototypeLibraryModuleRule.sensitiveError(spec, context)
   }
 
   private fun hostRequestError(context: PrototypeStateChecks.Context): PrototypeSpecError? {
@@ -256,7 +256,11 @@ internal object PrototypeStrictPolicy {
     spec["root"]?.let { scanner.scan(it) }
     (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
-    (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
+    val handlers = (spec["platform"] as? JsonObject)?.get("on")
+    handlers?.let { scanner.scan(it) }
+    (handlers as? JsonObject)?.keys?.forEach { event ->
+      PrototypePlatformModules.eventCapability(event)?.let(scanner.result::add)
+    }
     if ("hideKeyboard" in locatedActionTypes(spec)) scanner.result.add("prototype_hide_keyboard_v1")
     return scanner.result
   }

@@ -26,6 +26,15 @@ fun interface LibraryClock {
   fun nowMillis(): Long
 }
 
+/**
+ * Whether content may enter the library. [DirectoryLibraryRepository.add] asks under its lock, so a
+ * Hide that lands while an import is staging either rejects the import or is followed by a purge
+ * that sees the new entry (#16669).
+ */
+fun interface LibraryAdmission {
+  fun admits(source: LibrarySource, specSha256: String, sourceHost: String?): Boolean
+}
+
 @Serializable
 enum class LibrarySource {
   mcp,
@@ -44,6 +53,11 @@ data class LibraryEntry(
   val specSha256: String,
   val requires: List<String>,
   val pinned: Boolean,
+  /**
+   * Lowercase https host a link import (#14128) fetched the bundle from. App-owned, never read from
+   * bundle bytes; null for every other source. It is the identity Block acts on.
+   */
+  val sourceHost: String? = null,
 )
 
 enum class LibraryError {
@@ -53,6 +67,8 @@ enum class LibraryError {
   Storage,
   Limit,
   Invalid,
+  /** Received content the user hid, or whose link host they blocked, on this device. */
+  Hidden,
 }
 
 sealed interface LibraryResult<out T> {
@@ -74,6 +90,12 @@ interface LibraryRepository {
   fun resetStorage(libraryId: String): LibraryResult<Unit>
 
   fun delete(libraryId: String): LibraryResult<Unit>
+
+  /**
+   * Delete saved bundles that have no metadata directory and return how many were removed. A
+   * metadata listing failure returns a typed failure and deletes nothing.
+   */
+  fun sweepOrphans(): LibraryResult<Int>
 }
 
 /** Only app-owned importing code constructs source/metadata; never deserialize it from a bundle. */
@@ -83,6 +105,7 @@ class DirectoryLibraryRepository(
   private val storage: LibraryStorage,
   private val ids: IdGenerator = IdGenerator { UUID.randomUUID().toString() },
   private val clock: LibraryClock = LibraryClock(System::currentTimeMillis),
+  private val admission: LibraryAdmission = LibraryAdmission { _, _, _ -> true },
 ) : LibraryRepository {
   private val json = Json {
     ignoreUnknownKeys = false
@@ -168,6 +191,33 @@ class DirectoryLibraryRepository(
     }
   }
 
+  /**
+   * Finishes deletes that failed after metadata removal and saves interrupted before the metadata
+   * commit (#16653). Only a saved id with no metadata directory at all is swept: unreadable or
+   * corrupt metadata still keeps its bundle. Runs under the repository lock so it cannot race
+   * [add].
+   */
+  @Synchronized
+  override fun sweepOrphans(): LibraryResult<Int> {
+    // Throws, and so aborts the whole sweep, when the metadata tree cannot be listed.
+    val committed = storageResult { files.ids().toSet() }
+    if (committed is LibraryResult.Failure) return committed
+    val known = (committed as LibraryResult.Success).value
+    return storageResult {
+      store
+        .list()
+        .map { it.id }
+        .filter { validLibraryId(it) && it !in known }
+        .count { id ->
+          val swept = storageResult {
+            storage.reset(id)
+            store.delete(id)
+          }
+          swept is LibraryResult.Success && swept.value
+        }
+    }
+  }
+
   /** App-owned source and identity; metadata is the final visibility marker. */
   @Synchronized
   fun add(
@@ -175,10 +225,10 @@ class DirectoryLibraryRepository(
     source: LibrarySource,
     requires: List<String> = emptyList(),
   ): LibraryResult<LibraryEntry> {
-    if (
-      !validLibrarySpec(request.specJson) || !AutoMobilePrototype.capabilities.containsAll(requires)
-    )
-      return LibraryResult.Failure(LibraryError.Invalid)
+    val specSha256 = sha256Hex(request.specJson.toByteArray())
+    rejectedEntry(request, source, specSha256, requires, admission)?.let {
+      return LibraryResult.Failure(it)
+    }
     val listed = list()
     if (listed is LibraryResult.Failure) return listed
     if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
@@ -213,7 +263,7 @@ class DirectoryLibraryRepository(
               clock.nowMillis(),
               0,
               source,
-              sha256Hex(request.specJson.toByteArray()),
+              specSha256,
               requires.distinct().sorted(),
               false,
             )
@@ -248,7 +298,8 @@ class DirectoryLibraryRepository(
             it.label.length <= libraryLimits.maxLabelLength &&
             it.importedAt >= 0 &&
             it.lastOpenedAt >= 0 &&
-            Regex("[a-f0-9]{64}").matches(it.specSha256)
+            Regex("[a-f0-9]{64}").matches(it.specSha256) &&
+            (it.sourceHost == null || validSourceHost(it.sourceHost))
         }
       } catch (error: Exception) {
         java.util.logging.Logger.getLogger("ProtoViewerLibrary")
@@ -282,3 +333,21 @@ internal fun <T> storageResult(block: () -> T): LibraryResult<T> =
 private fun validLibrarySpec(spec: String): Boolean =
   PrototypeSpecValidator.validate(spec, AutoMobilePrototype.capabilities, library = true) is
     PrototypeSpecValidation.Success
+
+/**
+ * Validity and admission checks for a new entry. [DirectoryLibraryRepository.add] repeats the
+ * importer's early admission check under its lock, because purgeBlocked() lists through that lock.
+ */
+private fun rejectedEntry(
+  request: SavedPrototypeSaveRequest,
+  source: LibrarySource,
+  specSha256: String,
+  requires: List<String>,
+  admission: LibraryAdmission,
+): LibraryError? =
+  when {
+    !validLibrarySpec(request.specJson) ||
+      !AutoMobilePrototype.capabilities.containsAll(requires) -> LibraryError.Invalid
+    !admission.admits(source, specSha256, null) -> LibraryError.Hidden
+    else -> null
+  }

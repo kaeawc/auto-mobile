@@ -16,7 +16,10 @@ import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
-import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  currentPlanLockNamespace,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 
 isolateToolRegistry();
@@ -75,6 +78,81 @@ describe("criticalSection tool", () => {
     }
   });
 
+  test("a plan step enters the critical section under the plan's lock namespace (#15663)", async () => {
+    const coordinator = CriticalSectionCoordinator.getInstance();
+    const enter = spyOn(coordinator, "enterCriticalSection").mockResolvedValue(() => {});
+    const register = spyOn(coordinator, "registerExpectedDevices").mockImplementation(() => {});
+    const subStepNamespaces: (string | undefined)[] = [];
+    ToolRegistry.register(
+      "namespaceProbe",
+      "Sub-step that records the plan lock namespace it sees",
+      z.object({}).passthrough(),
+      async () => {
+        subStepNamespaces.push(currentPlanLockNamespace());
+        return { success: true };
+      },
+    );
+    const device: BootedDevice = { platform: "android", deviceId: "device-a", name: "A" };
+    const originalToolCallRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async (input) => ({
+          args: input.args,
+          baseSessionUuid: "plan-session",
+          device,
+          internalCall: true,
+          sessionUuid: "plan-session",
+          shouldResolveDevice: true,
+        }),
+      },
+      auditRunner: {
+        run: async (input) => input.handler(input.device, input.args, input.progress, input.signal),
+      },
+      afterToolCall: {
+        handle: async (input) => ({ durationMs: 0, finalizedResponse: input.response }),
+      },
+      planLifecycleManager: { afterExecution: async () => {} },
+    });
+
+    try {
+      const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
+        {
+          name: "namespaced critical section",
+          steps: [
+            {
+              tool: "criticalSection",
+              params: {
+                device: "A",
+                lock: "ns-lock",
+                deviceCount: 1,
+                steps: [{ tool: "namespaceProbe", params: { device: "A" } }],
+              },
+            },
+          ],
+        },
+        0,
+        "android",
+        device.deviceId,
+        "plan-session",
+      );
+
+      expect(result.failedStep?.error).toBeUndefined();
+      expect(register.mock.calls[0]?.[2]).toBe("plan-session");
+      expect(enter.mock.calls[0]?.[2]?.namespace).toBe("plan-session");
+      // A sub-step is a nested call: it does not inherit the section's namespace.
+      expect(subStepNamespaces).toEqual([undefined]);
+    } finally {
+      restore();
+      ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: originalToolCallRepository });
+      ToolRegistry.unregister("namespaceProbe");
+      enter.mockRestore();
+      register.mockRestore();
+    }
+  });
+
   test("owner mismatch immediately rejects a parked peer in the same namespace", async () => {
     const timer = new FakeTimer();
     const coordinator = CriticalSectionCoordinator.createForTesting(timer);
@@ -90,15 +168,16 @@ describe("criticalSection tool", () => {
       );
     try {
       await expect(
-        ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
-          { platform: "android", deviceId: "A", name: "A" },
-          {
-            lock: "mismatch",
-            device: "A",
-            deviceCount: 2,
-            __lockNamespace: "plan",
-            steps: [{ tool: "tapOn", params: { device: "B" } }],
-          },
+        runWithToolSelectionContext({ planLockNamespace: "plan" }, () =>
+          ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+            { platform: "android", deviceId: "A", name: "A" },
+            {
+              lock: "mismatch",
+              device: "A",
+              deviceCount: 2,
+              steps: [{ tool: "tapOn", params: { device: "B" } }],
+            },
+          ),
         ),
       ).rejects.toThrow('differs from criticalSection owner device="A"');
       await drainMicrotasks(40);
@@ -1104,16 +1183,17 @@ describe("criticalSection tool", () => {
 
     try {
       const tool = ToolRegistry.getToolForPlan("criticalSection")!;
-      const error = await tool.deviceAwareHandler!(
-        device,
-        {
-          lock: "loss-lock",
-          __lockNamespace: "loss-session",
-          deviceCount: 1,
-          steps: [{ tool: "mockDeviceLoss", params: { device: "A" } }],
-        },
-        undefined,
-        signal,
+      const error = await runWithToolSelectionContext({ planLockNamespace: "loss-session" }, () =>
+        tool.deviceAwareHandler!(
+          device,
+          {
+            lock: "loss-lock",
+            deviceCount: 1,
+            steps: [{ tool: "mockDeviceLoss", params: { device: "A" } }],
+          },
+          undefined,
+          signal,
+        ),
       ).then(
         () => undefined,
         (error: unknown) => error,

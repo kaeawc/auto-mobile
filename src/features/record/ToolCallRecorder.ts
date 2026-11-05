@@ -188,7 +188,6 @@ export const INTERNAL_PARAMS = new Set([
   "devices",
   "keepScreenAwake",
   ...INTERNAL_TOOL_PARAM_NAMES,
-  "__lockNamespace",
 ]);
 
 export function stripInternalParams(args: Record<string, unknown>): Record<string, unknown> {

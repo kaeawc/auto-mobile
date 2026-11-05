@@ -86,10 +86,32 @@ describe("faults.lockScreen", () => {
     const first = await injector.apply("pin");
     const second = await injector.apply("pin");
     expect(second.status).toBe("unchanged");
+    expect(second.reset).toBeUndefined();
     await first.reset?.();
     const commands = adb.getExecutedCommands();
     await first.reset?.();
     expect(adb.getExecutedCommands()).toEqual(commands);
+  });
+  test("a second pin caller gets no reset and the installer's reset still clears the PIN", async () => {
+    const adb = new LockDevice();
+    const injector = pin(adb);
+    const first = await injector.apply("pin");
+    const second = await injector.apply("pin");
+    expect(second.status).toBe("unchanged");
+    expect(second.reset).toBeUndefined();
+    expect(await injector.isClean?.()).toBe(false);
+    await second.reset?.();
+    expect(adb.credential).toBe(LOCK_SCREEN_TEST_PIN);
+    await first.reset?.();
+    expect(adb.credential).toBeUndefined();
+  });
+  test("a PIN AutoMobile did not install is unchanged with no reset owed", async () => {
+    const adb = new LockDevice();
+    adb.credential = LOCK_SCREEN_TEST_PIN;
+    const injector = pin(adb);
+    const outcome = await injector.apply("pin");
+    expect(outcome.reset).toBeUndefined();
+    expect(await injector.isClean?.()).toBe(true);
   });
   test("rejects unknown credentials", async () => {
     const adb = new LockDevice();

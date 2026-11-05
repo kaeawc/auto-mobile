@@ -74,8 +74,8 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
     const present = await hasCredential(adb);
     if (value === "pin") {
       if (verifies) {
-        ownsPin = true;
-        return { status: "unchanged", detail: "AutoMobile test PIN is already set", reset };
+        // The cleanup obligation stays with whichever caller installed the PIN.
+        return { status: "unchanged", detail: "AutoMobile test PIN is already set" };
       }
       if (present) {
         unsupported(

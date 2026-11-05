@@ -6,22 +6,6 @@ import {
 import { KILL_PROFILE_IDS, KILL_PROFILES } from "../../../src/features/utility/KillProfiles";
 
 describe("kill profile expected survival scores", () => {
-  test.each([
-    "huawei-powergenie",
-    "vivo-autostart",
-    "realme-power-saver",
-    "meizu-flyme-background",
-    "asus-power-master",
-    "sony-stamina",
-    "tecno-app-halt",
-  ] as const)("%s has explicitly unmeasured scores", (id) => {
-    expect(KILL_PROFILE_IDS).toContain(id);
-    expect(Object.keys(KILL_PROFILE_EXPECTED_SCORES)).toContain(id);
-    expect(Object.values(KILL_PROFILE_EXPECTED_SCORES[id])).toEqual(
-      SURVIVAL_EVENT_IDS.map(() => "TODO_MEASURE"),
-    );
-  });
-
   test("every profile covers exactly every stable event id", () => {
     for (const id of KILL_PROFILE_IDS) {
       expect(Object.keys(KILL_PROFILE_EXPECTED_SCORES[id]).sort()).toEqual(
@@ -42,8 +26,7 @@ describe("kill profile expected survival scores", () => {
     }
   });
 
-  // Enable once the OEM profiles are measured; placeholders are not claims about emulator behaviour.
-  test.skip("no expected value is TODO_MEASURE", () => {
+  test("no expected value is TODO_MEASURE", () => {
     for (const id of KILL_PROFILE_IDS) {
       for (const event of SURVIVAL_EVENT_IDS) {
         expect(KILL_PROFILE_EXPECTED_SCORES[id][event]).not.toBe("TODO_MEASURE");

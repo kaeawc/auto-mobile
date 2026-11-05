@@ -129,3 +129,111 @@ test("the registered observe tool routes a visionOS session into the Apple windo
     ToolRegistry.setCollaboratorsForTesting(previous);
   }
 });
+
+function visionDependencies(
+  screenshots: FakeVisionScreenshots,
+  visionosRunner: (deviceId: string, signal?: AbortSignal) => Promise<FakeVisionosRunnerClient>,
+) {
+  const timer = new FakeTimer();
+  const fileWriter = new FakeScreenshotFileWriter();
+  return {
+    fileWriter,
+    dependencies: {
+      screenshots,
+      fileWriter,
+      timer,
+      visionosRunner,
+      pathProtection: new FakeScreenshotPathProtection(timer),
+      idGenerator: new CountingIdGenerator("vision-fallback"),
+      cacheDir: () => "/cache/screenshots",
+    },
+  };
+}
+
+test("visionOS observe uses an available runner's hierarchy", async () => {
+  const client = new FakeVisionosRunnerClient(visionosProbeHierarchy(probe.snapshotAfterImmersive));
+  const screenshots = new FakeVisionScreenshots();
+  const started: string[] = [];
+  const { dependencies } = visionDependencies(screenshots, async (deviceId) => {
+    started.push(deviceId);
+    return client;
+  });
+  const response = await observeWatch(device, {}, undefined, dependencies);
+  const result = getStructuredPayload<ObserveResult & { hierarchyUnavailable?: unknown }>(
+    readToolResponse(response),
+  )!;
+  expect(started).toEqual([device.deviceId]);
+  expect(result.hierarchyUnavailable).toBeUndefined();
+  expect(result.focusedElement).toMatchObject({ "resource-id": "field", focused: true });
+  expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+});
+
+test.each([
+  [
+    "cannot be started",
+    async (): Promise<FakeVisionosRunnerClient> => {
+      throw new Error("visionOS window-app runner unavailable: no xctestrun");
+    },
+    "no xctestrun",
+  ],
+  [
+    "cannot be reached",
+    async (): Promise<FakeVisionosRunnerClient> => {
+      const client = new FakeVisionosRunnerClient();
+      client.failure = new Error("runner socket closed");
+      return client;
+    },
+    "runner socket closed",
+  ],
+])(
+  "visionOS observe falls back to a screenshot when the runner %s",
+  async (_case, startRunner, reason) => {
+    const screenshots = new FakeVisionScreenshots();
+    const { dependencies, fileWriter } = visionDependencies(screenshots, startRunner);
+    const response = await observeWatch(device, {}, undefined, dependencies);
+    const result = getStructuredPayload<{
+      screenshotPath: string;
+      viewHierarchy?: unknown;
+      hierarchyUnavailable: { platform: string; message: string };
+    }>(readToolResponse(response))!;
+    expect(result.viewHierarchy).toBeUndefined();
+    expect(result.hierarchyUnavailable.platform).toBe("visionos");
+    expect(result.hierarchyUnavailable.message).toContain("The view hierarchy needs the runner.");
+    expect(result.hierarchyUnavailable.message).toContain(reason);
+    expect(fileWriter.written).toEqual([result.screenshotPath]);
+    expect(screenshots.calls).toEqual([{ deviceId: device.deviceId, display: undefined }]);
+    expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+  },
+);
+
+test("visionOS observe refuses project without a runner instead of dropping the hierarchy", async () => {
+  const screenshots = new FakeVisionScreenshots();
+  const { dependencies } = visionDependencies(screenshots, async () => {
+    throw new Error("no runner");
+  });
+  await expect(observeWatch(device, { project: "full" }, undefined, dependencies)).rejects.toThrow(
+    "returns only a screenshot",
+  );
+  expect(screenshots.calls).toEqual([]);
+});
+
+test("visionOS observe propagates cancellation during runner startup without capturing", async () => {
+  const controller = new AbortController();
+  const screenshots = new FakeVisionScreenshots();
+  let startupBegan!: () => void;
+  const began = new Promise<void>((resolve) => (startupBegan = resolve));
+  const { dependencies } = visionDependencies(
+    screenshots,
+    (_deviceId, signal) =>
+      new Promise<FakeVisionosRunnerClient>((_resolve, reject) => {
+        // Startup only ends through the signal observeWatch forwards.
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        startupBegan();
+      }),
+  );
+  const observed = observeWatch(device, {}, controller.signal, dependencies);
+  await began;
+  controller.abort(new Error("cancelled"));
+  await expect(observed).rejects.toThrow("cancelled");
+  expect(screenshots.calls).toEqual([]);
+});

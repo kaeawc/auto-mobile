@@ -294,6 +294,8 @@ class TwoDeviceCompareViewTest {
     val fakeB = FakeObservationStream()
     val epochB = FakeObservationStream()
     val sideA = mutableStateOf(columnA().copy(deviceSessionUuid = "epoch-a"))
+    // Built once, outside the composition: a recomposition must not restart its queue.
+    val factory = QueuedStreamFactory(epochA, fakeB, epochB)
     setContent {
       MaterialTheme {
         TwoDeviceCompareView(
@@ -301,7 +303,7 @@ class TwoDeviceCompareViewTest {
           columnB = columnB(),
           options =
             DeviceCompareOptions(
-              observationStreamFactory = QueuedStreamFactory(epochA, fakeB, epochB),
+              observationStreamFactory = factory,
               sideContent = { column, _ -> Text(column.name) },
             ),
         )

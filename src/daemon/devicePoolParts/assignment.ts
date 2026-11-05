@@ -3,6 +3,7 @@ import { holderOf } from "../deviceBinding";
 import { type ForeignDeviceOwnership } from "../foreignDeviceOwnership";
 import { type Session, type SessionRecoveryTarget } from "../sessionManager";
 import { ActionableError, Platform } from "../../models";
+import type { LivenessUnknown } from "../deviceAllocation";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
@@ -44,7 +45,7 @@ export interface AssignmentOperations {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: boolean;
+    livenessUnknown?: LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
@@ -210,7 +211,7 @@ export class DevicePoolAssignment {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: boolean;
+    livenessUnknown?: LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;

@@ -2,6 +2,7 @@ import { holderOf, isBusy, isIdle } from "../deviceBinding";
 import {
   type AllocationDiscoverySnapshots,
   type AssignableIdleDeviceSelection,
+  type LivenessUnknown,
 } from "../deviceAllocation";
 import {
   DeviceCleanupInProgressError,
@@ -41,7 +42,7 @@ export interface AllocationHealthOperations {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: boolean;
+    livenessUnknown?: LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
@@ -140,7 +141,7 @@ export class DevicePoolAllocationHealth {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: boolean;
+    livenessUnknown?: LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;

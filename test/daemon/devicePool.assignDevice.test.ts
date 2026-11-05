@@ -280,6 +280,25 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
+    test("names visionOS when a pooled headset's liveness discovery fails", async () => {
+      const headset = "C0FFEE00-0000-4000-8000-000000000099";
+      await devicePool.initializeWithDevices([
+        createBootedDevice(headset, "visionos", "Fake Vision Pro"),
+      ]);
+      fakeDeviceManager.bootedDevices = [];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>(["visionos"]);
+
+      const error = await devicePool.assignDeviceToSession("session-1", "visionos").then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      expect(String(error)).toContain(
+        "Unable to verify visionOS simulator liveness for session session-1; visionOS discovery failed.",
+      );
+      expect(devicePool.getDevice(headset)?.sessionId).toBeNull();
+    });
+
     test("validates multiple idle iOS candidates with one liveness discovery snapshot", async () => {
       const countingDeviceManager = new CountingFakeDeviceManager(
         [],

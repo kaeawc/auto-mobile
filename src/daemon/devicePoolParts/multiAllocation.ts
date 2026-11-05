@@ -9,6 +9,7 @@ import {
 import { withAllocationCancellationScope } from "../allocationCancellationScope";
 import { logger } from "../../utils/logger";
 import { ActionableError, Platform } from "../../models";
+import { livenessUnknownMessage } from "../deviceAllocation";
 import { matchesPlatformSelector } from "../../models/Platform";
 import { assertPoolCapacity } from "../poolCapacityError";
 import { type DevicePoolRefreshResult } from "../devicePoolRefresh";
@@ -230,7 +231,7 @@ export class DevicePoolMultiAllocation {
                 );
               } else if (assignResult.livenessUnknown) {
                 throw new DevicePoolError(
-                  `Unable to verify iOS simulator liveness for session ${sessionId}; iOS discovery failed.`,
+                  livenessUnknownMessage(sessionId, assignResult.livenessUnknown),
                   false,
                 );
               } else if (!assignResult.shouldWait) {
@@ -486,7 +487,7 @@ export class DevicePoolMultiAllocation {
                   );
                 } else if (result.livenessUnknown) {
                   throw new ActionableError(
-                    `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
+                    livenessUnknownMessage(request.sessionId, result.livenessUnknown),
                   );
                 } else if (!result.shouldWait) {
                   const summary = this.state.criteriaMatcher.formatCriteriaSummary(

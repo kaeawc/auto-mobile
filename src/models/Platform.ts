@@ -20,6 +20,13 @@ export const NON_IOS_APPLE_PLATFORM_LABELS: Readonly<Record<NonIosApplePlatform,
   visionos: "visionOS",
 };
 
+/** How messages name each platform. */
+export const PLATFORM_LABELS: Readonly<Record<Platform, string>> = {
+  android: "Android",
+  ios: "iOS",
+  ...NON_IOS_APPLE_PLATFORM_LABELS,
+};
+
 /** A platform selector: one platform, or `"either"` for whichever is connected. */
 export type SomePlatform = Platform | "either";
 

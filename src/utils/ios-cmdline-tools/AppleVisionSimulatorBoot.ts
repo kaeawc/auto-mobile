@@ -6,11 +6,14 @@ import type { SimCtl } from "./SimCtlClient";
 
 export type ListedAppleVision = DeviceInfo & { deviceId: string };
 export type AppleVisionBootAdmission = Pick<IosBootInstrumentation, "run">;
-export type AppleVisionBootSimctl = Pick<SimCtl, "waitForSimulatorReady">;
+export type AppleVisionBootSimctl = Pick<SimCtl, "waitForSimulatorReady" | "killSimulator">;
 export interface AppleVisionBootResult {
   device: BootedDevice;
   acquisition: "already-booted" | "cold-boot";
 }
+
+/** Cleanup of a cold boot must outlive the cancellation that made it necessary. */
+const STOP_COLD_BOOT_TIMEOUT_MS = 30_000;
 
 /** Boots an inventory-resolved Apple Vision Pro under the shared host simulator capacity limit. */
 export class AppleVisionSimulatorBoot {
@@ -44,5 +47,19 @@ export class AppleVisionSimulatorBoot {
       : await boot();
     // The shared simctl boot returns an iOS label; inventory established the visionOS identity.
     return { device: { ...booted, platform: "visionos" }, acquisition: "cold-boot" };
+  }
+
+  /**
+   * Stops a headset that `boot` cold-booted; an adopted, already running headset is left alone.
+   * A Vision boot has no process handle, so the stop is a `simctl shutdown` of its UDID.
+   */
+  async stopColdBooted(boot: AppleVisionBootResult): Promise<void> {
+    if (boot.acquisition !== "cold-boot") {
+      return;
+    }
+    await this.simctl.killSimulator(boot.device, {
+      timeoutMs: STOP_COLD_BOOT_TIMEOUT_MS,
+      signal: AbortSignal.timeout(STOP_COLD_BOOT_TIMEOUT_MS),
+    });
   }
 }

@@ -2,6 +2,7 @@ import { bindDevice, holderOf, isIdle } from "./deviceBinding";
 import { DevicePoolError } from "./DevicePoolError";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type Platform } from "../models";
+import * as liveness from "./allocationLiveness";
 import { runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import type { TTLCache } from "../utils/cache/Cache";
 import type { SingleFlight } from "../utils/cache/SingleFlight";
@@ -46,7 +47,7 @@ export interface AllocationDiscoverySnapshots {
 
 export interface AssignableIdleDeviceSelection {
   device?: PooledDevice;
-  livenessUnknown: boolean;
+  livenessUnknown: liveness.LivenessUnknown;
   snapshotStale: boolean;
 }
 
@@ -234,7 +235,7 @@ export class DeviceAllocation {
         // No device available - check if we should wait or fail
         if (assignResult.livenessUnknown) {
           throw new DevicePoolError(
-            `Unable to verify iOS simulator liveness for session ${sessionId}; iOS discovery failed.`,
+            liveness.livenessUnknownMessage(sessionId, assignResult.livenessUnknown),
             false,
           );
         }
@@ -446,7 +447,7 @@ export class DeviceAllocation {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: boolean;
+    livenessUnknown?: liveness.LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
@@ -630,7 +631,7 @@ export class DeviceAllocation {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: boolean;
+    livenessUnknown?: liveness.LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
@@ -712,13 +713,13 @@ export class DeviceAllocation {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: boolean;
+    livenessUnknown?: liveness.LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
     const { recoveryTarget, settledRecoveryLoss = false, signal } = options;
-    let livenessUnknown = false;
+    let livenessUnknown: liveness.LivenessUnknown = false;
     let refreshCompleteness: DiscoveryCompleteness | undefined;
     let refreshFailure: string | undefined;
     let refreshCompleted = false;
@@ -909,7 +910,7 @@ export class DeviceAllocation {
     forSessionId?: string,
   ): Promise<AssignableIdleDeviceSelection> {
     let device = this.selectIdleDevice(candidates, forSessionId);
-    let livenessUnknown = false;
+    let livenessUnknown: liveness.LivenessUnknown = false;
     let snapshotStale = [...capturedEntries].some(
       (entry) =>
         !this.port.isPooledEntryCurrent(entry) ||
@@ -957,11 +958,8 @@ export class DeviceAllocation {
           // As with Android, absence before the lock cannot retire this entry.
           snapshotStale = true;
         } else {
-          livenessUnknown = true;
-          logger.warn(
-            `[DevicePool] Cannot assign idle iOS ${this.port.idleDeviceReaper.iosDeviceNoun(device.id)} ${device.id}: ` +
-              "its iOS liveness discovery source failed",
-          );
+          livenessUnknown = device.platform;
+          liveness.logLivenessUnknown(device, this.port.idleDeviceReaper.iosDeviceNoun(device.id));
         }
       }
       candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);

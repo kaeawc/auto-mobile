@@ -135,7 +135,7 @@ export interface DeviceToolsDependencies {
     "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
   >;
   /** Apple Vision Pro boot through shared simctl readiness and simulator capacity admission. */
-  appleVisionSimulatorBootFactory?: () => Pick<AppleVisionSimulatorBoot, "boot">;
+  appleVisionSimulatorBootFactory?: () => Pick<AppleVisionSimulatorBoot, "boot" | "stopColdBooted">;
   /** Exact Apple Vision Pro adoption, creation and verified deletion. */
   appleVisionSimulatorProvisionerFactory?: () => Pick<
     AppleVisionSimulatorProvisioner,

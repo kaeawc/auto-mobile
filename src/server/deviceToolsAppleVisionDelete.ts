@@ -1,3 +1,4 @@
+import { notifyAppleSimulatorInventoryChanged } from "./appleSimulatorInventoryNotify";
 import {
   getDeviceToolsDependencies,
   initializedDevicePool,
@@ -16,6 +17,7 @@ import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
 import { AppleVisionSimulatorProvisioner } from "../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
 import { logger } from "../utils/logger";
+import { awaitWhileRequestIsLive } from "../utils/toolUtils";
 import type { z } from "zod/v4";
 
 /** A deleteDevice request as registered; it may name an Apple Vision Pro simulator. */
@@ -36,10 +38,11 @@ export interface AppleVisionDeleteSteps {
  * listing by UDID; an absent headset is already deleted. The caller checks run first. A running
  * headset, or a stopped one the pool still records (a session may be bound to it), goes through
  * killDevice, which stops it and releases its ownership; that happens before the teardown lease,
- * which killDevice's own lease would wait on. Under the teardown lease `simctl delete` runs and a
- * fresh headset listing must no longer show it.
+ * which killDevice's own lease would wait on. Under the teardown lease the caller checks run
+ * again, then `simctl delete` runs and a fresh headset listing, template-format names included,
+ * must no longer show it.
  *
- * `timeoutMs` bounds the whole delete. As with every deleteDevice, a caller that goes away does
+ * `timeoutMs` bounds the whole delete, the caller checks included. As with every deleteDevice, a caller that goes away does
  * not stop an accepted delete unless it asked for `cancel-on-request-abort`.
  */
 export async function deleteAppleVisionDevice(
@@ -57,7 +60,8 @@ export async function deleteAppleVisionDevice(
       {
         assertCaller: async (device) => {
           assertingCaller = true;
-          await steps.assertCaller(device);
+          // The checks take no signal; the delete's deadline still ends the wait for them.
+          await awaitWhileRequestIsLive(steps.assertCaller(device), operation.signal);
           assertingCaller = false;
         },
         stop: (device, signal) => steps.stop(device, signal),
@@ -70,7 +74,11 @@ export async function deleteAppleVisionDevice(
       `[DeviceTools] deleteDevice visionos:${args.target.stableId} failed: ${errorMessage(error)}`,
       error,
     );
-    if (assertingCaller && error instanceof ActionableError) {
+    if (
+      assertingCaller &&
+      error instanceof ActionableError &&
+      error !== Reflect.get(operation.signal, "reason")
+    ) {
       throw error;
     }
     if (operation.timedOut()) {
@@ -129,7 +137,8 @@ async function runAppleVisionDelete(
     await steps.stop(device, signal);
   }
   signal.throwIfAborted();
-  await destroyUnderLease(provisioner, device, deadlineMs, signal);
+  await destroyUnderLease(provisioner, device, { deadlineMs, signal, steps });
+  notifyAppleSimulatorInventoryChanged(`deleting Apple Vision Pro simulator ${udid}`);
   return createTeardownResponse(
     args,
     "destroyed",
@@ -178,8 +187,15 @@ function headsetDeleteOperation(
 async function destroyUnderLease(
   provisioner: Pick<AppleVisionSimulatorProvisioner, "find" | "deleteAndConfirmAbsent">,
   device: BootedDevice,
-  deadlineMs: number,
-  signal: AbortSignal,
+  {
+    deadlineMs,
+    signal,
+    steps,
+  }: {
+    deadlineMs: number;
+    signal: AbortSignal;
+    steps: Pick<AppleVisionDeleteSteps, "assertCaller">;
+  },
 ): Promise<void> {
   const deps = getDeviceToolsDependencies();
   const lease = await deps.lifecycleCoordinator.reserve(
@@ -198,6 +214,9 @@ async function destroyUnderLease(
         `Apple Vision Pro simulator ${device.deviceId} was started again before it could be deleted; retry deleteDevice.`,
       );
     }
+    // The lease is per process: a peer daemon may have claimed the headset since the first
+    // caller check, so the caller checks (other-daemon claims included) run again here.
+    await steps.assertCaller(device);
     signal.throwIfAborted();
     await provisioner.deleteAndConfirmAbsent(device.deviceId, signal);
   } finally {

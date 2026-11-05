@@ -32,13 +32,20 @@ export class AppleVisionSimulatorInventory {
     private readonly hostArchitecture: string = process.arch,
   ) {}
 
-  async listAppleVisionSimulators(signal?: AbortSignal): Promise<DeviceInfo[]> {
+  /**
+   * Headsets on visionOS runtimes. Template-format names are hidden unless `includeTemplateNames`
+   * is set: deleteDevice must see every headset, or it could report one absent that still exists.
+   */
+  async listAppleVisionSimulators(
+    signal?: AbortSignal,
+    options: { includeTemplateNames?: boolean } = {},
+  ): Promise<DeviceInfo[]> {
     const listing = await this.simctl.listSimulators(undefined, signal);
     return Object.entries(listing.devices)
       .filter(([runtimeId]) => isVisionOsSimulatorRuntime(runtimeId))
       .flatMap(([runtimeId, devices]) =>
         devices
-          .filter((device) => !isTemplateSimName(device.name))
+          .filter((device) => options.includeTemplateNames || !isTemplateSimName(device.name))
           .map((device) => this.toDeviceInfo(runtimeId, device)),
       )
       .sort((a, b) => (a.deviceId ?? "").localeCompare(b.deviceId ?? ""));

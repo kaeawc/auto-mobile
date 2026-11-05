@@ -63,7 +63,17 @@ that only visible sources back: its own text, its composed label when a visible
 descendant supplies the folded part, and each visible descendant's label. The
 comparison follows the resolver's exact, contains and regex rules, and an unscoped
 wait then takes any other match. Selector resolution for `tapOn` and other actions
-does not apply this check.
+does not apply this check: a row stays tappable while some part of it is on screen
+and not covered, whichever sources built its label. The tap point is picked inside
+that part, away from the keyboard, application windows above the row's window and
+AutoMobile's prototype windows. Controls drawn over the row in its own window are
+avoided as well, for a row inside a scroll container. iOS counts a control outside
+that container, or after the row inside it. Android counts a control outside the
+container that comes after it in capture order, and only in captures with
+per-window trees. When covers leave no exposed point,
+the tap is refused with a `no-visible-tap-area` error that names the cover, and
+observe reports that row `occluded`, with no affordances, from the same check. A row
+with no on-screen part is refused and the error says to scroll it into view.
 
 iOS simulator lock readings are shared per device: unlocked known readings use
 `knownTtlMs` (30 seconds), locked readings use `lockedTtlMs` (2 seconds), and

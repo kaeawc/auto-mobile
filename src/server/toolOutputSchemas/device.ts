@@ -106,6 +106,19 @@ const deviceStateOutputFields = {
           .passthrough(),
       ),
       postures: z.array(observationDisplaySchema.unwrap().shape.posture),
+      current: z
+        .object({
+          posture: observationDisplaySchema.unwrap().shape.posture,
+          activePanel: z
+            .object({ key: z.string(), role: observationDisplaySchema.unwrap().shape.role })
+            .passthrough()
+            .optional(),
+        })
+        .passthrough()
+        .optional()
+        .describe(
+          "Android foldables only: the committed device_state posture and the panel behind the default display, read live on every call.",
+        ),
     })
     .passthrough()
     .optional(),

@@ -16,9 +16,7 @@ import {
   isWatch,
   type DeviceTraits,
 } from "../utils/android-cmdline-tools/deviceTraits";
-import { DEVICE_TRAITS_TIMEOUT_MS } from "./bootedDeviceTraits";
-import { logger } from "../utils/logger";
-import { errorMessage } from "../utils/describeUnknownError";
+import { readTraitFormFactor } from "./bootedDeviceTraits";
 import type { ObserveResult } from "../models";
 import {
   AdbRotaryScroller,
@@ -110,15 +108,8 @@ export type WatchCheck = (device: BootedDevice) => Promise<boolean | undefined>;
 
 export function traitsWatchCheck(traits: DeviceTraits, adbFactory: AdbClientFactory): WatchCheck {
   return async (device) => {
-    try {
-      const read = await traits.read(adbFactory.create(device), device.deviceId, {
-        timeoutMs: DEVICE_TRAITS_TIMEOUT_MS,
-      });
-      return isWatch(read);
-    } catch (error) {
-      logger.warn(`rotaryScroll could not read device traits: ${errorMessage(error)}`, error);
-      return undefined;
-    }
+    const formFactor = await readTraitFormFactor(traits, adbFactory, device, "rotaryScroll");
+    return formFactor === undefined ? undefined : isWatch({ formFactor });
   };
 }
 

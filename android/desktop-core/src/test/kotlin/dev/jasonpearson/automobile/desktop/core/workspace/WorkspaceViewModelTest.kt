@@ -167,6 +167,51 @@ class WorkspaceViewModelTest {
   }
 
   @Test
+  fun `refreshing an ended column's epoch replaces it and drops the retired epoch's state`() =
+    testScope.runTest {
+      val registry = NavigationScreenshotLoaderRegistry()
+      val exec = FakeEmulatorControlExecutor().apply { localeGate = CompletableDeferred() }
+      val vm = WorkspaceViewModel(this, exec, screenshotLoaderRegistry = registry)
+      vm.observeEpochAWithState(registry)
+      vm.onAction(WorkspaceAction.SetLocale("a", "de-DE"))
+      val parkedLocale = vm.localeJobs.getValue("a")
+      vm.onAction(WorkspaceAction.EndDeviceSession("a", "epoch-a"))
+
+      vm.onAction(WorkspaceAction.RefreshDeviceSessionUuids(mapOf("a" to "epoch-b")))
+
+      val column = vm.onlyColumn()
+      assertEquals("epoch-b", column.deviceSessionUuid)
+      assertEquals(false, column.sessionEnded)
+      assertEquals(1, column.epochGeneration)
+      // The user's layout carries over.
+      assertEquals(Tool.Storage, column.activeTool)
+      assertEquals(0.5f, column.firstPaneFractionOverride)
+      // State observed from the retired epoch does not.
+      assertEquals(Orientation.Portrait, column.orientation)
+      assertEquals(false, column.locked)
+      assertNull("the retired epoch's screenshot cache is dropped", registry.peek("a"))
+      assertNull(vm.localeJobs["a"])
+      assertTrue("the retired epoch's locale request is cancelled", parkedLocale.isCancelled)
+    }
+
+  @Test
+  fun `refreshing a live column's epoch keeps its remembered state and caches`() =
+    testScope.runTest {
+      val registry = NavigationScreenshotLoaderRegistry()
+      val vm = WorkspaceViewModel(this, screenshotLoaderRegistry = registry)
+      vm.observeEpochAWithState(registry)
+
+      vm.onAction(WorkspaceAction.RefreshDeviceSessionUuids(mapOf("a" to "epoch-b")))
+
+      val column = vm.onlyColumn()
+      assertEquals("epoch-b", column.deviceSessionUuid)
+      assertEquals(0, column.epochGeneration)
+      assertEquals(Orientation.Landscape, column.orientation)
+      assertEquals(true, column.locked)
+      assertNotNull(registry.peek("a"))
+    }
+
+  @Test
   fun `manual resize exits shrink preset`() = testScope.runTest {
     val vm = WorkspaceViewModel(this)
     vm.onAction(WorkspaceAction.ObserveDevice(column("a")))

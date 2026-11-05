@@ -18,6 +18,7 @@ export interface DevicectlDisplayInfo {
   displayId: number;
   name?: string;
   primary?: boolean;
+  active?: boolean;
   typeKind?: string;
   bounds?: { origin: { x: number; y: number }; size: DisplaySize };
   nativeSize?: DisplaySize;
@@ -29,6 +30,13 @@ export interface DevicectlDisplayInfo {
   backlightState?: string;
   chromeIdentifier?: string;
   framebufferMaskIdentifier?: string;
+}
+
+export interface DevicectlDisplayInfoSource {
+  readDisplays(request: {
+    deviceId: string;
+    signal?: AbortSignal;
+  }): Promise<DevicectlDisplayInfo[]>;
 }
 
 interface DisplayInfoFailure {
@@ -121,6 +129,7 @@ function readDisplay(value: unknown): DevicectlDisplayInfo | undefined {
     displayId,
     name: asString(record.name),
     primary: readBoolean(record.primary),
+    active: readBoolean(record.active),
     typeKind: readTypeKind(record.type),
     bounds: readBounds(record.bounds),
     nativeSize: readSize(record.nativeSize),

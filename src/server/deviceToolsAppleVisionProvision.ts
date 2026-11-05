@@ -295,7 +295,10 @@ export async function bootAndBindHeadset(
   }
 }
 
-/** A cold boot no session holds yet is stopped; a headset another request bound is left alone. */
+/**
+ * A cold boot no session holds yet is stopped; a headset another request bound, or another
+ * daemon claims, is left alone.
+ */
 async function stopUnboundColdBoot(
   lifecycle: Pick<AppleVisionSimulatorBoot, "stopColdBooted">,
   boot: AppleVisionBootResult | undefined,
@@ -305,6 +308,8 @@ async function stopUnboundColdBoot(
     return;
   }
   try {
+    // A bind refused for another daemon's claim leaves no local holder: the headset is theirs.
+    await assertVisionNotClaimedByForeignDaemon(udid);
     await lifecycle.stopColdBooted(boot);
   } catch (error) {
     logger.warn(

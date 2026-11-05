@@ -1040,6 +1040,30 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
   });
 
+  test("a bind refused for a peer's claim made during boot leaves the peer's headset running", async () => {
+    const existing = visionDevice({ name: NAME });
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl } = {};
+    const { simctl, sessions } = await arrange([existing], {
+      // The peer claims the headset only once this call has booted it.
+      ownership: new FakeVisionClaims(
+        () => ref.simctl?.commands.some((command) => command.startsWith("boot ")) === true,
+      ),
+    });
+    ref.simctl = simctl;
+
+    const error = await failure(
+      call("startDevice", {
+        platform: "visionos",
+        deviceId: existing.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 360000`]);
+    expect(sessions.getAllSessions()).toEqual([]);
+  });
+
   test("startDevice cancelled between boot and bind stops the headset it cold-booted", async () => {
     const existing = visionDevice({ name: NAME });
     const { simctl, sessions, pool } = await arrange([existing]);

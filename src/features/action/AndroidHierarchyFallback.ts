@@ -23,9 +23,49 @@ export interface AndroidHierarchyFallbackDeps {
   deviceId?: string;
 }
 
-/** Run a dump-and-read under the device's UiAutomation lock when the device is known. */
-function withDumpLock<T>(deps: AndroidHierarchyFallbackDeps, run: () => Promise<T>): Promise<T> {
-  return deps.deviceId === undefined ? run() : uiautomatorDumpLock(deps.deviceId).runExclusive(run);
+/** The absolute host-clock deadline and abort signal bounding one supplemental dump. */
+interface DumpBound {
+  deadline: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Run a dump-and-read under the device's UiAutomation lock when the device is known. The wait
+ * for the lock is bounded by the capture's deadline and abort signal: a capture queued behind
+ * another dump gives up when either ends instead of waiting for that dump to release. An
+ * abandoned acquisition releases the lock as soon as it is granted, so later waiters proceed.
+ */
+async function withDumpLock<T>(
+  deps: AndroidHierarchyFallbackDeps,
+  { deadline, signal }: DumpBound,
+  run: () => Promise<T>,
+): Promise<T> {
+  if (deps.deviceId === undefined) {
+    return run();
+  }
+  throwIfAborted(signal);
+  const remaining = deadline - deps.timer.now();
+  if (remaining <= 0) {
+    throw new Error("Hierarchy fallback deadline exhausted before the dump lock was free");
+  }
+  const acquisition = uiautomatorDumpLock(deps.deviceId).acquire();
+  let release: () => void;
+  try {
+    release = await raceWithDeadline(acquisition, {
+      timer: deps.timer,
+      timeoutMs: remaining,
+      signal,
+      label: "Hierarchy fallback dump lock wait",
+    });
+  } catch (error) {
+    void acquisition.then((granted) => granted());
+    throw error;
+  }
+  try {
+    return await run();
+  } finally {
+    release();
+  }
 }
 
 interface XmlNode {
@@ -142,7 +182,7 @@ export async function supplementAndroidHierarchy(
     logger.warn(
       `[HierarchyFallback] Supplementing incomplete CtrlProxy hierarchy (ctrlProxyIncompleteReason=${original.ctrlProxyIncompleteReason ?? "unknown"})`,
     );
-    const result = await withDumpLock(deps, async () => {
+    const result = await withDumpLock(deps, { deadline, signal }, async () => {
       await execute(["shell", "uiautomator", "dump", path]);
       return execute(["shell", "cat", path]);
     });
@@ -202,12 +242,6 @@ async function removeDump(
 
 function dumpPath(idGenerator: IdGenerator = defaultIdGenerator): string {
   return `/data/local/tmp/automobile-hierarchy-${idGenerator.next()}.xml`;
-}
-
-/** The absolute host-clock deadline and abort signal bounding one supplemental dump. */
-interface DumpBound {
-  deadline: number;
-  signal?: AbortSignal;
 }
 
 async function verifyAndMergeDump(
@@ -314,7 +348,7 @@ export async function readAndroidDisplayHierarchy(
     // Some releases ignore `--display` and dump the default display; the display's real size
     // is what lets the dump be rejected instead of being labelled as this display.
     const size = await readDisplaySize(displayId, execute);
-    const result = await withDumpLock(deps, async () => {
+    const result = await withDumpLock(deps, { deadline, signal }, async () => {
       await execute(["shell", "uiautomator", "dump", "--display", String(displayId), path]);
       return execute(["shell", "cat", path]);
     });

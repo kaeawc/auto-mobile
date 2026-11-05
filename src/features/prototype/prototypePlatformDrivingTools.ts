@@ -75,6 +75,10 @@ export const PROTOTYPE_PLATFORM_DRIVING_TOOLS: Readonly<
     tools: ["systemTray", "setAppPermissions"],
     note: "open, act on, reply to or dismiss a posted notification; `notificationsEnabled` blocks the whole app, while a single channel is blocked only in system Settings (`observe`, `tapOn`)",
   },
+  permissions: {
+    tools: ["setAppPermissions", "systemAlerts"],
+    note: "grant or revoke before reading `/platform/permissions`; answer the prompt a `request` raises",
+  },
   media: { tools: ["mediaSession"], note: "headset transport keys and session state (Android)" },
   cast: { tools: [], note: "needs a real receiver on the network; no device tool" },
 };

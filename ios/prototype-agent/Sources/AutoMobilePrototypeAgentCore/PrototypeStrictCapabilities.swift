@@ -7,7 +7,7 @@ enum PrototypeStrictCapabilities {
     static let freeFormMaps: Set<String> = ["headers", "query", "params", "args"]
 
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
-        var result = Set<String>()
+        var result = PrototypePlatformValidator.backendCapabilities(spec)
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
         if PrototypeContractValidator.locatedActionTypes(.object(spec)).contains("hideKeyboard") {
             need("hide_keyboard")

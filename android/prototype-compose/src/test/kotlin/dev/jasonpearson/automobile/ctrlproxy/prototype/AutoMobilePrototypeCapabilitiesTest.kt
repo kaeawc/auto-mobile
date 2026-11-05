@@ -71,6 +71,9 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_sensors_v1",
       // Contract only; the map renderers are owed (#14310, #14311).
       "prototype_platform_map_v1",
+      // Contract only; map backends are advertised once their renderers can serve them (#14302).
+      "prototype_platform_map_google_v1",
+      "prototype_platform_map_maplibre_v1",
       // Contract only; the location runtimes are owed (#14325, #14326).
       "prototype_platform_location_v1",
       // Contract only; the system media picker and camera runtimes are owed (#14197).
@@ -88,6 +91,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audioRecorder_v1",
       // Contract only; the local notification runtime is owed (#14281).
       "prototype_platform_notifications_v1",
+      // Contract only; the disposable-app permission runtime is owed (#14298).
+      "prototype_platform_permissions_v1",
       // Contract only; the scheduled notification runtimes are owed (#14283).
       "prototype_platform_notifications_scheduled_v1",
       // Contract only; push delivery to prototype apps is owed (#14286).

@@ -69,6 +69,35 @@ are not built in: add those files yourself (a saved prototype serves their bytes
 Revisions, errors, `_meta` (without `variants`) and subscriptions work as for the web page below,
 and `resources/list` lists both files for every prototype shown in this daemon session.
 
+## Eject to code you own
+
+The resources above keep the renderer library and the spec in your app. To replace a prototype
+with screens you write and style by hand, read `automobile:prototype/eject?id=<id>` (same `id`,
+`platform` and `deviceId` parameters as the native resource) once and edit the result. Nothing is
+regenerated or synced back to the spec afterwards.
+
+The result is JSON:
+
+| Field        | Meaning                                                                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`      | One file: `app/src/main/java/prototypes/eject/<Type>.kt` (Jetpack Compose, Material 3) or `<Type>.swift` (SwiftUI). No library is needed. |
+| `scaffolded` | Node types written as real code.                                                                                                          |
+| `remaining`  | What is left for you, by spec path: `node` (an unsupported node), `action` (an action other than stack navigation) or `binding`.          |
+| `notes`      | Limits of the scaffold for this prototype.                                                                                                |
+
+`box`, `row`, `column`, `card`, `scroll`, `spacer`, `divider`, `text`, `button`, `textField`,
+`list`, `listItem` and `stack` become native code. Stack screens become their own functions or
+views, and `push`, `replace`, `pop` and `popToRoot` drive a back stack in the generated state
+class, which also holds text field values (seeded from string `state`). Every other node becomes a
+placeholder, marked with an `(eject)` comment, that keeps its `testTag` and children. Styles, conditions, data
+placeholders such as `{item.name}` and other actions stay as written or as `(eject)` comments;
+a list shows as many rows as its data had. Explicit theme color roles become a Material 3 color
+scheme or SwiftUI colors; a seeded scheme is not exported.
+
+Every `testTag` is kept as `Modifier.testTag` or `.accessibilityIdentifier`, with `{index}` bound
+to the row index, so tests and flows recorded against the prototype can target the ejected
+screens.
+
 ## Where the files go
 
 Copy each `files[].path` and `assets[].path` exactly as the resource returns it. The host file reads

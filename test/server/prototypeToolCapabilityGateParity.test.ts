@@ -713,6 +713,32 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_permissions_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["permissions"],
+        permissions: [{ name: "camera", purpose: "Take a photo" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "permissions.request",
+                args: { names: { value: ["camera"] } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_notifications_scheduled_v1: {
     minimalSpec: {
       ...base,
@@ -911,6 +937,8 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_map_google_v1: mapBackendFixture("google"),
+  prototype_platform_map_maplibre_v1: mapBackendFixture("maplibre"),
   prototype_platform_sensors_v1: {
     minimalSpec: {
       ...base,
@@ -1055,6 +1083,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     with: ["prototype_platform_v1"],
   },
 };
+/**
+ * A map naming a non-default backend (#14302). A patch cannot add `requires`, so, like the map
+ * module gate, the patch path is covered by the patch-result gate test in prototypeMap.test.ts.
+ */
+function mapBackendFixture(backend: string) {
+  const map = { type: "map", id: "label", backend, camera: { lat: 0, lng: 0, zoom: 2 } };
+  return {
+    minimalSpec: { ...fixture(map).minimalSpec, requires: { platform: ["map"] } },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_map_v1"],
+  };
+}
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {
     minimalSpec: {

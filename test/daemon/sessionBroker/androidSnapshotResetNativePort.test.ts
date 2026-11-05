@@ -700,7 +700,9 @@ describe("NativeAndroidSnapshotResetPort", () => {
   });
 
   test("clock drift or incomplete boot fails closed", async () => {
-    const { port, step, adb } = nativeRig();
+    const { port, step, adb, timer } = nativeRig();
+    // Drift persists across the restore's bounded settle read-backs before failing closed.
+    timer.enableAutoAdvance();
     healthyClock(adb);
     adb.setCommandResult("shell getprop sys.boot_completed", "0");
     await expect(port.health(ANDROID_RESET_DEVICE, step)).rejects.toThrow("completed boot");

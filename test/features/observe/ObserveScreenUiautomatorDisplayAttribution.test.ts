@@ -18,8 +18,16 @@ afterEach(() => {
   resetObserveCacheStore();
 });
 
-/** The legacy window query answers for the default display's launcher. */
-async function observe(sources: HierarchySource[]) {
+const launcher = {
+  appId: "com.google.android.apps.nexuslauncher",
+  activityName: "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+};
+
+/** The legacy window query answers for the default display (the launcher unless overridden). */
+async function observe(
+  sources: HierarchySource[],
+  defaultDisplayWindow: { appId: string; activityName: string } = launcher,
+) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_700_000_000_000);
   const viewHierarchy = new FakeViewHierarchy();
@@ -44,11 +52,7 @@ async function observe(sources: HierarchySource[]) {
     {
       viewHierarchy,
       window: {
-        getActive: async () => ({
-          appId: "com.google.android.apps.nexuslauncher",
-          activityName: "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
-          layoutSeqSum: 7,
-        }),
+        getActive: async () => ({ ...defaultDisplayWindow, layoutSeqSum: 7 }),
         getActiveHash: async () => "hash",
         getCachedActiveWindow: async () => null,
         setCachedActiveWindow: async () => undefined,
@@ -66,6 +70,16 @@ async function observe(sources: HierarchySource[]) {
 
 test("a UIAutomator-only display read replaces the default display's app attribution", async () => {
   const result = await observe(["uiautomator"]);
+  expect(result.activeWindow?.appId).toBe("com.android.settings");
+  expect(result.activeWindow?.activityName).toBe("");
+  expect(result.activeWindow?.layoutSeqSum).toBe(7);
+});
+
+test("a UIAutomator-only display read drops the default display's activity of the same app", async () => {
+  const result = await observe(["uiautomator"], {
+    appId: "com.android.settings",
+    activityName: "com.android.settings.SubSettings",
+  });
   expect(result.activeWindow?.appId).toBe("com.android.settings");
   expect(result.activeWindow?.activityName).toBe("");
   expect(result.activeWindow?.layoutSeqSum).toBe(7);

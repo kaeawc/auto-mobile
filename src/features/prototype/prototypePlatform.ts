@@ -38,6 +38,7 @@ import { prototypePlatformPlaceholders } from "./prototypeData";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import { PROTOTYPE_REQUEST_EVENT_NAME, prototypeIntoError } from "./prototypeRequest";
 import { numberValid, type Rule } from "./prototypeBindingValidation";
+import { prototypePermissionRequestError } from "./prototypePermissionRules";
 import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -111,6 +112,11 @@ export interface PrototypePlatformStateEntry {
 export interface PrototypePlatformModule {
   capability: string;
   deviceCapability?: string;
+  /**
+   * Non-default SDK backends a node of this module may name in `backend` (#14302), each with the
+   * capability a runtime advertises only while that backend works on the device.
+   */
+  backends?: Record<string, { capability: string }>;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   /** Shared runtime call budget; the host validates metadata but does not count calls. */
@@ -243,7 +249,7 @@ const sortedKeys = (value: Raw): string[] =>
 export type PrototypePlatformUse =
   | { kind: "requires"; path: string }
   | { kind: "declared"; path: string; module: string }
-  | { kind: "node"; path: string; module: string }
+  | { kind: "node"; path: string; module: string; backend?: unknown }
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string; userGesture: boolean }
   | { kind: "call"; path: string; action: Raw; userGesture: boolean }
@@ -430,7 +436,7 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   // positions count: a map-shaped value in a request field or payload is data.
   walkPrototypeNodes(root, (node, path) => {
     if (node.type === "map") {
-      uses.push({ kind: "node", path, module: "map" });
+      uses.push({ kind: "node", path, module: "map", backend: node.backend });
     }
   });
   return uses;
@@ -541,7 +547,7 @@ function callError(
   if (args) {
     return args;
   }
-  const crossArgs = crossArgumentsError(action, path);
+  const crossArgs = crossArgumentsError(action, path, context.permissions);
   if (crossArgs) {
     return crossArgs;
   }
@@ -552,18 +558,19 @@ function callError(
 /** Rules that relate one call's arguments to each other, beyond the per-argument contract table. */
 const crossArgumentRules: Record<
   string,
-  (args: Raw, path: string) => PrototypePlatformError | undefined
+  (args: Raw, path: string, permissions: ReadonlySet<string>) => PrototypePlatformError | undefined
 > = {
   "share.open": (args, path) => prototypeShareArgumentsError(args, path),
   "links.open": prototypeLinksArgumentsError,
+  "permissions.request": prototypePermissionRequestError,
 };
 
-function crossArgumentsError(action: Raw, path: string): PrototypePlatformError | undefined {
+function crossArgumentsError(action: Raw, path: string, permissions: ReadonlySet<string>) {
   const rule =
     typeof action.call === "string" && Object.hasOwn(crossArgumentRules, action.call)
       ? crossArgumentRules[action.call]
       : undefined;
-  return rule?.(record(action.args) ?? {}, `${path}.args`);
+  return rule?.(record(action.args) ?? {}, `${path}.args`, permissions);
 }
 
 function intoError(into: string): string | undefined {

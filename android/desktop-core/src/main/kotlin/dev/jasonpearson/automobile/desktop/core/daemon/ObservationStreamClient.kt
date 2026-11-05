@@ -763,6 +763,13 @@ sealed class DeviceStreamEvent {
     val timestamp: Long,
   ) : DeviceStreamEvent()
 
+  /** The daemon retired [retiredUuid] for [deviceId] with no successor: the device is gone. */
+  data class DeviceSessionEnded(
+    val deviceId: String,
+    val retiredUuid: String,
+    val timestamp: Long,
+  ) : DeviceStreamEvent()
+
   data class DeviceConnectionLost(
     val deviceId: String,
     val timestamp: Long,

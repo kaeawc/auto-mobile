@@ -69,3 +69,11 @@ fallback), instead of opening their own socket:
 
 Storage, failures and video streams still connect per pane, as do observation
 streams in hosts without a hub (the IDE plugin).
+
+A pane is keyed on its device epoch. When the daemon ends that epoch with a
+successor, the pane re-keys onto the successor. When it ends with no successor
+(the device disconnected for good), the pane drops the epoch and shows "Device
+disconnected" in place of its stream and facets, which releases their leases.
+The pane is marked rather than closed so the user sees why the device went away;
+it stays until closed, and observing the device again or a fresh epoch for it
+restores the live pane. An end for an epoch the pane is not on is ignored.

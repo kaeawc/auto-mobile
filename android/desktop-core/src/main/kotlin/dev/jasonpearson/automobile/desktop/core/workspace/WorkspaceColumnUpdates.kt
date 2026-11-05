@@ -25,9 +25,21 @@ internal fun WorkspaceViewModel.refreshDeviceSessionUuids(sessionUuids: Map<Stri
         content.columns.map { column ->
           val refreshed = sessionUuids[column.deviceId] ?: return@map column
           if (refreshed == column.deviceSessionUuid) column
-          else column.copy(deviceSessionUuid = refreshed)
+          else column.copy(deviceSessionUuid = refreshed, sessionEnded = false)
         },
     )
+  }
+}
+
+/**
+ * Mark [deviceId]'s column ended when it still observes [retiredUuid]: drop its epoch so no
+ * UUID-scoped stream can re-attach to it. The pane then renders its disconnected state, which
+ * disposes its stream and facets. The column stays open so the user sees why the device went away.
+ */
+internal fun WorkspaceViewModel.markDeviceSessionEnded(deviceId: String, retiredUuid: String) {
+  mutate(deviceId) { column ->
+    if (column.deviceSessionUuid != retiredUuid) column
+    else column.copy(deviceSessionUuid = null, sessionEnded = true)
   }
 }
 

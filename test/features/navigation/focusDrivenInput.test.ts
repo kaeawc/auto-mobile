@@ -82,6 +82,9 @@ describe("dpadReplayInteraction", () => {
       { toolName: "tapAt", args: { x: 1, y: 2 } },
       { toolName: "focusNavigate", args: { until: { text: "Row" }, select: true } },
       { toolName: "tapOn", args: { x: 1, y: 2 } },
+      { toolName: "tapOn", args: { selector: { text: "Row" }, duration: 800 } },
+      { toolName: "tapOn", args: { selector: { text: "More" }, index: 1, action: "tap" } },
+      { toolName: "tapOn", args: { text: "More", index: 1 } },
     ];
     for (const interaction of unchanged) {
       expect(dpadReplayInteraction(interaction)).toBe(interaction);
@@ -113,6 +116,28 @@ describe("focusTargetForElement", () => {
     const [element] = extractNavigationElements(hierarchy, parser);
     return { element, hierarchy };
   }
+
+  test("returns null for a duplicate that needs an occurrence index", () => {
+    const tile = {
+      class: "android.widget.FrameLayout",
+      clickable: "true",
+      enabled: "true",
+      focusable: "true",
+      "resource-id": "app:id/more",
+      text: "More",
+    };
+    const hierarchy = createHierarchyForTest({
+      hierarchy: {
+        node: [
+          { $: { ...tile, bounds: "[0,0][200,100]" } },
+          { $: { ...tile, bounds: "[0,100][200,200]" } },
+        ],
+      },
+      packageName: "com.example.tv",
+    });
+    const [, second] = extractNavigationElements(hierarchy, parser);
+    expect(focusTargetForElement(second, hierarchy)).toBeNull();
+  });
 
   test("uses the resource id when the element has one", () => {
     const { element, hierarchy } = candidate({ "resource-id": "app:id/movies", text: "Movies" });

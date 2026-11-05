@@ -88,7 +88,8 @@ export function focusTargetFromSelector(
 
 /**
  * The focus target explore moves to for `element`: its resource id, else the label its tap
- * selector uses, matched on the property that label came from. Null when nothing names it.
+ * selector uses, matched on the property that label came from. Null when nothing names it, or
+ * when the selector needs an occurrence index to tell duplicates apart.
  */
 export function focusTargetForElement(
   element: Element,
@@ -96,6 +97,10 @@ export function focusTargetForElement(
 ): FocusNavigateTarget | null {
   const selector = tapSelectorFor(element, hierarchy);
   if (!selector) {
+    return null;
+  }
+  if (selector.index !== undefined) {
+    // focusNavigate has no occurrence index, so a duplicate would select the wrong one.
     return null;
   }
   if ("elementId" in selector) {
@@ -117,7 +122,8 @@ export function focusSelectArgs(until: FocusNavigateTarget): {
 /**
  * The D-pad replay of a recorded interaction on a TV: a plain `tapOn` by element id or text
  * becomes `focusNavigate` to that element with select. Every other call (including a
- * `focusNavigate` explore recorded, a long press, or a coordinate tap) replays unchanged.
+ * `focusNavigate` explore recorded, a long press, an occurrence `index`, or a coordinate tap)
+ * replays unchanged.
  */
 export function dpadReplayInteraction<T extends Pick<ToolCallInteraction, "toolName" | "args">>(
   interaction: T,
@@ -126,11 +132,16 @@ export function dpadReplayInteraction<T extends Pick<ToolCallInteraction, "toolN
     return interaction;
   }
   const { args } = interaction;
-  const action = args.action;
-  if (action !== undefined && action !== "tap") {
+  // tapOn reads a positive duration without an action as a long press.
+  const longPress = typeof args.duration === "number" && args.duration > 0;
+  if ((args.action !== undefined && args.action !== "tap") || longPress) {
     return interaction;
   }
   const selector = asRecord(args.selector) ?? args;
+  if (args.index !== undefined || selector.index !== undefined) {
+    // focusNavigate has no occurrence index, so a duplicate would select the wrong one.
+    return interaction;
+  }
   const until = focusTargetFromSelector(selector);
   return until
     ? { ...interaction, toolName: "focusNavigate", args: focusSelectArgs(until) }

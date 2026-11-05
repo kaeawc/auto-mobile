@@ -168,7 +168,7 @@ export class PortReverseManager {
         await this.add(target, state, request, added);
         mappings.push(ownedMapping(request, "added"));
       }
-      return { mappings, ...report };
+      return this.acknowledge(state, target.owner, { mappings, ...report });
     });
     return run.finally(() => {
       const left = (state.ensuring.get(owner) ?? 1) - 1;
@@ -193,7 +193,10 @@ export class PortReverseManager {
           mappings.push(ownedMapping({ devicePort, hostPort: mapping.hostPort }, "missing"));
         }
       }
-      return { mappings: mappings.sort((a, b) => a.devicePort - b.devicePort), ...report };
+      return this.acknowledge(state, target.owner, {
+        mappings: mappings.sort((a, b) => a.devicePort - b.devicePort),
+        ...report,
+      });
     });
   }
 
@@ -225,9 +228,9 @@ export class PortReverseManager {
         const probed = await Promise.all(
           mappings.map((mapping) => this.probeMapping(target, mapping)),
         );
-        return { mappings: probed, ...report };
+        return this.acknowledge(state, target.owner, { mappings: probed, ...report });
       }
-      return { mappings, ...report };
+      return this.acknowledge(state, target.owner, { mappings, ...report });
     });
   }
 
@@ -374,6 +377,21 @@ export class PortReverseManager {
     });
   }
 
+  /**
+   * The pool has evidence another device now answers on this serial: forget every owned mapping and
+   * pending removal there, synchronously and without a command, so no reconcile queued or scheduled
+   * afterwards re-adds the old device's mappings to the replacement.
+   */
+  forgetDevice(deviceId: string): void {
+    const state = this.devices.get(deviceId);
+    if (state === undefined) {
+      return;
+    }
+    state.owned.clear();
+    state.pendingRemoval.clear();
+    state.backgroundRestored.clear();
+  }
+
   /** Released mappings on the device whose removal is still pending, ascending. */
   pendingRemovals(deviceId: string): number[] {
     return [...(this.devices.get(deviceId)?.pendingRemoval.keys() ?? [])].sort((a, b) => a - b);
@@ -484,6 +502,20 @@ export class PortReverseManager {
     }
   }
 
+  /** A call returned these background restores to the owner: stop reporting them. */
+  private acknowledge(
+    state: DeviceState,
+    owner: string,
+    result: PortReverseResult,
+  ): PortReverseResult {
+    const pending = state.backgroundRestored.get(owner);
+    result.restored.forEach((port) => pending?.delete(port));
+    if (pending?.size === 0) {
+      state.backgroundRestored.delete(owner);
+    }
+    return result;
+  }
+
   /** The device's current reverses after re-applying the owned ones it lost. */
   private async reconciled(target: PortReverseTarget, state: DeviceState) {
     const view = await this.view(target.deviceId, state);
@@ -498,11 +530,11 @@ export class PortReverseManager {
   ): Promise<PortReverseRestoreReport> {
     const all = await this.restoreMissing(target.deviceId, state, view);
     const mine = (port: number) => state.owned.get(port)?.owner === target.owner;
-    // Ports a background reconcile restored since this owner's last call, still owned and mapped.
+    // Ports a background reconcile restored since this owner's last call, still owned and mapped;
+    // cleared by `acknowledge` once the call returns them, so a call that throws keeps them.
     const earlier = [...(state.backgroundRestored.get(target.owner) ?? [])].filter(
       (port) => mine(port) && view.has(port),
     );
-    state.backgroundRestored.delete(target.owner);
     const report: PortReverseRestoreReport = {
       restored: [...new Set([...earlier, ...all.restored.filter(mine)])].sort((a, b) => a - b),
       restoreFailures: all.restoreFailures.filter((failure) => mine(failure.devicePort)),

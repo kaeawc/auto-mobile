@@ -22,6 +22,10 @@ import {
   type AdbTransportRecoveredSignal,
 } from "../utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  registerDeviceIncarnationListener,
+  type DeviceIncarnationListener,
+} from "../utils/deviceIncarnation";
 import { defaultTimer } from "../utils/SystemTimer";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defineDeviceTool, type DeviceToolHandler } from "./defineTool";
@@ -223,13 +227,27 @@ export const portReverseSchema = portReverseTool.schema;
  */
 export function subscribePortReverseTransportRecovery(
   signal: Pick<AdbTransportRecoveredSignal, "subscribe">,
-  scheduler: Pick<PortReverseRecoveryScheduler, "deviceRecovered" | "dispose">,
+  scheduler: Pick<PortReverseRecoveryScheduler, "deviceRecovered" | "cancel" | "dispose">,
+  manager: Pick<PortReverseManager, "forgetDevice">,
+  registerIdentityListener: (
+    listener: DeviceIncarnationListener,
+  ) => () => void = registerDeviceIncarnationListener,
 ): () => void {
   const unsubscribe = signal.subscribe((deviceId, reason) =>
     scheduler.deviceRecovered(deviceId, reason),
   );
+  // Another device on the serial: its mappings are not ours, so nothing may be restored there.
+  const unregister = registerIdentityListener({
+    name: "port-reverse-recovery",
+    onDeviceIdentityReplaced: (deviceId) => {
+      scheduler.cancel(deviceId);
+      manager.forgetDevice(deviceId);
+    },
+    onDeviceIncarnationChanged: () => undefined,
+  });
   return () => {
     unsubscribe();
+    unregister();
     scheduler.dispose();
   };
 }
@@ -246,6 +264,7 @@ function daemonManager(): PortReverseManager {
     subscribePortReverseTransportRecovery(
       adbTransportRecoveredSignal,
       new PortReverseRecoveryScheduler({ manager: defaultPortReverseManager, timer: defaultTimer }),
+      defaultPortReverseManager,
     );
   }
   return defaultPortReverseManager;

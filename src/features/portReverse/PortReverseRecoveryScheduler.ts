@@ -87,6 +87,18 @@ export class PortReverseRecoveryScheduler {
     return [...this.episodes.keys()].sort();
   }
 
+  /**
+   * Another device now answers on this serial (identity replacement): drop its pending episode, so
+   * no reconcile triggered for the old device runs against the replacement.
+   */
+  cancel(deviceId: string): void {
+    const episode = this.episodes.get(deviceId);
+    if (episode?.timeout) {
+      this.deps.timer.clearTimeout(episode.timeout);
+    }
+    this.episodes.delete(deviceId);
+  }
+
   dispose(): void {
     this.disposed = true;
     for (const episode of this.episodes.values()) {
@@ -103,12 +115,15 @@ export class PortReverseRecoveryScheduler {
    * (and be aborted by) that call's cancellation or deadline.
    */
   private schedule(deviceId: string, episode: Episode, delayMs: number): void {
-    episode.timeout = runOutsideRequestContext(() =>
+    const handle = runOutsideRequestContext(() =>
       this.deps.timer.setTimeout(() => {
         episode.timeout = null;
         void runOutsideRequestContext(() => this.run(deviceId, episode));
       }, delayMs),
     );
+    // Best-effort background work never holds the process open during shutdown.
+    handle.unref?.();
+    episode.timeout = handle;
   }
 
   private async run(deviceId: string, episode: Episode): Promise<void> {
@@ -137,7 +152,8 @@ export class PortReverseRecoveryScheduler {
       this.schedule(deviceId, episode, this.backoff.delayForAttempt(episode.attempt));
       return;
     }
-    if (failure === undefined && episode.rerun) {
+    // An event that arrived during this attempt (even a failed final one) gets a fresh episode.
+    if (episode.rerun) {
       episode.attempt = 0;
       this.schedule(deviceId, episode, 0);
       return;

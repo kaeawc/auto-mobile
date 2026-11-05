@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { adbTransportRecoveredSignal } from "../../../src/utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import { DefaultEmulatorOfflineRecovery } from "../../../src/utils/android-cmdline-tools/EmulatorOfflineRecovery";
 import type { OfflineTracker } from "../../../src/utils/android-cmdline-tools/EmulatorReadinessPoller";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -56,5 +57,18 @@ describe("DefaultEmulatorOfflineRecovery", () => {
     });
     await subject.recoverOfflineDevices(["emulator-5554", "emulator-5556"]);
     expect(recovered).toEqual(["emulator-5554"]);
+  });
+
+  test("without an injected callback, a reconnect reports adb_reconnect on the process signal", async () => {
+    const recovered: string[] = [];
+    const stop = adbTransportRecoveredSignal.subscribe((deviceId, reason) =>
+      recovered.push(`${deviceId} ${reason}`),
+    );
+    try {
+      await recovery().recoverOfflineDevices(["emulator-5554"]);
+      expect(recovered).toEqual(["emulator-5554 adb_reconnect"]);
+    } finally {
+      stop();
+    }
   });
 });

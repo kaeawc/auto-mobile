@@ -161,6 +161,10 @@ const execFileAsync: ExecFileAsync = async (
   );
 };
 
+/** The device a command addresses, read once per command. */
+const deviceIdOf = (device: BootedDevice | null | undefined): string | undefined =>
+  device?.deviceId;
+
 export class AdbClient implements AdbExecutor {
   readonly adbDeviceDiscovery: AdbDeviceDiscovery;
   private createAdbDeviceDiscovery(): AdbDeviceDiscovery {
@@ -800,6 +804,8 @@ export class AdbClient implements AdbExecutor {
       onStdout,
     } = options;
     const startTime = this.timer.now();
+    // Snapshot the device: a setDevice while this command is pending must not retarget it.
+    const deviceId = deviceIdOf(this.device);
     const resolvedSignal = signal ?? getAbortSignal();
     const { adbPath, baseArgs } = await this.getBaseCommandParts(timeoutMs, resolvedSignal);
     const fullArgs = [...baseArgs, ...commandArgs];
@@ -827,7 +833,7 @@ export class AdbClient implements AdbExecutor {
           return rawExec(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
         },
         {
-          deviceId: this.device?.deviceId,
+          deviceId,
           transportId: baseArgs[1],
           timer: this.timer,
           backoff: this.transportBackoff,
@@ -836,8 +842,7 @@ export class AdbClient implements AdbExecutor {
           signal: resolvedSignal,
           onExhausted: (error) =>
             this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]),
-          onRecovered: () =>
-            notifyAdbTransportRecovered(this.device?.deviceId, "transport_refusal"),
+          onRecovered: () => notifyAdbTransportRecovered(deviceId, "transport_refusal"),
         },
       );
     let busyAtDispatch = { busy: false, generation: 0 };

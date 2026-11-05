@@ -157,7 +157,7 @@ describe("PortReverseRecoveryScheduler", () => {
     const { adb, manager, scheduler, target, timer, advance } = setup();
     await manager.ensure(target(), [{ devicePort: 8080, hostPort: 8080 }]);
     const signal = new AdbTransportRecoveredSignal();
-    const stop = subscribePortReverseTransportRecovery(signal, scheduler);
+    const stop = subscribePortReverseTransportRecovery(signal, scheduler, manager, () => () => {});
 
     adb.dropAll();
     signal.notify(DEVICE, "ctrl_proxy_reconnect");
@@ -192,5 +192,51 @@ describe("PortReverseRecoveryScheduler", () => {
     expect(ambient).toEqual([undefined]);
     expect(adb.mappings.get(8080)).toBe("tcp:8080");
     expect(outcomes.map((o) => o.kind)).toEqual(["restored"]);
+  });
+
+  test("an event during a failed final attempt still gets its own reconcile", async () => {
+    const { adb, manager, scheduler, outcomes, target, advance } = setup(1);
+    await manager.ensure(target(), [{ devicePort: 8080, hostPort: 8080 }]);
+    adb.dropAll();
+    adb.failList = true;
+    adb.list = new Proxy(adb.list, {
+      apply: (fn, self, args) => {
+        // The device answers again while the failing attempt runs, and says so.
+        adb.failList = false;
+        scheduler.deviceRecovered(DEVICE, "ctrl_proxy_reconnect");
+        adb.failList = true;
+        return Reflect.apply(fn, self, args);
+      },
+    });
+    scheduler.deviceRecovered(DEVICE, "adb_reconnect");
+    await advance(PORT_REVERSE_RECOVERY_SETTLE_MS);
+    expect(outcomes).toEqual([]);
+    expect(scheduler.pendingDevices()).toEqual([DEVICE]);
+  });
+
+  test("identity replacement cancels the episode and forgets the old device's mappings", async () => {
+    const { adb, manager, scheduler, target, timer, advance, adds } = setup();
+    await manager.ensure(target(), [{ devicePort: 8080, hostPort: 8080 }]);
+    let identity: { onDeviceIdentityReplaced?(deviceId: string): void } | undefined;
+    const stop = subscribePortReverseTransportRecovery(
+      new AdbTransportRecoveredSignal(),
+      scheduler,
+      manager,
+      (listener) => {
+        identity = listener;
+        return () => {};
+      },
+    );
+    adb.dropAll();
+    scheduler.deviceRecovered(DEVICE, "ctrl_proxy_reconnect");
+    identity?.onDeviceIdentityReplaced?.(DEVICE);
+
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(manager.ownedPorts(DEVICE)).toEqual([]);
+    await manager.reconcile(DEVICE);
+    await advance(PORT_REVERSE_RECOVERY_SETTLE_MS);
+    expect(adds()).toEqual(["add 8080 8080 no-rebind"]);
+    expect(adb.mappings.has(8080)).toBe(false);
+    stop();
   });
 });

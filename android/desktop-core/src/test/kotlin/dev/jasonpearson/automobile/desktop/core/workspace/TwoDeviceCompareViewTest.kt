@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -286,4 +287,47 @@ class TwoDeviceCompareViewTest {
       onNodeWithText("Waiting for both device hierarchies", substring = true).assertExists()
       onNodeWithContentDescription("Only in Pixel: gated").assertDoesNotExist()
     }
+
+  @Test
+  fun `a side switching to a new device epoch drops the old epoch's snapshot`() = runComposeUiTest {
+    val epochA = FakeObservationStream()
+    val fakeB = FakeObservationStream()
+    val epochB = FakeObservationStream()
+    val sideA = mutableStateOf(columnA().copy(deviceSessionUuid = "epoch-a"))
+    setContent {
+      MaterialTheme {
+        TwoDeviceCompareView(
+          columnA = sideA.value,
+          columnB = columnB(),
+          options =
+            DeviceCompareOptions(
+              observationStreamFactory = QueuedStreamFactory(epochA, fakeB, epochB),
+              sideContent = { column, _ -> Text(column.name) },
+            ),
+        )
+      }
+    }
+    emit(epochA, "dev-a", "onlyA")
+    emit(fakeB, "dev-b", "onlyB")
+    waitUntil {
+      onAllNodesWithContentDescription("Only in Pixel: onlyA").fetchSemanticsNodes().isNotEmpty()
+    }
+
+    // The same device restarts as a new epoch: side A gets a fresh stream for it. Until that
+    // stream delivers a frame, no diff may be built from epoch A's retired tree.
+    runOnIdle { sideA.value = sideA.value.copy(deviceSessionUuid = "epoch-b") }
+    waitForIdle()
+    assertEquals("dev-a", epochB.lastConnectedDeviceId)
+    onNodeWithText("Waiting for both device hierarchies", substring = true).assertExists()
+    onNodeWithContentDescription("Only in Pixel: onlyA").assertDoesNotExist()
+
+    // Epoch B's own frame then drives the diff.
+    emit(epochB, "dev-a", "onlyEpochB")
+    waitUntil {
+      onAllNodesWithContentDescription("Only in Pixel: onlyEpochB")
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+    onNodeWithContentDescription("Only in Pixel: onlyA").assertDoesNotExist()
+  }
 }

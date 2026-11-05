@@ -15,6 +15,7 @@ import {
   type VisionosRunnerLauncher,
 } from "./VisionosRunnerLauncher";
 import { visionosRunners } from "./VisionosRunnerRegistry";
+import { visionosTargetApps } from "./VisionosTargetApps";
 
 type VisionosRunnerSessions = Pick<
   SessionManager,
@@ -25,6 +26,8 @@ interface OwnedRunner {
   controller: AbortController;
   stop?: () => void;
   port?: number;
+  /** The window app the runner was started to automate; absent means its demo app. */
+  bundleId?: string;
 }
 
 /** Owns only runners launched here; a pre-registered runner is reused without taking ownership. */
@@ -39,8 +42,8 @@ export class VisionosRunnerLifecycle {
     private readonly dependencies: {
       artifacts: Pick<VisionosRunnerArtifacts, "resolve">;
       launcher: VisionosRunnerLauncher;
-      /** The user's window app, when known; absent keeps the runner on its demo app. */
-      targetBundleId?: () => string | undefined;
+      /** The device's window app, when known; absent keeps the runner on its demo app. */
+      targetBundleId?: (deviceId: string) => string | undefined;
       ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
     },
   ) {}
@@ -79,11 +82,12 @@ export class VisionosRunnerLifecycle {
     if (sessions) {
       this.observeSessions(sessions);
     }
-    if (visionosRunners.get(deviceId)?.isUsable()) {
+    if (visionosRunners.get(deviceId)?.isUsable() && !this.needsRestart(deviceId)) {
       return {};
     }
     this.stop(deviceId);
-    const entry: OwnedRunner = { controller: new AbortController() };
+    const bundleId = this.dependencies.targetBundleId?.(deviceId);
+    const entry: OwnedRunner = { controller: new AbortController(), bundleId };
     const signal = combineAbortSignals(request.signal, entry.controller.signal)!;
     this.runners.set(deviceId, entry);
     try {
@@ -94,7 +98,7 @@ export class VisionosRunnerLifecycle {
         deviceId,
         xctestrun,
         port: entry.port,
-        bundleId: this.dependencies.targetBundleId?.(),
+        bundleId,
         signal,
       });
       entry.stop = handle.stop;
@@ -119,6 +123,15 @@ export class VisionosRunnerLifecycle {
       logger.warn(`[VisionosRunner] Runner unavailable for ${deviceId}: ${reason}`, error);
       return { runnerUnavailable: reason };
     }
+  }
+
+  /**
+   * A runner this lifecycle started keeps its window app for its lifetime, so any change of
+   * target restarts it, including losing the target when that app is terminated.
+   */
+  needsRestart(deviceId: string): boolean {
+    const entry = this.runners.get(deviceId);
+    return entry !== undefined && entry.bundleId !== this.dependencies.targetBundleId?.(deviceId);
   }
 
   /** Transfer only lifecycle-owned runners to the newly bound session. */
@@ -232,7 +245,9 @@ export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
             `${deviceId}-${defaultIdGenerator.next()}`,
           ),
       }),
-      targetBundleId: () => globalThis.process.env.CTRL_PROXY_IOS_BUNDLE_ID,
+      // The app the session launched on this device, else the optional env override.
+      targetBundleId: (deviceId) =>
+        visionosTargetApps.get(deviceId) ?? globalThis.process.env.CTRL_PROXY_IOS_BUNDLE_ID,
       ports: {
         allocate: (deviceId) =>
           PortManager.allocate(`visionos:${deviceId}`, {
@@ -254,10 +269,14 @@ export function stopVisionosRunners(): void {
 export async function requireVisionosRunner(
   deviceId: string,
   signal?: AbortSignal,
-  lifecycle?: Pick<VisionosRunnerLifecycle, "start" | "attach">,
+  lifecycle?: Pick<VisionosRunnerLifecycle, "start" | "attach"> &
+    Partial<Pick<VisionosRunnerLifecycle, "needsRestart">>,
 ) {
   signal?.throwIfAborted();
-  if (!visionosRunners.get(deviceId)?.isUsable()) {
+  if (
+    !visionosRunners.get(deviceId)?.isUsable() ||
+    (lifecycle ?? defaultLifecycle)?.needsRestart?.(deviceId)
+  ) {
     lifecycle ??= getVisionosRunnerLifecycle();
     const result = await lifecycle.start({ deviceId, signal });
     signal?.throwIfAborted();

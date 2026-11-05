@@ -106,13 +106,13 @@ describe("portReverse tool", () => {
     expect(executor.commands).toEqual([]);
   });
 
-  test("device removal releases only sessionless mappings", async () => {
-    const { mappings, manager, handler } = setup("session-a");
+  test("device removal forgets only sessionless ownership and sends no command", async () => {
+    const { mappings, executor, manager, handler } = setup("session-a");
     await handler(android, { action: "ensure", ports: [{ devicePort: 8080 }] });
     const sessionless = createPortReverseHandler({
       manager,
       policy: {},
-      adbFactory: { create: () => fakeExecutor(mappings) },
+      adbFactory: { create: () => executor },
       sessionUuid: () => undefined,
     });
     await sessionless(android, { action: "ensure", ports: [{ devicePort: 9090 }] });
@@ -124,12 +124,15 @@ describe("portReverse tool", () => {
       },
     };
     subscribePortReverseCleanup(lifecycle, manager);
+    executor.commands.length = 0;
     onRemoval("emulator-5554");
-    // Queued behind the release on the same device, so it observes its result.
+    // Queued behind the removal on the same device, so it observes its result.
     await handler(android, { action: "list" });
-    // The session's 8080 survives (recovery keeps the session bound); sessionless 9090 is gone.
+    // The session's 8080 survives (recovery keeps the session bound); sessionless 9090 is no
+    // longer owned, and the removal itself sent no command (the serial may name a new device).
     expect(manager.ownedPorts("emulator-5554")).toEqual([8080]);
-    expect(mappings.has(9090)).toBe(false);
+    expect(executor.commands).not.toContain("reverse --remove tcp:9090");
+    expect(mappings.has(9090)).toBe(true);
   });
 
   test("an aborted call creates no mapping", async () => {

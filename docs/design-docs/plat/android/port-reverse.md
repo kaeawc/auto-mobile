@@ -44,7 +44,10 @@ call.
 
 Session release and device unbind remove that session's mappings on the device,
 registered as pending device cleanup so the next session waits for it. Device
-removal from the pool removes only `sessionless` mappings: Android recovery
+removal from the pool forgets `sessionless` ownership without sending a command:
+the event cannot tell a disconnect or relaunch (whose reverses died with the
+transport) from identity replacement (another device on the serial, whose
+mappings are not ours). It leaves session-owned mappings alone: Android recovery
 removes and re-adds a device while its session stays bound, and that session's
 mappings are restored on its next call. A released mapping whose removal fails
 (or whose device cannot answer `--list`) leaves `owned`, so it is never restored,

@@ -53,17 +53,19 @@ export interface PortReverseLifecycle {
 }
 
 /**
- * Releases the sessionless mappings on a device when it leaves the pool. Session-owned mappings are
- * released by the session's own release or unbind (`registerPortReverseSessionCleanup`), not here:
- * Android recovery removes and re-adds a device while its session stays bound, and those mappings
- * must survive to be restored after the relaunch.
+ * Forgets the sessionless mappings on a device when it leaves the pool, without sending a command:
+ * the removal event cannot tell a disconnect or relaunch (whose reverses died with the transport)
+ * from identity replacement (another device now answers on the serial, and its mappings are not
+ * ours). Session-owned mappings are released by the session's own release or unbind
+ * (`registerPortReverseSessionCleanup`), not here: Android recovery removes and re-adds a device
+ * while its session stays bound, and those mappings must survive to be restored after the relaunch.
  */
 export function subscribePortReverseCleanup(
   lifecycle: PortReverseLifecycle,
-  manager: Pick<PortReverseManager, "releaseOwnerOnDevice">,
+  manager: Pick<PortReverseManager, "forgetOwnerOnDevice">,
 ): () => void {
   return lifecycle.subscribeDeviceRemoval(
-    (deviceId) => void manager.releaseOwnerOnDevice(SESSIONLESS_PORT_REVERSE_OWNER, deviceId),
+    (deviceId) => void manager.forgetOwnerOnDevice(SESSIONLESS_PORT_REVERSE_OWNER, deviceId),
   );
 }
 

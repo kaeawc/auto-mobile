@@ -90,8 +90,9 @@ AutoMobile owns the mappings it creates for your session. If one disappears
 restart), the next `ensure`, `list` or `verify` call re-adds it and lists it in
 `restored`; a mapping it could not re-add is listed in `restoreFailures` and
 retried on the next call. Your mappings are removed when your session is
-released or leaves the device; mappings made without a session are removed when
-the device is disconnected.
+released or leaves the device. Mappings made without a session stay until the
+device disconnects; AutoMobile stops tracking them then, and a device that stays
+connected keeps them until you run `adb reverse --remove`.
 
 Errors come back with `errorCode`:
 

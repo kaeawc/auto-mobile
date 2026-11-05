@@ -25,7 +25,7 @@ export interface BootedDeviceTraits {
   model: string | null;
   sdk: number | null;
   abi: string | null;
-  /** `"watch"`, `"automotive"` or `"tv"` when the build announces it; null otherwise. */
+  /** `"watch"`, `"automotive"`, `"tv"`, `"xr-headset"` or `"xr-glasses"` when the build announces it; null otherwise. */
   formFactor: TraitFormFactor | null;
   /** Vehicle states the car build can simulate; absent on every non-automotive device. */
   vehicle?: VehicleCapabilities;
@@ -73,6 +73,27 @@ async function readTraits(
       `[BootedDeviceResources] Device traits unavailable for ${device.deviceId}: ${errorMessage(error)}`,
       error,
     );
+    return undefined;
+  }
+}
+
+/**
+ * The form factor the build announces (`ro.build.characteristics`): null when it announces none
+ * (a phone or tablet), undefined when the traits could not be read. `caller` labels the warning.
+ */
+export async function readTraitFormFactor(
+  reader: DeviceTraits,
+  adbFactory: AdbClientFactory,
+  device: BootedDevice,
+  caller: string,
+): Promise<TraitFormFactor | null | undefined> {
+  try {
+    const traits = await reader.read(adbFactory.create(device), device.deviceId, {
+      timeoutMs: DEVICE_TRAITS_TIMEOUT_MS,
+    });
+    return traits.formFactor;
+  } catch (error) {
+    logger.warn(`${caller} could not read device traits: ${errorMessage(error)}`, error);
     return undefined;
   }
 }

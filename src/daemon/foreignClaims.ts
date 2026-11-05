@@ -16,6 +16,7 @@ export interface ForeignClaimsPort {
   readonly watchForeignDeviceOwnership?: ForeignDeviceOwnership;
   /** Apple TV simulators, claimed by UDID in their own namespace. */
   readonly tvForeignDeviceOwnership?: ForeignDeviceOwnership;
+  readonly visionForeignDeviceOwnership?: ForeignDeviceOwnership;
   readonly timer: Pick<Timer, "now">;
   readonly inventoryProbeBackoff?: BackoffPolicy;
   getDevice(deviceId: string): Pick<PooledDevice, "sessionId"> | undefined;
@@ -115,6 +116,8 @@ export class ForeignClaims {
         return this.port.iosForeignDeviceOwnership;
       case "watchos":
         return this.port.watchForeignDeviceOwnership;
+      case "visionos":
+        return this.port.visionForeignDeviceOwnership;
       case "tvos":
         return this.port.tvForeignDeviceOwnership;
       default:
@@ -128,7 +131,8 @@ export class ForeignClaims {
       ? this.port.foreignDeviceOwnership !== undefined ||
           this.port.iosForeignDeviceOwnership !== undefined ||
           this.port.watchForeignDeviceOwnership !== undefined ||
-          this.port.tvForeignDeviceOwnership !== undefined
+          this.port.tvForeignDeviceOwnership !== undefined ||
+          this.port.visionForeignDeviceOwnership !== undefined
       : this.foreignOwnershipFor(platform) !== undefined;
   }
 

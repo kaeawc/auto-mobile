@@ -375,6 +375,8 @@ const formFactorSchema = z.enum([
   "tv",
   "watch",
   "automotive",
+  "xr-headset",
+  "xr-glasses",
   "unknown",
 ]);
 const lifecycleSchema = z

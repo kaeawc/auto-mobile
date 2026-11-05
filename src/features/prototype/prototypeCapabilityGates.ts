@@ -110,7 +110,7 @@ import {
   PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformUnsupportedMessage,
-} from "./prototypePlatform";
+} from "./prototypePlatformGates";
 import {
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,

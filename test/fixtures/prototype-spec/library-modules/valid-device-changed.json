@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "library-device",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["device"]
+    },
+    "platform": {
+      "on": {
+        "device.changed": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "options": {
+    "library": true
+  }
+}

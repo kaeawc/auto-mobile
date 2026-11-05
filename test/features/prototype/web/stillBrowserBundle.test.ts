@@ -12,6 +12,8 @@ const FORBIDDEN_INPUTS = [
   "node_modules/zod/",
   "src/utils/logger.ts",
   "src/config/",
+  "src/models/ActionableError.ts",
+  "src/models/describeUnknownError.ts",
 ];
 
 const entry = fileURLToPath(
@@ -73,6 +75,11 @@ describe("still renderer browser bundle (#16451)", () => {
     expect(
       bundle.inputs.filter((input) => FORBIDDEN_INPUTS.some((part) => input.includes(part))),
     ).toEqual([]);
+  });
+
+  test("tree-shakes the server-only Android wire tables (#16804)", () => {
+    const wireTypes = ["request_hierarchy_if_stale", "hierarchy_update"];
+    expect(wireTypes.filter((type) => bundle.code.includes(`"${type}"`))).toEqual([]);
   });
 
   test("stays within the minified and gzip budgets", () => {

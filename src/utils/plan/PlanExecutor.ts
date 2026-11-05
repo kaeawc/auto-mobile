@@ -54,8 +54,6 @@ import {
 } from "./PlanStepExecutor";
 import { PlanToolResultsBudget, StepToolResultCollector } from "./stepToolResults";
 
-export { UNEVALUATED_EXPECTATIONS_WARNING } from "./planStepParams";
-
 /**
  * Interface for plan execution
  * Handles execution of plan steps sequentially or in parallel (multi-device)

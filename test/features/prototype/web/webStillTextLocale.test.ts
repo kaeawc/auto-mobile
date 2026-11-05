@@ -5,7 +5,7 @@ import {
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
 import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
-import { ActionableError } from "../../../../src/models/ActionableError";
+import { PrototypeWebInputError } from "../../../../src/features/prototype/web/prototypeWebInputError";
 
 function find(node: WebChild, predicate: (element: WebElement) => boolean): WebElement[] {
   if (typeof node === "string") {
@@ -81,7 +81,7 @@ describe("still font scale and Dynamic Type (#16552)", () => {
   test("refuses the other platform's text size option", () => {
     expect(() =>
       renderPrototypeStill(spec(), { frame: "iphone-16", textSize: { fontScale: 2 } }),
-    ).toThrow(ActionableError);
+    ).toThrow(PrototypeWebInputError);
   });
 });
 
@@ -110,6 +110,8 @@ describe("still locale and layout direction (#16552)", () => {
   });
 
   test("refuses an invalid locale tag", () => {
-    expect(() => renderPrototypeStill(spec(), { locale: "not a locale" })).toThrow(ActionableError);
+    expect(() => renderPrototypeStill(spec(), { locale: "not a locale" })).toThrow(
+      PrototypeWebInputError,
+    );
   });
 });

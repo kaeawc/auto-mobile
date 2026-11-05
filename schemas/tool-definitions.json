@@ -20,7 +20,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -152,7 +152,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -233,7 +233,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -359,7 +359,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -569,7 +569,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Wear OS power-state change: enter sends KEYCODE_SLEEP, exit sends KEYCODE_WAKEUP, then reads wakefulness once. Enter succeeds on Dozing or Asleep; exit succeeds on Awake. Wear exposes no ambient readback, so success does not prove ambient mode. Hardware wake by tilt or touch is untested.",
+    "description": "Wear OS watches only (other form factors are refused without a change): power-state change. enter sends KEYCODE_SLEEP, exit sends KEYCODE_WAKEUP, then reads wakefulness once. Enter succeeds on Dozing or Asleep; exit succeeds on Awake. Wear exposes no ambient readback, so success does not prove ambient mode. Hardware wake by tilt or touch is untested.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -580,7 +580,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -689,7 +689,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -904,7 +904,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1126,7 +1126,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1390,13 +1390,9 @@
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
         },
-        "__lockNamespace": {
-          "description": "Internal plan-scoped lock namespace (injected)",
-          "type": "string"
-        },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1486,7 +1482,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1578,7 +1574,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1707,7 +1703,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1797,7 +1793,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "appId": {
           "description": "Android app package for locale changes",
@@ -1958,7 +1954,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2022,7 +2018,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2116,7 +2112,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2283,7 +2279,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2442,7 +2438,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2700,13 +2696,9 @@
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
         },
-        "__lockNamespace": {
-          "description": "Internal plan-scoped lock namespace (injected)",
-          "type": "string"
-        },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2775,7 +2767,7 @@
             "platform": {
               "description": "Platform reported by automobile:devices/booted",
               "type": "string",
-              "enum": ["android", "ios", "watchos", "tvos"]
+              "enum": ["android", "ios", "watchos", "tvos", "visionos"]
             },
             "isVirtual": {
               "description": "Virtual-device flag reported by automobile:devices/booted",
@@ -2882,7 +2874,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3001,7 +2993,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3276,7 +3268,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3619,7 +3611,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3835,7 +3827,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -6018,7 +6010,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6059,7 +6051,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6546,7 +6538,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Automatically explore app to build navigation graph",
+    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -6563,7 +6555,7 @@
           "exclusiveMinimum": 0
         },
         "strategy": {
-          "description": "Strategy (default: weighted)",
+          "description": "Element choice (default: weighted): breadth-first tries the highest-scoring element on the current screen; depth-first prefers untried elements; weighted scores by navigation, novelty and coverage",
           "type": "string",
           "enum": ["breadth-first", "depth-first", "weighted"]
         },
@@ -6578,7 +6570,7 @@
           "maximum": 9007199254740991
         },
         "mode": {
-          "description": "Mode (default: hybrid)",
+          "description": "Goal (default: hybrid): discover favors new elements; validate re-walks known transitions to check they still hold; hybrid balances both",
           "type": "string",
           "enum": ["discover", "validate", "hybrid"]
         },
@@ -6592,7 +6584,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9239,7 +9231,7 @@
       "type": "object",
       "properties": {
         "recordingId": {
-          "description": "Recording ID",
+          "description": "recordDeviceGestures recordingId; defaults to the active recording. For recordToolCalls plans use recordToolCalls action=end",
           "type": "string"
         },
         "planName": {
@@ -9376,7 +9368,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9482,6 +9474,10 @@
               "description": "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
               "type": "boolean"
             },
+            "screenRound": {
+              "description": "Wear OS emulators only: true matches only a round Wear profile, false only a square one; a new watch is created round unless this is false",
+              "type": "boolean"
+            },
             "vehicle": {
               "description": "Simulated vehicle states the automotive emulator must support",
               "type": "object",
@@ -9582,6 +9578,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",
@@ -9643,7 +9640,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
+    "description": "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device. getApple does not create iOS simulators; use provisionDevice (opt-in via enableTools) to create and boot one from a runtime and device type, and deleteDevice to remove it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9745,6 +9742,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",
@@ -9827,7 +9825,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9965,7 +9963,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10028,7 +10026,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10192,7 +10190,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. On a multi-panel device, displays lists the panels and supported postures; on an Android foldable displays.current adds the live posture (from the committed device_state) and activePanel (key and role of the panel behind the default display), so a setPosture or fold shows up in the next read. iOS (including iPhone Duo) reports no displays.current. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -10217,7 +10215,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10248,7 +10246,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "error": {
           "type": "string"
@@ -10265,17 +10263,7 @@
                     "type": "string"
                   },
                   "role": {
-                    "type": "string",
-                    "enum": [
-                      "inner",
-                      "cover",
-                      "rear",
-                      "external",
-                      "cluster",
-                      "overlay",
-                      "virtual",
-                      "unknown"
-                    ]
+                    "$ref": "#/$defs/__schema0"
                   },
                   "sizePx": {
                     "type": "object",
@@ -10301,17 +10289,32 @@
             "postures": {
               "type": "array",
               "items": {
-                "type": "string",
-                "enum": [
-                  "closed",
-                  "half_opened",
-                  "opened",
-                  "rear_display",
-                  "flipped",
-                  "tent",
-                  "unknown"
-                ]
+                "$ref": "#/$defs/__schema1"
               }
+            },
+            "current": {
+              "description": "Android foldables only: the committed device_state posture and the panel behind the default display, read live on every call.",
+              "type": "object",
+              "properties": {
+                "posture": {
+                  "$ref": "#/$defs/__schema1"
+                },
+                "activePanel": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  },
+                  "required": ["key", "role"],
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["posture"],
+              "additionalProperties": {}
             }
           },
           "required": ["panels", "postures"],
@@ -10337,25 +10340,25 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "enabled": {
               "type": "boolean"
             },
             "mode": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/__schema7"
             },
             "rawValue": {
               "type": "string"
@@ -10367,10 +10370,10 @@
               "type": "string"
             },
             "requestedMode": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/__schema7"
             },
             "appliedMode": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/__schema7"
             }
           },
           "required": ["supported"],
@@ -10380,19 +10383,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "enrollment": {
               "type": "string",
@@ -10406,19 +10409,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "airplaneMode": {
               "type": "boolean"
@@ -10449,71 +10452,71 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "capability": {
               "type": "string"
             },
             "profile": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/__schema8"
             },
             "requestedProfile": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/__schema8"
             },
             "appliedProfile": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/__schema8"
             },
             "values": {
               "type": "object",
               "properties": {
                 "delayMs": {
-                  "$ref": "#/$defs/__schema7"
-                },
-                "downloadKbps": {
-                  "$ref": "#/$defs/__schema8"
-                },
-                "uploadKbps": {
                   "$ref": "#/$defs/__schema9"
                 },
-                "packetLossPercent": {
+                "downloadKbps": {
                   "$ref": "#/$defs/__schema10"
+                },
+                "uploadKbps": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "packetLossPercent": {
+                  "$ref": "#/$defs/__schema12"
                 }
               },
               "required": ["delayMs", "downloadKbps", "uploadKbps", "packetLossPercent"],
               "additionalProperties": {
-                "$ref": "#/$defs/__schema11"
+                "$ref": "#/$defs/__schema13"
               }
             },
             "observedValues": {
               "type": "object",
               "properties": {
                 "delayMs": {
-                  "$ref": "#/$defs/__schema7"
-                },
-                "downloadKbps": {
-                  "$ref": "#/$defs/__schema8"
-                },
-                "uploadKbps": {
                   "$ref": "#/$defs/__schema9"
                 },
-                "packetLossPercent": {
+                "downloadKbps": {
                   "$ref": "#/$defs/__schema10"
+                },
+                "uploadKbps": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "packetLossPercent": {
+                  "$ref": "#/$defs/__schema12"
                 }
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema11"
+                "$ref": "#/$defs/__schema13"
               }
             },
             "expiresInSeconds": {
@@ -10553,12 +10556,12 @@
               "type": "string"
             },
             "rule": {
-              "$ref": "#/$defs/__schema12"
+              "$ref": "#/$defs/__schema14"
             },
             "rules": {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema12"
+                "$ref": "#/$defs/__schema14"
               }
             },
             "acknowledged": {
@@ -10582,19 +10585,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "mode": {
               "type": "string"
@@ -10644,19 +10647,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "mode": {
               "type": "string",
@@ -10677,19 +10680,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "capability": {
               "type": "string"
@@ -10739,19 +10742,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "sensors": {
               "type": "array",
@@ -10818,19 +10821,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "type": {
               "type": "string",
@@ -10864,19 +10867,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "battery": {
               "type": "object",
@@ -10961,33 +10964,35 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
-          "type": "boolean"
+          "type": "string",
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema1": {
-          "type": "boolean"
+          "type": "string",
+          "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"]
         },
         "__schema2": {
-          "type": "string"
+          "type": "boolean"
         },
         "__schema3": {
-          "type": "string"
+          "type": "boolean"
         },
         "__schema4": {
           "type": "string"
         },
         "__schema5": {
+          "type": "string"
+        },
+        "__schema6": {
+          "type": "string"
+        },
+        "__schema7": {
           "type": "string",
           "enum": ["off", "none", "priority", "alarms"]
         },
-        "__schema6": {
+        "__schema8": {
           "type": "string",
           "enum": ["none", "offline", "veryBad", "2g", "3g", "4g"]
-        },
-        "__schema7": {
-          "type": "number"
-        },
-        "__schema8": {
-          "type": "number"
         },
         "__schema9": {
           "type": "number"
@@ -10995,8 +11000,14 @@
         "__schema10": {
           "type": "number"
         },
-        "__schema11": {},
+        "__schema11": {
+          "type": "number"
+        },
         "__schema12": {
+          "type": "number"
+        },
+        "__schema13": {},
+        "__schema14": {
           "type": "object",
           "properties": {
             "appId": {
@@ -11225,7 +11236,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -11336,14 +11347,14 @@
       "readOnlyHint": true,
       "openWorldHint": false
     },
-    "description": "Get navigation graph for debugging",
+    "description": "Get the learned navigation graph (screens, transitions, current screen) for the foreground or given app; use before navigateTo to find screen names",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "appId": {
           "description": "Scope the graph to this app id instead of the device's current foreground app",
@@ -11810,7 +11821,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -11888,7 +11899,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12028,7 +12039,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12160,7 +12171,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12238,7 +12249,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -12490,7 +12501,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12525,7 +12536,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -14572,7 +14583,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -14604,7 +14615,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "filter": {
           "description": "Filter options",
@@ -14909,7 +14920,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -14990,7 +15001,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15220,7 +15231,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "artifactPath": {
           "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa; watchOS: .app",
@@ -15429,7 +15440,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15558,7 +15569,7 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios", "watchos", "tvos"]
+              "enum": ["android", "ios", "watchos", "tvos", "visionos"]
             }
           },
           "required": ["name", "deviceId", "platform"],
@@ -15603,6 +15614,7 @@
           "enum": [
             "samsung-sleeping",
             "samsung-deep-sleeping",
+            "samsung-auto-disable",
             "xiaomi-autostart-off",
             "oneplus-deep-optimization",
             "recents-swipe-kill",
@@ -15610,7 +15622,15 @@
             "oneplus-sleep-standby",
             "motorola-adaptive",
             "user-restricted",
-            "exact-alarm-denied"
+            "exact-alarm-denied",
+            "notifications-off",
+            "huawei-powergenie",
+            "vivo-autostart",
+            "realme-power-saver",
+            "meizu-flyme-background",
+            "asus-power-master",
+            "sony-stamina",
+            "tecno-app-halt"
           ]
         },
         "baseline": {
@@ -15619,7 +15639,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15673,6 +15693,7 @@
               "enum": [
                 "samsung-sleeping",
                 "samsung-deep-sleeping",
+                "samsung-auto-disable",
                 "xiaomi-autostart-off",
                 "oneplus-deep-optimization",
                 "recents-swipe-kill",
@@ -15680,7 +15701,15 @@
                 "oneplus-sleep-standby",
                 "motorola-adaptive",
                 "user-restricted",
-                "exact-alarm-denied"
+                "exact-alarm-denied",
+                "notifications-off",
+                "huawei-powergenie",
+                "vivo-autostart",
+                "realme-power-saver",
+                "meizu-flyme-background",
+                "asus-power-master",
+                "sony-stamina",
+                "tecno-app-halt"
               ]
             },
             "version": {
@@ -15749,6 +15778,7 @@
                 "enum": [
                   "samsung-sleeping",
                   "samsung-deep-sleeping",
+                  "samsung-auto-disable",
                   "xiaomi-autostart-off",
                   "oneplus-deep-optimization",
                   "recents-swipe-kill",
@@ -15756,7 +15786,15 @@
                   "oneplus-sleep-standby",
                   "motorola-adaptive",
                   "user-restricted",
-                  "exact-alarm-denied"
+                  "exact-alarm-denied",
+                  "notifications-off",
+                  "huawei-powergenie",
+                  "vivo-autostart",
+                  "realme-power-saver",
+                  "meizu-flyme-background",
+                  "asus-power-master",
+                  "sony-stamina",
+                  "tecno-app-halt"
                 ]
               }
             },
@@ -15813,7 +15851,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "clearAppData": {
           "description": "Clear app data before launch (default false); on watchOS wipes the app's data container",
@@ -18026,7 +18064,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "type": {
           "description": "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) are visible while content providers and RRO overlays are not. 'user' and 'system' keep their meaning and must be asked for explicitly; 'all' returns every installed package. The default degrades to 'user' when the device reports no launchability signal, and an explicit 'launchable' is then rejected rather than silently empty. On a physical iOS device, where user/system classification is unavailable (devicectl reports no such signal), an omitted type returns every app (reported as 'all') and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
@@ -18204,7 +18242,7 @@
       "$defs": {
         "__schema0": {
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         }
       }
     },
@@ -18235,7 +18273,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -18289,7 +18327,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session used for inventory admission",
@@ -18365,7 +18403,17 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+                "enum": [
+                  "phone",
+                  "tablet",
+                  "foldable",
+                  "tv",
+                  "watch",
+                  "automotive",
+                  "xr-headset",
+                  "xr-glasses",
+                  "unknown"
+                ]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -18862,7 +18910,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "configuredInventory": {},
         "artifact": {
@@ -18939,7 +18987,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "requires": {
           "description": "Filter booted devices by display inventory capabilities",
@@ -19034,7 +19082,17 @@
               },
               "formFactor": {
                 "type": "string",
-                "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+                "enum": [
+                  "phone",
+                  "tablet",
+                  "foldable",
+                  "tv",
+                  "watch",
+                  "automotive",
+                  "xr-headset",
+                  "xr-glasses",
+                  "unknown"
+                ]
               },
               "deviceType": {
                 "$ref": "#/$defs/__schema0"
@@ -19742,7 +19800,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates effects, not firmware.",
+    "description": "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, oppo-coloros, motorola, huawei-emui, vivo-funtouch, realme-ui, meizu-flyme, asus-zenui, sony-xperia, tecno-hios) on a stock device by composing the keyboard profile, killProfile and displayProfile executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the recorded one first; reset restores the display, kill and keyboard changes (display, keyboard and device-wide kill state are shared with displayProfile, keyboard setProfile and killProfile, so reset also undoes their direct changes). In a daemon session, release or rebind restores all three. Simulates effects, not firmware.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -19761,7 +19819,14 @@
             "xiaomi-hyperos",
             "oneplus-oxygenos",
             "oppo-coloros",
-            "motorola"
+            "motorola",
+            "huawei-emui",
+            "vivo-funtouch",
+            "realme-ui",
+            "meizu-flyme",
+            "asus-zenui",
+            "sony-xperia",
+            "tecno-hios"
           ]
         },
         "appId": {
@@ -19790,7 +19855,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -19842,7 +19907,14 @@
             "xiaomi-hyperos",
             "oneplus-oxygenos",
             "oppo-coloros",
-            "motorola"
+            "motorola",
+            "huawei-emui",
+            "vivo-funtouch",
+            "realme-ui",
+            "meizu-flyme",
+            "asus-zenui",
+            "sony-xperia",
+            "tecno-hios"
           ]
         },
         "replaced": {
@@ -19853,7 +19925,14 @@
             "xiaomi-hyperos",
             "oneplus-oxygenos",
             "oppo-coloros",
-            "motorola"
+            "motorola",
+            "huawei-emui",
+            "vivo-funtouch",
+            "realme-ui",
+            "meizu-flyme",
+            "asus-zenui",
+            "sony-xperia",
+            "tecno-hios"
           ]
         },
         "manufacturerProfiles": {
@@ -19951,7 +20030,14 @@
                 "xiaomi-hyperos",
                 "oneplus-oxygenos",
                 "oppo-coloros",
-                "motorola"
+                "motorola",
+                "huawei-emui",
+                "vivo-funtouch",
+                "realme-ui",
+                "meizu-flyme",
+                "asus-zenui",
+                "sony-xperia",
+                "tecno-hios"
               ]
             },
             "version": {
@@ -20047,7 +20133,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -20264,7 +20350,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -20626,7 +20712,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -20762,7 +20848,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -20889,18 +20975,18 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Navigate to screen using navigation graph",
+    "description": "Navigate to a learned screen by replaying recorded transitions from the navigation graph",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "targetScreen": {
-          "description": "Target screen name",
+          "description": "Screen name to reach; use a name from getNavigationGraph's screens",
           "type": "string"
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -21032,7 +21118,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -21126,7 +21212,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot-only observation with hierarchyUnavailable. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -21134,7 +21220,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "waitFor": {
           "$defs": {
@@ -21208,6 +21294,10 @@
             },
             "elementId": {
               "type": "string"
+            },
+            "testTag": {
+              "type": "string",
+              "description": "Android test tag, matched like tapOn testTag"
             },
             "text": {
               "type": "string"
@@ -21290,6 +21380,9 @@
                 "elementId": {
                   "type": "string"
                 },
+                "testTag": {
+                  "type": "string"
+                },
                 "text": {
                   "type": "string"
                 },
@@ -21303,6 +21396,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -21375,6 +21471,9 @@
                   "required": ["elementId"]
                 },
                 {
+                  "required": ["testTag"]
+                },
+                {
                   "required": ["text"]
                 },
                 {
@@ -21396,6 +21495,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -23058,6 +23160,47 @@
         "screenSize": {
           "$ref": "#/$defs/__schema1"
         },
+        "automotive": {
+          "description": "Automotive devices only. Unavailable CarService reads omit the corresponding fields.",
+          "type": "object",
+          "properties": {
+            "drivingState": {
+              "type": "string",
+              "enum": ["parked", "idling", "moving"]
+            },
+            "uxRestrictions": {
+              "type": "object",
+              "properties": {
+                "requiresDistractionOptimization": {
+                  "type": "boolean"
+                },
+                "activeRestrictions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["requiresDistractionOptimization", "activeRestrictions"],
+              "additionalProperties": false
+            },
+            "foregroundActivity": {
+              "type": "object",
+              "properties": {
+                "distractionOptimized": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["distractionOptimized"],
+              "additionalProperties": false
+            },
+            "blocked": {
+              "description": "True when DO is required and the known foreground activity is not distraction optimized.",
+              "type": "boolean"
+            }
+          },
+          "required": ["blocked"],
+          "additionalProperties": false
+        },
         "isScreenRound": {
           "description": "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
           "type": "boolean"
@@ -23075,6 +23218,10 @@
                 {
                   "type": "string",
                   "const": "tvos"
+                },
+                {
+                  "type": "string",
+                  "const": "visionos"
                 }
               ]
             },
@@ -23112,6 +23259,516 @@
             "required": ["code", "message", "retryable"],
             "additionalProperties": false
           }
+        },
+        "carAppTemplates": {
+          "description": "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. This is what the app built, not what the car host rendered.",
+          "type": "object",
+          "properties": {
+            "packageName": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "const": "sdk"
+            },
+            "note": {
+              "type": "string"
+            },
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "screens": {
+                    "description": "Root screen first, top screen last.",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "screenClass": {
+                          "type": "string"
+                        },
+                        "top": {
+                          "type": "boolean"
+                        },
+                        "marker": {
+                          "type": "string"
+                        },
+                        "template": {
+                          "description": "Absent when the app has not recorded a template for this screen.",
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "loading": {
+                              "type": "boolean"
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "searchHint": {
+                              "type": "string"
+                            },
+                            "initialSearchText": {
+                              "type": "string"
+                            },
+                            "headerActions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "hasIcon": {
+                                    "type": "boolean"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["id", "type", "hasIcon", "enabled"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "kind": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "section": {
+                                    "type": "string"
+                                  },
+                                  "texts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "hasImage": {
+                                    "type": "boolean"
+                                  },
+                                  "toggle": {
+                                    "description": "Checked state; absent when the row has no toggle.",
+                                    "type": "boolean"
+                                  },
+                                  "browsable": {
+                                    "type": "boolean"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean"
+                                  },
+                                  "actions": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        },
+                                        "title": {
+                                          "type": "string"
+                                        },
+                                        "hasIcon": {
+                                          "type": "boolean"
+                                        },
+                                        "enabled": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": ["id", "type", "hasIcon", "enabled"],
+                                      "additionalProperties": {}
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "kind",
+                                  "texts",
+                                  "hasImage",
+                                  "browsable",
+                                  "enabled",
+                                  "actions"
+                                ],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "actions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "hasIcon": {
+                                    "type": "boolean"
+                                  },
+                                  "enabled": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["id", "type", "hasIcon", "enabled"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "actionStrips": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "actions": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        },
+                                        "title": {
+                                          "type": "string"
+                                        },
+                                        "hasIcon": {
+                                          "type": "boolean"
+                                        },
+                                        "enabled": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": ["id", "type", "hasIcon", "enabled"],
+                                      "additionalProperties": {}
+                                    }
+                                  }
+                                },
+                                "required": ["id", "role", "actions"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "tabs": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "contentId": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "hasIcon": {
+                                    "type": "boolean"
+                                  },
+                                  "active": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": ["id", "contentId", "hasIcon", "active"],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "tabContent": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "type": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "loading": {
+                                  "type": "boolean"
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "searchHint": {
+                                  "type": "string"
+                                },
+                                "initialSearchText": {
+                                  "type": "string"
+                                },
+                                "headerActions": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "hasIcon": {
+                                        "type": "boolean"
+                                      },
+                                      "enabled": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": ["id", "type", "hasIcon", "enabled"],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "section": {
+                                        "type": "string"
+                                      },
+                                      "texts": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "hasImage": {
+                                        "type": "boolean"
+                                      },
+                                      "toggle": {
+                                        "description": "Checked state; absent when the row has no toggle.",
+                                        "type": "boolean"
+                                      },
+                                      "browsable": {
+                                        "type": "boolean"
+                                      },
+                                      "enabled": {
+                                        "type": "boolean"
+                                      },
+                                      "actions": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "type": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "hasIcon": {
+                                              "type": "boolean"
+                                            },
+                                            "enabled": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": ["id", "type", "hasIcon", "enabled"],
+                                          "additionalProperties": {}
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "kind",
+                                      "texts",
+                                      "hasImage",
+                                      "browsable",
+                                      "enabled",
+                                      "actions"
+                                    ],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "actions": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "hasIcon": {
+                                        "type": "boolean"
+                                      },
+                                      "enabled": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": ["id", "type", "hasIcon", "enabled"],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "actionStrips": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "role": {
+                                        "type": "string"
+                                      },
+                                      "actions": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "type": {
+                                              "type": "string"
+                                            },
+                                            "title": {
+                                              "type": "string"
+                                            },
+                                            "hasIcon": {
+                                              "type": "boolean"
+                                            },
+                                            "enabled": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": ["id", "type", "hasIcon", "enabled"],
+                                          "additionalProperties": {}
+                                        }
+                                      }
+                                    },
+                                    "required": ["id", "role", "actions"],
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "tabs": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "contentId": {
+                                        "type": "string"
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "hasIcon": {
+                                        "type": "boolean"
+                                      },
+                                      "active": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": ["id", "contentId", "hasIcon", "active"],
+                                    "additionalProperties": {}
+                                  }
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "type",
+                                "headerActions",
+                                "items",
+                                "actions",
+                                "actionStrips",
+                                "tabs"
+                              ],
+                              "additionalProperties": {}
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "headerActions",
+                            "items",
+                            "actions",
+                            "actionStrips",
+                            "tabs"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": ["id", "screenClass", "top"],
+                      "additionalProperties": {}
+                    }
+                  }
+                },
+                "required": ["id", "screens"],
+                "additionalProperties": {}
+              }
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": ["packageName", "source", "note", "sessions"],
+          "additionalProperties": {}
         },
         "layoutWarnings": {
           "type": "object",
@@ -24065,7 +24722,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "waitFor": {
           "$defs": {
@@ -24139,6 +24796,10 @@
             },
             "elementId": {
               "type": "string"
+            },
+            "testTag": {
+              "type": "string",
+              "description": "Android test tag, matched like tapOn testTag"
             },
             "text": {
               "type": "string"
@@ -24221,6 +24882,9 @@
                 "elementId": {
                   "type": "string"
                 },
+                "testTag": {
+                  "type": "string"
+                },
                 "text": {
                   "type": "string"
                 },
@@ -24234,6 +24898,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -24306,6 +24973,9 @@
                   "required": ["elementId"]
                 },
                 {
+                  "required": ["testTag"]
+                },
+                {
                   "required": ["text"]
                 },
                 {
@@ -24327,6 +24997,9 @@
               "anyOf": [
                 {
                   "required": ["elementId"]
+                },
+                {
+                  "required": ["testTag"]
                 },
                 {
                   "required": ["text"]
@@ -24520,7 +25193,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -24756,7 +25429,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -24865,7 +25538,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -26931,12 +27604,167 @@
     }
   },
   {
+    "name": "portReverse",
+    "title": "Manage Port Reverse",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true
+    },
+    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "ensure: add missing mappings (idempotent). list: every reverse on the device. verify: whether ports are mapped now. remove: delete mappings this session created",
+          "type": "string",
+          "enum": ["ensure", "list", "verify", "remove"]
+        },
+        "ports": {
+          "description": "Required for ensure and remove; verify defaults to this session's ports",
+          "minItems": 1,
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "description": "Device-side localhost port",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "hostPort": {
+                "description": "Host loopback port; default devicePort",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": ["devicePort"],
+            "additionalProperties": false
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed", "not_applicable"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["ensure", "list", "verify", "remove"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "mappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "hostPort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "host": {
+                "type": "string"
+              },
+              "owned": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["added", "present", "restored", "missing", "removed", "gone", "foreign"]
+              }
+            },
+            "required": ["devicePort", "host", "owned", "status"],
+            "additionalProperties": false
+          }
+        },
+        "restored": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "restoreFailures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["devicePort", "error"],
+            "additionalProperties": false
+          }
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": ["port_reverse_conflict", "port_reverse_not_owned", "port_reverse_port_refused"]
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "required": ["message", "success", "status", "action", "deviceId"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "postNotification",
     "title": "Post Notification",
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Post notification via Android SDK hooks or iOS Simulator simctl push.",
+    "description": "Post notification via Android SDK hooks or iOS/watchOS simulator simctl push.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -26957,11 +27785,11 @@
           "enum": ["normal", "bigPicture"]
         },
         "imagePath": {
-          "description": "Android: host image path for bigPicture. iOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
+          "description": "Android: host image path for bigPicture. iOS/watchOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
           "type": "string"
         },
         "actions": {
-          "description": "Android action buttons; iOS buttons come from the registered category",
+          "description": "Android action buttons; iOS/watchOS buttons come from the registered category",
           "type": "array",
           "items": {
             "type": "object",
@@ -26982,16 +27810,16 @@
           }
         },
         "channelId": {
-          "description": "Android channel ID; iOS APNs category when category is omitted",
+          "description": "Android channel ID; iOS/watchOS APNs category when category is omitted",
           "type": "string"
         },
         "category": {
-          "description": "iOS: aps.category naming a UNNotificationCategory the app registered",
+          "description": "iOS/watchOS: aps.category naming a UNNotificationCategory the app registered",
           "type": "string",
           "minLength": 1
         },
         "payload": {
-          "description": "iOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
+          "description": "iOS/watchOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -26999,15 +27827,16 @@
           "additionalProperties": {}
         },
         "appId": {
-          "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted",
+          "description": "Android target package name or iOS/watchOS target bundle ID (required on iOS/watchOS); Android defaults to the live foreground app when omitted",
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -27115,7 +27944,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -39220,7 +40049,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -41475,7 +42304,14 @@
                             "xiaomi-hyperos",
                             "oneplus-oxygenos",
                             "oppo-coloros",
-                            "motorola"
+                            "motorola",
+                            "huawei-emui",
+                            "vivo-funtouch",
+                            "realme-ui",
+                            "meizu-flyme",
+                            "asus-zenui",
+                            "sony-xperia",
+                            "tecno-hios"
                           ]
                         },
                         "requires": {
@@ -41625,6 +42461,44 @@
               },
               "required": ["platform", "name", "spec"],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "const": "visionos"
+                },
+                "name": {
+                  "description": "Exact Apple Vision Pro simulator name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "deviceId": {
+                  "description": "Exact Apple Vision Pro simulator UDID; a UDID that names no Apple Vision Pro is refused, not created",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "description": "visionOS CoreSimulator runtime identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deviceType": {
+                      "description": "Apple Vision Pro CoreSimulator device-type identifier",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["runtime", "deviceType"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["platform", "name", "spec"],
+              "additionalProperties": false
             }
           ]
         },
@@ -41634,7 +42508,7 @@
           "type": "boolean"
         },
         "readiness": {
-          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS and tvOS provisioning take only \"none\" (their default); startDevice prepares their runners",
+          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS and tvOS provisioning take only \"none\" (their default); visionOS also takes only \"none\" and has no runner; startDevice prepares watchOS/tvOS runners",
           "type": "string",
           "enum": ["automation", "none"]
         },
@@ -41719,6 +42593,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",
@@ -41817,7 +42692,7 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios", "watchos", "tvos"]
+              "enum": ["android", "ios", "watchos", "tvos", "visionos"]
             },
             "isVirtual": {
               "type": "boolean"
@@ -41835,7 +42710,17 @@
             },
             "formFactor": {
               "type": "string",
-              "enum": ["phone", "tablet", "foldable", "tv", "watch", "automotive", "unknown"]
+              "enum": [
+                "phone",
+                "tablet",
+                "foldable",
+                "tv",
+                "watch",
+                "automotive",
+                "xr-headset",
+                "xr-glasses",
+                "unknown"
+              ]
             },
             "deviceType": {
               "$ref": "#/$defs/__schema0"
@@ -42591,7 +43476,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -42734,7 +43619,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -45052,7 +45937,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -45387,12 +46272,13 @@
       "destructiveHint": false,
       "openWorldHint": false
     },
-    "description": "Record MCP tool calls to YAML. begin/end require tool-call-recording; status always works.",
+    "description": "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
+          "description": "begin starts recording this connection's tool calls; end stops and returns the YAML plan; status reports state",
           "type": "string",
           "enum": ["begin", "end", "status"]
         },
@@ -45529,7 +46415,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -45615,7 +46501,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -45713,7 +46599,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -45891,7 +46777,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -45994,7 +46880,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -48086,7 +48972,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -50259,7 +51145,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -50531,7 +51417,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -50859,7 +51745,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -50929,9 +51815,9 @@
           ]
         },
         "platform": {
-          "description": "Inferred from the device; \"watchos\" is required to select an Apple Watch simulator",
+          "description": "Inferred from the device; \"watchos\", \"tvos\" or \"visionos\" is required to select an Apple Watch, Apple TV or Apple Vision Pro simulator",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -51016,7 +51902,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -51246,7 +52132,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "type": "string"
@@ -51844,7 +52730,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -52604,6 +53490,11 @@
           "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Every applied condition restores to a clean state on release, rebind or lease expiry. Send it in its own call, not combined with other setDeviceState fields.",
           "type": "object",
           "properties": {
+            "exportAttestation": {
+              "type": "boolean",
+              "const": true,
+              "description": "Export public Android KeyStore attestation certificates and parsed fields for a test backend. Send alone; temporary key is deleted. No trust verdict."
+            },
             "version": {
               "type": "number",
               "const": 1,
@@ -52932,7 +53823,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -52963,7 +53854,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "error": {
           "type": "string"
@@ -52980,17 +53871,7 @@
                     "type": "string"
                   },
                   "role": {
-                    "type": "string",
-                    "enum": [
-                      "inner",
-                      "cover",
-                      "rear",
-                      "external",
-                      "cluster",
-                      "overlay",
-                      "virtual",
-                      "unknown"
-                    ]
+                    "$ref": "#/$defs/__schema0"
                   },
                   "sizePx": {
                     "type": "object",
@@ -53016,17 +53897,32 @@
             "postures": {
               "type": "array",
               "items": {
-                "type": "string",
-                "enum": [
-                  "closed",
-                  "half_opened",
-                  "opened",
-                  "rear_display",
-                  "flipped",
-                  "tent",
-                  "unknown"
-                ]
+                "$ref": "#/$defs/__schema1"
               }
+            },
+            "current": {
+              "description": "Android foldables only: the committed device_state posture and the panel behind the default display, read live on every call.",
+              "type": "object",
+              "properties": {
+                "posture": {
+                  "$ref": "#/$defs/__schema1"
+                },
+                "activePanel": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  },
+                  "required": ["key", "role"],
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["posture"],
+              "additionalProperties": {}
             }
           },
           "required": ["panels", "postures"],
@@ -53052,25 +53948,25 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "enabled": {
               "type": "boolean"
             },
             "mode": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/__schema7"
             },
             "rawValue": {
               "type": "string"
@@ -53082,10 +53978,10 @@
               "type": "string"
             },
             "requestedMode": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/__schema7"
             },
             "appliedMode": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/__schema7"
             }
           },
           "required": ["supported"],
@@ -53095,19 +53991,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "enrollment": {
               "type": "string",
@@ -53121,19 +54017,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "airplaneMode": {
               "type": "boolean"
@@ -53164,71 +54060,71 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "capability": {
               "type": "string"
             },
             "profile": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/__schema8"
             },
             "requestedProfile": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/__schema8"
             },
             "appliedProfile": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/__schema8"
             },
             "values": {
               "type": "object",
               "properties": {
                 "delayMs": {
-                  "$ref": "#/$defs/__schema7"
-                },
-                "downloadKbps": {
-                  "$ref": "#/$defs/__schema8"
-                },
-                "uploadKbps": {
                   "$ref": "#/$defs/__schema9"
                 },
-                "packetLossPercent": {
+                "downloadKbps": {
                   "$ref": "#/$defs/__schema10"
+                },
+                "uploadKbps": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "packetLossPercent": {
+                  "$ref": "#/$defs/__schema12"
                 }
               },
               "required": ["delayMs", "downloadKbps", "uploadKbps", "packetLossPercent"],
               "additionalProperties": {
-                "$ref": "#/$defs/__schema11"
+                "$ref": "#/$defs/__schema13"
               }
             },
             "observedValues": {
               "type": "object",
               "properties": {
                 "delayMs": {
-                  "$ref": "#/$defs/__schema7"
-                },
-                "downloadKbps": {
-                  "$ref": "#/$defs/__schema8"
-                },
-                "uploadKbps": {
                   "$ref": "#/$defs/__schema9"
                 },
-                "packetLossPercent": {
+                "downloadKbps": {
                   "$ref": "#/$defs/__schema10"
+                },
+                "uploadKbps": {
+                  "$ref": "#/$defs/__schema11"
+                },
+                "packetLossPercent": {
+                  "$ref": "#/$defs/__schema12"
                 }
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema11"
+                "$ref": "#/$defs/__schema13"
               }
             },
             "expiresInSeconds": {
@@ -53268,12 +54164,12 @@
               "type": "string"
             },
             "rule": {
-              "$ref": "#/$defs/__schema12"
+              "$ref": "#/$defs/__schema14"
             },
             "rules": {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema12"
+                "$ref": "#/$defs/__schema14"
               }
             },
             "acknowledged": {
@@ -53297,19 +54193,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "mode": {
               "type": "string"
@@ -53359,19 +54255,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "mode": {
               "type": "string",
@@ -53392,19 +54288,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "capability": {
               "type": "string"
@@ -53454,19 +54350,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "sensors": {
               "type": "array",
@@ -53533,19 +54429,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "type": {
               "type": "string",
@@ -53579,19 +54475,19 @@
           "type": "object",
           "properties": {
             "supported": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "verified": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "method": {
               "$ref": "#/$defs/__schema2"
             },
-            "warning": {
+            "verified": {
               "$ref": "#/$defs/__schema3"
             },
-            "error": {
+            "method": {
               "$ref": "#/$defs/__schema4"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema6"
             },
             "battery": {
               "type": "object",
@@ -53676,33 +54572,35 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
-          "type": "boolean"
+          "type": "string",
+          "enum": ["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]
         },
         "__schema1": {
-          "type": "boolean"
+          "type": "string",
+          "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"]
         },
         "__schema2": {
-          "type": "string"
+          "type": "boolean"
         },
         "__schema3": {
-          "type": "string"
+          "type": "boolean"
         },
         "__schema4": {
           "type": "string"
         },
         "__schema5": {
+          "type": "string"
+        },
+        "__schema6": {
+          "type": "string"
+        },
+        "__schema7": {
           "type": "string",
           "enum": ["off", "none", "priority", "alarms"]
         },
-        "__schema6": {
+        "__schema8": {
           "type": "string",
           "enum": ["none", "offline", "veryBad", "2g", "3g", "4g"]
-        },
-        "__schema7": {
-          "type": "number"
-        },
-        "__schema8": {
-          "type": "number"
         },
         "__schema9": {
           "type": "number"
@@ -53710,8 +54608,14 @@
         "__schema10": {
           "type": "number"
         },
-        "__schema11": {},
+        "__schema11": {
+          "type": "number"
+        },
         "__schema12": {
+          "type": "number"
+        },
+        "__schema13": {},
+        "__schema14": {
           "type": "object",
           "properties": {
             "appId": {
@@ -53820,7 +54724,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -53899,7 +54803,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54023,7 +54927,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54184,7 +55088,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54331,7 +55235,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54510,6 +55414,7 @@
             "performanceTrace",
             "phoneCall",
             "pinchOn",
+            "portReverse",
             "postNotification",
             "pressButton",
             "prototype",
@@ -54635,6 +55540,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",
@@ -54806,7 +55712,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54957,7 +55863,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -56949,7 +57855,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -58777,7 +59683,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "elementId": {
           "description": "Unique exposed element ID",
@@ -59020,7 +59926,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -59152,7 +60058,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -59314,7 +60220,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -59770,7 +60676,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -59997,7 +60903,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -60126,7 +61032,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -60345,7 +61251,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -62577,7 +63483,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -62706,7 +63612,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -63207,7 +64113,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -65340,7 +66246,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -67337,7 +68243,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false; refused on watchOS)",
@@ -67432,7 +68338,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -67752,7 +68658,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -67780,7 +68686,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "wasAsleep": {
           "type": "boolean"
@@ -68044,7 +68950,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",

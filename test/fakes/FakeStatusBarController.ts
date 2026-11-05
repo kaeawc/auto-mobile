@@ -13,12 +13,25 @@ export class FakeStatusBarController implements StatusBarController {
   unsupportedFields = new Set<keyof StatusBarOverrides>();
   readback: string | null = "readback";
   clearError: Error | null = null;
+  /** When set, override() records the call and then rejects with it, as a refused field would. */
+  overrideError: Error | null = null;
   /** When set, clear() waits for the signal to abort, then rejects with its reason. */
   hangClear = false;
   lastClearSignal: AbortSignal | undefined;
+  /** Each queued gate holds one override() call (in call order) until it resolves. */
+  overrideGates: Promise<void>[] = [];
+  /** Each queued gate holds one clear() call (in call order) until it resolves. */
+  clearGates: Promise<void>[] = [];
 
   async override(overrides: StatusBarOverrides): Promise<StatusBarApplyOutcome> {
     this.overrides.push(overrides);
+    const gate = this.overrideGates.shift();
+    if (gate) {
+      await gate;
+    }
+    if (this.overrideError) {
+      throw this.overrideError;
+    }
     const fields = requestedStatusBarFields(overrides);
     return {
       applied: fields.filter((field) => !this.unsupportedFields.has(field)),
@@ -29,6 +42,10 @@ export class FakeStatusBarController implements StatusBarController {
   async clear(signal?: AbortSignal): Promise<void> {
     this.clears++;
     this.lastClearSignal = signal;
+    const gate = this.clearGates.shift();
+    if (gate) {
+      await gate;
+    }
     if (this.hangClear) {
       await new Promise<void>((_resolve, reject) => {
         signal?.addEventListener("abort", () => reject(signal.reason), { once: true });

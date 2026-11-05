@@ -24545,7 +24545,8 @@
           "value": {
             "kind": "string",
             "max": 64
-          }
+          },
+          "sensitive": true
         }
       }
     },
@@ -24587,7 +24588,8 @@
           "value": {
             "kind": "json",
             "maxDepth": 1
-          }
+          },
+          "sensitive": true
         },
         "servicesEnabled": {
           "platforms": ["android", "ios"],
@@ -25327,7 +25329,8 @@
         "dismissed": {
           "sensitive": false
         },
-        "scheduledFired": { "sensitive": false }
+        "scheduledFired": { "sensitive": false },
+        "push": { "sensitive": false, "capability": "prototype_platform_push_v1" }
       },
       "state": {
         "badge": {
@@ -25917,6 +25920,19 @@
           "value": {
             "kind": "enum",
             "values": ["googleCast", "airplay"]
+          }
+        },
+        "protocols": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "array",
+            "item": {
+              "kind": "enum",
+              "values": ["googleCast", "airplay"]
+            },
+            "min": 0,
+            "max": 2,
+            "unique": true
           }
         },
         "player": {

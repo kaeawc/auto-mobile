@@ -373,8 +373,9 @@ the prototype as app UI.
 ## Entry point: `launchApp { prototype: true }`
 
 The intended entry point (#10567) on an iOS simulator: resolves the dylib, allocates port and token,
-launches with `SIMCTL_CHILD_*`, and records the agent against device and bundle id so `prototype` can
-connect. A normal `launchApp` injects nothing; an existing `DYLD_INSERT_LIBRARIES` is preserved. On a
+launches with `SIMCTL_CHILD_*`, connects (retrying refused connections every 200 ms for about 15 s,
+because a first launch on a freshly booted simulator can take seconds to bind the listener), and
+records the agent against device and bundle id so `prototype` can connect. A normal `launchApp` injects nothing; an existing `DYLD_INSERT_LIBRARIES` is preserved. On a
 physical device the option fails with a simulator-only error. If `prototype` targets an app not
 launched this way it fails with a relaunch hint instead of relaunching (that would lose state).
 

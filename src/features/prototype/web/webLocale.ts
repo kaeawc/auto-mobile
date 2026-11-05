@@ -1,4 +1,4 @@
-import { ActionableError, toActionableError } from "../../../models/ActionableError";
+import { PrototypeWebInputError } from "./prototypeWebInputError";
 
 /** The locale a still renders in when the caller names none. */
 export const DEFAULT_STILL_LOCALE = "en-US";
@@ -22,7 +22,7 @@ const RTL_LANGUAGES = new Set([
 /** Scripts written right to left; an explicit script subtag decides over the language. */
 const RTL_SCRIPTS = new Set(["adlm", "arab", "hebr", "nkoo", "rohg", "syrc", "thaa"]);
 
-/** The canonical BCP 47 tag, or an ActionableError naming the invalid one. */
+/** The canonical BCP 47 tag, or a PrototypeWebInputError naming the invalid one. */
 export function stillLocale(locale: string | undefined): string {
   if (locale === undefined) {
     return DEFAULT_STILL_LOCALE;
@@ -33,9 +33,17 @@ export function stillLocale(locale: string | undefined): string {
       return canonical;
     }
   } catch (error) {
-    throw toActionableError(error, `locale "${locale}" is not a valid BCP 47 tag`);
+    // Intl throws a RangeError or TypeError; anything else is not an input problem, so it
+    // propagates as is. errorMessage would pull the server's error helpers into the bundle.
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    throw new PrototypeWebInputError(
+      `locale "${locale}" is not a valid BCP 47 tag: ${error.message}`,
+      { cause: error },
+    );
   }
-  throw new ActionableError(`locale "${locale}" is not a valid BCP 47 tag.`);
+  throw new PrototypeWebInputError(`locale "${locale}" is not a valid BCP 47 tag.`);
 }
 
 /**

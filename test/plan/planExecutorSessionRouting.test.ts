@@ -10,6 +10,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { currentPlanLockNamespace } from "../../src/features/toolSelection/toolSelectionContext";
 
 describe("PlanExecutor - Session-based Device Routing", () => {
   let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
@@ -256,27 +257,32 @@ describe("PlanExecutor - Session-based Device Routing", () => {
     expect(capturedParams[0]).toHaveProperty("testParam", "value1");
   });
 
-  test("injects __lockNamespace (base sessionUuid) into a tool whose schema declares it", async () => {
-    // The plan's base sessionUuid must reach the coordination tools as
-    // __lockNamespace so the shared CriticalSectionCoordinator is scoped per
-    // plan. Only schemas that declare the field keep it through schema.parse.
+  test("passes the base sessionUuid as the plan lock namespace to an opted-in tool (#15663)", async () => {
+    // The plan's base sessionUuid scopes the shared CriticalSectionCoordinator per
+    // plan. It travels as call context for that one step, never as an argument, and
+    // a call nested inside the step does not inherit it.
     const capturedParams: any[] = [];
-    const mockHandler = mock(async (params: any) => {
-      capturedParams.push({ ...params });
+    const namespaces: (string | undefined)[] = [];
+    const nestedNamespaces: (string | undefined)[] = [];
+    ToolRegistry.register("testNestedTool", "Nested call", z.object({}), async () => {
+      nestedNamespaces.push(currentPlanLockNamespace());
       return { success: true };
     });
-
-    const testToolSchema = z.object({
-      platform: z.string().optional(),
-      sessionUuid: z.string().optional(),
-      __lockNamespace: z.string().optional(),
-      testParam: z.string().optional(),
+    const mockHandler = mock(async (params: any) => {
+      capturedParams.push({ ...params });
+      namespaces.push(currentPlanLockNamespace());
+      await ToolRegistry.callInternal("testNestedTool", {});
+      return { success: true };
     });
 
     ToolRegistry.register(
       "testLockNamespaceTool",
-      "Test tool that declares __lockNamespace",
-      testToolSchema,
+      "Test tool that opts into the plan lock namespace",
+      z.object({
+        platform: z.string().optional(),
+        sessionUuid: z.string().optional(),
+        testParam: z.string().optional(),
+      }),
       {
         handler: mockHandler,
         acceptsPlanLockNamespace: true,
@@ -285,24 +291,27 @@ describe("PlanExecutor - Session-based Device Routing", () => {
     ToolRegistry.getTool("testLockNamespaceTool")!.requiresDevice = true;
 
     const plan: Plan = {
-      name: "Test Lock Namespace Injection",
+      name: "Test Lock Namespace Context",
       mcpVersion: "1.0",
       steps: [{ tool: "testLockNamespaceTool", params: { testParam: "v" } }],
     };
 
     const sessionUuid = "base-session-uuid-789";
-    await planExecutor.executePlan(plan, 0, "android", undefined, sessionUuid);
+    try {
+      await planExecutor.executePlan(plan, 0, "android", undefined, sessionUuid);
+    } finally {
+      ToolRegistry.unregister("testNestedTool");
+    }
 
-    expect(capturedParams.length).toBe(1);
-    expect(capturedParams[0]).toHaveProperty("__lockNamespace", sessionUuid);
+    expect(namespaces).toEqual([sessionUuid]);
+    expect(nestedNamespaces).toEqual([undefined]);
+    expect(capturedParams[0]).not.toHaveProperty("__lockNamespace");
   });
 
-  test("does NOT leak __lockNamespace to tools whose schema omits it", async () => {
-    // A regular tool's schema (no __lockNamespace) must strip the injected field,
-    // so the internal namespace never surfaces on ordinary tool params.
-    const capturedParams: any[] = [];
-    const mockHandler = mock(async (params: any) => {
-      capturedParams.push({ ...params });
+  test("does NOT give the plan lock namespace to a tool that did not opt in", async () => {
+    const namespaces: (string | undefined)[] = [];
+    const mockHandler = mock(async () => {
+      namespaces.push(currentPlanLockNamespace());
       return { success: true };
     });
 
@@ -316,7 +325,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
 
     ToolRegistry.register(
       "testNoLockNamespaceTool",
-      "Test tool that does not declare __lockNamespace",
+      "Test tool that does not opt into the plan lock namespace",
       testToolSchema,
       mockHandler,
     );
@@ -330,8 +339,8 @@ describe("PlanExecutor - Session-based Device Routing", () => {
 
     await planExecutor.executePlan(plan, 0, "android", undefined, "base-session-uuid-000");
 
-    expect(capturedParams.length).toBe(1);
-    expect(capturedParams[0]).not.toHaveProperty("__lockNamespace");
+    expect(mockHandler).toHaveBeenCalledTimes(1);
+    expect(namespaces).toEqual([undefined]);
   });
 
   test("should NOT override deviceId if already present in step params", async () => {

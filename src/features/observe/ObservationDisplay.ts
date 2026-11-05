@@ -1,4 +1,10 @@
-import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
+import type {
+  BootedDevice,
+  DisplayPanel,
+  DisplayRef,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
 import {
   buildDisconnectedPanelMessage,
   isPhysicalPanel,
@@ -413,15 +419,37 @@ function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
   return POSTURE_PANEL_ROLES.find(([, panelRole]) => panelRole === role)?.[0] ?? "unknown";
 }
 
-/** Match the runner's live pixel size against the enumerated physical panels. */
+/**
+ * Live CoreDevice panel evidence, keyed by the observation it was read for. It is never shared
+ * per device: a concurrent observation without a live source cannot clear or replace the panel
+ * an in-flight observation already adopted (#17114).
+ */
+const liveIosPanelEvidence = new WeakMap<ObserveResult, DisplayPanel>();
+
+export function rememberLiveIosPanel(result: ObserveResult, panel: DisplayPanel | undefined): void {
+  if (panel) {
+    liveIosPanelEvidence.set(result, panel);
+  } else {
+    liveIosPanelEvidence.delete(result);
+  }
+}
+
+export function liveIosPanelFor(result: ObserveResult): DisplayPanel | undefined {
+  return liveIosPanelEvidence.get(result);
+}
+
+/** Prefer the observation's live CoreDevice panel, falling back to the runner pixel size. */
 export function observedIosDisplay(
   device: BootedDevice,
   hierarchy:
     | Pick<ViewHierarchyResult, "pixelWidth" | "pixelHeight" | "captureSequence">
     | undefined,
+  livePanel?: DisplayPanel,
 ): DisplayRef {
   const panels = device.displays?.panels ?? [];
-  const panel = liveIosPanel(panels, hierarchy);
+  const panel =
+    (livePanel && panels.find((candidate) => candidate.key === livePanel.key)) ??
+    liveIosPanel(panels, hierarchy);
   return {
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",

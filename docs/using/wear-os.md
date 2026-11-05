@@ -128,19 +128,25 @@ On a watch, `systemTray` drives the Wear OS notification stream instead of the p
 `open` swipes the stream up from the bottom edge and `close` goes back. `list` and `clearAll`
 require `notification.appId`; `find`, `tap`, `dismiss`, `list` and `clearAll` scroll the stream
 from its top, and an already-open stream is scrolled back to the top first and left open
-afterwards.
+afterwards. If the top cannot be reached within `awaitTimeout`, the action fails with
+`notification_not_found` instead of scanning from the middle.
 
 - `list` returns each card's app label, `title`, `body`, `texts` and `bounds`; `id` is `null`
   and `actions` is empty.
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
-  view. If that text is not a single clickable target there, it fails rather than guessing:
-  `observe` the expanded notification and retry with an explicit `tapActionLabel`.
-- `dismiss` swipes the card sideways and reports `dismissal_unconfirmed` if it is still shown.
+  view. If that text is not a single clickable target there, it fails rather than guessing and
+  goes back to the stream; retry with an explicit `tapActionLabel`.
+- `dismiss` swipes the card sideways and reports `dismissal_unconfirmed` unless the removal is
+  confirmed: with `appId`, by one of the app's active notifications showing the card's title
+  and body going away; otherwise by one fewer such card being shown. Of two identical cards,
+  removing one counts as a dismissal.
 - `clearAll` taps the stream's **Clear all** only when every active notification belongs to
   `appId`; otherwise, or when `title` or `body` narrows it, it dismisses matching cards one by
   one.
 
 A tap target whose centre falls outside the round display is refused; scroll it into view.
+Every action captures the configured action screenshot or accessibility audit from the final
+screen, as on a phone.
 
 ## Ambient power state
 

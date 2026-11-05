@@ -1,3 +1,4 @@
+import { notifyAfterAppleSimulatorProvision } from "./appleSimulatorInventoryNotify";
 import { requestAcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import {
   currentAutolockMcpSessionId,
@@ -31,7 +32,7 @@ import {
   type AppleVisionProvisionRequest,
   type AppleVisionDiscardResult,
 } from "../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
-import { createStructuredToolResponse } from "../utils/toolUtils";
+import { awaitWhileRequestIsLive, createStructuredToolResponse } from "../utils/toolUtils";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
@@ -89,6 +90,10 @@ export async function provisionAppleVisionDevice(
             let resolved = await provisioner.provision(request, {
               // provisionDevice is an explicit creation request, as on Android and iOS.
               allowCreate: deps.deviceCreationGateFactory().isCreationAllowed(true),
+              // A headset created only to be refused at boot would then be deleted (#11236).
+              ...(args.boot === false
+                ? {}
+                : { assertCapacityBeforeCreate: visionBootCapacityCheck(deps) }),
               signal: requestSignal,
               discardUnconfirmed: (headset) =>
                 discardUnclaimedCreatedVision(headset, provisioner, deps, lease),
@@ -148,6 +153,11 @@ export async function provisionAppleVisionDevice(
             }
             const { headset, created } = resolved;
             if (args.boot === false) {
+              notifyAfterAppleSimulatorProvision(
+                `Apple Vision Pro simulator ${headset.deviceId}`,
+                created,
+                undefined,
+              );
               return headsetProvisionResponse(args, headset, created, undefined);
             }
             const booted = await bootAndBind(
@@ -155,6 +165,11 @@ export async function provisionAppleVisionDevice(
               deps,
               deadlineMs,
               { signal: requestSignal, stage },
+            );
+            notifyAfterAppleSimulatorProvision(
+              `Apple Vision Pro simulator ${headset.deviceId}`,
+              created,
+              booted,
             );
             return headsetProvisionResponse(args, headset, created, booted);
           } finally {
@@ -187,30 +202,21 @@ async function bootAndBind(
   deadlineMs: number,
   { signal, stage }: { signal: AbortSignal; stage: { current: string } },
 ): Promise<{ boot: AppleVisionBootResult; sessionId: string }> {
-  // A teardown that preempts this lease aborts boot admission and binding, as in startDevice.
-  const lifecycleSignal = combineAbortSignals(signal, lease.signal) ?? lease.signal;
   try {
-    const reusableSessionId = reusableVisionSessionId(headset.deviceId, deps);
-    assertVisionUnclaimed(headset.deviceId, deps, lease, reusableSessionId);
-    lifecycleSignal.throwIfAborted();
-    stage.current = "booting the Apple Vision Pro simulator";
-    const lifecycle = (deps.appleVisionSimulatorBootFactory ?? defaultAppleVisionBoot)();
-    const boot = await runWithAbortSignal(lifecycleSignal, () =>
-      lifecycle.boot(headset, {
-        timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
-        signal: lifecycleSignal,
-      }),
+    return await bootAndBindHeadset(
+      // A headset this call created is deleted again below, which also stops it.
+      {
+        rawArgs,
+        headset,
+        lease,
+        bindSession,
+        operation: "provisionDevice",
+        stopColdBoot: !created,
+      },
+      deps,
+      deadlineMs,
+      { signal, stage },
     );
-    lifecycleSignal.throwIfAborted();
-    stage.current = "binding the device session";
-    const sessionId = await bindBootedSimulatorSession(
-      { device: headset, boot, rawArgs, operation: "provisionDevice" },
-      bindSession,
-      deps.timer,
-      { deadlineMs, signal: lifecycleSignal },
-    );
-    lifecycleSignal.throwIfAborted();
-    return { boot, sessionId };
   } catch (error) {
     if (!created) {
       throw toActionableError(
@@ -225,6 +231,137 @@ async function bootAndBind(
       { cause: error },
     );
   }
+}
+
+/**
+ * The boot and session bind startDevice and provisionDevice share, under the headset's canonical
+ * lifecycle lease. This daemon's holders and lifecycles, then other daemons' claims, are checked
+ * before the boot. A headset this call cold-booted is stopped again when the boot or bind fails or
+ * is cancelled before a session holds it.
+ */
+export async function bootAndBindHeadset(
+  {
+    rawArgs,
+    headset,
+    lease,
+    bindSession,
+    operation,
+    stopColdBoot = true,
+  }: {
+    /** The request as received: the binder reads the caller's connection from its internal params. */
+    rawArgs: object;
+    headset: ListedAppleVision;
+    lease: VirtualDeviceLifecycleLease;
+    bindSession: BindBootedSession;
+    operation: "startDevice" | "provisionDevice";
+    /** Whether a failure stops a headset this call cold-booted (default true). */
+    stopColdBoot?: boolean;
+  },
+  deps: DeviceToolsDependencies,
+  deadlineMs: number,
+  { signal, stage }: { signal: AbortSignal; stage: { current: string } },
+): Promise<{ boot: AppleVisionBootResult; sessionId: string }> {
+  // A teardown that preempts this lease aborts boot admission and binding.
+  const lifecycleSignal = combineAbortSignals(signal, lease.signal) ?? lease.signal;
+  const reusableSessionId = reusableVisionSessionId(headset.deviceId, deps);
+  assertVisionUnclaimed(headset.deviceId, deps, lease, reusableSessionId);
+  await assertVisionNotClaimedByForeignDaemon(headset.deviceId, lifecycleSignal);
+  lifecycleSignal.throwIfAborted();
+  stage.current = "booting the Apple Vision Pro simulator";
+  const lifecycle = (deps.appleVisionSimulatorBootFactory ?? defaultAppleVisionBoot)();
+  let boot: AppleVisionBootResult | undefined;
+  try {
+    boot = await runWithAbortSignal(lifecycleSignal, () =>
+      lifecycle.boot(headset, {
+        timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
+        signal: lifecycleSignal,
+      }),
+    );
+    lifecycleSignal.throwIfAborted();
+    stage.current = "binding the device session";
+    const sessionId = await bindBootedSimulatorSession(
+      { device: headset, boot, rawArgs, operation },
+      bindSession,
+      deps.timer,
+      { deadlineMs, signal: lifecycleSignal },
+    );
+    lifecycleSignal.throwIfAborted();
+    return { boot, sessionId };
+  } catch (error) {
+    if (stopColdBoot) {
+      await stopUnboundColdBoot(lifecycle, boot, headset.deviceId);
+    }
+    throw error;
+  }
+}
+
+/**
+ * A cold boot no session holds yet is stopped; a headset another request bound, or another
+ * daemon claims, is left alone.
+ */
+async function stopUnboundColdBoot(
+  lifecycle: Pick<AppleVisionSimulatorBoot, "stopColdBooted">,
+  boot: AppleVisionBootResult | undefined,
+  udid: string,
+): Promise<void> {
+  if (boot?.acquisition !== "cold-boot") {
+    return;
+  }
+  try {
+    await withUnboundHeadsetFence(udid, () => lifecycle.stopColdBooted(boot));
+  } catch (error) {
+    logger.warn(
+      `[visionOS] Leaving Apple Vision Pro simulator ${udid} running after its start failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
+
+/**
+ * Runs a stop or delete of a headset that no session of this daemon holds and no other daemon
+ * claims. After the claim read, the pool's shutdown reservation re-checks the holder under the
+ * assignment mutex and keeps a concurrent bind (setActiveDevice) off the headset until
+ * `operation` ends, as killDevice does. Throws, without running `operation`, when a session holds
+ * the headset or a claim refuses it.
+ */
+async function withUnboundHeadsetFence<T>(udid: string, operation: () => Promise<T>): Promise<T> {
+  const pool = initializedDevicePool();
+  const assertUnheld = () => {
+    const holder = holderOf(pool?.getDevice(udid));
+    if (holder) {
+      throw new ActionableError(`session ${holder} holds it now`);
+    }
+  };
+  assertUnheld();
+  // A bind refused for another daemon's claim leaves no local holder: the headset is theirs.
+  await assertVisionNotClaimedByForeignDaemon(udid);
+  const reservation = await pool?.reserveDeviceForShutdown(udid, undefined, undefined, {
+    assertHolder: assertUnheld,
+    fenceUnpooled: true,
+  });
+  try {
+    return await operation();
+  } finally {
+    await reservation?.release();
+    if (!reservation) {
+      pool?.settleUnpooledShutdown(udid);
+    }
+  }
+}
+
+/**
+ * Another daemon's claim refuses a boot or a cleanup delete before it runs. The session bind
+ * refuses it too, but only after the boot; this daemon's own holder passes.
+ */
+export async function assertVisionNotClaimedByForeignDaemon(
+  udid: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await awaitWhileRequestIsLive(
+    initializedDevicePool()?.assertNotClaimedByForeignDaemon(udid, "visionos", undefined, 0) ??
+      Promise.resolve(),
+    signal,
+  );
 }
 
 /**
@@ -299,7 +436,9 @@ async function discardUnclaimedCreatedVision(
       );
     }
     assertVisionUnclaimed(headset.deviceId, deps, cleanupLease ?? lease);
-    return await provisioner.discardCreated(headset);
+    return await withUnboundHeadsetFence(headset.deviceId, () =>
+      provisioner.discardCreated(headset),
+    );
   } catch (error) {
     logger.warn(
       `[visionOS] Leaving created Apple Vision Pro simulator ${headset.deviceId}: ${errorMessage(error)}`,
@@ -309,6 +448,16 @@ async function discardUnclaimedCreatedVision(
   } finally {
     cleanupLease?.release();
   }
+}
+
+function visionBootCapacityCheck(
+  deps: DeviceToolsDependencies,
+): (signal?: AbortSignal) => Promise<void> {
+  return async (signal) => {
+    await (deps.checkBootCapacity
+      ? deps.checkBootCapacity("visionos", signal)
+      : bootAdmissionServices.assertBootCapacityAvailable("visionos", { signal }));
+  };
 }
 
 function discardMessage(discarded: AppleVisionDiscardResult): string {

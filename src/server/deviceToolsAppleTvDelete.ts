@@ -1,3 +1,4 @@
+import { notifyAppleSimulatorInventoryChanged } from "./appleSimulatorInventoryNotify";
 import {
   getDeviceToolsDependencies,
   initializedDevicePool,
@@ -130,6 +131,7 @@ async function runAppleTvDelete(
   }
   signal.throwIfAborted();
   await destroyUnderLease(provisioner, device, deadlineMs, signal);
+  notifyAppleSimulatorInventoryChanged(`deleting tvOS simulator ${udid}`);
   return createTeardownResponse(
     args,
     "destroyed",

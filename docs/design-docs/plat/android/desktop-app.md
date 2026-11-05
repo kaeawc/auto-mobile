@@ -80,12 +80,30 @@ fallback), instead of opening their own socket:
   device's leases. The first lease that asks sends `subscribe_storage` on the
   shared stream, and the last one to let go sends `unsubscribe_storage`. Updates,
   acknowledgements and reconciliation requests for a file reach only the leases
-  holding it, without loss. A lease that joins a file the device already
+  holding it, without loss. The daemon pushes a device's storage updates to every
+  subscription for that device, including files only another client observes;
+  the stream drops those on arrival, so a device with no local Storage lease
+  retains none of them. A lease that joins a file the device already
   observes is acknowledged at once, so it reconciles its snapshot. A dropped
   connection forgets every confirmation until the re-registration after the
   reconnect acknowledges the holders again. The daemon owns an observer per
   socket, so a device that leaves a socket other devices keep open sends
   `unsubscribe_storage` for its files.
+- One-shot captures (a saved screenshot, the foreground-app lookup) lease the
+  device's shared stream and take the first frame captured after their request.
+  A lease joined onto a live subscription replays the stream's latest frame,
+  which can be one cadence interval old, so the capture never accepts it: it
+  snapshots the replay when it subscribes, sends `request_observation`, and
+  skips the replayed frames (by identity). A screenshot capture also skips
+  anything stamped older than them: screenshots carry the daemon's clock, so the
+  desktop clock is never compared with it. Hierarchies are not ordered by
+  timestamp, because a hierarchy carries the device's capture time when it has
+  one and the daemon's otherwise. `request_observation` pushes a hierarchy but
+  no screenshot, so a screenshot capture also asks for the daemon's minimum screenshot interval
+  (250 ms) on its own lease; the hub's fastest-interval merge applies it while
+  the lease is held, and releasing the lease restores the others' cadence. The
+  foreground-app lookup is keyed by serial only, so it joins a key a pane
+  already leases for that serial; with none it opens its own short-lived stream.
 - Leases are ref-counted per device and stream kind; `subscriptions` and
   `observationSubscriptions` expose the live counts, and
   `telemetryConnectionState`/`observationConnectionState` the per-device health.
@@ -97,9 +115,8 @@ fallback), instead of opening their own socket:
   inject the delay and the random source.
 
 Failures and video streams still connect per pane, as do observation streams in
-hosts without a hub (the IDE plugin) and one-shot captures (a saved screenshot,
-a picker thumbnail, the foreground-app lookup), which need a fresh initial frame
-that a shared subscription does not replay.
+hosts without a hub (the IDE plugin). A device-picker thumbnail opens its own
+short-lived stream: it has no pane, so no stream to join.
 
 A pane is keyed on its device epoch. When the daemon ends that epoch with a
 successor, the pane re-keys onto the successor. When it ends with no successor

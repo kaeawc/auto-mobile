@@ -40,15 +40,33 @@ internal class ObservationMuxFrames(
   }
 
   private fun route(response: StreamResponse) {
-    val channel =
+    val (channel, unsolicited) =
       synchronized(table.lock) {
-        table.target(response.subscriptionId) ?: table.requests.take(response.id)
+        val channel = table.target(response.subscriptionId) ?: table.requests.take(response.id)
+        channel to (channel != null && unsolicitedStorage(channel, response))
       }
     if (channel == null) {
       log.debug("Observation ${response.type} for no live subscription; dropped")
       return
     }
+    if (unsolicited) return
     if (!channel.flows.deliver(response)) log.warn("Unknown message type: ${response.type}")
+  }
+
+  /**
+   * Called under the table lock. The daemon pushes a device's `storage_update` frames to every
+   * observation subscription for that device, so a stream also receives files another client
+   * observes. The storage queue is unbounded and lossless, so only files [channel] wants may enter
+   * it; anything else would be retained until a local storage collector starts, which may be never
+   * (#17040).
+   */
+  private fun unsolicitedStorage(
+    channel: MuxObservationChannel,
+    response: StreamResponse,
+  ): Boolean {
+    if (response.type != "storage_update") return false
+    val event = response.storageEvent ?: return false
+    return !channel.storage.isDesired(StorageSubscriptionKey(event.packageName, event.fileName))
   }
 
   private fun acknowledge(open: TelemetrySocket, response: StreamResponse) {

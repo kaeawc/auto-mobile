@@ -4,6 +4,7 @@ import {
   type AcquisitionReceipt,
 } from "../../src/daemon/acquisitionReceipt";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { holderOf } from "../../src/daemon/deviceBinding";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { startDeviceOutputSchema } from "../../src/server/toolOutputSchemas";
 import { provisionAppleVisionDevice } from "../../src/server/deviceToolsAppleVisionProvision";
@@ -43,6 +44,9 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
+import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -61,6 +65,22 @@ const NAME = "AutoMobile Vision";
 const SPEC = { deviceType: VISION_DEVICE_TYPE.identifier, runtime: VISION_RUNTIME_ID };
 const headset = { platform: "visionos", name: NAME, spec: SPEC };
 const sessionSchema = z.object({ sessionId: z.string() });
+
+/** Another daemon's Vision claims: `claimed` decides, per read, which UDIDs it holds. */
+class FakeVisionClaims implements ForeignDeviceOwnership {
+  readonly reads: string[] = [];
+  constructor(private readonly claimed: (udid: string) => boolean) {}
+  async refresh(ids: readonly string[]): Promise<void> {
+    this.reads.push(...ids);
+  }
+  foreignOwnerPid(udid: string): number | undefined {
+    return this.claimed(udid) ? 4242 : undefined;
+  }
+  async claim(): Promise<boolean> {
+    return true;
+  }
+  release(): void {}
+}
 
 describe("provisionDevice on an Apple Vision Pro simulator", () => {
   const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
@@ -86,7 +106,12 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     {
       autolock = "0",
       admission,
-    }: { autolock?: "0" | "1"; admission?: AppleVisionBootAdmission } = {},
+      ownership,
+    }: {
+      autolock?: "0" | "1";
+      admission?: AppleVisionBootAdmission;
+      ownership?: ForeignDeviceOwnership;
+    } = {},
   ) {
     env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
     restoreEnv = ToolRegistry.setPipelineOverridesForTesting({ env });
@@ -115,6 +140,7 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
         env,
         timer,
         deviceManager: deviceUtils,
+        ...(ownership ? { visionForeignDeviceOwnership: ownership } : {}),
       }),
     );
     await pool.initializeWithDevices(await deviceUtils.getBootedDevices("visionos"));
@@ -152,6 +178,7 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
       runnerCalls,
       timer,
       lifecycleCoordinator,
+      deviceUtils,
     };
   }
 
@@ -333,6 +360,68 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  test("startDevice accepts the advertised selectors and picks the one matching headset", async () => {
+    const existing = visionDevice({ name: NAME });
+    const { simctl } = await arrange([existing]);
+
+    const result = toolJson(
+      await call("startDevice", {
+        platform: "visionos",
+        formFactor: "xr-headset",
+        minOsVersion: "26",
+        maxOsVersion: "26.5",
+        preferRunning: true,
+        __mcpSessionId: "client-a",
+      }),
+    );
+
+    expect(result).toMatchObject({ platform: "visionos", acquisition: "cold-boot" });
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 360000`]);
+  });
+
+  for (const preferRunning of [true, false]) {
+    test(`startDevice without deviceId or name prefers the single running headset (preferRunning=${preferRunning})`, async () => {
+      const stopped = visionDevice({ name: "Vision A" });
+      const running = visionDevice({
+        name: "Vision B",
+        udid: "C0FFEE00-0000-4000-8000-0000000000AA",
+        state: "Booted",
+      });
+      const { simctl } = await arrange([stopped, running]);
+
+      const outcome = await call("startDevice", {
+        platform: "visionos",
+        preferRunning,
+        __mcpSessionId: "client-a",
+      }).then(toolJson, (error: unknown) => error);
+
+      if (preferRunning) {
+        expect(outcome).toMatchObject({ acquisition: "already-booted" });
+        expect(JSON.stringify(outcome)).toContain(running.udid);
+        expect(JSON.stringify(outcome)).not.toContain(stopped.udid);
+      } else {
+        expect(String(outcome)).toContain("ambiguous");
+      }
+      expect(simctl.commands).toEqual([]);
+    });
+  }
+
+  for (const [label, selector] of [
+    ["another form factor", { formFactor: "phone" }],
+    ["an OS range the runtime is outside", { minOsVersion: "27" }],
+  ] as const) {
+    test(`startDevice with ${label} matches no headset and boots nothing`, async () => {
+      const { simctl } = await arrange([visionDevice({ name: NAME })]);
+
+      const error = await failure(
+        call("startDevice", { platform: "visionos", ...selector, __mcpSessionId: "client-a" }),
+      );
+
+      expect(String(error)).toContain("No Apple Vision Pro simulator matches");
+      expect(simctl.commands).toEqual([]);
+    });
+  }
+
   test("startDevice refuses Android/iOS setup options before booting a headset", async () => {
     const { simctl } = await arrange([visionDevice({ name: NAME })]);
     await expect(
@@ -366,6 +455,52 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(pool.getDevice(headset.udid)?.sessionId).toBe(sessionId);
     expect(timer.getSleepHistory()).toEqual([]);
   });
+
+  test("setActiveDevice selects a running headset the pool has not tracked yet", async () => {
+    const headset = visionDevice({ name: NAME, state: "Shutdown" });
+    const { pool, sessions, simctl } = await arrange([headset]);
+    headset.state = "Booted";
+    simctl.onStateChange?.();
+    expect(pool.getDevice(headset.udid)).toBeNull();
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {
+        throw new Error("a headset must not resume CtrlProxy");
+      },
+    });
+
+    await handler({ deviceId: headset.udid, platform: "visionos", sessionUuid: "unpooled" });
+
+    expect(pool.getDevice(headset.udid)).toMatchObject({
+      platform: "visionos",
+      sessionId: "unpooled",
+    });
+    expect(sessions.getSession("unpooled")?.platform).toBe("visionos");
+  });
+
+  for (const listing of ["failed", "complete"] as const) {
+    test(`setActiveDevice on a pooled headset the visionOS listing ${listing === "failed" ? "could not read" : "no longer shows"}`, async () => {
+      const headset = visionDevice({ name: NAME, state: "Booted" });
+      const { deviceUtils, sessions } = await arrange([headset]);
+      if (listing === "failed") {
+        deviceUtils.failedPlatforms.add("visionos");
+      } else {
+        deviceUtils.setBootedDevices("visionos", []);
+      }
+      const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+
+      const error = await failure(
+        handler({ deviceId: headset.udid, platform: "visionos", sessionUuid: "lost" }),
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error instanceof BootedDeviceDiscoveryIncompleteError).toBe(listing === "failed");
+      if (error instanceof BootedDeviceDiscoveryIncompleteError) {
+        expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+        expect(error.message).not.toContain("iOS");
+      }
+      expect(sessions.getSession("lost")?.assignedDevice ?? null).toBeNull();
+    });
+  }
 
   test("creates a missing headset, boots it and binds a visionOS session without a runner", async () => {
     const { simctl, pool, sessions, runnerCalls } = await arrange();
@@ -892,6 +1027,223 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(simctl.commands.some((command) => command.startsWith("delete"))).toBe(false);
   });
 
+  test("startDevice refuses a headset another daemon claims before booting it", async () => {
+    const existing = visionDevice({ name: NAME });
+    const claims = new FakeVisionClaims((udid) => udid === existing.udid);
+    const { simctl, sessions } = await arrange([existing], { ownership: claims });
+
+    const error = await failure(
+      call("startDevice", {
+        platform: "visionos",
+        deviceId: existing.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+
+    expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+    expect(claims.reads).toContain(existing.udid);
+    expect(simctl.commands).toEqual([]);
+    expect(sessions.getAllSessions()).toEqual([]);
+  });
+
+  test("provisionDevice refuses to boot an adopted headset another daemon claims", async () => {
+    const existing = visionDevice({ name: NAME });
+    const { simctl } = await arrange([existing], {
+      ownership: new FakeVisionClaims((udid) => udid === existing.udid),
+    });
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("another AutoMobile");
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("a created headset another daemon claimed after a failed boot is left in place", async () => {
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl } = {};
+    const { simctl } = await arrange([], {
+      // The peer claims the new headset only once this call has tried to boot it.
+      ownership: new FakeVisionClaims(
+        () => ref.simctl?.commands.some((command) => command.startsWith("boot ")) === true,
+      ),
+    });
+    ref.simctl = simctl;
+    simctl.bootError = new Error("Unable to boot: CoreSimulator timed out");
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("delete it with deleteDevice");
+    expect(simctl.commands.map((command) => command.split(" ")[0])).toEqual(["create", "boot"]);
+    expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+  });
+
+  test("a bind refused for a peer's claim made during boot leaves the peer's headset running", async () => {
+    const existing = visionDevice({ name: NAME });
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl } = {};
+    const { simctl, sessions } = await arrange([existing], {
+      // The peer claims the headset only once this call has booted it.
+      ownership: new FakeVisionClaims(
+        () => ref.simctl?.commands.some((command) => command.startsWith("boot ")) === true,
+      ),
+    });
+    ref.simctl = simctl;
+
+    const error = await failure(
+      call("startDevice", {
+        platform: "visionos",
+        deviceId: existing.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 360000`]);
+    expect(sessions.getAllSessions()).toEqual([]);
+  });
+
+  test("a session bound while cleanup reads foreign claims keeps its headset running", async () => {
+    const existing = visionDevice({ name: NAME });
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl; pool?: DevicePool } = {};
+    const claims = new FakeVisionClaims(() => false);
+    const read = claims.refresh.bind(claims);
+    claims.refresh = async (ids) => {
+      await read(ids);
+      // Cleanup's foreign-claim read follows the boot; a concurrent bind lands while it is pending.
+      if (ref.simctl?.commands.some((command) => command.startsWith("boot ")) && ref.pool) {
+        await ref.pool.addDevice({ name: NAME, platform: "visionos", deviceId: existing.udid });
+        patchDeviceBinding(ref.pool.getDevice(existing.udid)!, {
+          sessionId: "concurrent-session",
+          status: "busy",
+        });
+      }
+    };
+    const { simctl, pool } = await arrange([existing], { ownership: claims });
+    ref.simctl = simctl;
+    ref.pool = pool;
+
+    const error = await failure(
+      provisionVisionDirect({ __mcpSessionId: "client-a", device: headset }, async () => {
+        throw new Error("session bind failed");
+      }),
+    );
+
+    expect(String(error)).toContain("session bind failed");
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 480000`]);
+    expect(pool.getDevice(existing.udid)?.sessionId).toBe("concurrent-session");
+  });
+
+  test("a session bound while cleanup reads foreign claims keeps the headset this call created", async () => {
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl; pool?: DevicePool } = {};
+    const claims = new FakeVisionClaims(() => false);
+    const read = claims.refresh.bind(claims);
+    claims.refresh = async (ids) => {
+      await read(ids);
+      // The created headset's delete-again follows the failed boot; a bind lands mid-read.
+      const udid = ids[0];
+      if (ref.simctl?.commands.some((command) => command.startsWith("boot ")) && ref.pool && udid) {
+        await ref.pool.addDevice({ name: NAME, platform: "visionos", deviceId: udid });
+        patchDeviceBinding(ref.pool.getDevice(udid)!, {
+          sessionId: "concurrent-session",
+          status: "busy",
+        });
+      }
+    };
+    const { simctl, pool } = await arrange([], { ownership: claims });
+    ref.simctl = simctl;
+    ref.pool = pool;
+    simctl.bootError = new Error("Unable to boot: CoreSimulator timed out");
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("delete it with deleteDevice");
+    expect(simctl.commands.map((command) => command.split(" ")[0])).toEqual(["create", "boot"]);
+    expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+  });
+
+  test("startDevice cancelled between boot and bind stops the headset it cold-booted", async () => {
+    const existing = visionDevice({ name: NAME });
+    const { simctl, sessions, pool } = await arrange([existing]);
+    const request = new AbortController();
+    const boot = simctl.waitForSimulatorReady.bind(simctl);
+    simctl.waitForSimulatorReady = async (udid, timeoutMs) => {
+      const booted = await boot(udid, timeoutMs);
+      request.abort(new Error("client cancelled"));
+      return booted;
+    };
+
+    const error = await failure(
+      call(
+        "startDevice",
+        { platform: "visionos", deviceId: existing.udid, __mcpSessionId: "client-a" },
+        undefined,
+        request.signal,
+      ),
+    );
+
+    expect(error).toBeDefined();
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 360000`, `shutdown ${existing.udid}`]);
+    expect(sessions.getAllSessions()).toEqual([]);
+    expect(holderOf(pool.getDevice(existing.udid)) ?? null).toBeNull();
+  });
+
+  for (const state of ["Shutdown", "Booted"] as const) {
+    test(`a failed bind stops only a headset this call cold-booted (${state})`, async () => {
+      const existing = visionDevice({ name: NAME, state });
+      const { simctl } = await arrange([existing]);
+
+      const error = await failure(
+        provisionVisionDirect({ __mcpSessionId: "client-a", device: headset }, async () => {
+          throw new Error("session bind failed");
+        }),
+      );
+
+      expect(String(error)).toContain("session bind failed");
+      expect(simctl.commands).toEqual(
+        state === "Shutdown" ? [`boot ${existing.udid} 480000`, `shutdown ${existing.udid}`] : [],
+      );
+      expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+    });
+  }
+
+  test("a boot refused for capacity is refused before simctl create", async () => {
+    const { simctl } = await arrange();
+    const checked: string[] = [];
+    setDeviceToolsDependencies({
+      checkBootCapacity: async (platform) => {
+        checked.push(platform);
+        throw new ActionableError("simulator boot capacity exhausted");
+      },
+    });
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("simulator boot capacity exhausted");
+    expect(checked).toEqual(["visionos"]);
+    expect(simctl.commands).toEqual([]);
+  });
+
+  for (const scenario of ["boot false", "adopt"] as const) {
+    test(`no pre-create capacity check runs when nothing would be created and booted (${scenario})`, async () => {
+      const { simctl } = await arrange(
+        scenario === "adopt" ? [visionDevice({ name: NAME, state: "Booted" })] : [],
+      );
+      const checked: string[] = [];
+      setDeviceToolsDependencies({
+        checkBootCapacity: async (platform) => {
+          checked.push(platform);
+          throw new ActionableError("simulator boot capacity exhausted");
+        },
+      });
+
+      const result = toolJson(
+        await provision({ device: headset, ...(scenario === "boot false" ? { boot: false } : {}) }),
+      );
+
+      expect(checked).toEqual([]);
+      expect(result).toMatchObject({ created: scenario === "boot false" });
+      expect(simctl.commands.filter((command) => command.startsWith("boot "))).toEqual([]);
+    });
+  }
+
   test("Android and iOS keep their readiness default; the registered schema gives a headset none", () => {
     const ios = provisionDeviceSchema.parse({
       device: {
@@ -908,5 +1260,21 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(ios).toMatchObject({ readiness: "automation", boot: true });
     expect(parsedHeadset).toMatchObject({ boot: true });
     expect(parsedHeadset.readiness).toBeUndefined();
+  });
+
+  test("a created headset notifies resource subscribers; adopting it does not", async () => {
+    await arrange();
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    await provision({ device: headset });
+    expect(notified).toBe(1);
+
+    await provision({ device: headset, boot: false });
+    expect(notified).toBe(1);
   });
 });

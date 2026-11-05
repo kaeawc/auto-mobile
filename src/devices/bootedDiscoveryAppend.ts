@@ -1,7 +1,10 @@
 import type { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
-import type { BootedDevice, Platform, SomePlatform } from "../models";
+import type { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type { DeviceDiscoveryError } from "../models/DeviceDiscoveryError";
-import type { TransitionalSimulator } from "../models/TransitionalSimulator";
+import {
+  isTransitionalSimulatorState,
+  type TransitionalSimulator,
+} from "../models/TransitionalSimulator";
 import type { DiscoverySource } from "../utils/discoverySource";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -74,16 +77,19 @@ export function appendIosBootedDiscovery(
 /** Which sweeps a booted-device read runs. "Either" is Android and iOS unless the caller opts in. */
 export function bootedSweepsFor(
   platform: SomePlatform,
-  options: Pick<BootedDeviceDiscoveryOptions, "includeWatchOs">,
+  options: Pick<BootedDeviceDiscoveryOptions, "includeWatchOs" | "includeAppleSimulatorPlatforms">,
 ): Record<Platform, boolean> {
   const either = platform === "either";
+  const optedIn = (family: "tvos" | "visionos") =>
+    either && (options.includeAppleSimulatorPlatforms?.includes(family) ?? false);
   return {
     android: either || platform === "android",
     ios: either || platform === "ios",
     // Only the pool's own readers ask an "either" read for watches (#14908).
     watchos: platform === "watchos" || (either && options.includeWatchOs === true),
-    tvos: platform === "tvos",
-    visionos: platform === "visionos",
+    // The pool's readers ask for these only while it tracks a device of the family.
+    tvos: platform === "tvos" || optedIn("tvos"),
+    visionos: platform === "visionos" || optedIn("visionos"),
   };
 }
 
@@ -136,11 +142,40 @@ export function appendWatchBootedDiscovery(
   }
 }
 
+/** A tvOS or visionOS listing as booted devices plus the rows `simctl` shows mid-transition. */
+function companionSimulatorSweep(
+  listed: readonly DeviceInfo[],
+  platform: "tvos" | "visionos",
+): CompanionSimulatorSweep {
+  const devices: BootedDevice[] = [];
+  const transitional: TransitionalSimulator[] = [];
+  for (const simulator of listed) {
+    if (!simulator.deviceId) {
+      continue;
+    }
+    const device = { name: simulator.name, platform, deviceId: simulator.deviceId };
+    if (simulator.isRunning) {
+      devices.push(device);
+    } else if (isTransitionalSimulatorState(simulator.state)) {
+      // A held TV or headset that is booting or shutting down is not lost (#11573).
+      transitional.push({ device, state: simulator.state });
+    }
+  }
+  return transitional.length > 0 ? { devices, transitional } : { devices };
+}
+
+/** One tvOS or visionOS sweep: booted devices, transitional rows, or why it has no answer. */
+export interface CompanionSimulatorSweep {
+  devices: BootedDevice[];
+  transitional?: TransitionalSimulator[];
+  error?: DeviceDiscoveryError;
+}
+
 /** Booted Apple TV simulators, or the typed reason the tvOS sweep has no answer. */
 export async function discoverBootedAppleTvs(
   appleTvs: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators"> | undefined,
   signal: AbortSignal | undefined,
-): Promise<{ devices: BootedDevice[]; error?: DeviceDiscoveryError }> {
+): Promise<CompanionSimulatorSweep> {
   signal?.throwIfAborted();
   if (!appleTvs) {
     return {
@@ -151,13 +186,7 @@ export async function discoverBootedAppleTvs(
   try {
     const listed = await appleTvs.listAppleTvSimulators(signal);
     signal?.throwIfAborted();
-    return {
-      devices: listed.flatMap((tv) =>
-        tv.isRunning && tv.deviceId
-          ? [{ name: tv.name, platform: "tvos" as const, deviceId: tv.deviceId }]
-          : [],
-      ),
-    };
+    return companionSimulatorSweep(listed, "tvos");
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(`tvOS simulator discovery failed: ${errorMessage(error)}`, error);
@@ -194,7 +223,7 @@ export function appendTvOsBootedDiscovery(
 export async function discoverBootedAppleVisions(
   appleVisions: Pick<AppleVisionSimulatorInventory, "listAppleVisionSimulators"> | undefined,
   signal: AbortSignal | undefined,
-): Promise<{ devices: BootedDevice[]; error?: DeviceDiscoveryError }> {
+): Promise<CompanionSimulatorSweep> {
   signal?.throwIfAborted();
   if (!appleVisions) {
     return {
@@ -205,13 +234,7 @@ export async function discoverBootedAppleVisions(
   try {
     const listed = await appleVisions.listAppleVisionSimulators(signal);
     signal?.throwIfAborted();
-    return {
-      devices: listed.flatMap((tv) =>
-        tv.isRunning && tv.deviceId
-          ? [{ name: tv.name, platform: "visionos" as const, deviceId: tv.deviceId }]
-          : [],
-      ),
-    };
+    return companionSimulatorSweep(listed, "visionos");
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(`visionOS simulator discovery failed: ${errorMessage(error)}`, error);
@@ -287,6 +310,11 @@ export async function collectBootedDiscovery(
   }
   appendTvOsBootedDiscovery(tv, result);
   appendVisionOsBootedDiscovery(vision, result);
+  for (const sweep of [tv, vision]) {
+    if (sweep?.transitional && !sweep.error) {
+      transitional.simulators = [...(transitional.simulators ?? []), ...sweep.transitional];
+    }
+  }
   if (watch) {
     appendWatchBootedDiscovery(watch, result);
   }

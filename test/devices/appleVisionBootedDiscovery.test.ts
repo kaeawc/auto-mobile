@@ -1,4 +1,6 @@
 import { bootedSweepsFor } from "../../src/devices/bootedDiscoveryAppend";
+import { transitionalCandidateIds } from "../../src/daemon/deviceLossDiscovery";
+import type { PooledDevice } from "../../src/daemon/devicePool";
 import { resolveBootedAppleVisionForCall } from "../../src/daemon/readiness/appleVisionReadiness";
 import { describe, expect, test } from "bun:test";
 import fixture from "../fixtures/ios-simctl/list-all-visionos-26-5.json";
@@ -37,6 +39,33 @@ describe("booted Apple Vision Pro discovery", () => {
     expect(result.succeededSources).toEqual(new Set(["visionos-simulator"]));
     expect(result.freshDeviceIds).toEqual(new Set([headset.udid]));
     expect(discoverySourceFor("visionos", headset.udid)).toBe("visionos-simulator");
+  });
+  test("a headset mid-transition is reported transitional, and only a held one is kept", async () => {
+    const { simctl, manager } = host();
+    const headset = simctl.listing.devices[runtimeId][0];
+    headset.state = "Shutting Down";
+    const result = await manager.getBootedDevicesDetailed("either", {
+      includeAppleSimulatorPlatforms: ["visionos"],
+    });
+    const device = { name: headset.name, platform: "visionos" as const, deviceId: headset.udid };
+    expect(result.devices.some((listed) => listed.deviceId === headset.udid)).toBe(false);
+    expect(result.transitionalSimulators).toContainEqual({ device, state: "Shutting Down" });
+    const heldRow: PooledDevice = {
+      id: headset.udid,
+      name: headset.name,
+      platform: "visionos",
+      sessionId: "held",
+      status: "busy",
+      lastUsedAt: 0,
+      assignmentCount: 1,
+      errorCount: 0,
+      incarnation: 1,
+    };
+    const pool = (sessionId: string | null) => ({
+      getAssignedDevices: () => (sessionId ? [heldRow] : []),
+    });
+    expect(transitionalCandidateIds(pool("held"), result, {})).toEqual(new Set([headset.udid]));
+    expect(transitionalCandidateIds(pool(null), result, {})).toEqual(new Set());
   });
   test("an unqualified discovery never sweeps Apple Vision Pros", () => {
     expect(bootedSweepsFor("either", {}).visionos).toBe(false);

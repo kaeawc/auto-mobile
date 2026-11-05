@@ -29,6 +29,11 @@ export interface AppleVisionProvisionRequest {
 export interface AppleVisionProvisionOptions {
   /** The device creation gate's verdict; a headset that does not exist is created only when true. */
   allowCreate: boolean;
+  /**
+   * Refuses the create when the boot that follows would be refused for capacity, so a headset is
+   * never created only to be deleted again. Adopting an existing headset never runs it.
+   */
+  assertCapacityBeforeCreate?: (signal?: AbortSignal) => Promise<void>;
   /** Runs immediately before `simctl create`, after every check passed. */
   onBeforeCreate?: () => void;
   /** Lifecycle-fenced cleanup when the listing cannot confirm the newly created headset. */
@@ -87,6 +92,8 @@ export class AppleVisionSimulatorProvisioner {
       );
     }
     options.signal?.throwIfAborted();
+    await options.assertCapacityBeforeCreate?.(options.signal);
+    options.signal?.throwIfAborted();
     options.onBeforeCreate?.();
     return { headset: await this.create(request, options), created: true };
   }
@@ -111,9 +118,14 @@ export class AppleVisionSimulatorProvisioner {
     }
   }
 
-  /** The listed headset with this UDID, else undefined; a failed listing throws. */
+  /**
+   * The listed headset with this UDID, else undefined; a failed listing throws. The listing
+   * includes template-format names, so a headset that exists is never reported absent.
+   */
   async find(udid: string, signal?: AbortSignal): Promise<ListedAppleVision | undefined> {
-    return (await this.listed(signal)).find((headset) => headset.deviceId === udid);
+    return (await this.listed(signal, { includeTemplateNames: true })).find(
+      (headset) => headset.deviceId === udid,
+    );
   }
 
   /**
@@ -192,8 +204,11 @@ export class AppleVisionSimulatorProvisioner {
     }
   }
 
-  private async listed(signal: AbortSignal | undefined): Promise<ListedAppleVision[]> {
-    return (await this.inventory.listAppleVisionSimulators(signal)).filter(
+  private async listed(
+    signal: AbortSignal | undefined,
+    options?: { includeTemplateNames?: boolean },
+  ): Promise<ListedAppleVision[]> {
+    return (await this.inventory.listAppleVisionSimulators(signal, options)).filter(
       (headset): headset is ListedAppleVision => !!headset.deviceId,
     );
   }

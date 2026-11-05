@@ -17,13 +17,8 @@ describe("systemTray default observer dependencies", () => {
   afterEach(() => resetSystemTrayDependencies());
 
   test("creates the live iOS panel source for the default observer", () => {
-    const source = { readDisplays: async () => [] };
-    const createSource = spyOn(
-      panelSource,
-      "createProductionDevicectlPanelScreenshotSource",
-    ).mockReturnValue(
-      source as ReturnType<typeof panelSource.createProductionDevicectlPanelScreenshotSource>,
-    );
+    // Calls through: constructing the production source only wires its collaborators.
+    const createSource = spyOn(panelSource, "createProductionDevicectlPanelScreenshotSource");
 
     getSystemTrayDependencies().observeScreenFactory(device);
 

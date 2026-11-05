@@ -1,3 +1,5 @@
+import { createProductionDevicectlPanelScreenshotSource } from "../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import type { DevicectlDisplayInfoSource } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models";
@@ -56,6 +58,7 @@ import {
   POSTURE_LOCK_WAIT_TIMEOUT_MS,
   PostureOperation,
   classifyIosPostureObservation,
+  devicectlConfirmsIosPanel,
   observeIosPosture,
   withWarnings,
   activePanelWarning,
@@ -95,6 +98,7 @@ export class SetPosture {
   private readonly androidHingeAngleConsole: AndroidHingeAngleConsole;
   private readonly observeFactory: (device: BootedDevice) => ObserveScreen;
   private readonly iosClientProvider: (device: BootedDevice) => IosCtrlProxy;
+  private readonly iosDisplayInfoSource: DevicectlDisplayInfoSource;
   private readonly simctl?: Pick<SimCtl, "getDeviceInfo">;
   private readonly timer: Timer;
   private readonly transitionSink: DisplayTransitionSink;
@@ -110,6 +114,8 @@ export class SetPosture {
     this.observeFactory =
       dependencies.observeFactory ?? ((target) => new RealObserveScreen(target));
     this.iosClientProvider = dependencies.iosClientProvider ?? iosCtrlProxyClientFor;
+    this.iosDisplayInfoSource =
+      dependencies.iosDisplayInfoSource ?? createProductionDevicectlPanelScreenshotSource();
     this.simctl = dependencies.simctl;
     this.timer = dependencies.timer ?? defaultTimer;
     this.transitionSink = dependencies.transitionSink ?? displayTransitions;
@@ -793,13 +799,41 @@ export class SetPosture {
       "setPosture changed the iPhone Duo hinge angle",
     );
     const expectedRole = requested === "closed" ? "cover" : "inner";
-    const observe = () =>
-      observeIosPosture(
+    const panels = this.device.displays?.panels;
+    const expectedPanel = panels?.find((panel) => panel.role === expectedRole);
+    const observe = async () => {
+      let confirmed = false;
+      const observation = await observeIosPosture(
         () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
-        this.device.displays?.panels,
+        panels,
         expectedRole,
-        { timer: this.timer, operation },
+        {
+          timer: this.timer,
+          operation,
+          confirmActivePanel: async (role) => {
+            const displays = await this.iosDisplayInfoSource.readDisplays({
+              deviceId: this.device.deviceId,
+              signal,
+            });
+            confirmed =
+              expectedPanel !== undefined && devicectlConfirmsIosPanel(displays, panels, role);
+            return confirmed;
+          },
+        },
       );
+      // Only the posture result adopts this identity. The observe tool's runner data stays unchanged.
+      return confirmed && expectedPanel
+        ? {
+            ...observation,
+            display: {
+              key: expectedPanel.key,
+              role: expectedPanel.role,
+              posture: requested,
+              generation: observation.display.generation,
+            },
+          }
+        : observation;
+    };
     const settled = await this.observeFinalPosture(requested, observe, observe, operation);
     assertCurrent();
     return settled;

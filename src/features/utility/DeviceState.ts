@@ -55,6 +55,7 @@ import type { BootedDevice } from "../../models";
 import { requireAndroidOrIosPlatform } from "../../models";
 import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
+import { readCurrentDisplayState } from "./device-state/CurrentDisplayState";
 import { writeDeviceCameraPoster } from "./DeviceCameraPoster";
 import { AdbEmulatorSensorConsole, readEmulatorSensors } from "./EmulatorSensors";
 import type { QrPosterWriter } from "../../utils/qr/QrPosterWriter";
@@ -245,6 +246,7 @@ export class DeviceState {
       };
     }
     const selected = await this.readSelectedStates(include);
+    const displays = await this.readDisplays();
     const requestedStates = Object.values(selected).filter(
       (state): state is SelectedDeviceState => state !== undefined,
     );
@@ -259,11 +261,29 @@ export class DeviceState {
       success: !failedState,
       deviceId: this.device.deviceId,
       platform,
-      ...(this.device.displays ? { displays: this.device.displays } : {}),
+      ...(displays ? { displays } : {}),
       ...selected,
       ...(unsupported.length > 0 ? { unsupported } : {}),
       ...(failedState?.error ? { error: failedState.error } : {}),
     };
+  }
+
+  /**
+   * The static inventory, plus the live posture and active panel on an Android foldable. Read on
+   * every call, never cached: a posture change (setPosture, `emu fold`) must show up in the next
+   * read (#17049).
+   */
+  private async readDisplays(): Promise<DeviceStateResult["displays"]> {
+    if (!this.device.displays) {
+      return undefined;
+    }
+    const current = await readCurrentDisplayState(
+      this.device,
+      this.adbFactory.create(this.device),
+      this.timer,
+      getAbortSignal(),
+    );
+    return { ...this.device.displays, ...(current ? { current } : {}) };
   }
 
   /**

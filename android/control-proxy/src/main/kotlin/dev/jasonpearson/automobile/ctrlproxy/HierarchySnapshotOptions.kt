@@ -12,6 +12,9 @@ data class HierarchySnapshotOptions(
   val displayId: Int? = null,
   val isCancelled: () -> Boolean = { false },
 ) {
+  // Owned by this snapshot, so concurrent requests cannot consume another display's failure.
+  internal var missingAccessibilityWindows: MissingAccessibilityWindows? = null
+
   init {
     require(maxDepth >= 0) { "maxDepth must be >= 0" }
     require(maxNodes > 0) { "maxNodes must be > 0" }

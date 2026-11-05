@@ -70,6 +70,17 @@ sealed interface WorkspaceAction {
    */
   data class RefreshDeviceSessionUuids(val sessionUuids: Map<String, String>) : WorkspaceAction
 
+  /**
+   * The daemon ended [deviceId]'s epoch [retiredUuid] and minted [successorUuid] for the same
+   * device (`device_session_ended`, e.g. a reboot that reused the serial). The column observing the
+   * retired epoch becomes a fresh column for the successor; any other column is untouched.
+   */
+  data class EndDeviceSession(
+    val deviceId: String,
+    val retiredUuid: String,
+    val successorUuid: String,
+  ) : WorkspaceAction
+
   /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */
   data class DiffTool(val tool: Tool) : WorkspaceAction
 }
@@ -98,7 +109,7 @@ sealed interface WorkspaceEffect {
 class WorkspaceViewModel(
   private val scope: CoroutineScope,
   private val controlExecutor: EmulatorControlExecutor = NoOpEmulatorControlExecutor,
-  private val screenshotLoaderRegistry: NavigationScreenshotLoaderRegistry =
+  internal val screenshotLoaderRegistry: NavigationScreenshotLoaderRegistry =
     DefaultNavigationScreenshotLoaderRegistry,
 ) {
   internal val _state = MutableStateFlow<WorkspaceUiState>(WorkspaceUiState.Empty)
@@ -109,7 +120,7 @@ class WorkspaceViewModel(
 
   // The in-flight locale request per device, so a newer selection can supersede an older one that
   // is still resolving the foreground app (see [setLocale]).
-  private val localeJobs = mutableMapOf<String, Job>()
+  internal val localeJobs = mutableMapOf<String, Job>()
 
   fun onAction(action: WorkspaceAction) {
     when (action) {
@@ -130,8 +141,9 @@ class WorkspaceViewModel(
       is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
       is WorkspaceAction.PressDeviceButton -> pressDeviceButton(action.deviceId, action.button)
       is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
-      is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
-      is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
+      is WorkspaceAction.SetLockStates,
+      is WorkspaceAction.RefreshDeviceSessionUuids,
+      is WorkspaceAction.EndDeviceSession -> applyDeviceState(action)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }
@@ -172,7 +184,7 @@ class WorkspaceViewModel(
     }
   }
 
-  private fun columnFor(deviceId: String): DeviceColumn? =
+  internal fun columnFor(deviceId: String): DeviceColumn? =
     (_state.value as? WorkspaceUiState.Content)?.columns?.firstOrNull { it.deviceId == deviceId }
 
   /** Reflect an observed lock-state snapshot onto the columns; absent devices keep their state. */
@@ -191,12 +203,18 @@ class WorkspaceViewModel(
   }
 
   private fun observe(column: DeviceColumn) {
+    val existing = columnFor(column.deviceId)
+    if (existing != null && existing.isNewEpoch(column)) {
+      LOG.debug("Device ${column.deviceId} reobserved as a new epoch; replacing its column")
+      replaceEpoch(existing, existing.nextEpoch(column))
+      focus(column.deviceId)
+      return
+    }
     _state.update { current ->
       val columns = (current as? WorkspaceUiState.Content)?.columns ?: emptyList()
       if (columns.any { it.deviceId == column.deviceId }) {
-        // A restarted emulator can keep its serial while receiving a fresh daemon-minted epoch.
-        // Preserve the pane's UI state but replace identity/device metadata so its facets dispose
-        // stale streams and reconnect with the current session UUID.
+        // Same epoch (or an older daemon that sends none): refresh identity/device metadata and
+        // keep the pane's UI state.
         LOG.debug("Device ${column.deviceId} already observed; refreshing and refocusing")
         WorkspaceUiState.Content(
           columns.map { existing ->
@@ -209,6 +227,7 @@ class WorkspaceViewModel(
                 shrunk = existing.shrunk,
                 firstPaneFractionOverride = existing.firstPaneFractionOverride,
                 orientation = existing.orientation,
+                epochGeneration = existing.epochGeneration,
               )
             }
           },

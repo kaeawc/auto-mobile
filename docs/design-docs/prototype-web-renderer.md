@@ -408,7 +408,7 @@ the host, so the page's script only switches between views it was given and neve
   component draws the shared Material 3 renderer on both. A node's `ios` namespace is read only in
   the iOS skin and its `android` namespace only in the Android one. The Android skin replaces
   nothing. The iOS skin draws `button` as the iOS renderer's SwiftUI styles at the regular control
-  size in the 17 px body style, tinted with the theme's `primary`: `filled` is a 6 px-radius tint fill
+  size in the 17 px body style (scaled by the frame's Dynamic Type size), tinted with the theme's `primary`: `filled` is a 6 px-radius tint fill
   under white text with 7x12 px padding, `tonal` the tint at 0.15 opacity under tint text,
   `elevated` that with a 1 px shadow, `outlined` a 1 px tint capsule with 8x16 px padding, `text`
   bare tint text; `ios.buttonStyle` draws `glassProminent` as a filled and `glass` as a tonal

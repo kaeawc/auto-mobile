@@ -79,6 +79,20 @@ describe("platform skins (#16531)", () => {
     expect(ios.attrs.role).toBe("button");
   });
 
+  test("the iOS body style follows the frame's Dynamic Type size", () => {
+    const large = { frame: "iphone-16", textSize: { contentSize: "large" } } as const;
+    const largest = {
+      frame: "iphone-16",
+      textSize: { contentSize: "accessibility-extra-extra-extra-large" },
+    } as const;
+    expect(rendered([button()], large, "b").style["font-size"]).toBe("17px");
+    const scaled = rendered([button()], largest, "b").style;
+    expect(Number.parseFloat(scaled["font-size"]!)).toBeGreaterThan(17);
+    expect(Number.parseFloat(scaled["line-height"]!)).toBeGreaterThan(22);
+    const label = find(rendered([slider()], largest, "s"), (el) => el.children[0] === "Volume")[0]!;
+    expect(label.style["font-size"]).toBe(scaled["font-size"]);
+  });
+
   test("each iOS button variant takes its SwiftUI style", () => {
     const styleOf = (variant: string) =>
       rendered([button({ variant })], { skin: "ios" }, "b").style;

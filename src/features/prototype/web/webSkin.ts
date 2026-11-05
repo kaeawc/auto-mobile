@@ -2,7 +2,7 @@ import { record, type Raw } from "../prototypeTemplate";
 import { defaultFillAxes, filling } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
-import { cssColor, rgbaCss } from "./webStyle";
+import { cssColor, fontPx, rgbaCss } from "./webStyle";
 
 /**
  * A platform skin: how the still draws the components whose look differs between the devices.
@@ -27,8 +27,14 @@ export function skinNamespace(node: Raw, scope: WebRenderScope): Raw | undefined
   return record(node[scope.skin ?? "android"]);
 }
 
-/** SwiftUI's body text style: 17 pt on a 22 pt line. */
-const IOS_BODY: Css = { "font-size": "17px", "line-height": "22px", "font-weight": "400" };
+/** SwiftUI's body text style: 17 pt on a 22 pt line, scaled by the frame's Dynamic Type size. */
+function iosBody(scope: WebRenderScope): Css {
+  return {
+    "font-size": fontPx(17, scope.style),
+    "line-height": fontPx(22, scope.style),
+    "font-weight": "400",
+  };
+}
 
 /** UIKit's systemBlue, the accent a SwiftUI Slider takes when nothing tints it. */
 function systemBlue(scope: WebRenderScope): string {
@@ -106,7 +112,7 @@ const iosButtonRenderer =
       "box-sizing": "border-box",
       "text-align": "center",
       gap: "6px",
-      ...IOS_BODY,
+      ...iosBody(scope),
       ...iosButtonChrome(variant, typeof glass === "string" ? glass : undefined, scope),
       ...disabled.css,
     });
@@ -194,7 +200,7 @@ const iosSliderRenderer =
     const label =
       typeof node.label === "string"
         ? [
-            el("span", { style: { ...IOS_BODY, ...(color ? { color } : {}) } }, [
+            el("span", { style: { ...iosBody(scope), ...(color ? { color } : {}) } }, [
               kit.bound(node.label, scope),
             ]),
           ]

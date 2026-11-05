@@ -13,12 +13,17 @@ export class FakeStatusBarController implements StatusBarController {
   unsupportedFields = new Set<keyof StatusBarOverrides>();
   readback: string | null = "readback";
   clearError: Error | null = null;
+  /** When set, override() records the call and then rejects with it, as a refused field would. */
+  overrideError: Error | null = null;
   /** When set, clear() waits for the signal to abort, then rejects with its reason. */
   hangClear = false;
   lastClearSignal: AbortSignal | undefined;
 
   async override(overrides: StatusBarOverrides): Promise<StatusBarApplyOutcome> {
     this.overrides.push(overrides);
+    if (this.overrideError) {
+      throw this.overrideError;
+    }
     const fields = requestedStatusBarFields(overrides);
     return {
       applied: fields.filter((field) => !this.unsupportedFields.has(field)),

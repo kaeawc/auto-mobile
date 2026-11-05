@@ -225,7 +225,7 @@ test/lint/avdManagerExecutionBoundary.integration.test.ts | safe | source scan v
 test/lint/devicectlExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; devicectl calls are string literals L132
 test/lint/hostDefaultsExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string literals L63
 test/lint/macOsOnlyTestClassification.integration.test.ts | safe | parses test and src files via readFileSync and the TypeScript API; spawns nothing L15
-test/lint/oxlintConfigScoping.integration.test.ts | unsafe | Bun.spawnSync runs one real oxlint over fixtures in the shared repo scratch/ tree L58
+test/lint/oxlintConfigScoping.integration.test.ts | unsafe | Bun.spawnSync runs one real oxlint over fixtures in the shared repo scratch/ tree (skipped on win32) L67
 test/lint/sdkManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; sdkmanager calls are string literals L174
 test/lint/turboTestInputsCoverNativeSources.integration.test.ts | safe | reads turbo.json and repo sources via readFileSync L90
 test/lint/webpExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string literals L69

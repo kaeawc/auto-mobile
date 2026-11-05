@@ -480,6 +480,39 @@ class MultiplexedObservationSocketClientTest {
       mux.close()
     }
 
+  @Test
+  fun `a device session that ends or is superseded reaches only its own device`() = runBlocking {
+    val daemon = Daemon()
+    val mux = client(daemon)
+    val (a, b) = connectDevices(mux, 2)
+    val socket = daemon.nextSocket()
+    val (subA, subB) = subscribeAll(socket, listOf(a, b))
+    a.connectionState.awaitFirst { it is ConnectionState.Connected }
+
+    socket.send(
+      """{"type":"device_session_ended","subscriptionId":"$subA","deviceId":"emulator-0","deviceSessionUuid":"uuid-0","successorSessionUuid":"uuid-0b","timestamp":5}""",
+    )
+    assertEquals(
+      DeviceStreamEvent.DeviceSessionSuperseded("emulator-0", "uuid-0", "uuid-0b", 5L),
+      a.deviceEvents.awaitFirst(),
+    )
+    assertTrue(b.deviceEvents.replayCache.isEmpty())
+
+    // No successor: the device left for good, and only the device it names hears about it.
+    socket.send(
+      """{"type":"device_session_ended","subscriptionId":"$subB","deviceId":"emulator-1","deviceSessionUuid":"uuid-1","timestamp":6}""",
+    )
+    assertEquals(
+      DeviceStreamEvent.DeviceSessionEnded("emulator-1", "uuid-1", 6L),
+      b.deviceEvents.awaitFirst(),
+    )
+    assertEquals(
+      listOf(DeviceStreamEvent.DeviceSessionSuperseded("emulator-0", "uuid-0", "uuid-0b", 5L)),
+      a.deviceEvents.replayCache,
+    )
+    mux.close()
+  }
+
   companion object {
     private const val TIMEOUT_SECONDS = 5L
     private const val CLIENT_THREADS = 4

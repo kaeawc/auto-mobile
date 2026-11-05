@@ -69,6 +69,36 @@ class ReconnectingObservationStreamTest {
     }
 
   @Test
+  fun `forwards ended events for every device without reconnecting`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    val forwarded = CopyOnWriteArrayList<DeviceStreamEvent.DeviceSessionEnded>()
+    val event = DeviceStreamEvent.DeviceSessionEnded("dev-1", "epoch-a", 123L)
+    setContent {
+      CompositionLocalProvider(LocalDeviceSessionEndedHandler provides { forwarded += it }) {
+        rememberReconnectingObservationState(
+          dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+            deviceId = "dev-1",
+            deviceSessionUuid = "epoch-a",
+            streamFactory = { fake },
+            backoffDelay = {},
+            socketAvailable = { true },
+          ),
+        )
+      }
+    }
+    waitForIdle()
+
+    // An all-device stream on one pane is how another pane hears its device leave.
+    val otherDevice = event.copy(deviceId = "other-device")
+    runOnIdle { assertTrue(fake.emitDeviceEvent(otherDevice)) }
+    waitForIdle()
+    runOnIdle { assertTrue(fake.emitDeviceEvent(event)) }
+    waitForIdle()
+    assertEquals(listOf(otherDevice, event), forwarded.toList())
+    assertEquals(1, fake.connectCallCount)
+  }
+
+  @Test
   fun `generation advances when a fast reconnect conflates the disconnected state`() =
     runComposeUiTest {
       val fake = FakeObservationStream()

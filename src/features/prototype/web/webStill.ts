@@ -22,6 +22,7 @@ import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import type { WebSkinId } from "./webSkin";
 import type { WebStackScreens } from "./webStack";
 import { localeLayoutDirection, stillLocale } from "./webLocale";
 import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
@@ -32,6 +33,8 @@ export interface PrototypeStillOptions {
   /** A device frame id; defaults to the platform's default frame. */
   readonly frame?: string;
   readonly platform?: "android" | "ios";
+  /** The platform skin components draw in; defaults to the frame's platform. */
+  readonly skin?: WebSkinId;
   readonly orientation?: WebOrientation;
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
@@ -219,6 +222,12 @@ function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderS
   };
 }
 
+/** An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's. */
+function colorMode(spec: Raw, options: PrototypeStillOptions): PrototypeColorMode {
+  const authored = record(spec.theme)?.mode;
+  return authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
+}
+
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
@@ -226,11 +235,11 @@ function stillScope(
   locale: string,
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
-  // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
-  const authored = record(spec.theme)?.mode;
   const size = screenSize(frame, options.orientation ?? "portrait");
   const screenDp = { widthDp: size.width, heightDp: size.height };
-  const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
+  const mode = colorMode(spec, options);
+  // The skin decides every look the devices draw differently, glass included.
+  const skin = options.skin ?? frame.platform;
   const textScale = stillTextScale(frame.platform, options.textSize);
   return {
     style: {
@@ -239,7 +248,7 @@ function stillScope(
       parentAxis: COLUMN,
       typography: themeTypography(expanded),
       ...(textScale ? { textScale } : {}),
-      platform: frame.platform,
+      platform: skin,
       ...(windowDirection(spec, locale) === "rtl" ? { rtl: true } : {}),
     },
     condition: {
@@ -254,6 +263,7 @@ function stillScope(
     instances: [],
     inBox: false,
     unsupported: [],
+    skin,
     ...glyphScope(options, frame),
     screenWidth: size.width,
     screenHeight: size.height,

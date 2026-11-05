@@ -9,6 +9,8 @@ expressions, URLs, image bytes or migration instructions.
 
 ## Owner decisions
 
+- 2026-10-31 (#14180): `image` may take a `url`, including a data-bound one (`{item.avatarUrl}`). A URL image uses the same egress policy as `request` in its runtime: the overlay as `request` today, ProtoViewer behind its network switch and filter (image loads count as network), and the disposable app as decided in #14184 / #14289. Only https is allowed outside dev flavors; cleartext is allowed only on loopback through `adb reverse` for fixtures. An optional `via: "host"` lets the host fetch a static URL at show/patch time and upload it as a content-hash asset, so the device makes no network call. Image fetches never send cookies or referrers. The URL can be seen by the host but never appears in accessibility text, `observe` or events. Not implemented yet: `image` currently accepts only `asset`.
+
 - 2026-10-27: `style.surface: "glass"` requires real glass and `prototype_glass_v1`: iOS 26+ Liquid Glass, and Android API 31+ real backdrop blur when its renderer is implemented. iOS 17–25 and Android below API 31 refuse glass through missing capability advertisement. There is no simulated translucent fill, ultraThinMaterial substitute, or fallback capability. Android rendering and device verification remain owed by the Android renderer slice.
 
 - 2026-10-26: Android-only custom AGSL shaders require `prototype_custom_shaders_v1` and the host opt-in `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` (off by default). Source assets use `application/vnd.automobile.agsl`, valid UTF-8, at most 16 KiB (16384 bytes), and at most 16 scalar `uniform float name;` declarations. The only other permitted uniform is one optional `uniform shader content;`: only the node's own rendered content may be sampled. Comments (`//` and `/* */`) are stripped to separators before token scanning. Code tokens must be ASCII; no preprocessor directives, strings, escapes, qualifiers, arrays, initializers, comma declarations, duplicate names, or other uniform types/samplers are accepted. `content`, `main`, GLSL/AGSL reserved words and names starting with `sk_` or `gl_` are reserved uniform names. A leading UTF-8 BOM is rejected. `style.shader: {asset, uniforms?}` supplies at most 16 declared float names matching `[A-Za-z_][A-Za-z0-9_]*`, with finite values in [-1000000, 1000000]; the host cross-checks available source assets. The Android runtime must compile on `put_prototype_asset` before retaining source and cap returned errors at 2 KiB of UTF-8. Execution fails closed under the preset frame-budget guard. iOS agents and ProtoViewer bundle import/export explicitly refuse both this MIME type and `style.shader`.
@@ -2122,7 +2124,15 @@ window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) reque
 `statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
 prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
-best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+best effort, and the iOS Simulator ignores `brightness`. CtrlProxy advertises the capability and applies
+`FLAG_KEEP_SCREEN_ON`, window-local `screenBrightness` (`system` uses `BRIGHTNESS_OVERRIDE_NONE`) and
+`screenOrientation`; `unlocked` and omission use `SCREEN_ORIENTATION_UNSPECIFIED`. Replacement rebuilds
+these values from the new spec; removal releases them, and an animated exit resets them before waiting
+for removal. Failed replacements restore the previous params. Inspect entries add `orientation` for the
+requested orientation and `statusBar: "unsupported"` for an authored status bar style. Hierarchy window
+entries add the same values as `prototypeOrientation` and `prototypeStatusBar`; omitted controls omit
+these fields. Orientation reports a request, not proof that the device rotated. Embedded Android does
+not advertise these overlay controls.
 
 **Prototype layout direction.** Optional `window.layoutDirection: "ltr" | "rtl"` requires
 `prototype_layout_direction_v1`. Omission inherits the host direction. The iOS renderer overrides
@@ -2132,8 +2142,10 @@ Android does not advertise this capability, so the host refuses specs that set i
 **Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
 `prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
 prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`
-`hide(ime())`; iOS `endEditing(true)`). With no keyboard up it does nothing. No production runtime advertises
-the capability yet.
+`hide(ime())`; iOS `endEditing(true)`). CtrlProxy advertises the capability and dispatches the action to
+the owning surface's host on main, hiding the IME before clearing its view focus. Without a shown
+window it does nothing; navigation focusability is retained. The embedded Android renderer does not
+advertise it.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
@@ -2371,7 +2383,13 @@ importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped id
 most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
 256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
 must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
-exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime. The bounds are named
+contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`, `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state
+and channel rules repeat. The runtime enforces the ones that apply after placeholders resolve: a reply of
+at most 1 KiB, a resolved notification of at most 4 KiB, and at most 4 updates per second per notification,
+coalesced to the latest. Title and body limits count characters, while the 4 KiB total counts UTF-8 bytes of
+the resolved record and is checked on its own: ASCII text at every per-field limit fits, but multibyte text
+at those limits can exceed it.
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
 apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
@@ -2511,9 +2529,20 @@ Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote
 `cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
 app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
 `media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
-`unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
-`sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
-`receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
+`unsupported`. Event data is a closed object (unknown keys are refused):
+
+| event             | data                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `routesChanged`   | `state` (as `/platform/cast/state`), `routeCount` (integer >= 0)                                                   |
+| `sessionStarting` | `player` (1-64 chars), `protocol`, `deviceName` (0-256 chars)                                                      |
+| `sessionStarted`  | as `sessionStarting`, plus `positionMs` (integer >= 0, the remote position)                                        |
+| `sessionEnded`    | as `sessionStarted`; `positionMs` is where local playback resumes                                                  |
+| `sessionFailed`   | `player`, `reason` (`media_not_castable`, `play_services_unavailable`, `network`, `receiver`), optional `protocol` |
+| `remoteVolume`    | `volume` (0-1)                                                                                                     |
+
+The host decodes them with `prototypeCastEventOf` (truncated data does not decode); Kotlin
+`PrototypeCastEvents` and Swift `PrototypeCastEvents` are the twins, and all three replay
+`test/fixtures/prototype-spec/cast/events.json`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
 `connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
 (the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
 reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises

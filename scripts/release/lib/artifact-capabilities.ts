@@ -74,10 +74,6 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
     prototype_motion_v3: "Expressive, press and layout animate are Android only until #14684",
     prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
-    prototype_hide_keyboard_v1:
-      "hideKeyboard has a validated contract only; the iOS agent does not run it yet (#14320)",
-    prototype_platform_window_controls_v1:
-      "Window controls have a validated contract only; the iOS agent does not apply them yet (#14320)",
     prototype_motion_v2:
       "iOS agent does not advertise it; the host refuses motion v2 features against it",
     prototype_network_upload_v1:
@@ -320,6 +316,22 @@ export function findStaleExemptions(
       .sort()
       .map((capability) => ({ artifact, capability }));
   });
+}
+
+/**
+ * Splits a pinned release's gaps into those the checked-out sources now advertise (the next
+ * release ships them; the host fails closed against the pinned artifact meanwhile, as for a gate
+ * added after the pin) and those still missing, which stay failures. A gap is excused only by the
+ * working tree advertising it, so removing an exemption without implementing the capability still
+ * fails here and in the candidate check.
+ */
+export function splitImplementedSince(
+  gaps: CapabilityGap[],
+  candidate: ArtifactCapabilities,
+): { implemented: CapabilityGap[]; missing: CapabilityGap[] } {
+  const implemented = gaps.filter((gap) => candidate[gap.artifact].includes(gap.capability));
+  const missing = gaps.filter((gap) => !candidate[gap.artifact].includes(gap.capability));
+  return { implemented, missing };
 }
 
 /** `label` names what was checked, e.g. "Pinned release 0.0.88" or "Release candidate". */

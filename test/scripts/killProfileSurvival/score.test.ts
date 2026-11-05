@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { SURVIVAL_EVENT_IDS } from "../../../src/features/utility/KillProfileExpectedScores";
 import { FIXTURE_PACKAGE, scoringWindow } from "../../../scripts/kill-profile-survival/matrix";
@@ -5,6 +6,8 @@ import { runHarness, type HarnessDeps } from "../../../scripts/kill-profile-surv
 import { AvdGuardedAdb, parseCli } from "../../../scripts/kill-profile-survival/run";
 import { KILL_PROFILE_IDS } from "../../../src/features/utility/KillProfiles";
 import type { DeviceClockAdapter } from "../../../src/features/utility/DeviceClock";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
@@ -119,6 +122,34 @@ describe("survival scoring", () => {
   });
 });
 
+// The capture holds only the runtime section; supply the package context dumpsys normally has.
+const notificationDump = (state: "granted" | "revoked") =>
+  `Packages:\n  Package [${FIXTURE_PACKAGE}] (test):\n    User 0: installed=true\n${readFileSync(
+    new URL(
+      `../../fixtures/android-notification-enabled/api35-deskclock-${state}-dumpsys-package.txt`,
+      import.meta.url,
+    ),
+    "utf8",
+  )}`;
+
+// notifications-off reads the POST_NOTIFICATIONS grant, revokes it, verifies the revoke and
+// restores the grant (#17106), so the fake device keeps that one permission's state.
+class NotificationPermissionAdb extends FakeAdbExecutor {
+  private notifications: "granted" | "revoked" = "granted";
+
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
+    const result = await super.executeCommand(command, options);
+    if (/pm revoke .*POST_NOTIFICATIONS/.test(command)) {
+      this.notifications = "revoked";
+    } else if (/pm grant .*POST_NOTIFICATIONS/.test(command)) {
+      this.notifications = "granted";
+    } else if (command.startsWith("shell dumpsys package ")) {
+      return createExecResult(notificationDump(this.notifications), "");
+    }
+    return result;
+  }
+}
+
 function harnessFakes() {
   const fakeTimer = new FakeTimer();
   fakeTimer.setCurrentTime(START);
@@ -147,7 +178,7 @@ function harnessFakes() {
       anchor = fakeTimer.now();
     },
   };
-  const shell = new FakeAdbExecutor();
+  const shell = new NotificationPermissionAdb();
   shell.setAndroidApiLevel(37);
   shell.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("37", ""));
   shell.setCommandResponse(

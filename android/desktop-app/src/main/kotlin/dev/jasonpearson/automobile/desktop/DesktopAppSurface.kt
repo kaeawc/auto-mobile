@@ -40,7 +40,6 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShellOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
-import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.isolatedBehindOverlay
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.BasicsChecklistOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
@@ -48,6 +47,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerOpt
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RecordDeviceObserved
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberDaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
+import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceStatus
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import kotlinx.coroutines.launch
 
@@ -294,10 +294,7 @@ internal fun DesktopWorkspaceShell(
 ) {
   with(presentation) {
     with(ui) {
-      val workspaceStatus =
-        remember(daemonConnectionState) {
-          deriveWorkspaceStatus(daemon = daemonConnectionState, devices = emptyList())
-        }
+      val workspaceStatus = rememberWorkspaceStatus(daemonConnectionState, workspaceState)
 
       WorkspaceShell(
         state = workspaceState,
@@ -389,12 +386,8 @@ internal fun DesktopWorkspaceContent(presentation: DesktopAppPresentation, ui: D
         // refocus reconnects them via the existing auto-reconnect machinery.
         val streamingEnabled = LocalWindowInfo.current.isWindowFocused
 
-        // Roll live connection health up into the top-bar status dot. The daemon signal is
-        // polled here; per-device stream health is not yet fed in — device streams are
-        // facet-owned and carry screenshots, so opening extra status-only streams would be
-        // wasteful. deriveWorkspaceStatus already handles the device dimension, so it can
-        // be
-        // fed once a central per-device stream registry exists (follow-up).
+        // Roll live connection health up into the top-bar status dot: the polled daemon
+        // signal, the stream hub's per-device health, and failing diagnostic checks.
         DesktopWorkspaceShell(presentation, ui, streamingEnabled)
         if (paletteOpen) {
           CommandPalette(

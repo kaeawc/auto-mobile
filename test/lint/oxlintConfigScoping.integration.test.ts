@@ -20,6 +20,15 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // generated config copy, in ONE oxlint invocation over every fixture. Oxlint
 // resolves override globs from the project root, so an OS temp dir does not
 // work. Fixtures are cleaned in afterAll and the startup sweep.
+//
+// That end-to-end lint does not run on Windows. Every launch shape tried there
+// (one spawn per case, `--print-config`, one batched spawn) kept hanging with
+// no output until SIGKILL on both attempts, while the control `bun --version`
+// launch took ~7 ms, so the runner was not starved (#9702, #9763, #12346,
+// #16415, #16983). No Windows CI job runs oxlint otherwise: lint is gated on
+// Ubuntu (#11577). The same per-fixture expectations are instead resolved
+// from .oxlintrc.json with Bun.Glob on every platform, Windows included, so a
+// glob or override-order change still fails everywhere.
 
 const ROOT = join(import.meta.dir, "..", "..");
 // A fixture lint normally takes well under a second, but it can be delayed by
@@ -108,6 +117,7 @@ interface RawOxlintConfig {
   jsPlugins: string[];
   ignorePatterns: string[];
   overrides: ResolvedOverride[];
+  rules?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -285,6 +295,43 @@ const FIXTURES: Record<string, string> = {
   "raw-timer.ts": "setTimeout(() => {}, 1);\n",
 };
 
+// Which scoped rule must (and must not) fire on each fixture. Both the portable
+// glob resolution and the end-to-end oxlint lint assert this table.
+const FIXTURE_EXPECTATIONS: Array<{ path: string; rule: string; fires: boolean }> = [
+  { path: "src/accumulator.ts", rule: "auto-mobile/no-accumulator-foreach", fires: true },
+  { path: "test/accumulator.ts", rule: "auto-mobile/no-accumulator-foreach", fires: false },
+  { path: "src/bare-expect.ts", rule: "auto-mobile/no-bare-expect", fires: false },
+  { path: "test/bare-expect.ts", rule: "auto-mobile/no-bare-expect", fires: true },
+  { path: "test/timeout.test.ts", rule: "auto-mobile/stress-explicit-timeout", fires: false },
+  { path: "test/stress/timeout.test.ts", rule: "auto-mobile/stress-explicit-timeout", fires: true },
+  { path: "raw-timer.ts", rule: "auto-mobile/no-raw-timer", fires: true },
+];
+
+// Resolve a rule's effective printed severity for a project-relative path the
+// way oxlint layers config: top-level `rules`, then every override whose
+// `files` glob matches, in order, with the last match winning.
+function effectiveSeverity(
+  raw: Pick<RawOxlintConfig, "overrides" | "rules">,
+  rule: string,
+  path: string,
+): unknown {
+  let setting = raw.rules?.[rule];
+  for (const override of raw.overrides) {
+    if (
+      override.rules &&
+      Object.prototype.hasOwnProperty.call(override.rules, rule) &&
+      override.files.some((pattern) => new Bun.Glob(pattern).match(path))
+    ) {
+      setting = override.rules[rule];
+    }
+  }
+  if (setting === undefined) {
+    return "allow";
+  }
+  const printed = printedRuleSetting(setting);
+  return Array.isArray(printed) ? printed[0] : printed;
+}
+
 describe(".oxlintrc.json rule scoping (as oxlint --print-config prints it)", () => {
   test("catch-convention is scoped to src/**; casts are hard errors in src and test", () => {
     expectScopedRule("auto-mobile/catch-convention", ["src/**/*.ts"], "deny");
@@ -335,66 +382,107 @@ describe(".oxlintrc.json rule scoping (as oxlint --print-config prints it)", () 
   });
 });
 
-describe("oxlint applies the configured globs to linted fixtures", () => {
-  let lintedFiles = 0;
-  let codes = new Map<string, string[]>();
-  let exitCode: number | null = null;
-
-  beforeAll(async () => {
-    const scratchDirectory = await makeScratchDirectory();
-    await mkdir(join(scratchDirectory, "src"));
-    await mkdir(join(scratchDirectory, "test", "stress"), { recursive: true });
-    await writeFile(join(scratchDirectory, ".oxlintrc.json"), JSON.stringify(fixtureConfig));
-    await Promise.all(
-      Object.entries(FIXTURES).map(([path, contents]) =>
-        writeFile(join(scratchDirectory, path), contents),
-      ),
+describe(".oxlintrc.json globs resolve per fixture on every platform", () => {
+  test("each fixture covers exactly one expectation", () => {
+    expect(FIXTURE_EXPECTATIONS.map(({ path }) => path).sort()).toEqual(
+      Object.keys(FIXTURES).sort(),
     );
-    // One process lints every fixture, so a single retried spawn bounds the
-    // whole check instead of one timeout-prone launch per case.
-    const result = runOxlint(
-      [
-        "--config",
-        join(scratchDirectory, ".oxlintrc.json"),
-        "--format",
-        "json",
-        ...Object.keys(FIXTURES).map((path) => `./${path}`),
+  });
+
+  for (const { path, rule, fires } of FIXTURE_EXPECTATIONS) {
+    test(`${rule} ${fires ? "applies to" : "does not apply to"} ${path}`, () => {
+      expect(effectiveSeverity(fixtureConfig, rule, path)).toBe(fires ? "deny" : "allow");
+    });
+  }
+
+  test("an unmatched path keeps the top-level setting and the last matching override wins", () => {
+    const raw = {
+      rules: { r: "error" },
+      overrides: [
+        { files: ["src/**/*.ts"], rules: { r: "off" } },
+        { files: ["src/keep/**/*.ts"], rules: { r: ["warn", { max: 1 }] } },
+        { files: ["src/**/*.ts"], rules: { other: "error" } },
       ],
-      true,
-      undefined,
-      undefined,
-      scratchDirectory,
-    );
-    exitCode = result.exitCode;
-    ({ lintedFiles, codes } = diagnosticCodesByFile(result.stdout.toString()));
-  }, FIXTURE_LINT_HOOK_TIMEOUT_MS);
-
-  test("every fixture is linted in the one invocation", () => {
-    expect(lintedFiles).toBe(Object.keys(FIXTURES).length);
-    expect(exitCode).toBe(1);
-  });
-
-  test("no-accumulator-foreach fires in src/** but not test/**", () => {
-    expect(codes.get("src/accumulator.ts")).toContain("auto-mobile(no-accumulator-foreach)");
-    expect(codes.get("test/accumulator.ts") ?? []).toEqual([]);
-  });
-
-  test("no-bare-expect fires in test/** but not src/**", () => {
-    expect(codes.get("src/bare-expect.ts") ?? []).toEqual([]);
-    expect(codes.get("test/bare-expect.ts")).toContain("auto-mobile(no-bare-expect)");
-  });
-
-  test("stress-explicit-timeout fires in test/stress/** but not elsewhere in test/**", () => {
-    expect(codes.get("test/timeout.test.ts") ?? []).toEqual([]);
-    expect(codes.get("test/stress/timeout.test.ts")).toContain(
-      "auto-mobile(stress-explicit-timeout)",
-    );
-  });
-
-  test("the raw-timer guard is active outside its SystemTimer.ts exemption", () => {
-    expect(codes.get("raw-timer.ts")).toContain("auto-mobile(no-raw-timer)");
+    };
+    expect(effectiveSeverity(raw, "r", "test/a.ts")).toBe("deny");
+    expect(effectiveSeverity(raw, "r", "src/a.ts")).toBe("allow");
+    expect(effectiveSeverity(raw, "r", "src/keep/a.ts")).toBe("warn");
+    expect(effectiveSeverity(raw, "missing", "src/a.ts")).toBe("allow");
   });
 });
+
+// Skipped on Windows only: see the header comment for why oxlint is not
+// launched there and which portable suite covers the same expectations.
+describe.skipIf(process.platform === "win32")(
+  "oxlint applies the configured globs to linted fixtures",
+  () => {
+    let lintedFiles = 0;
+    let codes = new Map<string, string[]>();
+    let exitCode: number | null = null;
+
+    beforeAll(async () => {
+      const scratchDirectory = await makeScratchDirectory();
+      await mkdir(join(scratchDirectory, "src"));
+      await mkdir(join(scratchDirectory, "test", "stress"), { recursive: true });
+      await writeFile(join(scratchDirectory, ".oxlintrc.json"), JSON.stringify(fixtureConfig));
+      await Promise.all(
+        Object.entries(FIXTURES).map(([path, contents]) =>
+          writeFile(join(scratchDirectory, path), contents),
+        ),
+      );
+      // One process lints every fixture, so a single retried spawn bounds the
+      // whole check instead of one timeout-prone launch per case.
+      const result = runOxlint(
+        [
+          "--config",
+          join(scratchDirectory, ".oxlintrc.json"),
+          "--format",
+          "json",
+          ...Object.keys(FIXTURES).map((path) => `./${path}`),
+        ],
+        true,
+        undefined,
+        undefined,
+        scratchDirectory,
+      );
+      exitCode = result.exitCode;
+      ({ lintedFiles, codes } = diagnosticCodesByFile(result.stdout.toString()));
+    }, FIXTURE_LINT_HOOK_TIMEOUT_MS);
+
+    test("every fixture is linted in the one invocation", () => {
+      expect(lintedFiles).toBe(Object.keys(FIXTURES).length);
+      expect(exitCode).toBe(1);
+    });
+
+    test("no-accumulator-foreach fires in src/** but not test/**", () => {
+      expect(codes.get("src/accumulator.ts")).toContain("auto-mobile(no-accumulator-foreach)");
+      expect(codes.get("test/accumulator.ts") ?? []).toEqual([]);
+    });
+
+    test("no-bare-expect fires in test/** but not src/**", () => {
+      expect(codes.get("src/bare-expect.ts") ?? []).toEqual([]);
+      expect(codes.get("test/bare-expect.ts")).toContain("auto-mobile(no-bare-expect)");
+    });
+
+    test("stress-explicit-timeout fires in test/stress/** but not elsewhere in test/**", () => {
+      expect(codes.get("test/timeout.test.ts") ?? []).toEqual([]);
+      expect(codes.get("test/stress/timeout.test.ts")).toContain(
+        "auto-mobile(stress-explicit-timeout)",
+      );
+    });
+
+    test("the raw-timer guard is active outside its SystemTimer.ts exemption", () => {
+      expect(codes.get("raw-timer.ts")).toContain("auto-mobile(no-raw-timer)");
+    });
+
+    test("oxlint's diagnostics agree with the portable glob resolution for every fixture", () => {
+      for (const { path, rule, fires } of FIXTURE_EXPECTATIONS) {
+        const code = rule.replace("/", "(") + ")";
+        expect(codes.get(path)?.includes(code) ?? false, `${code} on ${path}`).toBe(fires);
+      }
+    });
+  },
+);
 
 describe("config normalization and fixture report parsing", () => {
   test("severities and options normalize the way oxlint --print-config prints them", () => {

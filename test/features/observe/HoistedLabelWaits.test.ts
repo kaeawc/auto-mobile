@@ -193,3 +193,118 @@ describe("visible equivalents of hoisted text still match (#17007)", () => {
     expect(disappear(resolver, { text: "7:00 Alarm" })(observation).matched).toBe(false);
   });
 });
+
+describe("elementId + text waits use the text narrowing's substring rule (#17026)", () => {
+  /** A clickable `alarm` row reading "Alarm Clock" with an unrelated "7:00" child at `childTop`. */
+  const alarmRow = (childTop: number) =>
+    screenWith([
+      {
+        ...rowWithChild("Alarm Clock", [0, 900], "7:00", childTop),
+        "resource-id": "alarm",
+      },
+    ]);
+  const selector = { elementId: "alarm", text: "Alarm" };
+
+  test("a substring of the row's own text matches while an unrelated child is off screen", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(alarmRow(850)).matched).toBe(true);
+    expect(disappear(resolver, selector)(alarmRow(850)).matched).toBe(false);
+  });
+
+  test("the answer does not depend on where the unrelated child sits", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(alarmRow(850)).matched).toBe(
+      appear(resolver, selector)(alarmRow(700)).matched,
+    );
+  });
+});
+
+describe("whitespace-variant contributors to the folded label (#17026)", () => {
+  /** A " Alarm" row with an off-screen "7:00 " child first and a "7:00" child at `visibleTop`. */
+  const alarmRow = (visibleTop: number) =>
+    screenWith([
+      {
+        text: " Alarm",
+        clickable: "true",
+        bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        node: [
+          { text: "7:00 ", bounds: { left: 0, top: -90, right: 100, bottom: -50 } },
+          {
+            text: "7:00",
+            bounds: { left: 0, top: visibleTop, right: 100, bottom: visibleTop + 40 },
+          },
+        ],
+      },
+    ]);
+
+  test("a visible equivalent contributor supplies the folded part", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "7:00 Alarm" })(alarmRow(20)).matched).toBe(true);
+    expect(disappear(resolver, { text: "7:00 Alarm" })(alarmRow(20)).matched).toBe(false);
+  });
+
+  test("the composite label is still refused when every equivalent contributor is off screen", () => {
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, { text: "7:00 Alarm" })(alarmRow(850)).matched).toBe(false);
+    expect(disappear(resolver, { text: "7:00 Alarm" })(alarmRow(850)).matched).toBe(true);
+  });
+});
+
+describe("regex waits keep whitespace when judging the folded part (#17026)", () => {
+  test("a visible part that differs in whitespace does not back a whitespace-sensitive regex", () => {
+    const observation = screenWith([
+      {
+        text: " Alarm",
+        clickable: "true",
+        bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        node: [
+          { text: "7:00 ", bounds: { left: 0, top: -90, right: 100, bottom: -50 } },
+          { text: "7:00", bounds: { left: 0, top: 20, right: 100, bottom: 60 } },
+        ],
+      },
+    ]);
+    const selector = { text: "^7:00 {2}Alarm$", match: "regex" as const };
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(observation).matched).toBe(false);
+    expect(disappear(resolver, selector)(observation).matched).toBe(true);
+  });
+});
+
+describe("case-insensitive regex waits judge the folded part with the regex engine's case folding (#17044)", () => {
+  /** A " Alarm" row whose folded "K" part is off screen, with a visible `visibleText` child. */
+  const kelvinRow = (visibleText: string) =>
+    screenWith([
+      {
+        text: " Alarm",
+        clickable: "true",
+        bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        node: [
+          { text: "K", bounds: { left: 0, top: -90, right: 100, bottom: -50 } },
+          { text: visibleText, bounds: { left: 0, top: 20, right: 100, bottom: 60 } },
+        ],
+      },
+    ]);
+  const selector = { text: "^K Alarm$", match: "regex" as const };
+
+  test("a visible part that only lowercases to the folded part does not back it", () => {
+    // "K" (KELVIN SIGN) lowercases to "k", but non-Unicode /i does not fold it to "K".
+    const observation = kelvinRow("K");
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(observation).matched).toBe(false);
+    expect(disappear(resolver, selector)(observation).matched).toBe(true);
+  });
+
+  test("a visible part that /i folds to the folded part still backs it", () => {
+    const observation = kelvinRow("k");
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(observation).matched).toBe(true);
+    expect(disappear(resolver, selector)(observation).matched).toBe(false);
+  });
+});

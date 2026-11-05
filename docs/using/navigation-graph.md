@@ -50,8 +50,9 @@ Launch the app first, then call `explore`:
 ```
 
 `explore` taps and swipes through the app until it reaches a limit or runs out
-of new things to try. It interacts with the device, so run it on a test device
-and test account.
+of new things to try. On an Android TV it moves D-pad focus to an element and
+selects it instead, recorded as `focusNavigate` with `select: true`. It interacts
+with the device, so run it on a test device and test account.
 
 | Parameter         | Default    | Meaning                                                                                                |
 | ----------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
@@ -118,7 +119,8 @@ lacks.
 
 `navigateTo` finds the shortest known path from the current screen and replays
 the recorded action for each step, checking that each step lands on the
-expected screen.
+expected screen. On an Android TV a recorded `tapOn` of an element id or text is
+replayed as D-pad focus moves and select.
 
 | Field           | Meaning                                                             |
 | --------------- | ------------------------------------------------------------------- |

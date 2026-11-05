@@ -97,8 +97,13 @@ appears in `listDevices` and can be asked for in a device `requires` clause or a
 ## Navigating a TV app
 
 TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
-`sendKeys` with `enter` to activate the focused item.
+`sendKeys` with `enter` to activate the focused item, or pass `select: true` to `focusNavigate` to
+press `enter` once focus lands; the result then reports `selected: true`.
 `pressButton` handles back and home.
+
+`explore` walks a TV app the same way: it moves focus to each element and selects it, recording the
+screens and transitions in the navigation graph. `navigateTo` replays those steps with D-pad moves.
+See [Navigation graph](navigation-graph.md).
 
 `focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
 on a child view of the focused row counts. A large focused container that holds the target also

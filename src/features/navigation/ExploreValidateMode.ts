@@ -263,7 +263,7 @@ type TargetDescriptors = { descriptors: TargetDescriptor[] } | { reason: string 
 
 const MIN_CONFIDENCE = 0.6;
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
@@ -302,6 +302,13 @@ function interactionSelector(
   if (toolName === "tapOn") {
     // Public tapOn nests the target in `selector`; Explore's own recording is flat.
     return asRecord(args.selector) ?? args;
+  }
+  if (toolName === "focusNavigate") {
+    // Explore's D-pad select on a TV (#16737) names its target in `until`.
+    const until = asRecord(args.until);
+    return until
+      ? { text: until.text ?? until.contentDesc, elementId: until.resourceId }
+      : undefined;
   }
   return toolName === "swipeOn" ? innermostContainer(args) : undefined;
 }

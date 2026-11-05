@@ -545,6 +545,24 @@ describe("ExploreValidateMode", () => {
       expect(result?.confidence).toBe(0.9);
     });
 
+    test("targets the element a D-pad focusNavigate select named", () => {
+      const target = openSettings();
+      const byId = interactionEdge("focusNavigate", {
+        until: { resourceId: "com.test:id/open_settings" },
+        select: true,
+      });
+      const byDescription = interactionEdge("focusNavigate", {
+        until: { contentDesc: "Open settings" },
+        select: true,
+      });
+
+      expect(findElementMatchingEdge([homeTab(), target], byId)?.element).toBe(target);
+      expect(findElementMatchingEdge([homeTab(), target], byDescription)?.element).toBe(target);
+      expect(resolveEdgeTarget([target], interactionEdge("focusNavigate", {}))).toMatchObject({
+        status: "not-validatable",
+      });
+    });
+
     test("never taps the selected tab when the recorded target is absent", () => {
       const edge = interactionEdge(
         "tapOn",

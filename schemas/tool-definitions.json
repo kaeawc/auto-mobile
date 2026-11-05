@@ -6538,7 +6538,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph",
+    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9325,7 +9325,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). Activate the result with sendKeys key enter.",
+    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused and reports `selected`; otherwise activate the result with sendKeys key enter.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9359,6 +9359,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        },
+        "select": {
+          "description": "Press enter (D-pad select) once the target is focused (default false)",
+          "type": "boolean"
         },
         "settleMs": {
           "description": "Wait after each press before observing (default 200)",
@@ -9415,6 +9419,9 @@
             "type": "string"
           },
           "additionalProperties": {}
+        },
+        "selected": {
+          "type": "boolean"
         },
         "message": {
           "type": "string"
@@ -20975,7 +20982,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Navigate to a learned screen by replaying recorded transitions from the navigation graph",
+    "description": "Navigate to a learned screen by replaying recorded transitions from the navigation graph; on Android TV taps replay as D-pad focus moves and select",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

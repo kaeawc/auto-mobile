@@ -11,6 +11,7 @@ import {
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { deviceInputModeResolver } from "../features/navigation/focusDrivenInput";
 import { throwIfAborted, createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
@@ -137,6 +138,7 @@ function createDefaultNavigateTo(
     navigationManager,
     pathOptimizer: new DefaultPathOptimizer(navigationManager),
     sessionUuid: args.sessionUuid,
+    inputMode: deviceInputModeResolver(device),
   });
 }
 
@@ -270,7 +272,7 @@ export function registerNavigationTools({
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "navigateTo",
-    "Navigate to a learned screen by replaying recorded transitions from the navigation graph",
+    "Navigate to a learned screen by replaying recorded transitions from the navigation graph; on Android TV taps replay as D-pad focus moves and select",
     navigateToSchema,
     {
       handler: createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
@@ -333,6 +335,7 @@ export function registerNavigationTools({
       const explore = new Explore(device, null, undefined, {
         navigationManager: navigationManagerFactory(args.sessionUuid),
         sessionUuid: args.sessionUuid,
+        inputMode: deviceInputModeResolver(device),
       });
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
@@ -367,7 +370,7 @@ export function registerNavigationTools({
 
   ToolRegistry.registerDeviceAware(
     "explore",
-    "Automatically interact with the app to discover screens and record transitions in the navigation graph",
+    "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping",
     exploreSchema,
     {
       handler: exploreHandler,

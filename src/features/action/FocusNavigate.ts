@@ -67,6 +67,8 @@ export interface FocusNavigateOptions {
   direction?: FocusNavigateDirection;
   maxSteps?: number;
   settleMs?: number;
+  /** Press the D-pad select key (enter) once focus lands on the target. */
+  select?: boolean;
   signal?: AbortSignal;
 }
 
@@ -78,8 +80,13 @@ export interface FocusNavigateResult {
   /** Focused elements in the order observed; consecutive repeats are collapsed. */
   path: FocusPathEntry[];
   focusedElement?: FocusPathEntry;
+  /** True when `select` was requested and the select key was sent to the focused target. */
+  selected?: boolean;
   message?: string;
 }
+
+/** The key that activates the focused element; TV views treat enter as D-pad center. */
+export const FOCUS_NAVIGATE_SELECT_KEY = "enter" satisfies InputKeyName;
 
 const DIRECTION_KEYS = {
   up: "arrow_up",
@@ -309,7 +316,7 @@ export class FocusNavigate {
         path,
       });
       if (done) {
-        return done;
+        return await this.finish(done, options.select === true, signal);
       }
       if (!direction) {
         throw new ActionableError("focusNavigate has no direction to press");
@@ -355,6 +362,23 @@ export class FocusNavigate {
       elementMatchesTarget(element, options.until),
     );
     return directionsToward(screen.focused, matches).find((direction) => !blocked.has(direction));
+  }
+
+  /** With `select`, activate a focused target with the select key; a refused key fails the call. */
+  private async finish(
+    done: FocusNavigateResult,
+    select: boolean,
+    signal: AbortSignal | undefined,
+  ): Promise<FocusNavigateResult> {
+    if (!select || !done.success) {
+      return done;
+    }
+    throwIfAborted(signal);
+    const pressed = await this.keys.press(FOCUS_NAVIGATE_SELECT_KEY, signal);
+    if (!pressed.success) {
+      throw new ActionableError(pressed.error ?? "Failed to press the D-pad select key");
+    }
+    return { ...done, selected: true };
   }
 
   private async press(

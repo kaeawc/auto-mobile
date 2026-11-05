@@ -16,13 +16,9 @@ import {
   FOCUS_NAVIGATE_STATUSES,
   FocusNavigate,
   type FocusKeyPresser,
-  type FocusObserver,
 } from "../features/action/FocusNavigate";
-import { findFocusedElement } from "../features/observe/HierarchyFocus";
-import { hasOwnPrototype, scopeHierarchyToLayer } from "../features/observe/hierarchyLayer";
-import { DefaultElementParser } from "../features/utility/ElementParser";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
+import { createFocusNavigateObserver } from "../features/action/FocusNavigateObserver";
 
 const focusNavigateInput = z.object({
   until: z
@@ -44,6 +40,10 @@ const focusNavigateInput = z.object({
     .max(FOCUS_NAVIGATE_MAX_STEPS_LIMIT)
     .optional()
     .describe(`Maximum D-pad presses (default ${FOCUS_NAVIGATE_DEFAULT_MAX_STEPS})`),
+  select: z
+    .boolean()
+    .optional()
+    .describe("Press enter (D-pad select) once the target is focused (default false)"),
   settleMs: z
     .number()
     .int()
@@ -62,41 +62,10 @@ export const focusNavigateResultSchema = z
     steps: z.number(),
     path: z.array(z.record(z.string(), z.unknown())),
     focusedElement: z.record(z.string(), z.unknown()).optional(),
+    selected: z.boolean().optional(),
     message: z.string().optional(),
   })
   .passthrough();
-
-const parser = new DefaultElementParser();
-
-export function createFocusNavigateObserver(screen: Pick<ObserveScreen, "execute">): FocusObserver {
-  return {
-    read: async (signal) => {
-      const result = await screen.execute({
-        hierarchyOnly: true,
-        skipScreenshot: true,
-        skipCache: true,
-        freshness: "fresh",
-        signal,
-      });
-      if (!result.viewHierarchy) {
-        throw new ActionableError(result.error ?? "The hierarchy read returned no view hierarchy");
-      }
-      let hierarchy = result.viewHierarchy;
-      let focused = result.focusedElement ?? findFocusedElement(hierarchy, parser);
-      if (hasOwnPrototype(hierarchy)) {
-        // App nodes can retain focus behind the overlay; prefer the prototype's own focus.
-        const prototype = scopeHierarchyToLayer(hierarchy, "prototype");
-        const prototypeFocus = findFocusedElement(prototype, parser);
-        hierarchy = prototypeFocus ? prototype : scopeHierarchyToLayer(hierarchy, "app");
-        focused = prototypeFocus ?? findFocusedElement(hierarchy, parser);
-      }
-      return {
-        focused,
-        elements: parser.flattenViewHierarchy(hierarchy).map(({ element }) => element),
-      };
-    },
-  };
-}
 
 function createKeyPresser(device: BootedDevice): FocusKeyPresser {
   const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
@@ -106,7 +75,7 @@ function createKeyPresser(device: BootedDevice): FocusKeyPresser {
 export const focusNavigateTool = defineDeviceTool({
   name: "focusNavigate",
   description:
-    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). Activate the result with sendKeys key enter.",
+    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused and reports `selected`; otherwise activate the result with sendKeys key enter.",
   input: focusNavigateInput,
   handler: async (device, args, _progress, signal) => {
     if (device.platform !== "android") {
@@ -122,6 +91,7 @@ export const focusNavigateTool = defineDeviceTool({
       ...(args.direction !== undefined ? { direction: args.direction } : {}),
       ...(args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : {}),
       ...(args.settleMs !== undefined ? { settleMs: args.settleMs } : {}),
+      ...(args.select !== undefined ? { select: args.select } : {}),
       ...(signal ? { signal } : {}),
     });
     return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);

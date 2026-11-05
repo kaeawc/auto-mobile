@@ -98,6 +98,31 @@ describe("FocusNavigate", () => {
     expect(result.path).toHaveLength(1);
   });
 
+  test("select presses enter once focus lands on the target", async () => {
+    const grid = new FakeGrid(0);
+    const result = await navigator(grid).execute({ until: { text: "Search" }, select: true });
+    expect(result).toMatchObject({ success: true, status: "focused", selected: true });
+    expect(grid.presses.at(-1)).toBe("enter");
+    expect(grid.presses.filter((key) => key === "enter")).toHaveLength(1);
+  });
+
+  test("select does not press enter when the target is never focused", async () => {
+    const grid = new FakeGrid(0);
+    grid.blocked = new Set([1, 3]);
+    const result = await navigator(grid).execute({ until: { text: "Search" }, select: true });
+    expect(result.success).toBe(false);
+    expect(result.selected).toBeUndefined();
+    expect(grid.presses).not.toContain("enter");
+  });
+
+  test("a refused select key fails the call", async () => {
+    const grid = new FakeGrid(1);
+    grid.failPress = "key refused";
+    await expect(
+      navigator(grid).execute({ until: { text: "Movies" }, select: true }),
+    ).rejects.toThrow("key refused");
+  });
+
   test("recognises the inline TV Settings child label without pressing keys", async () => {
     const grid = new FakeGrid(0);
     grid.elements = [

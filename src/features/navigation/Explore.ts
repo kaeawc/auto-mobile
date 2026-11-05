@@ -23,11 +23,20 @@ import {
   getSafeExplorationCandidates,
   planExplorationDryRun,
 } from "./ExploreDryRun";
-import { ExploreElementActions } from "./ExploreElementActions";
+import {
+  defaultFocusSelectNavigator,
+  ExploreElementActions,
+  type FocusSelectNavigator,
+} from "./ExploreElementActions";
+import { touchInputMode, type InputModeResolver } from "./focusDrivenInput";
 import { getElementKey } from "./ExploreElementExtraction";
 import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
-import { generateExplorationReport, isExplorationResetDue } from "./ExploreReporting";
+import {
+  generateExplorationReport,
+  isExplorationResetDue,
+  reportExplorationProgress,
+} from "./ExploreReporting";
 import { explorationSafetyStopReason } from "./ExploreSafety";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import type {
@@ -38,6 +47,7 @@ import type {
   ExploreExecutionResult,
   ExploreOptions,
   ExploreResult,
+  ExploreSessionOptions,
   GraphTraversalState,
   TrackedElement,
 } from "./ExploreTypes";
@@ -72,12 +82,6 @@ export const DEFAULT_MAX_INTERACTIONS = 200;
  * automatically discovering navigation paths, prioritizing likely navigation elements,
  * avoiding redundant interactions, and efficiently covering unexplored screens.
  */
-/** The session an exploration records under and the dialog-tap seam its blocker handlers use. */
-export interface ExploreSessionOptions {
-  sessionUuid?: string;
-  tapActionFactory?: DialogTapActionFactory;
-}
-
 export class Explore extends BaseVisualChange {
   private navigationManager: NavigationGraphService;
   private exploredElements: Map<string, TrackedElement>;
@@ -112,6 +116,8 @@ export class Explore extends BaseVisualChange {
   private currentElementConfidence: number = 0;
   private sessionUuid?: string;
   private readonly tapActionFactory?: DialogTapActionFactory;
+  private readonly inputMode: InputModeResolver;
+  private readonly focusNavigatorFactory: () => FocusSelectNavigator;
 
   // Constants for safety limits
   static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
@@ -126,6 +132,8 @@ export class Explore extends BaseVisualChange {
       navigationManager,
       sessionUuid,
       tapActionFactory,
+      inputMode = touchInputMode,
+      focusNavigatorFactory,
     }: ExploreSessionOptions & { navigationManager?: NavigationGraphService } = {},
   ) {
     super(device, { adb, timer });
@@ -134,6 +142,10 @@ export class Explore extends BaseVisualChange {
     this.elementParser = new DefaultElementParser();
     this.sessionUuid = sessionUuid;
     this.tapActionFactory = tapActionFactory;
+    this.inputMode = inputMode;
+    this.focusNavigatorFactory =
+      focusNavigatorFactory ??
+      (() => defaultFocusSelectNavigator(device, this.observeScreen, this.adbFactory, timer));
   }
 
   /**
@@ -547,29 +559,15 @@ export class Explore extends BaseVisualChange {
   private async reportProgressAndReset(context: ExplorationLoopContext): Promise<void> {
     const { progress, mode, maxInteractions, initialNodeCount, options, resetInterval, signal } =
       context;
-    // Report progress
     if (progress) {
-      if (mode === "validate" && this.graphTraversalState) {
-        // Report graph traversal progress
-        const edgesTraversed = this.graphTraversalState.traversedEdges.size;
-        const totalEdges = this.graphTraversalState.totalEdgesInGraph;
-        const coveragePercent =
-          totalEdges > 0 ? Math.round((edgesTraversed / totalEdges) * 100) : 0;
-        await progress(
-          this.interactionCount,
-          maxInteractions,
-          `Validating graph: ${edgesTraversed}/${totalEdges} edges traversed (${coveragePercent}%) - ${this.interactionCount}/${maxInteractions} interactions`,
-        );
-      } else {
-        // Report discovery progress
-        const currentStats = await this.navigationManager.getStats();
-        const currentNodeCount = currentStats.nodeCount;
-        await progress(
-          this.interactionCount,
-          maxInteractions,
-          `Explored ${currentNodeCount - initialNodeCount} new screens (${this.interactionCount}/${maxInteractions} interactions)`,
-        );
-      }
+      await reportExplorationProgress(progress, {
+        mode,
+        maxInteractions,
+        initialNodeCount,
+        interactionCount: this.interactionCount,
+        graphTraversalState: this.graphTraversalState,
+        navigationManager: this.navigationManager,
+      });
     }
 
     // Periodic reset if configured
@@ -857,9 +855,12 @@ export class Explore extends BaseVisualChange {
       // Check if element is scrollable - perform swipe instead of tap
       const isScrollable = isTruthy(element.scrollable);
 
-      const success = isScrollable
-        ? await this.swipeContainer(element, observation, progress, signal)
-        : await this.tapElement(element, observation, progress, signal);
+      const success =
+        (await this.inputMode()) === "dpad"
+          ? await this.elementActions().focusSelectElement(element, observation, signal)
+          : isScrollable
+            ? await this.swipeContainer(element, observation, progress, signal)
+            : await this.tapElement(element, observation, progress, signal);
       // Reset consecutive back count since we did a swipe or tap (not when
       // there was no tap target to dispatch).
       if (success !== null) {
@@ -1046,6 +1047,7 @@ export class Explore extends BaseVisualChange {
       device: this.device,
       adb: this.adb,
       timer: this.timer,
+      focusNavigator: this.focusNavigatorFactory,
       runRecorded: (toolName, args, observation, run) =>
         this.runRecorded(toolName, args, observation, run),
     });

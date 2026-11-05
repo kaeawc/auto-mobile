@@ -6,12 +6,38 @@ import { SwipeOnElement } from "../action/SwipeOnElement";
 import { TapAtCoordinate } from "../action/TapAtCoordinate";
 import { TapOnElement } from "../action/TapOnElement";
 import { Timer } from "../../utils/SystemTimer";
+import { FocusNavigate } from "../action/FocusNavigate";
+import { createFocusNavigateObserver } from "../action/FocusNavigateObserver";
+import { InputKey } from "../action/InputKey";
+import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { isTruthy } from "../../models";
 import { publicTapOnArgs, tapCoordinatesFor, tapSelectorFor } from "./ExploreElementExtraction";
+import { focusSelectArgs, focusTargetForElement } from "./focusDrivenInput";
+
+/** The D-pad focus walk explore drives on a TV. */
+export type FocusSelectNavigator = Pick<FocusNavigate, "execute">;
+
+/** The production D-pad walk: fresh hierarchy reads and Android key presses. */
+export function defaultFocusSelectNavigator(
+  device: BootedDevice,
+  observeScreen: Pick<ObserveScreen, "execute">,
+  adbFactory: AdbClientFactory,
+  timer: Timer,
+): FocusSelectNavigator {
+  const keys = new InputKey(device, { adbFactory, timer });
+  return new FocusNavigate(
+    createFocusNavigateObserver(observeScreen),
+    { press: (key) => keys.press(key) },
+    timer,
+  );
+}
 
 interface ExplorationActionContext {
   device: BootedDevice;
   adb: AdbExecutor | undefined;
   timer: Timer;
+  focusNavigator: () => FocusSelectNavigator;
   runRecorded<T extends { success: boolean }>(
     toolName: string | null,
     args: Record<string, unknown>,
@@ -79,6 +105,41 @@ export class ExploreElementActions {
               timer: this.context.timer,
             }).execute({ ...coordinates!, action: "tap" }, { progress, signal }),
         );
+    return result.success;
+  }
+
+  /**
+   * Move D-pad focus to the element and select it, recorded as `focusNavigate` with
+   * `select: true` so navigateTo replays the same D-pad walk; null when nothing names it.
+   * A scrollable container is not selected: moving focus through it scrolls it.
+   */
+  async focusSelectElement(
+    element: Element,
+    observation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<boolean | null> {
+    if (isTruthy(element.scrollable)) {
+      logger.debug("[Explore] D-pad mode: skipping scrollable container; focus moves scroll it");
+      return null;
+    }
+    const until = observation.viewHierarchy
+      ? focusTargetForElement(element, observation.viewHierarchy)
+      : null;
+    if (!until) {
+      logger.warn(
+        `[Explore] Element has no focus target: missing resource-id and text/content-desc (including descendants); class=${element["class"] || "<empty>"}`,
+      );
+      return null;
+    }
+    const args = focusSelectArgs(until);
+    const result = await this.context.runRecorded("focusNavigate", args, observation, () =>
+      this.context.focusNavigator().execute({ ...args, ...(signal ? { signal } : {}) }),
+    );
+    if (!result.success) {
+      logger.info(
+        `[Explore] D-pad focus did not reach ${JSON.stringify(until)}: ${result.message}`,
+      );
+    }
     return result.success;
   }
 }

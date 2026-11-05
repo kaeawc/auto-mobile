@@ -96,15 +96,31 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
   });
 
-  test("visionOS starts with only the device lifecycle tools (#16848)", () => {
+  test("visionOS allows lifecycle, app tools and screenshot observation", () => {
     expect([...APPLE_PLATFORM_SUPPORTED_TOOLS.visionos].sort()).toEqual(
-      [...DEVICE_LIFECYCLE_TOOLS].sort(),
+      [
+        ...DEVICE_LIFECYCLE_TOOLS,
+        "installApp",
+        "uninstallApp",
+        "launchApp",
+        "terminateApp",
+        "listApps",
+        "observe",
+      ].sort(),
     );
-    for (const tool of DEVICE_LIFECYCLE_TOOLS) {
+    for (const tool of [
+      ...DEVICE_LIFECYCLE_TOOLS,
+      "installApp",
+      "uninstallApp",
+      "launchApp",
+      "terminateApp",
+      "listApps",
+      "observe",
+    ]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
       expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
     }
-    for (const tool of ["observe", "tapOn", "installApp", "launchApp", "sendKeys", "pressButton"]) {
+    for (const tool of ["tapOn", "tapAt", "swipeOn", "sendKeys", "pressButton", "tapAny"]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
         new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
       );
@@ -202,8 +218,8 @@ describe("assertRequestedPlatformSupported", () => {
     expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),
     );
-    expect(() => assertRequestedPlatformSupported("observe", { platform: "visionos" })).toThrow(
-      new ActionableError(unsupportedPlatformToolMessage("observe", "visionos")),
+    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "visionos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("tapOn", "visionos")),
     );
   });
 

@@ -41,4 +41,11 @@ export const KILL_PROFILE_EXPECTED_SCORES: Record<KillProfileId, ExpectedSurviva
   "user-restricted": { ...UNMEASURED },
   "exact-alarm-denied": { ...UNMEASURED },
   "notifications-off": { ...UNMEASURED },
+  "huawei-powergenie": { ...UNMEASURED },
+  "vivo-autostart": { ...UNMEASURED },
+  "realme-power-saver": { ...UNMEASURED },
+  "meizu-flyme-background": { ...UNMEASURED },
+  "asus-power-master": { ...UNMEASURED },
+  "sony-stamina": { ...UNMEASURED },
+  "tecno-app-halt": { ...UNMEASURED },
 };

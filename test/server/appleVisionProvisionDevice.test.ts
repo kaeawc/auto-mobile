@@ -1131,6 +1131,34 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(pool.getDevice(existing.udid)?.sessionId).toBe("concurrent-session");
   });
 
+  test("a session bound while cleanup reads foreign claims keeps the headset this call created", async () => {
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl; pool?: DevicePool } = {};
+    const claims = new FakeVisionClaims(() => false);
+    const read = claims.refresh.bind(claims);
+    claims.refresh = async (ids) => {
+      await read(ids);
+      // The created headset's delete-again follows the failed boot; a bind lands mid-read.
+      const udid = ids[0];
+      if (ref.simctl?.commands.some((command) => command.startsWith("boot ")) && ref.pool && udid) {
+        await ref.pool.addDevice({ name: NAME, platform: "visionos", deviceId: udid });
+        patchDeviceBinding(ref.pool.getDevice(udid)!, {
+          sessionId: "concurrent-session",
+          status: "busy",
+        });
+      }
+    };
+    const { simctl, pool } = await arrange([], { ownership: claims });
+    ref.simctl = simctl;
+    ref.pool = pool;
+    simctl.bootError = new Error("Unable to boot: CoreSimulator timed out");
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("delete it with deleteDevice");
+    expect(simctl.commands.map((command) => command.split(" ")[0])).toEqual(["create", "boot"]);
+    expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+  });
+
   test("startDevice cancelled between boot and bind stops the headset it cold-booted", async () => {
     const existing = visionDevice({ name: NAME });
     const { simctl, sessions, pool } = await arrange([existing]);

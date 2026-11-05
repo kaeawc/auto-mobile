@@ -297,9 +297,7 @@ export async function bootAndBindHeadset(
 
 /**
  * A cold boot no session holds yet is stopped; a headset another request bound, or another
- * daemon claims, is left alone. The stop runs under the pool's shutdown reservation, which
- * re-checks the holder under the assignment mutex and keeps a concurrent bind (setActiveDevice)
- * off the headset until the stop ends, as killDevice does.
+ * daemon claims, is left alone.
  */
 async function stopUnboundColdBoot(
   lifecycle: Pick<AppleVisionSimulatorBoot, "stopColdBooted">,
@@ -309,6 +307,24 @@ async function stopUnboundColdBoot(
   if (boot?.acquisition !== "cold-boot") {
     return;
   }
+  try {
+    await withUnboundHeadsetFence(udid, () => lifecycle.stopColdBooted(boot));
+  } catch (error) {
+    logger.warn(
+      `[visionOS] Leaving Apple Vision Pro simulator ${udid} running after its start failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
+
+/**
+ * Runs a stop or delete of a headset that no session of this daemon holds and no other daemon
+ * claims. After the claim read, the pool's shutdown reservation re-checks the holder under the
+ * assignment mutex and keeps a concurrent bind (setActiveDevice) off the headset until
+ * `operation` ends, as killDevice does. Throws, without running `operation`, when a session holds
+ * the headset or a claim refuses it.
+ */
+async function withUnboundHeadsetFence<T>(udid: string, operation: () => Promise<T>): Promise<T> {
   const pool = initializedDevicePool();
   const assertUnheld = () => {
     const holder = holderOf(pool?.getDevice(udid));
@@ -316,27 +332,20 @@ async function stopUnboundColdBoot(
       throw new ActionableError(`session ${holder} holds it now`);
     }
   };
+  assertUnheld();
+  // A bind refused for another daemon's claim leaves no local holder: the headset is theirs.
+  await assertVisionNotClaimedByForeignDaemon(udid);
+  const reservation = await pool?.reserveDeviceForShutdown(udid, undefined, undefined, {
+    assertHolder: assertUnheld,
+    fenceUnpooled: true,
+  });
   try {
-    assertUnheld();
-    // A bind refused for another daemon's claim leaves no local holder: the headset is theirs.
-    await assertVisionNotClaimedByForeignDaemon(udid);
-    const reservation = await pool?.reserveDeviceForShutdown(udid, undefined, undefined, {
-      assertHolder: assertUnheld,
-      fenceUnpooled: true,
-    });
-    try {
-      await lifecycle.stopColdBooted(boot);
-    } finally {
-      await reservation?.release();
-      if (!reservation) {
-        pool?.settleUnpooledShutdown(udid);
-      }
+    return await operation();
+  } finally {
+    await reservation?.release();
+    if (!reservation) {
+      pool?.settleUnpooledShutdown(udid);
     }
-  } catch (error) {
-    logger.warn(
-      `[visionOS] Leaving Apple Vision Pro simulator ${udid} running after its start failed: ${errorMessage(error)}`,
-      error,
-    );
   }
 }
 
@@ -427,8 +436,9 @@ async function discardUnclaimedCreatedVision(
       );
     }
     assertVisionUnclaimed(headset.deviceId, deps, cleanupLease ?? lease);
-    await assertVisionNotClaimedByForeignDaemon(headset.deviceId);
-    return await provisioner.discardCreated(headset);
+    return await withUnboundHeadsetFence(headset.deviceId, () =>
+      provisioner.discardCreated(headset),
+    );
   } catch (error) {
     logger.warn(
       `[visionOS] Leaving created Apple Vision Pro simulator ${headset.deviceId}: ${errorMessage(error)}`,

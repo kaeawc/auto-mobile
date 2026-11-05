@@ -5,11 +5,14 @@ page records what the runner can observe and act on, what it cannot, and the
 decision for the visionOS runner in #16852 (Part of #16851).
 
 AutoMobile models Vision Pro simulators as platform `visionos`, form factor
-`xr-headset`, with independent discovery and ownership claims. Only `listDevices`,
+`xr-headset`, with independent discovery and ownership claims. `listDevices`,
 `listDeviceImages`, `provisionDevice`, `deleteDevice`, `startDevice`, `setActiveDevice`
-and `killDevice` are enabled. Lifecycle operations use `simctl`; boot binds a session
-at `booted` readiness without starting an automation runner. iOS inventories exclude
-xrOS runtimes. Runner capability evidence below does not enable additional tools.
+and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
+`observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner
+on demand. Provisioning still accepts only readiness `none`. The runner reports
+hierarchy and focus, taps uniquely identified window and ornament elements, and
+appends text to a focused field; screenshots use `simctl`. iOS inventories exclude
+xrOS runtimes. All other device tools remain disabled.
 
 ## Environment
 

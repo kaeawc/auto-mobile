@@ -42,7 +42,7 @@ describe("kill profile expected survival scores", () => {
     }
   });
 
-  // Enable once measured values land; placeholders are not claims about emulator behaviour.
+  // Enable once the OEM profiles are measured; placeholders are not claims about emulator behaviour.
   test.skip("no expected value is TODO_MEASURE", () => {
     for (const id of KILL_PROFILE_IDS) {
       for (const event of SURVIVAL_EVENT_IDS) {

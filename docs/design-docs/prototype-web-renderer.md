@@ -125,8 +125,8 @@ it inlined per variant.
 
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
 spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
-`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
-`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
+`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery`,
+`doc-example-2` and `native-controls` (every button variant and two sliders), each in `pixel-9` and `iphone-16`, portrait (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
@@ -224,9 +224,9 @@ the host, so the page's script only switches between views it was given and neve
   `shadows` map to `box-shadow` with the authored blur as the CSS blur (sigma b/2), and `elevation`
   takes its `shadowColor` tint. A gradient border and inner shadows are absolutely placed layers
   after the node's children, so they paint over the content, inside its bounds, as Compose draws
-  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: an iOS frame blurs and
-  saturates the backdrop under a translucent tint (else white) with a light rim, and an Android
-  frame draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
+  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: the iOS skin blurs and
+  saturates the backdrop under a translucent tint (else white) with a light rim, and the Android
+  skin draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
   keeps its colour. `ios.glassGroup` draws nothing of its own. `scroll.fadeEdges` is a mask on the
   trailing edge only (the leading one in a `reverse` scroll), since a still opens at the scroll's
   start; horizontal start and end mirror in RTL. The still cannot measure overflow, so it hands the
@@ -267,7 +267,7 @@ the host, so the page's script only switches between views it was given and neve
   `select`, `segmentedButton`, `searchBar`, `datePicker`, `timePicker`, `pasteButton`, `badge`,
   `progress`, `fab`, `chart`, `adaptive`, `bottomSheet`, `dialog`, `snackbar`, `videoPlayer`, `map`,
   `cameraPreview` and `castButton`, and a `row` or `listItem`'s `swipeActions`. Where the devices differ,
-  the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
+  the skin decides (below); the descriptions here are the Android skin's. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
   would reveal are not drawn. Its `dots` indicator is a row of 6 px dots, 8 px apart, the current one
@@ -402,6 +402,34 @@ the host, so the page's script only switches between views it was given and neve
   headline, the month row with its arrows, and that month (else today's from the still's clock) in
   a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
+- **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
+  `skin` option overrides it. A skin replaces the renderers of the components its platform draws
+  natively (`designCoverage` `native` in `schemas/prototype-spec-contract.json`), and those of the
+  Material components the iOS renderer draws with SwiftUI defaults; every other component draws
+  the shared Material 3 renderer on both. A node's `ios` namespace is read only in
+  the iOS skin and its `android` namespace only in the Android one. The Android skin replaces
+  nothing. The iOS skin draws `button` as the iOS renderer's SwiftUI styles at the regular control
+  size in the 17 px body style (scaled by the frame's Dynamic Type size), tinted with the theme's `primary`: `filled` is a 6 px-radius tint fill
+  under white text with 7x12 px padding, `tonal` the tint at 0.15 opacity under tint text,
+  `elevated` that with a 1 px shadow, `outlined` a 1 px tint capsule with 8x16 px padding, `text`
+  bare tint text; `ios.buttonStyle` draws `glassProminent` as a filled and `glass` as a tonal
+  capsule, without blur. Its `slider` is the system slider: its label 4 px above a 28 px row whose
+  4 px track is systemBlue up to the value and systemFill after it, under a white 28 px thumb whose
+  centre travels 14 px inside each end; the value is its state, else `min`, clamped and not
+  snapped. Its Material components follow the iOS renderer's SwiftUI views (text sizes are
+  body 17, subheadline 15, `.title3` 20, `.title` 28 and `.largeTitle` 34 px, scaled by the frame's
+  Dynamic Type size): `switch` is a body label filling a 44 px row before a 51x31 capsule track (`primary` on,
+  `surfaceContainerHighest` off) with a 27 px thumb; `checkbox` is a 17 px check square, filled
+  when checked, 8 px before its label; `listItem` has a body headline over a subheadline
+  `onSurfaceVariant` supporting line, 56 px tall or 72 px with one, and that switch track or check
+  square as its trailing control; `chip` is 32 px with 12 px padding in the medium subheadline style
+  and the content colour, in a 44 px target; `topAppBar` is a 64 px row padded 4 px with 48 px icon
+  buttons and a `.title3` semibold title (12 px in, 4 px after a navigation icon), or a `.title`
+  (medium) or `.largeTitle` (large) line below the row, framed at 48 or 88 px with an
+  `enterAlways` or `exitUntilCollapsed` `onScroll`; `card` is `surfaceContainerHigh` when
+  filled, else `surface`, with an `outlineVariant` outline when outlined. Like the iOS renderer,
+  the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField`, `bottomNav`, `tabBar`
+  and `bottomSheet` still draw the shared renderer.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
   navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to

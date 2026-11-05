@@ -25963,6 +25963,247 @@
           }
         }
       }
+    },
+    "permissions": {
+      "capability": "prototype_platform_permissions_v1",
+      "calls": {
+        "request": {
+          "args": {
+            "names": {
+              "optional": false,
+              "value": {
+                "kind": "array",
+                "item": {
+                  "kind": "enum",
+                  "values": [
+                    "camera",
+                    "microphone",
+                    "location",
+                    "locationBackground",
+                    "notifications",
+                    "photos",
+                    "photosAdd",
+                    "contacts",
+                    "calendar",
+                    "bluetooth",
+                    "nearbyWifi",
+                    "motion",
+                    "speech"
+                  ]
+                },
+                "min": 1,
+                "max": 16,
+                "unique": true
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "changed": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "camera": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "microphone": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "location": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "locationBackground": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "notifications": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "photos": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "photosAdd": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "contacts": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "calendar": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "bluetooth": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "nearbyWifi": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "motion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "speech": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

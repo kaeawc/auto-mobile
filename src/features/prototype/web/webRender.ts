@@ -13,10 +13,7 @@ import {
   FLEX_BASIS,
   FLEX_DIRECTION,
   FONT_SIZE,
-  FONT_WEIGHT,
   GRID_AREA,
-  INLINE_FLEX,
-  JUSTIFY_CONTENT,
   JUSTIFY_SELF,
   MIN_HEIGHT,
   MIN_WIDTH,
@@ -52,6 +49,7 @@ import {
   type WebAxis,
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { materialButtonRenderer } from "./webButton";
 import { webControlRenderers } from "./webControls";
 import { webIndicatorRenderers, withSwipeActions } from "./webIndicators";
 import { webMapRenderers } from "./webMap";
@@ -61,6 +59,8 @@ import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
 import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
+import { webSkins, type WebSkinId } from "./webSkin";
+import { iosCardChrome } from "./webSkinIos";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { withLaterMinStrut } from "./webLaterMin";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -114,6 +114,8 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /** The platform skin components draw in; Android (Material 3) when absent. */
+  readonly skin?: WebSkinId;
   /**
    * Where icons find their glyphs; without one every icon draws the placeholder and none is
    * reported, since no glyph set was asked for.
@@ -496,12 +498,6 @@ const image: NodeRenderer = (node, scope, path) => {
   return el("div", { attrs: { ...attrs, role: "img" }, style });
 };
 
-const BUTTON_ROLES: Readonly<Record<string, [string, string]>> = {
-  filled: ["primary", "onPrimary"],
-  tonal: ["secondaryContainer", "onSecondaryContainer"],
-  elevated: ["surfaceContainerLow", "primary"],
-};
-
 /**
  * A control whose enabledWhen is decidably false draws disabled (Material's 0.38 opacity) and
  * says so to assistive tech, as the native controls do. Undecidable conditions stay enabled.
@@ -516,33 +512,6 @@ function disabledState(
     ? { css: {}, attrs: {} }
     : { css: { opacity: "0.38" }, attrs: { "aria-disabled": "true" } };
 }
-
-const button: NodeRenderer = (node, scope) => {
-  const disabled = disabledState(node, scope);
-  const variant = typeof node.variant === "string" ? node.variant : "filled";
-  const roles = BUTTON_ROLES[variant];
-  const outline: Record<string, string> =
-    variant === "outlined"
-      ? { border: `1px solid ${cssColor("outline", scope.style) ?? "currentColor"}` }
-      : {};
-  const { attrs, style } = base(node, scope, {
-    display: INLINE_FLEX,
-    [ALIGN_ITEMS]: CENTER,
-    [JUSTIFY_CONTENT]: CENTER,
-    [MIN_HEIGHT]: "40px",
-    padding: "0 24px",
-    [BORDER_RADIUS]: "20px",
-    [FONT_WEIGHT]: "500",
-    ...(roles ? roleCss(scope, roles[0], roles[1]) : roleCss(scope, "transparent", "primary")),
-    gap: "8px",
-    ...outline,
-    ...disabled.css,
-  });
-  return el("div", { attrs: { ...attrs, role: "button", ...disabled.attrs }, style }, [
-    ...namedIcon(node.icon, scope),
-    bound(node.label, scope),
-  ]);
-};
 
 /** App-bar navigation and action slots draw as icon placeholders labelled with their action. */
 function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: string): WebElement[] {
@@ -797,11 +766,14 @@ const card: NodeRenderer = (raw, scope, path) => {
     // Material's ColumnScope keeps wrap-sized content at its own width.
     [ALIGN_ITEMS]: "flex-start",
     [BORDER_RADIUS]: "12px",
-    ...roleCss(
-      scope,
-      node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
-      "onSurface",
-    ),
+    // The container is a skin metric; the layout is shared.
+    ...(scope.skin === "ios"
+      ? iosCardChrome(node.variant, scope)
+      : roleCss(
+          scope,
+          node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
+          "onSurface",
+        )),
   });
   const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));
@@ -887,6 +859,8 @@ const KIT: WebRenderKit = {
   safeAreaEdges,
 };
 
+const materialButton = materialButtonRenderer(KIT);
+
 export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   box,
   row: line("row"),
@@ -897,16 +871,16 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   divider,
   icon,
   image,
-  button,
   topAppBar,
   textField,
   switch: toggle("switch"),
   checkbox: toggle("checkbox"),
   card,
   listItem,
+  button: materialButton,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
-  ...webSelectionRenderers(KIT, button),
+  ...webSelectionRenderers(KIT, materialButton),
   ...webMediaRenderers(KIT),
   ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
@@ -914,6 +888,8 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 };
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
+
+const WEB_SKINS = webSkins(KIT);
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
@@ -1008,7 +984,8 @@ export function renderWebNode(
     layer(styled, own, path);
     return undefined;
   }
-  const renderer = WEB_NODE_RENDERERS[String(styled.type)];
+  const type = String(styled.type);
+  const renderer = WEB_SKINS[own.skin ?? "android"].renderers[type] ?? WEB_NODE_RENDERERS[type];
   const element = renderer
     ? withSwipeActions(renderer(styled, own, path), styled, own, KIT)
     : placeholder(styled, own, path);

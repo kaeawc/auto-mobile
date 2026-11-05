@@ -41,7 +41,14 @@ done
 case " $* " in
   *' -version '*) echo 'Xcode fixture' ;;
   *' -showsdks '*) echo 'iphonesimulator' ;;
-  *' -list '*) printf 'Schemes:\n    AutoMobileTest\n    CtrlProxyWatch\n    AutoMobileTVTest\n\n' ;;
+  *' -list '*) printf 'Schemes:\n    AutoMobileTest\n    CtrlProxyWatch\n    AutoMobileTVTest\n    AutoMobileVisionTest\n\n' ;;
+  *' -showdestinations '*)
+    case "${VISION_MODE:-available}" in
+      available) echo '		{ platform:visionOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-xrsimulator:placeholder, name:Any visionOS Simulator Device }' ;;
+      missing) echo '		{ platform:iOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-iphonesimulator:placeholder, name:Any iOS Simulator Device }' ;;
+      failure) echo 'xcodebuild: error: probe failed' >&2; exit 70 ;;
+    esac
+    ;;
   *' -showBuildSettings '*)
     if [ "$scheme" = CtrlProxyWatch ]; then
       case "${PROBE_MODE:-}" in
@@ -57,6 +64,10 @@ case " $* " in
       AutoMobileTest) platform=iphoneos ;;
       CtrlProxyWatch) platform=watchos ;;
       AutoMobileTVTest) platform=appletvos ;;
+      AutoMobileVisionTest)
+        echo '    SDKROOT = xros'
+        platform=xros
+        [ "${VISION_MODE:-}" = nosdk ] && platform=unresolved ;;
     esac
     printf '    PLATFORM_NAME = %s\n' "$platform"
     # A later target must not override the first platform setting.
@@ -118,6 +129,39 @@ assert_build_destination() {
   setup_build_stubs
   run_stubbed_build
   assert_build_destination AutoMobileTVTest tvOS
+}
+
+@test "visionOS scheme uses the visionOS Simulator destination when one is available" {
+  setup_build_stubs
+  run_stubbed_build
+  assert_build_destination AutoMobileVisionTest visionOS
+}
+
+@test "visionOS scheme is skipped with a log line when no visionOS destination exists" {
+  setup_build_stubs
+  export VISION_MODE=missing
+  run_stubbed_build
+  [[ "$output" == *"Skipping AutoMobileVisionTest: no visionOS Simulator destination available"* ]]
+  ! grep -F -- "-scheme AutoMobileVisionTest -destination" "$XCODE_BUILD_LOG"
+  assert_build_destination AutoMobileTest iOS
+  assert_build_destination CtrlProxyWatch watchOS
+  assert_build_destination AutoMobileTVTest tvOS
+}
+
+@test "visionOS scheme with an unresolved platform (no SDK) is skipped, not built for iOS" {
+  setup_build_stubs
+  export VISION_MODE=nosdk
+  run_stubbed_build
+  [[ "$output" == *"Skipping AutoMobileVisionTest"* ]]
+  ! grep -F -- "-scheme AutoMobileVisionTest -destination" "$XCODE_BUILD_LOG"
+}
+
+@test "visionOS scheme is skipped when the destination probe fails" {
+  setup_build_stubs
+  export VISION_MODE=failure
+  run_stubbed_build
+  [[ "$output" == *"Skipping AutoMobileVisionTest"* ]]
+  ! grep -F -- "-scheme AutoMobileVisionTest -destination" "$XCODE_BUILD_LOG"
 }
 
 @test "failed build settings probe falls back to iOS even with platform output" {

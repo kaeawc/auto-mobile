@@ -1,3 +1,4 @@
+import { sendKeysToAppleRunner } from "../features/visionos/AppleRunnerActionDispatch";
 import {
   ActionableError,
   BootedDevice,
@@ -41,7 +42,6 @@ import type {
 } from "./interactionTools/dependencies";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../features/observe/ios";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
-import { tvosSendKeys } from "../features/tvos/TvosActions";
 import { SendKeys } from "../features/action/SendKeys";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
@@ -751,8 +751,8 @@ export const createSendKeysHandler =
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    if (device.platform === "tvos") {
-      const result = await tvosSendKeys(device.deviceId, args.commands, args.selector, {
+    if (device.platform === "tvos" || device.platform === "visionos") {
+      const result = await sendKeysToAppleRunner(device, args.commands, args.selector, {
         ...args,
         signal,
       });

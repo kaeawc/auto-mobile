@@ -24,7 +24,7 @@ class McpInboxTest {
   private val inbox =
     McpInbox(
       root,
-      { bytes, source, label ->
+      { bytes, source, label, _ ->
         imports += Triple(bytes, source, label)
         importResult
       },
@@ -185,7 +185,7 @@ class McpInboxTest {
     val fresh = Files.createTempDirectory("mcp-fresh").toFile()
     try {
       val mcp = File(fresh, "mcp")
-      val freshInbox = McpInbox(mcp, { _, _, _ -> importResult }, repository)
+      val freshInbox = McpInbox(mcp, { _, _, _, _ -> importResult }, repository)
 
       assertNull(freshInbox.handle(McpCommand.Prepare("mcp-18")))
 
@@ -284,7 +284,7 @@ class McpInboxTest {
     val described =
       McpInbox(
         root,
-        { _, _, _ -> importResult },
+        { _, _, _, _ -> importResult },
         repository,
         { nowMillis },
         McpAbout(42, "1.2.3", setOf("prototype_routes_v1", "prototype_anchor_v1")),
@@ -311,7 +311,7 @@ class McpInboxTest {
     val described =
       McpInbox(
         root,
-        { _, _, _ -> importResult },
+        { _, _, _, _ -> importResult },
         repository,
         { nowMillis },
         McpAbout(2, null, setOf("x")),

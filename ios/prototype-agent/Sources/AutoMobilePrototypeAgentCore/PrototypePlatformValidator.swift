@@ -540,6 +540,9 @@ enum PrototypePlatformValidator {
         try PrototypeMedia.call(action, path: path, players: declared.players)
         try PrototypeCameraPreview.call(action, path: path, previews: declared.previews)
         try PrototypeWebView.call(action, path: path, webViews: declared.webViews)
+        if call == "permissions.request" {
+            try requestedPermissions(args, path: path, declared: declared.permissions)
+        }
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)
         }
@@ -553,6 +556,23 @@ enum PrototypePlatformValidator {
                 path,
                 "Side-effecting platform call \(call) needs a user gesture: move it into onTap, onLongPress, onDoubleTap or onSubmit"
             )
+        }
+    }
+
+    /// `permissions.request` may only ask for permissions declared in `requires.permissions`, since the
+    /// declaration carries the usage string and the manifest entry (#14297). A bound list is checked by
+    /// the runtime once it resolves.
+    private static func requestedPermissions(
+        _ args: [String: JSONValue], path: String, declared: Set<String>
+    ) throws {
+        guard case let .object(form)? = args["names"], case let .array(names)? = form["value"] else { return }
+        for (index, entry) in names.enumerated() {
+            if case let .string(name) = entry, !declared.contains(name) {
+                throw fail(
+                    "\(path).args.names.value[\(index)]",
+                    "Permission \(name) is not declared in requires.permissions"
+                )
+            }
         }
     }
 

@@ -98,6 +98,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audioRecorder_v1",
             // Contract only; the Viewer notification runtime is owed (#14282).
             "prototype_platform_notifications_v1",
+            // Contract only; the Viewer permission runtime is owed (#14299).
+            "prototype_platform_permissions_v1",
             // Contract only; the scheduled notification runtimes are owed (#14283).
             "prototype_platform_notifications_scheduled_v1",
             // Contract only; push delivery to Viewer apps is owed (#14287).

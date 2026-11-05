@@ -344,7 +344,7 @@ export class IosCtrlProxyBuilder {
    * Get the .xctestrun file path
    */
   public async getXctestrunPath(
-    platform?: IOSCtrlProxyPlatform | "watchSimulator" | "tvSimulator",
+    platform?: IOSCtrlProxyPlatform | "watchSimulator" | "tvSimulator" | "visionSimulator",
   ): Promise<string | null> {
     // Local discovery/prefetch follows the simulator default of build-product paths.
     platform ??= this.isLocalBuildMode() ? "simulator" : undefined;

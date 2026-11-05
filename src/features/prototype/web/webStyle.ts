@@ -46,7 +46,7 @@ export interface WebStyleContext {
   readonly typography?: { readonly scale: number; readonly fontFamily?: string };
   /** The system text size (Android font scale, iOS Dynamic Type); absent at the default size. */
   readonly textScale?: TextScale;
-  /** The frame's platform, for looks the devices draw differently (glass). Android when unset. */
+  /** The skin's platform, for looks the devices draw differently (glass). Android when unset. */
   readonly platform?: "android" | "ios";
   /** The window's explicit `rtl` direction, for physical edges such as a fade's. */
   readonly rtl?: boolean;

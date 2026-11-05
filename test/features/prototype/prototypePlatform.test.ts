@@ -35,6 +35,65 @@ const spec = (extra: Record<string, unknown>, root: unknown = { type: "spacer" }
   root,
 });
 
+describe("permissions module contract", () => {
+  const permissions = PROTOTYPE_PLATFORM_MODULES.permissions;
+
+  test("request takes a list of names and needs no permission itself", () => {
+    expect(Object.keys(permissions.calls)).toEqual(["request"]);
+    expect(permissions.calls.request.permissions).toEqual([]);
+    expect(permissions.calls.request.args.names.value).toMatchObject({
+      kind: "array",
+      min: 1,
+      max: 16,
+      unique: true,
+    });
+  });
+
+  test("changed is the only event, and every name has a state in the shared vocabulary", () => {
+    expect(permissions.events).toEqual({ changed: { sensitive: false } });
+    const states = Object.values(permissions.state ?? {});
+    expect(states).toHaveLength(13);
+    for (const state of states) {
+      expect(state.value.values).toEqual([
+        "granted",
+        "denied",
+        "blocked",
+        "notDetermined",
+        "limited",
+        "restricted",
+        "unavailable",
+      ]);
+    }
+  });
+
+  test("a literal request names only declared permissions; a bound list waits for the runtime", () => {
+    const request = (names: unknown) =>
+      spec(
+        {
+          data: { names: [] },
+          requires: {
+            platform: ["permissions"],
+            permissions: [{ name: "camera", purpose: "Scan a receipt." }],
+          },
+        },
+        {
+          type: "button",
+          label: "Allow",
+          onTap: [{ type: "platform", call: "permissions.request", args: { names } }],
+        },
+      );
+    expect(validatePrototypeSpec(request({ value: ["camera"] })).success).toBe(true);
+    expect(validatePrototypeSpec(request({ data: "/names" })).success).toBe(true);
+    expect(validatePrototypeSpec(request({ value: ["camera", "speech"] }))).toMatchObject({
+      success: false,
+      error: {
+        path: "root.onTap[0].args.names.value[1]",
+        message: "Permission speech is not declared in requires.permissions",
+      },
+    });
+  });
+});
+
 describe("notifications module contract", () => {
   const notifications = PROTOTYPE_PLATFORM_MODULES.notifications;
 

@@ -96,6 +96,9 @@ internal object PrototypePlatformRules {
         PrototypeCameraPreview.callError(action, path, declared.previews)
       },
       { action, path, _, declared -> PrototypeWebView.callError(action, path, declared.webViews) },
+      { action, path, _, declared ->
+        PrototypePermissionRules.callError(action, path, declared.permissions)
+      },
     )
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {

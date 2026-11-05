@@ -43,12 +43,36 @@ class ImportHideRaceTest {
   @Test
   fun hideAndPurgeDuringStagingEndWithNothingStored() {
     var result: LibraryResult<LibraryEntry>? = null
-    val importer = Thread { result = commit.commit(bundle, LibrarySource.share, null) }
+    val importer = Thread { result = commit.commit(bundle, LibrarySource.share, null, null) }
     importer.start()
     assertTrue(staging.entered.await(5, TimeUnit.SECONDS))
 
     // The importer's early check already passed; Hide and its purge land mid-import.
     blocklist.hide(specSha256)
+    assertEquals(
+      emptyList<LibraryEntry>(),
+      (repository.purgeBlocked() as LibraryResult.Success).value,
+    )
+    staging.release.countDown()
+    importer.join(5_000)
+
+    assertEquals(LibraryResult.Failure(LibraryError.Hidden), result)
+    assertTrue(metadata.documents.isEmpty())
+    assertTrue(store.results.isEmpty())
+    assertEquals(emptyList<LibraryEntry>(), (library.list() as LibraryResult.Success).value)
+  }
+
+  @Test
+  fun hostBlockDuringStagingEndsWithNothingStored() {
+    var result: LibraryResult<LibraryEntry>? = null
+    val importer = Thread {
+      result = commit.commit(bundle, LibrarySource.share, null, "example.com")
+    }
+    importer.start()
+    assertTrue(staging.entered.await(5, TimeUnit.SECONDS))
+
+    // The importer's early check already passed; the host Block and its purge land mid-import.
+    blocklist.block("example.com")
     assertEquals(
       emptyList<LibraryEntry>(),
       (repository.purgeBlocked() as LibraryResult.Success).value,
@@ -69,7 +93,7 @@ class ImportHideRaceTest {
 
     assertEquals(
       LibraryResult.Failure(LibraryError.Hidden),
-      commit.commit(bundle, LibrarySource.file, null),
+      commit.commit(bundle, LibrarySource.file, null, null),
     )
     assertEquals(1L, staging.entered.count)
     assertTrue(store.results.isEmpty())
@@ -80,7 +104,7 @@ class ImportHideRaceTest {
     blocklist.hide(specSha256)
     staging.release.countDown()
 
-    assertTrue(commit.commit(bundle, LibrarySource.mcp, null) is LibraryResult.Success)
+    assertTrue(commit.commit(bundle, LibrarySource.mcp, null, null) is LibraryResult.Success)
   }
 
   /** Pauses the importer as staging starts, after its early blocklist check. */

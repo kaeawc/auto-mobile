@@ -1,3 +1,5 @@
+import { normalizeVisionosHierarchy } from "../visionos/VisionosHierarchy";
+import { requireVisionosRunner } from "../visionos/VisionosRunnerLifecycle";
 import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { normalizeTvosHierarchy } from "../tvos/TvosHierarchy";
 import { tvosRunners } from "../tvos/TvosRunnerRegistry";
@@ -464,16 +466,26 @@ export function createDeviceHierarchyCapture(
   device: BootedDevice,
   dependencies: DeviceHierarchyCaptureDependencies = {},
 ): HierarchyCapture {
-  if (device.platform === "watchos" || device.platform === "tvos") {
+  if (
+    device.platform === "watchos" ||
+    device.platform === "tvos" ||
+    device.platform === "visionos"
+  ) {
     const read = async (request: HierarchyCaptureRequest) =>
-      device.platform === "tvos"
-        ? normalizeTvosHierarchy(
-            await tvosRunners.require(device.deviceId).hierarchy(request.signal),
+      device.platform === "visionos"
+        ? normalizeVisionosHierarchy(
+            await (
+              await requireVisionosRunner(device.deviceId, request.signal)
+            ).hierarchy(request.signal),
           )
-        : normalizeWatchHierarchy(
-            await watchRunners.require(device.deviceId).hierarchy(request.signal),
-          );
-    // Watch wire trees use the iOS bounds/attribute projection, without routing iOS commands.
+        : device.platform === "tvos"
+          ? normalizeTvosHierarchy(
+              await tvosRunners.require(device.deviceId).hierarchy(request.signal),
+            )
+          : normalizeWatchHierarchy(
+              await watchRunners.require(device.deviceId).hierarchy(request.signal),
+            );
+    // Apple runner trees use the iOS bounds/attribute projection, without routing iOS commands.
     return new DefaultHierarchyCapture(
       "ios",
       {

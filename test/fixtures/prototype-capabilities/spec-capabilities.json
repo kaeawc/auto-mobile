@@ -63,6 +63,7 @@
   "prototype_platform_namespace_v1",
   "prototype_platform_notifications_scheduled_v1",
   "prototype_platform_notifications_v1",
+  "prototype_platform_permissions_v1",
   "prototype_platform_power_v1",
   "prototype_platform_push_v1",
   "prototype_platform_realtime_device_v1",

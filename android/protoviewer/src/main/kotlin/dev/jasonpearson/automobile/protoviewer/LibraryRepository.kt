@@ -224,11 +224,13 @@ class DirectoryLibraryRepository(
     request: SavedPrototypeSaveRequest,
     source: LibrarySource,
     requires: List<String> = emptyList(),
+    sourceHost: String? = null,
   ): LibraryResult<LibraryEntry> {
     val specSha256 = sha256Hex(request.specJson.toByteArray())
-    rejectedEntry(request, source, specSha256, requires, admission)?.let {
-      return LibraryResult.Failure(it)
-    }
+    rejectedEntry(request, requires) { admission.admits(source, specSha256, sourceHost) }
+      ?.let {
+        return LibraryResult.Failure(it)
+      }
     val listed = list()
     if (listed is LibraryResult.Failure) return listed
     if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
@@ -266,6 +268,9 @@ class DirectoryLibraryRepository(
               specSha256,
               requires.distinct().sorted(),
               false,
+              // A host the reader would reject (IP literal, single label) is dropped, not stored,
+              // so the entry stays listable; it just has no Block identity.
+              sourceHost?.takeIf(::validSourceHost),
             )
           // Metadata is the library's commit marker. An interrupted commit stays invisible.
           var committed = false
@@ -340,14 +345,12 @@ private fun validLibrarySpec(spec: String): Boolean =
  */
 private fun rejectedEntry(
   request: SavedPrototypeSaveRequest,
-  source: LibrarySource,
-  specSha256: String,
   requires: List<String>,
-  admission: LibraryAdmission,
+  admitted: () -> Boolean,
 ): LibraryError? =
   when {
     !validLibrarySpec(request.specJson) ||
       !AutoMobilePrototype.capabilities.containsAll(requires) -> LibraryError.Invalid
-    !admission.admits(source, specSha256, null) -> LibraryError.Hidden
+    !admitted() -> LibraryError.Hidden
     else -> null
   }

@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["permissions"],
+      "permissions": [
+        {
+          "name": "camera",
+          "purpose": "Scan a receipt."
+        }
+      ]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "permissions.request",
+          "args": {
+            "names": {
+              "value": ["camera"]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_permissions_v1"
+}

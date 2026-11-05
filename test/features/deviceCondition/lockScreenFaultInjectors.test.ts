@@ -11,6 +11,8 @@ import {
 } from "../../../src/features/deviceCondition/lockScreenFaultInjectors";
 import { deviceConditionInputSchema } from "../../../src/features/deviceCondition/DeviceConditionTypes";
 import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
+import { DeviceConditionController } from "../../../src/features/deviceCondition/DeviceConditionController";
+import { FakeLogger } from "../../fakes/FakeLogger";
 
 class LockDevice extends FakeAdbExecutor {
   credential: string | undefined;
@@ -119,6 +121,42 @@ describe("faults.lockScreen", () => {
     expect(adb.credential).toBeUndefined();
   });
 
+  test("a superseded installation's cleanup check reads clean while the later PIN is owned", async () => {
+    const adb = new LockDevice();
+    const injector = pin(adb);
+    const a = await injector.apply("pin");
+    expect(await a.isClean?.()).toBe(false);
+    await injector.apply("none");
+    const b = await injector.apply("pin");
+    expect(await a.isClean?.()).toBe(true);
+    expect(await b.isClean?.()).toBe(false);
+    await b.reset?.();
+    expect(await b.isClean?.()).toBe(true);
+  });
+  test("a superseded controller's restore retires its obligation without touching the current owner", async () => {
+    const adb = new LockDevice();
+    const injector = pin(adb);
+    const controllerA = new DeviceConditionController(() => injector, new FakeLogger());
+    const controllerB = new DeviceConditionController(() => injector, new FakeLogger());
+    await controllerA.apply({ faults: { lockScreen: "pin" } });
+    await controllerB.apply({ faults: { lockScreen: "none" } });
+    await controllerB.apply({ faults: { lockScreen: "pin" } });
+
+    const reportA = await controllerA.restore();
+    expect(reportA).toEqual({
+      restored: [LOCK_SCREEN_FAULT_KEY],
+      failures: [],
+      verifiedClean: true,
+    });
+    expect(controllerA.hasActiveConditions()).toBe(false);
+    expect(adb.credential).toBe(LOCK_SCREEN_TEST_PIN);
+    expect(controllerB.activeKeys()).toEqual([LOCK_SCREEN_FAULT_KEY]);
+
+    const reportB = await controllerB.restore();
+    expect(reportB.verifiedClean).toBe(true);
+    expect(adb.credential).toBeUndefined();
+  });
+
   test("a PIN AutoMobile did not install is unchanged with no reset owed", async () => {
     const adb = new LockDevice();
     adb.credential = LOCK_SCREEN_TEST_PIN;
@@ -163,9 +201,11 @@ describe("faults.lockScreen", () => {
       }
     }
     expect(owed).toBeDefined();
+    expect(await owed?.owedIsClean?.()).toBe(false);
     await owed?.owedReset();
     expect(adb.credential).toBeUndefined();
     expect(await injector.isClean()).toBe(true);
+    expect(await owed?.owedIsClean?.()).toBe(true);
   });
   test("swipe-only device (no credential) accepts pin and none", async () => {
     const adb = new LockDevice();

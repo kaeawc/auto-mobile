@@ -76,3 +76,38 @@ test("landscape button navigation sits on the right edge the frame reserves; ges
   const bottom = chrome(frameOf("iphone-16", "landscape"), "navBar")!;
   expect(bottom.style).toMatchObject({ bottom: "0", left: "0" });
 });
+
+test("iOS gestures draw the home indicator; Android draws the navigation handle", () => {
+  const ios = chrome(frameOf("iphone-16", "portrait"), "navBar")!.children[0] as WebElement;
+  expect(ios.attrs["data-nav"]).toBe("homeIndicator");
+  expect(ios.style).toMatchObject({ width: "134px", height: "5px" });
+  const android = chrome(frameOf("pixel-9", "portrait"), "navBar")!.children[0] as WebElement;
+  expect(android.attrs["data-nav"]).toBe("handle");
+  expect(android.style).toMatchObject({ width: "108px", height: "4px" });
+});
+
+test("the status bar content follows the option, else the dark flag", () => {
+  const dark = renderDeviceFrame(
+    deviceFrameOrThrow("pixel-9"),
+    "portrait",
+    { dark: true, textColor: "#fff", background: "#000" },
+    el("div"),
+  );
+  expect(chrome(dark, "statusBar")?.attrs["data-status-content"]).toBe("light");
+  const forced = renderDeviceFrame(
+    deviceFrameOrThrow("pixel-9"),
+    "portrait",
+    { dark: true, textColor: "#fff", background: "#000", statusBarContent: "dark" },
+    el("div"),
+  );
+  expect(chrome(forced, "statusBar")?.attrs["data-status-content"]).toBe("dark");
+  expect(chrome(forced, "statusBar")?.style.color).toBe("#000000");
+});
+
+test("the island and the punch hole draw as a pill and a circle", () => {
+  const island = chrome(frameOf("iphone-16", "portrait"), "cutout")!.style;
+  expect(parseFloat(island.width!)).toBeGreaterThan(parseFloat(island.height!));
+  expect(island["border-radius"]).toBe(`${parseFloat(island.height!) / 2}px`);
+  const hole = chrome(frameOf("pixel-9", "portrait"), "cutout")!.style;
+  expect(hole).toMatchObject({ width: "24px", height: "24px", "border-radius": "12px" });
+});

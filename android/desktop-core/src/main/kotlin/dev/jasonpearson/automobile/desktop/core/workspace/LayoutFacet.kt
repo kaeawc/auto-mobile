@@ -33,27 +33,22 @@ internal const val INSPECTOR_PANE_FPS = 10
  * the panel never regresses to screenshots mid-session. The observation screenshot remains the
  * pre-video bootstrap and the capture the hierarchy overlay/selection maps against.
  *
- * [observationStreamFactory] is injected (defaulting to a real per-device
- * [ObservationStreamClient]) so the connect/dispose lifecycle can be verified with a
- * [FakeObservationStream] instead of real socket I/O. The stream reconnects automatically if it
- * drops while the facet is open (see [rememberReconnectingObservationStream]); [backoffDelay] and
- * [socketAvailable] are the injected timer/daemon-availability seams that let that recovery be
- * tested with virtual time. [videoSourceFactory] is the same seam for the live mirror, and
- * [sessionUuidProvider] authenticates its subscribe against the stream-socket session guard (#4751)
- * — the host supplies it from its `DesktopDaemonSession`.
+ * When the app provides a [LocalDaemonStreamHub], the stream is instead a lease on the hub's one
+ * shared observation connection for the device (#16967). [observationStreamFactory] is injected
+ * (defaulting to a real per-device [ObservationStreamClient]) so the connect/dispose lifecycle can
+ * be verified with a [FakeObservationStream] instead of real socket I/O. The stream reconnects
+ * automatically if it drops while the facet is open (see [rememberReconnectingObservationStream]);
+ * [backoffDelay] and [socketAvailable] are the injected timer/daemon-availability seams that let
+ * that recovery be tested with virtual time. [videoSourceFactory] is the same seam for the live
+ * mirror, and [sessionUuidProvider] authenticates its subscribe against the stream-socket session
+ * guard (#4751) — the host supplies it from its `DesktopDaemonSession`.
  */
 @Composable
 fun LayoutFacet(options: LayoutFacetOptions) {
   with(options) {
     val observation =
-      rememberReconnectingObservationState(
-        dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
-          deviceId = column.deviceId,
-          streamFactory = observationStreamFactory,
-          backoffDelay = backoffDelay,
-          socketAvailable = socketAvailable,
-        ),
-      )
+      rememberPaneObservationState(column, observationStreamFactory, backoffDelay, socketAvailable)
+    ForegroundAppReporter(observation.stream, column.deviceId, onForegroundApp)
     val videoSource = remember(column.deviceId) { videoSourceFactory(column.deviceId) }
     // The relay's own heartbeat (issue #7549) makes the Streaming-stall watchdog safe on any
     // backend,

@@ -5,7 +5,7 @@ extension PrototypeSession {
         guard let id = action.stack else { return [] }
         let direction: PrototypeStackChange.Direction = switch action.type {
         case "push": .push
-        case "replace": .replace
+        case "replace", "setStack": .replace
         default: .pop
         }
         return changeStack(id, direction: direction, override: action.transition, source: action.source) { node, path in
@@ -21,6 +21,13 @@ extension PrototypeSession {
             case "replace":
                 guard let screen = action.screen, node.screens?[screen] != nil else { return path }
                 return Array(path.dropLast()) + [screen]
+            case "setStack":
+                // The whole path is replaced (#16620); an unknown screen, an empty path or one past
+                // the depth limit leaves the stack as it was.
+                let screens = (action.stackPath ?? []).map(\.screen)
+                guard !screens.isEmpty, screens.count <= PrototypeLimits.maxStackDepth,
+                      screens.allSatisfy({ node.screens?[$0] != nil }) else { return path }
+                return screens
             default:
                 return path
             }

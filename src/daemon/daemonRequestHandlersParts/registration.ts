@@ -16,6 +16,7 @@ import {
 } from "../wire/constants";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../sessionReleasedDuringCall";
 import {
+  cliIdleTimeoutField,
   idleReleaseField,
   isExpiryReleaseReason,
   isTerminalReleaseReason,
@@ -29,7 +30,7 @@ import type {
   DaemonRequestContext,
   DaemonRequestOptions,
 } from "./contracts";
-import { reportedWallClock, lookupReleasedSessionReason } from "./sessionReporting";
+import { reportedWallClock, lookupReleasedSessionEnd } from "./sessionReporting";
 
 const registerSessionParams = z.object({
   sessionId: z.string().max(MAX_OBSERVER_SESSION_ID_LENGTH).uuid(),
@@ -121,13 +122,13 @@ function inMemorySessionRelease(
 /** Build the unchanged terminal-expiry refusal; expired rows also qualify without an expiry reason. */
 function terminalSessionRegistrationRefusal(
   sessionId: string,
-  release: Pick<SessionReleaseSnapshot, "releaseReason" | "terminal" | "ownerPid"> | undefined,
+  release: TerminalRegistrationRelease | undefined,
   expiredRow = false,
 ): DaemonMethodResult | undefined {
   if (!release?.terminal || (!expiredRow && !isExpiryReleaseReason(release.releaseReason))) {
     return undefined;
   }
-  const { releaseReason, ownerPid } = release;
+  const { releaseReason, ownerPid, cliIdleTimeoutMs } = release;
   return {
     success: false,
     code: SESSION_OWNERSHIP_LOST_CODE,
@@ -140,21 +141,33 @@ function terminalSessionRegistrationRefusal(
       sessionUuid: sessionId,
       reason: releaseReason,
       ...idleReleaseField(releaseReason),
+      // Only a cli-idle release records a window: its own, or its plan base's (#16940, #16971).
+      ...cliIdleTimeoutField(releaseReason, cliIdleTimeoutMs),
       ...(ownerPid === undefined ? {} : { ownerPid }),
     },
-    ...releasedSessionNotFoundFields(releaseReason),
+    ...releasedSessionNotFoundFields(releaseReason, cliIdleTimeoutMs),
   };
 }
+
+/** What a terminal registration refusal reports of the release it names. */
+type TerminalRegistrationRelease = Pick<
+  SessionReleaseSnapshot,
+  "releaseReason" | "terminal" | "ownerPid" | "cliIdleTimeoutMs"
+>;
 
 /** The persisted release of a UUID this daemon holds no snapshot for (best-effort read). */
 async function persistedTerminalRelease(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
-): Promise<Pick<SessionReleaseSnapshot, "releaseReason" | "terminal" | "ownerPid"> | undefined> {
-  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+): Promise<TerminalRegistrationRelease | undefined> {
+  const { releaseReason, idleTimeoutMs } = await lookupReleasedSessionEnd(manager, sessionId);
   return releaseReason === undefined
     ? undefined
-    : { releaseReason, terminal: isTerminalReleaseReason(releaseReason) };
+    : {
+        releaseReason,
+        terminal: isTerminalReleaseReason(releaseReason),
+        ...(idleTimeoutMs === undefined ? {} : { cliIdleTimeoutMs: idleTimeoutMs }),
+      };
 }
 
 /** The accepted registration of a UUID that is a live device session, or undefined. */

@@ -16,7 +16,11 @@ export const KILL_PROFILE_EVIDENCE_STATUSES = [
 export type KillProfileEvidenceStatus = (typeof KILL_PROFILE_EVIDENCE_STATUSES)[number];
 
 /** App ops a recipe may change. Package-mode ops are set per package, uid-mode per uid. */
-export type KillProfileAppOp = "RUN_ANY_IN_BACKGROUND" | "SCHEDULE_EXACT_ALARM";
+export type KillProfileAppOp =
+  | "RUN_ANY_IN_BACKGROUND"
+  | "SCHEDULE_EXACT_ALARM"
+  | "WAKE_LOCK"
+  | "POST_NOTIFICATION";
 
 /** One device command of a recipe, in the order it runs. */
 export type KillProfileStep =
@@ -26,6 +30,10 @@ export type KillProfileStep =
   | { kind: "standbyBucket"; bucket: "restricted" | "rare" }
   /** `appops set [--uid] <pkg> <op> <mode>`. Restored to the mode read before the first change. */
   | { kind: "appOp"; op: KillProfileAppOp; mode: "ignore" | "deny" }
+  /** Revoke POST_NOTIFICATIONS on API 33+, restoring the grant read before the first change. */
+  | { kind: "notificationPermission"; mode: "revoke" }
+  /** App hibernation, restored to the state read before the first change. */
+  | { kind: "hibernation" }
   /** `dumpsys deviceidle force-idle`: force deep Doze. Restored by `dumpsys deviceidle unforce`. */
   | { kind: "forceIdle" }
   /** `input keyevent KEYCODE_HOME`: background the app first, as a recents swipe does. */
@@ -36,6 +44,7 @@ export type KillProfileStep =
 export const KILL_PROFILE_IDS = [
   "samsung-sleeping",
   "samsung-deep-sleeping",
+  "samsung-auto-disable",
   "xiaomi-autostart-off",
   "oneplus-deep-optimization",
   "recents-swipe-kill",
@@ -44,6 +53,14 @@ export const KILL_PROFILE_IDS = [
   "motorola-adaptive",
   "user-restricted",
   "exact-alarm-denied",
+  "notifications-off",
+  "huawei-powergenie",
+  "vivo-autostart",
+  "realme-power-saver",
+  "meizu-flyme-background",
+  "asus-power-master",
+  "sony-stamina",
+  "tecno-app-halt",
 ] as const;
 
 export type KillProfileId = (typeof KILL_PROFILE_IDS)[number];
@@ -89,11 +106,26 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
   },
   "samsung-deep-sleeping": {
     id: "samsung-deep-sleeping",
-    version: 1,
+    version: 2,
     description: "Samsung 'Deep sleeping apps': stopped and never run in the background.",
-    steps: FORCE_STOP_AND_RESTRICT,
+    steps: [...FORCE_STOP_AND_RESTRICT, { kind: "appOp", op: "WAKE_LOCK", mode: "ignore" }],
     evidenceStatus: "inferred",
-    evidenceNote: FORCE_STOP_AND_RESTRICT_NOTE,
+    evidenceNote:
+      FORCE_STOP_AND_RESTRICT_NOTE +
+      " WAKE_LOCK ignore simulates Samsung's foreground-service wake-lock denial on Android 11; " +
+      "this is inferred, not a vendor-documented capture.",
+    source: SAMSUNG_APP_MANAGEMENT,
+  },
+  "samsung-auto-disable": {
+    id: "samsung-auto-disable",
+    version: 1,
+    description: "Samsung auto-disable of unused apps: app hibernation.",
+    steps: [{ kind: "hibernation" }],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Approximated by AOSP app hibernation, which Samsung's auto-disable of unused apps uses. " +
+      "Restores the hibernation state read before the first change; the unused-for-N-days trigger " +
+      "is not reproduced.",
     source: SAMSUNG_APP_MANAGEMENT,
   },
   "xiaomi-autostart-off": {
@@ -177,6 +209,114 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
       "AOSP behaviour when the user turns off 'Alarms & reminders' (API 31+). Apps that declare " +
       "USE_EXACT_ALARM keep the permission.",
     source: ANDROID_EXACT_ALARMS,
+  },
+  "notifications-off": {
+    id: "notifications-off",
+    version: 2,
+    description: "Notifications off: POST_NOTIFICATIONS runtime permission revoked (Android 13+).",
+    steps: [{ kind: "notificationPermission", mode: "revoke" }],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Revokes the POST_NOTIFICATIONS runtime permission, as the Settings notification toggle does " +
+      "on Android 13+. Restored to the grant read before the first change; an already-denied " +
+      "permission stays denied.",
+  },
+  "huawei-powergenie": {
+    id: "huawei-powergenie",
+    version: 1,
+    description:
+      "Huawei EMUI: Classic battery optimization: Don't allow and background restriction.",
+    steps: [
+      { kind: "standbyBucket", bucket: "restricted" },
+      { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+      { kind: "appOp", op: "WAKE_LOCK", mode: "ignore" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Classic battery optimization: Don't allow and background restriction, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Huawei entry (CC-BY-4.0). Not modelled yet (#16869): PowerGenie's kill of non-whitelisted apps (time-based policy and foreground-change kill); the Startup manager boot check (boot-receiver check).",
+    source: "https://dontkillmyapp.com/huawei",
+  },
+  "vivo-autostart": {
+    id: "vivo-autostart",
+    version: 1,
+    description: "Vivo Funtouch OS: Per-app background power restriction (Android 13).",
+    steps: [
+      { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+      { kind: "standbyBucket", bucket: "restricted" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Per-app background power restriction (Android 13), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Vivo entry (CC-BY-4.0). Not modelled yet (#16869): the Autostart permission, which gates apps launched from the background and at boot (boot-receiver check).",
+    source: "https://dontkillmyapp.com/vivo",
+  },
+  "realme-power-saver": {
+    id: "realme-power-saver",
+    version: 1,
+    description: "realme UI: Power saving on battery with App battery management set to Optimize.",
+    steps: [
+      { kind: "batteryUnplug" },
+      { kind: "standbyBucket", bucket: "restricted" },
+      { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Power saving on battery with App battery management set to Optimize, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com realme entry (CC-BY-4.0). Not modelled yet (#16869): the power-saving background kill and stand-by optimization, which depend on screen-off and sleep time (time-based policy).",
+    source: "https://dontkillmyapp.com/realme",
+  },
+  "meizu-flyme-background": {
+    id: "meizu-flyme-background",
+    version: 1,
+    description:
+      'Meizu Flyme: Background processes not allowed and "keep running after screen off" off (wake-lock denial).',
+    steps: [
+      { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+      { kind: "appOp", op: "WAKE_LOCK", mode: "ignore" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      'Background processes not allowed and "keep running after screen off" off (wake-lock denial), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Meizu entry (CC-BY-4.0). Not modelled yet (#16869): Protected apps kill when the screen turns off (time-based policy).',
+    source: "https://dontkillmyapp.com/meizu",
+  },
+  "asus-power-master": {
+    id: "asus-power-master",
+    version: 1,
+    description: "Asus ZenUI: Power Master's auto-deny of auto-start.",
+    steps: [
+      { kind: "standbyBucket", bucket: "restricted" },
+      { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Power Master's auto-deny of auto-start, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Asus entry (CC-BY-4.0). Not modelled yet (#16869): Power Master's clean-up of background tasks on screen-off (time-based policy).",
+    source: "https://dontkillmyapp.com/asus",
+  },
+  "sony-stamina": {
+    id: "sony-stamina",
+    version: 1,
+    description: "Sony Xperia: STAMINA mode (background processes and alarms restricted).",
+    steps: [
+      { kind: "batteryUnplug" },
+      { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+      { kind: "appOp", op: "SCHEDULE_EXACT_ALARM", mode: "deny" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      'STAMINA mode (background processes and alarms restricted), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Sony entry (CC-BY-4.0). Not modelled yet (#16869): STAMINA\'s "Prefer battery time" limits that apply after screen-off (time-based policy); the Power-saving feature exception list (boot-receiver/alarm check).',
+    source: "https://dontkillmyapp.com/sony",
+  },
+  "tecno-app-halt": {
+    id: "tecno-app-halt",
+    version: 1,
+    description:
+      "Tecno HiOS: Background execution denied and foreground-service wake locks denied.",
+    steps: [
+      { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+      { kind: "appOp", op: "WAKE_LOCK", mode: "ignore" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Background execution denied and foreground-service wake locks denied, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Tecno entry (CC-BY-4.0). Not modelled yet (#16869): the app-freeze that stops timers and services until the user reopens it, Power Marathon's screen-off optimisation, and the night-time airplane-mode sleep schedule (time-based policy).",
+    source: "https://dontkillmyapp.com/tecno",
   },
 };
 

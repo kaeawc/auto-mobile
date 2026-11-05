@@ -28,6 +28,7 @@ export interface HttpHeartbeatManager {
   recordHeartbeat(sessionId: string): void;
   creditOwnerHeartbeatDuringRelease?(sessionId: string, ownerToken: string): void;
   getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
+  getReleasedSessionIdleTimeoutMs?(sessionId: string): Promise<number | undefined>;
 }
 
 export interface HttpHeartbeatResponse {
@@ -96,7 +97,7 @@ export async function handleHttpHeartbeat(
       status: 404,
       body: {
         error: `Session not found: ${sessionId}`,
-        ...releasedSessionNotFoundFields(miss.recordedReason),
+        ...releasedSessionNotFoundFields(miss.recorded.releaseReason, miss.recorded.idleTimeoutMs),
       },
     };
   }

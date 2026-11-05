@@ -1532,6 +1532,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     throw new Error("FakeCtrlProxy.resetKeystore is not scripted");
   }
 
+  exportAttestation(): ReturnType<AndroidCtrlProxy["exportAttestation"]> {
+    throw new Error("FakeCtrlProxy.exportAttestation is not scripted");
+  }
+
   discoverKeystore(
     ..._args: Parameters<AndroidCtrlProxy["discoverKeystore"]>
   ): ReturnType<AndroidCtrlProxy["discoverKeystore"]> {

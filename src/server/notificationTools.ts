@@ -11,7 +11,7 @@ import {
 } from "./notificationToolOutputSchemas";
 import {
   addDeviceTargetingToSchema,
-  platformSchema,
+  watchAwarePlatformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
@@ -25,8 +25,6 @@ import {
 } from "../features/utility/NotificationPolicy";
 
 export type PostNotificationArgs = z.output<typeof postNotificationSchema>;
-
-const iosAppIdRequiredMessage = "appId is required when platform is ios";
 
 const actionSchema = z.object({
   label: z.string().min(1).describe("Action label"),
@@ -44,31 +42,31 @@ const postNotificationCommonShape = {
     .string()
     .optional()
     .describe(
-      "Android: host image path for bigPicture. iOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
+      "Android: host image path for bigPicture. iOS/watchOS: host path or URL sent as automobile-image-url with mutable-content for the app's service extension",
     ),
   actions: z
     .array(actionSchema)
     .optional()
-    .describe("Android action buttons; iOS buttons come from the registered category"),
+    .describe("Android action buttons; iOS/watchOS buttons come from the registered category"),
   channelId: z
     .string()
     .optional()
-    .describe("Android channel ID; iOS APNs category when category is omitted"),
+    .describe("Android channel ID; iOS/watchOS APNs category when category is omitted"),
   category: z
     .string()
     .min(1)
     .optional()
-    .describe("iOS: aps.category naming a UNNotificationCategory the app registered"),
+    .describe("iOS/watchOS: aps.category naming a UNNotificationCategory the app registered"),
   payload: z
     .record(z.string(), z.unknown())
     .optional()
     .describe(
-      "iOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
+      "iOS/watchOS: raw APNs JSON merged over the generated payload (aps fields override); 4096-byte limit",
     ),
 };
 
 const postNotificationAppIdDescription =
-  "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted";
+  "Android target package name or iOS/watchOS target bundle ID (required on iOS/watchOS); Android defaults to the live foreground app when omitted";
 
 const androidAppIdInvalidMessage = "appId must be an Android package name";
 
@@ -76,7 +74,7 @@ const androidAppIdInvalidMessage = "appId must be an Android package name";
  * #6154 follow-up: `postNotification` used a `z.discriminatedUnion("platform", ...)`,
  * which requires the discriminator field to be present to pick a branch — so
  * `platform` could not be made optional (resolved from deviceId/session) without
- * restructuring away from the union. These per-platform appId rules (iOS requires
+ * restructuring away from the union. These per-platform appId rules (iOS/watchOS require
  * it, Android's must look like a package name) now run through this single
  * checker: from the schema's `superRefine` when the caller provided an explicit
  * `platform` (fast, parse-time feedback), and from `postNotificationHandler`
@@ -87,8 +85,8 @@ export function checkPostNotificationPlatformConstraints(
   platform: Platform | undefined,
   args: { appId?: string },
 ): { path: "appId"; message: string } | null {
-  if (platform === "ios" && !args.appId) {
-    return { path: "appId", message: iosAppIdRequiredMessage };
+  if ((platform === "ios" || platform === "watchos") && !args.appId) {
+    return { path: "appId", message: `appId is required when platform is ${platform}` };
   }
   if (platform === "android" && args.appId && !ANDROID_PACKAGE_NAME_PATTERN.test(args.appId)) {
     return { path: "appId", message: androidAppIdInvalidMessage };
@@ -108,7 +106,7 @@ export const postNotificationSchema = withAppIdAliases(
           // is sufficient on its own. The per-platform appId rules below only
           // fire when the caller provided an explicit `platform`; the omitted
           // case is enforced post-resolution in postNotificationHandler.
-          platform: platformSchema.optional(),
+          platform: watchAwarePlatformSchema(),
         })
         .strict(),
     ).superRefine((values, ctx) => {
@@ -123,7 +121,7 @@ export const postNotificationSchema = withAppIdAliases(
     }),
     (jsonSchema) => {
       jsonSchema.if = {
-        properties: { platform: { const: "ios" } },
+        properties: { platform: { enum: ["ios", "watchos"] } },
         required: ["platform"],
       };
       jsonSchema.then = { required: ["appId"] };
@@ -261,7 +259,7 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
 
   ToolRegistry.registerDeviceAware(
     "postNotification",
-    "Post notification via Android SDK hooks or iOS Simulator simctl push.",
+    "Post notification via Android SDK hooks or iOS/watchOS simulator simctl push.",
     postNotificationSchema,
     {
       handler: createPostNotificationHandler(deps),

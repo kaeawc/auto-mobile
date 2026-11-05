@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { prototypeRequiredCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
 import { expandPrototypeComponents } from "../../../src/features/prototype/prototypeComponents";
-import { prototypeMapError } from "../../../src/features/prototype/prototypeMap";
+import {
+  PROTOTYPE_MARKER_TAP_EMIT_CONTEXT,
+  prototypeMapError,
+} from "../../../src/features/prototype/prototypeMap";
 
 const map = (fields: Record<string, unknown> = {}) => ({ type: "map", ...fields });
 const spec = (node: Record<string, unknown>, requires: Record<string, unknown>) => ({
@@ -44,6 +47,48 @@ test("onCameraIdle writes only into /data", () => {
       message: "onCameraIdle.into must be a /data/<pointer> path",
     });
   }
+});
+
+test("the contract adds markerId to a marker tap's emit context", () => {
+  expect(PROTOTYPE_MARKER_TAP_EMIT_CONTEXT).toEqual(["markerId"]);
+});
+
+test("an onMarkerTap emit cannot author markerId, at any action depth", () => {
+  const emit = (context: Record<string, unknown>) => ({ type: "emit", name: "tap", context });
+  const at = (onMarkerTap: unknown[]) =>
+    prototypeMapError(spec(map({ onMarkerTap }), { platform: ["map"] }));
+  const message =
+    "markerId is reserved in an onMarkerTap emit context: the runtime sets it to the tapped marker's id";
+  expect(at([emit({ markerId: { value: "x" } })])).toEqual({
+    path: "root.children[0].onMarkerTap[0].context.markerId",
+    message,
+  });
+  const timer = { type: "startTimer", id: "t", afterMs: 100 };
+  expect(at([{ ...timer, actions: [emit({ markerId: { state: "s" } })] }])).toEqual({
+    path: "root.children[0].onMarkerTap[0].actions[0].context.markerId",
+    message,
+  });
+  const request = { type: "request", method: "GET", url: "https://example.com" };
+  expect(at([{ ...request, onError: [emit({ markerId: { value: 1 } })] }])?.path).toBe(
+    "root.children[0].onMarkerTap[0].onError[0].context.markerId",
+  );
+  // Other names, payload fields and non-emit actions are the author's.
+  expect(at([emit({ marker: { value: "x" } })])).toBeUndefined();
+  expect(at([{ type: "emit", name: "tap", payload: { markerId: "x" } }])).toBeUndefined();
+  expect(at([{ type: "setState", key: "markerId", value: "x" }])).toBeUndefined();
+});
+
+test("markerId stays an authored name outside onMarkerTap", () => {
+  const button = {
+    type: "button",
+    label: "Go",
+    onTap: [{ type: "emit", name: "go", context: { markerId: { value: "x" } } }],
+  };
+  const both = {
+    requires: { platform: ["map"] },
+    root: { type: "column", children: [map(), button] },
+  };
+  expect(prototypeMapError(both)).toBeUndefined();
 });
 
 test("the map gate names each map node as well as the declaration", () => {

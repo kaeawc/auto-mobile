@@ -1,3 +1,6 @@
+import type { AppleVisionSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
+import type { AppleVisionSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorBoot";
+import type { PendingImeRestoreRegistry } from "../../action/sendkeys/PendingImeRestore";
 import type { AppleTvSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
 import type { AppleTvSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorBoot";
 import type { WatchSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
@@ -131,6 +134,13 @@ export interface DeviceToolsDependencies {
     AppleTvSimulatorProvisioner,
     "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
   >;
+  /** Apple Vision Pro boot through shared simctl readiness and simulator capacity admission. */
+  appleVisionSimulatorBootFactory?: () => Pick<AppleVisionSimulatorBoot, "boot" | "stopColdBooted">;
+  /** Exact Apple Vision Pro adoption, creation and verified deletion. */
+  appleVisionSimulatorProvisionerFactory?: () => Pick<
+    AppleVisionSimulatorProvisioner,
+    "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
+  >;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
   exactDeviceProvisionerFactory: (
@@ -161,6 +171,8 @@ export interface DeviceToolsDependencies {
    * to the daemon's snapshot manager, wired where the workflow runs.
    */
   forgetDestroyedAvdFixtures?: (avdName: string) => Promise<unknown>;
+  /** Pending keyboard restores killDevice flushes after admitting its caller (#16579). */
+  pendingImeRestores?: Pick<PendingImeRestoreRegistry, "flush">;
   stopPerformanceMonitoring: (deviceId: string) => void;
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
   idGenerator: IdGenerator;

@@ -11,6 +11,7 @@ import { barrierResultSchema } from "./barrierToolOutputSchemas";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
 import { isDeviceLostError } from "../utils/deviceLossOutcome";
+import { currentPlanLockNamespace } from "../features/toolSelection/toolSelectionContext";
 
 // Barrier tool schema. A barrier is a pure synchronization point: every
 // participating device arrives, and once all `deviceCount` devices have
@@ -32,11 +33,6 @@ const barrierInput = z.object({
     .positive()
     .describe("Number of devices that must arrive before the barrier lifts"),
   timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
-  // Internal: the plan's base session UUID, injected by PlanExecutor
-  // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
-  // plans that reuse the same lock name get isolated barriers instead of
-  // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-  __lockNamespace: z.string().optional().describe("Internal plan-scoped lock namespace (injected)"),
 });
 
 type BarrierParams = z.output<DeviceToolSchema<typeof barrierInput>>;
@@ -52,7 +48,9 @@ const barrierHandler = async (
   _progress?: unknown,
   signal?: AbortSignal,
 ): Promise<any> => {
-  const { lock, deviceCount, timeout, __lockNamespace: namespace } = params;
+  const { lock, deviceCount, timeout } = params;
+  // A plan step runs under its plan's namespace; a direct call is unscoped (#15663).
+  const namespace = currentPlanLockNamespace();
   const coordinator = CriticalSectionCoordinator.getInstance();
 
   logger.info(

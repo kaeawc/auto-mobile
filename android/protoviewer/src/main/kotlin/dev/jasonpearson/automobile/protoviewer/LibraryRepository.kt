@@ -44,6 +44,11 @@ data class LibraryEntry(
   val specSha256: String,
   val requires: List<String>,
   val pinned: Boolean,
+  /**
+   * Lowercase https host a link import (#14128) fetched the bundle from. App-owned, never read from
+   * bundle bytes; null for every other source. It is the identity Block acts on.
+   */
+  val sourceHost: String? = null,
 )
 
 enum class LibraryError {
@@ -74,6 +79,12 @@ interface LibraryRepository {
   fun resetStorage(libraryId: String): LibraryResult<Unit>
 
   fun delete(libraryId: String): LibraryResult<Unit>
+
+  /**
+   * Delete saved bundles that have no metadata directory and return how many were removed. A
+   * metadata listing failure returns a typed failure and deletes nothing.
+   */
+  fun sweepOrphans(): LibraryResult<Int>
 }
 
 /** Only app-owned importing code constructs source/metadata; never deserialize it from a bundle. */
@@ -168,6 +179,33 @@ class DirectoryLibraryRepository(
     }
   }
 
+  /**
+   * Finishes deletes that failed after metadata removal and saves interrupted before the metadata
+   * commit (#16653). Only a saved id with no metadata directory at all is swept: unreadable or
+   * corrupt metadata still keeps its bundle. Runs under the repository lock so it cannot race
+   * [add].
+   */
+  @Synchronized
+  override fun sweepOrphans(): LibraryResult<Int> {
+    // Throws, and so aborts the whole sweep, when the metadata tree cannot be listed.
+    val committed = storageResult { files.ids().toSet() }
+    if (committed is LibraryResult.Failure) return committed
+    val known = (committed as LibraryResult.Success).value
+    return storageResult {
+      store
+        .list()
+        .map { it.id }
+        .filter { validLibraryId(it) && it !in known }
+        .count { id ->
+          val swept = storageResult {
+            storage.reset(id)
+            store.delete(id)
+          }
+          swept is LibraryResult.Success && swept.value
+        }
+    }
+  }
+
   /** App-owned source and identity; metadata is the final visibility marker. */
   @Synchronized
   fun add(
@@ -248,7 +286,8 @@ class DirectoryLibraryRepository(
             it.label.length <= libraryLimits.maxLabelLength &&
             it.importedAt >= 0 &&
             it.lastOpenedAt >= 0 &&
-            Regex("[a-f0-9]{64}").matches(it.specSha256)
+            Regex("[a-f0-9]{64}").matches(it.specSha256) &&
+            (it.sourceHost == null || validSourceHost(it.sourceHost))
         }
       } catch (error: Exception) {
         java.util.logging.Logger.getLogger("ProtoViewerLibrary")

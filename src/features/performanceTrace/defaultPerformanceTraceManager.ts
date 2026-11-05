@@ -20,6 +20,8 @@ import { TraceProcessorShell, type PerfettoTraceProcessor } from "./perfettoTrac
 import { PerformanceTraceManager } from "./PerformanceTraceManager";
 import type { PerformanceTraceRecorder } from "./PerformanceTraceRecorder";
 import { XctraceRecorder } from "./XctraceRecorder";
+import { HostXctraceEnvironment } from "./xctraceCompatibility";
+import { XcodebuildClient } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 
 const PID_LOOKUP_TIMEOUT_MS = 5_000;
 
@@ -67,7 +69,22 @@ export function createDefaultPerformanceTraceManager(): PerformanceTraceManager 
       traceProcessor: traceProcessorLocator(host),
       timer: defaultTimer,
     }),
-    ios: new XctraceRecorder({ host, resolvePid: resolveIosAppPid, timer: defaultTimer }),
+    ios: new XctraceRecorder({
+      host,
+      resolvePid: resolveIosAppPid,
+      timer: defaultTimer,
+      environment: new HostXctraceEnvironment({
+        xcodebuild: new XcodebuildClient(),
+        listSimulatorDevices: async (device, timeoutMs, signal) =>
+          (
+            await new SimCtlClient(device).executeCommandArgs(
+              ["list", "--json", "devices", device.deviceId],
+              timeoutMs,
+              signal,
+            )
+          ).stdout,
+      }),
+    }),
   };
   return new PerformanceTraceManager({
     recorderFor: (platform) =>

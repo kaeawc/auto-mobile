@@ -20,7 +20,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -152,7 +152,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -233,7 +233,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -359,7 +359,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -580,7 +580,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -689,7 +689,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -904,7 +904,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1126,7 +1126,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1392,7 +1392,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1482,7 +1482,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1574,7 +1574,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1703,7 +1703,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1793,7 +1793,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "appId": {
           "description": "Android app package for locale changes",
@@ -1954,7 +1954,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2018,7 +2018,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2112,7 +2112,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2279,7 +2279,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2438,7 +2438,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2698,7 +2698,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2767,7 +2767,7 @@
             "platform": {
               "description": "Platform reported by automobile:devices/booted",
               "type": "string",
-              "enum": ["android", "ios", "watchos", "tvos"]
+              "enum": ["android", "ios", "watchos", "tvos", "visionos"]
             },
             "isVirtual": {
               "description": "Virtual-device flag reported by automobile:devices/booted",
@@ -2874,7 +2874,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2993,7 +2993,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3268,7 +3268,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3611,7 +3611,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3827,7 +3827,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -6010,7 +6010,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6051,7 +6051,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6584,7 +6584,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9368,7 +9368,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9825,7 +9825,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -9963,7 +9963,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10026,7 +10026,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10215,7 +10215,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10246,7 +10246,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "error": {
           "type": "string"
@@ -11236,7 +11236,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -11354,7 +11354,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "appId": {
           "description": "Scope the graph to this app id instead of the device's current foreground app",
@@ -11821,7 +11821,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -11899,7 +11899,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12039,7 +12039,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12171,7 +12171,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12249,7 +12249,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -12501,7 +12501,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -12536,7 +12536,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -14583,7 +14583,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -14615,7 +14615,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "filter": {
           "description": "Filter options",
@@ -14920,7 +14920,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15001,7 +15001,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15231,7 +15231,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "artifactPath": {
           "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa; watchOS: .app",
@@ -15440,7 +15440,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15569,7 +15569,7 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios", "watchos", "tvos"]
+              "enum": ["android", "ios", "watchos", "tvos", "visionos"]
             }
           },
           "required": ["name", "deviceId", "platform"],
@@ -15632,7 +15632,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15830,7 +15830,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "clearAppData": {
           "description": "Clear app data before launch (default false); on watchOS wipes the app's data container",
@@ -18043,7 +18043,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "type": {
           "description": "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) are visible while content providers and RRO overlays are not. 'user' and 'system' keep their meaning and must be asked for explicitly; 'all' returns every installed package. The default degrades to 'user' when the device reports no launchability signal, and an explicit 'launchable' is then rejected rather than silently empty. On a physical iOS device, where user/system classification is unavailable (devicectl reports no such signal), an omitted type returns every app (reported as 'all') and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
@@ -18252,7 +18252,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -18306,7 +18306,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session used for inventory admission",
@@ -18889,7 +18889,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "configuredInventory": {},
         "artifact": {
@@ -18966,7 +18966,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "requires": {
           "description": "Filter booted devices by display inventory capabilities",
@@ -19827,7 +19827,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -20084,7 +20084,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -20301,7 +20301,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -20663,7 +20663,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -20799,7 +20799,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -20937,7 +20937,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -21069,7 +21069,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -21171,7 +21171,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "waitFor": {
           "$defs": {
@@ -24653,7 +24653,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "waitFor": {
           "$defs": {
@@ -25108,7 +25108,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -25344,7 +25344,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -25453,7 +25453,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -27750,7 +27750,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -27858,7 +27858,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -39790,7 +39790,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -42195,6 +42195,44 @@
               },
               "required": ["platform", "name", "spec"],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "const": "visionos"
+                },
+                "name": {
+                  "description": "Exact Apple Vision Pro simulator name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "deviceId": {
+                  "description": "Exact Apple Vision Pro simulator UDID; a UDID that names no Apple Vision Pro is refused, not created",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "description": "visionOS CoreSimulator runtime identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deviceType": {
+                      "description": "Apple Vision Pro CoreSimulator device-type identifier",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["runtime", "deviceType"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["platform", "name", "spec"],
+              "additionalProperties": false
             }
           ]
         },
@@ -42204,7 +42242,7 @@
           "type": "boolean"
         },
         "readiness": {
-          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS and tvOS provisioning take only \"none\" (their default); startDevice prepares their runners",
+          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS and tvOS provisioning take only \"none\" (their default); visionOS also takes only \"none\" and has no runner; startDevice prepares watchOS/tvOS runners",
           "type": "string",
           "enum": ["automation", "none"]
         },
@@ -42388,7 +42426,7 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios", "watchos", "tvos"]
+              "enum": ["android", "ios", "watchos", "tvos", "visionos"]
             },
             "isVirtual": {
               "type": "boolean"
@@ -43172,7 +43210,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -43315,7 +43353,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -45633,7 +45671,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -46110,7 +46148,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -46196,7 +46234,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -46294,7 +46332,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -46472,7 +46510,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -46575,7 +46613,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -48667,7 +48705,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -50840,7 +50878,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -51112,7 +51150,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -51440,7 +51478,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -51510,9 +51548,9 @@
           ]
         },
         "platform": {
-          "description": "Inferred from the device; \"watchos\" is required to select an Apple Watch simulator",
+          "description": "Inferred from the device; \"watchos\", \"tvos\" or \"visionos\" is required to select an Apple Watch, Apple TV or Apple Vision Pro simulator",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -51597,7 +51635,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -51827,7 +51865,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "type": "string"
@@ -52425,7 +52463,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -53518,7 +53556,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -53549,7 +53587,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "error": {
           "type": "string"
@@ -54419,7 +54457,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54498,7 +54536,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54622,7 +54660,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54783,7 +54821,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -54930,7 +54968,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -55407,7 +55445,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -55558,7 +55596,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -57550,7 +57588,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -59378,7 +59416,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "elementId": {
           "description": "Unique exposed element ID",
@@ -59621,7 +59659,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -59753,7 +59791,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -59915,7 +59953,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -60371,7 +60409,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -60598,7 +60636,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -60727,7 +60765,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -60946,7 +60984,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -63178,7 +63216,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -63307,7 +63345,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -63808,7 +63846,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -65941,7 +65979,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
@@ -67938,7 +67976,7 @@
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "watchos", "tvos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false; refused on watchOS)",
@@ -68033,7 +68071,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -68353,7 +68391,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -68381,7 +68419,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "wasAsleep": {
           "type": "boolean"
@@ -68645,7 +68683,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",

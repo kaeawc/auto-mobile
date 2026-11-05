@@ -359,8 +359,11 @@ export class PortReverseManager {
         `adb reverse ${tcp(request.devicePort)} ${tcp(request.hostPort)} failed on ${target.deviceId}`,
       );
     }
+    // A port already owned (lost, then re-added here) keeps its ownership if a later add fails.
+    if (!state.owned.has(request.devicePort)) {
+      added.push(request.devicePort);
+    }
     state.owned.set(request.devicePort, { hostPort: request.hostPort, owner: target.owner });
-    added.push(request.devicePort);
     this.audit(
       `ensure ${tcp(request.devicePort)} -> ${tcp(request.hostPort)} device=${target.deviceId} session=${target.owner}`,
     );
